@@ -18,6 +18,11 @@ from dependency_injector import providers
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect, status
 
 from eneo.allowed_origins.get_origin_callback import get_origin
+from eneo.authentication.endpoint_access import (
+    Authentication,
+    Authorization,
+    endpoint_access,
+)
 from eneo.database.database import sessionmanager
 from eneo.database.tables.ai_models_table import TranscriptionModels
 from eneo.flows.api.flow_live_transcription_models import (
@@ -54,6 +59,10 @@ logger = get_logger(__name__)
 
 router = APIRouter()
 __all__ = ["router"]
+_LIVE_TRANSCRIPTION_TICKET_REASON = (
+    "The handler checks the Origin and redeems a single-use ticket that an "
+    "authorised live transcription session request issued for one flow step."
+)
 
 
 @dataclass(frozen=True)
@@ -64,6 +73,11 @@ class _UpstreamTarget:
 
 
 @router.websocket(LIVE_TRANSCRIPTION_SOCKET_PATH)
+@endpoint_access(
+    authentication=Authentication.PUBLIC,
+    authorization=Authorization.PUBLIC,
+    reason=_LIVE_TRANSCRIPTION_TICKET_REASON,
+)
 async def live_transcription_socket(websocket: WebSocket) -> None:
     offered = [
         protocol.strip()

@@ -121,6 +121,21 @@ class UsersRepository:
 
         return await self._get_model_from_query(query, with_deleted=with_deleted)
 
+    async def has_removed_user_by_email(self, email: str, tenant_id: UUID) -> bool:
+        """Keep removed tenant members from being recreated by JIT login.
+
+        Historical rows may share an email. Test for existence instead of
+        resolving them as a single current account.
+        """
+        query = sa.select(
+            sa.exists().where(
+                sa.func.lower(Users.email) == email.lower(),
+                Users.tenant_id == tenant_id,
+                Users.deleted_at.is_not(None),
+            )
+        )
+        return bool(await self.session.scalar(query))
+
     async def get_user_by_username(
         self, username: str, with_deleted: bool = False
     ) -> UserInDB | None:

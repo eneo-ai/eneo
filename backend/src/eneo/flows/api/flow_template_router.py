@@ -19,6 +19,11 @@ from fastapi import (
 from eneo.audit.application.audit_metadata import AuditMetadata
 from eneo.audit.domain.action_types import ActionType
 from eneo.audit.domain.entity_types import EntityType
+from eneo.authentication.endpoint_access import (
+    Authentication,
+    Authorization,
+    endpoint_access,
+)
 from eneo.database.database import AsyncSession
 from eneo.files.file_models import SignedURLRequest, SignedURLResponse
 from eneo.files.signed_urls import build_signed_download_response
@@ -28,6 +33,7 @@ from eneo.flows.api.flow_template_asset_models import (
     FlowTemplateAssetPublic,
     FlowTemplateInspectionPublic,
 )
+from eneo.flows.flow_access_policy import FlowApiAction, flow_action_access_reason
 from eneo.flows.flow_api_error_code import FlowApiErrorCode
 from eneo.main.container.container import Container
 from eneo.main.exceptions import AuditLoggingUnavailableException, ErrorCodes
@@ -67,6 +73,11 @@ logger = logging.getLogger(__name__)
             code="not_found",
         ),
     },
+)
+@endpoint_access(
+    authentication=Authentication.USER,
+    authorization=Authorization.AUTHENTICATED,
+    reason=flow_action_access_reason(FlowApiAction.EDIT),
 )
 async def list_flow_template_files(
     id: Annotated[
@@ -118,6 +129,11 @@ async def list_flow_template_files(
             code="not_found",
         ),
     },
+)
+@endpoint_access(
+    authentication=Authentication.USER,
+    authorization=Authorization.AUTHENTICATED,
+    reason=flow_action_access_reason(FlowApiAction.EDIT),
 )
 async def inspect_flow_template(
     id: Annotated[
@@ -183,6 +199,11 @@ async def inspect_flow_template(
             code="unsupported_media_type",
         ),
     },
+)
+@endpoint_access(
+    authentication=Authentication.USER,
+    authorization=Authorization.AUTHENTICATED,
+    reason=flow_action_access_reason(FlowApiAction.EDIT),
 )
 async def upload_flow_template_file(
     id: Annotated[
@@ -262,6 +283,11 @@ async def upload_flow_template_file(
         ),
     },
 )
+@endpoint_access(
+    authentication=Authentication.USER,
+    authorization=Authorization.AUTHENTICATED,
+    reason=flow_action_access_reason(FlowApiAction.EDIT),
+)
 async def delete_flow_template_file(
     id: Annotated[
         UUID,
@@ -340,6 +366,11 @@ async def delete_flow_template_file(
             context={"audit_required": True},
         ),
     },
+)
+@endpoint_access(
+    authentication=Authentication.USER,
+    authorization=Authorization.AUTHENTICATED,
+    reason=flow_action_access_reason(FlowApiAction.EDIT),
 )
 async def generate_flow_template_signed_url(
     id: Annotated[

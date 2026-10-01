@@ -14,6 +14,8 @@ from uuid import uuid4
 
 import pytest
 
+from eneo.main.models import GeneralError
+
 
 @pytest.fixture
 async def admin_token(db_container, patch_auth_service_jwt, admin_user):
@@ -107,3 +109,8 @@ async def test_a_session_caller_has_no_key_capacity_to_report(
     )
 
     assert resp.status_code == 403, resp.text
+    # The handler owns this refusal: endpoint admission must let a session
+    # caller through so the documented typed envelope reaches the client.
+    error = GeneralError.model_validate(resp.json())
+    assert error.code == "api_key_required"
+    assert error.message == "This endpoint describes the calling API key."

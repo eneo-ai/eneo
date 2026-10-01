@@ -40,7 +40,7 @@ SCHEMA_DRIFT_ENV = {
     "JWT_ALGORITHM": "HS256",
     "JWT_SECRET": "ci-test-jwt-secret-not-for-production-0123456789",
     "JWT_TOKEN_PREFIX": "Bearer",
-    "URL_SIGNING_KEY": "test_key",
+    "URL_SIGNING_KEY": "unit-test-url-signing-key-with-at-least-32-bytes",
     "ENCRYPTION_KEY": "yPIAaWTENh5knUuz75NYHblR3672X-7lH-W6AD4F1hs=",
     "OPENAI_API_KEY": "test-api-key",
 }

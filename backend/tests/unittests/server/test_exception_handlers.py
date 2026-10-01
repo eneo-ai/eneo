@@ -6,6 +6,11 @@ from fastapi.testclient import TestClient
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 from sqlalchemy.exc import IntegrityError
 
+from eneo.authentication.endpoint_access import (
+    Authentication,
+    Authorization,
+    endpoint_access,
+)
 from eneo.files.file_models import FileOriginalNotFoundError
 from eneo.main.exceptions import (
     BadRequestException,
@@ -30,6 +35,11 @@ def password_validation_client() -> TestClient:
     app = get_application()
 
     @app.post("/_test-password-validation", status_code=204)
+    @endpoint_access(
+        authentication=Authentication.PUBLIC,
+        authorization=Authorization.PUBLIC,
+        reason="Test-only route for password request validation.",
+    )
     async def validate_password_request(payload: PasswordChangeRequest):
         return None
 
@@ -361,6 +371,11 @@ def test_main_app_request_validation_error_uses_general_error_for_non_flow_route
     # The crawler health route takes no parameters, so a probe route stands in
     # for any non-Flow route with a typed query parameter.
     @app.get("/_test-query-validation")
+    @endpoint_access(
+        authentication=Authentication.PUBLIC,
+        authorization=Authorization.PUBLIC,
+        reason="Test-only route for request validation errors.",
+    )
     async def validate_query_request(include_all: bool = False) -> dict[str, bool]:
         return {"include_all": include_all}
 
@@ -406,6 +421,11 @@ def test_explicit_http_500_uses_platform_error_envelope(monkeypatch) -> None:
     assert app.exception_handlers[500] is app.exception_handlers[Exception]
 
     @app.get("/_test_explicit_500")
+    @endpoint_access(
+        authentication=Authentication.PUBLIC,
+        authorization=Authorization.PUBLIC,
+        reason="Test-only route for the internal error envelope.",
+    )
     async def explicit_500() -> None:
         raise HTTPException(status_code=500, detail="must not leak")
 
@@ -423,6 +443,11 @@ def test_unhandled_exception_uses_platform_error_envelope(monkeypatch) -> None:
     app = get_application()
 
     @app.get("/_test_unhandled_exception")
+    @endpoint_access(
+        authentication=Authentication.PUBLIC,
+        authorization=Authorization.PUBLIC,
+        reason="Test-only route for the internal error envelope.",
+    )
     async def unhandled_exception() -> None:
         raise RuntimeError("must not leak")
 

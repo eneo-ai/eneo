@@ -26,6 +26,11 @@ from eneo.audit.domain.action_types import ActionType
 from eneo.audit.domain.constants import MAX_ERROR_MESSAGE_LENGTH
 from eneo.audit.domain.entity_types import EntityType
 from eneo.audit.domain.outcome import Outcome
+from eneo.authentication.endpoint_access import (
+    Authentication,
+    Authorization,
+    endpoint_access,
+)
 from eneo.flow_packages.api import flow_package_openapi_examples as openapi_examples
 from eneo.flow_packages.api.flow_package_models import (
     FLOW_PACKAGE_OMITTED_MCP_ASSISTANT_COUNT_HEADER,
@@ -77,7 +82,11 @@ from eneo.flows.api import flow_access_context
 from eneo.flows.api.flow_api_common import error_response
 from eneo.flows.api.flow_definition_access import require_flow_edit_access
 from eneo.flows.domain.flow import Flow
-from eneo.flows.flow_access_policy import FlowApiAction, require_flow_action
+from eneo.flows.flow_access_policy import (
+    FlowApiAction,
+    flow_action_access_reason,
+    require_flow_action,
+)
 from eneo.flows.flow_api_error_code import FlowApiErrorCode
 from eneo.flows.flow_resource_bindings import FlowResourceBindingResolutionError
 from eneo.main.container.container import Container
@@ -166,6 +175,11 @@ PackageUpload = Annotated[
         ),
     },
 )
+@endpoint_access(
+    authentication=Authentication.USER,
+    authorization=Authorization.AUTHENTICATED,
+    reason=flow_action_access_reason(FlowApiAction.EDIT),
+)
 async def validate_flow_package(
     package_file: PackageUpload,
     container: Annotated[Container, Depends(get_container(with_user=True))],
@@ -212,6 +226,11 @@ async def validate_flow_package(
             examples=openapi_examples.FLOW_PACKAGE_TOO_LARGE_EXAMPLE,
         ),
     },
+)
+@endpoint_access(
+    authentication=Authentication.USER,
+    authorization=Authorization.AUTHENTICATED,
+    reason=flow_action_access_reason(FlowApiAction.EDIT),
 )
 async def create_flow_package_import_plan(
     id: Annotated[
@@ -298,6 +317,11 @@ async def create_flow_package_import_plan(
             examples=openapi_examples.FLOW_PACKAGE_TOO_LARGE_EXAMPLE,
         ),
     },
+)
+@endpoint_access(
+    authentication=Authentication.USER,
+    authorization=Authorization.AUTHENTICATED,
+    reason=flow_action_access_reason(FlowApiAction.EDIT),
 )
 async def import_flow_package_as_draft(
     id: Annotated[
@@ -532,6 +556,11 @@ def _replayed_install_result(
             context={"audit_required": True},
         ),
     },
+)
+@endpoint_access(
+    authentication=Authentication.USER,
+    authorization=Authorization.AUTHENTICATED,
+    reason=flow_action_access_reason(FlowApiAction.EDIT),
 )
 async def export_flow_package(
     id: Annotated[UUID, Path(description="Identifier of the draft Flow to export.")],

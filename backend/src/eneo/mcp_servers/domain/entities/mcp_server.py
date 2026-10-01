@@ -232,6 +232,9 @@ class MCPServer(Entity):
         super().__init__(id=id, created_at=created_at, updated_at=updated_at)
         self.tenant_id = tenant_id
         self.name = name
+        # Set only by the loopback factory for the ephemeral servers Eneo
+        # attaches itself (knowledge, files); never mapped from a row.
+        self._is_loopback = is_internal
         self.description = description
         self.http_url = http_url
         self.http_auth_type = http_auth_type
@@ -253,9 +256,19 @@ class MCPServer(Entity):
         self.documentation_url = documentation_url
         self.tools = tools or []
         self.security_classification = security_classification
-        # Runtime provenance must be explicit: a tenant-controlled display name
-        # cannot grant the reduced approval policy of built-in loopback tools.
-        self.is_internal = is_internal
+
+    @property
+    def is_internal(self) -> bool:
+        """Whether this server is one of Eneo's own loopback servers.
+
+        True for the ephemeral knowledge and files servers a completion
+        attaches (built with ``is_internal=True``) and for a built-in provider
+        row, whose endpoint the service pins to the loopback of its purpose.
+        Never derived from the name: an admin-registered server called
+        "knowledge" or "files" is external, so its tools stay subject to user
+        approval and are never mistaken for Eneo's own.
+        """
+        return self._is_loopback or is_builtin_provider(self.http_auth_type)
 
     @property
     def user_group_ids(self) -> list[UUID]:

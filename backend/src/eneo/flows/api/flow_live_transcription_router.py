@@ -8,6 +8,11 @@ from fastapi import APIRouter, Depends, Path, Request, status
 from eneo.audit.application.audit_metadata import AuditMetadata
 from eneo.audit.domain.action_types import ActionType
 from eneo.audit.domain.entity_types import EntityType
+from eneo.authentication.endpoint_access import (
+    Authentication,
+    Authorization,
+    endpoint_access,
+)
 from eneo.database.database import AsyncSession
 from eneo.flows.api import flow_access_context
 from eneo.flows.api.flow_api_common import error_response
@@ -19,7 +24,7 @@ from eneo.flows.api.flow_live_transcription_models import (
     FlowLiveTranscriptionUnavailableError,
 )
 from eneo.flows.api.flow_runtime_paths import FLOW_LIVE_TRANSCRIPTION_SESSIONS_PATH
-from eneo.flows.flow_access_policy import FlowApiAction
+from eneo.flows.flow_access_policy import FlowApiAction, flow_action_access_reason
 from eneo.flows.flow_api_error_code import FlowApiErrorCode
 from eneo.main.config import get_settings
 from eneo.main.container.container import Container
@@ -98,6 +103,11 @@ reason, so a client can decide before recording whether to offer the preview.
             "model": FlowLiveTranscriptionUnavailableError,
         },
     },
+)
+@endpoint_access(
+    authentication=Authentication.USER,
+    authorization=Authorization.AUTHENTICATED,
+    reason=flow_action_access_reason(FlowApiAction.RUN),
 )
 async def create_flow_live_transcription_session(
     id: Annotated[UUID, Path(description="Identifier of the published flow.")],

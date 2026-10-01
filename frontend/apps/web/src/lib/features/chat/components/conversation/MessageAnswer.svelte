@@ -14,9 +14,9 @@
     capabilityProviderDetail,
     internalToolDoneLabel,
     isBuiltinToolCall,
+    isSkillActivation,
     serverDisplayName,
-    toolDisplayName,
-    SKILLS_SERVER
+    toolDisplayName
   } from "../../internalToolLabels";
   import { getAttachmentUrlService } from "$lib/features/attachments/AttachmentUrlService.svelte";
   import { getMessageContext } from "../../MessageContext.svelte";
@@ -53,6 +53,7 @@
           approved?: boolean;
           result_status?: string;
           purpose?: string | null;
+          is_internal?: boolean | null;
         }>
       | undefined
   );
@@ -100,8 +101,9 @@
     server_name: string;
     tool_name: string;
     arguments?: Record<string, unknown>;
+    is_internal?: boolean | null;
   }) => {
-    const fileId = internalReadFileId(tc.server_name, tc.tool_name, tc.arguments);
+    const fileId = internalReadFileId(tc.server_name, tc.tool_name, tc.arguments, tc.is_internal);
     return fileId ? (attachmentNamesById.get(fileId) ?? null) : null;
   };
   const tracedSteps = $derived(
@@ -134,17 +136,24 @@
         tc.server_name,
         tc.title,
         tc.arguments,
-        tc.purpose
+        tc.purpose,
+        tc.is_internal
       );
       return {
         // Eneo's own tools and capability calls get localized labels; otherwise
         // prefer the server-provided title, falling back to the raw tool name.
         toolName,
         doneLabel:
-          internalToolDoneLabel(tc.tool_name, tc.server_name, tc.arguments, tc.purpose) ?? toolName,
-        serverName: serverDisplayName(tc.server_name, tc.purpose),
+          internalToolDoneLabel(
+            tc.tool_name,
+            tc.server_name,
+            tc.arguments,
+            tc.purpose,
+            tc.is_internal
+          ) ?? toolName,
+        serverName: serverDisplayName(tc.server_name, tc.purpose, tc.is_internal),
         detail: readFileDetail(tc) ?? capabilityProviderDetail(tc),
-        skillName: tc.server_name === SKILLS_SERVER ? (tc.title ?? tc.tool_name) : null,
+        skillName: isSkillActivation(tc) ? (tc.title ?? tc.tool_name) : null,
         args: tc.arguments,
         toolCallId: tc.tool_call_id,
         status,
@@ -404,7 +413,8 @@
                     toolCall.server_name,
                     toolCall.title,
                     undefined,
-                    toolCall.purpose
+                    toolCall.purpose,
+                    toolCall.is_internal
                   )}</span
                 >
                 {#if pendingDetail}
@@ -425,7 +435,11 @@
                 {/if}
               </div>
               <span class="text-muted text-xs"
-                >{serverDisplayName(toolCall.server_name, toolCall.purpose)}</span
+                >{serverDisplayName(
+                  toolCall.server_name,
+                  toolCall.purpose,
+                  toolCall.is_internal
+                )}</span
               >
             </div>
 

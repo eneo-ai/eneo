@@ -395,6 +395,7 @@ def _fresh_access_snapshot(monkeypatch: pytest.MonkeyPatch) -> Iterator[None]:
         return BuilderAccessSnapshot(
             space=SpaceAccessFacts(
                 id=space_id,
+                tenant_id=user.tenant_id,
                 user_id=None,
                 tenant_space_id=None,
                 members={},

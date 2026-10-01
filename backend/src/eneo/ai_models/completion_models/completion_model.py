@@ -123,6 +123,12 @@ class ToolCallMetadata:
     # general MCP servers and Eneo's own loopback servers. Clients render
     # capability calls by purpose, not by the provider's name.
     purpose: Optional[str] = None
+    # Whether the call ran on one of Eneo's own servers (the loopback
+    # knowledge and files servers, a built-in provider, Skill activation).
+    # Decided by the server the call was routed to, never by its display name,
+    # which an admin is free to set to "files" or "knowledge" on an external
+    # server. Clients use it to tell Eneo's tools from look-alikes.
+    is_internal: Optional[bool] = None
     # The tool result's MCP `_meta` (capped by the client). Servers use it for
     # out-of-band facts about the call, e.g. OpenTelemetry GenAI usage
     # attributes (`gen_ai.usage.input_tokens`) from a model-backed tool.

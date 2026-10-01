@@ -15,17 +15,17 @@ from jwt import PyJWKClient as _PyJWKClient
 from pydantic import BaseModel
 from typing_extensions import NotRequired, TypedDict
 
-# JIT provisioning imports
-from eneo.audit.application.audit_service import AuditService
-from eneo.audit.domain.action_types import ActionType
-from eneo.audit.domain.actor_types import ActorType
-from eneo.audit.domain.entity_types import EntityType
-from eneo.audit.domain.outcome import Outcome
+from eneo.authentication.auth_models import FederatedIdentity
+from eneo.authentication.endpoint_access import (
+    Authentication,
+    Authorization,
+    endpoint_access,
+)
 from eneo.main.aiohttp_client import aiohttp_client
 from eneo.main.config import get_settings, validate_redirect_uri
 from eneo.main.container.container import Container
+from eneo.main.exceptions import FederatedLoginDenied
 from eneo.main.logging import get_logger
-from eneo.main.models import ModelId
 from eneo.main.request_context import set_request_context
 from eneo.observability.debug_toggle import is_debug_enabled
 from eneo.observability.redaction import sanitize_payload
@@ -33,7 +33,6 @@ from eneo.server.dependencies.container import get_container
 from eneo.server.protocol import responses
 from eneo.settings.credential_resolver import CredentialResolver
 from eneo.tenants.tenant import TenantState
-from eneo.users.user import UserAdd, UserInDB, UserState
 
 logger = get_logger(__name__)
 
@@ -186,134 +185,6 @@ async def fetch_discovery(discovery_url: str) -> OIDCDiscoveryDocument:
         return await resp.json()
 
 
-async def _jit_provision_user(
-    container: Container,
-    tenant_id: UUID,
-    email: str,
-    correlation_id: str,
-) -> UserInDB:
-    """Create user via JIT provisioning during SSO login."""
-    user_repo = container.user_repo()
-    tenant_repo = container.tenant_repo()
-
-    tenant = await tenant_repo.get(tenant_id)
-
-    # Assign default role if configured on tenant
-    roles = []
-    if tenant and tenant.default_role_id:
-        roles = [ModelId(id=tenant.default_role_id)]
-        logger.info(
-            "JIT provisioning: Assigning default role",
-            extra={
-                "correlation_id": correlation_id,
-                "default_role_id": str(tenant.default_role_id),
-            },
-        )
-    else:
-        # WARNING (not INFO): a role-less user cannot create shared
-        # spaces, use assistants, apps, or any other permission-gated
-        # feature. See S7 rationale in user_service.py.
-        logger.warning(
-            "JIT provisioning: No default role configured; creating user "
-            "without role — user will have zero permissions until an "
-            "admin assigns roles",
-            extra={
-                "correlation_id": correlation_id,
-                "tenant_id": str(tenant_id),
-            },
-        )
-
-    username = email.split("@")[0].lower()
-    # Usernames are not unique across accounts and identity never depends on
-    # them. Avoid creating another account with a taken username: fall back to
-    # the full email (the convention for admin-created users), and to no
-    # username at all (as for invited users) if even that is taken.
-    if await user_repo.get_user_by_username(username, with_deleted=True) is not None:
-        username = email
-        if await user_repo.get_user_by_username(username, with_deleted=True):
-            username = None
-
-    new_user = UserAdd(
-        email=email,
-        username=username,
-        tenant_id=tenant_id,
-        roles=roles,
-        state=UserState.ACTIVE,
-    )
-
-    try:
-        user_in_db = await user_repo.add(new_user)
-
-        logger.info(
-            "JIT provisioning: Created user",
-            extra={
-                "correlation_id": correlation_id,
-                "user_id": str(user_in_db.id),
-                "email": email,
-                "username": username,
-                "tenant_id": str(tenant_id),
-            },
-        )
-
-        return user_in_db
-
-    except Exception as e:
-        logger.error(
-            "JIT provisioning failed: Could not create user",
-            extra={
-                "correlation_id": correlation_id,
-                "email": email,
-                "tenant_id": str(tenant_id),
-                "error_type": type(e).__name__,
-                "error": str(e),
-            },
-        )
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Failed to create user account",
-            headers={"X-Correlation-ID": correlation_id},
-        )
-
-
-async def _log_jit_user_created(
-    container: Container,
-    tenant_id: UUID,
-    user: UserInDB,
-    correlation_id: str,
-) -> None:
-    """Log audit event for JIT-provisioned user. Non-blocking on failure."""
-    try:
-        audit_service: AuditService = container.audit_service()
-
-        await audit_service.log(
-            tenant_id=tenant_id,
-            actor_id=None,
-            action=ActionType.USER_CREATED,
-            entity_type=EntityType.USER,
-            entity_id=user.id,
-            description=f"User '{user.email}' auto-provisioned via SSO federation",
-            metadata={
-                "provisioning_method": "jit_federation",
-                "correlation_id": correlation_id,
-                "email": user.email,
-                "username": user.username,
-            },
-            outcome=Outcome.SUCCESS,
-            actor_type=ActorType.SYSTEM,
-        )
-
-    except Exception as e:
-        logger.warning(
-            "Failed to log JIT user creation audit event",
-            extra={
-                "correlation_id": correlation_id,
-                "user_id": str(user.id),
-                "email": user.email,
-                "error": str(e),
-            },
-        )
-
-
 class TenantInfo(BaseModel):
     """Public tenant information for selector grid."""
 
@@ -421,6 +292,11 @@ class FederationStatusResponse(BaseModel):
     ),
     responses=responses.get_responses([]),
 )
+@endpoint_access(
+    authentication=Authentication.PUBLIC,
+    authorization=Authorization.PUBLIC,
+    reason="Federation discovery and login handshake precede an Eneo session; AuthService validates exchanged credentials and state.",
+)
 async def get_federation_status(
     container: Annotated[Container, Depends(get_container())],
 ) -> FederationStatusResponse:
@@ -504,6 +380,11 @@ async def get_federation_status(
     ),
     responses=responses.get_responses([]),
 )
+@endpoint_access(
+    authentication=Authentication.PUBLIC,
+    authorization=Authorization.PUBLIC,
+    reason="Federation discovery and login handshake precede an Eneo session; AuthService validates exchanged credentials and state.",
+)
 async def list_tenants(
     container: Annotated[Container, Depends(get_container())],
 ) -> TenantListResponse:
@@ -553,6 +434,11 @@ async def list_tenants(
         404: {"description": "Tenant not found or not configured"},
         500: {"description": "Federation or redirect configuration missing"},
     },
+)
+@endpoint_access(
+    authentication=Authentication.PUBLIC,
+    authorization=Authorization.PUBLIC,
+    reason="Federation discovery and login handshake precede an Eneo session; AuthService validates exchanged credentials and state.",
 )
 async def initiate_auth(
     container: Annotated[Container, Depends(get_container())],
@@ -933,6 +819,11 @@ async def initiate_auth(
         404: {"description": "Tenant or user not found"},
     },
 )
+@endpoint_access(
+    authentication=Authentication.PUBLIC,
+    authorization=Authorization.PUBLIC,
+    reason="Federation discovery and login handshake precede an Eneo session; AuthService validates exchanged credentials and state.",
+)
 async def auth_callback(
     callback: CallbackRequest,
     container: Annotated[Container, Depends(get_container())],
@@ -946,7 +837,7 @@ async def auth_callback(
     3. Exchanges authorization code for tokens
     4. Validates ID token (signature, audience, expiry, at_hash)
     5. Validates email domain against tenant's allowed_domains
-    6. Looks up existing user (NO auto-creation)
+    6. Resolves an active tenant member or provisions under the shared JIT policy
     7. Issues Eneo JWT token
 
     Args:
@@ -1649,24 +1540,18 @@ async def auth_callback(
                 },
             )
 
-            email = payload.get(email_claim)
-
-            if not email:
-                logger.error(
-                    "Email claim not found in ID token",
-                    extra={
-                        "tenant_id": str(tenant_id),
-                        "correlation_id": correlation_id,
-                        "email_claim": email_claim,
-                        "payload_keys": list(payload.keys()),
-                    },
+            try:
+                identity = FederatedIdentity.from_claims(
+                    payload, email_claim=email_claim
                 )
+            except ValueError as exc:
                 raise HTTPException(
                     status_code=status.HTTP_401_UNAUTHORIZED,
-                    detail="Email claim not found in ID token",
+                    detail=str(exc),
                     headers={"X-Correlation-ID": correlation_id},
-                )
+                ) from exc
 
+            email = identity.email
             set_request_context(user_email=email)
             await _log_oidc_debug(
                 redis_client=redis_client,
@@ -1675,180 +1560,34 @@ async def auth_callback(
                 email=email,
                 email_claim=email_claim,
             )
-
-            # Validate email format before domain checks (defensive against bad IdP data)
-            _local_part, separator, domain_part = email.partition("@")
-            if (
-                separator == ""
-                or not domain_part
-                or not _local_part
-                or "@" in domain_part
-            ):
-                logger.error(
-                    "Email claim invalid format",
-                    extra={
-                        "tenant_id": str(tenant_id),
-                        "tenant_slug": tenant_slug,
-                        "email": email,
-                        "correlation_id": correlation_id,
-                    },
+            try:
+                user, created = await container.user_service().resolve_federated_user(
+                    identity=identity,
+                    tenant_id=tenant_id,
+                    allowed_domains=federation_config.get("allowed_domains") or [],
+                    correlation_id=correlation_id,
                 )
+            except FederatedLoginDenied as exc:
                 await _log_oidc_debug(
                     redis_client=redis_client,
                     correlation_id=correlation_id,
-                    event="callback.email_invalid_format",
+                    event="callback.user_denied",
                     tenant_slug=tenant_slug,
-                    email=email,
-                )
-                raise HTTPException(
-                    status_code=status.HTTP_401_UNAUTHORIZED,
-                    detail="Email claim from identity provider is invalid. Contact your administrator.",
-                    headers={"X-Correlation-ID": correlation_id},
-                )
-
-            # CRITICAL: Email domain validation
-            allowed_domains = federation_config.get("allowed_domains") or []
-            if allowed_domains:
-                email_domain_raw = domain_part
-                email_domain = email_domain_raw.lower()
-                try:
-                    email_domain = email_domain.encode("idna").decode("ascii")
-                except Exception:  # pragma: no cover - defensive normalization
-                    pass
-
-                normalized_allowed: list[str] = []
-                for domain in allowed_domains:
-                    normalized = domain.lower()
-                    try:
-                        normalized = normalized.encode("idna").decode("ascii")
-                    except Exception:
-                        pass
-                    normalized_allowed.append(normalized)
-
-                if email_domain not in normalized_allowed:
-                    logger.error(
-                        "Email domain not allowed for tenant",
-                        extra={
-                            "tenant_id": str(tenant_id),
-                            "tenant_slug": tenant_slug,
-                            "email_domain": email_domain,
-                            "allowed_domains": normalized_allowed,
-                            "correlation_id": correlation_id,
-                        },
-                    )
-                    await _log_oidc_debug(
-                        redis_client=redis_client,
-                        correlation_id=correlation_id,
-                        event="callback.domain_rejected",
-                        tenant_slug=tenant_slug,
-                        email=email,
-                        email_domain=email_domain,
-                    )
-                    raise HTTPException(
-                        status_code=status.HTTP_403_FORBIDDEN,
-                        detail=(
-                            f"Email domain '{email_domain_raw}' is not allowed for this organization. "
-                            "Contact your administrator to add your domain."
-                        ),
-                        headers={"X-Correlation-ID": correlation_id},
-                    )
-                else:
-                    await _log_oidc_debug(
-                        redis_client=redis_client,
-                        correlation_id=correlation_id,
-                        event="callback.domain_allowed",
-                        tenant_slug=tenant_slug,
-                        email=email,
-                        email_domain=email_domain,
-                    )
-
-            user_repo = container.user_repo()
-            user = await user_repo.get_user_by_email(email)
-
-            if not user:
-                tenant_repo = container.tenant_repo()
-                tenant = await tenant_repo.get(tenant_id)
-
-                if tenant and tenant.provisioning:
-                    logger.info(
-                        "JIT provisioning: Creating new user",
-                        extra={
-                            "tenant_id": str(tenant_id),
-                            "tenant_slug": tenant_slug,
-                            "email": email,
-                            "correlation_id": correlation_id,
-                        },
-                    )
-                    await _log_oidc_debug(
-                        redis_client=redis_client,
-                        correlation_id=correlation_id,
-                        event="callback.jit_provisioning",
-                        tenant_slug=tenant_slug,
-                        email=email,
-                    )
-
-                    user = await _jit_provision_user(
-                        container=container,
-                        tenant_id=tenant_id,
-                        email=email,
-                        correlation_id=correlation_id,
-                    )
-
-                    await _log_jit_user_created(
-                        container=container,
-                        tenant_id=tenant_id,
-                        user=user,
-                        correlation_id=correlation_id,
-                    )
-                else:
-                    logger.error(
-                        "User not found (JIT provisioning disabled)",
-                        extra={
-                            "tenant_id": str(tenant_id),
-                            "tenant_slug": tenant_slug,
-                            "email": email,
-                            "correlation_id": correlation_id,
-                            "provisioning_enabled": tenant.provisioning
-                            if tenant
-                            else False,
-                        },
-                    )
-                    await _log_oidc_debug(
-                        redis_client=redis_client,
-                        correlation_id=correlation_id,
-                        event="callback.user_missing",
-                        tenant_slug=tenant_slug,
-                        email=email,
-                    )
-                    raise HTTPException(
-                        status_code=status.HTTP_403_FORBIDDEN,
-                        detail="User not found. Contact your administrator for access.",
-                        headers={"X-Correlation-ID": correlation_id},
-                    )
-
-            # Verify user belongs to correct tenant
-            if user.tenant_id != tenant_id:
-                logger.error(
-                    "User tenant mismatch",
-                    extra={
-                        "user_tenant_id": str(user.tenant_id),
-                        "expected_tenant_id": str(tenant_id),
-                        "email": email,
-                        "correlation_id": correlation_id,
-                    },
-                )
-                await _log_oidc_debug(
-                    redis_client=redis_client,
-                    correlation_id=correlation_id,
-                    event="callback.user_tenant_mismatch",
-                    tenant_slug=tenant_slug,
-                    email=email,
-                    user_tenant_id=str(user.tenant_id),
+                    reason=str(exc),
                 )
                 raise HTTPException(
                     status_code=status.HTTP_403_FORBIDDEN,
-                    detail="Access denied for this organization.",
+                    detail=str(exc),
                     headers={"X-Correlation-ID": correlation_id},
+                ) from exc
+
+            if created:
+                await _log_oidc_debug(
+                    redis_client=redis_client,
+                    correlation_id=correlation_id,
+                    event="callback.jit_provisioning",
+                    tenant_slug=tenant_slug,
+                    email=email,
                 )
 
             # Create JWT token for existing user

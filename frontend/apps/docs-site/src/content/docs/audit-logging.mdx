@@ -123,6 +123,10 @@ There is no tenant-level conversation retention setting: it was removed from the
 
 Use assistant/app-level overrides when you need a different period from the Space default. A null child value removes that override and falls back to its parent. The shared daily retention worker removes conversation data after its effective configured period; under the current model this can include Flow AI Builder conversation sessions.
 
+In shared and organization spaces, changing or clearing an assistant/app override requires the same space administration permission as changing the space policy. Editors can continue editing other settings but cannot change retention. Personal-space owners retain control of their own assistants and apps.
+
+The existing valid range is 1–2555 days. The space value is a default, not a maximum: administrators can choose a shorter or longer assistant/app override within that range. Setting the override to `null` restores inheritance; omitting it from an update leaves it unchanged. If neither the assistant/app nor its space has a policy, data is kept indefinitely (unless a legacy tenant policy applies).
+
 Flow run and step history is separate. Its dedicated Organization → Space → Flow policy never authorizes scheduled deletion and only sets eligibility or a human-review queue. See [Data retention and deletion](/guides/data-retention).
 
 ## Export formats

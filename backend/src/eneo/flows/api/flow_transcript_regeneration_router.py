@@ -8,6 +8,11 @@ from fastapi.responses import JSONResponse
 from pydantic import BaseModel, ConfigDict, Field
 from pydantic.config import JsonDict
 
+from eneo.authentication.endpoint_access import (
+    Authentication,
+    Authorization,
+    endpoint_access,
+)
 from eneo.flows.api import flow_access_context
 from eneo.flows.api.flow_api_common import (
     commit_flow_runtime_write_before_response,
@@ -20,7 +25,7 @@ from eneo.flows.application.flow_dispatch import (
     dispatch_flow_run_recoverably_after_commit,
 )
 from eneo.flows.domain.flow_run_exceptions import FlowRunConcurrencyLimitReachedError
-from eneo.flows.flow_access_policy import FlowApiAction
+from eneo.flows.flow_access_policy import FlowApiAction, flow_action_access_reason
 from eneo.flows.flow_api_error_code import FlowApiErrorCode
 from eneo.flows.flow_run_input_envelope import TRANSCRIPT_REGENERATION_KEY
 from eneo.main.container.container import Container
@@ -142,6 +147,11 @@ Poll the returned run using the existing run endpoint.
             code=FlowApiErrorCode.EVIDENCE_AUDIT_LOGGING_FAILED,
         ),
     },
+)
+@endpoint_access(
+    authentication=Authentication.USER,
+    authorization=Authorization.AUTHENTICATED,
+    reason=flow_action_access_reason(FlowApiAction.RUN, FlowApiAction.REVIEW),
 )
 async def regenerate_flow_run_transcript(
     id: UUID,

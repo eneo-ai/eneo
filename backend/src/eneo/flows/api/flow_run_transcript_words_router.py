@@ -6,6 +6,11 @@ from uuid import UUID
 from fastapi import APIRouter, Depends, Path, Request, status
 
 from eneo.audit.domain.action_types import ActionType
+from eneo.authentication.endpoint_access import (
+    Authentication,
+    Authorization,
+    endpoint_access,
+)
 from eneo.flows.api import flow_access_context
 from eneo.flows.api.flow_api_common import (
     FLOW_RUN_FORBIDDEN_DESCRIPTION,
@@ -28,7 +33,7 @@ from eneo.flows.application.flow_transcript_words_service import (
     FlowTranscriptWordsView,
 )
 from eneo.flows.domain.flow import FlowRun
-from eneo.flows.flow_access_policy import FlowApiAction
+from eneo.flows.flow_access_policy import FlowApiAction, flow_action_access_reason
 from eneo.flows.flow_api_error_code import FlowApiErrorCode
 from eneo.main.container.container import Container
 from eneo.main.exceptions import AuditLoggingUnavailableException, ErrorCodes
@@ -118,6 +123,11 @@ def _present_transcript_words(
             context={"audit_required": True},
         ),
     },
+)
+@endpoint_access(
+    authentication=Authentication.USER,
+    authorization=Authorization.AUTHENTICATED,
+    reason=flow_action_access_reason(FlowApiAction.VIEW),
 )
 async def get_flow_run_transcript_words(
     id: Annotated[

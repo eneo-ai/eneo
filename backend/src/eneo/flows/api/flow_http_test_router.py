@@ -10,9 +10,15 @@ from eneo.audit.application.audit_metadata import AuditMetadata
 from eneo.audit.domain.action_types import ActionType
 from eneo.audit.domain.entity_types import EntityType
 from eneo.audit.domain.outcome import Outcome
+from eneo.authentication.endpoint_access import (
+    Authentication,
+    Authorization,
+    endpoint_access,
+)
 from eneo.flows.api import flow_http_test_models
 from eneo.flows.api.flow_api_common import error_response
 from eneo.flows.api.flow_definition_access import require_flow_edit_access
+from eneo.flows.flow_access_policy import FlowApiAction, flow_action_access_reason
 from eneo.flows.http_transport import (
     HttpAuthoredConfig,
     HttpTemplateInterpolationError,
@@ -63,6 +69,11 @@ logger = logging.getLogger(__name__)
             context={"auth_layer": "space_membership"},
         ),
     },
+)
+@endpoint_access(
+    authentication=Authentication.USER,
+    authorization=Authorization.AUTHENTICATED,
+    reason=flow_action_access_reason(FlowApiAction.EDIT),
 )
 async def test_flow_http(
     id: Annotated[UUID, Path(description="Flow ID")],

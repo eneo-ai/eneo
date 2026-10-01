@@ -10,6 +10,11 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from eneo.audit.application.audit_metadata import AuditMetadata
 from eneo.audit.domain.action_types import ActionType
 from eneo.audit.domain.entity_types import EntityType
+from eneo.authentication.endpoint_access import (
+    Authentication,
+    Authorization,
+    endpoint_access,
+)
 from eneo.files.file_models import FileMetadata, SignedURLRequest, SignedURLResponse
 from eneo.files.signed_urls import build_signed_download_response
 from eneo.flows.api import flow_access_context
@@ -37,7 +42,7 @@ from eneo.flows.application.flow_trace_audit import (
     raise_flow_trace_audit_unavailable,
 )
 from eneo.flows.domain.flow import FlowRun
-from eneo.flows.flow_access_policy import FlowApiAction
+from eneo.flows.flow_access_policy import FlowApiAction, flow_action_access_reason
 from eneo.flows.flow_api_error_code import FlowApiErrorCode
 from eneo.flows.flow_run_input_envelope import read_single_recording_steps
 from eneo.flows.published_runtime import load_published_definition
@@ -161,6 +166,11 @@ def _raise_run_file_access_audit_unavailable(
             context={"audit_required": True},
         ),
     },
+)
+@endpoint_access(
+    authentication=Authentication.USER,
+    authorization=Authorization.AUTHENTICATED,
+    reason=flow_action_access_reason(FlowApiAction.VIEW),
 )
 async def list_flow_run_steps(
     id: Annotated[
@@ -288,6 +298,11 @@ their own run snapshots. Authoring still requires a user principal.
         ),
     },
 )
+@endpoint_access(
+    authentication=Authentication.USER,
+    authorization=Authorization.AUTHENTICATED,
+    reason=flow_action_access_reason(FlowApiAction.VIEW),
+)
 async def get_flow_graph(
     id: Annotated[
         UUID, Path(description="Identifier of the flow whose graph should be returned.")
@@ -385,6 +400,11 @@ async def get_flow_graph(
             context={"audit_required": True},
         ),
     },
+)
+@endpoint_access(
+    authentication=Authentication.USER,
+    authorization=Authorization.AUTHENTICATED,
+    reason=flow_action_access_reason(FlowApiAction.VIEW),
 )
 async def generate_flow_run_artifact_signed_url(
     id: Annotated[
@@ -515,6 +535,11 @@ Audio downloads honour HTTP Range requests, so the URL can be used directly as a
             context={"audit_required": True},
         ),
     },
+)
+@endpoint_access(
+    authentication=Authentication.USER,
+    authorization=Authorization.AUTHENTICATED,
+    reason=flow_action_access_reason(FlowApiAction.VIEW),
 )
 async def generate_flow_run_input_file_signed_url(
     id: Annotated[

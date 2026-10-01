@@ -222,6 +222,29 @@ def action_requirement(action: FlowApiAction) -> FlowActionRequirement:
     return FLOW_ACTION_REQUIREMENTS[action]
 
 
+def flow_action_access_reason(*actions: FlowApiAction) -> str:
+    """The endpoint_access reason of a route whose handler enforces ``actions``.
+
+    Flow routes declare ``Authorization.AUTHENTICATED`` because this module,
+    not endpoint admission, owns their access rule: an action may need several
+    permissions, admits service-key principals per route, and returns the
+    documented Flows 403 codes. The reason names the enforced actions.
+    """
+    rules = " or ".join(
+        f"{action.value} ("
+        + " and ".join(
+            permission.value
+            for permission in action_requirement(action).required_permissions
+        )
+        + ")"
+        for action in actions
+    )
+    return (
+        f"The flow access policy enforces {rules} and its service-key rule; "
+        "flow, space and run checks stay in the route's access helpers."
+    )
+
+
 def user_can_perform_flow_action(user: UserInDB, action: FlowApiAction) -> bool:
     requirement = action_requirement(action)
     if not requirement.implemented:

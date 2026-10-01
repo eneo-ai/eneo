@@ -8,10 +8,16 @@ from pathlib import Path
 from typing import Literal, Optional
 from urllib.parse import urlparse
 
-from pydantic import Field, computed_field, field_validator, model_validator
+from pydantic import (
+    Field,
+    ValidationError,
+    computed_field,
+    field_validator,
+    model_validator,
+)
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
-from eneo.main.removed_env import check_removed_variables
+from eneo.main.removed_env import UPGRADE_GUIDE_URL, check_removed_variables
 from eneo.object_content.configuration import DEFAULT_FILE_UPLOAD_LIMIT_BYTES
 
 # Version manifest lookup:
@@ -26,6 +32,12 @@ _LOCAL_MANIFEST = (
 )
 _PROCESS_STARTED_AT = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
 _BUILD_ID_ENV_VARS = ("GIT_COMMIT", "BUILD_ID")
+
+
+URL_SIGNING_KEY_MINIMUM_BYTES = 32
+# Absolute upper bound for a login session; a longer-lived captured token
+# would stay replayable for as long. 1440 (24 hours) is the recommended value.
+JWT_EXPIRY_TIME_MAXIMUM_MINUTES = 30 * 24 * 60
 
 
 def validate_public_origin(origin: str | None) -> str | None:
@@ -234,7 +246,11 @@ AI_BUILDER_PROVIDER_CALL_CEILING_SECONDS_DEFAULT = 1800.0
 
 
 class Settings(BaseSettings):
-    model_config = SettingsConfigDict(env_file=".env", extra="allow")
+    # Never echo settings values in validation errors: the environment holds
+    # secrets, and a failed startup must not print them.
+    model_config = SettingsConfigDict(
+        env_file=".env", extra="allow", hide_input_in_errors=True
+    )
 
     app_version: str = _set_app_version()
 
@@ -283,6 +299,10 @@ class Settings(BaseSettings):
     redis_host: str
     redis_port: int
     redis_db: int = 0
+    # Optional Redis authentication. Unset or blank connects without
+    # credentials; a username requires a password (Redis ACL user).
+    redis_username: str | None = None
+    redis_password: str | None = None
     # Redis connection resilience defaults
     # Safe defaults avoid aggressive timeouts during transient network blips
     redis_conn_timeout: int = 5
@@ -455,7 +475,11 @@ class Settings(BaseSettings):
     oidc_discovery_endpoint: Optional[str] = None
     oidc_client_id: Optional[str] = None
     oidc_client_secret: Optional[str] = None
-    oidc_tenant_id: Optional[str] = None  # For backward compat with user creation
+    oidc_tenant_id: Optional[str] = None
+    oidc_allowed_domains: list[str] = Field(
+        default_factory=list,
+        description="Allowed email domains for global OIDC; required for JIT provisioning.",
+    )
 
     # Public-facing origin for OIDC redirect_uri (single-tenant fallback)
     # This is the externally-reachable URL for the application
@@ -546,6 +570,9 @@ class Settings(BaseSettings):
     trusted_proxy_headers: list[str] = ["x-forwarded-for", "x-real-ip"]
     jwt_audience: str
     jwt_issuer: str
+    # Session token lifetime in minutes. The value has always been applied as
+    # minutes; it is not reinterpreted on upgrade, but it may not exceed
+    # JWT_EXPIRY_TIME_MAXIMUM_MINUTES.
     jwt_expiry_time: int
     jwt_algorithm: str
     jwt_secret: str
@@ -642,6 +669,35 @@ class Settings(BaseSettings):
         """
         if v is None or (isinstance(v, str) and not v.strip()):
             return Path("exports")
+        return v
+
+    @field_validator("jwt_expiry_time")
+    @classmethod
+    def validate_jwt_expiry_time(cls, v: int) -> int:
+        if v <= 0:
+            raise ValueError(
+                "JWT_EXPIRY_TIME must be a positive number of minutes "
+                "(for example 1440 for 24 hours)"
+            )
+        if v > JWT_EXPIRY_TIME_MAXIMUM_MINUTES:
+            raise ValueError(
+                "JWT_EXPIRY_TIME is the session lifetime in minutes and may not "
+                f"exceed {JWT_EXPIRY_TIME_MAXIMUM_MINUTES} (30 days). "
+                "Set 1440 for 24-hour sessions."
+            )
+        return v
+
+    @field_validator("url_signing_key")
+    @classmethod
+    def validate_url_signing_key(cls, v: str) -> str:
+        """Signed download links are HMAC bearer credentials; a blank or short
+        key would let anyone forge them. The key value is never logged."""
+        if len(v.strip().encode("utf-8")) < URL_SIGNING_KEY_MINIMUM_BYTES:
+            raise ValueError(
+                "URL_SIGNING_KEY must be set to at least "
+                f"{URL_SIGNING_KEY_MINIMUM_BYTES} bytes of random data "
+                "(for example: openssl rand -hex 32)"
+            )
         return v
 
     @field_validator("sharepoint_max_download_bytes")
@@ -962,6 +1018,13 @@ class Settings(BaseSettings):
             return self.crawl_job_concurrency_limit
         return self.worker_max_jobs
 
+    @field_validator("redis_username", "redis_password", mode="before")
+    @classmethod
+    def blank_redis_credential_is_unset(cls, value: object) -> object:
+        if isinstance(value, str) and not value.strip():
+            return None
+        return value
+
     @model_validator(mode="after")
     def validate_flow_transcription_service_settings(self):
         """Ensure external flow transcription service settings are coherent."""
@@ -992,6 +1055,8 @@ class Settings(BaseSettings):
     @model_validator(mode="after")
     def validate_redis_settings(self):
         """Ensure Redis connection settings are sane."""
+        if self.redis_username is not None and self.redis_password is None:
+            raise ValueError("REDIS_USERNAME requires REDIS_PASSWORD to be set.")
         if self.redis_conn_timeout <= 0:
             logging.error(
                 "REDIS_CONN_TIMEOUT must be greater than zero. Current value: %s",
@@ -1219,15 +1284,49 @@ class Settings(BaseSettings):
 _settings: Optional[Settings] = None
 
 
+class InvalidConfiguration(SystemExit):
+    """The settings could not be loaded; the reasons were already logged.
+
+    A ``SystemExit`` so that a service stops with exit code 1 and no traceback.
+    Command-line tools that report their own outcome catch it explicitly.
+    """
+
+    def __init__(self) -> None:
+        super().__init__(1)
+
+
+def _describe_configuration_errors(error: ValidationError) -> list[str]:
+    """One line per problem, naming the environment variable, never its value."""
+    lines: list[str] = []
+    for problem in error.errors(include_url=False, include_input=False):
+        variable = "_".join(str(part) for part in problem["loc"]).upper()
+        message = problem["msg"].removeprefix("Value error, ")
+        lines.append(
+            message if message.startswith(variable) else f"{variable}: {message}"
+        )
+    return lines
+
+
 def get_settings() -> Settings:
     """Get settings singleton, creating it if needed.
+
+    Exits with one readable message per configuration problem instead of a
+    traceback, so an operator reading the service log sees what to change.
 
     Returns:
         Settings: The application settings instance.
     """
     global _settings
     if _settings is None:
-        _settings = Settings()  # pyright: ignore[reportCallIssue]
+        try:
+            _settings = Settings()  # pyright: ignore[reportCallIssue]
+        except ValidationError as error:
+            logging.error(
+                "Eneo cannot start until its configuration is corrected:\n  %s\nSee %s",
+                "\n  ".join(_describe_configuration_errors(error)),
+                UPGRADE_GUIDE_URL,
+            )
+            raise InvalidConfiguration() from None
     return _settings
 
 

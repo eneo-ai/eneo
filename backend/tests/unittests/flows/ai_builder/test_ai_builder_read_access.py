@@ -45,9 +45,12 @@ def _user(*, permissions: Sequence[Permission] = _BUILDER, api_key=None):
     )
 
 
-def _facts(space_id: UUID, user_id: UUID, role: str | None) -> SpaceAccessFacts:
+def _facts(
+    space_id: UUID, tenant_id: UUID, user_id: UUID, role: str | None
+) -> SpaceAccessFacts:
     return SpaceAccessFacts(
         id=space_id,
+        tenant_id=tenant_id,
         user_id=None,
         tenant_space_id=uuid4(),
         members=(
@@ -85,7 +88,9 @@ class _Snapshots:
         self.reads.append((space_id, flow_id))
         role, flow_space_id = self.states[min(len(self.reads), len(self.states)) - 1]
         return BuilderAccessSnapshot(
-            space=_facts(space_id, user.id, role) if role != "absent" else None,
+            space=_facts(space_id, user.tenant_id, user.id, role)
+            if role != "absent"
+            else None,
             flow_space_id=flow_space_id if flow_id is not None else None,
         )
 

@@ -7,7 +7,7 @@ import pytest
 from pydantic import ValidationError
 
 from eneo.authentication import auth_service as auth_service_module
-from eneo.authentication.auth_service import AuthService
+from eneo.authentication.auth_service import INTERNAL_MCP_AUDIENCE, AuthService
 from eneo.internal_mcp.foundation import (
     assistant_id_from_token,
     mcp_server_id_from_token,
@@ -56,6 +56,39 @@ async def test_can_create_access_token_successfully(auth_service: AuthService):
     assert creds["user_id"] == str(TEST_USER.id)
     assert creds["tenant_id"] == str(TEST_USER.tenant_id)
     assert creds["token_version"] == 2
+
+
+def test_expiry_time_is_applied_as_minutes(auth_service: AuthService):
+    """A configured 1440 yields a 24-hour session; the unit is minutes."""
+    access_token = auth_service.create_access_token_for_user(
+        user=TEST_USER,
+        secret_key=str(JWT_SECRET),
+        audience=JWT_AUDIENCE,
+        expires_in=1440,
+    )
+    creds = jwt.decode(
+        access_token,
+        str(JWT_SECRET),
+        audience=JWT_AUDIENCE,
+        algorithms=[JWT_ALGORITHM],
+    )
+    # ``iat`` is backdated by two seconds so the token is valid immediately.
+    lifetime_seconds = creds["exp"] - creds["iat"] - 2
+    assert abs(lifetime_seconds - 24 * 60 * 60) < 5
+
+
+def test_default_expiry_comes_from_settings(auth_service: AuthService):
+    access_token = auth_service.create_access_token_for_user(
+        user=TEST_USER, secret_key=str(JWT_SECRET), audience=JWT_AUDIENCE
+    )
+    creds = jwt.decode(
+        access_token,
+        str(JWT_SECRET),
+        audience=JWT_AUDIENCE,
+        algorithms=[JWT_ALGORITHM],
+    )
+    lifetime_seconds = creds["exp"] - creds["iat"] - 2
+    assert abs(lifetime_seconds - JWT_EXPIRY_TIME_MINUTES * 60) < 5
 
 
 async def test_token_missing_user_is_invalid(auth_service: AuthService):
@@ -209,13 +242,12 @@ def session_service(auth_service: AuthService):
     return service, users
 
 
-def token_claims(token: str) -> dict[str, object]:
-    settings = get_settings()
+def token_claims(token: str, audience: str = JWT_AUDIENCE) -> dict[str, object]:
     return jwt.decode(
         token,
         JWT_SECRET,
-        algorithms=[settings.jwt_algorithm],
-        audience=settings.jwt_audience,
+        algorithms=[get_settings().jwt_algorithm],
+        audience=audience,
     )
 
 
@@ -244,12 +276,16 @@ async def test_same_username_sessions_keep_their_own_identity(
     users.update({anna.id: anna, other_anna.id: other_anna})
 
     for owner in (anna, other_anna):
-        token = (
-            service.auth_service.create_scoped_mcp_token(owner, assistant_id=uuid4())
-            if scoped_mcp
-            else service.auth_service.create_access_token_for_user(owner)
-        )
-        actual = await service.authenticate(token=token)
+        if scoped_mcp:
+            actual = await service.authenticate_internal_mcp_token(
+                service.auth_service.create_scoped_mcp_token(
+                    owner, assistant_id=uuid4()
+                )
+            )
+        else:
+            actual = await service.authenticate(
+                token=service.auth_service.create_access_token_for_user(owner)
+            )
         assert (actual.id, actual.tenant_id, actual.email) == (
             owner.id,
             owner.tenant_id,
@@ -385,7 +421,7 @@ def test_scoped_mcp_token_uses_the_common_identity_contract(auth_service: AuthSe
     token = auth_service.create_scoped_mcp_token(
         TEST_USER, assistant_id=assistant_id, mcp_server_id=server_id
     )
-    claims = token_claims(token)
+    claims = token_claims(token, audience=INTERNAL_MCP_AUDIENCE)
     assert claims["user_id"] == str(TEST_USER.id)
     assert claims["tenant_id"] == str(TEST_USER.tenant_id)
     assert claims["token_version"] == 2
@@ -397,6 +433,29 @@ def test_scoped_mcp_token_uses_the_common_identity_contract(auth_service: AuthSe
     for read_scope in (assistant_id_from_token, mcp_server_id_from_token):
         with pytest.raises(AuthenticationException):
             read_scope(legacy)
+
+
+async def test_scoped_mcp_token_is_not_a_session(session_service):
+    service, users = session_service
+    users[TEST_USER.id] = TEST_USER
+    token = service.auth_service.create_scoped_mcp_token(
+        TEST_USER, assistant_id=uuid4()
+    )
+    with pytest.raises(AuthenticationException):
+        await service.authenticate(token=token)
+
+
+async def test_session_token_is_not_a_scoped_mcp_token(session_service):
+    service, users = session_service
+    users[TEST_USER.id] = TEST_USER
+    token = service.auth_service.create_access_token_for_user(TEST_USER)
+    assert (await service.authenticate(token=token)).id == TEST_USER.id
+
+    with pytest.raises(AuthenticationException):
+        await service.authenticate_internal_mcp_token(token)
+    for read_scope in (assistant_id_from_token, mcp_server_id_from_token):
+        with pytest.raises(AuthenticationException):
+            read_scope(token)
 
 
 async def test_identity_bound_session_checks_live_user_and_tenant_state(

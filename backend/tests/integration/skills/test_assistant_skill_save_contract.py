@@ -1334,6 +1334,8 @@ async def test_assistant_skill_configuration_requires_skill_read_access(
             model.id,
             space_id=space.id,
         )
+        assistant.published = True
+        await session.flush()
         token = container.auth_service().create_access_token_for_user(user)
         space_id = space.id
         assistant_id = assistant.id

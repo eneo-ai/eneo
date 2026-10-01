@@ -7,6 +7,11 @@ from uuid import UUID
 from fastapi import APIRouter, Depends, Path, Request, Response, status
 from fastapi.routing import APIRoute
 
+from eneo.authentication.endpoint_access import (
+    Authentication,
+    Authorization,
+    endpoint_access,
+)
 from eneo.flows.api.flow_api_common import error_response
 from eneo.flows.api.flow_assembler import FlowAssembler
 from eneo.flows.api.flow_assistant_router import (
@@ -18,6 +23,7 @@ from eneo.flows.api.flow_security_classification_models import (
     FlowSecurityClassificationPreviewPublic,
     FlowSecurityClassificationPreviewRequest,
 )
+from eneo.flows.flow_access_policy import FlowApiAction, flow_action_access_reason
 from eneo.flows.flow_api_error_code import FlowApiErrorCode
 from eneo.flows.flow_authoring_spec import (
     MAX_FLOW_AUTHORING_REQUEST_BYTES,
@@ -171,6 +177,11 @@ router = APIRouter(route_class=_CappedBodyRoute)
             context={"max_bytes": MAX_FLOW_AUTHORING_REQUEST_BYTES},
         ),
     },
+)
+@endpoint_access(
+    authentication=Authentication.USER,
+    authorization=Authorization.AUTHENTICATED,
+    reason=flow_action_access_reason(FlowApiAction.EDIT),
 )
 async def preview_flow_security_classification(
     id: Annotated[UUID, Path(description="Identifier of the draft flow to explain.")],

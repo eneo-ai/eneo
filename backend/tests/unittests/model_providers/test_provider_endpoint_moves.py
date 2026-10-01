@@ -62,10 +62,15 @@ def _provider(
 @pytest.mark.asyncio
 async def test_moving_the_endpoint_withdraws_strict_tool_schema_declarations():
     provider = _provider(endpoint="https://gateway.invalid/v1")
-    service, repository = _service(provider)
+    service, repository = _service(
+        provider,
+        encryption_key=Fernet.generate_key().decode(),
+    )
 
+    # A real move must carry a key entered for the new destination.
     await service.update(
         provider.id,
+        credentials={"api_key": "key-for-the-other-gateway"},
         config={"endpoint": "https://other-gateway.invalid/v1"},
     )
 

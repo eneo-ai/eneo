@@ -24,6 +24,7 @@ def build_signed_download_response(
         expires_at=expires_at,
         content_disposition=signed_url_request.content_disposition,
         tenant_id=tenant_id,
+        issued_at=issued_at,
     )
     url = (
         f"{base_url.rstrip('/')}"

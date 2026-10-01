@@ -9,6 +9,11 @@ from eneo.audit.domain.action_types import ActionType
 from eneo.authentication.auth_models import (
     FLOW_EVIDENCE_SERVICE_KEY_PERMISSION_RECIPE,
 )
+from eneo.authentication.endpoint_access import (
+    Authentication,
+    Authorization,
+    endpoint_access,
+)
 from eneo.flows.api import flow_access_context
 from eneo.flows.api.flow_api_common import (
     error_response,
@@ -41,7 +46,7 @@ from eneo.flows.application.flow_trace_audit import (
 )
 from eneo.flows.domain.flow import FlowRun
 from eneo.flows.domain.provider_call import ProviderCallEvidencePage
-from eneo.flows.flow_access_policy import FlowApiAction
+from eneo.flows.flow_access_policy import FlowApiAction, flow_action_access_reason
 from eneo.flows.flow_api_error_code import FlowApiErrorCode
 from eneo.flows.flow_run_input_envelope import (
     read_max_speakers,
@@ -136,6 +141,11 @@ _RAW_REASON_REQUIRED_MESSAGE: Final[str] = (
             context={"audit_required": True},
         ),
     },
+)
+@endpoint_access(
+    authentication=Authentication.USER,
+    authorization=Authorization.AUTHENTICATED,
+    reason=flow_action_access_reason(FlowApiAction.VIEW),
 )
 async def get_flow_run_evidence(
     id: Annotated[
@@ -266,6 +276,11 @@ async def get_flow_run_evidence(
             context={"audit_required": True},
         ),
     },
+)
+@endpoint_access(
+    authentication=Authentication.USER,
+    authorization=Authorization.AUTHENTICATED,
+    reason=flow_action_access_reason(FlowApiAction.VIEW),
 )
 async def list_flow_run_provider_calls(
     id: Annotated[
@@ -431,6 +446,11 @@ async def list_flow_run_provider_calls(
             context={"audit_required": True},
         ),
     },
+)
+@endpoint_access(
+    authentication=Authentication.USER,
+    authorization=Authorization.AUTHENTICATED,
+    reason=flow_action_access_reason(FlowApiAction.VIEW),
 )
 async def export_flow_run_evidence(
     id: Annotated[

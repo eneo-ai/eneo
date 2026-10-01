@@ -20,6 +20,11 @@ from eneo.audit.application.audit_metadata import AuditMetadata
 from eneo.audit.domain.action_types import ActionType
 from eneo.audit.domain.entity_types import EntityType
 from eneo.authentication.auth_dependencies import get_scope_filter
+from eneo.authentication.endpoint_access import (
+    Authentication,
+    Authorization,
+    endpoint_access,
+)
 from eneo.completion_models.domain.model_capacity import UnknownModelCapacityError
 from eneo.completion_models.infrastructure.tenant_model_capabilities import (
     enrich_reasoning_effort_capability,
@@ -157,6 +162,7 @@ from eneo.flows.domain.flow import FlowRun
 from eneo.flows.flow_access_policy import (
     FlowAccessFilterMode,
     FlowApiAction,
+    flow_action_access_reason,
     require_flow_action,
 )
 from eneo.main.container.container import Container
@@ -881,6 +887,11 @@ def _ai_builder_json_error_response(
         ),
     },
 )
+@endpoint_access(
+    authentication=Authentication.USER,
+    authorization=Authorization.AUTHENTICATED,
+    reason=flow_action_access_reason(FlowApiAction.BUILDER_CLIENT_ERROR_REPORT),
+)
 async def report_client_error(
     body: ReportClientErrorRequest,
     container: ContainerWithUserExplicitTransactionDep,
@@ -977,6 +988,11 @@ async def report_client_error(
         ),
     },
 )
+@endpoint_access(
+    authentication=Authentication.USER,
+    authorization=Authorization.AUTHENTICATED,
+    reason=flow_action_access_reason(FlowApiAction.BUILDER_REVIEW),
+)
 async def get_flow_review_packet(
     request: Request,
     flow_id: UUID,
@@ -1018,6 +1034,11 @@ async def get_flow_review_packet(
             code=AIBuilderErrorCode.INSUFFICIENT_SCOPE,
         ),
     },
+)
+@endpoint_access(
+    authentication=Authentication.USER,
+    authorization=Authorization.AUTHENTICATED,
+    reason=flow_action_access_reason(FlowApiAction.BUILDER_REVIEW),
 )
 async def get_run_failure_launch(
     request: Request,
@@ -1093,6 +1114,11 @@ async def get_run_failure_launch(
         ),
     },
 )
+@endpoint_access(
+    authentication=Authentication.USER,
+    authorization=Authorization.AUTHENTICATED,
+    reason=flow_action_access_reason(FlowApiAction.BUILDER_REVIEW),
+)
 async def post_flow_review_suggestions(
     request: Request,
     flow_id: UUID,
@@ -1167,6 +1193,11 @@ async def post_flow_review_suggestions(
         ),
     },
 )
+@endpoint_access(
+    authentication=Authentication.USER,
+    authorization=Authorization.AUTHENTICATED,
+    reason=flow_action_access_reason(FlowApiAction.BUILDER_SESSION_CREATE),
+)
 async def create_session(
     request: Request,
     body: CreateSessionRequest,
@@ -1236,6 +1267,11 @@ async def create_session(
             details={"auth_layer": "space_membership"},
         ),
     },
+)
+@endpoint_access(
+    authentication=Authentication.USER,
+    authorization=Authorization.AUTHENTICATED,
+    reason=flow_action_access_reason(FlowApiAction.BUILDER_SESSION_LIST),
 )
 async def list_sessions(
     request: Request,
@@ -1338,6 +1374,13 @@ async def list_sessions(
             code=AIBuilderErrorCode.NOT_FOUND,
         ),
     },
+)
+@endpoint_access(
+    authentication=Authentication.USER,
+    authorization=Authorization.AUTHENTICATED,
+    reason=flow_action_access_reason(
+        FlowApiAction.BUILDER_MESSAGE_SEND, FlowApiAction.BUILDER_REVIEW
+    ),
 )
 async def send_message(
     request: Request,
@@ -1679,6 +1722,11 @@ async def send_message(
         ),
     },
 )
+@endpoint_access(
+    authentication=Authentication.USER,
+    authorization=Authorization.AUTHENTICATED,
+    reason=flow_action_access_reason(FlowApiAction.BUILDER_SESSION_READ),
+)
 async def get_session(
     request: Request,
     session_id: Annotated[
@@ -1729,6 +1777,11 @@ async def get_session(
     },
     include_in_schema=False,
 )
+@endpoint_access(
+    authentication=Authentication.USER,
+    authorization=Authorization.AUTHENTICATED,
+    reason=flow_action_access_reason(FlowApiAction.BUILDER_SESSION_READ),
+)
 async def get_session_classifier_diagnostics(
     request: Request,
     session_id: Annotated[
@@ -1775,6 +1828,11 @@ async def get_session_classifier_diagnostics(
         ),
     },
     include_in_schema=False,
+)
+@endpoint_access(
+    authentication=Authentication.USER,
+    authorization=Authorization.AUTHENTICATED,
+    reason=flow_action_access_reason(FlowApiAction.BUILDER_SESSION_READ),
 )
 async def get_session_proposal_telemetry_diagnostics(
     request: Request,
@@ -1833,6 +1891,11 @@ async def get_session_proposal_telemetry_diagnostics(
             code=AIBuilderErrorCode.SESSION_SEND_IN_PROGRESS,
         ),
     },
+)
+@endpoint_access(
+    authentication=Authentication.USER,
+    authorization=Authorization.AUTHENTICATED,
+    reason=flow_action_access_reason(FlowApiAction.BUILDER_ATTACHMENT_DETACH),
 )
 async def detach_session_attachment(
     request: Request,
@@ -1897,6 +1960,11 @@ async def detach_session_attachment(
             code=AIBuilderErrorCode.NOT_FOUND,
         ),
     },
+)
+@endpoint_access(
+    authentication=Authentication.USER,
+    authorization=Authorization.AUTHENTICATED,
+    reason=flow_action_access_reason(FlowApiAction.BUILDER_MODELS_LIST),
 )
 async def get_session_models(
     request: Request,
@@ -2002,6 +2070,11 @@ async def get_session_models(
         ),
     },
 )
+@endpoint_access(
+    authentication=Authentication.USER,
+    authorization=Authorization.AUTHENTICATED,
+    reason=flow_action_access_reason(FlowApiAction.BUILDER_PLAN_READ),
+)
 async def get_plan(
     request: Request,
     plan_id: Annotated[
@@ -2045,6 +2118,11 @@ async def get_plan(
             code=AIBuilderErrorCode.NOT_FOUND,
         ),
     },
+)
+@endpoint_access(
+    authentication=Authentication.USER,
+    authorization=Authorization.AUTHENTICATED,
+    reason=flow_action_access_reason(FlowApiAction.BUILDER_PLAN_LIST),
 )
 async def list_session_plans(
     request: Request,
@@ -2090,6 +2168,11 @@ async def list_session_plans(
             code=AIBuilderErrorCode.NOT_FOUND,
         ),
     },
+)
+@endpoint_access(
+    authentication=Authentication.USER,
+    authorization=Authorization.AUTHENTICATED,
+    reason=flow_action_access_reason(FlowApiAction.BUILDER_SESSION_CANCEL),
 )
 async def cancel_session(
     request: Request,
@@ -2152,6 +2235,11 @@ async def cancel_session(
             code=AIBuilderErrorCode.NOT_FOUND,
         ),
     },
+)
+@endpoint_access(
+    authentication=Authentication.USER,
+    authorization=Authorization.AUTHENTICATED,
+    reason=flow_action_access_reason(FlowApiAction.BUILDER_PLAN_APPROVE),
 )
 async def approve_plan(
     request: Request,
@@ -2230,6 +2318,11 @@ async def approve_plan(
             code=AIBuilderErrorCode.STALE_REVISION,
         ),
     },
+)
+@endpoint_access(
+    authentication=Authentication.USER,
+    authorization=Authorization.AUTHENTICATED,
+    reason=flow_action_access_reason(FlowApiAction.BUILDER_PLAN_APPLY),
 )
 async def apply_plan(
     request: Request,
@@ -2321,6 +2414,11 @@ async def apply_plan(
         ),
     },
 )
+@endpoint_access(
+    authentication=Authentication.USER,
+    authorization=Authorization.AUTHENTICATED,
+    reason=flow_action_access_reason(FlowApiAction.BUILDER_PLAN_APPLY),
+)
 async def approve_and_apply_create_plan(
     request: Request,
     plan_id: Annotated[
@@ -2401,6 +2499,11 @@ async def approve_and_apply_create_plan(
             code=AIBuilderErrorCode.SESSION_CREATOR_REQUIRED,
         ),
     },
+)
+@endpoint_access(
+    authentication=Authentication.USER,
+    authorization=Authorization.AUTHENTICATED,
+    reason=flow_action_access_reason(FlowApiAction.BUILDER_PLAN_REVISE),
 )
 async def revise_plan(
     request: Request,

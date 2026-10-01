@@ -7,13 +7,14 @@ from eneo.audit.application.audit_metadata import AuditMetadata
 from eneo.audit.domain.action_types import ActionType
 from eneo.audit.domain.entity_types import EntityType
 from eneo.authentication.auth_dependencies import get_current_active_user
+from eneo.authentication.endpoint_access import Authentication, endpoint_access
 from eneo.image_models.presentation.image_model_models import (
     ImageModelPublic,
     ImageModelUpdate,
 )
 from eneo.main.container.container import Container
 from eneo.main.models import PaginatedResponse, is_provided
-from eneo.roles.permissions import Permission, validate_permission
+from eneo.roles.permissions import Permission
 from eneo.server.dependencies.container import get_container
 from eneo.server.protocol import responses
 from eneo.users.user import UserInDB
@@ -29,12 +30,15 @@ router = APIRouter()
     responses=responses.get_responses([403]),
     description="List all image models for the tenant.",
 )
+@endpoint_access(
+    authentication=Authentication.USER,
+    authorization=Permission.ADMIN,
+    reason="This operation requires Permission.ADMIN before accessing tenant resources.",
+)
 async def get_image_models(
     user: CurrentUser,
     container: Annotated[Container, Depends(get_container(with_user=True))],
 ):
-    validate_permission(user, Permission.ADMIN)
-
     service = container.image_model_crud_service()
     models = await service.get_image_models()
 
@@ -49,6 +53,11 @@ async def get_image_models(
     responses=responses.get_responses([403, 404]),
     description="Update org settings for an image model.",
 )
+@endpoint_access(
+    authentication=Authentication.USER,
+    authorization=Permission.ADMIN,
+    reason="This operation requires Permission.ADMIN before accessing tenant resources.",
+)
 async def update_image_model(
     id: UUID,
     update_flags: ImageModelUpdate,
@@ -56,8 +65,6 @@ async def update_image_model(
 ):
     service = container.image_model_crud_service()
     user = container.user()
-
-    validate_permission(user, Permission.ADMIN)
 
     old_model = await container.image_model_repo().one(model_id=id)
 

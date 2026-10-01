@@ -38,6 +38,10 @@ class _FakeMCPProxy:
         del prefixed_tool_name
         return None
 
+    def is_internal_tool(self, prefixed_tool_name: str) -> bool:
+        del prefixed_tool_name
+        return False
+
     async def call_tools_parallel(self, proxy_calls):
         self.call_count += 1
         return [{"content": [{"type": "text", "text": "ok"}], "is_error": False}]

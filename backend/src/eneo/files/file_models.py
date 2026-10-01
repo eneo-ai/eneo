@@ -246,6 +246,12 @@ class FileRestrictions(BaseModel):
     limit: Limit
 
 
+# Signed links are stateless bearer credentials and cannot be revoked, so
+# every purpose has a hard maximum lifetime enforced at mint and at redemption.
+FILE_PROCESSING_SIGNED_URL_MAXIMUM_EXPIRY_SECONDS = 7 * 24 * 60 * 60
+FILE_ORIGINAL_SIGNED_URL_MAXIMUM_EXPIRY_SECONDS = 60 * 60
+
+
 class SignedURLRequest(BaseModel):
     model_config = ConfigDict(
         json_schema_extra={
@@ -273,9 +279,6 @@ class SignedURLRequest(BaseModel):
             "signature already carries the authorization."
         ),
     )
-
-
-FILE_ORIGINAL_SIGNED_URL_MAXIMUM_EXPIRY_SECONDS = 60 * 60
 
 
 class OriginalSignedURLRequest(SignedURLRequest):

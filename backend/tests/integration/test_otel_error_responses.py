@@ -14,6 +14,11 @@ from __future__ import annotations
 import pytest
 from fastapi import HTTPException, Response
 
+from eneo.authentication.endpoint_access import (
+    Authentication,
+    Authorization,
+    endpoint_access,
+)
 from eneo.flow_packages.api.flow_package_models import (
     FLOW_PACKAGE_OMITTED_MCP_ASSISTANT_COUNT_HEADER,
 )
@@ -78,6 +83,11 @@ async def test_cors_exposes_positive_package_omission_header(app):
     from httpx import ASGITransport, AsyncClient
 
     @app.get("/api/v1/_test_package_omission_header")
+    @endpoint_access(
+        authentication=Authentication.PUBLIC,
+        authorization=Authorization.PUBLIC,
+        reason="Test-only route for the package omission CORS header.",
+    )
     async def _package_omission_header() -> Response:
         return Response(headers={FLOW_PACKAGE_OMITTED_MCP_ASSISTANT_COUNT_HEADER: "2"})
 
@@ -109,6 +119,11 @@ async def test_500_exposes_trace_headers(app, allowed_origin, same_origin):
     from httpx import ASGITransport, AsyncClient
 
     @app.get("/api/v1/_test_force_500")
+    @endpoint_access(
+        authentication=Authentication.PUBLIC,
+        authorization=Authorization.PUBLIC,
+        reason="Test-only route for error response trace headers.",
+    )
     async def _force_500():
         raise RuntimeError("forced error for integration test")
 
@@ -143,6 +158,11 @@ async def test_explicit_http_500_preserves_error_identity_and_cors(app):
     from httpx import ASGITransport, AsyncClient
 
     @app.get("/api/v1/_test_explicit_500")
+    @endpoint_access(
+        authentication=Authentication.PUBLIC,
+        authorization=Authorization.PUBLIC,
+        reason="Test-only route for the internal error envelope.",
+    )
     async def _explicit_500():
         raise HTTPException(status_code=500, detail="must not leak")
 

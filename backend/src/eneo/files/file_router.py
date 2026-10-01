@@ -1,6 +1,5 @@
 import base64
 import time
-from dataclasses import dataclass
 from types import SimpleNamespace
 from typing import Annotated, cast
 from urllib.parse import urlencode
@@ -15,6 +14,12 @@ from eneo.audit.domain.action_types import ActionType
 from eneo.audit.domain.actor_types import ActorType
 from eneo.audit.domain.entity_types import EntityType
 from eneo.authentication.auth_dependencies import require_user_for_creation
+from eneo.authentication.endpoint_access import (
+    Authentication,
+    Authorization,
+    authenticates,
+    endpoint_access,
+)
 from eneo.authentication.signed_urls import (
     generate_file_original_download_token,
     generate_signed_token,
@@ -75,6 +80,11 @@ async def _require_upload_user_for_creation(
     description="Upload a file; rejects unsupported media types and oversized files.",
     dependencies=[Depends(_require_upload_user_for_creation)],
 )
+@endpoint_access(
+    authentication=Authentication.USER,
+    authorization=Authorization.AUTHENTICATED,
+    reason="FileService enforces file ownership and access to the containing resource.",
+)
 async def upload_file(
     upload_file: UploadFile,
     container: _FileUploadContainer,
@@ -129,6 +139,11 @@ async def upload_file(
     responses=responses.get_responses([]),
     description="List the current user's uploaded files.",
 )
+@endpoint_access(
+    authentication=Authentication.USER,
+    authorization=Authorization.AUTHENTICATED,
+    reason="FileService enforces file ownership and access to the containing resource.",
+)
 async def get_files(
     container: Annotated[Container, Depends(get_container(with_user=True))],
 ):
@@ -144,6 +159,11 @@ async def get_files(
     status_code=200,
     responses=responses.get_responses([403, 404]),
     description="Fetch a single file's metadata by id.",
+)
+@endpoint_access(
+    authentication=Authentication.USER,
+    authorization=Authorization.AUTHENTICATED,
+    reason="FileService enforces file ownership and access to the containing resource.",
 )
 async def get_file(
     id: UUID,
@@ -164,6 +184,11 @@ async def get_file(
         },
         **responses.get_responses([403, 404, 409]),
     },
+)
+@endpoint_access(
+    authentication=Authentication.USER,
+    authorization=Authorization.AUTHENTICATED,
+    reason="FileService enforces file ownership and access to the containing resource.",
 )
 async def delete_file(
     id: UUID,
@@ -214,6 +239,11 @@ async def delete_file(
         "App, or App-run attachments."
     ),
 )
+@endpoint_access(
+    authentication=Authentication.USER,
+    authorization=Authorization.AUTHENTICATED,
+    reason="FileService enforces file ownership and access to the containing resource.",
+)
 async def get_file_deletion_preview(
     id: UUID,
     container: Annotated[Container, Depends(get_container(with_user=True))],
@@ -234,6 +264,11 @@ async def get_file_deletion_preview(
     This is useful for sharing files with third parties or for embedding in emails.
     """,
 )
+@endpoint_access(
+    authentication=Authentication.USER,
+    authorization=Authorization.AUTHENTICATED,
+    reason="FileService enforces file ownership and access to the containing resource.",
+)
 async def generate_signed_url(
     id: UUID,
     request: Request,
@@ -244,16 +279,17 @@ async def generate_signed_url(
     service = container.file_service()
     await service.get_file_infos(file_ids=[id])
 
-    # Calculate expiration time
-    expires_at = int(time.time()) + signed_url_req.expires_in
+    issued_at = int(time.time())
+    expires_at = issued_at + signed_url_req.expires_in
 
-    # Generate the signed token. tenant_id is bound into the signature so the
-    # download handler refuses cross-tenant replay even if the URL leaks.
+    # The tenant is bound into the signed claims so the download handler
+    # refuses cross-tenant replay even if the URL leaks.
     token = generate_signed_token(
         file_id=id,
         expires_at=expires_at,
         content_disposition=signed_url_req.content_disposition,
         tenant_id=container.user().tenant_id,
+        issued_at=issued_at,
     )
 
     # Build the full URL
@@ -275,6 +311,11 @@ async def generate_signed_url(
         "short-lived URL that cannot be used for a processing download."
     ),
 )
+@endpoint_access(
+    authentication=Authentication.USER,
+    authorization=Authorization.AUTHENTICATED,
+    reason="FileService enforces file ownership and access to the containing resource.",
+)
 async def generate_original_signed_url(
     id: UUID,
     request: Request,
@@ -285,12 +326,14 @@ async def generate_original_signed_url(
     file = await service.ensure_original_available(id)
     current_user = container.user()
 
-    expires_at = int(time.time()) + signed_url_req.expires_in
+    issued_at = int(time.time())
+    expires_at = issued_at + signed_url_req.expires_in
     token = generate_file_original_download_token(
         file_id=id,
         expires_at=expires_at,
         content_disposition=signed_url_req.content_disposition,
         tenant_id=current_user.tenant_id,
+        issued_at=issued_at,
     )
     await container.audit_service().log_async(
         tenant_id=current_user.tenant_id,
@@ -315,28 +358,46 @@ async def generate_original_signed_url(
     )
 
 
-@dataclass(frozen=True, slots=True)
-class _SignedDownloadClaims:
-    tenant_id: UUID
-    content_disposition: ContentDisposition
-
-
 def _validate_download_claims(
     *,
     file_id: UUID,
     payload: dict[str, object] | None,
-) -> _SignedDownloadClaims:
+) -> tuple[ContentDisposition, UUID]:
+    """Validate token claims; returns the disposition and the tenant claim.
+
+    Every valid token carries the tenant that owns the file. The download
+    service compares it with the stored file's tenant, so a leaked link
+    cannot be redeemed against another tenant's file. A token without the
+    claim is invalid, whatever else it carries.
+    """
     if not payload:
         raise AuthenticationException("Invalid or expired token")
     if str(file_id) != payload.get("file_id"):
         raise UnauthorizedException("Token not valid for this file")
     try:
-        return _SignedDownloadClaims(
-            tenant_id=UUID(str(payload["tenant_id"])),
-            content_disposition=ContentDisposition(str(payload["content_disposition"])),
-        )
-    except (KeyError, TypeError, ValueError) as exc:
-        raise AuthenticationException("Invalid or expired token") from exc
+        expected_tenant_id = UUID(str(payload["tenant_id"]))
+        content_disposition = ContentDisposition(str(payload["content_disposition"]))
+    except (KeyError, TypeError, ValueError):
+        raise AuthenticationException("Invalid token claims") from None
+    return content_disposition, expected_tenant_id
+
+
+@authenticates(Authentication.SIGNED_URL)
+def authorize_signed_file(
+    id: UUID,
+    token: Annotated[str, Query(description="The signed token for file access")],
+) -> tuple[ContentDisposition, UUID]:
+    return _validate_download_claims(file_id=id, payload=verify_signed_token(token))
+
+
+@authenticates(Authentication.SIGNED_URL)
+def authorize_original_signed_file(
+    id: UUID,
+    token: Annotated[str, Query(description="The signed original-download token")],
+) -> tuple[ContentDisposition, UUID]:
+    return _validate_download_claims(
+        file_id=id, payload=verify_file_original_download_token(token)
+    )
 
 
 def _download_response(
@@ -405,25 +466,27 @@ def _range_not_satisfiable_response(exc: FileContentRangeError) -> JSONResponse:
         **responses.get_responses([503]),
     },
 )
+@endpoint_access(
+    authentication=Authentication.SIGNED_URL,
+    authorization=Authorization.SIGNED_URL,
+    reason="A signed token grants access only to its file, representation and tenant.",
+)
 async def download_file_signed(
     id: UUID,
-    token: Annotated[str, Query(description="The signed token for file access")],
+    access: Annotated[tuple[ContentDisposition, UUID], Depends(authorize_signed_file)],
     container: Annotated[
         Container,
         Depends(get_container(with_transaction=False)),
     ],
     range: Annotated[str | None, Header()] = None,
 ):
-    claims = _validate_download_claims(
-        file_id=id,
-        payload=verify_signed_token(token, expected_file_id=id),
-    )
+    content_disposition, expected_tenant_id = access
 
     service = container.file_service(user=None)
     try:
         download = await service.get_download_no_auth(
             id,
-            tenant_id=claims.tenant_id,
+            tenant_id=expected_tenant_id,
             range_header=range,
         )
     except FileContentRangeError as exc:
@@ -433,7 +496,7 @@ async def download_file_signed(
         )
     return _download_response(
         download,
-        content_disposition=claims.content_disposition,
+        content_disposition=content_disposition,
     )
 
 
@@ -449,24 +512,28 @@ async def download_file_signed(
         **responses.get_responses([400, 401, 403, 404, 409, 416, 503]),
     },
 )
+@endpoint_access(
+    authentication=Authentication.SIGNED_URL,
+    authorization=Authorization.SIGNED_URL,
+    reason="A signed token grants access only to its file, representation and tenant.",
+)
 async def download_original_file_signed(
     id: UUID,
-    token: Annotated[str, Query(description="The signed original-download token")],
+    access: Annotated[
+        tuple[ContentDisposition, UUID], Depends(authorize_original_signed_file)
+    ],
     container: Annotated[
         Container,
         Depends(get_container(with_transaction=False)),
     ],
     range: Annotated[str | None, Header()] = None,
 ) -> ClosingStreamingResponse | Response:
-    claims = _validate_download_claims(
-        file_id=id,
-        payload=verify_file_original_download_token(token, expected_file_id=id),
-    )
+    content_disposition, expected_tenant_id = access
     service = container.file_service(user=None)
     try:
         download = await service.get_original_download_no_auth(
             id,
-            tenant_id=claims.tenant_id,
+            tenant_id=expected_tenant_id,
             range_header=range,
         )
     except FileContentRangeError as exc:
@@ -474,13 +541,12 @@ async def download_original_file_signed(
     await _audit_original_download_redeemed(
         container,
         download,
-        content_disposition=claims.content_disposition,
+        content_disposition=content_disposition,
         ranged=range is not None,
-        tenant_claim_present=True,
     )
     return _download_response(
         download,
-        content_disposition=claims.content_disposition,
+        content_disposition=content_disposition,
         include_repr_digest=True,
     )
 
@@ -491,7 +557,6 @@ async def _audit_original_download_redeemed(
     *,
     content_disposition: ContentDisposition,
     ranged: bool,
-    tenant_claim_present: bool,
 ) -> None:
     """Record that a signed original link was redeemed.
 
@@ -519,7 +584,6 @@ async def _audit_original_download_redeemed(
                     extra={
                         "content_disposition": content_disposition.value,
                         "ranged": ranged,
-                        "tenant_claim_present": tenant_claim_present,
                         "content_length": download.content_length,
                     },
                 ),

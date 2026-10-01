@@ -2,11 +2,16 @@ from typing import Annotated, Awaitable, Callable, Literal, NoReturn, cast
 from uuid import UUID
 
 from dependency_injector import providers
-from fastapi import Depends, Request, Security, WebSocketException
+from fastapi import Depends, Request, Security, WebSocket, WebSocketException
 from starlette.status import WS_1008_POLICY_VIOLATION
 
 from eneo.authentication.api_key_resolver import ApiKeyValidationError
 from eneo.authentication.api_key_router_helpers import raise_api_key_http_error
+from eneo.authentication.endpoint_access import (
+    Authentication,
+    authenticates,
+    authorize_user,
+)
 from eneo.database.database import (
     AsyncSession,
     get_session,
@@ -85,14 +90,13 @@ def get_container(
             session=providers.Object(session),
         )
 
+    @authenticates(Authentication.USER)
     async def _get_container_with_user(
         request: Request,
         token: Annotated[str, Security(OAUTH2_SCHEME)],
         api_key: Annotated[str, Security(API_KEY_HEADER)],
         container: Annotated[Container, Depends(_get_container)],
     ) -> Container:
-        if request.method == "OPTIONS":
-            return container
         if with_upload_admission:
             await object_content_runtime.refresh_object_store_configuration()
 
@@ -146,6 +150,7 @@ def get_container(
 
         return container
 
+    @authenticates(Authentication.ASSISTANT)
     async def _get_container_with_user_from_assistant_api_key(
         id: UUID,
         request: Request,
@@ -153,8 +158,6 @@ def get_container(
         api_key: Annotated[str, Security(API_KEY_HEADER)],
         container: Annotated[Container, Depends(_get_container)],
     ) -> Container:
-        if request.method == "OPTIONS":
-            return container
         try:
             session = cast(AsyncSession, container.session())
             if session.in_transaction():
@@ -242,7 +245,9 @@ def get_container_for_sysadmin() -> Callable[..., Awaitable[Container]]:
 
 
 # TODO: Find a better place for this
+@authenticates(Authentication.WEBSOCKET)
 async def get_user_from_websocket(
+    websocket: WebSocket,
     token: Annotated[str, Security(get_token_from_websocket_header)],
     session: Annotated[AsyncSession, Depends(get_session)],
 ) -> UserInDB:
@@ -251,6 +256,7 @@ async def get_user_from_websocket(
 
         try:
             user = await container.user_service().authenticate(token=token)
+            authorize_user(websocket, user)
         except Exception as e:
             raise WebSocketException(
                 code=WS_1008_POLICY_VIOLATION,

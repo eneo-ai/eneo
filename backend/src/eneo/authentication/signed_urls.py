@@ -10,59 +10,186 @@ from uuid import UUID
 
 from eneo.files.file_models import (
     FILE_ORIGINAL_SIGNED_URL_MAXIMUM_EXPIRY_SECONDS,
+    FILE_PROCESSING_SIGNED_URL_MAXIMUM_EXPIRY_SECONDS,
     ContentDisposition,
 )
 from eneo.main.config import get_settings
 
 
-def _get_signing_key():
-    """Get the signing key from settings."""
-    return get_settings().url_signing_key.encode()
+def _get_signing_key() -> bytes:
+    """The configured signing key; its strength is validated at startup."""
+    return get_settings().url_signing_key.encode("utf-8")
 
 
 SIGNING_KEY = _get_signing_key()
+
+# Token contract version. Every claim below is required; anything older is
+# rejected outright because it cannot prove its lifetime or its tenant.
+TOKEN_VERSION = 2
+
+FILE_PROCESSING_DOWNLOAD_AUDIENCE = "file_processing_download"
 FILE_ORIGINAL_DOWNLOAD_AUDIENCE = "file_original_download"
 INFO_BLOB_ORIGINAL_DOWNLOAD_AUDIENCE = "info_blob_original_download"
-_FILE_ORIGINAL_DOWNLOAD_KEY = hmac.new(
-    SIGNING_KEY,
-    b"eneo:file-original-download:v1",
-    hashlib.sha256,
-).digest()
-_INFO_BLOB_ORIGINAL_DOWNLOAD_KEY = hmac.new(
-    SIGNING_KEY,
-    b"eneo:info-blob-original-download:v1",
-    hashlib.sha256,
-).digest()
+
+# How far in the future ``issued_at`` may lie before the token is rejected;
+# covers clock skew between replicas without admitting pre-dated tokens.
+MAX_FUTURE_ISSUANCE_SECONDS = 60
+
+
+def _derive_key(purpose: bytes) -> bytes:
+    return hmac.new(SIGNING_KEY, purpose, hashlib.sha256).digest()
+
+
+_FILE_PROCESSING_DOWNLOAD_KEY = _derive_key(b"eneo:file-processing-download:v2")
+_FILE_ORIGINAL_DOWNLOAD_KEY = _derive_key(b"eneo:file-original-download:v2")
+_INFO_BLOB_ORIGINAL_DOWNLOAD_KEY = _derive_key(b"eneo:info-blob-original-download:v2")
 
 
 def _generate_token(
     resource_id: UUID,
     expires_at: int,
     content_disposition: ContentDisposition,
-    tenant_id: UUID,
     *,
     signing_key: bytes,
-    audience: str | None,
-    resource_claim: str = "file_id",
+    audience: str,
+    tenant_id: UUID,
+    resource_claim: str,
+    maximum_lifetime_seconds: int,
+    issued_at: int | None = None,
 ) -> str:
+    """Sign a version-2 download token.
+
+    The lifetime is checked here as well as at the API boundary so no caller
+    can mint a link that outlives its purpose's maximum.
+    """
+    issued_at = int(time.time()) if issued_at is None else issued_at
+    lifetime = expires_at - issued_at
+    if lifetime <= 0:
+        raise ValueError("A signed download token must expire after it is issued")
+    if lifetime > maximum_lifetime_seconds:
+        raise ValueError(
+            "A signed download token may not live longer than "
+            f"{maximum_lifetime_seconds} seconds"
+        )
+
     payload: dict[str, Any] = {
+        "v": TOKEN_VERSION,
+        "aud": audience,
         resource_claim: str(resource_id),
+        # Bind the credential to the tenant that owns the resource, so a
+        # leaked link cannot be redeemed against another tenant's copy.
         "tenant_id": str(tenant_id),
+        "issued_at": issued_at,
         "expires_at": expires_at,
         "content_disposition": content_disposition.value,
     }
-    if audience is not None:
-        payload["aud"] = audience
-
-    # Encode the payload as JSON and then base64
     message = base64.urlsafe_b64encode(json.dumps(payload).encode()).decode()
-
-    # Create a signature using HMAC-SHA256
     signature = hmac.new(signing_key, message.encode(), hashlib.sha256).digest()
     signature_b64 = base64.urlsafe_b64encode(signature).decode()
-
-    # Return the token in the format message.signature
     return f"{message}.{signature_b64}"
+
+
+def _is_int(value: object) -> bool:
+    return isinstance(value, int) and not isinstance(value, bool)
+
+
+def _is_uuid_string(value: object) -> bool:
+    if not isinstance(value, str):
+        return False
+    try:
+        UUID(value)
+    except ValueError:
+        return False
+    return True
+
+
+def _verify_token(
+    token: str,
+    *,
+    signing_key: bytes,
+    audience: str,
+    resource_claim: str,
+    maximum_lifetime_seconds: int,
+    expected_resource_id: UUID | None = None,
+    expected_tenant_id: UUID | None = None,
+) -> dict[str, Any] | None:
+    """Verify signature, contract version, claim types and lifetime.
+
+    Returns the payload only when every required claim is present and well
+    formed, the audience matches the verifier's purpose, the token was issued
+    before it expires, its lifetime is within the purpose's maximum, it has
+    not expired, and it was not issued more than a short skew in the future.
+    Anything else, including every token from the previous contract, is
+    rejected.
+    """
+    try:
+        message, signature_b64 = token.split(".")
+        signature = base64.urlsafe_b64decode(signature_b64)
+    except Exception:
+        return None
+    # Only the canonical encoding of a 32-byte digest is a signature; trailing
+    # or substituted characters that decode to the same bytes are rejected.
+    if (
+        len(signature) != hashlib.sha256().digest_size
+        or base64.urlsafe_b64encode(signature).decode() != signature_b64
+    ):
+        return None
+
+    expected_signature = hmac.new(
+        signing_key, message.encode(), hashlib.sha256
+    ).digest()
+    if not hmac.compare_digest(signature, expected_signature):
+        return None
+
+    try:
+        payload = json.loads(base64.urlsafe_b64decode(message).decode())
+    except Exception:
+        return None
+    if not isinstance(payload, dict):
+        return None
+    claims = cast(dict[str, object], payload)
+
+    if claims.get("v") != TOKEN_VERSION:
+        return None
+    if claims.get("aud") != audience:
+        return None
+    if not _is_uuid_string(claims.get(resource_claim)):
+        return None
+    if not _is_uuid_string(claims.get("tenant_id")):
+        return None
+    disposition = claims.get("content_disposition")
+    if not isinstance(disposition, str) or disposition not in {
+        item.value for item in ContentDisposition
+    }:
+        return None
+    issued_at = claims.get("issued_at")
+    expires_at = claims.get("expires_at")
+    if not _is_int(issued_at) or not _is_int(expires_at):
+        return None
+    issued_at = cast(int, issued_at)
+    expires_at = cast(int, expires_at)
+    if issued_at >= expires_at:
+        return None
+    if expires_at - issued_at > maximum_lifetime_seconds:
+        return None
+
+    now = int(time.time())
+    if expires_at < now:
+        return None
+    if issued_at > now + MAX_FUTURE_ISSUANCE_SECONDS:
+        return None
+    # A caller that already knows the resource or tenant it serves binds the
+    # token to them, so a valid link cannot be redeemed for another object.
+    if expected_resource_id is not None and claims.get(resource_claim) != str(
+        expected_resource_id
+    ):
+        return None
+    if expected_tenant_id is not None and claims.get("tenant_id") != str(
+        expected_tenant_id
+    ):
+        return None
+
+    return cast(dict[str, Any], claims)
 
 
 def generate_signed_token(
@@ -70,15 +197,20 @@ def generate_signed_token(
     expires_at: int,
     content_disposition: ContentDisposition,
     tenant_id: UUID,
+    *,
+    issued_at: int | None = None,
 ) -> str:
-    """Generate a legacy processing-download token."""
+    """Generate a processing-download token (extracted or derived content)."""
     return _generate_token(
         file_id,
         expires_at,
         content_disposition,
-        tenant_id,
-        signing_key=SIGNING_KEY,
-        audience=None,
+        signing_key=_FILE_PROCESSING_DOWNLOAD_KEY,
+        audience=FILE_PROCESSING_DOWNLOAD_AUDIENCE,
+        tenant_id=tenant_id,
+        resource_claim="file_id",
+        maximum_lifetime_seconds=FILE_PROCESSING_SIGNED_URL_MAXIMUM_EXPIRY_SECONDS,
+        issued_at=issued_at,
     )
 
 
@@ -87,71 +219,43 @@ def generate_file_original_download_token(
     expires_at: int,
     content_disposition: ContentDisposition,
     tenant_id: UUID,
+    *,
+    issued_at: int | None = None,
 ) -> str:
     """Generate a token that is valid only for exact-original downloads."""
     return _generate_token(
         file_id,
         expires_at,
         content_disposition,
-        tenant_id,
         signing_key=_FILE_ORIGINAL_DOWNLOAD_KEY,
         audience=FILE_ORIGINAL_DOWNLOAD_AUDIENCE,
+        tenant_id=tenant_id,
+        resource_claim="file_id",
+        maximum_lifetime_seconds=FILE_ORIGINAL_SIGNED_URL_MAXIMUM_EXPIRY_SECONDS,
+        issued_at=issued_at,
     )
 
 
-def _verify_token(
-    token: str,
+def generate_info_blob_original_download_token(
+    info_blob_id: UUID,
+    expires_at: int,
+    content_disposition: ContentDisposition,
+    tenant_id: UUID,
     *,
-    signing_key: bytes,
-    expected_file_id: UUID | None = None,
-    expected_tenant_id: UUID | None = None,
-) -> dict[str, Any] | None:
-    try:
-        # Split the token into message and signature parts
-        if "." not in token:
-            return None
-
-        message, signature_b64 = token.split(".")
-
-        # Decode the signature
-        try:
-            signature = base64.urlsafe_b64decode(signature_b64)
-        except Exception:
-            return None
-
-        # Compute the expected signature
-        expected_signature = hmac.new(
-            signing_key, message.encode(), hashlib.sha256
-        ).digest()
-
-        # Compare signatures using constant-time comparison to prevent timing attacks
-        if not hmac.compare_digest(signature, expected_signature):
-            return None
-
-        # Decode the payload
-        try:
-            payload_json = base64.urlsafe_b64decode(message).decode()
-            payload = json.loads(payload_json)
-        except Exception:
-            return None
-
-        # Check if the URL has expired
-        if payload["expires_at"] < int(time.time()):
-            return None
-
-        if expected_file_id is not None and payload.get("file_id") != str(
-            expected_file_id
-        ):
-            return None
-
-        if expected_tenant_id is not None and payload.get("tenant_id") != str(
-            expected_tenant_id
-        ):
-            return None
-
-        return payload
-    except Exception:
-        return None
+    issued_at: int | None = None,
+) -> str:
+    """Generate a purpose-separated token for an InfoBlob original."""
+    return _generate_token(
+        info_blob_id,
+        expires_at,
+        content_disposition,
+        signing_key=_INFO_BLOB_ORIGINAL_DOWNLOAD_KEY,
+        audience=INFO_BLOB_ORIGINAL_DOWNLOAD_AUDIENCE,
+        tenant_id=tenant_id,
+        resource_claim="info_blob_id",
+        maximum_lifetime_seconds=FILE_ORIGINAL_SIGNED_URL_MAXIMUM_EXPIRY_SECONDS,
+        issued_at=issued_at,
+    )
 
 
 def verify_signed_token(
@@ -160,11 +264,14 @@ def verify_signed_token(
     expected_file_id: UUID | None = None,
     expected_tenant_id: UUID | None = None,
 ) -> dict[str, Any] | None:
-    """Verify a legacy processing-download token."""
+    """Verify a processing-download token."""
     return _verify_token(
         token,
-        signing_key=SIGNING_KEY,
-        expected_file_id=expected_file_id,
+        signing_key=_FILE_PROCESSING_DOWNLOAD_KEY,
+        audience=FILE_PROCESSING_DOWNLOAD_AUDIENCE,
+        resource_claim="file_id",
+        maximum_lifetime_seconds=FILE_PROCESSING_SIGNED_URL_MAXIMUM_EXPIRY_SECONDS,
+        expected_resource_id=expected_file_id,
         expected_tenant_id=expected_tenant_id,
     )
 
@@ -176,43 +283,26 @@ def verify_file_original_download_token(
     expected_tenant_id: UUID | None = None,
 ) -> dict[str, Any] | None:
     """Verify an exact-original token using its purpose-separated key."""
-    payload = _verify_token(
+    return _verify_token(
         token,
         signing_key=_FILE_ORIGINAL_DOWNLOAD_KEY,
-        expected_file_id=expected_file_id,
+        audience=FILE_ORIGINAL_DOWNLOAD_AUDIENCE,
+        resource_claim="file_id",
+        maximum_lifetime_seconds=FILE_ORIGINAL_SIGNED_URL_MAXIMUM_EXPIRY_SECONDS,
+        expected_resource_id=expected_file_id,
         expected_tenant_id=expected_tenant_id,
-    )
-    if payload is None or payload.get("aud") != FILE_ORIGINAL_DOWNLOAD_AUDIENCE:
-        return None
-    return payload
-
-
-def generate_info_blob_original_download_token(
-    info_blob_id: UUID,
-    expires_at: int,
-    content_disposition: ContentDisposition,
-    tenant_id: UUID,
-) -> str:
-    """Generate a purpose-separated token for an InfoBlob original."""
-    return _generate_token(
-        info_blob_id,
-        expires_at,
-        content_disposition,
-        signing_key=_INFO_BLOB_ORIGINAL_DOWNLOAD_KEY,
-        audience=INFO_BLOB_ORIGINAL_DOWNLOAD_AUDIENCE,
-        tenant_id=tenant_id,
-        resource_claim="info_blob_id",
     )
 
 
 def verify_info_blob_original_download_token(token: str) -> dict[str, Any] | None:
     """Verify an InfoBlob original token and its explicit audience."""
-    payload = _verify_token(token, signing_key=_INFO_BLOB_ORIGINAL_DOWNLOAD_KEY)
-    if payload is None or payload.get("aud") != INFO_BLOB_ORIGINAL_DOWNLOAD_AUDIENCE:
-        return None
-    if "info_blob_id" not in payload:
-        return None
-    return payload
+    return _verify_token(
+        token,
+        signing_key=_INFO_BLOB_ORIGINAL_DOWNLOAD_KEY,
+        audience=INFO_BLOB_ORIGINAL_DOWNLOAD_AUDIENCE,
+        resource_claim="info_blob_id",
+        maximum_lifetime_seconds=FILE_ORIGINAL_SIGNED_URL_MAXIMUM_EXPIRY_SECONDS,
+    )
 
 
 # Path suffix of a signed original-download URL (the shape minted by
@@ -301,13 +391,16 @@ def build_signed_original_download_url(
     (no trailing slash). ``expires_in`` is clamped to the original-download
     token maximum so a config value cannot extend a leaked URL's lifetime.
     """
-    expires_in = min(expires_in, FILE_ORIGINAL_SIGNED_URL_MAXIMUM_EXPIRY_SECONDS)
-    expires_at = int(time.time()) + expires_in
+    expires_in = max(
+        1, min(expires_in, FILE_ORIGINAL_SIGNED_URL_MAXIMUM_EXPIRY_SECONDS)
+    )
+    issued_at = int(time.time())
     token = generate_file_original_download_token(
         file_id=file_id,
-        expires_at=expires_at,
+        expires_at=issued_at + expires_in,
         content_disposition=content_disposition,
         tenant_id=tenant_id,
+        issued_at=issued_at,
     )
     return (
         f"{base_url.rstrip('/')}/api/v1/files/{file_id}/original/download/"

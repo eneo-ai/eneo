@@ -361,7 +361,10 @@ async def test_download_file_signed_raises_not_found_for_missing_content(monkeyp
 
     with pytest.raises(NotFoundException, match="File content not found"):
         await file_router.download_file_signed(
-            id=file_id, token="token", range=None, container=Container()
+            id=file_id,
+            access=file_router.authorize_signed_file(id=file_id, token="token"),
+            range=None,
+            container=Container(),
         )
 
     service.get_download_no_auth.assert_awaited_once_with(
@@ -438,7 +441,9 @@ async def test_original_download_rejects_processing_token(monkeypatch):
     with pytest.raises(AuthenticationException, match="Invalid or expired token"):
         await file_router.download_original_file_signed(
             id=file_id,
-            token="token",
+            access=file_router.authorize_original_signed_file(
+                id=file_id, token="token"
+            ),
             range=None,
             container=object(),
         )
@@ -459,7 +464,9 @@ async def test_original_download_rejects_token_for_another_file(monkeypatch):
     with pytest.raises(UnauthorizedException, match="not valid for this file"):
         await file_router.download_original_file_signed(
             id=requested_file_id,
-            token="token",
+            access=file_router.authorize_original_signed_file(
+                id=requested_file_id, token="token"
+            ),
             range=None,
             container=object(),
         )
@@ -493,7 +500,7 @@ async def test_unsatisfiable_original_range_uses_known_size_without_reopening(
 
     response = await file_router.download_original_file_signed(
         id=file_id,
-        token="token",
+        access=file_router.authorize_original_signed_file(id=file_id, token="token"),
         range="bytes=999-",
         container=Container(),
     )
@@ -563,7 +570,7 @@ async def test_original_download_audits_the_redemption(monkeypatch):
 
     response = await file_router.download_original_file_signed(
         id=file_id,
-        token="token",
+        access=file_router.authorize_original_signed_file(id=file_id, token="token"),
         range=None,
         container=Container(),
     )
@@ -580,7 +587,6 @@ async def test_original_download_audits_the_redemption(monkeypatch):
     assert audit["metadata"]["extra"] == {
         "content_disposition": "attachment",
         "ranged": False,
-        "tenant_claim_present": True,
         "content_length": 5,
     }
 
@@ -636,7 +642,7 @@ async def test_original_download_is_served_when_audit_storage_fails(monkeypatch)
 
     response = await file_router.download_original_file_signed(
         id=file_id,
-        token="token",
+        access=file_router.authorize_original_signed_file(id=file_id, token="token"),
         range=None,
         container=Container(),
     )
@@ -671,7 +677,7 @@ async def test_legacy_unsatisfiable_range_preserves_empty_response(monkeypatch):
 
     response = await file_router.download_file_signed(
         id=file_id,
-        token="token",
+        access=file_router.authorize_signed_file(id=file_id, token="token"),
         range="bytes=999-",
         container=Container(),
     )
@@ -928,7 +934,7 @@ def test_original_download_openapi_declares_json_error_contracts():
 
 def test_download_claims_return_tenant_claim_when_present():
     file_id, tenant_id = uuid4(), uuid4()
-    claims = file_router._validate_download_claims(
+    disposition, expected_tenant = file_router._validate_download_claims(
         file_id=file_id,
         payload={
             "file_id": str(file_id),
@@ -937,13 +943,14 @@ def test_download_claims_return_tenant_claim_when_present():
         },
     )
 
-    assert claims.content_disposition is ContentDisposition.INLINE
-    assert claims.tenant_id == tenant_id
+    assert disposition is ContentDisposition.INLINE
+    assert expected_tenant == tenant_id
 
 
 def test_download_claims_reject_absent_tenant_claim():
+    """A token that cannot name its tenant is not a valid credential."""
     file_id = uuid4()
-    with pytest.raises(AuthenticationException, match="Invalid or expired token"):
+    with pytest.raises(AuthenticationException, match="Invalid token claims"):
         file_router._validate_download_claims(
             file_id=file_id,
             payload={"file_id": str(file_id), "content_disposition": "attachment"},

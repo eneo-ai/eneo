@@ -12,6 +12,7 @@ from eneo.ai_models.completion_models.completion_model import (
     refuse_blank_token_limit,
 )
 from eneo.authentication.auth_dependencies import get_current_active_user
+from eneo.authentication.endpoint_access import Authentication, endpoint_access
 from eneo.completion_models.domain.model_kwargs_capabilities import (
     SupportedModelKwargs,
 )
@@ -19,7 +20,7 @@ from eneo.completion_models.presentation import CompletionModelPublic
 from eneo.database.database import AsyncSession, get_session_with_transaction
 from eneo.main.container.container import Container
 from eneo.main.models import ModelId
-from eneo.roles.permissions import Permission, validate_permission
+from eneo.roles.permissions import Permission
 from eneo.server.dependencies.container import get_container
 from eneo.server.protocol import responses
 from eneo.tenant_models.application.tenant_model_service import (
@@ -104,6 +105,11 @@ def _service(
     description="Create a new tenant-specific completion model.",
     responses=responses.get_responses([400, 403, 404, 409]),
 )
+@endpoint_access(
+    authentication=Authentication.USER,
+    authorization=Permission.ADMIN,
+    reason="This operation requires Permission.ADMIN before accessing tenant resources.",
+)
 async def create_tenant_completion_model(
     model_create: TenantCompletionModelCreate,
     user: Annotated[UserInDB, Depends(get_current_active_user)],
@@ -111,7 +117,6 @@ async def create_tenant_completion_model(
     container: Annotated[Container, Depends(get_container(with_user=True))],
 ):
     """Create a new tenant-specific completion model."""
-    validate_permission(user, Permission.ADMIN)
     assembler = container.completion_model_assembler()
 
     service = _service(session, user, container)
@@ -127,6 +132,11 @@ async def create_tenant_completion_model(
     description="Update a tenant-specific completion model.",
     responses=responses.get_responses([403, 404, 409]),
 )
+@endpoint_access(
+    authentication=Authentication.USER,
+    authorization=Permission.ADMIN,
+    reason="This operation requires Permission.ADMIN before accessing tenant resources.",
+)
 async def update_tenant_completion_model(
     model_id: UUID,
     model_update: TenantCompletionModelUpdate,
@@ -135,7 +145,6 @@ async def update_tenant_completion_model(
     container: Annotated[Container, Depends(get_container(with_user=True))],
 ):
     """Update a tenant-specific completion model."""
-    validate_permission(user, Permission.ADMIN)
     assembler = container.completion_model_assembler()
 
     service = _service(session, user, container)
@@ -151,6 +160,11 @@ async def update_tenant_completion_model(
     description="Soft-delete a tenant-specific completion model.",
     responses=responses.get_responses([403, 404]),
 )
+@endpoint_access(
+    authentication=Authentication.USER,
+    authorization=Permission.ADMIN,
+    reason="This operation requires Permission.ADMIN before accessing tenant resources.",
+)
 async def delete_tenant_completion_model(
     model_id: UUID,
     user: Annotated[UserInDB, Depends(get_current_active_user)],
@@ -158,7 +172,6 @@ async def delete_tenant_completion_model(
     container: Annotated[Container, Depends(get_container(with_user=True))],
 ):
     """Soft-delete a tenant-specific completion model."""
-    validate_permission(user, Permission.ADMIN)
 
     service = _service(session, user, container)
     await service.delete(model_id)

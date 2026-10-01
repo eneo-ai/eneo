@@ -20,6 +20,12 @@ REDIS_HOST=redis              # Docker service name
 REDIS_PORT=6379
 # Redis database slots (must be unique)
 REDIS_DB=0
+# Optional Redis authentication. With the bundled Compose stack, define
+# REDIS_PASSWORD in the deployment .env instead, so the Redis container and
+# the backend services receive the same value. Set it here only when Redis
+# runs outside this Compose file.
+# REDIS_PASSWORD=
+# REDIS_USERNAME=             # Only for a Redis ACL user; requires REDIS_PASSWORD
 
 # ----------------------------------------------------------------------------
 # Security (REQUIRED)
@@ -29,7 +35,7 @@ API_KEY_LENGTH=64
 API_KEY_HEADER_NAME=X-API-Key
 JWT_AUDIENCE=*
 JWT_ISSUER=ENEO
-JWT_EXPIRY_TIME=86400                       # seconds (24 hours)
+JWT_EXPIRY_TIME=1440                        # session lifetime in MINUTES (1440 = 24 hours; maximum 43200 = 30 days)
 JWT_ALGORITHM=HS256
 
 # JWT_SECRET - CRITICAL FOR PRODUCTION
@@ -46,7 +52,7 @@ JWT_SECRET=
 API_KEY_HASH_SECRET=
 
 JWT_TOKEN_PREFIX=Bearer
-URL_SIGNING_KEY=
+URL_SIGNING_KEY=                            # required, at least 32 random bytes: openssl rand -hex 32
 
 # Module auth broker (optional module applications, see MODULES.md)
 # Ticket: one-time login handoff carrier; only needs to cover one redirect.
@@ -97,8 +103,14 @@ OIDC_DISCOVERY_ENDPOINT=
 OIDC_CLIENT_ID=
 OIDC_CLIENT_SECRET=
 
-# [OPTIONAL] OIDC tenant ID (for backward compatibility with user creation)
+# Eneo tenant ID required by the global OIDC/MobilityGuard login endpoint.
 OIDC_TENANT_ID=
+
+# Global OIDC email-domain restriction, as a JSON array.
+# [] allows existing members of OIDC_TENANT_ID to sign in without a domain filter.
+# JIT additionally requires tenant.provisioning=true and email_verified=true.
+# To admit new members through JIT, configure e.g. ["your-company.com"].
+OIDC_ALLOWED_DOMAINS=[]
 
 # FEDERATION MODE
 # ----------------------------------------------------------------------------

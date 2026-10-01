@@ -6,6 +6,11 @@ from uuid import UUID
 from fastapi import APIRouter, BackgroundTasks, Depends, Header, Request, Response
 from fastapi.responses import JSONResponse
 
+from eneo.authentication.endpoint_access import (
+    Authentication,
+    Authorization,
+    endpoint_access,
+)
 from eneo.flows.api import flow_access_context
 from eneo.flows.api.flow_api_common import (
     commit_flow_runtime_write_before_response,
@@ -19,7 +24,7 @@ from eneo.flows.application.flow_dispatch import (
 )
 from eneo.flows.application.flow_run_retry_service import FlowRunRetryService
 from eneo.flows.domain.flow_run_exceptions import FlowRunConcurrencyLimitReachedError
-from eneo.flows.flow_access_policy import FlowApiAction
+from eneo.flows.flow_access_policy import FlowApiAction, flow_action_access_reason
 from eneo.flows.flow_api_error_code import FlowApiErrorCode
 from eneo.main.container.container import Container
 from eneo.main.exceptions import ErrorCodes
@@ -96,6 +101,11 @@ shared input files remain available while the child references them.
             code=FlowApiErrorCode.EVIDENCE_AUDIT_LOGGING_FAILED,
         ),
     },
+)
+@endpoint_access(
+    authentication=Authentication.USER,
+    authorization=Authorization.AUTHENTICATED,
+    reason=flow_action_access_reason(FlowApiAction.RUN),
 )
 async def retry_flow_run_from_failed_step(
     id: UUID,

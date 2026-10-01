@@ -19,6 +19,7 @@ from eneo.analysis.analysis import (
     ConversationInsightResponse,
     Counts,
 )
+from eneo.analysis.analysis_job import AnalysisJob
 from eneo.analysis.analysis_repo import AnalysisRepository
 from eneo.assistants.assistant import Assistant
 from eneo.assistants.assistant_service import AssistantService
@@ -37,6 +38,7 @@ from eneo.roles.permissions import Permission, validate_permissions
 from eneo.sessions.session import SessionInDB, SessionMetadataPublic
 from eneo.sessions.session_service import SessionService
 from eneo.sessions.sessions_repo import SessionRepository
+from eneo.spaces.space import Space
 from eneo.spaces.space_service import SpaceService
 from eneo.users.user import UserInDB
 
@@ -563,15 +565,31 @@ class AnalysisService:
             active_user_count=active_users,
         )
 
-    async def _check_space_permissions(self, space_id: UUID | None):
+    async def _check_assistant_question_access(
+        self, *, assistant_id: UUID, space_id: UUID | None
+    ) -> None:
         if space_id is None:
             return
 
         space = await self.space_service.get_space(space_id)
-        if space.is_personal() and Permission.INSIGHTS not in self.user.permissions:
-            raise UnauthorizedException(
-                f"Need permission {Permission.INSIGHTS.value} in order to access"
-            )
+        if space.is_personal():
+            if Permission.INSIGHTS not in self.user.permissions:
+                raise UnauthorizedException(
+                    f"Need permission {Permission.INSIGHTS.value} in order to access"
+                )
+            return
+
+        self._require_assistant_insight_access(
+            space=space,
+            assistant=space.get_assistant(assistant_id=assistant_id),
+        )
+
+    def _require_assistant_insight_access(
+        self, *, space: Space, assistant: Assistant
+    ) -> None:
+        actor = self.space_service.actor_manager.get_space_actor_from_space(space=space)
+        if not actor.can_access_insight_assistant(assistant=assistant):
+            raise UnauthorizedException("Insights are not enabled for this assistant")
 
     @validate_permissions(Permission.INSIGHTS)
     async def get_message_for_insights(self, *, message_id: UUID) -> Question:
@@ -609,15 +627,8 @@ class AnalysisService:
             space = await self.space_service.get_space_by_assistant(
                 assistant_id=assistant_id
             )
-            actor = self.space_service.actor_manager.get_space_actor_from_space(
-                space=space
-            )
             assistant = space.get_assistant(assistant_id=assistant_id)
-
-            if not actor.can_access_insight_assistant(assistant=assistant):
-                raise UnauthorizedException(
-                    "Insights are not enabled for this assistant"
-                )
+            self._require_assistant_insight_access(space=space, assistant=assistant)
 
         elif group_chat_id:
             space = await self.space_service.get_space_by_group_chat(
@@ -637,6 +648,17 @@ class AnalysisService:
                 "Either assistant_id or group_chat_id must be provided"
             )
 
+    async def authorize_insight_job(self, job: AnalysisJob) -> None:
+        """Recheck access to the resource behind a persisted insight result."""
+        if job.tenant_id != self.user.tenant_id:
+            raise NotFoundException("Insights analysis job not found")
+        if (job.assistant_id is None) == (job.group_chat_id is None):
+            raise NotFoundException("Insights analysis job not found")
+        await self._check_insight_access(
+            assistant_id=job.assistant_id,
+            group_chat_id=job.group_chat_id,
+        )
+
     async def get_questions_since(
         self,
         assistant_id: UUID,
@@ -645,7 +667,9 @@ class AnalysisService:
         include_followups: bool = False,
     ) -> list[Question]:
         assistant, _ = await self.assistant_service.get_assistant(assistant_id)
-        await self._check_space_permissions(assistant.space_id)
+        await self._check_assistant_question_access(
+            assistant_id=assistant_id, space_id=assistant.space_id
+        )
 
         sessions = await self.repo.get_assistant_sessions_since(
             assistant_id=assistant_id,
@@ -715,7 +739,9 @@ class AnalysisService:
         include_followup: bool = False,
     ) -> CompletionModelResponse:
         assistant, _ = await self.assistant_service.get_assistant(assistant_id)
-        await self._check_space_permissions(assistant.space_id)
+        await self._check_assistant_question_access(
+            assistant_id=assistant_id, space_id=assistant.space_id
+        )
         rows = await self.repo.get_assistant_question_texts_since(
             assistant_id=assistant_id,
             from_date=from_date,
@@ -814,7 +840,9 @@ class AnalysisService:
         cursor: str | None = None,
     ) -> tuple[list[AssistantInsightQuestion], int, str | None]:
         assistant, _ = await self.assistant_service.get_assistant(assistant_id)
-        await self._check_space_permissions(assistant.space_id)
+        await self._check_assistant_question_access(
+            assistant_id=assistant_id, space_id=assistant.space_id
+        )
 
         cursor_created_at, cursor_id = self._decode_question_cursor(cursor)
         started = perf_counter()

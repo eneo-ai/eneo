@@ -1,5 +1,6 @@
 import base64
 import binascii
+from collections.abc import Mapping
 from datetime import datetime, timezone
 from enum import Enum
 from typing import TYPE_CHECKING, Final, Literal, Optional
@@ -761,6 +762,39 @@ class ApiKeyUsageResponse(BaseModel):
     items: list[ApiKeyUsageEvent]
     limit: int
     next_cursor: Optional[datetime] = None
+
+
+class FederatedIdentity(BaseModel):
+    """Email identity extracted only after the OIDC token has been validated."""
+
+    model_config = ConfigDict(frozen=True)
+
+    email: EmailStr
+    email_verified: bool = Field(strict=True)
+
+    @classmethod
+    def from_claims(
+        cls, claims: Mapping[str, object], email_claim: str = "email"
+    ) -> "FederatedIdentity":
+        email = claims.get(email_claim)
+        if not isinstance(email, str) or not email:
+            raise ValueError("Email claim not found in ID token")
+        if email_claim == "email" and claims.get("email_verified") is False:
+            raise ValueError("Email is not verified by the identity provider")
+        try:
+            return cls(
+                email=email,
+                # The standard verification claim verifies the standard email,
+                # not an unrelated address selected by a custom claims mapping.
+                email_verified=(
+                    claims.get("email_verified") is True
+                    and claims.get("email") == email
+                ),
+            )
+        except ValueError as exc:
+            raise ValueError(
+                "Email claim from identity provider is invalid. Contact your administrator."
+            ) from exc
 
 
 class OpenIdConnectLogin(BaseModel):

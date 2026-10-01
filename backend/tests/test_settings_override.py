@@ -46,7 +46,7 @@ def test_settings_can_be_overridden():
         jwt_algorithm="HS256",
         jwt_secret="test_secret",
         jwt_token_prefix="Bearer",
-        url_signing_key="test_signing_key",
+        url_signing_key="unit-test-url-signing-key-with-at-least-32-bytes",
     )
 
     # Override with test settings
@@ -85,7 +85,7 @@ def test_settings_reset():
         jwt_algorithm="HS256",
         jwt_secret="test",
         jwt_token_prefix="Bearer",
-        url_signing_key="test",
+        url_signing_key="unit-test-url-signing-key-with-at-least-32-bytes",
     )
     set_settings(test_settings)
 
@@ -121,7 +121,7 @@ def test_settings_database_url_construction():
         jwt_algorithm="HS256",
         jwt_secret="test",
         jwt_token_prefix="Bearer",
-        url_signing_key="test",
+        url_signing_key="unit-test-url-signing-key-with-at-least-32-bytes",
     )
     set_settings(test_settings)
 
@@ -158,7 +158,7 @@ def _set_minimal_settings_env(monkeypatch: pytest.MonkeyPatch) -> None:
         "JWT_ALGORITHM": "HS256",
         "JWT_SECRET": "test-secret",
         "JWT_TOKEN_PREFIX": "Bearer",
-        "URL_SIGNING_KEY": "test-signing-key",
+        "URL_SIGNING_KEY": "unit-test-url-signing-key-with-at-least-32-bytes",
         "ENCRYPTION_KEY": "yPIAaWTENh5knUuz75NYHblR3672X-7lH-W6AD4F1hs=",
     }
     for key, value in values.items():

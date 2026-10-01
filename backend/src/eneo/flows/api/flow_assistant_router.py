@@ -13,6 +13,11 @@ from eneo.assistants.assistant_update import AssistantUpdateCommand
 from eneo.audit.application.audit_metadata import AuditMetadata
 from eneo.audit.domain.action_types import ActionType
 from eneo.audit.domain.entity_types import EntityType
+from eneo.authentication.endpoint_access import (
+    Authentication,
+    Authorization,
+    endpoint_access,
+)
 from eneo.flows.api import flow_access_context
 from eneo.flows.api.flow_api_common import error_response
 from eneo.flows.api.flow_models import (
@@ -22,7 +27,7 @@ from eneo.flows.api.flow_models import (
     FlowAssistantUpdatePublic,
     FlowAssistantUpdateRequest,
 )
-from eneo.flows.flow_access_policy import FlowApiAction
+from eneo.flows.flow_access_policy import FlowApiAction, flow_action_access_reason
 from eneo.flows.flow_api_error_code import FlowApiErrorCode
 from eneo.main.container.container import Container
 from eneo.main.exceptions import ErrorCodes, UnauthorizedException
@@ -136,6 +141,11 @@ async def require_flow_assistant_access(
         ),
     },
 )
+@endpoint_access(
+    authentication=Authentication.USER,
+    authorization=Authorization.AUTHENTICATED,
+    reason=flow_action_access_reason(FlowApiAction.EDIT),
+)
 async def create_flow_assistant(
     id: Annotated[
         UUID,
@@ -209,6 +219,11 @@ async def create_flow_assistant(
             code="not_found",
         ),
     },
+)
+@endpoint_access(
+    authentication=Authentication.USER,
+    authorization=Authorization.AUTHENTICATED,
+    reason=flow_action_access_reason(FlowApiAction.EDIT),
 )
 async def get_flow_assistant(
     id: Annotated[
@@ -294,6 +309,11 @@ async def get_flow_assistant(
             code="not_found",
         ),
     },
+)
+@endpoint_access(
+    authentication=Authentication.USER,
+    authorization=Authorization.AUTHENTICATED,
+    reason=flow_action_access_reason(FlowApiAction.EDIT),
 )
 async def update_flow_assistant(
     id: Annotated[
@@ -389,6 +409,11 @@ async def update_flow_assistant(
             code="not_found",
         ),
     },
+)
+@endpoint_access(
+    authentication=Authentication.USER,
+    authorization=Authorization.AUTHENTICATED,
+    reason=flow_action_access_reason(FlowApiAction.EDIT),
 )
 async def delete_flow_assistant(
     id: Annotated[

@@ -8,13 +8,14 @@ from fastapi import APIRouter, Depends
 from pydantic import BaseModel, Field
 
 from eneo.authentication.auth_dependencies import get_current_active_user
+from eneo.authentication.endpoint_access import Authentication, endpoint_access
 from eneo.database.database import AsyncSession, get_session_with_transaction
 from eneo.embedding_models.presentation.embedding_model_models import (
     EmbeddingModelPublic,
 )
 from eneo.main.container.container import Container
 from eneo.main.models import ModelId
-from eneo.roles.permissions import Permission, validate_permission
+from eneo.roles.permissions import Permission
 from eneo.server.dependencies.container import get_container
 from eneo.server.protocol import responses
 from eneo.tenant_models.application.tenant_model_service import (
@@ -93,6 +94,11 @@ def _service(
     response_model=EmbeddingModelPublic,
     responses=responses.get_responses([400, 403, 404, 409]),
 )
+@endpoint_access(
+    authentication=Authentication.USER,
+    authorization=Permission.ADMIN,
+    reason="This operation requires Permission.ADMIN before accessing tenant resources.",
+)
 async def create_tenant_embedding_model(
     model_create: TenantEmbeddingModelCreate,
     user: Annotated[UserInDB, Depends(get_current_active_user)],
@@ -100,7 +106,6 @@ async def create_tenant_embedding_model(
     container: Annotated[Container, Depends(get_container(with_user=True))],
 ):
     """Create a new tenant-specific embedding model."""
-    validate_permission(user, Permission.ADMIN)
 
     service = _service(session, user, container)
     embedding_model = await service.create(model_create)
@@ -115,6 +120,11 @@ async def create_tenant_embedding_model(
     response_model=EmbeddingModelPublic,
     responses=responses.get_responses([403, 404, 409]),
 )
+@endpoint_access(
+    authentication=Authentication.USER,
+    authorization=Permission.ADMIN,
+    reason="This operation requires Permission.ADMIN before accessing tenant resources.",
+)
 async def update_tenant_embedding_model(
     model_id: UUID,
     model_update: TenantEmbeddingModelUpdate,
@@ -123,7 +133,6 @@ async def update_tenant_embedding_model(
     container: Annotated[Container, Depends(get_container(with_user=True))],
 ):
     """Update a tenant-specific embedding model."""
-    validate_permission(user, Permission.ADMIN)
 
     service = _service(session, user, container)
     embedding_model = await service.update(model_id, model_update)
@@ -138,6 +147,11 @@ async def update_tenant_embedding_model(
     response_model=None,
     responses=responses.get_responses([400, 403, 404]),
 )
+@endpoint_access(
+    authentication=Authentication.USER,
+    authorization=Permission.ADMIN,
+    reason="This operation requires Permission.ADMIN before accessing tenant resources.",
+)
 async def delete_tenant_embedding_model(
     model_id: UUID,
     user: Annotated[UserInDB, Depends(get_current_active_user)],
@@ -145,7 +159,6 @@ async def delete_tenant_embedding_model(
     container: Annotated[Container, Depends(get_container(with_user=True))],
 ):
     """Delete a tenant-specific embedding model."""
-    validate_permission(user, Permission.ADMIN)
 
     service = _service(session, user, container)
     await service.delete(model_id)

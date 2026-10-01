@@ -121,6 +121,7 @@ services:
       - OBJECT_CONTENT_SECRET_ACCESS_KEY
       - OBJECT_CONTENT_DEPLOYMENT_ID
       - OBJECT_CONTENT_ALLOW_INSECURE_HTTP
+      - REDIS_PASSWORD
     env_file:
       - env_backend.env
     volumes:
@@ -177,6 +178,7 @@ services:
       - OBJECT_CONTENT_SECRET_ACCESS_KEY
       - OBJECT_CONTENT_DEPLOYMENT_ID
       - OBJECT_CONTENT_ALLOW_INSECURE_HTTP
+      - REDIS_PASSWORD
     env_file:
       - env_backend.env
     volumes:
@@ -258,6 +260,7 @@ services:
       - OBJECT_CONTENT_SECRET_ACCESS_KEY
       - OBJECT_CONTENT_DEPLOYMENT_ID
       - OBJECT_CONTENT_ALLOW_INSECURE_HTTP
+      - REDIS_PASSWORD
     env_file:
       - env_backend.env
     # Startup recovery requires /tmp to remain private to this crawler container.
@@ -310,12 +313,23 @@ services:
     image: redis@sha256:${REDIS_IMAGE_DIGEST:?Set REDIS_IMAGE_DIGEST in .env}
     container_name: eneo_redis
     restart: unless-stopped
+    # Optional: define REDIS_PASSWORD in the deployment .env to require
+    # authentication. The same value reaches backend and workers through their
+    # pass-through lists; leave it undefined to run without a password.
+    environment:
+      - REDIS_PASSWORD
+    command:
+      - sh
+      - -c
+      - exec redis-server $${REDIS_PASSWORD:+--requirepass "$$REDIS_PASSWORD"}
     volumes:
       - eneo_redis_data:/data
     networks:
       - data_net
     healthcheck:
-      test: ["CMD", "redis-cli", "ping"]
+      test:
+        - CMD-SHELL
+        - REDISCLI_AUTH="$$REDIS_PASSWORD" redis-cli ping | grep -q PONG
       interval: 10s
       timeout: 5s
       retries: 5
@@ -326,6 +340,8 @@ services:
     image: ghcr.io/eneo-ai/eneo-backend@sha256:${ENEO_BACKEND_IMAGE_DIGEST:?Set ENEO_BACKEND_IMAGE_DIGEST in .env}
     container_name: eneo_db_init
     command: ["python", "init_db.py"]
+    environment:
+      - REDIS_PASSWORD
     env_file:
       - env_backend.env
     networks:

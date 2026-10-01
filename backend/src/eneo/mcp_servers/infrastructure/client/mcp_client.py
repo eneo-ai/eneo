@@ -25,7 +25,7 @@ from mcp.types import (
 from eneo.main.config import get_settings
 from eneo.main.exceptions import MCPAuthenticationError, MCPClientError
 from eneo.main.logging import get_logger
-from eneo.mcp_servers.domain.entities.mcp_server import MCPServer
+from eneo.mcp_servers.domain.entities.mcp_server import MCPServer, is_builtin_provider
 
 logger = get_logger(__name__)
 
@@ -598,6 +598,26 @@ async def _diagnose_http(url: str, headers: dict[str, str]) -> str:
     return "Connection failed for unknown reasons."
 
 
+def loopback_endpoint(name: str) -> str:
+    """URL of one of Eneo's own loopback MCP servers, mounted under ``name``."""
+    base = get_settings().internal_mcp_base_url.rstrip("/")
+    return f"{base}/internal-mcp/{name}/mcp"
+
+
+def endpoint_url(mcp_server: MCPServer) -> str:
+    """URL to connect to for ``mcp_server``.
+
+    A built-in provider runs on Eneo's own loopback server of its purpose, so
+    its endpoint follows ``INTERNAL_MCP_BASE_URL`` as it is configured now.
+    The URL stored on its row is the value from the last time the row was
+    saved: it goes stale when the setting changes, and the scoped token minted
+    for a built-in provider must only ever reach Eneo itself.
+    """
+    if is_builtin_provider(mcp_server.http_auth_type):
+        return loopback_endpoint(mcp_server.purpose)
+    return mcp_server.http_url
+
+
 class MCPClient:
     """Client for interacting with HTTP-based MCP servers."""
 
@@ -629,6 +649,7 @@ class MCPClient:
         """
         super().__init__()
         self.mcp_server = mcp_server
+        self.endpoint_url = endpoint_url(mcp_server)
         self.auth_credentials = auth_credentials or {}
         self.timeout = timeout or MCP_CONNECTION_TIMEOUT_DEFAULT
         self.list_tools_timeout = list_tools_timeout or MCP_LIST_TOOLS_TIMEOUT_DEFAULT
@@ -722,9 +743,7 @@ class MCPClient:
                     # Still produce a diagnostic if auth header construction
                     # fails for any unexpected reason.
                     diagnostic_headers = {}
-                error_msg = await _diagnose_http(
-                    self.mcp_server.http_url, diagnostic_headers
-                )
+                error_msg = await _diagnose_http(self.endpoint_url, diagnostic_headers)
             logger.error(
                 f"Failed to connect to MCP server {self.mcp_server.name}: {error_msg}"
             )
@@ -764,7 +783,7 @@ class MCPClient:
         headers = await self._build_auth_headers()
 
         streams_context = _open_streamable_http_client(
-            url=self.mcp_server.http_url,
+            url=self.endpoint_url,
             headers=headers,
             timeout_seconds=float(self.timeout),
             read_timeout_seconds=transport_read_timeout(self.tool_call_timeout),
@@ -776,9 +795,7 @@ class MCPClient:
 
         self._streams_context = streams_context
         read, write, get_session_id = streams
-        logger.debug(
-            f"Streamable HTTP transport connected to {self.mcp_server.http_url}"
-        )
+        logger.debug(f"Streamable HTTP transport connected to {self.endpoint_url}")
 
         session_context = ClientSession(
             read, write, message_handler=self._handle_session_message

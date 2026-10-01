@@ -17,6 +17,11 @@ from fastapi import (
 from eneo.audit.application.audit_metadata import AuditMetadata
 from eneo.audit.domain.action_types import ActionType
 from eneo.audit.domain.entity_types import EntityType
+from eneo.authentication.endpoint_access import (
+    Authentication,
+    Authorization,
+    endpoint_access,
+)
 from eneo.database.database import AsyncSession
 from eneo.files.file_models import FilePublic
 from eneo.flows.api import flow_access_context
@@ -27,7 +32,7 @@ from eneo.flows.api.flow_runtime_paths import (
     RUN_CONTRACT_PATH,
     UPLOAD_STEP_RUNTIME_FILE_PATH,
 )
-from eneo.flows.flow_access_policy import FlowApiAction
+from eneo.flows.flow_access_policy import FlowApiAction, flow_action_access_reason
 from eneo.flows.flow_api_error_code import FlowApiErrorCode
 from eneo.main.container.container import Container
 from eneo.main.exceptions import ErrorCodes
@@ -176,6 +181,11 @@ Service-key principals may use this endpoint for published-flow runtime only.
         ),
     },
 )
+@endpoint_access(
+    authentication=Authentication.USER,
+    authorization=Authorization.AUTHENTICATED,
+    reason=flow_action_access_reason(FlowApiAction.VIEW),
+)
 async def get_flow_run_contract(
     id: Annotated[
         UUID,
@@ -256,6 +266,11 @@ through that Flow's runtime upload endpoint.
             code="unsupported_media_type",
         ),
     },
+)
+@endpoint_access(
+    authentication=Authentication.USER,
+    authorization=Authorization.AUTHENTICATED,
+    reason=flow_action_access_reason(FlowApiAction.RUN),
 )
 async def upload_flow_runtime_file(
     id: Annotated[
@@ -344,6 +359,11 @@ typed 409 conflict.
             code=FlowApiErrorCode.RUNTIME_FILE_ATTACHED,
         ),
     },
+)
+@endpoint_access(
+    authentication=Authentication.USER,
+    authorization=Authorization.AUTHENTICATED,
+    reason=flow_action_access_reason(FlowApiAction.RUN),
 )
 async def delete_flow_runtime_file(
     id: Annotated[

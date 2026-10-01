@@ -254,7 +254,7 @@ def _assert_service_key_admin_required(response) -> None:
 async def test_service_key_creation_rejected_for_non_admin(client, regular_user_token):
     """A user without Permission.API_KEYS cannot create service-owned keys.
 
-    The role-level gate (require_permission(Permission.API_KEYS)) fires before
+    The role-level gate (the endpoint Permission.API_KEYS policy) fires before
     the policy-level "service keys require admin" check, so the underlying
     rejection layer differs from earlier versions — but the security
     invariant (unprivileged user → 403) is unchanged.

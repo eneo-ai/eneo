@@ -771,7 +771,9 @@ async def test_original_audio_range_reads_only_verified_chunks_from_real_store(
             )
             response = await file_router.download_original_file_signed(
                 id=file_id,
-                token=token,
+                access=file_router.authorize_original_signed_file(
+                    id=file_id, token=token
+                ),
                 range=(
                     f"bytes={settings.multipart_part_bytes + 1}-"
                     f"{settings.multipart_part_bytes + 5}"

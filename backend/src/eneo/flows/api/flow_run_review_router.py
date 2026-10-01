@@ -19,6 +19,11 @@ from fastapi import (
 from eneo.audit.application.audit_metadata import AuditMetadata
 from eneo.audit.domain.action_types import ActionType
 from eneo.audit.domain.entity_types import EntityType
+from eneo.authentication.endpoint_access import (
+    Authentication,
+    Authorization,
+    endpoint_access,
+)
 from eneo.flows.api import flow_access_context
 from eneo.flows.api.flow_api_common import (
     FLOW_RUN_COMMIT_BEFORE_RESPONSE_CLAUSE,
@@ -74,7 +79,7 @@ from eneo.flows.application.flow_transcript_corrections_propagation import (
     TranscriptCorrectionsFoldOutcome,
 )
 from eneo.flows.domain.flow import FlowRun, FlowRunReviewCheckpoint, FlowRunStatus
-from eneo.flows.flow_access_policy import FlowApiAction
+from eneo.flows.flow_access_policy import FlowApiAction, flow_action_access_reason
 from eneo.flows.flow_api_error_code import FlowApiErrorCode
 from eneo.flows.published_runtime import load_published_definition
 from eneo.main.container.container import Container
@@ -129,6 +134,11 @@ router = APIRouter()
             context={"audit_required": True},
         ),
     },
+)
+@endpoint_access(
+    authentication=Authentication.USER,
+    authorization=Authorization.AUTHENTICATED,
+    reason=flow_action_access_reason(FlowApiAction.VIEW),
 )
 async def list_flow_run_review_checkpoint_edits(
     id: UUID,
@@ -656,6 +666,11 @@ Service-key principals may resume approved checkpoints only for runs they own (k
         ),
     },
 )
+@endpoint_access(
+    authentication=Authentication.USER,
+    authorization=Authorization.AUTHENTICATED,
+    reason=flow_action_access_reason(FlowApiAction.VIEW),
+)
 async def get_active_flow_run_review_checkpoint(
     id: Annotated[
         UUID, Path(description="Identifier of the flow that owns the requested run.")
@@ -770,6 +785,11 @@ async def get_active_flow_run_review_checkpoint(
         ),
     },
 )
+@endpoint_access(
+    authentication=Authentication.USER,
+    authorization=Authorization.AUTHENTICATED,
+    reason=flow_action_access_reason(FlowApiAction.REVIEW),
+)
 async def edit_flow_run_review_checkpoint(
     id: Annotated[UUID, Path(description="Identifier of the flow that owns the run.")],
     run_id: Annotated[UUID, Path(description="Identifier of the run to mutate.")],
@@ -848,6 +868,11 @@ async def edit_flow_run_review_checkpoint(
             code=FlowApiErrorCode.REVIEW_CHECKPOINT_NOT_FOUND.value,
         ),
     },
+)
+@endpoint_access(
+    authentication=Authentication.USER,
+    authorization=Authorization.AUTHENTICATED,
+    reason=flow_action_access_reason(FlowApiAction.REVIEW),
 )
 async def approve_flow_run_review_checkpoint(
     id: Annotated[UUID, Path(description="Identifier of the flow that owns the run.")],
@@ -933,6 +958,11 @@ async def approve_flow_run_review_checkpoint(
         ),
     },
 )
+@endpoint_access(
+    authentication=Authentication.USER,
+    authorization=Authorization.AUTHENTICATED,
+    reason=flow_action_access_reason(FlowApiAction.REVIEW),
+)
 async def reject_flow_run_review_checkpoint(
     id: Annotated[UUID, Path(description="Identifier of the flow that owns the run.")],
     run_id: Annotated[UUID, Path(description="Identifier of the run to mutate.")],
@@ -1014,6 +1044,11 @@ async def reject_flow_run_review_checkpoint(
             code=FlowApiErrorCode.REVIEW_CHECKPOINT_NOT_FOUND.value,
         ),
     },
+)
+@endpoint_access(
+    authentication=Authentication.USER,
+    authorization=Authorization.AUTHENTICATED,
+    reason=flow_action_access_reason(FlowApiAction.RESUME),
 )
 async def resume_flow_run_review_checkpoint(
     id: Annotated[UUID, Path(description="Identifier of the flow that owns the run.")],
@@ -1113,6 +1148,11 @@ async def resume_flow_run_review_checkpoint(
             code=FlowApiErrorCode.REVIEW_CHECKPOINT_NOT_FOUND.value,
         ),
     },
+)
+@endpoint_access(
+    authentication=Authentication.USER,
+    authorization=Authorization.AUTHENTICATED,
+    reason=flow_action_access_reason(FlowApiAction.RESUME),
 )
 async def approve_and_continue_flow_run_review_checkpoint(
     id: Annotated[UUID, Path(description="Identifier of the flow that owns the run.")],

@@ -206,3 +206,55 @@ async def test_rollback_template_restores_completion_model_id(
     params = stmt.compile().params
 
     assert params["completion_model_id"] == completion_model_id
+
+
+# ---------------------------------------------------------------------------
+# Consumption: creating an app from a template
+# ---------------------------------------------------------------------------
+
+
+async def test_consumable_lookup_requires_templates_entitlement(
+    service, mock_repo, mock_feature_flag_service
+):
+    from uuid import uuid4
+
+    from eneo.main.exceptions import BadRequestException
+
+    mock_feature_flag_service.check_is_feature_enabled.return_value = False
+
+    with pytest.raises(BadRequestException):
+        await service.get_consumable_app_template(app_template_id=uuid4())
+
+    mock_repo.get_consumable.assert_not_awaited()
+
+
+async def test_consumable_lookup_resolves_within_callers_tenant(
+    service, mock_repo, mock_feature_flag_service, mock_user
+):
+    from uuid import uuid4
+
+    template_id = uuid4()
+    template = Mock()
+    mock_feature_flag_service.check_is_feature_enabled.return_value = True
+    mock_repo.get_consumable.return_value = template
+
+    result = await service.get_consumable_app_template(app_template_id=template_id)
+
+    assert result is template
+    mock_repo.get_consumable.assert_awaited_once_with(
+        app_template_id=template_id, tenant_id=mock_user.tenant_id
+    )
+
+
+async def test_consumable_lookup_treats_unresolved_template_as_not_found(
+    service, mock_repo, mock_feature_flag_service
+):
+    from uuid import uuid4
+
+    from eneo.main.exceptions import NotFoundException
+
+    mock_feature_flag_service.check_is_feature_enabled.return_value = True
+    mock_repo.get_consumable.return_value = None
+
+    with pytest.raises(NotFoundException):
+        await service.get_consumable_app_template(app_template_id=uuid4())

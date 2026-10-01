@@ -8,6 +8,11 @@ from fastapi import APIRouter, Depends, Path, Query, Request, status
 from eneo.audit.application.audit_metadata import AuditMetadata
 from eneo.audit.domain.action_types import ActionType
 from eneo.audit.domain.entity_types import EntityType
+from eneo.authentication.endpoint_access import (
+    Authentication,
+    Authorization,
+    endpoint_access,
+)
 from eneo.flows.api import flow_access_context
 from eneo.flows.api.flow_api_common import error_response
 from eneo.flows.api.flow_assembler import FlowAssembler
@@ -31,7 +36,7 @@ from eneo.flows.api.flow_runtime_paths import (
     PUBLISHED_FLOW_RUNTIME_PATH,
     FlowRuntimePublic,
 )
-from eneo.flows.flow_access_policy import FlowApiAction
+from eneo.flows.flow_access_policy import FlowApiAction, flow_action_access_reason
 from eneo.flows.flow_api_error_code import FlowApiErrorCode
 from eneo.flows.flow_api_exceptions import FlowBadRequestException
 from eneo.flows.principal import FlowPrincipal
@@ -130,6 +135,11 @@ def _classification_override_step_orders(
             context={"auth_layer": "api_key_scope"},
         ),
     },
+)
+@endpoint_access(
+    authentication=Authentication.USER,
+    authorization=Authorization.AUTHENTICATED,
+    reason=flow_action_access_reason(FlowApiAction.EDIT),
 )
 async def create_flow(
     request: Request,
@@ -246,6 +256,11 @@ async def create_flow(
             context={"auth_layer": "api_key_scope"},
         ),
     },
+)
+@endpoint_access(
+    authentication=Authentication.USER,
+    authorization=Authorization.AUTHENTICATED,
+    reason=flow_action_access_reason(FlowApiAction.VIEW),
 )
 async def list_flows(
     request: Request,
@@ -388,6 +403,11 @@ async def list_flows(
         ),
     },
 )
+@endpoint_access(
+    authentication=Authentication.USER,
+    authorization=Authorization.AUTHENTICATED,
+    reason=flow_action_access_reason(FlowApiAction.VIEW),
+)
 async def get_flow(
     id: Annotated[
         UUID, Path(description="Identifier of the draft flow definition to return.")
@@ -438,6 +458,11 @@ async def get_flow(
             code="not_found",
         ),
     },
+)
+@endpoint_access(
+    authentication=Authentication.USER,
+    authorization=Authorization.AUTHENTICATED,
+    reason=flow_action_access_reason(FlowApiAction.VIEW),
 )
 async def get_published_flow_runtime(
     id: Annotated[
@@ -497,6 +522,11 @@ async def get_published_flow_runtime(
             code="not_found",
         ),
     },
+)
+@endpoint_access(
+    authentication=Authentication.USER,
+    authorization=Authorization.AUTHENTICATED,
+    reason=flow_action_access_reason(FlowApiAction.EDIT),
 )
 async def update_flow(
     id: Annotated[
@@ -580,6 +610,11 @@ async def update_flow(
         ),
     },
 )
+@endpoint_access(
+    authentication=Authentication.USER,
+    authorization=Authorization.AUTHENTICATED,
+    reason=flow_action_access_reason(FlowApiAction.EDIT),
+)
 async def delete_flow(
     id: Annotated[
         UUID, Path(description="Identifier of the draft flow definition to delete.")
@@ -633,6 +668,11 @@ async def delete_flow(
             code="not_found",
         ),
     },
+)
+@endpoint_access(
+    authentication=Authentication.USER,
+    authorization=Authorization.AUTHENTICATED,
+    reason=flow_action_access_reason(FlowApiAction.EDIT),
 )
 async def publish_flow(
     id: Annotated[
@@ -688,6 +728,11 @@ async def publish_flow(
             code="not_found",
         ),
     },
+)
+@endpoint_access(
+    authentication=Authentication.USER,
+    authorization=Authorization.AUTHENTICATED,
+    reason=flow_action_access_reason(FlowApiAction.EDIT),
 )
 async def unpublish_flow(
     id: Annotated[

@@ -16,11 +16,23 @@ from eneo.authentication.api_key_router_helpers import (
     raise_api_key_http_error,
 )
 from eneo.authentication.auth_models import ApiKeyPermission, ApiKeyScopeType
+from eneo.authentication.endpoint_access import (
+    Authentication,
+    Authorization,
+    endpoint_access,
+)
 from eneo.main.container.container import Container
 from eneo.server.dependencies.container import get_container
 from eneo.users.user import UserInDB
 
 router = APIRouter()
+# The handler owns the API-key requirement: it refuses a session caller with
+# the documented api_key_required error, which an API_KEY admission would
+# replace with an untyped one.
+_CALLING_KEY_ACCESS_REASON = (
+    "The handler requires an API key (api_key_required) and describes only "
+    "the calling key's own request capacity."
+)
 
 _DESCRIPTION = """
 Return how much request budget the calling API key has left in the current
@@ -133,6 +145,11 @@ class ApiKeyCapacityPublic(BaseModel):
         200: {"description": "Request capacity for the authenticated API key."},
         **error_responses([401, 403, 429, 503]),
     },
+)
+@endpoint_access(
+    authentication=Authentication.USER,
+    authorization=Authorization.AUTHENTICATED,
+    reason=_CALLING_KEY_ACCESS_REASON,
 )
 async def get_api_key_capacity(
     container: Annotated[Container, Depends(get_container(with_user=True))],

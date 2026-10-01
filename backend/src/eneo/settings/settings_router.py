@@ -4,6 +4,11 @@ from uuid import UUID
 from fastapi import APIRouter, Depends, Query
 
 from eneo.authentication import auth_dependencies
+from eneo.authentication.endpoint_access import (
+    Authentication,
+    Authorization,
+    endpoint_access,
+)
 from eneo.files.mime_support import supported_mimes
 from eneo.flows.domain.flow_run_retention_policy import (
     FlowRunRetentionFlowTargetPage,
@@ -16,7 +21,7 @@ from eneo.main.container.container import Container
 from eneo.main.exceptions import BadRequestException, ErrorCodes
 from eneo.main.logging import get_logger
 from eneo.main.models import GeneralError, PaginatedResponse
-from eneo.roles.permissions import Permission, validate_permission
+from eneo.roles.permissions import Permission
 from eneo.server.dependencies.container import get_container
 from eneo.server.protocol import responses, to_paginated_response
 from eneo.settings import settings_factory
@@ -60,6 +65,10 @@ logger = get_logger(__name__)
 
 router = APIRouter()
 settings_admin_router = APIRouter()
+_TENANT_SETTINGS_ADMIN_ACCESS_REASON = (
+    "Administering tenant settings requires the admin permission."
+)
+
 FlowRetentionMutationContainer = Annotated[
     Container,
     Depends(get_container(with_user=True, transaction_scope="function")),
@@ -187,6 +196,11 @@ def _flow_settings_invalid_payload_response(
     summary="Get an organisation Skill execution block",
     description="Return the active tenant-scoped execution block for one organisation Skill.",
 )
+@endpoint_access(
+    authentication=Authentication.USER,
+    authorization=Permission.ADMIN,
+    reason=_TENANT_SETTINGS_ADMIN_ACCESS_REASON,
+)
 async def get_skill_execution_block(
     skill_id: UUID,
     container: Annotated[Container, Depends(get_container(with_user=True))],
@@ -206,6 +220,11 @@ async def get_skill_execution_block(
         "Block every retained version of an organisation Skill from subsequent "
         "runtime composition without changing its bindings or history."
     ),
+)
+@endpoint_access(
+    authentication=Authentication.USER,
+    authorization=Permission.ADMIN,
+    reason=_TENANT_SETTINGS_ADMIN_ACCESS_REASON,
 )
 async def block_skill_execution(
     skill_id: UUID,
@@ -227,6 +246,11 @@ async def block_skill_execution(
     description=(
         "Release the exact active execution block reviewed by the tenant administrator."
     ),
+)
+@endpoint_access(
+    authentication=Authentication.USER,
+    authorization=Permission.ADMIN,
+    reason=_TENANT_SETTINGS_ADMIN_ACCESS_REASON,
 )
 async def unblock_skill_execution(
     skill_id: UUID,
@@ -252,6 +276,11 @@ async def unblock_skill_execution(
         "per-turn activation ceiling."
     ),
 )
+@endpoint_access(
+    authentication=Authentication.USER,
+    authorization=Permission.ADMIN,
+    reason=_TENANT_SETTINGS_ADMIN_ACCESS_REASON,
+)
 async def get_skill_runtime_policy(
     container: Annotated[Container, Depends(get_container(with_user=True))],
     _user_identity_guard: None = Depends(auth_dependencies.require_user_identity),
@@ -269,6 +298,11 @@ async def get_skill_runtime_policy(
         "activation ceiling can be lowered but never raised past the "
         "platform bound."
     ),
+)
+@endpoint_access(
+    authentication=Authentication.USER,
+    authorization=Permission.ADMIN,
+    reason=_TENANT_SETTINGS_ADMIN_ACCESS_REASON,
 )
 async def update_skill_runtime_policy(
     data: SkillRuntimePolicyUpdate,
@@ -288,6 +322,11 @@ async def update_skill_runtime_policy(
         "deployment's migrated environment seed."
     ),
 )
+@endpoint_access(
+    authentication=Authentication.USER,
+    authorization=Permission.ADMIN,
+    reason=_TENANT_SETTINGS_ADMIN_ACCESS_REASON,
+)
 async def reset_skill_runtime_policy(
     container: Annotated[Container, Depends(get_container(with_user=True))],
     _user_identity_guard: None = Depends(auth_dependencies.require_user_identity),
@@ -306,6 +345,11 @@ async def reset_skill_runtime_policy(
         "allowance produced by the configured context share."
     ),
 )
+@endpoint_access(
+    authentication=Authentication.USER,
+    authorization=Permission.ADMIN,
+    reason=_TENANT_SETTINGS_ADMIN_ACCESS_REASON,
+)
 async def get_skill_runtime_model_projections(
     container: Annotated[Container, Depends(get_container(with_user=True))],
     _user_identity_guard: None = Depends(auth_dependencies.require_user_identity),
@@ -318,6 +362,11 @@ async def get_skill_runtime_model_projections(
     response_model=SettingsPublic,
     description="Get the current tenant settings.",
     responses=responses.get_responses([]),
+)
+@endpoint_access(
+    authentication=Authentication.ASSISTANT,
+    authorization=Authorization.AUTHENTICATED,
+    reason="Settings services return tenant-scoped configuration to authenticated callers.",
 )
 async def get_settings(
     service: Annotated[
@@ -334,12 +383,16 @@ async def get_settings(
     description="Update tenant settings; omitted fields are not updated.",
     responses=responses.get_responses([403]),
 )
+@endpoint_access(
+    authentication=Authentication.USER,
+    authorization=Permission.ADMIN,
+    reason=_TENANT_SETTINGS_ADMIN_ACCESS_REASON,
+)
 async def upsert_settings(
     settings: SettingsBase,
     container: Annotated[Container, Depends(get_container(with_user=True))],
 ):
     """Omitted fields are not updated."""
-    validate_permission(container.user(), Permission.ADMIN)
     service = container.settings_service()
     return await service.update_settings(settings)
 
@@ -349,6 +402,11 @@ async def upsert_settings(
     response_model=GetModelsResponse,
     description="List available completion and embedding models.",
     responses=responses.get_responses([]),
+)
+@endpoint_access(
+    authentication=Authentication.USER,
+    authorization=Authorization.AUTHENTICATED,
+    reason="Settings services return tenant-scoped configuration to authenticated callers.",
 )
 async def get_models(
     container: Annotated[Container, Depends(get_container(with_user=True))],
@@ -376,6 +434,11 @@ async def get_models(
     responses=responses.get_responses([]),
     dependencies=[Depends(auth_dependencies.get_current_active_user)],
 )
+@endpoint_access(
+    authentication=Authentication.USER,
+    authorization=Authorization.AUTHENTICATED,
+    reason="Settings services return tenant-scoped configuration to authenticated callers.",
+)
 def get_formats():
     return to_paginated_response(supported_mimes())
 
@@ -394,13 +457,17 @@ def get_formats():
     ),
     responses={403: _flow_settings_admin_forbidden_response()},
 )
+@endpoint_access(
+    authentication=Authentication.USER,
+    authorization=Permission.ADMIN,
+    reason=_TENANT_SETTINGS_ADMIN_ACCESS_REASON,
+)
 async def get_flow_input_limits(
     container: Annotated[
         Container,
         Depends(get_container(with_user=True, with_upload_admission=True)),
     ],
 ) -> FlowInputLimitsPublic:
-    validate_permission(container.user(), Permission.ADMIN)
     service = cast(_FlowSettingsServiceProtocol, container.settings_service())
     return await service.get_flow_input_limits()
 
@@ -426,6 +493,11 @@ async def get_flow_input_limits(
         403: _flow_settings_admin_forbidden_response(),
     },
 )
+@endpoint_access(
+    authentication=Authentication.USER,
+    authorization=Permission.ADMIN,
+    reason=_TENANT_SETTINGS_ADMIN_ACCESS_REASON,
+)
 async def update_flow_input_limits(
     payload: FlowInputLimitsUpdate,
     container: Annotated[
@@ -433,7 +505,6 @@ async def update_flow_input_limits(
         Depends(get_container(with_user=True, with_upload_admission=True)),
     ],
 ) -> FlowInputLimitsPublic:
-    validate_permission(container.user(), Permission.ADMIN)
     service = cast(_FlowSettingsServiceProtocol, container.settings_service())
     return await service.update_flow_input_limits(payload)
 
@@ -451,10 +522,14 @@ async def update_flow_input_limits(
     ),
     responses={403: _flow_settings_admin_forbidden_response()},
 )
+@endpoint_access(
+    authentication=Authentication.USER,
+    authorization=Permission.ADMIN,
+    reason=_TENANT_SETTINGS_ADMIN_ACCESS_REASON,
+)
 async def get_flow_document_render_limits(
     container: Annotated[Container, Depends(get_container(with_user=True))],
 ) -> FlowDocumentRenderLimitsPublic:
-    validate_permission(container.user(), Permission.ADMIN)
     service = cast(_FlowSettingsServiceProtocol, container.settings_service())
     return await service.get_flow_document_render_limits()
 
@@ -479,11 +554,15 @@ async def get_flow_document_render_limits(
         403: _flow_settings_admin_forbidden_response(),
     },
 )
+@endpoint_access(
+    authentication=Authentication.USER,
+    authorization=Permission.ADMIN,
+    reason=_TENANT_SETTINGS_ADMIN_ACCESS_REASON,
+)
 async def update_flow_document_render_limits(
     payload: FlowDocumentRenderLimitsUpdate,
     container: Annotated[Container, Depends(get_container(with_user=True))],
 ) -> FlowDocumentRenderLimitsPublic:
-    validate_permission(container.user(), Permission.ADMIN)
     service = cast(_FlowSettingsServiceProtocol, container.settings_service())
     return await service.update_flow_document_render_limits(payload)
 
@@ -501,10 +580,14 @@ async def update_flow_document_render_limits(
     ),
     responses={403: _flow_settings_admin_forbidden_response()},
 )
+@endpoint_access(
+    authentication=Authentication.USER,
+    authorization=Permission.ADMIN,
+    reason=_TENANT_SETTINGS_ADMIN_ACCESS_REASON,
+)
 async def get_flow_runtime_policy(
     container: Annotated[Container, Depends(get_container(with_user=True))],
 ) -> FlowRuntimePolicyPublic:
-    validate_permission(container.user(), Permission.ADMIN)
     service = cast(_FlowSettingsServiceProtocol, container.settings_service())
     return await service.get_flow_runtime_policy()
 
@@ -528,11 +611,15 @@ async def get_flow_runtime_policy(
         403: _flow_settings_admin_forbidden_response(),
     },
 )
+@endpoint_access(
+    authentication=Authentication.USER,
+    authorization=Permission.ADMIN,
+    reason=_TENANT_SETTINGS_ADMIN_ACCESS_REASON,
+)
 async def update_flow_runtime_policy(
     payload: FlowRuntimePolicyUpdate,
     container: Annotated[Container, Depends(get_container(with_user=True))],
 ) -> FlowRuntimePolicyPublic:
-    validate_permission(container.user(), Permission.ADMIN)
     service = cast(_FlowSettingsServiceProtocol, container.settings_service())
     return await service.update_flow_runtime_policy(payload)
 
@@ -550,10 +637,14 @@ async def update_flow_runtime_policy(
     ),
     responses={403: _flow_settings_admin_forbidden_response()},
 )
+@endpoint_access(
+    authentication=Authentication.USER,
+    authorization=Permission.ADMIN,
+    reason=_TENANT_SETTINGS_ADMIN_ACCESS_REASON,
+)
 async def get_mapped_execution_policy(
     container: Annotated[Container, Depends(get_container(with_user=True))],
 ) -> FlowMappedExecutionPolicyPublic:
-    validate_permission(container.user(), Permission.ADMIN)
     service = cast(_FlowSettingsServiceProtocol, container.settings_service())
     return await service.get_mapped_execution_policy()
 
@@ -577,11 +668,15 @@ async def get_mapped_execution_policy(
         403: _flow_settings_admin_forbidden_response(),
     },
 )
+@endpoint_access(
+    authentication=Authentication.USER,
+    authorization=Permission.ADMIN,
+    reason=_TENANT_SETTINGS_ADMIN_ACCESS_REASON,
+)
 async def update_mapped_execution_policy(
     payload: FlowMappedExecutionPolicyUpdate,
     container: Annotated[Container, Depends(get_container(with_user=True))],
 ) -> FlowMappedExecutionPolicyPublic:
-    validate_permission(container.user(), Permission.ADMIN)
     service = cast(_FlowSettingsServiceProtocol, container.settings_service())
     return await service.update_mapped_execution_policy(payload)
 
@@ -598,10 +693,14 @@ async def update_mapped_execution_policy(
     ),
     responses={403: _flow_settings_admin_forbidden_response()},
 )
+@endpoint_access(
+    authentication=Authentication.USER,
+    authorization=Permission.ADMIN,
+    reason=_TENANT_SETTINGS_ADMIN_ACCESS_REASON,
+)
 async def get_rag_evidence_policy(
     container: Annotated[Container, Depends(get_container(with_user=True))],
 ) -> FlowRagEvidencePolicyPublic:
-    validate_permission(container.user(), Permission.ADMIN)
     service = cast(_FlowSettingsServiceProtocol, container.settings_service())
     return await service.get_rag_evidence_policy()
 
@@ -624,11 +723,15 @@ async def get_rag_evidence_policy(
         403: _flow_settings_admin_forbidden_response(),
     },
 )
+@endpoint_access(
+    authentication=Authentication.USER,
+    authorization=Permission.ADMIN,
+    reason=_TENANT_SETTINGS_ADMIN_ACCESS_REASON,
+)
 async def update_rag_evidence_policy(
     payload: FlowRagEvidencePolicyUpdate,
     container: Annotated[Container, Depends(get_container(with_user=True))],
 ) -> FlowRagEvidencePolicyPublic:
-    validate_permission(container.user(), Permission.ADMIN)
     service = cast(_FlowSettingsServiceProtocol, container.settings_service())
     return await service.update_rag_evidence_policy(payload)
 
@@ -646,10 +749,14 @@ async def update_rag_evidence_policy(
     ),
     responses={403: _flow_settings_admin_forbidden_response()},
 )
+@endpoint_access(
+    authentication=Authentication.USER,
+    authorization=Permission.ADMIN,
+    reason=_TENANT_SETTINGS_ADMIN_ACCESS_REASON,
+)
 async def get_flow_evidence_policy(
     container: Annotated[Container, Depends(get_container(with_user=True))],
 ) -> FlowEvidencePolicyPublic:
-    validate_permission(container.user(), Permission.ADMIN)
     service = cast(_FlowSettingsServiceProtocol, container.settings_service())
     return await service.get_flow_evidence_policy()
 
@@ -673,11 +780,15 @@ async def get_flow_evidence_policy(
         403: _flow_settings_admin_forbidden_response(),
     },
 )
+@endpoint_access(
+    authentication=Authentication.USER,
+    authorization=Permission.ADMIN,
+    reason=_TENANT_SETTINGS_ADMIN_ACCESS_REASON,
+)
 async def update_flow_evidence_policy(
     payload: FlowEvidencePolicyUpdate,
     container: Annotated[Container, Depends(get_container(with_user=True))],
 ) -> FlowEvidencePolicyPublic:
-    validate_permission(container.user(), Permission.ADMIN)
     service = cast(_FlowSettingsServiceProtocol, container.settings_service())
     return await service.update_flow_evidence_policy(payload)
 
@@ -695,10 +806,14 @@ async def update_flow_evidence_policy(
     ),
     responses={403: _flow_settings_admin_forbidden_response()},
 )
+@endpoint_access(
+    authentication=Authentication.USER,
+    authorization=Permission.ADMIN,
+    reason=_TENANT_SETTINGS_ADMIN_ACCESS_REASON,
+)
 async def get_flow_retention_policy(
     container: Annotated[Container, Depends(get_container(with_user=True))],
 ) -> FlowRetentionPolicyPublic:
-    validate_permission(container.user(), Permission.ADMIN)
     service = cast(_FlowSettingsServiceProtocol, container.settings_service())
     return await service.get_flow_retention_policy()
 
@@ -721,11 +836,15 @@ async def get_flow_retention_policy(
         403: _flow_settings_admin_forbidden_response(),
     },
 )
+@endpoint_access(
+    authentication=Authentication.USER,
+    authorization=Permission.ADMIN,
+    reason=_TENANT_SETTINGS_ADMIN_ACCESS_REASON,
+)
 async def update_flow_retention_policy(
     payload: FlowRetentionPolicyUpdate,
     container: Annotated[Container, Depends(get_container(with_user=True))],
 ) -> FlowRetentionPolicyPublic:
-    validate_permission(container.user(), Permission.ADMIN)
     service = cast(_FlowSettingsServiceProtocol, container.settings_service())
     return await service.update_flow_retention_policy(payload)
 
@@ -740,6 +859,11 @@ async def update_flow_retention_policy(
         "No configured policy means run history has no age threshold and remains stored."
     ),
     responses={403: _flow_settings_admin_forbidden_response()},
+)
+@endpoint_access(
+    authentication=Authentication.USER,
+    authorization=Permission.ADMIN,
+    reason=_TENANT_SETTINGS_ADMIN_ACCESS_REASON,
 )
 async def get_organization_flow_run_retention_policy(
     container: Annotated[Container, Depends(get_container(with_user=True))],
@@ -758,6 +882,11 @@ async def get_organization_flow_run_retention_policy(
         "human review; neither mode deletes data automatically."
     ),
     responses={403: _flow_settings_admin_forbidden_response()},
+)
+@endpoint_access(
+    authentication=Authentication.USER,
+    authorization=Permission.ADMIN,
+    reason=_TENANT_SETTINGS_ADMIN_ACCESS_REASON,
 )
 async def replace_organization_flow_run_retention_policy(
     payload: FlowRunRetentionPolicyReplaceRequest,
@@ -779,6 +908,11 @@ async def replace_organization_flow_run_retention_policy(
         "response contains identifiers and names only."
     ),
     responses={403: _flow_settings_admin_forbidden_response()},
+)
+@endpoint_access(
+    authentication=Authentication.USER,
+    authorization=Permission.ADMIN,
+    reason=_TENANT_SETTINGS_ADMIN_ACCESS_REASON,
 )
 async def list_flow_run_retention_space_targets(
     container: Annotated[Container, Depends(get_container(with_user=True))],
@@ -805,6 +939,11 @@ async def list_flow_run_retention_space_targets(
         403: _flow_settings_admin_forbidden_response(),
         404: _flow_retention_not_found_response("Space"),
     },
+)
+@endpoint_access(
+    authentication=Authentication.USER,
+    authorization=Permission.ADMIN,
+    reason=_TENANT_SETTINGS_ADMIN_ACCESS_REASON,
 )
 async def list_flow_run_retention_flow_targets(
     space_id: UUID,
@@ -836,6 +975,11 @@ async def list_flow_run_retention_flow_targets(
         404: _flow_retention_not_found_response("Space"),
     },
 )
+@endpoint_access(
+    authentication=Authentication.USER,
+    authorization=Permission.ADMIN,
+    reason=_TENANT_SETTINGS_ADMIN_ACCESS_REASON,
+)
 async def get_space_flow_run_retention_policy(
     space_id: UUID,
     container: Annotated[Container, Depends(get_container(with_user=True))],
@@ -860,6 +1004,11 @@ async def get_space_flow_run_retention_policy(
         403: _flow_settings_admin_forbidden_response(),
         404: _flow_retention_not_found_response("Space"),
     },
+)
+@endpoint_access(
+    authentication=Authentication.USER,
+    authorization=Permission.ADMIN,
+    reason=_TENANT_SETTINGS_ADMIN_ACCESS_REASON,
 )
 async def replace_space_flow_run_retention_policy(
     space_id: UUID,
@@ -888,6 +1037,11 @@ async def replace_space_flow_run_retention_policy(
         404: _flow_retention_not_found_response("Flow"),
     },
 )
+@endpoint_access(
+    authentication=Authentication.USER,
+    authorization=Permission.ADMIN,
+    reason=_TENANT_SETTINGS_ADMIN_ACCESS_REASON,
+)
 async def get_flow_run_retention_policy(
     flow_id: UUID,
     container: Annotated[Container, Depends(get_container(with_user=True))],
@@ -910,6 +1064,11 @@ async def get_flow_run_retention_policy(
         403: _flow_settings_admin_forbidden_response(),
         404: _flow_retention_not_found_response("Flow"),
     },
+)
+@endpoint_access(
+    authentication=Authentication.USER,
+    authorization=Permission.ADMIN,
+    reason=_TENANT_SETTINGS_ADMIN_ACCESS_REASON,
 )
 async def replace_flow_run_retention_policy(
     flow_id: UUID,
@@ -938,6 +1097,11 @@ async def replace_flow_run_retention_policy(
     ),
     responses={403: _flow_settings_admin_forbidden_response()},
 )
+@endpoint_access(
+    authentication=Authentication.USER,
+    authorization=Permission.ADMIN,
+    reason=_TENANT_SETTINGS_ADMIN_ACCESS_REASON,
+)
 async def purge_organization_flow_run_history(
     payload: FlowRunHistoryPurgeRequest,
     container: FlowRetentionMutationContainer,
@@ -964,6 +1128,11 @@ async def purge_organization_flow_run_history(
         403: _flow_settings_admin_forbidden_response(),
         404: _flow_retention_not_found_response("Space"),
     },
+)
+@endpoint_access(
+    authentication=Authentication.USER,
+    authorization=Permission.ADMIN,
+    reason=_TENANT_SETTINGS_ADMIN_ACCESS_REASON,
 )
 async def purge_space_flow_run_history(
     space_id: UUID,
@@ -993,6 +1162,11 @@ async def purge_space_flow_run_history(
         404: _flow_retention_not_found_response("Flow"),
     },
 )
+@endpoint_access(
+    authentication=Authentication.USER,
+    authorization=Permission.ADMIN,
+    reason=_TENANT_SETTINGS_ADMIN_ACCESS_REASON,
+)
 async def purge_flow_run_history(
     flow_id: UUID,
     payload: FlowRunHistoryPurgeRequest,
@@ -1018,6 +1192,11 @@ async def purge_flow_run_history(
         400: _flow_retention_invalid_cursor_response(),
         403: _flow_settings_admin_forbidden_response(),
     },
+)
+@endpoint_access(
+    authentication=Authentication.USER,
+    authorization=Permission.ADMIN,
+    reason=_TENANT_SETTINGS_ADMIN_ACCESS_REASON,
 )
 async def list_organization_flow_run_retention_review_queue(
     container: Annotated[Container, Depends(get_container(with_user=True))],
@@ -1050,6 +1229,11 @@ async def list_organization_flow_run_retention_review_queue(
         403: _flow_settings_admin_forbidden_response(),
         404: _flow_retention_not_found_response("Space"),
     },
+)
+@endpoint_access(
+    authentication=Authentication.USER,
+    authorization=Permission.ADMIN,
+    reason=_TENANT_SETTINGS_ADMIN_ACCESS_REASON,
 )
 async def list_space_flow_run_retention_review_queue(
     space_id: UUID,
@@ -1085,6 +1269,11 @@ async def list_space_flow_run_retention_review_queue(
         404: _flow_retention_not_found_response("Flow"),
     },
 )
+@endpoint_access(
+    authentication=Authentication.USER,
+    authorization=Permission.ADMIN,
+    reason=_TENANT_SETTINGS_ADMIN_ACCESS_REASON,
+)
 async def list_flow_run_retention_review_queue(
     flow_id: UUID,
     container: Annotated[Container, Depends(get_container(with_user=True))],
@@ -1112,10 +1301,14 @@ async def list_flow_run_retention_review_queue(
     ),
     responses={403: _flow_settings_admin_forbidden_response()},
 )
+@endpoint_access(
+    authentication=Authentication.USER,
+    authorization=Permission.ADMIN,
+    reason=_TENANT_SETTINGS_ADMIN_ACCESS_REASON,
+)
 async def get_ai_builder_budget_settings(
     container: Annotated[Container, Depends(get_container(with_user=True))],
 ) -> AIBuilderBudgetSettingsPublic:
-    validate_permission(container.user(), Permission.ADMIN)
     service = cast(_FlowSettingsServiceProtocol, container.settings_service())
     return await service.get_ai_builder_budget_settings()
 
@@ -1136,11 +1329,15 @@ async def get_ai_builder_budget_settings(
         403: _flow_settings_admin_forbidden_response(),
     },
 )
+@endpoint_access(
+    authentication=Authentication.USER,
+    authorization=Permission.ADMIN,
+    reason=_TENANT_SETTINGS_ADMIN_ACCESS_REASON,
+)
 async def update_ai_builder_budget_settings(
     payload: AIBuilderBudgetSettingsUpdate,
     container: Annotated[Container, Depends(get_container(with_user=True))],
 ) -> AIBuilderBudgetSettingsPublic:
-    validate_permission(container.user(), Permission.ADMIN)
     service = cast(_FlowSettingsServiceProtocol, container.settings_service())
     return await service.update_ai_builder_budget_settings(payload)
 
@@ -1176,6 +1373,11 @@ Enable or disable the template management feature for your tenant.
 }
 ```
     """,
+)
+@endpoint_access(
+    authentication=Authentication.USER,
+    authorization=Permission.ADMIN,
+    reason=_TENANT_SETTINGS_ADMIN_ACCESS_REASON,
 )
 async def update_template_setting(
     data: ToggleSettingUpdate,
@@ -1225,6 +1427,11 @@ Enable or disable global audit logging for your tenant.
 ```
     """,
 )
+@endpoint_access(
+    authentication=Authentication.USER,
+    authorization=Permission.ADMIN,
+    reason=_TENANT_SETTINGS_ADMIN_ACCESS_REASON,
+)
 async def update_audit_logging_setting(
     data: ToggleSettingUpdate,
     container: Annotated[Container, Depends(get_container(with_user=True))],
@@ -1273,6 +1480,11 @@ Enable or disable JIT (Just-In-Time) user provisioning for your tenant.
 ```
     """,
 )
+@endpoint_access(
+    authentication=Authentication.USER,
+    authorization=Permission.ADMIN,
+    reason=_TENANT_SETTINGS_ADMIN_ACCESS_REASON,
+)
 async def update_provisioning_setting(
     data: ToggleSettingUpdate,
     container: Annotated[Container, Depends(get_container(with_user=True))],
@@ -1297,6 +1509,11 @@ Toggle API key expiry notifications for your tenant.
 - When disabled: API key expiry notifications are suppressed
 - Change takes effect immediately
     """,
+)
+@endpoint_access(
+    authentication=Authentication.USER,
+    authorization=Permission.ADMIN,
+    reason=_TENANT_SETTINGS_ADMIN_ACCESS_REASON,
 )
 async def update_api_key_expiry_notifications_setting(
     data: ToggleSettingUpdate,
@@ -1323,6 +1540,11 @@ Toggle the What's new page, release announcement and menu indicator for your ten
 - When disabled: the page, the one-time release announcement and the menu indicator are hidden for every user in the tenant
 - Change takes effect on the next page load
     """,
+)
+@endpoint_access(
+    authentication=Authentication.USER,
+    authorization=Permission.ADMIN,
+    reason=_TENANT_SETTINGS_ADMIN_ACCESS_REASON,
 )
 async def update_whats_new_setting(
     data: ToggleSettingUpdate,

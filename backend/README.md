@@ -144,7 +144,7 @@ for view semantics, query bounds and rollback behavior.
 | API_KEY_HEADER_NAME              | x        | Header name for the api keys                             |
 | JWT_AUDIENCE                     | x        | Example: *                                               |
 | JWT_ISSUER                       | x        |                                                          |
-| JWT_EXPIRY_TIME                  | x        | In seconds. Determines how long a user should be logged in before they are required to login again |
+| JWT_EXPIRY_TIME                  | x        | In minutes (1440 = 24 hours; at most 43200 = 30 days). Determines how long a user should be logged in before they are required to login again |
 | JWT_ALGORITHM                    | x        | Example: HS256                                           |
 | JWT_SECRET                       | x        |                                                          |
 | JWT_TOKEN_PREFIX                 | x        | In the header - eg `Bearer`                              |

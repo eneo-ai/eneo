@@ -19,6 +19,11 @@ from fastapi.responses import JSONResponse
 from eneo.audit.application.audit_metadata import AuditMetadata
 from eneo.audit.domain.action_types import ActionType
 from eneo.audit.domain.entity_types import EntityType
+from eneo.authentication.endpoint_access import (
+    Authentication,
+    Authorization,
+    endpoint_access,
+)
 from eneo.flows.api import flow_access_context
 from eneo.flows.api.flow_api_common import (
     FLOW_RUN_COMMIT_BEFORE_RESPONSE_CLAUSE,
@@ -68,7 +73,7 @@ from eneo.flows.application.flow_trace_audit import (
 )
 from eneo.flows.domain.flow import FlowRun, FlowRunStatus
 from eneo.flows.domain.flow_run_exceptions import FlowRunConcurrencyLimitReachedError
-from eneo.flows.flow_access_policy import FlowApiAction
+from eneo.flows.flow_access_policy import FlowApiAction, flow_action_access_reason
 from eneo.flows.flow_api_error_code import FlowApiErrorCode
 from eneo.flows.flow_run_step_inputs import FlowRunStepInputFiles
 from eneo.main.container.container import Container
@@ -87,6 +92,10 @@ from eneo.server.exception_handlers import extract_request_id
 from eneo.users.user import UserInDB
 
 router = APIRouter()
+_TENANT_RUN_CAPACITY_REASON = (
+    "Tenant members may read Flow run status capabilities and their own "
+    "tenant's run capacity."
+)
 
 _FLOW_RUN_IDEMPOTENCY_HEADER_DESCRIPTION = (
     "Optional caller-supplied idempotency key of 1 to 255 characters after trimming; "
@@ -292,6 +301,11 @@ principals can cancel only their own runs.
         ),
     },
 )
+@endpoint_access(
+    authentication=Authentication.USER,
+    authorization=Authorization.AUTHENTICATED,
+    reason=_TENANT_RUN_CAPACITY_REASON,
+)
 async def get_flow_run_status_capabilities(
     _container: Container = Depends(
         get_container(with_user=True, with_module_user=True, with_upload_admission=True)
@@ -322,6 +336,11 @@ async def get_flow_run_status_capabilities(
             context={"auth_layer": "api_key_scope"},
         ),
     },
+)
+@endpoint_access(
+    authentication=Authentication.USER,
+    authorization=Authorization.AUTHENTICATED,
+    reason=_TENANT_RUN_CAPACITY_REASON,
 )
 async def get_flow_run_capacity(
     container: Container = Depends(
@@ -404,6 +423,11 @@ async def get_flow_run_capacity(
             },
         },
     },
+)
+@endpoint_access(
+    authentication=Authentication.USER,
+    authorization=Authorization.AUTHENTICATED,
+    reason=flow_action_access_reason(FlowApiAction.RUN),
 )
 async def create_flow_run(
     id: Annotated[
@@ -561,6 +585,11 @@ async def create_flow_run(
         ),
     },
 )
+@endpoint_access(
+    authentication=Authentication.USER,
+    authorization=Authorization.AUTHENTICATED,
+    reason=flow_action_access_reason(FlowApiAction.VIEW),
+)
 async def list_flow_runs(
     id: Annotated[
         UUID, Path(description="Identifier of the flow whose runs should be listed.")
@@ -642,6 +671,11 @@ async def list_flow_runs(
         ),
     },
 )
+@endpoint_access(
+    authentication=Authentication.USER,
+    authorization=Authorization.AUTHENTICATED,
+    reason=flow_action_access_reason(FlowApiAction.VIEW),
+)
 async def get_flow_run_status(
     id: Annotated[
         UUID, Path(description="Identifier of the flow that owns the requested run.")
@@ -698,6 +732,11 @@ async def get_flow_run_status(
             context={"audit_required": True},
         ),
     },
+)
+@endpoint_access(
+    authentication=Authentication.USER,
+    authorization=Authorization.AUTHENTICATED,
+    reason=flow_action_access_reason(FlowApiAction.VIEW),
 )
 async def get_flow_run(
     id: Annotated[
@@ -783,6 +822,11 @@ async def get_flow_run(
             code="not_found",
         ),
     },
+)
+@endpoint_access(
+    authentication=Authentication.USER,
+    authorization=Authorization.AUTHENTICATED,
+    reason=flow_action_access_reason(FlowApiAction.RUN),
 )
 async def cancel_flow_run(
     id: Annotated[
@@ -898,6 +942,11 @@ async def cancel_flow_run(
             },
         ),
     },
+)
+@endpoint_access(
+    authentication=Authentication.USER,
+    authorization=Authorization.AUTHENTICATED,
+    reason=flow_action_access_reason(FlowApiAction.RUN),
 )
 async def redispatch_flow_run(
     id: Annotated[

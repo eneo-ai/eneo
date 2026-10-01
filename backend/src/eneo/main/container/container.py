@@ -1433,6 +1433,7 @@ class Container(containers.DeclarativeContainer):
     )
     resource_mover_service = providers.Factory(
         ResourceMoverService,
+        user=user,
         space_repo=space_repo,
         space_service=space_service,
         actor_manager=actor_manager,
@@ -1818,6 +1819,7 @@ class Container(containers.DeclarativeContainer):
         oauth_token_repo=oauth_token_repo,
         sharepoint_auth_service=sharepoint_auth_service,
         redis_client=redis_client,
+        user=user,
     )
 
     oauth_token_service = providers.Factory(
@@ -1830,7 +1832,6 @@ class Container(containers.DeclarativeContainer):
     # SharePoint auth router (after oauth_token_service)
     sharepoint_auth_router = providers.Factory(
         SharePointAuthRouter,
-        user_oauth_service=sharepoint_auth_service,
         tenant_app_service=tenant_sharepoint_app_service,
         tenant_app_auth_service=tenant_app_auth_service,
         oauth_token_service=oauth_token_service,
@@ -1848,6 +1849,7 @@ class Container(containers.DeclarativeContainer):
         user_integration_repo=user_integration_repo,
         tenant_integration_repo=tenant_integration_repo,
         user=user,
+        actor_manager=actor_manager,
         tenant_sharepoint_app_repo=tenant_sharepoint_app_repo,
         oauth_token_repo=oauth_token_repo,
         sharepoint_subscription_service=sharepoint_subscription_service,
@@ -1861,7 +1863,7 @@ class Container(containers.DeclarativeContainer):
         space_repo=space_repo,
         integration_knowledge_repo=integration_knowledge_repo,
         embedding_model_repo=embedding_model_repo2,
-        user_integration_repo=user_integration_repo,
+        user_integration_service=user_integration_service,
         actor_manager=actor_manager,
         sharepoint_subscription_service=sharepoint_subscription_service,
         tenant_sharepoint_app_repo=tenant_sharepoint_app_repo,
@@ -1922,14 +1924,13 @@ class Container(containers.DeclarativeContainer):
     integration_preview_service = providers.Factory(
         IntegrationPreviewService,
         oauth_token_repo=oauth_token_repo,
-        user_integration_repo=user_integration_repo,
+        user_integration_service=user_integration_service,
         confluence_preview_service=confluence_preview_service,
         sharepoint_preview_service=sharepoint_preview_service,
-        tenant_sharepoint_app_repo=tenant_sharepoint_app_repo,
     )
     sharepoint_tree_service = providers.Factory(
         AppSharePointTreeService,
-        user_integration_repo=user_integration_repo,
+        user_integration_service=user_integration_service,
         sharepoint_auth_router=sharepoint_auth_router,
         space_repo=space_repo,
     )

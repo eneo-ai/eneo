@@ -2,6 +2,11 @@ from typing import Annotated
 
 from fastapi import APIRouter, Depends
 
+from eneo.authentication.endpoint_access import (
+    Authentication,
+    Authorization,
+    endpoint_access,
+)
 from eneo.limits.limit import Limits
 from eneo.main.container.container import Container
 from eneo.server.dependencies.container import get_container
@@ -19,6 +24,11 @@ with_user_container = get_container(
     response_model=Limits,
     description="Get configured upload and AI Builder input limits.",
     responses=responses.get_responses([]),
+)
+@endpoint_access(
+    authentication=Authentication.USER,
+    authorization=Authorization.AUTHENTICATED,
+    reason="Tenant members may read their applicable service limits.",
 )
 async def get_limits(container: Annotated[Container, Depends(with_user_container)]):
     service = container.limit_service()

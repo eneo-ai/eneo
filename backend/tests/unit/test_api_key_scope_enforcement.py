@@ -99,15 +99,137 @@ class TestScopeEnforcementUnit:
     """Direct unit tests for UserService._enforce_api_key_scope()."""
 
     @pytest.mark.asyncio
-    async def test_tenant_key_always_passes(self):
-        """Tenant-scoped key should pass regardless of resource_type."""
+    async def test_tenant_key_admin_route_passes(self):
+        """Tenant-scoped keys are the only keys admitted to admin routes."""
         svc = _make_user_service()
         key = _make_key(scope_type=ApiKeyScopeType.TENANT, scope_id=None)
         request = _scope_request()
         scope_config = {"resource_type": "admin", "path_param": None}
 
-        # Should not raise
         await svc._enforce_api_key_scope(request, key, scope_config)
+
+    @pytest.mark.asyncio
+    async def test_tenant_key_list_route_passes_without_lookup(self):
+        """List routes carry no resource id; the handler filters by tenant."""
+        svc = _make_user_service()
+        key = _make_key(scope_type=ApiKeyScopeType.TENANT, scope_id=None)
+        request = _scope_request()
+        scope_config = {"resource_type": "space", "path_param": None}
+
+        await svc._enforce_api_key_scope(request, key, scope_config)
+
+        svc.repo.session.scalar.assert_not_awaited()
+        svc.repo.session.scalars.assert_not_awaited()
+
+    @pytest.mark.asyncio
+    async def test_tenant_key_own_tenant_resource_passes(self):
+        """A resource whose space lives in the key's tenant is in scope."""
+        space_id = uuid4()
+        svc = _make_user_service(session_scalar_return=space_id)
+        key = _make_key(scope_type=ApiKeyScopeType.TENANT, scope_id=None)
+        svc.repo.session.scalars = AsyncMock(
+            return_value=SimpleNamespace(all=lambda: [key.tenant_id])
+        )
+        request = _scope_request(path_params={"id": str(uuid4())})
+        scope_config = {"resource_type": "assistant", "path_param": "id"}
+
+        await svc._enforce_api_key_scope(request, key, scope_config)
+
+    @pytest.mark.parametrize(
+        "resource_type",
+        ["space", "assistant", "app", "collection", "website", "group_chat"],
+    )
+    @pytest.mark.asyncio
+    async def test_tenant_key_foreign_tenant_resource_denied(self, resource_type):
+        """A resource whose space lives in another tenant is out of scope."""
+        svc = _make_user_service(session_scalar_return=uuid4())
+        key = _make_key(scope_type=ApiKeyScopeType.TENANT, scope_id=None)
+        svc.repo.session.scalars = AsyncMock(
+            return_value=SimpleNamespace(all=lambda: [uuid4()])
+        )
+        request = _scope_request(path_params={"id": str(uuid4())})
+        scope_config = {"resource_type": resource_type, "path_param": "id"}
+
+        with pytest.raises(ApiKeyValidationError) as exc_info:
+            await svc._enforce_api_key_scope(request, key, scope_config)
+        assert exc_info.value.status_code == 403
+        assert exc_info.value.code == "insufficient_scope"
+        assert "tenant" in exc_info.value.message
+
+    @pytest.mark.asyncio
+    async def test_tenant_key_space_route_checks_the_space_itself(self):
+        """For space routes the path id is the space; its tenant is compared."""
+        svc = _make_user_service()
+        key = _make_key(scope_type=ApiKeyScopeType.TENANT, scope_id=None)
+        seen: list[object] = []
+
+        async def _scalars(stmt):
+            seen.append(stmt)
+            return SimpleNamespace(all=lambda: [uuid4()])
+
+        svc.repo.session.scalars = _scalars
+        request = _scope_request(path_params={"id": str(uuid4())})
+        scope_config = {"resource_type": "space", "path_param": "id"}
+
+        with pytest.raises(ApiKeyValidationError):
+            await svc._enforce_api_key_scope(request, key, scope_config)
+        assert len(seen) == 1
+        svc.repo.session.scalar.assert_not_awaited()
+
+    @pytest.mark.asyncio
+    async def test_tenant_key_unresolvable_resource_falls_through(self):
+        """An id that maps to no space is left to the handler's not-found path."""
+        svc = _make_user_service(session_scalar_return=None)
+        key = _make_key(scope_type=ApiKeyScopeType.TENANT, scope_id=None)
+        request = _scope_request(path_params={"id": str(uuid4())})
+        scope_config = {"resource_type": "assistant", "path_param": "id"}
+
+        await svc._enforce_api_key_scope(request, key, scope_config)
+
+        svc.repo.session.scalars.assert_not_awaited()
+
+    @pytest.mark.asyncio
+    async def test_tenant_key_file_route_passes_without_lookup(self):
+        """Files are bound to the calling identity, not to a space."""
+        svc = _make_user_service()
+        key = _make_key(scope_type=ApiKeyScopeType.TENANT, scope_id=None)
+        request = _scope_request(path_params={"id": str(uuid4())})
+        scope_config = {"resource_type": "file", "path_param": "id"}
+
+        await svc._enforce_api_key_scope(request, key, scope_config)
+
+        svc.repo.session.scalar.assert_not_awaited()
+
+    @pytest.mark.asyncio
+    async def test_tenant_key_prompt_in_foreign_tenant_denied(self):
+        """A prompt whose assistants all live in another tenant is denied."""
+        svc = _make_user_service()
+        key = _make_key(scope_type=ApiKeyScopeType.TENANT, scope_id=None)
+        svc._resolve_prompt_space_ids = AsyncMock(return_value={uuid4()})
+        svc.repo.session.scalars = AsyncMock(
+            return_value=SimpleNamespace(all=lambda: [uuid4()])
+        )
+        request = _scope_request(path_params={"id": str(uuid4())})
+        scope_config = {"resource_type": "prompt", "path_param": "id"}
+
+        with pytest.raises(ApiKeyValidationError) as exc_info:
+            await svc._enforce_api_key_scope(request, key, scope_config)
+        assert exc_info.value.code == "insufficient_scope"
+
+    @pytest.mark.asyncio
+    async def test_tenant_key_info_blob_space_param_checks_that_space(self):
+        """Info-blob routes keyed by space_id compare that space's tenant."""
+        svc = _make_user_service()
+        key = _make_key(scope_type=ApiKeyScopeType.TENANT, scope_id=None)
+        svc.repo.session.scalars = AsyncMock(
+            return_value=SimpleNamespace(all=lambda: [key.tenant_id])
+        )
+        request = _scope_request(path_params={"space_id": str(uuid4())})
+        scope_config = {"resource_type": "info_blob", "path_param": "space_id"}
+
+        await svc._enforce_api_key_scope(request, key, scope_config)
+
+        svc.repo.session.scalar.assert_not_awaited()
 
     @pytest.mark.asyncio
     async def test_space_key_admin_route_denied(self):
@@ -651,7 +773,7 @@ class TestScopeListEndpoints:
 
 
 class TestResolveApiKeyScopeWiring:
-    """Ensure _resolve_api_key calls scope enforcement for non-tenant keys."""
+    """Ensure _resolve_api_key calls scope enforcement for every key scope."""
 
     @staticmethod
     def _build_request() -> SimpleNamespace:
@@ -726,10 +848,11 @@ class TestResolveApiKeyScopeWiring:
         svc._enforce_api_key_scope.assert_awaited_once()
 
     @pytest.mark.asyncio
-    async def test_resolve_api_key_tenant_scoped_key_skips_scope_enforcement(
+    async def test_resolve_api_key_tenant_scoped_key_runs_scope_enforcement(
         self, monkeypatch
     ):
-        """Tenant-scoped keys bypass scope enforcement (they have full access)."""
+        """Tenant-scoped keys go through scope enforcement like every other key,
+        so a foreign-tenant resource id is rejected before the handler runs."""
         key = _make_key(scope_type=ApiKeyScopeType.TENANT, scope_id=None)
         svc = self._build_service(key)
         request = self._build_request()
@@ -754,7 +877,7 @@ class TestResolveApiKeyScopeWiring:
 
         await svc._resolve_api_key("sk_test_key", request=request)
 
-        svc._enforce_api_key_scope.assert_not_awaited()
+        svc._enforce_api_key_scope.assert_awaited_once()
 
 
 # ---------------------------------------------------------------------------

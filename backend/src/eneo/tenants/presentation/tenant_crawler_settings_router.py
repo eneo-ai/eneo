@@ -16,6 +16,11 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel, ConfigDict, Field
 
 from eneo.authentication import auth
+from eneo.authentication.endpoint_access import (
+    Authentication,
+    Authorization,
+    endpoint_access,
+)
 from eneo.main.container.container import Container
 from eneo.main.exceptions import NotFoundException
 from eneo.server.dependencies.container import get_container
@@ -230,6 +235,11 @@ class DeleteSettingsResponse(BaseModel):
     "System admin only.",
     responses=responses.get_responses([404]),
 )
+@endpoint_access(
+    authentication=Authentication.SYSADMIN,
+    authorization=Authorization.SYSADMIN,
+    reason="Deployment administration requires the configured super API key.",
+)
 async def update_crawler_settings(
     tenant_id: UUID,
     request: CrawlerSettingsUpdate,
@@ -287,6 +297,11 @@ async def update_crawler_settings(
     "System admin only.",
     responses=responses.get_responses([404]),
 )
+@endpoint_access(
+    authentication=Authentication.SYSADMIN,
+    authorization=Authorization.SYSADMIN,
+    reason="Deployment administration requires the configured super API key.",
+)
 async def get_crawler_settings(
     tenant_id: UUID,
     container: Annotated[Container, Depends(get_container())],
@@ -332,6 +347,11 @@ async def get_crawler_settings(
     description="Delete all tenant-specific crawler settings, reverting to environment defaults. "
     "System admin only.",
     responses=responses.get_responses([404]),
+)
+@endpoint_access(
+    authentication=Authentication.SYSADMIN,
+    authorization=Authorization.SYSADMIN,
+    reason="Deployment administration requires the configured super API key.",
 )
 async def delete_crawler_settings(
     tenant_id: UUID,

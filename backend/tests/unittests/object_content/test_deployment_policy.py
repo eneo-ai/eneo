@@ -16,8 +16,9 @@ from pydantic import ValidationError
 
 import eneo.object_content.deployment_policy_router as deployment_policy_router
 from eneo.authentication.auth_dependencies import (
-    require_storage_administration,
+    require_active_storage_identity,
 )
+from eneo.authentication.endpoint_access import Authentication, access_for
 from eneo.database.database import get_session, get_session_with_transaction
 from eneo.database.tables.object_content_policy_table import (
     ObjectContentDeploymentPolicy,
@@ -46,6 +47,7 @@ from eneo.object_content.runtime import (
     ObjectContentReadinessCode,
     StorageCapability,
 )
+from eneo.roles.permissions import Permission
 from eneo.tenants.tenant import TenantState
 from eneo.users.user import UserState
 from tests.fixtures import TEST_USER
@@ -282,7 +284,7 @@ def test_policy_conflicts_have_stable_machine_readable_codes() -> None:
 @pytest.mark.asyncio
 async def test_storage_authority_requires_current_active_eligibility() -> None:
     eligible = TEST_USER
-    await require_storage_administration(eligible)
+    await require_active_storage_identity(eligible)
 
     ineligible = (
         eligible.model_copy(update={"state": UserState.INACTIVE}),
@@ -296,11 +298,10 @@ async def test_storage_authority_requires_current_active_eligibility() -> None:
                 )
             }
         ),
-        eligible.model_copy(update={"roles": []}),
     )
     for user in ineligible:
         with pytest.raises(HTTPException) as error:
-            await require_storage_administration(user)
+            await require_active_storage_identity(user)
         assert error.value.status_code == 403
 
 
@@ -311,9 +312,11 @@ def test_policy_mutation_composes_existing_session_and_identity_fences() -> None
         if isinstance(route, APIRoute) and route.endpoint is replace_deployment_policy
     )
     dependency_calls = {dependency.call for dependency in route.dependant.dependencies}
-    assert deployment_policy_router._require_policy_session_auth in dependency_calls
+    policy = access_for(route.endpoint)
+    assert policy.authentication is Authentication.SESSION
+    assert policy.authorization is Permission.STORAGE
     assert deployment_policy_router._require_policy_user_identity in dependency_calls
-    assert deployment_policy_router._require_policy_storage_admin in dependency_calls
+    assert deployment_policy_router._require_policy_active_identity in dependency_calls
     assert route.responses[403]["model"].__name__ == "GeneralError"
     assert route.responses[409]["model"].__name__ == "GeneralError"
 
@@ -331,9 +334,11 @@ def test_inventory_read_composes_existing_storage_authority_fences() -> None:
         if isinstance(route, APIRoute) and route.endpoint is endpoint
     )
     dependency_calls = {dependency.call for dependency in route.dependant.dependencies}
-    assert deployment_policy_router._require_policy_session_auth in dependency_calls
+    policy = access_for(route.endpoint)
+    assert policy.authentication is Authentication.SESSION
+    assert policy.authorization is Permission.STORAGE
     assert deployment_policy_router._require_policy_user_identity in dependency_calls
-    assert deployment_policy_router._require_policy_storage_admin in dependency_calls
+    assert deployment_policy_router._require_policy_active_identity in dependency_calls
     assert route.responses[403]["model"].__name__ == "GeneralError"
 
 

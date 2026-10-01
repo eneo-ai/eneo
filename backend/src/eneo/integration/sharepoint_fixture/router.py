@@ -2,6 +2,11 @@ from typing import Annotated, Optional
 
 from fastapi import APIRouter, Depends, Query
 
+from eneo.authentication.endpoint_access import (
+    Authentication,
+    Authorization,
+    endpoint_access,
+)
 from eneo.integration.sharepoint_fixture.models import (
     SharePointFixturePreviewResponse,
     SharePointFixtureScenario,
@@ -35,6 +40,11 @@ router = APIRouter(dependencies=[Depends(require_sharepoint_fixture_mode)])
     ),
     responses=responses.get_responses([404]),
 )
+@endpoint_access(
+    authentication=Authentication.PUBLIC,
+    authorization=Authorization.PUBLIC,
+    reason="Synthetic fixtures only; require_sharepoint_fixture_mode hides these outside explicitly enabled development mode.",
+)
 async def get_sharepoint_fixture_preview(
     scenario: SharePointFixtureScenario,
 ) -> SharePointFixturePreviewResponse:
@@ -49,6 +59,11 @@ async def get_sharepoint_fixture_preview(
         "Graph request is made. Requires SHAREPOINT_FIXTURE_MODE_ENABLED=true."
     ),
     responses=responses.get_responses([400, 404]),
+)
+@endpoint_access(
+    authentication=Authentication.PUBLIC,
+    authorization=Authorization.PUBLIC,
+    reason="Synthetic fixtures only; require_sharepoint_fixture_mode hides these outside explicitly enabled development mode.",
 )
 async def get_sharepoint_fixture_tree(
     scenario: SharePointFixtureScenario,

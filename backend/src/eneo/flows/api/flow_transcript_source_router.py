@@ -8,6 +8,11 @@ from fastapi.responses import JSONResponse
 from pydantic import BaseModel, ConfigDict, Field
 
 from eneo.audit.domain.action_types import ActionType
+from eneo.authentication.endpoint_access import (
+    Authentication,
+    Authorization,
+    endpoint_access,
+)
 from eneo.flows.api import flow_access_context
 from eneo.flows.api.flow_api_common import error_response
 from eneo.flows.application.flow_run_evidence_service import (
@@ -26,7 +31,7 @@ from eneo.flows.domain.transcript_source import (
     TranscriptSourceBounds,
     TranscriptSourceOmissionReason,
 )
-from eneo.flows.flow_access_policy import FlowApiAction
+from eneo.flows.flow_access_policy import FlowApiAction, flow_action_access_reason
 from eneo.flows.flow_api_error_code import FlowApiErrorCode
 from eneo.main.container.container import Container
 from eneo.main.exceptions import (
@@ -139,6 +144,11 @@ TranscriptSourcePage = Annotated[
             context={"audit_required": True},
         ),
     },
+)
+@endpoint_access(
+    authentication=Authentication.USER,
+    authorization=Authorization.AUTHENTICATED,
+    reason=flow_action_access_reason(FlowApiAction.VIEW),
 )
 async def get_flow_run_transcript_source(
     flow_id: UUID,

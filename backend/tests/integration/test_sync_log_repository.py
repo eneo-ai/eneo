@@ -182,7 +182,10 @@ async def test_sync_log_repo_get_by_integration_knowledge(db_container):
 
         # Act
         logs = await repo.get_by_integration_knowledge(
-            integration_knowledge_id=integration_knowledge_id, limit=10, offset=0
+            integration_knowledge_id=integration_knowledge_id,
+            tenant_id=container.tenant().id,
+            limit=10,
+            offset=0,
         )
 
         # Assert
@@ -221,17 +224,26 @@ async def test_sync_log_repo_pagination_with_offset(db_container):
 
         # Act - Get page 1 (offset 0, limit 10)
         page1 = await repo.get_by_integration_knowledge(
-            integration_knowledge_id=integration_knowledge_id, limit=10, offset=0
+            integration_knowledge_id=integration_knowledge_id,
+            tenant_id=container.tenant().id,
+            limit=10,
+            offset=0,
         )
 
         # Get page 2 (offset 10, limit 10)
         page2 = await repo.get_by_integration_knowledge(
-            integration_knowledge_id=integration_knowledge_id, limit=10, offset=10
+            integration_knowledge_id=integration_knowledge_id,
+            tenant_id=container.tenant().id,
+            limit=10,
+            offset=10,
         )
 
         # Get page 3 (offset 20, limit 10)
         page3 = await repo.get_by_integration_knowledge(
-            integration_knowledge_id=integration_knowledge_id, limit=10, offset=20
+            integration_knowledge_id=integration_knowledge_id,
+            tenant_id=container.tenant().id,
+            limit=10,
+            offset=20,
         )
 
         # Assert
@@ -273,7 +285,8 @@ async def test_sync_log_repo_count_by_integration_knowledge(db_container):
 
         # Act
         count = await repo.count_by_integration_knowledge(
-            integration_knowledge_id=integration_knowledge_id
+            integration_knowledge_id=integration_knowledge_id,
+            tenant_id=container.tenant().id,
         )
 
         # Assert
@@ -315,10 +328,12 @@ async def test_sync_log_repo_count_other_integration_not_included(db_container):
 
         # Act
         count_1 = await repo.count_by_integration_knowledge(
-            integration_knowledge_id=knowledge_1_id
+            integration_knowledge_id=knowledge_1_id,
+            tenant_id=container.tenant().id,
         )
         count_2 = await repo.count_by_integration_knowledge(
-            integration_knowledge_id=knowledge_2_id
+            integration_knowledge_id=knowledge_2_id,
+            tenant_id=container.tenant().id,
         )
 
         # Assert
@@ -367,6 +382,7 @@ async def test_sync_log_repo_ordered_by_created_at_desc(db_container):
         # Act
         logs = await repo.get_by_integration_knowledge(
             integration_knowledge_id=integration_knowledge_id,
+            tenant_id=container.tenant().id,
             limit=10,
             offset=0,
         )
@@ -407,7 +423,8 @@ async def test_sync_log_repo_get_recent_by_integration_knowledge(db_container):
 
         # Act
         recent = await repo.get_recent_by_integration_knowledge(
-            integration_knowledge_id=integration_knowledge_id
+            integration_knowledge_id=integration_knowledge_id,
+            tenant_id=container.tenant().id,
         )
 
         # Assert - Should return 10 most recent (default limit)
@@ -498,11 +515,13 @@ async def test_sync_log_repo_limit_enforced(db_container):
         # Act with different limits
         logs_5 = await repo.get_by_integration_knowledge(
             integration_knowledge_id=integration_knowledge_id,
+            tenant_id=container.tenant().id,
             limit=5,
             offset=0,
         )
         logs_15 = await repo.get_by_integration_knowledge(
             integration_knowledge_id=integration_knowledge_id,
+            tenant_id=container.tenant().id,
             limit=15,
             offset=0,
         )
@@ -524,6 +543,7 @@ async def test_sync_log_repo_empty_result(db_container):
         # Act
         logs = await repo.get_by_integration_knowledge(
             integration_knowledge_id=integration_knowledge_id,
+            tenant_id=container.tenant().id,
             limit=10,
             offset=0,
         )
@@ -533,9 +553,58 @@ async def test_sync_log_repo_empty_result(db_container):
 
         # Also test count
         count = await repo.count_by_integration_knowledge(
-            integration_knowledge_id=integration_knowledge_id
+            integration_knowledge_id=integration_knowledge_id,
+            tenant_id=container.tenant().id,
         )
         assert count == 0
+
+
+@pytest.mark.integration
+@pytest.mark.asyncio
+async def test_sync_log_repo_hides_logs_from_other_tenants(db_container):
+    """A valid knowledge ID returns nothing when queried for another tenant."""
+    async with db_container() as container:
+        repo = container.sync_log_repo()
+        integration_knowledge_id = await create_integration_knowledge_record(container)
+        await repo.add(
+            SyncLog(
+                integration_knowledge_id=integration_knowledge_id,
+                sync_type="delta",
+                status="error",
+                error_message="Failed to read /internal/example/file.txt",
+                started_at=datetime.now(timezone.utc),
+            )
+        )
+        other_tenant_id = uuid4()
+
+        assert (
+            await repo.count_by_integration_knowledge(
+                integration_knowledge_id=integration_knowledge_id,
+                tenant_id=container.tenant().id,
+            )
+            == 1
+        )
+        assert (
+            await repo.get_by_integration_knowledge(
+                integration_knowledge_id=integration_knowledge_id,
+                tenant_id=other_tenant_id,
+            )
+            == []
+        )
+        assert (
+            await repo.get_recent_by_integration_knowledge(
+                integration_knowledge_id=integration_knowledge_id,
+                tenant_id=other_tenant_id,
+            )
+            == []
+        )
+        assert (
+            await repo.count_by_integration_knowledge(
+                integration_knowledge_id=integration_knowledge_id,
+                tenant_id=other_tenant_id,
+            )
+            == 0
+        )
 
 
 if __name__ == "__main__":

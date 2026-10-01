@@ -54,7 +54,7 @@ describe("assistant function settings", () => {
   it("blocks newly enabling a function with a model that cannot call tools", async () => {
     render(CapabilityToggle, { capability, selectedModel: { supports_tool_calling: false } });
     await expect.element(control()).toBeDisabled();
-    await expect.element(page.getByText(m.model_does_not_support_tools())).toBeVisible();
+    await expect.element(page.getByText(m.tools_readiness_model_no_tool_calling())).toBeVisible();
   });
 
   it("allows turning off a saved function even with space and model restrictions", async () => {

@@ -27,7 +27,6 @@ from eneo.authentication.auth_dependencies import (
     require_api_key_scope_check,
     require_file_delete_scope_guard,
     require_resource_permission_for_method,
-    require_session_auth,
 )
 from eneo.authentication.auth_models import ApiKeyPermission
 from eneo.authentication.federation_router import router as federation_router
@@ -640,7 +639,6 @@ router.include_router(
     whats_new_router,
     prefix="/whats-new",
     tags=["whats-new"],
-    dependencies=[Depends(require_session_auth)],
 )
 router.include_router(
     sharepoint_webhook_router, prefix="/integrations", tags=["integrations"]

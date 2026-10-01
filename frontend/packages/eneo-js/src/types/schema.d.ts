@@ -6422,7 +6422,7 @@ export interface paths {
     put?: never;
     /**
      * On Auth Callback
-     * @description Complete the OAuth2 callback by exchanging the auth code for a user integration.
+     * @description Complete the OAuth2 callback for an integration in the current tenant.
      */
     post: operations["on_auth_callback_api_v1_integrations_auth_callback_token__post"];
     delete?: never;
@@ -6440,7 +6440,7 @@ export interface paths {
     };
     /**
      * Gen Url
-     * @description Generate the OAuth2 authorization URL for a tenant integration.
+     * @description Generate the OAuth2 authorization URL for an integration in the current tenant.
      */
     get: operations["gen_url_api_v1_integrations_auth__tenant_integration_id__url__get"];
     put?: never;
@@ -6606,7 +6606,7 @@ export interface paths {
     put?: never;
     /**
      * Add Tenant Integration
-     * @description Add an integration to the tenant.
+     * @description Add an integration to the tenant. Requires administrator permission.
      */
     post: operations["add_tenant_integration_api_v1_integrations_tenant_add__integration_id___post"];
     delete?: never;
@@ -6627,7 +6627,7 @@ export interface paths {
     post?: never;
     /**
      * Remove Tenant Integration
-     * @description Remove an integration from the tenant.
+     * @description Remove an integration from the tenant. Requires administrator permission.
      */
     delete: operations["remove_tenant_integration_api_v1_integrations_tenant_remove__tenant_integration_id___delete"];
     options?: never;
@@ -12859,87 +12859,6 @@ export interface components {
       /** Updated At */
       updated_at?: string | null;
     };
-    /** ApiKeyV2InDB */
-    ApiKeyV2InDB: {
-      /** Allowed Ips */
-      allowed_ips?: string[] | null;
-      /** Allowed Origins */
-      allowed_origins?: string[] | null;
-      /** Created At */
-      created_at?: string | null;
-      /** Created By Key Id */
-      created_by_key_id?: string | null;
-      created_by_user?: components["schemas"]["ApiKeyUserSnapshot"] | null;
-      /** Created By User Id */
-      created_by_user_id?: string | null;
-      /**
-       * Delegation Depth
-       * @default 0
-       */
-      delegation_depth?: number;
-      /** Description */
-      description?: string | null;
-      /** Expires At */
-      expires_at?: string | null;
-      /** Hash Version */
-      hash_version: string;
-      /**
-       * Id
-       * Format: uuid
-       */
-      id: string;
-      /** Key Hash */
-      key_hash: string;
-      /** Key Prefix */
-      key_prefix: string;
-      /** Key Suffix */
-      key_suffix: string;
-      key_type: components["schemas"]["ApiKeyType"];
-      /** Last Used At */
-      last_used_at?: string | null;
-      /** Name */
-      name: string;
-      owner_user?: components["schemas"]["ApiKeyUserSnapshot"] | null;
-      /** Owner User Id */
-      owner_user_id?: string | null;
-      /** @default user */
-      ownership?: components["schemas"]["ApiKeyOwnership"];
-      permission: components["schemas"]["ApiKeyPermission"];
-      /** Rate Limit */
-      rate_limit?: number | null;
-      resource_permissions?: {
-        [key: string]: string;
-      } | null;
-      /** Revoked At */
-      revoked_at?: string | null;
-      revoked_reason_code?: components["schemas"]["ApiKeyStateReasonCode"] | null;
-      /** Revoked Reason Text */
-      revoked_reason_text?: string | null;
-      /** Rotated From Key Id */
-      rotated_from_key_id?: string | null;
-      /** Rotation Grace Until */
-      rotation_grace_until?: string | null;
-      /** Scope Id */
-      scope_id?: string | null;
-      scope_type: components["schemas"]["ApiKeyScopeType"];
-      /** Search Match Reasons */
-      search_match_reasons?: components["schemas"]["ApiKeySearchMatchReason"][] | null;
-      /** Service Principal Id */
-      service_principal_id?: string | null;
-      state: components["schemas"]["ApiKeyState"];
-      /** Suspended At */
-      suspended_at?: string | null;
-      suspended_reason_code?: components["schemas"]["ApiKeyStateReasonCode"] | null;
-      /** Suspended Reason Text */
-      suspended_reason_text?: string | null;
-      /**
-       * Tenant Id
-       * Format: uuid
-       */
-      tenant_id: string;
-      /** Updated At */
-      updated_at?: string | null;
-    };
     /** AppFleetAdvanceCountsPublic */
     AppFleetAdvanceCountsPublic: {
       /** Advanced */
@@ -13341,7 +13260,10 @@ export interface components {
       attachments?: components["schemas"]["ModelId"][] | null;
       completion_model?: components["schemas"]["ModelId"] | null;
       completion_model_kwargs?: components["schemas"]["ModelKwargs"] | null;
-      /** Data Retention Days */
+      /**
+       * Data Retention Days
+       * @description Conversation retention override. Requires space administration permission in shared and organization spaces. Set to null to inherit the space policy; omit to leave unchanged.
+       */
       data_retention_days?: number | null;
       /** Description */
       description?: string | null;
@@ -30428,8 +30350,8 @@ export interface components {
        */
       items: components["schemas"]["UserGroupPublic"][];
     };
-    /** PaginatedResponse[UserInDB] */
-    PaginatedResponse_UserInDB_: {
+    /** PaginatedResponse[UserSysAdminView] */
+    PaginatedResponse_UserSysAdminView_: {
       /**
        * Count
        * @description Number of items returned in the response
@@ -30439,7 +30361,7 @@ export interface components {
        * Items
        * @description List of items returned in the response
        */
-      items: components["schemas"]["UserInDB"][];
+      items: components["schemas"]["UserSysAdminView"][];
     };
     /** PaginatedResponse[WebsitePublic] */
     PaginatedResponse_WebsitePublic_: {
@@ -30594,7 +30516,10 @@ export interface components {
        * @description This field is deprecated and will be ignored
        */
       completion_model_kwargs?: components["schemas"]["ModelKwargs"] | null;
-      /** Data Retention Days */
+      /**
+       * Data Retention Days
+       * @description Conversation retention override. Requires space administration permission in shared and organization spaces. Set to null to inherit the space policy; omit to leave unchanged.
+       */
       data_retention_days?: number | null;
       /**
        * Description
@@ -32362,29 +32287,6 @@ export interface components {
       name: string;
       /** Permissions */
       permissions: components["schemas"]["Permission"][];
-    };
-    /** RoleInDB */
-    RoleInDB: {
-      /** Created At */
-      created_at?: string | null;
-      /**
-       * Id
-       * Format: uuid
-       */
-      id: string;
-      /** Name */
-      name: string;
-      /** Permissions */
-      permissions: components["schemas"]["Permission"][];
-      /** Predefined Source */
-      predefined_source?: string | null;
-      /**
-       * Tenant Id
-       * Format: uuid
-       */
-      tenant_id: string;
-      /** Updated At */
-      updated_at?: string | null;
     };
     /** RolePublic */
     RolePublic: {
@@ -35936,80 +35838,6 @@ export interface components {
        */
       stability?: string | null;
     };
-    /** TenantInDB */
-    TenantInDB: {
-      /** Api Credentials */
-      api_credentials?: {
-        [key: string]: unknown;
-      };
-      /** Api Key Policy */
-      api_key_policy?: {
-        [key: string]: unknown;
-      };
-      /** Crawler Settings */
-      crawler_settings?: {
-        [key: string]: unknown;
-      };
-      /** Created At */
-      created_at?: string | null;
-      /** Default Role Id */
-      default_role_id?: string | null;
-      /** Display Name */
-      display_name?: string | null;
-      /** Domain */
-      domain?: string | null;
-      /** Favorite Providers */
-      favorite_providers?: string[];
-      /** Federation Config */
-      federation_config?: {
-        [key: string]: unknown;
-      };
-      /** Flow Runtime Upload Abandonment Days */
-      flow_runtime_upload_abandonment_days?: number | null;
-      /** Flow Settings */
-      flow_settings?: {
-        [key: string]: unknown;
-      };
-      /**
-       * Id
-       * Format: uuid
-       */
-      id: string;
-      /**
-       * Modules
-       * @default []
-       */
-      modules?: components["schemas"]["ModuleInDB"][];
-      /** Name */
-      name: string;
-      /** Privacy Policy */
-      privacy_policy?: string | null;
-      /**
-       * Provisioning
-       * @default false
-       */
-      provisioning?: boolean;
-      /** Quota Limit */
-      quota_limit: number;
-      /**
-       * Security Enabled
-       * @default false
-       */
-      security_enabled?: boolean;
-      /**
-       * Show Model Pricing
-       * @default true
-       */
-      show_model_pricing?: boolean;
-      /** Slug */
-      slug?: string | null;
-      /** @default active */
-      state?: components["schemas"]["TenantState"];
-      /** Updated At */
-      updated_at?: string | null;
-      /** Zitadel Org Id */
-      zitadel_org_id?: string | null;
-    };
     /**
      * TenantInfo
      * @description Public tenant information for selector grid.
@@ -36559,6 +36387,8 @@ export interface components {
       } | null;
       /** Generated File Ids */
       generated_file_ids?: string[] | null;
+      /** Is Internal */
+      is_internal?: boolean | null;
       /** Mcp Tool Name */
       mcp_tool_name?: string | null;
       /** Meta */
@@ -37284,90 +37114,6 @@ export interface components {
        */
       username?: string | null;
     };
-    /** UserCreated */
-    UserCreated: {
-      access_token?: components["schemas"]["AccessToken"] | null;
-      active_api_key?: components["schemas"]["ApiKeyV2InDB"] | null;
-      /** Created At */
-      created_at?: string | null;
-      /**
-       * Credential Version
-       * @default 0
-       */
-      credential_version?: number;
-      /**
-       * Deleted At
-       * @description Timestamp when user was soft-deleted (null for active users)
-       */
-      deleted_at?: string | null;
-      /**
-       * Email
-       * Format: email
-       * @description Valid email address
-       * @example john.doe@municipality.se
-       */
-      email: string;
-      /**
-       * Email Verified
-       * @default false
-       */
-      email_verified?: boolean;
-      /**
-       * Id
-       * Format: uuid
-       */
-      id: string;
-      /**
-       * Is Active
-       * @default true
-       */
-      is_active?: boolean;
-      /** Password */
-      password?: string | null;
-      /** Permissions */
-      readonly permissions: components["schemas"]["Permission"][];
-      /** Quota Limit */
-      quota_limit?: number | null;
-      /**
-       * Quota Used
-       * @default 0
-       */
-      quota_used?: number;
-      /**
-       * Roles
-       * @default []
-       */
-      roles?: components["schemas"]["RoleInDB"][];
-      /** Salt */
-      salt?: string | null;
-      state: components["schemas"]["UserState"];
-      tenant: components["schemas"]["TenantInDB"];
-      /**
-       * Tenant Id
-       * Format: uuid
-       */
-      tenant_id: string;
-      /** Updated At */
-      updated_at?: string | null;
-      /**
-       * Used Tokens
-       * @default 0
-       */
-      used_tokens?: number;
-      /**
-       * User Groups
-       * @default []
-       */
-      user_groups?: components["schemas"]["UserGroupInDBRead"][];
-      /** User Groups Ids */
-      readonly user_groups_ids: string[];
-      /**
-       * Username
-       * @description Unique username (optional, will use email prefix if not provided)
-       * @example john.doe
-       */
-      username?: string | null;
-    };
     /**
      * UserDeletedListItem
      * @description User information for deleted users list operations
@@ -37402,22 +37148,6 @@ export interface components {
     UserGroupCreateRequest: {
       /** Name */
       name: string;
-    };
-    /** UserGroupInDBRead */
-    UserGroupInDBRead: {
-      /** Created At */
-      created_at?: string | null;
-      /**
-       * Id
-       * Format: uuid
-       */
-      id: string;
-      /** Name */
-      name: string;
-      /** State */
-      state?: string | null;
-      /** Updated At */
-      updated_at?: string | null;
     };
     /** UserGroupPublic */
     UserGroupPublic: {
@@ -37461,89 +37191,6 @@ export interface components {
        * @default []
        */
       users?: components["schemas"]["ModelId"][];
-    };
-    /** UserInDB */
-    UserInDB: {
-      active_api_key?: components["schemas"]["ApiKeyV2InDB"] | null;
-      /** Created At */
-      created_at?: string | null;
-      /**
-       * Credential Version
-       * @default 0
-       */
-      credential_version?: number;
-      /**
-       * Deleted At
-       * @description Timestamp when user was soft-deleted (null for active users)
-       */
-      deleted_at?: string | null;
-      /**
-       * Email
-       * Format: email
-       * @description Valid email address
-       * @example john.doe@municipality.se
-       */
-      email: string;
-      /**
-       * Email Verified
-       * @default false
-       */
-      email_verified?: boolean;
-      /**
-       * Id
-       * Format: uuid
-       */
-      id: string;
-      /**
-       * Is Active
-       * @default true
-       */
-      is_active?: boolean;
-      /** Password */
-      password?: string | null;
-      /** Permissions */
-      readonly permissions: components["schemas"]["Permission"][];
-      /** Quota Limit */
-      quota_limit?: number | null;
-      /**
-       * Quota Used
-       * @default 0
-       */
-      quota_used?: number;
-      /**
-       * Roles
-       * @default []
-       */
-      roles?: components["schemas"]["RoleInDB"][];
-      /** Salt */
-      salt?: string | null;
-      state: components["schemas"]["UserState"];
-      tenant: components["schemas"]["TenantInDB"];
-      /**
-       * Tenant Id
-       * Format: uuid
-       */
-      tenant_id: string;
-      /** Updated At */
-      updated_at?: string | null;
-      /**
-       * Used Tokens
-       * @default 0
-       */
-      used_tokens?: number;
-      /**
-       * User Groups
-       * @default []
-       */
-      user_groups?: components["schemas"]["UserGroupInDBRead"][];
-      /** User Groups Ids */
-      readonly user_groups_ids: string[];
-      /**
-       * Username
-       * @description Unique username (optional, will use email prefix if not provided)
-       * @example john.doe
-       */
-      username?: string | null;
     };
     /** UserIntegration */
     UserIntegration: {
@@ -37720,6 +37367,112 @@ export interface components {
        * @example jane.smith
        */
       username: string;
+    };
+    /** UserSysAdminCreated */
+    UserSysAdminCreated: {
+      access_token: components["schemas"]["AccessToken"];
+      /** Created At */
+      created_at?: string | null;
+      /**
+       * Email
+       * Format: email
+       * @description Valid email address
+       * @example john.doe@municipality.se
+       */
+      email: string;
+      /** Email Verified */
+      email_verified: boolean;
+      /**
+       * Id
+       * Format: uuid
+       */
+      id: string;
+      /** Is Active */
+      is_active: boolean;
+      /** Quota Limit */
+      quota_limit: number | null;
+      /**
+       * Quota Used
+       * @default 0
+       */
+      quota_used?: number;
+      /** Roles */
+      roles: components["schemas"]["RolePublic"][];
+      state: components["schemas"]["UserState"];
+      tenant: components["schemas"]["TenantPublic"];
+      /**
+       * Tenant Id
+       * Format: uuid
+       */
+      tenant_id: string;
+      /** Updated At */
+      updated_at?: string | null;
+      /** Used Tokens */
+      used_tokens: number;
+      /** User Groups */
+      user_groups: components["schemas"]["UserGroupRead"][];
+      /**
+       * Username
+       * @description Unique username (optional, will use email prefix if not provided)
+       * @example john.doe
+       */
+      username?: string | null;
+    };
+    /**
+     * UserSysAdminView
+     * @description A user as returned by the sysadmin API, which spans tenants.
+     *
+     *     Declares what is returned instead of inheriting from UserInDB, so the
+     *     password hash, salt, API key hashes and the tenant's stored provider and
+     *     federation secrets are left out.
+     */
+    UserSysAdminView: {
+      /** Created At */
+      created_at?: string | null;
+      /**
+       * Email
+       * Format: email
+       * @description Valid email address
+       * @example john.doe@municipality.se
+       */
+      email: string;
+      /** Email Verified */
+      email_verified: boolean;
+      /**
+       * Id
+       * Format: uuid
+       */
+      id: string;
+      /** Is Active */
+      is_active: boolean;
+      /** Quota Limit */
+      quota_limit: number | null;
+      /**
+       * Quota Used
+       * @default 0
+       */
+      quota_used?: number;
+      /** Roles */
+      roles: components["schemas"]["RolePublic"][];
+      state: components["schemas"]["UserState"];
+      tenant: components["schemas"]["TenantPublic"];
+      /**
+       * Tenant Id
+       * Format: uuid
+       */
+      tenant_id: string;
+      /** Updated At */
+      updated_at?: string | null;
+      /** Used Tokens */
+      used_tokens: number;
+      /** User Groups */
+      user_groups: components["schemas"]["UserGroupRead"][];
+      /**
+       * Username
+       * @description Unique username (optional, will use email prefix if not provided)
+       * @example john.doe
+       */
+      username?: string | null;
     };
     /** UserTokenUsage */
     UserTokenUsage: {
@@ -38412,6 +38165,15 @@ export interface operations {
         };
         content: {
           "application/json": components["schemas"]["CrawlerHealthResponse"];
+        };
+      };
+      /** @description Missing or invalid super API key */
+      401: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
         };
       };
     };
@@ -40508,6 +40270,15 @@ export interface operations {
           "application/json": components["schemas"]["RoleAssignmentPublic"] | null;
         };
       };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
       /** @description Not Found */
       404: {
         headers: {
@@ -40932,6 +40703,15 @@ export interface operations {
           "application/json": {
             [key: string]: string[];
           };
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
         };
       };
       /** @description Validation Error */
@@ -46153,6 +45933,15 @@ export interface operations {
           "application/json": components["schemas"]["AnalysisJobStatusResponse"];
         };
       };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
       /** @description Not Found */
       404: {
         headers: {
@@ -50063,6 +49852,15 @@ export interface operations {
         };
         content?: never;
       };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
       /** @description Not Found */
       404: {
         headers: {
@@ -51555,6 +51353,8 @@ export interface operations {
                     } | null;
                     /** Generated File Ids */
                     generated_file_ids?: string[] | null;
+                    /** Is Internal */
+                    is_internal?: boolean | null;
                     /** Mcp Tool Name */
                     mcp_tool_name?: string | null;
                     /** Meta */
@@ -51614,6 +51414,8 @@ export interface operations {
                     } | null;
                     /** Generated File Ids */
                     generated_file_ids?: string[] | null;
+                    /** Is Internal */
+                    is_internal?: boolean | null;
                     /** Mcp Tool Name */
                     mcp_tool_name?: string | null;
                     /** Meta */
@@ -51673,6 +51475,8 @@ export interface operations {
                     } | null;
                     /** Generated File Ids */
                     generated_file_ids?: string[] | null;
+                    /** Is Internal */
+                    is_internal?: boolean | null;
                     /** Mcp Tool Name */
                     mcp_tool_name?: string | null;
                     /** Meta */
@@ -62595,6 +62399,15 @@ export interface operations {
           "application/json": components["schemas"]["UserIntegrationList"];
         };
       };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
       /** @description Not Found */
       404: {
         headers: {
@@ -62638,6 +62451,15 @@ export interface operations {
         };
         content: {
           "application/json": components["schemas"]["PaginatedSyncLogList"];
+        };
+      };
+      /** @description Not Found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
         };
       };
       /** @description Validation Error */
@@ -62711,6 +62533,15 @@ export interface operations {
           "application/json": components["schemas"]["GeneralError"];
         };
       };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
       /** @description Not Found */
       404: {
         headers: {
@@ -62748,6 +62579,15 @@ export interface operations {
           [name: string]: unknown;
         };
         content?: never;
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
       };
       /** @description Not Found */
       404: {
@@ -62885,6 +62725,15 @@ export interface operations {
           "application/json": components["schemas"]["GeneralError"];
         };
       };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
       /** @description Not Found */
       404: {
         headers: {
@@ -62908,7 +62757,7 @@ export interface operations {
   get_sharepoint_folder_tree_api_v1_integrations__user_integration_id__sharepoint_tree__get: {
     parameters: {
       query: {
-        /** @description Space ID (for auth routing) */
+        /** @description Space ID (requires integration import rights) */
         space_id: string;
         /** @description SharePoint site ID (required for SharePoint) */
         site_id?: string | null;
@@ -62938,6 +62787,15 @@ export interface operations {
       };
       /** @description Bad Request */
       400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
         headers: {
           [name: string]: unknown;
         };
@@ -73759,7 +73617,7 @@ export interface operations {
           [name: string]: unknown;
         };
         content: {
-          "application/json": components["schemas"]["PaginatedResponse_UserInDB_"];
+          "application/json": components["schemas"]["PaginatedResponse_UserSysAdminView_"];
         };
       };
       /** @description Unauthorized */
@@ -73792,7 +73650,7 @@ export interface operations {
           [name: string]: unknown;
         };
         content: {
-          "application/json": components["schemas"]["UserCreated"];
+          "application/json": components["schemas"]["UserSysAdminCreated"];
         };
       };
       /** @description Bad Request */
@@ -73841,7 +73699,7 @@ export interface operations {
           [name: string]: unknown;
         };
         content: {
-          "application/json": components["schemas"]["UserInDB"];
+          "application/json": components["schemas"]["UserSysAdminView"];
         };
       };
       /** @description Unauthorized */
@@ -73894,7 +73752,7 @@ export interface operations {
           [name: string]: unknown;
         };
         content: {
-          "application/json": components["schemas"]["UserInDB"];
+          "application/json": components["schemas"]["UserSysAdminView"];
         };
       };
       /** @description Bad Request */
@@ -74804,6 +74662,15 @@ export interface operations {
           "application/json": components["schemas"]["UserGroupPublic"];
         };
       };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
       /** @description Not Found */
       404: {
         headers: {
@@ -75309,6 +75176,15 @@ export interface operations {
           "application/json": components["schemas"]["GeneralError"];
         };
       };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
       /** @description Validation Error */
       422: {
         headers: {
@@ -75371,6 +75247,15 @@ export interface operations {
       };
       /** @description Validation Error */
       422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Too Many Requests */
+      429: {
         headers: {
           [name: string]: unknown;
         };

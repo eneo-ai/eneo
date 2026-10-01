@@ -153,6 +153,7 @@ def test_the_capacity_route_is_not_behind_the_admin_scoped_api_key_router() -> N
     from fastapi.routing import APIRoute
     from starlette.routing import compile_path
 
+    from eneo.authentication.endpoint_access import require_endpoint_access
     from eneo.server.main import get_application
     from tests.unit.api_key_test_utils import flatten_routes
 
@@ -163,9 +164,17 @@ def test_the_capacity_route_is_not_behind_the_admin_scoped_api_key_router() -> N
     ]
     by_path = {route.path: route for route in routes}
 
-    capacity = by_path["/api/v1/api-key-capacity/"]
-    assert list(capacity.dependencies or []) == []
-    assert by_path["/api/v1/api-keys/policy-constraints"].dependencies
+    def inherited_guards(path: str) -> list[object]:
+        # Every route inherits the application-wide endpoint-admission check;
+        # only router-level guards beyond it are in question here.
+        return [
+            dependency.dependency
+            for dependency in by_path[path].dependencies or []
+            if dependency.dependency is not require_endpoint_access
+        ]
+
+    assert inherited_guards("/api/v1/api-key-capacity/") == []
+    assert inherited_guards("/api/v1/api-keys/policy-constraints")
 
     requested = "/api/v1/api-key-capacity/"
     selected = [

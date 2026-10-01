@@ -304,6 +304,29 @@ value and a comment.
     | `REDIS_HOST` | `redis` | Compose service name |
     | `REDIS_PORT` | `6379` | |
 
+    **Redis authentication (optional):**
+
+    Redis is only reachable on the internal `data_net` network and runs without a
+    password by default. To require one, define `REDIS_PASSWORD` in the
+    deployment `.env` next to `docker-compose.yml`. The Redis container and the
+    backend, worker and database initialisation services all read that value, so
+    it is set in one place.
+
+    ```bash
+    # .env
+    REDIS_PASSWORD=<output of: openssl rand -hex 32>
+    ```
+
+    Apply the change with `docker compose up -d`. Redis and the backend services
+    restart together; queued jobs and other Redis data stay in the volume. While
+    the password is set, run Redis commands with
+    `docker compose exec redis sh -c 'REDISCLI_AUTH="$REDIS_PASSWORD" redis-cli ping'`.
+
+    | Variable | Default | Description |
+    |----------|---------|-------------|
+    | `REDIS_PASSWORD` | unset | Password the backend and workers present to Redis. Unset or blank connects without authentication |
+    | `REDIS_USERNAME` | unset | Redis ACL user, for a Redis managed outside the bundled stack. Requires `REDIS_PASSWORD` |
+
     **Security (required):**
 
     | Variable | Template value | Description |
@@ -346,6 +369,8 @@ value and a comment.
     | `OIDC_DISCOVERY_ENDPOINT` | empty | IdP discovery URL (`.../.well-known/openid-configuration`) for single-tenant mode |
     | `OIDC_CLIENT_ID` | empty | OIDC client ID |
     | `OIDC_CLIENT_SECRET` | empty | OIDC client secret |
+    | `OIDC_TENANT_ID` | empty | Eneo tenant UUID required by the global OIDC/MobilityGuard login endpoint |
+    | `OIDC_ALLOWED_DOMAINS` | `[]` | Global OIDC email-domain restriction (JSON array); required for JIT account creation |
     | `FEDERATION_ENABLED` | `false` | Enable per-tenant IdP configuration via API |
     | `ENCRYPTION_KEY` | empty | 44-char base64 Fernet key (required for credentials & federation) |
     | `ENEO_SUPER_API_KEY` | empty | Super admin API access (sent as `X-API-Key`) |
@@ -950,8 +975,9 @@ curl -fsS https://your-domain.com/api/healthz
 # Readiness alias of /api/healthz on current images (older released images only have /api/healthz)
 curl -fsS https://your-domain.com/api/readyz
 
-# Crawler queue and worker diagnostics
-curl -fsS https://your-domain.com/api/healthz/crawler
+# Detailed crawler diagnostics (requires the deployment's super API key)
+curl -fsS https://your-domain.com/api/healthz/crawler \
+  -H "X-API-Key: $ENEO_SUPER_API_KEY"
 
 # Running backend version
 curl -fsS https://your-domain.com/version
