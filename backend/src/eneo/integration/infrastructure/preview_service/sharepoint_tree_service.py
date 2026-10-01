@@ -12,6 +12,7 @@ from eneo.integration.infrastructure.content_service.sharepoint_metadata import 
 from eneo.integration.infrastructure.preview_service.sharepoint_search import (
     MAX_SEARCH_RESULTS,
     build_odata_filter,
+    clean_search_text,
     filter_columns,
     row_from_drive_item,
     row_from_list_item,
@@ -162,7 +163,15 @@ class SharePointTreeService:
                     f"Failed to fetch folder items for folder {folder_id}: {str(e)}"
                 ) from e
 
-            catalog = await self._column_catalog(content_client, actual_drive_id)
+            # The root listing always needs the columns (they drive the filter
+            # menu); a subfolder only when it holds files whose properties are
+            # read, so opening folder after folder does not repeat the request.
+            has_files = any(item.get("folder") is None for item in items)
+            catalog = (
+                await self._column_catalog(content_client, actual_drive_id)
+                if folder_id == "root" or has_files
+                else SharePointColumnCatalog()
+            )
 
             tree_items: List[Dict[str, Any]] = []
             for item in items:
@@ -260,7 +269,7 @@ class SharePointTreeService:
         """
         if not site_id and not drive_id:
             raise ValueError("Either site_id or drive_id must be provided")
-        text = text.strip()
+        text = clean_search_text(text)
         filters = {k: v for k, v in (filters or {}).items() if v.strip()}
         if not text and not filters:
             return {
@@ -285,17 +294,32 @@ class SharePointTreeService:
 
             catalog = await self._column_catalog(content_client, actual_drive_id)
             odata_filter, residual = build_odata_filter(catalog, filters)
+            if residual:
+                # A column Graph cannot compare would turn the query into a
+                # capped listing of the whole library, checked locally.
+                raise ValueError(
+                    "Unknown filter column: " + ", ".join(sorted(residual))
+                )
 
             rows: List[Dict[str, Any]] = []
             truncated = False
             if filters:
-                raw_rows, truncated = await content_client.get_list_items_filtered(
-                    actual_drive_id, odata_filter, max_items=max_items
-                )
-                for raw in raw_rows:
+                # The free text is checked locally on the column query's rows;
+                # the client keeps paging until enough rows pass, so a match
+                # past the first page is not lost.
+                accepted: List[Dict[str, Any]] = []
+
+                def accept(raw: Dict[str, Any]) -> bool:
                     row = row_from_list_item(raw, catalog)
-                    if row and row_matches(row, text, residual):
-                        rows.append(row)
+                    if row is None or not row_matches(row, text, {}):
+                        return False
+                    accepted.append(row)
+                    return True
+
+                _, truncated = await content_client.get_list_items_filtered(
+                    actual_drive_id, odata_filter, max_items=max_items, accept=accept
+                )
+                rows = accepted[:max_items]
             else:
                 raw_rows, truncated = await content_client.search_drive_items(
                     actual_drive_id, text, max_items=max_items

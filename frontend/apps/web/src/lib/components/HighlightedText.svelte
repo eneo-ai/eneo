@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { splitSharePointMatches } from "$lib/features/integrations/sharepoint/treeState";
+  import { splitMatches } from "$lib/core/formatting/highlightMatches";
 
   /**
    * `text` with every case-insensitive occurrence of `query` wrapped in a
@@ -10,7 +10,7 @@
 </script>
 
 {#if query}
-  {#each splitSharePointMatches(text, query) as segment, index (index)}
+  {#each splitMatches(text, query) as segment, index (index)}
     {#if segment.match}
       <!-- Highlighter yellow from the theme, so it stays readable in both modes. -->
       <mark class="bg-highlight text-highlight-foreground rounded-sm px-0.5">{segment.text}</mark>

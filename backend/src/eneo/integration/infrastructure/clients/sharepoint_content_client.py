@@ -1,7 +1,7 @@
 import asyncio
 import json
 from typing import Any, Awaitable, Callable, Optional, Sequence, cast
-from urllib.parse import ParseResult, parse_qs, urlparse
+from urllib.parse import ParseResult, parse_qs, quote, urlparse
 from uuid import UUID
 
 import aiohttp
@@ -189,15 +189,26 @@ class SharePointContentClient(BaseClient):
                 return await self.client.get(endpoint, headers=self.headers)
             raise
 
+    # Rows Graph is asked for before a search gives up on finding more matches
+    # when a local check (free text on a column query) discards most of them.
+    MAX_SCANNED_ROWS = 2000
+
     async def _get_paged_items_capped(
         self,
         endpoint: str,
         *,
         max_items: int,
         headers: Optional[dict[str, str]] = None,
+        accept: Optional[Callable[[dict[str, Any]], bool]] = None,
     ) -> tuple[list[dict[str, Any]], bool]:
-        """Pages until ``max_items`` rows are in hand; True when more were available."""
+        """Pages until ``max_items`` accepted rows are in hand.
+
+        ``accept`` drops rows as they arrive, so the cap counts matches rather
+        than raw rows. The second value is True when more matches may exist:
+        another page remained, or the scan budget ran out first.
+        """
         rows: list[dict[str, Any]] = []
+        scanned = 0
         next_link: Optional[str] = endpoint
         while next_link:
             if next_link.startswith("http"):
@@ -205,33 +216,47 @@ class SharePointContentClient(BaseClient):
             response = await self.client.get(
                 next_link, headers={**self.headers, **(headers or {})}
             )
-            rows.extend(cast(list[dict[str, Any]], response.get("value", [])))
+            page = cast(list[dict[str, Any]], response.get("value", []))
+            scanned += len(page)
+            for row in page:
+                if accept is None or accept(row):
+                    rows.append(row)
             next_link = cast(Optional[str], response.get("@odata.nextLink"))
             if len(rows) >= max_items:
                 return rows[:max_items], bool(next_link) or len(rows) > max_items
+            if next_link and scanned >= self.MAX_SCANNED_ROWS:
+                return rows, True
         return rows, False
 
     async def get_list_items_filtered(
-        self, drive_id: str, odata_filter: Optional[str], *, max_items: int
+        self,
+        drive_id: str,
+        odata_filter: Optional[str],
+        *,
+        max_items: int,
+        accept: Optional[Callable[[dict[str, Any]], bool]] = None,
     ) -> tuple[list[dict[str, Any]], bool]:
         """List items of a library with their columns and drive item.
 
         ``odata_filter`` compares ``fields/<Column>``; Graph evaluates it for
         indexed columns and, with the Prefer header, tries non-indexed ones too.
+        ``accept`` keeps paging past rows a local check rejects.
         """
         endpoint = f"v1.0/drives/{drive_id}/list/items?$expand=fields,driveItem"
         if odata_filter:
-            endpoint += f"&$filter={odata_filter}"
+            # A column value may hold &, # or %, which would otherwise end or
+            # corrupt the query string.
+            endpoint += "&$filter=" + quote(odata_filter, safe="/")
         prefer = {"Prefer": "HonorNonIndexedQueriesWarningMayFailRandomly"}
         try:
             return await self._get_paged_items_capped(
-                endpoint, max_items=max_items, headers=prefer
+                endpoint, max_items=max_items, headers=prefer, accept=accept
             )
         except aiohttp.ClientResponseError as e:
             if e.status == 401 and self.token_refresh_callback and self.token_id:
                 await self.refresh_token()
                 return await self._get_paged_items_capped(
-                    endpoint, max_items=max_items, headers=prefer
+                    endpoint, max_items=max_items, headers=prefer, accept=accept
                 )
             raise
 
@@ -239,7 +264,9 @@ class SharePointContentClient(BaseClient):
         self, drive_id: str, text: str, *, max_items: int
     ) -> tuple[list[dict[str, Any]], bool]:
         """Drive items whose name or content matches ``text``, with list item columns when enabled."""
-        quoted = text.replace("'", "''")
+        # Percent-encoded inside the path segment, so quotes, &, # and spaces
+        # in what a person typed reach Graph as the search text.
+        quoted = quote(text.replace("'", "''"), safe="")
         endpoint = self._with_item_expand(
             f"v1.0/drives/{drive_id}/root/search(q='{quoted}')"
         )
