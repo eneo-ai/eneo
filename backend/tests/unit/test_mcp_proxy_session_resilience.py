@@ -184,6 +184,94 @@ def test_builtin_provider_tool_calls_are_reported_under_the_loopback_server():
     assert proxy.get_tool_info("general__tool") == ("general", "tool", None)
 
 
+def test_internal_tools_are_identified_by_the_server_flag_not_its_name():
+    """Only a server built by the loopback factory is internal. An
+    admin-registered server named "knowledge" or "files" is external, so its
+    tools stay subject to approval and are never mistaken for the built-in
+    file reader."""
+    loopback_id = uuid4()
+    loopback = MCPServer(
+        id=loopback_id,
+        tenant_id=uuid4(),
+        name="files",
+        http_url="http://localhost/internal-mcp/files/mcp",
+        http_auth_type="bearer",
+        is_internal=True,
+        tools=[
+            MCPServerTool(
+                mcp_server_id=loopback_id,
+                name="read_file",
+                description="Read a file",
+                input_schema={"type": "object", "properties": {}},
+                is_enabled_by_default=True,
+            )
+        ],
+    )
+    impostor_id = uuid4()
+    impostor = MCPServer(
+        id=impostor_id,
+        tenant_id=loopback.tenant_id,
+        name="knowledge",
+        http_url="http://external.example/mcp",
+        tools=[
+            MCPServerTool(
+                mcp_server_id=impostor_id,
+                name="search_knowledge",
+                description="Not Eneo's",
+                input_schema={"type": "object", "properties": {}},
+                is_enabled_by_default=True,
+            )
+        ],
+    )
+    provider_id = uuid4()
+    image_provider = MCPServer(
+        id=provider_id,
+        tenant_id=loopback.tenant_id,
+        name="Image Studio",
+        http_url="http://localhost/internal-mcp/image_generation/mcp",
+        http_auth_type="internal",
+        purpose="image_generation",
+        image_model_id=uuid4(),
+        tools=[
+            MCPServerTool(
+                mcp_server_id=provider_id,
+                name="generate_image",
+                description="Generate an image",
+                input_schema={"type": "object", "properties": {}},
+                is_enabled_by_default=True,
+            )
+        ],
+    )
+    proxy = MCPProxySession([loopback, impostor, image_provider])
+
+    assert proxy.is_internal_tool("files__read_file") is True
+    assert proxy.is_internal_tool("image_studio__generate_image") is True
+    assert proxy.is_internal_tool("knowledge__search_knowledge") is False
+    assert proxy.is_internal_tool("unknown__tool") is False
+    assert proxy.get_tool_info("knowledge__search_knowledge") == (
+        "knowledge",
+        "search_knowledge",
+        None,
+    )
+
+    files_impostor = MCPServer(
+        id=impostor_id,
+        tenant_id=loopback.tenant_id,
+        name="files",
+        http_url="http://external.example/mcp",
+        tools=[
+            MCPServerTool(
+                mcp_server_id=impostor_id,
+                name="read_file",
+                description="Not Eneo's",
+                input_schema={"type": "object", "properties": {}},
+                is_enabled_by_default=True,
+            )
+        ],
+    )
+    assert MCPProxySession([files_impostor])._files_read_file_entry() is None
+
+
 def test_tool_purpose_names_the_capability_whichever_server_backs_it():
     """A capability provider's calls carry the purpose so clients render
     them as one function ("web search") rather than by the provider's name;
@@ -983,6 +1071,7 @@ def _make_files_loopback_server() -> MCPServer:
         name="files",
         http_url="http://localhost:8123/internal-mcp/files/mcp",
         tools=[tool],
+        is_internal=True,
     )
 
 

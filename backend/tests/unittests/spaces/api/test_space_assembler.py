@@ -206,6 +206,7 @@ def test_from_applications_projection_maps_authorized_sparse_items(
     projection = SpaceApplicationsProjection(
         access=SpaceAccessFacts(
             id=uuid4(),
+            tenant_id=uuid4(),
             user_id=None,
             tenant_space_id=uuid4(),
             members={},

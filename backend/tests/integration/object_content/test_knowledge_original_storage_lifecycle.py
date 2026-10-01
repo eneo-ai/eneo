@@ -64,7 +64,7 @@ class _Extractor:
     def __init__(self, text: str) -> None:
         self._text = text
 
-    def extract(
+    async def extract_bounded(
         self,
         filepath: Path,
         mimetype: str,

@@ -25,7 +25,10 @@ from eneo.sysadmin.sysadmin_router import (
     get_user,
     update_user,
 )
-from eneo.users.user import UserUpdatePublic
+from eneo.users.user import UserSysAdminView, UserUpdatePublic
+from tests.fixtures import TEST_USER
+
+_CREDENTIAL_FIELDS = {"password", "salt", "active_api_key"}
 
 
 @pytest.fixture
@@ -83,15 +86,18 @@ class TestGetAccessToken:
 class TestGetUser:
     """Tests for the GET /users/{user_id}/ endpoint."""
 
-    async def test_returns_user_when_exists(self, mock_container, mock_user):
-        """Should return user when found."""
+    async def test_returns_user_when_exists(self, mock_container):
+        """Should return user when found, without its stored credentials."""
         user_service = mock_container.user_service.return_value
-        user_service.get_user.return_value = mock_user
+        user_service.get_user.return_value = TEST_USER
 
-        result = await get_user(user_id=mock_user.id, container=mock_container)
+        result = await get_user(user_id=TEST_USER.id, container=mock_container)
 
-        user_service.get_user.assert_called_once_with(mock_user.id)
-        assert result == mock_user
+        user_service.get_user.assert_called_once_with(TEST_USER.id)
+        assert isinstance(result, UserSysAdminView)
+        assert result.id == TEST_USER.id
+        assert result.tenant_id == TEST_USER.tenant_id
+        assert _CREDENTIAL_FIELDS.isdisjoint(result.model_dump())
 
     async def test_raises_not_found_for_nonexistent_user(self, mock_container):
         """Should raise NotFoundException when user doesn't exist."""
@@ -146,11 +152,13 @@ class TestUpdateUser:
         user_service = mock_container.user_service.return_value
         audit_service = mock_container.audit_service.return_value
 
-        updated_user = MagicMock()
-        updated_user.id = mock_user.id
-        updated_user.email = "new@example.com"
-        updated_user.username = "newusername"
-        updated_user.tenant_id = mock_user.tenant_id
+        updated_user = TEST_USER.model_copy(
+            update={
+                "id": mock_user.id,
+                "email": "new@example.com",
+                "username": "newusername",
+            }
+        )
 
         user_service.get_user.return_value = mock_user
         user_service.update_user.return_value = updated_user
@@ -166,7 +174,10 @@ class TestUpdateUser:
         user_service.get_user.assert_called_once_with(mock_user.id)
         user_service.update_user.assert_called_once_with(mock_user.id, user_update)
         audit_service.log_async.assert_called_once()
-        assert result == updated_user
+        assert isinstance(result, UserSysAdminView)
+        assert result.id == updated_user.id
+        assert result.email == "new@example.com"
+        assert _CREDENTIAL_FIELDS.isdisjoint(result.model_dump())
 
     async def test_raises_not_found_for_nonexistent_user(self, mock_container):
         """Should raise NotFoundException when user doesn't exist."""

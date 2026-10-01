@@ -2,6 +2,11 @@ from typing import Annotated
 
 from fastapi import APIRouter, Depends, WebSocket, WebSocketDisconnect
 
+from eneo.authentication.endpoint_access import (
+    Authentication,
+    Authorization,
+    endpoint_access,
+)
 from eneo.main.logging import get_logger
 from eneo.server.dependencies.container import get_user_from_websocket
 from eneo.server.websockets.websocket_manager import websocket_manager
@@ -18,6 +23,11 @@ router = APIRouter()
 
 
 @router.websocket("/ws")
+@endpoint_access(
+    authentication=Authentication.WEBSOCKET,
+    authorization=Authorization.AUTHENTICATED,
+    reason="WebSocketManager binds subscriptions to the authenticated user ID.",
+)
 async def connect(
     websocket: WebSocket,
     user: Annotated[UserInDB, Depends(get_user_from_websocket)],

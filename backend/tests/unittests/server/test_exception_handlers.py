@@ -6,6 +6,11 @@ from fastapi.testclient import TestClient
 from pydantic import BaseModel, field_validator
 from sqlalchemy.exc import IntegrityError
 
+from eneo.authentication.endpoint_access import (
+    Authentication,
+    Authorization,
+    endpoint_access,
+)
 from eneo.files.file_models import FileOriginalNotFoundError
 from eneo.main.exceptions import (
     BadRequestException,
@@ -29,6 +34,11 @@ def password_validation_client() -> TestClient:
     app = get_application()
 
     @app.post("/_test-password-validation", status_code=204)
+    @endpoint_access(
+        authentication=Authentication.PUBLIC,
+        authorization=Authorization.PUBLIC,
+        reason="Test-only route for password request validation.",
+    )
     async def validate_password_request(payload: PasswordChangeRequest):
         return None
 

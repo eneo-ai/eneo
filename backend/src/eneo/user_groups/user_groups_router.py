@@ -5,8 +5,14 @@ from uuid import UUID
 
 from fastapi import APIRouter, Depends
 
+from eneo.authentication.endpoint_access import (
+    Authentication,
+    Authorization,
+    endpoint_access,
+)
 from eneo.main.container.container import Container
 from eneo.main.models import PaginatedResponse
+from eneo.roles.permissions import Permission
 from eneo.server.dependencies.container import get_container
 from eneo.server.protocol import responses, to_paginated_response
 from eneo.user_groups.user_group import (
@@ -24,6 +30,11 @@ router = APIRouter()
     description="List all user groups in the tenant.",
     responses=responses.get_responses([]),
 )
+@endpoint_access(
+    authentication=Authentication.USER,
+    authorization=Authorization.AUTHENTICATED,
+    reason="Tenant members may list groups for member pickers.",
+)
 async def get_user_groups(
     container: Annotated[Container, Depends(get_container(with_user=True))],
 ):
@@ -37,7 +48,12 @@ async def get_user_groups(
     "/{id}/",
     response_model=UserGroupPublic,
     description="Get a single user group by id.",
-    responses=responses.get_responses([404]),
+    responses=responses.get_responses([403, 404]),
+)
+@endpoint_access(
+    authentication=Authentication.USER,
+    authorization=Permission.ADMIN,
+    reason="Managing tenant user groups requires the admin permission.",
 )
 async def get_user_group_by_uuid(
     id: UUID,
@@ -53,6 +69,11 @@ async def get_user_group_by_uuid(
     description="Create a new user group.",
     responses=responses.get_responses([400, 403]),
 )
+@endpoint_access(
+    authentication=Authentication.USER,
+    authorization=Permission.ADMIN,
+    reason="Managing tenant user groups requires the admin permission.",
+)
 async def create_user_group(
     user_group: UserGroupCreateRequest,
     container: Annotated[Container, Depends(get_container(with_user=True))],
@@ -66,6 +87,11 @@ async def create_user_group(
     response_model=UserGroupPublic,
     description="Update an existing user group by id.",
     responses=responses.get_responses([400, 401, 403, 404]),
+)
+@endpoint_access(
+    authentication=Authentication.USER,
+    authorization=Permission.ADMIN,
+    reason="Managing tenant user groups requires the admin permission.",
 )
 async def update_user_group(
     id: UUID,
@@ -84,6 +110,11 @@ async def update_user_group(
     description="Delete a user group by id.",
     responses=responses.get_responses([403, 404]),
 )
+@endpoint_access(
+    authentication=Authentication.USER,
+    authorization=Permission.ADMIN,
+    reason="Managing tenant user groups requires the admin permission.",
+)
 async def delete_user_group_by_uuid(
     id: UUID,
     container: Annotated[Container, Depends(get_container(with_user=True))],
@@ -97,6 +128,11 @@ async def delete_user_group_by_uuid(
     response_model=UserGroupPublic,
     description="Add a user to a user group.",
     responses=responses.get_responses([401, 403, 404]),
+)
+@endpoint_access(
+    authentication=Authentication.USER,
+    authorization=Permission.ADMIN,
+    reason="Managing tenant user groups requires the admin permission.",
 )
 async def add_user_to_user_group(
     id: UUID,
@@ -112,6 +148,11 @@ async def add_user_to_user_group(
     response_model=UserGroupPublic,
     description="Remove a user from a user group.",
     responses=responses.get_responses([403, 404]),
+)
+@endpoint_access(
+    authentication=Authentication.USER,
+    authorization=Permission.ADMIN,
+    reason="Managing tenant user groups requires the admin permission.",
 )
 async def delete_user_from_user_group(
     id: UUID,

@@ -102,3 +102,33 @@ class TestIsBackingModelAvailable:
         assert not _server(
             http_auth_type="internal", image_model=_backing_model(deleted=True)
         ).is_backing_model_available
+
+
+class TestIsInternal:
+    """Internal-ness is a property of how the server was built, never of its
+    name, so an admin-registered server cannot pass as one of Eneo's own."""
+
+    def _server(self, **kwargs) -> MCPServer:
+        base = dict(tenant_id=uuid4(), name="knowledge", http_url="http://x/mcp")
+        return MCPServer(**{**base, **kwargs})
+
+    def test_loopback_factory_servers_are_internal(self):
+        assert self._server(is_internal=True).is_internal is True
+
+    def test_builtin_provider_rows_are_internal(self):
+        server = self._server(
+            name="Image Studio",
+            http_auth_type="internal",
+            purpose="image_generation",
+            image_model_id=uuid4(),
+        )
+        assert server.is_internal is True
+
+    def test_external_server_named_like_an_internal_one_is_not_internal(self):
+        assert self._server(name="knowledge").is_internal is False
+        assert self._server(name="files", http_auth_type="bearer").is_internal is False
+
+    def test_flag_follows_an_auth_type_change(self):
+        server = self._server(http_auth_type="internal", purpose="image_generation")
+        server.http_auth_type = "bearer"
+        assert server.is_internal is False

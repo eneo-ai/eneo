@@ -10,9 +10,9 @@ Modules:
 """
 
 from eneo.worker.crawl.heartbeat import (
+    CrawlLeaseLostError,
     HeartbeatFailedError,
     HeartbeatMonitor,
-    JobPreemptedError,
 )
 from eneo.worker.crawl.persistence import persist_batch
 from eneo.worker.crawl.recovery import (
@@ -28,9 +28,9 @@ from eneo.worker.crawl.recovery import (
 
 __all__ = [
     # Heartbeat
+    "CrawlLeaseLostError",
     "HeartbeatFailedError",
     "HeartbeatMonitor",
-    "JobPreemptedError",
     # Persistence
     "persist_batch",
     # Recovery - Main API

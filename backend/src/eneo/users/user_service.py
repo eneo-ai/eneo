@@ -1,9 +1,11 @@
 import random
+from collections.abc import Sequence
 from datetime import datetime, timezone
 from enum import Enum
 from typing import TYPE_CHECKING, Optional, cast
 from uuid import UUID
 
+import idna
 import jwt
 import sqlalchemy as sa
 from starlette.requests import Request
@@ -29,9 +31,14 @@ from eneo.authentication.auth_models import (
     ApiKeyOwnership,
     ApiKeyPermission,
     ApiKeyScopeType,
+    ApiKeyState,
     ApiKeyV2InDB,
+    FederatedIdentity,
+    JWTPayload,
+    compute_effective_state,
 )
-from eneo.authentication.auth_service import AuthService
+from eneo.authentication.auth_service import INTERNAL_MCP_AUDIENCE, AuthService
+from eneo.authentication.endpoint_access import authorize_user
 from eneo.database.tables.app_table import AppRuns, Apps
 from eneo.database.tables.assistant_table import Assistants
 from eneo.database.tables.collections_table import CollectionsTable
@@ -49,6 +56,7 @@ from eneo.main.config import get_settings
 from eneo.main.exceptions import (
     AuthenticationException,
     BadRequestException,
+    FederatedLoginDenied,
     NotFoundException,
     TenantSuspendedException,
     UniqueUserException,
@@ -72,6 +80,7 @@ from eneo.users.user import (
     PropUserInvite,
     UserAdd,
     UserAddSuperAdmin,
+    UserInDB,
     UserState,
     UserUpdate,
     UserUpdatePublic,
@@ -82,7 +91,6 @@ if TYPE_CHECKING:
     from eneo.database.database import AsyncSession
     from eneo.feature_flag.feature_flag_service import FeatureFlagService
     from eneo.spaces.space_service import SpaceService
-    from eneo.users.user import UserInDB
 
 
 logger = get_logger(__name__)
@@ -100,7 +108,7 @@ def _permission_allows(key: ApiKeyV2InDB, required: ApiKeyPermission) -> bool:
 # and at SpaceActor for per-resource actions. Excludes:
 #   - Permission.ADMIN: only TENANT+ADMIN service keys get this
 #   - Permission.API_KEYS: lifecycle mutations are session-only (gated
-#     via require_session_auth in api_key_router)
+#     via Authentication.SESSION in api_key_router)
 _SERVICE_KEY_BASE_PERMISSIONS: frozenset[Permission] = frozenset(
     {
         Permission.ASSISTANTS,
@@ -425,6 +433,135 @@ class UserService:
             token_type="bearer",
         )
 
+    async def resolve_federated_user(
+        self,
+        *,
+        identity: FederatedIdentity,
+        tenant_id: UUID,
+        allowed_domains: Sequence[str],
+        correlation_id: str,
+    ) -> tuple[UserInDB, bool]:
+        """Resolve an active tenant member, or admit a new one under JIT policy.
+
+        Both OIDC entry points use this decision. SCIM/admin own reactivation;
+        signing in must never undo deprovisioning or switch tenant membership.
+        """
+        tenant = await self.tenant_repo.get(tenant_id)
+        if tenant is None or tenant.state != TenantState.ACTIVE:
+            raise FederatedLoginDenied(
+                "Tenant is not active. Contact your administrator."
+            )
+
+        if allowed_domains:
+            try:
+                # Match the IDNA2008 normalization used by EmailStr. Python's
+                # legacy IDNA codec aliases distinct domains such as ß and ss.
+                email_domain = idna.encode(
+                    identity.email.rsplit("@", 1)[1], uts46=True
+                ).decode("ascii")
+                normalized_domains = {
+                    idna.encode(domain, uts46=True).decode("ascii")
+                    for domain in allowed_domains
+                }
+            except idna.IDNAError as exc:
+                raise FederatedLoginDenied(
+                    "Allowed email domains are invalid. Contact your administrator."
+                ) from exc
+            if email_domain not in normalized_domains:
+                raise FederatedLoginDenied(
+                    f"Email domain '{email_domain}' is not allowed for this organization. "
+                    "Contact your administrator to add your domain."
+                )
+
+        user = await self.repo.get_user_by_email(identity.email)
+        if user is not None:
+            if user.tenant_id != tenant_id:
+                raise FederatedLoginDenied("Access denied for this organization.")
+            if user.state != UserState.ACTIVE or user.deleted_at is not None:
+                raise FederatedLoginDenied(
+                    "User is inactive or has been removed. Contact your administrator."
+                )
+            return user, False
+
+        if await self.repo.has_removed_user_by_email(identity.email, tenant_id):
+            raise FederatedLoginDenied(
+                "User is inactive or has been removed. Contact your administrator."
+            )
+        if not tenant.provisioning:
+            raise FederatedLoginDenied(
+                "User not found. Provision the account through SCIM or contact your administrator for access."
+            )
+        if not allowed_domains:
+            raise FederatedLoginDenied(
+                "Automatic account creation requires allowed email domains. Contact your administrator."
+            )
+        if not identity.email_verified:
+            raise FederatedLoginDenied(
+                "Automatic account creation requires a verified email address. Contact your administrator."
+            )
+
+        roles = []
+        if tenant.default_role_id:
+            roles = [ModelId(id=tenant.default_role_id)]
+        else:
+            logger.warning(
+                "JIT provisioning: No default role configured; creating user without roles",
+                extra={"tenant_id": str(tenant_id), "correlation_id": correlation_id},
+            )
+
+        username = identity.email.split("@", 1)[0].lower()
+        if (
+            await self.repo.get_user_by_username(username, with_deleted=True)
+            is not None
+        ):
+            username = identity.email
+            if await self.repo.get_user_by_username(username, with_deleted=True):
+                username = None
+
+        user = await self.repo.add(
+            UserAdd(
+                email=identity.email,
+                email_verified=True,
+                username=username,
+                tenant_id=tenant_id,
+                roles=roles,
+                state=UserState.ACTIVE,
+            )
+        )
+        logger.info(
+            "JIT provisioning: Created user",
+            extra={
+                "user_id": str(user.id),
+                "tenant_id": str(tenant_id),
+                "correlation_id": correlation_id,
+            },
+        )
+        if self.audit_service is not None:
+            try:
+                await self.audit_service.log(
+                    tenant_id=tenant_id,
+                    actor_id=None,
+                    action=ActionType.USER_CREATED,
+                    entity_type=EntityType.USER,
+                    entity_id=user.id,
+                    description=f"User '{user.email}' auto-provisioned via SSO federation",
+                    metadata={
+                        "provisioning_method": "jit_federation",
+                        "correlation_id": correlation_id,
+                        "email": user.email,
+                        "username": user.username,
+                    },
+                    outcome=Outcome.SUCCESS,
+                    actor_type=ActorType.SYSTEM,
+                )
+            except Exception:
+                logger.warning(
+                    "Failed to log JIT user creation audit event",
+                    extra={"user_id": str(user.id), "correlation_id": correlation_id},
+                    exc_info=True,
+                )
+        return user, True
+
     async def login_with_mobilityguard(
         self,
         id_token: str,
@@ -434,7 +571,6 @@ class UserService:
         correlation_id: str | None = None,
     ):
         # MIT License
-        was_federated = False
         correlation_id = correlation_id or "no-correlation-id"
 
         logger.debug(
@@ -454,7 +590,7 @@ class UserService:
                     "System configuration error: OIDC client ID not configured"
                 )
 
-            username, email = self.auth_service.get_username_and_email_from_openid_jwt(
+            payload = self.auth_service.get_payload_from_openid_jwt(
                 id_token=id_token,
                 access_token=access_token,
                 key=key.key,
@@ -464,14 +600,9 @@ class UserService:
                 correlation_id=correlation_id,
             )
 
-            logger.info(
-                "Successfully extracted user info from OIDC JWT",
-                extra={
-                    "correlation_id": correlation_id,
-                    "username": username,
-                    "email": email,
-                },
-            )
+            if not isinstance(payload.get("sub"), str) or not payload["sub"]:
+                raise ValueError("ID token is missing its subject")
+            identity = FederatedIdentity.from_claims(payload)
 
         except jwt.ExpiredSignatureError as e:
             logger.error(
@@ -516,162 +647,24 @@ class UserService:
 
         # Look up user in database
         logger.info(
-            f"OIDC: Looking up user by email: {email}",
+            "OIDC: Resolving tenant membership",
             extra={"correlation_id": correlation_id},
         )
 
-        user_in_db = await self.repo.get_user_by_email(email)
+        settings = get_settings()
+        if not settings.oidc_tenant_id:
+            raise AuthenticationException("OIDC tenant ID is not configured")
+        try:
+            tenant_id = UUID(settings.oidc_tenant_id)
+        except ValueError as exc:
+            raise AuthenticationException("Invalid OIDC tenant ID") from exc
 
-        if user_in_db is None:
-            logger.info(
-                "OIDC: User not found in database, attempting to create new user",
-                extra={
-                    "correlation_id": correlation_id,
-                    "email": email,
-                    "username": username,
-                },
-            )
-
-            # If a the user does not exist in our database, create it
-
-            # Check if tenant ID is configured
-            if not get_settings().oidc_tenant_id:
-                logger.error(
-                    "Cannot create new user: OIDC tenant ID not configured (OIDC_TENANT_ID or deprecated MOBILITYGUARD_TENANT_ID)",
-                    extra={
-                        "correlation_id": correlation_id,
-                        "email": email,
-                        "username": username,
-                    },
-                )
-                raise AuthenticationException(
-                    "System configuration error: Cannot create new users via OIDC. "
-                    "Please contact your administrator."
-                )
-
-            try:
-                # Will only work on one tenant in the instance for now
-                tenant_id = UUID(get_settings().oidc_tenant_id)
-
-                logger.info(
-                    f"Creating user with tenant ID: {tenant_id}",
-                    extra={"correlation_id": correlation_id},
-                )
-
-            except ValueError as e:
-                logger.error(
-                    f"Invalid OIDC_TENANT_ID format: {get_settings().oidc_tenant_id}",
-                    extra={
-                        "correlation_id": correlation_id,
-                        "error": str(e),
-                    },
-                )
-                raise AuthenticationException(
-                    "System configuration error: Invalid tenant ID format"
-                )
-
-            # Verify tenant exists
-            tenant = await self.tenant_repo.get(tenant_id)
-            if tenant is None:
-                logger.error(
-                    f"Tenant not found: {tenant_id}",
-                    extra={
-                        "correlation_id": correlation_id,
-                        "tenant_id": str(tenant_id),
-                    },
-                )
-                raise AuthenticationException(
-                    "System configuration error: Tenant does not exist"
-                )
-
-            # Assign default role if configured on tenant
-            roles = []
-            if tenant.default_role_id:
-                roles = [ModelId(id=tenant.default_role_id)]
-                logger.info(
-                    "OIDC: Assigning default role to new user",
-                    extra={
-                        "correlation_id": correlation_id,
-                        "default_role_id": str(tenant.default_role_id),
-                    },
-                )
-            else:
-                # WARNING (not INFO): a role-less user cannot create
-                # shared spaces, use assistants, apps, or any other
-                # permission-gated feature. This almost always indicates
-                # a misconfigured tenant or a seeder failure — operators
-                # should see it in log alerting.
-                logger.warning(
-                    "OIDC: No default role configured; creating user "
-                    "without role — user will have zero permissions "
-                    "until an admin assigns roles",
-                    extra={
-                        "correlation_id": correlation_id,
-                        "tenant_id": str(tenant_id),
-                    },
-                )
-
-            new_user = UserAdd(
-                email=email,
-                username=username.lower(),
-                tenant_id=tenant_id,
-                roles=roles,
-                state=UserState.ACTIVE,
-            )
-
-            try:
-                user_in_db = await self.repo.add(new_user)
-                was_federated = True
-
-                logger.info(
-                    "Successfully created new user via OIDC federation",
-                    extra={
-                        "correlation_id": correlation_id,
-                        "user_id": str(user_in_db.id),
-                        "email": email,
-                        "username": username.lower(),
-                        "tenant_id": str(tenant_id),
-                    },
-                )
-
-            except Exception as e:
-                logger.error(
-                    "Failed to create new user in database",
-                    extra={
-                        "correlation_id": correlation_id,
-                        "email": email,
-                        "username": username,
-                        "error_type": type(e).__name__,
-                        "error": str(e),
-                    },
-                )
-                raise AuthenticationException("Failed to create user account")
-
-        else:
-            logger.info(
-                "OIDC: User found in database, checking user and tenant state",
-                extra={
-                    "correlation_id": correlation_id,
-                    "user_id": str(user_in_db.id),
-                    "email": user_in_db.email,
-                    "tenant_id": str(user_in_db.tenant_id),
-                    "user_state": user_in_db.state,
-                },
-            )
-
-            try:
-                await self._check_user_and_tenant_state(user_in_db, correlation_id)
-            except (UserInactiveException, TenantSuspendedException) as e:
-                logger.warning(
-                    "User or tenant state check failed",
-                    extra={
-                        "correlation_id": correlation_id,
-                        "user_id": str(user_in_db.id),
-                        "error_type": type(e).__name__,
-                        "error": str(e),
-                    },
-                )
-                raise
+        user_in_db, was_federated = await self.resolve_federated_user(
+            identity=identity,
+            tenant_id=tenant_id,
+            allowed_domains=settings.oidc_allowed_domains,
+            correlation_id=correlation_id,
+        )
 
         # Create access token
         issued_token = self.auth_service.create_access_token_for_user(user=user_in_db)
@@ -751,20 +744,79 @@ class UserService:
 
         return user_in_db, access_token
 
-    async def _get_user_from_token(self, token: str):
+    def _get_token_payload(self, token: str, *, aud: str) -> JWTPayload:
         settings = get_settings()
-        payload, claims = self.auth_service.get_jwt_payload_with_claims(
+        return self.auth_service.get_jwt_payload(
             token,
             key=str(settings.jwt_secret),
-            aud=settings.jwt_audience,
+            aud=aud,
             algs=[settings.jwt_algorithm],
         )
-        if payload.username is None:
-            return None
-        user = await self.repo.get_user_by_username(payload.username)
+
+    async def _get_user_from_payload(self, payload: JWTPayload):
+        user = await self.repo.get_user_by_id_and_tenant_id(
+            payload.user_id, tenant_id=payload.tenant_id
+        )
         if user is not None:
-            self.auth_service.validate_credential_version(claims, user)
+            self.auth_service.validate_local_credential_version(
+                payload.credential_version, user
+            )
         return user
+
+    async def _get_user_from_token(self, token: str):
+        payload = self._get_token_payload(token, aud=get_settings().jwt_audience)
+        return await self._get_user_from_payload(payload)
+
+    async def authenticate_internal_mcp_token(self, token: str) -> "UserInDB":
+        """Authenticate the principal behind a scoped loopback MCP token.
+
+        The loopback MCP endpoints are the only callers. The token must carry
+        ``INTERNAL_MCP_AUDIENCE`` (see ``AuthService.create_scoped_mcp_token``),
+        so a session token is refused here just as a loopback token is refused
+        by ``authenticate``. Unlike a session, the principal may be a service
+        key: see ``_get_service_principal_from_token``.
+        """
+        payload = self._get_token_payload(token, aud=INTERNAL_MCP_AUDIENCE)
+        user = await self._get_user_from_payload(payload)
+        if user is None:
+            user = await self._get_service_principal_from_token(payload)
+        if user is None:
+            raise AuthenticationException("No authenticated user.")
+
+        await self._check_user_and_tenant_state(
+            user, correlation_id="internal-mcp-auth"
+        )
+        return user
+
+    async def _get_service_principal_from_token(
+        self, payload: JWTPayload
+    ) -> "UserInDB | None":
+        """Rebuild the synthetic user behind a token minted for a service key.
+
+        A service key authenticates as a synthetic user whose id is the key id
+        and that has no ``users`` row. Eneo mints tokens for such a principal
+        only for its own loopback MCP servers, so only
+        ``authenticate_internal_mcp_token`` falls through to the key itself;
+        session authentication never does. The key must still be active:
+        revoking, suspending or expiring it ends the principal's access before
+        the token expires. Origin and IP guardrails do not apply here, the
+        loopback caller is Eneo itself, and no usage is recorded: the API call
+        that minted the token already was.
+        """
+        key = await self.api_key_v2_repo.get(
+            key_id=payload.user_id, tenant_id=payload.tenant_id
+        )
+        if key is None or key.ownership != ApiKeyOwnership.SERVICE:
+            return None
+        effective_state = compute_effective_state(
+            revoked_at=key.revoked_at,
+            suspended_at=key.suspended_at,
+            expires_at=key.expires_at,
+            rotation_grace_until=key.rotation_grace_until,
+        )
+        if effective_state != ApiKeyState.ACTIVE:
+            return None
+        return await self._build_service_user(key)
 
     async def _resolve_space_id_for_scope(
         self, scope_type: str, scope_id: UUID
@@ -1088,12 +1140,9 @@ class UserService:
                 )
                 raise
 
-        # Scope enforcement (always active)
+        # Scope enforcement (always active, for every scope type)
         scope_config = getattr(request.state, "_scope_check_config", None)
-        if (
-            scope_config is not None
-            and resolved.key.scope_type != ApiKeyScopeType.TENANT.value
-        ):
+        if scope_config is not None:
             try:
                 await self._enforce_api_key_scope(
                     request,
@@ -1213,6 +1262,60 @@ class UserService:
         )
 
     # --- Scope enforcement (Phase 3) ---
+
+    async def _require_tenant_key_resource_in_tenant(
+        self,
+        *,
+        request: Request,
+        key: ApiKeyV2InDB,
+        resource_type: str,
+        path_param: str | None,
+    ) -> None:
+        """Reject a tenant-scoped key that addresses another tenant's resource.
+
+        Resources that cannot be resolved to a space are left to the handler,
+        which answers with its usual not-found response. Files are bound to
+        the calling identity rather than to a space and are checked by the
+        file service.
+        """
+        if resource_type in ("admin", "file"):
+            return
+
+        resource_id, resolved_param = self._extract_scoped_resource_id(
+            request=request,
+            resource_type=resource_type,
+            path_param=path_param,
+        )
+        if resource_id is None:
+            return
+
+        space_ids: set[UUID]
+        if resource_type == "prompt":
+            space_ids = await self._resolve_prompt_space_ids(resource_id)
+        elif resource_type == "info_blob" and resolved_param == "space_id":
+            space_ids = {resource_id}
+        else:
+            space_id = await self._resolve_space_id_for_resource(
+                resource_type, resource_id
+            )
+            space_ids = {space_id} if space_id is not None else set()
+
+        if not space_ids:
+            return
+
+        tenant_ids = await self._resolve_tenant_ids_for_spaces(space_ids)
+        if tenant_ids and key.tenant_id not in tenant_ids:
+            raise ApiKeyValidationError(
+                status_code=403,
+                code="insufficient_scope",
+                message="API key is not scoped to this tenant.",
+            )
+
+    async def _resolve_tenant_ids_for_spaces(self, space_ids: set[UUID]) -> set[UUID]:
+        rows = await self.repo.session.scalars(
+            sa.select(Spaces.tenant_id).where(Spaces.id.in_(space_ids))
+        )
+        return set(rows.all())
 
     async def _resolve_space_id_for_resource(
         self,
@@ -1398,15 +1501,24 @@ class UserService:
     ) -> None:
         """Enforce API key scope restrictions.
 
-        Called after authentication when scope config is set on the route
-        and the key is non-tenant scoped.
+        Called after authentication when scope config is set on the route.
+        Tenant-scoped keys are confined to their own tenant; narrower scopes
+        are additionally confined to their space, assistant or app.
         """
         resource_type = cast(str, scope_config["resource_type"])
         path_param = cast("str | None", scope_config["path_param"])
         scope_type = ApiKeyScopeType(key.scope_type)
 
-        # 1. Tenant-scoped keys always pass (fast path)
+        # 1. Tenant-scoped keys: the addressed resource must live in the key's
+        #    tenant. Admin routes and list routes carry no resource id; the
+        #    handlers behind them are already tenant-filtered.
         if scope_type == ApiKeyScopeType.TENANT:
+            await self._require_tenant_key_resource_in_tenant(
+                request=request,
+                key=key,
+                resource_type=resource_type,
+                path_param=path_param,
+            )
             return
 
         # 2. Admin/key-management routes: deny all non-tenant keys
@@ -1721,6 +1833,8 @@ class UserService:
 
         await self._check_user_and_tenant_state(user_in_db, correlation_id="api-auth")
 
+        authorize_user(request, user_in_db)
+
         if with_quota_used:
             user_in_db.quota_used = await self.info_blob_repo.get_total_size_of_user(
                 user_id=user_in_db.id
@@ -1851,6 +1965,7 @@ class UserService:
 
         await self._check_user_and_tenant_state(user_in_db, correlation_id="api-auth")
 
+        authorize_user(request, user_in_db)
         return user_in_db
 
     async def update_used_tokens(self, user_id: UUID, tokens_to_add: int):

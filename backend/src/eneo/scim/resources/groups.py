@@ -4,6 +4,11 @@ from uuid import UUID
 from fastapi import APIRouter, Depends, status
 from fastapi.responses import JSONResponse, Response
 
+from eneo.authentication.endpoint_access import (
+    Authentication,
+    Authorization,
+    endpoint_access,
+)
 from eneo.scim.auth import require_scim_auth
 from eneo.scim.deps import get_scim_group_service
 from eneo.scim.domain.errors import (
@@ -27,6 +32,11 @@ router = APIRouter(dependencies=[Depends(require_scim_auth)], tags=["SCIM Groups
     description="Provision a SCIM group.",
     responses=scim_responses(400, 401, 409, 500),
 )
+@endpoint_access(
+    authentication=Authentication.SCIM,
+    authorization=Authorization.SCIM,
+    reason="The SCIM token authorizes provisioning only within its bound tenant.",
+)
 async def create_group(
     payload: ScimGroupRequest,
     service: Annotated[ScimGroupService, Depends(get_scim_group_service)],
@@ -48,6 +58,11 @@ async def create_group(
     description="List and filter SCIM groups.",
     responses=scim_responses(400, 401, 500),
     response_model=ListResponse,
+)
+@endpoint_access(
+    authentication=Authentication.SCIM,
+    authorization=Authorization.SCIM,
+    reason="The SCIM token authorizes provisioning only within its bound tenant.",
 )
 async def list_groups(
     service: Annotated[ScimGroupService, Depends(get_scim_group_service)],
@@ -79,6 +94,11 @@ async def list_groups(
     responses=scim_responses(400, 401, 404, 500),
     response_model=ScimGroup,
 )
+@endpoint_access(
+    authentication=Authentication.SCIM,
+    authorization=Authorization.SCIM,
+    reason="The SCIM token authorizes provisioning only within its bound tenant.",
+)
 async def get_group(
     group_id: UUID,
     service: Annotated[ScimGroupService, Depends(get_scim_group_service)],
@@ -94,6 +114,11 @@ async def get_group(
     description="Replace a SCIM group.",
     responses=scim_responses(400, 401, 404, 409, 500),
     response_model=ScimGroup,
+)
+@endpoint_access(
+    authentication=Authentication.SCIM,
+    authorization=Authorization.SCIM,
+    reason="The SCIM token authorizes provisioning only within its bound tenant.",
 )
 async def replace_group(
     group_id: UUID,
@@ -114,6 +139,11 @@ async def replace_group(
     responses=scim_responses(400, 401, 404, 409, 500),
     response_model=ScimGroup,
 )
+@endpoint_access(
+    authentication=Authentication.SCIM,
+    authorization=Authorization.SCIM,
+    reason="The SCIM token authorizes provisioning only within its bound tenant.",
+)
 async def patch_group(
     group_id: UUID,
     payload: PatchRequest,
@@ -133,6 +163,11 @@ async def patch_group(
     description="Delete a SCIM group.",
     responses=scim_responses(400, 401, 404, 500),
     response_model=None,
+)
+@endpoint_access(
+    authentication=Authentication.SCIM,
+    authorization=Authorization.SCIM,
+    reason="The SCIM token authorizes provisioning only within its bound tenant.",
 )
 async def delete_group(
     group_id: UUID,

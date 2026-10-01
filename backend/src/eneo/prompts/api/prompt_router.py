@@ -8,6 +8,11 @@ from uuid import UUID
 
 from fastapi import APIRouter, Depends
 
+from eneo.authentication.endpoint_access import (
+    Authentication,
+    Authorization,
+    endpoint_access,
+)
 from eneo.main.container.container import Container
 from eneo.prompts.api.prompt_models import PromptPublic, PromptUpdateRequest
 from eneo.server.dependencies.container import get_container
@@ -24,6 +29,11 @@ _ContainerWithUser = Annotated[Container, Depends(get_container(with_user=True))
     response_model=PromptPublic,
     responses=responses.get_responses([400, 403, 404]),
 )
+@endpoint_access(
+    authentication=Authentication.USER,
+    authorization=Authorization.AUTHENTICATED,
+    reason="PromptService enforces access to the parent assistant or app.",
+)
 async def get_prompt(id: UUID, container: _ContainerWithUser):
     service = container.prompt_service()
     assembler = container.prompt_assembler()
@@ -37,6 +47,11 @@ async def get_prompt(id: UUID, container: _ContainerWithUser):
     description="Update a prompt's description by id.",
     response_model=PromptPublic,
     responses=responses.get_responses([400, 403, 404]),
+)
+@endpoint_access(
+    authentication=Authentication.USER,
+    authorization=Authorization.AUTHENTICATED,
+    reason="PromptService enforces access to the parent assistant or app.",
 )
 async def update_prompt_description(
     id: UUID,
@@ -57,6 +72,11 @@ async def update_prompt_description(
     description="Delete a prompt by id.",
     status_code=204,
     responses=responses.get_responses([400, 403, 404]),
+)
+@endpoint_access(
+    authentication=Authentication.USER,
+    authorization=Authorization.AUTHENTICATED,
+    reason="PromptService enforces access to the parent assistant or app.",
 )
 async def delete_prompt(
     id: UUID,

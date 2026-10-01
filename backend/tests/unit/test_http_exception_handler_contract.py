@@ -4,6 +4,11 @@ from fastapi.testclient import TestClient
 
 from eneo.authentication.api_key_resolver import ApiKeyValidationError
 from eneo.authentication.api_key_router_helpers import raise_api_key_http_error
+from eneo.authentication.endpoint_access import (
+    Authentication,
+    Authorization,
+    endpoint_access,
+)
 from eneo.main.exceptions import ErrorCodes
 from eneo.main.models import GeneralError
 from eneo.server.main import get_application
@@ -13,6 +18,11 @@ def _build_client_for_exception(detail):
     app = get_application()
 
     @app.get("/_test-http-exc")
+    @endpoint_access(
+        authentication=Authentication.PUBLIC,
+        authorization=Authorization.PUBLIC,
+        reason="Test-only route for HTTP exception handling.",
+    )
     async def _test_http_exc():
         raise HTTPException(status_code=503, detail=detail)
 
@@ -71,6 +81,11 @@ def test_code_message_detail_gets_the_numeric_category(status_code, expected):
     app = get_application()
 
     @app.get("/_test-coded-error")
+    @endpoint_access(
+        authentication=Authentication.PUBLIC,
+        authorization=Authorization.PUBLIC,
+        reason="Test-only route for coded HTTP exceptions.",
+    )
     async def _test_coded_error():
         raise HTTPException(
             status_code=status_code,
@@ -89,6 +104,11 @@ def test_raiser_supplied_category_is_kept():
     app = get_application()
 
     @app.get("/_test-owned-category")
+    @endpoint_access(
+        authentication=Authentication.PUBLIC,
+        authorization=Authorization.PUBLIC,
+        reason="Test-only route for explicit error categories.",
+    )
     async def _test_owned_category():
         raise HTTPException(
             status_code=403,
@@ -110,6 +130,11 @@ def test_api_key_refusal_validates_as_the_documented_error():
     app = get_application()
 
     @app.get("/_test-api-key-error")
+    @endpoint_access(
+        authentication=Authentication.PUBLIC,
+        authorization=Authorization.PUBLIC,
+        reason="Test-only route for API key error handling.",
+    )
     async def _test_api_key_error():
         raise_api_key_http_error(
             ApiKeyValidationError(
@@ -134,6 +159,11 @@ def test_conflict_does_not_borrow_a_domain_category():
     app = get_application()
 
     @app.post("/_test-conflict")
+    @endpoint_access(
+        authentication=Authentication.PUBLIC,
+        authorization=Authorization.PUBLIC,
+        reason="Test-only route for conflict error handling.",
+    )
     async def _test_conflict():
         raise HTTPException(
             status_code=409,

@@ -3,6 +3,11 @@ from uuid import UUID
 
 from fastapi import APIRouter, Depends
 
+from eneo.authentication.endpoint_access import (
+    Authentication,
+    Authorization,
+    endpoint_access,
+)
 from eneo.jobs.job_models import JobPublic
 from eneo.main.container.container import Container
 from eneo.main.models import PaginatedResponse
@@ -19,6 +24,11 @@ router = APIRouter()
     description="List the current user's running jobs.",
     responses=responses.get_responses([]),
 )
+@endpoint_access(
+    authentication=Authentication.USER,
+    authorization=Authorization.AUTHENTICATED,
+    reason="JobService authorizes access to the requested job.",
+)
 async def get_running_jobs(
     container: Annotated[Container, Depends(get_container(with_user=True))],
 ):
@@ -33,6 +43,11 @@ async def get_running_jobs(
     response_model=JobPublic,
     description="Get a single job owned by the current user by id.",
     responses=responses.get_responses([404]),
+)
+@endpoint_access(
+    authentication=Authentication.USER,
+    authorization=Authorization.AUTHENTICATED,
+    reason="JobService authorizes access to the requested job.",
 )
 async def get_job(
     id: UUID,

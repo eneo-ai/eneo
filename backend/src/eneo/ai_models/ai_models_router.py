@@ -7,6 +7,11 @@ from eneo.ai_models.ai_models_presentation import ModelsPresentation
 from eneo.ai_models.completion_models.completion_model import (
     CompletionModelSecurityStatus,
 )
+from eneo.authentication.endpoint_access import (
+    Authentication,
+    Authorization,
+    endpoint_access,
+)
 from eneo.embedding_models.presentation.embedding_model_models import (
     EmbeddingModelSecurityStatus,
 )
@@ -29,6 +34,11 @@ router = APIRouter()
     summary="Get all AI models",
     description="Get all completion, embedding, transcription and image models.",
     responses=responses.get_responses([404, 500]),
+)
+@endpoint_access(
+    authentication=Authentication.USER,
+    authorization=Authorization.AUTHENTICATED,
+    reason="Tenant model catalogue; model services scope results to the caller tenant.",
 )
 async def get_models(
     container: Annotated[Container, Depends(get_container(with_user=True))],

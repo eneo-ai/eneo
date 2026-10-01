@@ -22,7 +22,9 @@ SCIM provisioning in Eneo provides:
 | Groups synchronized | No | Yes |
 | Visible to admins before login | No | Yes |
 
-The two can coexist. SCIM reconciles existing JIT-created users automatically — no duplicates are created.
+For deployments using SCIM, keep tenant `provisioning: false` so that SCIM owns account creation and reactivation. OIDC still handles sign-in to existing active tenant accounts; it does not create an account when SCIM has not provisioned the user. An inactive or removed account cannot be recreated by signing in, even if JIT is enabled. Enabling or revoking a SCIM token does not change the JIT flag automatically.
+
+SCIM reconciles existing accounts created previously through JIT. If you deliberately enable both, every new account created through JIT must also pass the [JIT admission checks](/guides/oidc-federation/single-tenant#user-provisioning).
 
 ---
 

@@ -2,14 +2,16 @@
 from __future__ import annotations
 
 import argparse
+import ast
 import re
 import subprocess
 import sys
 from pathlib import Path
 
 ROUTE_START_RE = re.compile(
-    r"^(\s*)@[A-Za-z_][A-Za-z0-9_]*\.(get|post|put|patch|delete)\("
+    r"^(\s*)@[A-Za-z_][A-Za-z0-9_]*\.(get|post|put|patch|delete|head|options|websocket|api_route)\("
 )
+ROUTE_METHODS = {"get", "post", "put", "patch", "delete", "head", "options", "websocket", "api_route"}
 HUNK_RE = re.compile(r"^@@ -\d+(?:,\d+)? \+(\d+)(?:,(\d+))? @@")
 
 
@@ -87,6 +89,8 @@ def check_file(path: Path, changed: set[int] | None = None) -> list[str]:
     text = path.read_text(encoding="utf-8")
     failures: list[str] = []
     for line_no, method, block in iter_route_blocks(text):
+        if method == "websocket":
+            continue
         block_end = line_no + block.count("\n")
         if changed is not None and not any(line_no <= line <= block_end for line in changed):
             continue
@@ -108,6 +112,50 @@ def check_file(path: Path, changed: set[int] | None = None) -> list[str]:
         failures.append(
             f"{path}:{line_no} route decorator missing {', '.join(missing)}"
         )
+
+    # Parse actual endpoint functions: an unrelated guard elsewhere in the
+    # file (or a broad router/prefix exception) must never satisfy this rule.
+    for node in ast.walk(ast.parse(text, filename=str(path))):
+        if not isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+            continue
+        routes = [
+            decorator for decorator in node.decorator_list
+            if isinstance(decorator, ast.Call)
+            and isinstance(decorator.func, ast.Attribute)
+            and decorator.func.attr in ROUTE_METHODS
+        ]
+        if not routes:
+            continue
+        start = min(decorator.lineno for decorator in node.decorator_list)
+        if changed is not None and not any(start <= line <= (node.end_lineno or node.lineno) for line in changed):
+            continue
+        policies = [
+            decorator for decorator in node.decorator_list
+            if isinstance(decorator, ast.Call)
+            and isinstance(decorator.func, ast.Name)
+            and decorator.func.id == "endpoint_access"
+        ]
+        if len(policies) != 1 or not {"authentication", "authorization", "reason"}.issubset(
+            keyword.arg for keyword in policies[0].keywords
+        ):
+            failures.append(
+                f"{path}:{node.lineno} endpoint {node.name} requires an explicit "
+                "endpoint_access(authentication=..., authorization=..., reason=...)"
+            )
+        # Endpoint admission has one owner. Domain services still use
+        # validate_permission when protecting their own operations.
+        legacy_gates = {"validate_permission", "require_permission", "require_session_auth"}
+        for child in ast.walk(node):
+            name = (
+                child.id if isinstance(child, ast.Name)
+                else child.attr if isinstance(child, ast.Attribute)
+                else None
+            )
+            if name in legacy_gates:
+                failures.append(
+                    f"{path}:{child.lineno} endpoint {node.name} duplicates admission "
+                    f"with {name}; declare it in endpoint_access instead"
+                )
     return failures
 
 

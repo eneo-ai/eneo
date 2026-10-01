@@ -3,6 +3,11 @@ from typing import Annotated
 from fastapi import APIRouter, Depends, Request
 
 from eneo.authentication.auth_dependencies import get_scope_filter
+from eneo.authentication.endpoint_access import (
+    Authentication,
+    Authorization,
+    endpoint_access,
+)
 from eneo.dashboard.api.dashboard_models import Dashboard
 from eneo.main.container.container import Container
 from eneo.server import protocol
@@ -18,6 +23,11 @@ with_user_container = get_container(with_user=True)
     response_model=Dashboard,
     description="Get the current user's dashboard (spaces and published applications).",
     responses=responses.get_responses([]),
+)
+@endpoint_access(
+    authentication=Authentication.USER,
+    authorization=Authorization.AUTHENTICATED,
+    reason="DashboardService returns resources visible to the authenticated caller.",
 )
 async def get_dashboard(
     request: Request,

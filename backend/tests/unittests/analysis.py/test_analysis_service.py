@@ -8,7 +8,10 @@ from eneo.actors import SpaceActor
 from eneo.ai_models.completion_models.completion_model import (
     CompletionModel,
 )
-from eneo.analysis.analysis import AnalysisProcessingMode
+from eneo.analysis.analysis import AnalysisJobStatus, AnalysisProcessingMode
+from eneo.analysis.analysis_job import AnalysisJob
+from eneo.analysis.analysis_job_manager import AnalysisJobManager
+from eneo.analysis.analysis_router import get_conversation_insight_job
 from eneo.analysis.analysis_service import (
     ASYNC_AUTO_QUESTION_THRESHOLD,
     NO_QUESTIONS_ANSWER,
@@ -106,6 +109,72 @@ def analysis_service(user, mock_space_service):
         group_chat_service=group_chat_service,
         completion_service=AsyncMock(),
     )
+
+
+@pytest.mark.parametrize("target", ["assistant", "group_chat"])
+async def test_insight_job_poll_rechecks_access_after_revocation(
+    service: AnalysisService,
+    mock_actor: SpaceActor,
+    monkeypatch: pytest.MonkeyPatch,
+    target: str,
+):
+    target_id = uuid4()
+    job_id = uuid4()
+    now = datetime.now(timezone.utc)
+    job = AnalysisJob(
+        job_id=job_id,
+        tenant_id=TEST_UUID,
+        status=AnalysisJobStatus.COMPLETED,
+        question="What happened?",
+        assistant_id=target_id if target == "assistant" else None,
+        group_chat_id=target_id if target == "group_chat" else None,
+        answer="Private insight answer",
+        created_at=now,
+        updated_at=now,
+    )
+    get_job = AsyncMock(return_value=job)
+    monkeypatch.setattr(AnalysisJobManager, "get_job", get_job)
+    container = MagicMock()
+    container.user.return_value = service.user
+    container.analysis_service.return_value = service
+
+    response = await get_conversation_insight_job(job_id=job_id, container=container)
+    assert response.answer == "Private insight answer"
+    get_job.assert_awaited_with(tenant_id=TEST_UUID, job_id=job_id)
+
+    if target == "assistant":
+        mock_actor.can_access_insight_assistant.return_value = False
+    else:
+        mock_actor.can_access_insight_group_chat.return_value = False
+
+    with pytest.raises(UnauthorizedException):
+        await get_conversation_insight_job(job_id=job_id, container=container)
+
+
+@pytest.mark.parametrize("invalid_target", ["missing", "ambiguous", "other_tenant"])
+async def test_insight_job_poll_rejects_invalid_persisted_access_target(
+    service: AnalysisService,
+    mock_actor: SpaceActor,
+    invalid_target: str,
+):
+    now = datetime.now(timezone.utc)
+    job = AnalysisJob(
+        job_id=uuid4(),
+        tenant_id=uuid4() if invalid_target == "other_tenant" else TEST_UUID,
+        status=AnalysisJobStatus.COMPLETED,
+        question="What happened?",
+        assistant_id=None if invalid_target == "missing" else uuid4(),
+        group_chat_id=uuid4() if invalid_target == "ambiguous" else None,
+        answer="Private insight answer",
+        created_at=now,
+        updated_at=now,
+    )
+
+    with pytest.raises(NotFoundException, match="Insights analysis job not found"):
+        await service.authorize_insight_job(job)
+
+    mock_actor.can_access_insight_assistant.assert_not_called()
+    mock_actor.can_access_insight_group_chat.assert_not_called()
 
 
 async def test_get_message_for_insights_authorizes_assistant_before_hydration(
@@ -266,6 +335,79 @@ async def test_ask_question_personal_space_with_access(service: AnalysisService)
         from_date=from_date,
         to_date=to_date,
     )
+    service.space_service.actor_manager.get_space_actor_from_space.assert_not_called()
+
+
+@pytest.mark.parametrize(
+    ("method_name", "repository_method", "extra_arguments"),
+    [
+        ("get_questions_since", "get_assistant_sessions_since", {}),
+        (
+            "get_assistant_question_history_page",
+            "get_assistant_question_history_page",
+            {"include_followups": False, "limit": 20},
+        ),
+        (
+            "ask_question_on_questions",
+            "get_assistant_question_texts_since",
+            {"question": "What was asked?", "stream": False},
+        ),
+    ],
+)
+async def test_shared_assistant_question_access_is_checked_before_query(
+    service: AnalysisService,
+    mock_actor: SpaceActor,
+    method_name: str,
+    repository_method: str,
+    extra_arguments: dict[str, object],
+):
+    assistant_id = uuid4()
+    space_id = uuid4()
+    assistant = MagicMock(id=assistant_id, space_id=space_id)
+    space = MagicMock()
+    space.is_personal.return_value = False
+    space.get_assistant.return_value = assistant
+    service.assistant_service.get_assistant.return_value = (assistant, [])
+    service.space_service.get_space.return_value = space
+    mock_actor.can_access_insight_assistant.return_value = False
+
+    with pytest.raises(UnauthorizedException, match="Insights are not enabled"):
+        await getattr(service, method_name)(
+            assistant_id=assistant_id,
+            from_date=datetime(2026, 2, 1),
+            to_date=datetime(2026, 2, 11),
+            **extra_arguments,
+        )
+
+    service.space_service.get_space.assert_awaited_once_with(space_id)
+    space.get_assistant.assert_called_once_with(assistant_id=assistant_id)
+    mock_actor.can_access_insight_assistant.assert_called_once_with(assistant=assistant)
+    getattr(service.repo, repository_method).assert_not_awaited()
+
+
+async def test_shared_assistant_question_access_allows_insight_reader(
+    service: AnalysisService,
+    mock_actor: SpaceActor,
+):
+    assistant_id = uuid4()
+    assistant = MagicMock(id=assistant_id, space_id=uuid4())
+    space = MagicMock()
+    space.is_personal.return_value = False
+    space.get_assistant.return_value = assistant
+    service.assistant_service.get_assistant.return_value = (assistant, [])
+    service.space_service.get_space.return_value = space
+    service.repo.get_assistant_sessions_since.return_value = []
+    mock_actor.can_access_insight_assistant.return_value = True
+
+    questions = await service.get_questions_since(
+        assistant_id=assistant_id,
+        from_date=datetime(2026, 2, 1),
+        to_date=datetime(2026, 2, 11),
+    )
+
+    assert questions == []
+    mock_actor.can_access_insight_assistant.assert_called_once_with(assistant=assistant)
+    service.repo.get_assistant_sessions_since.assert_awaited_once()
 
 
 async def test_get_questions_since_passes_tenant_id(service: AnalysisService):

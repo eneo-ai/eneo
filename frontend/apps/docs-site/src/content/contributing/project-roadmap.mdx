@@ -137,6 +137,18 @@ Use the task issue number. The task owns the `Parent epic` link, and the epic st
 
 Non-draft PRs without a closing task reference get the `needs:task-link` label. The label is non-blocking, but it keeps unlinked implementation work visible in Project #5.
 
+PRs also need an explicit change type and at least one area label. The
+**PR labels** check rejects missing or conflicting classification; a planning
+marker such as `needs:task-link` does not satisfy it. This applies to bots and
+backports too. Follow the repository's
+[required-label policy](https://github.com/eneo-ai/eneo/blob/develop/.github/PROJECT_WORKFLOW.md#required-labels)
+for the vocabulary, examples, and enforcement setup.
+
+Issue forms require an explicit Area choice. Intake applies the corresponding
+label and flags missing classification with `needs:triage`. Epic and task
+templates do not automatically label work as an enhancement. Maintainers finish
+triage before treating unclassified work as ready.
+
 Project draft items work well for early planning. Convert a draft item to an issue before implementation starts so developers can link tasks and pull requests to real repository history.
 
 ## Export The Roadmap

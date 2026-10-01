@@ -24,7 +24,13 @@ from eneo.main.exceptions import (
     UnauthorizedException,
 )
 from eneo.main.logging import get_logger
-from eneo.main.models import NOT_PROVIDED, ModelId, NotProvided, ResourcePermission
+from eneo.main.models import (
+    NOT_PROVIDED,
+    ModelId,
+    NotProvided,
+    ResourcePermission,
+    is_provided,
+)
 from eneo.prompts.prompt_service import PromptService
 from eneo.skills.domain.skill import (
     AppPinAdvanceIncompatibleReason,
@@ -278,7 +284,7 @@ class AppService:
         name: str | None = None,
         transcription_model: "TranscriptionModel | None" = None,
     ):
-        template = await self.app_template_service.get_app_template(
+        template = await self.app_template_service.get_consumable_app_template(
             app_template_id=template_data.id
         )
 
@@ -357,7 +363,7 @@ class AppService:
         app = space.get_app(app_id=app_id)
         actor = self.actor_manager.get_space_actor_from_space(space)
 
-        if not actor.can_read_apps():
+        if not actor.can_read_app(app=app):
             raise UnauthorizedException(
                 "You do not have permission to read apps in this space.",
                 code="forbidden_action",
@@ -400,6 +406,17 @@ class AppService:
                 context={
                     "resource_type": "app",
                     "action": "update",
+                    "auth_layer": "domain_policy",
+                },
+            )
+
+        if is_provided(data_retention_days) and not actor.can_edit_retention():
+            raise UnauthorizedException(
+                "Only space admins can change conversation retention",
+                code="forbidden_action",
+                context={
+                    "resource_type": "app",
+                    "action": "update_retention",
                     "auth_layer": "domain_policy",
                 },
             )
