@@ -6,7 +6,7 @@ import re
 import time
 from collections.abc import Mapping
 from typing import Any, cast
-from urllib.parse import parse_qs, urlsplit
+from urllib.parse import parse_qs, unquote, urlsplit
 from uuid import UUID
 
 from eneo.files.file_models import (
@@ -378,6 +378,42 @@ def redact_reference_tokens(value: object) -> object:
         entries = cast(list[object], value)
         return [redact_reference_tokens(item) for item in entries]
     return value
+
+
+_REFERENCE_LINK = re.compile(
+    r"/api/v1/files/(?P<file_id>[0-9a-fA-F-]{36})/original/download/?"
+    r"\?(?:[^\s\"'<>]*?&)?token=(?P<token>[A-Za-z0-9_\-=.]+)"
+)
+
+
+def reference_file_ids(value: object, *, include_redacted: bool = False) -> set[UUID]:
+    """File ids of every signed reference link found anywhere in ``value``.
+
+    Walks strings, dicts and lists like :func:`redact_reference_tokens`, so a
+    link nested in an argument object or embedded in longer text is found.
+    Strings are percent-decoded first: the download route decodes its path, so
+    an encoded link reaches the same file. Shape only, no verification. A
+    redacted link carries no credential and is skipped unless asked for.
+    """
+    file_ids: set[UUID] = set()
+    if isinstance(value, str):
+        for match in _REFERENCE_LINK.finditer(unquote(value)):
+            if match.group("token") == REDACTED_TOKEN and not include_redacted:
+                continue
+            try:
+                file_ids.add(UUID(match.group("file_id")))
+            except ValueError:
+                continue
+        return file_ids
+    if isinstance(value, dict):
+        entries = list(cast(dict[object, object], value).values())
+    elif isinstance(value, list):
+        entries = cast(list[object], value)
+    else:
+        return file_ids
+    for item in entries:
+        file_ids |= reference_file_ids(item, include_redacted=include_redacted)
+    return file_ids
 
 
 def looks_like_reference_url(url: str) -> bool:

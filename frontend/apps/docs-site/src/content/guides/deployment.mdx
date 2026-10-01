@@ -526,12 +526,18 @@ same endpoint.
 The download endpoint accepts no session cookie or API key. The signed token
 is the only credential: it names the file and tenant, is signed with
 `URL_SIGNING_KEY`, and expires after `FILE_REFERENCE_URL_EXPIRY_SECONDS`
-(default one hour). Anyone holding an unexpired link can download the file.
-Treat every MCP server that receives file links as a recipient of the file
-contents, and enable such servers only where that data flow is acceptable.
+(default 15 minutes, at most one hour). Anyone holding an unexpired link can
+download the file. Treat every MCP server that receives file links as a
+recipient of the file contents, and enable such servers only where that data
+flow is acceptable.
 
-Two controls limit the exposure of a link:
+Three controls limit the exposure of a link:
 
+- A tool call may only carry links to the files of its own conversation: the
+  attachments and generated files Eneo minted links for in that request. A
+  link to any other file in the arguments, even a valid one pasted in by a
+  user or returned by another tool, stops the call before the MCP server is
+  contacted.
 - Every redemption is audited as `file_original_downloaded` under **File
   operations**, with the caller's address and user agent, next to the
   `file_original_download_link_created` entry written when the link was

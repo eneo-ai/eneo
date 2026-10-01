@@ -494,6 +494,8 @@ class CompletionService:
                 identity_headers=identity_headers,
                 mcp_server_tool_repo=self.mcp_server_tool_repo,
             )
+            # Tools may only be handed links to the files minted above.
+            mcp_proxy.allow_file_references(file_reference_urls)
             if model.supports_tool_calling:
                 await mcp_proxy.prepare_tools_for_context()
             logger.debug(
@@ -635,6 +637,10 @@ class CompletionService:
                             chunk.reference_url = await self._mint_generated_file_url(
                                 chunk.generated_file, session
                             )
+                            if mcp_proxy and chunk.reference_url:
+                                mcp_proxy.allow_file_references(
+                                    [chunk.generated_file.id]
+                                )
                 finally:
                     if approval_manager:
                         for approval_id in list(pending_approval_ids):

@@ -14,6 +14,7 @@ from eneo.authentication.signed_urls import (
     looks_like_reference_url,
     parse_file_reference_url,
     redact_reference_tokens,
+    reference_file_ids,
     restore_reference_tokens,
 )
 
@@ -81,6 +82,39 @@ class TestLooksLikeReferenceUrl:
         assert not looks_like_reference_url("https://example.com/report.pdf")
         assert not looks_like_reference_url("not a url at all")
         assert not looks_like_reference_url("")
+
+
+class TestReferenceFileIds:
+    """Every signed link in a tool call's arguments is found, wherever it sits,
+    so the proxy can tell which files the call would hand to a tool."""
+
+    def test_finds_links_nested_in_objects_lists_and_text(self):
+        first, second, third = uuid4(), uuid4(), uuid4()
+        arguments = {
+            "file": {"url": _signed_url(first), "filename": "a.xlsx"},
+            "files": [{"url": _signed_url(second), "alias": "b"}],
+            "content": f"See {_signed_url(third)} for the figures.",
+            "limit": 10,
+        }
+
+        assert reference_file_ids(arguments) == {first, second, third}
+
+    def test_percent_encoded_link_names_the_same_file(self):
+        file_id = uuid4()
+        encoded = _signed_url(file_id).replace("/original/", "/origina%6C/")
+
+        assert reference_file_ids(encoded) == {file_id}
+
+    def test_redacted_links_are_skipped_unless_asked_for(self):
+        file_id = uuid4()
+        redacted = redact_reference_tokens(_signed_url(file_id))
+
+        assert reference_file_ids(redacted) == set()
+        assert reference_file_ids(redacted, include_redacted=True) == {file_id}
+
+    def test_other_links_and_values_yield_nothing(self):
+        assert reference_file_ids("https://example.org/page?token=keep-me") == set()
+        assert reference_file_ids({"n": 7, "none": None, "items": []}) == set()
 
 
 class TestRedactReferenceTokens:

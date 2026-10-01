@@ -1122,23 +1122,29 @@ def _make_files_loopback_server() -> MCPServer:
     )
 
 
+def _reference_url(file_id: UUID) -> str:
+    from eneo.authentication.signed_urls import build_signed_original_download_url
+
+    return build_signed_original_download_url(
+        file_id=file_id,
+        base_url="http://host.docker.internal:8123",
+        expires_in=3600,
+        tenant_id=uuid4(),
+    )
+
+
+def _conversation_reference_url(proxy: MCPProxySession) -> str:
+    """A signed link to a file the proxy's conversation owns."""
+    file_id = uuid4()
+    proxy.allow_file_references([file_id])
+    return _reference_url(file_id)
+
+
 class TestReferenceFallbackHint:
     """A failed tool call that carried a signed attachment reference points the
     model at the loopback read_file instead of inviting a retry loop. The hint
     keys on the argument shape, not on which server failed, and only appears
     when read_file is actually registered."""
-
-    def _reference_url(self) -> str:
-        from eneo.authentication.signed_urls import (
-            build_signed_original_download_url,
-        )
-
-        return build_signed_original_download_url(
-            file_id=uuid4(),
-            base_url="http://host.docker.internal:8123",
-            expires_in=3600,
-            tenant_id=uuid4(),
-        )
 
     def _failing_client(self):
         return SimpleNamespace(
@@ -1155,7 +1161,9 @@ class TestReferenceFallbackHint:
         proxy = MCPProxySession([_make_files_loopback_server(), external])
         proxy._clients[external.id] = self._failing_client()
 
-        result = await proxy.call_tool("tabular__tool", {"url": self._reference_url()})
+        result = await proxy.call_tool(
+            "tabular__tool", {"url": _conversation_reference_url(proxy)}
+        )
 
         assert result["is_error"] is True
         texts = [block["text"] for block in result["content"]]
@@ -1181,7 +1189,9 @@ class TestReferenceFallbackHint:
         proxy = MCPProxySession([external])
         proxy._clients[external.id] = self._failing_client()
 
-        result = await proxy.call_tool("tabular__tool", {"url": self._reference_url()})
+        result = await proxy.call_tool(
+            "tabular__tool", {"url": _conversation_reference_url(proxy)}
+        )
 
         texts = [block["text"] for block in result["content"]]
         assert not any("read_file" in text for text in texts)
@@ -1192,7 +1202,9 @@ class TestReferenceFallbackHint:
         proxy = MCPProxySession([_make_files_loopback_server(), external])
         proxy._failed_server_ids.add(external.id)
 
-        result = await proxy.call_tool("tabular__tool", {"url": self._reference_url()})
+        result = await proxy.call_tool(
+            "tabular__tool", {"url": _conversation_reference_url(proxy)}
+        )
 
         message = result["content"][0]["text"]
         assert "temporarily unavailable" in message.lower()
@@ -1204,11 +1216,102 @@ class TestReferenceFallbackHint:
         proxy._clients[files_server.id] = self._failing_client()
 
         result = await proxy.call_tool(
-            "files__read_file", {"url": self._reference_url()}
+            "files__read_file", {"url": _conversation_reference_url(proxy)}
         )
 
         texts = [block["text"] for block in result["content"]]
         assert not any("still readable" in text for text in texts)
+
+
+class TestConversationBoundReferences:
+    """A tool call may only carry signed links to its own conversation's files.
+
+    A signed link is a bearer credential bound to a file and tenant, not to a
+    conversation, so the proxy refuses a call whose arguments link to any file
+    the completion layer did not register, before a server is contacted.
+    """
+
+    def _proxy(self) -> tuple[MCPProxySession, AsyncMock]:
+        server = _make_server(name="tabular")
+        proxy = MCPProxySession([server])
+        call_tool = AsyncMock(
+            return_value={"content": [{"type": "text", "text": "ok"}]}
+        )
+        proxy._clients[server.id] = SimpleNamespace(call_tool=call_tool)
+        return proxy, call_tool
+
+    async def test_link_to_a_file_outside_the_conversation_is_refused(self):
+        proxy, call_tool = self._proxy()
+        own = _conversation_reference_url(proxy)
+
+        result = await proxy.call_tool(
+            "tabular__tool",
+            {
+                "file": {"url": own, "filename": "own.xlsx"},
+                "files": [{"url": _reference_url(uuid4()), "alias": "other"}],
+            },
+        )
+
+        assert result["is_error"] is True
+        assert "does not belong to this conversation" in result["content"][0]["text"]
+        call_tool.assert_not_awaited()
+
+    async def test_links_to_the_conversations_files_reach_the_tool(self):
+        proxy, call_tool = self._proxy()
+        arguments = {
+            "file": {"url": _conversation_reference_url(proxy)},
+            "files": [{"url": _conversation_reference_url(proxy)}],
+        }
+
+        result = await proxy.call_tool("tabular__tool", arguments)
+
+        assert not result.get("is_error")
+        call_tool.assert_awaited_once_with("tool", arguments)
+
+    async def test_file_generated_during_the_turn_is_admitted_once_registered(self):
+        proxy, call_tool = self._proxy()
+        generated_id = uuid4()
+        arguments = {"source": {"url": _reference_url(generated_id)}}
+
+        refused = await proxy.call_tool("tabular__tool", arguments)
+        proxy.allow_file_references([generated_id])
+        admitted = await proxy.call_tool("tabular__tool", arguments)
+
+        assert refused["is_error"] is True
+        assert not admitted.get("is_error")
+        call_tool.assert_awaited_once()
+
+    async def test_link_embedded_in_text_or_percent_encoded_is_still_refused(self):
+        proxy, call_tool = self._proxy()
+        link = _reference_url(uuid4())
+
+        embedded = await proxy.call_tool("tabular__tool", {"note": f"fetch {link} now"})
+        encoded = await proxy.call_tool(
+            "tabular__tool", {"url": link.replace("download", "downloa%64")}
+        )
+
+        assert embedded["is_error"] is True
+        assert encoded["is_error"] is True
+        call_tool.assert_not_awaited()
+
+    async def test_redacted_link_carries_no_credential_and_passes(self):
+        from eneo.authentication.signed_urls import redact_reference_tokens
+
+        proxy, call_tool = self._proxy()
+        arguments = {"url": redact_reference_tokens(_reference_url(uuid4()))}
+
+        await proxy.call_tool("tabular__tool", arguments)
+
+        call_tool.assert_awaited_once()
+
+    async def test_other_urls_are_not_affected(self):
+        proxy, call_tool = self._proxy()
+
+        await proxy.call_tool(
+            "tabular__tool", {"url": "https://example.org/data.csv?token=abc"}
+        )
+
+        call_tool.assert_awaited_once()
 
 
 class TestTruncateToolResult:

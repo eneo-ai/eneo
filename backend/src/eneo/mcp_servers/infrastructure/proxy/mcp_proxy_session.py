@@ -12,11 +12,12 @@ import asyncio
 import json
 import re
 import time
+from collections.abc import Iterable
 from types import TracebackType
 from typing import TYPE_CHECKING, Any, cast
 from uuid import UUID
 
-from eneo.authentication.signed_urls import looks_like_reference_url
+from eneo.authentication.signed_urls import reference_file_ids
 from eneo.internal_mcp.constants import (
     FILES_SERVER_NAME,
     IMAGE_GENERATION_SERVER_NAME,
@@ -62,6 +63,14 @@ REFERENCE_URL_VALID_NOTICE = (
     "url, the tool runs somewhere that cannot reach this deployment's file "
     "references: tell the user that the tool cannot access the file from where "
     "it runs."
+)
+# Returned instead of calling the tool when its arguments carry a signed link to
+# a file this request minted no reference for.
+FOREIGN_REFERENCE_NOTICE = (
+    "The tool was not called: a file link in its arguments does not belong to "
+    "this conversation. Only the reference urls given for this conversation's "
+    "own files can be passed to tools. If the user wants that file used here, "
+    "ask them to attach it to this conversation."
 )
 AUTH_DENIED_NOTICE = (
     "Access was denied by this MCP tool. Check its permissions or the "
@@ -164,6 +173,10 @@ class MCPProxySession:
         # if entered and exited from different tasks. Captured lazily on first
         # connect because session construction is synchronous.
         self._owner_task: asyncio.Task[Any] | None = None
+
+        # Files whose signed reference links this request minted. Tool-call
+        # arguments may only carry links to these (see allow_file_references).
+        self._reference_file_ids: set[UUID] = set()
 
         # Build tool registry from DB (no connections needed)
         self._tool_registry: dict[str, tuple[MCPServer, str, str | None]] = {}
@@ -983,6 +996,19 @@ class MCPProxySession:
             )
             return client
 
+    def allow_file_references(self, file_ids: Iterable[UUID]) -> None:
+        """Admit signed reference links to these files in tool-call arguments.
+
+        The completion layer registers the files it minted links for: this
+        conversation's attachments and the files its tools generated. A signed
+        link is a bearer credential bound to a file and its tenant only, so a
+        still-valid link to another conversation's file, reaching the model
+        through pasted text or a tool result, would otherwise be fetched by
+        whichever tool the model handed it to. Links to any other file are
+        refused in :meth:`call_tool` before a server is contacted.
+        """
+        self._reference_file_ids.update(file_ids)
+
     def _files_read_file_entry(self) -> tuple[str, str | None] | None:
         """Prefixed name + title of the loopback read_file, when registered.
 
@@ -1012,10 +1038,7 @@ class MCPProxySession:
         when a remote tool could not fetch it. Empty when no argument is a
         reference or read_file itself failed.
         """
-        if not any(
-            isinstance(value, str) and looks_like_reference_url(value)
-            for value in arguments.values()
-        ):
+        if not reference_file_ids(arguments, include_redacted=True):
             return ""
         entry = self._files_read_file_entry()
         if entry is None:
@@ -1106,6 +1129,20 @@ class MCPProxySession:
             raise ValueError(f"Tool not found in proxy registry: {tool_name}")
 
         server, original_tool_name, _ = self._tool_registry[tool_name]
+
+        foreign_file_ids = reference_file_ids(arguments) - self._reference_file_ids
+        if foreign_file_ids:
+            logger.warning(
+                "[MCPProxy] Refused %s on '%s': reference link to a file outside "
+                "this conversation",
+                original_tool_name,
+                server.name,
+                extra={"file_ids": sorted(map(str, foreign_file_ids))},
+            )
+            return {
+                "content": [{"type": "text", "text": FOREIGN_REFERENCE_NOTICE}],
+                "is_error": True,
+            }
 
         logger.debug(f"[MCPProxy] Calling {original_tool_name} on '{server.name}'")
 
