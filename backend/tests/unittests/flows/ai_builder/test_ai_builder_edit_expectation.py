@@ -714,6 +714,12 @@ def test_a_plan_that_silently_drops_a_step_and_is_refused_is_scored_as_it_happen
 def test_digit_groups_and_no_break_spaces_are_one_edit_fact() -> None:
     assert edit.normalized_text("Belopp: 48 500 kr") == "belopp: 48500 kr"
     assert edit.normalized_text("2026-11-30") == "2026-11-30"
+    # Only a whole thousands-grouped number is joined: a street number beside
+    # a postcode, or a list of two amounts, is left as written.
+    assert edit.normalized_text("Sidsjövägen 17 851 86") == "sidsjövägen 17 851 86"
+    assert edit.normalized_text("1 500 2 720") == "1 500 2 720"
+    # A line break ends a number: two table cells are two grouped numbers.
+    assert edit.normalized_text("1 500\n2 720") == "1500 2720"
 
 
 @pytest.mark.parametrize(

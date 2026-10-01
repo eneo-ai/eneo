@@ -11,9 +11,11 @@ This module is a sibling of `ai_builder_api_battle_test.py`, not a second
 harness: the harness hands itself to `run_oracle_case`, so publish, run, review
 checkpoints, output reading and scoring are the harness's own functions, and
 the bundle is sealed, hashed and receipted by the harness's own code. Nothing
-here computes a verdict. What is new is only:
+here judges delivery. What is new is only:
 
   * the frozen spec set (`manifest.json` + one `<case>.spec.json` per case),
+  * the plan grader (`plan_step_content_check`): the flow the run executed
+    against that frozen spec, the gold only this arm has,
   * an authoring-contract check that never looks at the case's expectations,
   * the create step (a `SpecMaterializer`; production applies the command in
     process against the stack's database),
@@ -74,6 +76,10 @@ from eneo.flows.enums import FlowAuthoringOutputMode
 from eneo.flows.flow_authoring_name import normalize_flow_name
 from eneo.flows.flow_authoring_runtime_input import resolve_runtime_input_config
 from eneo.flows.flow_authoring_spec import FlowDraftSpecCore
+from eneo.flows.flow_authoring_variable_rewriting import (
+    build_ref_to_order,
+    rewrite_step_spec_variables,
+)
 from eneo.flows.flow_metadata import (
     normalize_flow_metadata_for_write,
     normalize_persisted_flow_metadata,
@@ -643,12 +649,9 @@ def _default_materializer(harness: ModuleType, config: Any) -> SpecMaterializer:
 def persisted_matches_spec(
     snapshot: Mapping[str, Any], spec: FlowDraftSpecCore
 ) -> JsonObject:
-    """Compare what the fields a materializer must carry through unchanged.
-
-    Order, name, instructions, input source and type, output mode and type,
-    review mode and the form's field names. Bindings and schemas are compiled
-    (step refs become stored aliases), so they are not compared here.
-    """
+    """Whether the flow the platform persisted carries the spec unchanged
+    (`_spec_mismatches`); `snapshot` is the flow and its assistants as read
+    back after the apply."""
 
     flow = snapshot.get("flow")
     flow = cast(Mapping[str, Any], flow if isinstance(flow, Mapping) else {})
@@ -656,6 +659,57 @@ def persisted_matches_spec(
     assistants = cast(
         Mapping[str, Any], assistants if isinstance(assistants, Mapping) else {}
     )
+
+    def instructions(step: Mapping[str, Any]) -> object:
+        assistant = assistants.get(str(step.get("assistant_id")))
+        prompt = assistant.get("prompt") if isinstance(assistant, Mapping) else None
+        return prompt.get("text") if isinstance(prompt, Mapping) else None
+
+    mismatches = _spec_mismatches(flow, instructions, spec)
+    return {"passed": not mismatches, "mismatches": mismatches}
+
+
+def executed_matches_spec(
+    definition: Mapping[str, Any], spec: FlowDraftSpecCore
+) -> JsonObject:
+    """Whether the published definition a run executed (the run evidence's
+    `definition_snapshot`) carries the spec unchanged (`_spec_mismatches`)."""
+
+    def instructions(step: Mapping[str, Any]) -> object:
+        assistant = step.get("assistant_snapshot")
+        return assistant.get("instructions") if isinstance(assistant, Mapping) else None
+
+    mismatches = _spec_mismatches(definition, instructions, spec)
+    return {"passed": not mismatches, "mismatches": mismatches}
+
+
+def _spec_mismatches(
+    flow: Mapping[str, Any],
+    instructions: Callable[[Mapping[str, Any]], object],
+    spec: FlowDraftSpecCore,
+) -> list[str]:
+    """Compare the fields a materializer must carry through unchanged.
+
+    Order, name, instructions, input bindings, template bindings (the
+    `output_config.bindings` map of placeholder to value), input source and
+    type, output mode and type, review mode, and each form field's name, type
+    and requiredness. The spec's steps are compiled by the platform's own owner
+    first (`rewrite_step_spec_variables`: a plan step ref becomes the runtime
+    `step_N` it names), so instructions and bindings are compared as the flow
+    stores them: a binding that reads another step or another field, or a
+    placeholder bound to another placeholder's value, fails. Of the template
+    config only the binding map is the spec's: the platform adds the
+    template's identity and placeholder list beside it.
+    """
+
+    def template_bindings(config: object) -> object:
+        bindings = (
+            cast(Mapping[str, Any], config).get("bindings")
+            if isinstance(config, Mapping)
+            else None
+        )
+        return bindings or None
+
     steps = sorted(
         [s for s in cast(list[Any], flow.get("steps") or []) if isinstance(s, Mapping)],
         key=lambda s: int(s.get("step_order") or 0),
@@ -663,30 +717,30 @@ def persisted_matches_spec(
     mismatches: list[str] = []
     if len(steps) != len(spec.steps):
         mismatches.append(f"step_count {len(steps)} != {len(spec.steps)}")
+    refs = build_ref_to_order(list(spec.steps))
     for index, (persisted, wanted) in enumerate(zip(steps, spec.steps), start=1):
-        assistant = assistants.get(str(persisted.get("assistant_id")))
-        assistant = cast(
-            Mapping[str, Any], assistant if isinstance(assistant, Mapping) else {}
-        )
-        prompt = assistant.get("prompt")
-        prompt_text = prompt.get("text") if isinstance(prompt, Mapping) else None
+        compiled = rewrite_step_spec_variables(wanted, refs)
         review = persisted.get("review_policy")
         expected = {
-            "name": wanted.name,
-            "instructions": wanted.assistant_spec.instructions,
-            "input_source": wanted.input_source.value,
-            "input_type": wanted.input_type.value,
-            "output_mode": wanted.output_mode.value,
-            "output_type": wanted.output_type.value,
+            "name": compiled.name,
+            "instructions": compiled.assistant_spec.instructions,
+            "input_bindings": compiled.input_bindings or None,
+            "output_config.bindings": template_bindings(compiled.output_config),
+            "input_source": compiled.input_source.value,
+            "input_type": compiled.input_type.value,
+            "output_mode": compiled.output_mode.value,
+            "output_type": compiled.output_type.value,
             "review_mode": (
                 None
-                if wanted.review_policy is None
-                else wanted.review_policy.mode.value
+                if compiled.review_policy is None
+                else compiled.review_policy.mode.value
             ),
         }
         observed = {
             "name": persisted.get("user_description"),
-            "instructions": prompt_text,
+            "instructions": instructions(persisted),
+            "input_bindings": persisted.get("input_bindings") or None,
+            "output_config.bindings": template_bindings(persisted.get("output_config")),
             "input_source": persisted.get("input_source"),
             "input_type": persisted.get("input_type"),
             "output_mode": persisted.get("output_mode"),
@@ -704,12 +758,48 @@ def persisted_matches_spec(
         else []
     )
     persisted_fields = sorted(
-        str(f.get("name")) for f in cast(list[Any], fields) if isinstance(f, Mapping)
+        (str(f.get("name")), str(f.get("type")), f.get("required") is True)
+        for f in cast(list[Any], fields)
+        if isinstance(f, Mapping)
     )
-    wanted_fields = sorted(f.name for f in spec.form_fields or [])
+    wanted_fields = sorted((f.name, f.type, f.required) for f in spec.form_fields or [])
     if persisted_fields != wanted_fields:
         mismatches.append(f"form fields {persisted_fields} != {wanted_fields}")
-    return {"passed": not mismatches, "mismatches": mismatches}
+    return mismatches
+
+
+def plan_step_content_check(
+    harness: ModuleType, gold: GoldSpec, runtime_evidence: Mapping[str, object] | None
+) -> JsonObject:
+    """The plan grader of an oracle observation (`harness.PLAN_CONTENT_GRADER`).
+
+    Gold: the case's frozen expert spec. It applies to every oracle
+    observation and reads the published definition the run executed, so steps
+    that ran with each other's instructions fail even where every name and the
+    step count match. Without a run the executed flow is unknown: `unmeasured`.
+    A pure function of the spec and the stored run evidence, so a kept bundle
+    is rescored by the same call.
+    """
+
+    name = harness.PLAN_CONTENT_GRADER
+    identity = {"spec_file": gold.spec_file, "spec_file_sha256": gold.spec_file_sha256}
+    definition = (runtime_evidence or {}).get("definition_snapshot")
+    if not isinstance(definition, Mapping):
+        return {
+            "name": name,
+            "passed": None,
+            "status": "unmeasured",
+            "gold": identity,
+            "reason": "no run: the flow the run would have executed is unknown",
+        }
+    matches = executed_matches_spec(cast(Mapping[str, Any], definition), gold.spec)
+    return {
+        "name": name,
+        "passed": matches["passed"],
+        "gold": identity,
+        "actual": matches["mismatches"] or "every step carries its gold content",
+        "expected": "the executed flow is the expert spec, step by step",
+    }
 
 
 # --------------------------------------------------------------------------
@@ -892,10 +982,12 @@ def _bundle(
             ),
             "expected": "the platform accepts the expert spec",
         },
+        plan_step_content_check(harness, gold, runtime_evidence),
         *run_checks,
     ]
     # The shape of a Builder observation's report: `checks` judge how the flow
-    # came to be (here, whether the platform accepted the spec) and the run's
+    # came to be (here, whether the platform accepted the spec and the run
+    # executed it step by step) and the run's
     # own delivery checks, and the output oracle stands apart in `output_checks`,
     # so a verdict that states plan, review-edit and output separately reads an
     # oracle observation exactly as it reads a Builder one.

@@ -2,9 +2,9 @@
 """Totals and the pre-registered decision of the oracle experiment.
 
 Reads the receipts of the experiment's legs (arm A, the Builder; arm O, expert
-specs) and reports for each leg attempted, invalid evidence, executed and
-fulfilled as separate totals, never rescaled: every rate is over the attempted
-slots, and a rate over executed slots is labelled as such.
+specs) and reports for each leg attempted, invalid evidence, executed,
+unmeasured, decided and fulfilled as separate totals, each rate labelled with
+its denominator.
 
 A leg is read only through an integrity-verified receipt (`verified_receipt`):
 the manifest's expected slots, every bundle's digest, the bundle's identity and
@@ -14,7 +14,15 @@ is NO_DECISION. Nothing here reads a summary or a bundle any other way.
 
 It computes no verdict of its own. A slot is fulfilled when the scorer's
 sealed final-output verdict (`verdict_states.output`) is `pass` on valid
-evidence; a row that does not carry a valid one is an invalid slot.
+evidence; a row that does not carry a valid one is an invalid slot. A slot
+whose run was created and whose output the scorer could not decide
+(`unmeasured`) is neither fulfilled, failed nor invalid: it is counted apart.
+The decided slots of a leg are its attempted slots less its unmeasured ones
+(invalid and not-executed slots stay decided, as not fulfilled), and the rule
+divides each arm's audited fulfilment by its decided slots. Because that
+denominator moves with the unmeasured count, two decision legs whose
+unmeasured counts differ by more than MAX_UNMEASURED_DIFFERENCE are not
+measured alike, and a leg with no decided slot has no rate: NO_DECISION.
 
 The decision fails closed. `decide` returns a decision only when the legs are
 one experiment: the canonical comparator's identity and run-context rules hold
@@ -28,9 +36,13 @@ The audit overlay is check-level. A correction names one exact oracle check of
 one case (a required literal, a forbidden literal or an association), says it is
 wrong and what it should have been (or that it has no basis), with a class and
 the evidence. It is applied to EVERY leg alike and every stored output of that
-case is re-scored through the harness's own scoring with the corrected
+case is re-scored through the scorer's own output dimension with the corrected
 expectation, so a slot changes state only if all of its checks agree; a slot
-with any other failed check stays failed. Lifts and drops are both counted.
+with any other failed check stays failed. Fulfilled, failed and unmeasured
+executed slots are all re-scored: lifts, drops, decided slots that the
+re-score cannot decide (unmeasured) and unmeasured slots it decides are each
+counted, in the totals and the per-case vectors alike. The audit re-scores
+only with the frozen scorer.
 
 usage:
   ai_builder_oracle_totals.py report --selection ai_builder_oracle_cases.json \\
@@ -78,6 +90,11 @@ DECISION_O_LEG = "O_luna6"
 DECISION_A_LEG = "A_luna6"
 # A leg with more invalid slots than this is not a measurement of its arm.
 MAX_INVALID_SLOTS = 6
+# An unmeasured slot (the scorer ran on the delivered output and could not
+# decide it) is neither a fulfilment nor a failure: the rule divides each
+# arm's fulfilment by its decided slots. Two arms whose unmeasured counts
+# differ by more than this are not measured alike: NO_DECISION.
+MAX_UNMEASURED_DIFFERENCE = 6
 BOOTSTRAP_DRAWS = 10_000
 BOOTSTRAP_SEED = 20260929
 AUDIT_CLASSES = frozenset({"OW", "OA", "SD", "FD"})
@@ -822,10 +839,12 @@ def slot_state(row: Mapping[str, Any]) -> str:
     """One slot, one state. Reads only what the sealed row says.
 
     The final-output verdict is the scorer's own (`verdict_states.output`, scorer
-    semantics 1): `pass` is fulfilment, `fail` an executed slot that did not
-    deliver, and `unmeasured` on a run that was created is evidence that could
-    not judge the output (the harness stopped the run, or it delivered nothing
-    to check): an invalid slot, never a silent failure and never a pass.
+    semantics 2): `pass` is fulfilment, `fail` an executed slot that did not
+    deliver, and `unmeasured` on a run that was created is an output the scorer
+    could not decide (no gold decides it, the harness stopped the run, or it
+    delivered nothing to check): an `unmeasured` slot of its own, never a
+    failure, never a pass and never an invalid slot (`MAX_INVALID_SLOTS`
+    counts invalid evidence only).
 
     Where a row without a valid verdict is refused. For a receipt whose scorer
     recorded its identity (the frozen H1 scorer, which the freeze requires of
@@ -847,21 +866,19 @@ def slot_state(row: Mapping[str, Any]) -> str:
         return "fulfilled"
     if output == "fail":
         return "executed_not_fulfilled"
-    if output == "unmeasured" and row.get("output_executed") is not True:
-        return "not_executed"
+    if output == "unmeasured":
+        return "unmeasured" if row.get("output_executed") is True else "not_executed"
     return "invalid"
 
 
 def invalid_class(row: Mapping[str, Any]) -> str:
     status = str(row.get("observation_status"))
     if status not in INVALID_STATUSES:
-        if _output_verdict(row) is None:
-            return (
-                "verdict_states_missing"
-                if not isinstance(row.get("verdict_states"), Mapping)
-                else "verdict_states_invalid"
-            )
-        return "output_unmeasured"
+        return (
+            "verdict_states_missing"
+            if not isinstance(row.get("verdict_states"), Mapping)
+            else "verdict_states_invalid"
+        )
     if status == "invalid_evidence":
         names = [str(c.get("name")) for c in row.get("evidence_failed_checks") or []]
         return "invalid_evidence:" + (",".join(sorted(set(names))) or "unnamed")
@@ -970,12 +987,20 @@ def corrected_expectation(
 
 
 def audited_states(leg: Leg, corrections: Sequence[Correction]) -> dict[SlotKey, str]:
-    """Per slot: `lifted`, `dropped` or nothing, from re-scoring the stored output.
+    """Per slot, the transition re-scoring its stored output makes, or nothing.
 
-    Every executed, valid slot of a corrected case is re-scored through the
-    harness's `_final_output_scoring` on its stored runtime evidence, with the
-    corrected expectation; every check that is not a corrected literal is
-    recomputed as it was, so a slot with any other failed check cannot lift.
+    Every executed, valid slot of a corrected case (fulfilled, failed or
+    unmeasured) is re-scored on its stored runtime evidence, with the corrected
+    expectation, by the scorer's own output dimension
+    (`_rescored_output_state`: `_final_output_scoring` read by
+    `_verdict_states`, so a run the harness stopped stays unmeasured); every
+    check that is not a corrected literal is recomputed as it was, so a slot
+    with any other failed check cannot lift. A pass `lifted` a failed or unmeasured slot,
+    a failure `dropped` a fulfilled one or `decided_failed` an unmeasured one,
+    and a re-score that cannot decide makes a decided slot `unmeasured`,
+    counted apart: never a drop and never a lift (`audited_slot_state`). The
+    caller has checked that the harness is the frozen scorer
+    (`audit_scorer_problems`).
     """
 
     by_case: dict[str, list[Correction]] = {}
@@ -991,6 +1016,7 @@ def audited_states(leg: Leg, corrections: Sequence[Correction]) -> dict[SlotKey,
         if case_id not in by_case or state not in (
             "fulfilled",
             "executed_not_fulfilled",
+            "unmeasured",
         ):
             continue
         bundle = leg_bundle(leg, row)
@@ -998,34 +1024,80 @@ def audited_states(leg: Leg, corrections: Sequence[Correction]) -> dict[SlotKey,
         expect = corrected_expectation(
             cast(Mapping[str, Any], case["execution"]["expect"]), by_case[case_id]
         )
-        expectation = harness._output_expectation(expect, owner=f"audit {case_id}")
-        _, report = harness._final_output_scoring(
-            cast(Mapping[str, Any], case.get("expected") or {}),
-            bundle.get("runtime_evidence"),
-            expectation,
+        output = harness._rescored_output_state(
+            bundle,
+            harness._output_expectation(expect, owner=f"audit {case_id}"),
+            observation_status=str(row.get("observation_status")),
         )
-        audited = report.get("output_success") is True
         key = (case_id, int(row["repetition"]))
-        if audited and state == "executed_not_fulfilled":
+        if output not in ("pass", "fail"):
+            if state != "unmeasured":
+                changes[key] = "unmeasured"
+        elif output == "pass" and state != "fulfilled":
             changes[key] = "lifted"
-        elif not audited and state == "fulfilled":
+        elif output == "fail" and state == "fulfilled":
             changes[key] = "dropped"
+        elif output == "fail" and state == "unmeasured":
+            changes[key] = "decided_failed"
     return changes
+
+
+# A slot's state once the audit re-scored it: one table for the totals and the
+# per-case vectors, so both count every transition alike.
+_AUDITED_STATE = {
+    "lifted": "fulfilled",
+    "dropped": "executed_not_fulfilled",
+    "decided_failed": "executed_not_fulfilled",
+    "unmeasured": "unmeasured",
+}
+
+
+def audited_slot_state(state: str, change: str | None) -> str:
+    return _AUDITED_STATE.get(change or "", state)
+
+
+def audit_scorer_problems(
+    freeze: Mapping[str, Any], corrections: Sequence[Correction]
+) -> list[str]:
+    """Why the audit may not re-score: the harness it would re-score with is
+    not the frozen scorer (semantics version and module digest)."""
+
+    if not corrections:
+        return []
+    harness = _harness()
+    ambient = (harness.SCORER_SEMANTICS_VERSION, harness._scorer_sha256())
+    frozen = (freeze["scorer_semantics_version"], freeze["scorer_sha256"])
+    if ambient != frozen:
+        return [
+            f"the audit would re-score with scorer {ambient[0]} ({ambient[1]}), "
+            f"not the frozen scorer {frozen[0]} ({frozen[1]})"
+        ]
+    return []
 
 
 def leg_totals(leg: Leg, audit: Mapping[SlotKey, str]) -> JsonObject:
     states = [leg_state(leg, row) for row in leg.rows]
     counts = Counter(states)
-    lifted = sum(1 for v in audit.values() if v == "lifted")
-    dropped = sum(1 for v in audit.values() if v == "dropped")
+    changes = [
+        audit.get((str(row["case_id"]), int(row["repetition"]))) for row in leg.rows
+    ]
+    audited_counts = Counter(
+        audited_slot_state(state, change)
+        for state, change in zip(states, changes, strict=True)
+    )
+    transitions = Counter(change for change in changes if change)
+    unmeasured = audited_counts["unmeasured"]
     invalid_classes = Counter(
         leg_invalid_class(leg, row)
         for row, state in zip(leg.rows, states, strict=True)
         if state == "invalid"
     )
     attempted = len(leg.rows)
-    executed = counts["fulfilled"] + counts["executed_not_fulfilled"]
-    audited = counts["fulfilled"] - dropped + lifted
+    executed = (
+        counts["fulfilled"] + counts["executed_not_fulfilled"] + counts["unmeasured"]
+    )
+    audited = audited_counts["fulfilled"]
+    decided = attempted - unmeasured
     return {
         "leg": leg.label,
         "arm": leg.arm,
@@ -1041,31 +1113,47 @@ def leg_totals(leg: Leg, audit: Mapping[SlotKey, str]) -> JsonObject:
         ),
         "executed": executed,
         "not_executed": counts["not_executed"],
+        "unmeasured": unmeasured,
+        "decided": decided,
         "fulfilled": counts["fulfilled"],
-        "audit_lifted": lifted,
-        "audit_dropped": dropped,
+        "audit_lifted": transitions["lifted"],
+        "audit_dropped": transitions["dropped"],
+        "audit_unmeasured": transitions["unmeasured"],
+        # Unmeasured slots the audit decided (lifted or decided_failed).
+        "audit_decided": sum(
+            1
+            for state, change in zip(states, changes, strict=True)
+            if state == "unmeasured" and change in ("lifted", "decided_failed")
+        ),
         "fulfilled_audited": audited,
         "fulfilled_of_attempted": f"{counts['fulfilled']}/{attempted}",
         "fulfilled_audited_of_attempted": f"{audited}/{attempted}",
+        "fulfilled_audited_of_decided": f"{audited}/{decided}",
         "fulfilled_of_executed": f"{counts['fulfilled']}/{executed}",
     }
 
 
 def per_case(leg: Leg, audit: Mapping[SlotKey, str]) -> dict[str, str]:
     """P fulfilled, p lifted by audit, x dropped by audit, F executed and failed,
-    - not executed, ? invalid."""
+    f failed once the audit decided an unmeasured slot, u unmeasured (by the
+    scorer or the audit), - not executed, ? invalid. Read with
+    `audited_slot_state`, as the totals are."""
 
     letters: dict[str, list[tuple[int, str]]] = {}
     for row in leg.rows:
         state = leg_state(leg, row)
         key = (str(row["case_id"]), int(row["repetition"]))
         change = audit.get(key)
-        letter = {
-            "fulfilled": "x" if change == "dropped" else "P",
-            "executed_not_fulfilled": "p" if change == "lifted" else "F",
-            "not_executed": "-",
-            "invalid": "?",
-        }[state]
+        letter = {"lifted": "p", "dropped": "x", "decided_failed": "f"}.get(
+            change or "",
+            {
+                "fulfilled": "P",
+                "executed_not_fulfilled": "F",
+                "unmeasured": "u",
+                "not_executed": "-",
+                "invalid": "?",
+            }[audited_slot_state(state, change)],
+        )
         letters.setdefault(key[0], []).append((key[1], letter))
     return {
         case_id: "".join(letter for _, letter in sorted(reps))
@@ -1077,14 +1165,24 @@ def audited_count(vector: str) -> int:
     return sum(1 for letter in vector if letter in "Pp")
 
 
+def decided_count(vector: str) -> int:
+    return sum(1 for letter in vector if letter != "u")
+
+
 def rule(o: JsonObject, a: JsonObject) -> JsonObject:
     """The pre-registered rule on two legs' audited totals. Callers gate on
-    `check_experiment`; use `decide`."""
+    `check_experiment`; use `decide`.
 
-    attempted = o["attempted"]
+    Each arm's fulfilment is over its decided slots (attempted less
+    unmeasured): an unmeasured slot is neither a fulfilment nor a failure.
+    Both arms need a decided slot (`_decision_from`). Integer cross-products:
+    no float comparison decides anything.
+    """
+
+    do, da = o["decided"], a["decided"]
     fo, fa = o["fulfilled_audited"], a["fulfilled_audited"]
-    o_ok = 100 * fo >= MIN_O_PERCENT * attempted
-    gap_ok = 100 * (fo - fa) >= MIN_GAP_POINTS * attempted
+    o_ok = 100 * fo >= MIN_O_PERCENT * do
+    gap_ok = 100 * (fo * da - fa * do) >= MIN_GAP_POINTS * do * da
     if o_ok and gap_ok:
         outcome = "ADVANCE_EXPLORATORY_PILOT"
     elif not o_ok:
@@ -1093,11 +1191,11 @@ def rule(o: JsonObject, a: JsonObject) -> JsonObject:
         outcome = "NO_ADVANTAGE_FIX_CONTRACTS_FIRST"
     return {
         "rule": f"audited O >= {MIN_O_PERCENT}% and O - A >= {MIN_GAP_POINTS} points",
-        "o_audited": f"{fo}/{attempted}",
-        "a_audited": f"{fa}/{attempted}",
-        "o_percent": round(100 * fo / attempted, 1),
-        "a_percent": round(100 * fa / attempted, 1),
-        "gap_points": round(100 * (fo - fa) / attempted, 1),
+        "o_audited": f"{fo}/{do}",
+        "a_audited": f"{fa}/{da}",
+        "o_percent": round(100 * fo / do, 1),
+        "a_percent": round(100 * fa / da, 1),
+        "gap_points": round(100 * fo / do - 100 * fa / da, 1),
         "o_threshold_met": o_ok,
         "gap_threshold_met": gap_ok,
         "outcome": outcome,
@@ -1119,21 +1217,24 @@ def bootstrap_gap(
     """
 
     ids = sorted(o_vectors)
-    reps = max(len(v) for v in o_vectors.values())
     rng = random.Random(BOOTSTRAP_SEED)
     gaps: list[float] = []
     for _ in range(BOOTSTRAP_DRAWS):
         drawn = [ids[rng.randrange(len(ids))] for _ in ids]
-        o = sum(audited_count(o_vectors[c]) for c in drawn)
-        a = sum(audited_count(a_vectors[c]) for c in drawn)
-        gaps.append(100 * (o - a) / (len(ids) * reps))
+        # Each arm over its decided slots in the draw, as the rule divides.
+        do = sum(decided_count(o_vectors[c]) for c in drawn)
+        da = sum(decided_count(a_vectors[c]) for c in drawn)
+        if do and da:
+            o = sum(audited_count(o_vectors[c]) for c in drawn)
+            a = sum(audited_count(a_vectors[c]) for c in drawn)
+            gaps.append(100 * o / do - 100 * a / da)
     gaps.sort()
     return {
         "level": 90,
         "clusters": len(ids),
-        "low": round(gaps[int(0.05 * BOOTSTRAP_DRAWS)], 1),
-        "high": round(gaps[int(0.95 * BOOTSTRAP_DRAWS)], 1),
-        "draws": BOOTSTRAP_DRAWS,
+        "low": round(gaps[int(0.05 * len(gaps))], 1) if gaps else None,
+        "high": round(gaps[int(0.95 * len(gaps))], 1) if gaps else None,
+        "draws": len(gaps),
         "seed": BOOTSTRAP_SEED,
     }
 
@@ -1156,7 +1257,7 @@ def strata(
             vectors = per_case(leg, audits[leg.label])
             row[leg.label] = (
                 f"{sum(audited_count(v) for c, v in vectors.items() if c in ids)}"
-                f"/{sum(len(v) for c, v in vectors.items() if c in ids)}"
+                f"/{sum(decided_count(v) for c, v in vectors.items() if c in ids)}"
             )
         out[name] = row
     return out
@@ -1165,11 +1266,39 @@ def strata(
 def _decision_from(
     legs: Sequence[Leg], audits: Mapping[str, Mapping[SlotKey, str]]
 ) -> JsonObject:
-    """The rule on a VALID experiment's audited totals, with its interval."""
+    """The rule on a VALID experiment's audited totals, with its interval.
+
+    The rule divides each arm by its decided slots, so the two decision legs'
+    unmeasured counts are reported beside it; legs whose counts differ by more
+    than MAX_UNMEASURED_DIFFERENCE, or a leg with no decided slot, get
+    NO_DECISION with that reason.
+    """
 
     by_label = {leg.label: leg for leg in legs}
     totals = {label: leg_totals(leg, audits[label]) for label, leg in by_label.items()}
-    result = rule(totals[DECISION_O_LEG], totals[DECISION_A_LEG])
+    o, a = totals[DECISION_O_LEG], totals[DECISION_A_LEG]
+    unmeasured = {DECISION_O_LEG: o["unmeasured"], DECISION_A_LEG: a["unmeasured"]}
+    difference = abs(o["unmeasured"] - a["unmeasured"])
+    problems = [
+        f"{label}: no decided slot (every slot is unmeasured)"
+        for label, leg in ((DECISION_O_LEG, o), (DECISION_A_LEG, a))
+        if not leg["decided"]
+    ]
+    if difference > MAX_UNMEASURED_DIFFERENCE:
+        problems.append(
+            f"unmeasured slots differ between {DECISION_O_LEG} ({o['unmeasured']}) "
+            f"and {DECISION_A_LEG} ({a['unmeasured']}) by {difference}, more than "
+            f"{MAX_UNMEASURED_DIFFERENCE}: the rule divides each arm by its decided "
+            "slots, so the arms are not measured alike"
+        )
+    if problems:
+        return {
+            "outcome": "NO_DECISION",
+            "problems": problems,
+            "unmeasured": unmeasured,
+        }
+    result = rule(o, a)
+    result["unmeasured"] = unmeasured
     result["gap_interval"] = bootstrap_gap(
         per_case(by_label[DECISION_O_LEG], audits[DECISION_O_LEG]),
         per_case(by_label[DECISION_A_LEG], audits[DECISION_A_LEG]),
@@ -1198,6 +1327,7 @@ def decide(
         reruns=reruns,
         evidence=evidence,
     )
+    problems += audit_scorer_problems(freeze, corrections)
     if problems:
         return {"outcome": "NO_DECISION", "problems": problems}
     audits = {leg.label: audited_states(leg, corrections) for leg in legs}
@@ -1298,6 +1428,7 @@ def report(args: argparse.Namespace) -> JsonObject:
         f"evidence label {label} repeats a decision leg" for label in sorted(clash)
     ]
     problems += [f"duplicate evidence label {label}" for label in duplicate_evidence]
+    problems += audit_scorer_problems(freeze, corrections)
     keys = _display_labels(legs)
     if problems:
         audits: dict[str, Mapping[SlotKey, str]] = {k: {} for k in keys}
@@ -1364,7 +1495,14 @@ def render_markdown(result: Mapping[str, Any]) -> str:
         lines += ["**NO DECISION.** The legs are not the frozen experiment:"]
         lines += [f"- {problem}" for problem in decision["problems"]]
         lines += [""]
-    else:
+    if decision.get("unmeasured"):
+        lines += [
+            "Unmeasured slots (neither fulfilled nor failed; the rule divides each "
+            "arm by its decided slots): "
+            + ", ".join(f"{k} {v}" for k, v in decision["unmeasured"].items()),
+            "",
+        ]
+    if decision["outcome"] != "NO_DECISION":
         interval = decision["gap_interval"]
         lines += [
             f"**Interval (read this first)**: O - A is {decision['gap_points']} points "
@@ -1377,8 +1515,8 @@ def render_markdown(result: Mapping[str, Any]) -> str:
             "",
         ]
     lines += [
-        "| leg | arm | runtime | attempted | invalid | executed | fulfilled | audited (lifted/dropped) | of executed |",
-        "|---|---|---|---|---|---|---|---|---|",
+        "| leg | arm | runtime | attempted | invalid | executed | unmeasured | fulfilled | audited (lifted/dropped/unmeasured/decided) | audited of decided | of executed |",
+        "|---|---|---|---|---|---|---|---|---|---|---|",
     ]
     rows = [
         (name, total)
@@ -1396,8 +1534,11 @@ def render_markdown(result: Mapping[str, Any]) -> str:
             name = f"{name} (RECEIPT REFUSED)"
         lines.append(
             f"| {name} | {total['arm']} | {total['runtime_model']} | {total['attempted']} "
-            f"| {total['invalid_evidence']} | {total['executed']} | {total['fulfilled_of_attempted']} "
-            f"| {total['fulfilled_audited_of_attempted']} ({total['audit_lifted']}/{total['audit_dropped']}) "
+            f"| {total['invalid_evidence']} | {total['executed']} | {total['unmeasured']} "
+            f"| {total['fulfilled_of_attempted']} "
+            f"| {total['fulfilled_audited_of_attempted']} ({total['audit_lifted']}/{total['audit_dropped']}"
+            f"/{total['audit_unmeasured']}/{total['audit_decided']}) "
+            f"| {total['fulfilled_audited_of_decided']} "
             f"| {total['fulfilled_of_executed']} |"
         )
     refused = result.get("refused_evidence") or {}
@@ -1415,7 +1556,7 @@ def render_markdown(result: Mapping[str, Any]) -> str:
             ensure_ascii=False,
         ),
         "",
-        "Per case (P fulfilled, p lifted by audit, x dropped by audit, F executed and failed, - not executed, ? invalid):",
+        "Per case (P fulfilled, p lifted by audit, x dropped by audit, F executed and failed, f failed once the audit decided it, u unmeasured, - not executed, ? invalid):",
     ]
     labels = list(result["per_case"])
     lines += ["| case | " + " | ".join(labels) + " |", "|---|" + "---|" * len(labels)]

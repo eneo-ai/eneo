@@ -150,10 +150,26 @@ OBSERVATION_INPUT_IDENTITY_SEMANTICS_VERSION = 4
 # v1: a verdict is stated per dimension (`verdict_states`), and a required fact,
 # an association or a reviewed edit on a run that delivered nothing is
 # `not_evaluated` instead of failed.
-SCORER_SEMANTICS_VERSION = 1
+# v2: a literal holds only as itself (`literal_appears`: never inside a longer
+# token, a number by value); a dimension passes only when its semantic grader
+# measured it (`PLAN_CONTENT_GRADER`, `OUTPUT_BINDING_GRADER`, the review-edit
+# location), so missing gold leaves it unmeasured.
+SCORER_SEMANTICS_VERSION = 2
 # The scoring modules beside the harness: what a verdict means is written in
 # their bytes too, so a receipt records them with the harness's own digest.
-_SCORER_MODULES = ("ai_builder_edit_expectation.py", "ai_builder_receipt.py")
+_SCORER_MODULES = (
+    "ai_builder_edit_expectation.py",
+    "ai_builder_oracle_arm.py",
+    "ai_builder_receipt.py",
+)
+# The semantic graders a dimension needs before it can pass (`_graded_state`).
+# Plan: each step carries the content written for it. Gold: the case's frozen
+# expert spec (the oracle arm, `ai_builder_oracle_arm.plan_step_content_check`);
+# a Builder-authored plan has none, so its plan is never a pass on name, count
+# and placement checks alone.
+PLAN_CONTENT_GRADER = "plan_step_content"
+# Output: no two required values exchanged places (`_value_binding_check`).
+OUTPUT_BINDING_GRADER = "output_value_binding"
 
 
 def _ensure_backend_src_importable() -> None:
@@ -200,6 +216,7 @@ from ai_builder_edit_expectation import (  # noqa: E402
     literal_appears,
     literal_checks,
     literal_list,
+    normalized_text,
     parse_edit_expectation,
     seed_view,
     snapshot_view,
@@ -2606,9 +2623,7 @@ def _output_expectation(value: object, *, owner: str) -> OutputExpectation:
     if output_kind is not None:
         _one_of(output_kind, _OUTPUT_KINDS, owner=f"{owner}.output_kind")
     required_facts = literal_list(
-        raw.get("required_facts"),
-        owner=f"{owner}.required_facts",
-        normalize=_normalized_output_text,
+        raw.get("required_facts"), owner=f"{owner}.required_facts"
     )
     if output_kind is None and not required_facts:
         raise ValueError(
@@ -2628,11 +2643,7 @@ def _output_expectation(value: object, *, owner: str) -> OutputExpectation:
     return OutputExpectation(
         output_kind=output_kind,
         required_facts=required_facts,
-        forbidden=literal_list(
-            raw.get("forbidden"),
-            owner=f"{owner}.forbidden",
-            normalize=_normalized_output_text,
-        ),
+        forbidden=literal_list(raw.get("forbidden"), owner=f"{owner}.forbidden"),
         associations=associations,
     )
 
@@ -6442,13 +6453,17 @@ def _leaf_kind(value: object) -> str | None:
 
 def _same_leaf_value(left: object, right: object) -> bool:
     """Exact, type-aware leaf equality: the same JSON type and value, numbers as
-    decimals. Unlike `_value_occurs`, which scans delivered text, a value that
-    merely occurs inside another leaf is a different leaf value."""
+    decimals, strings through the harness's one text normalizer (`normalized_text`,
+    as every literal check reads text). Unlike `_value_occurs`, which scans
+    delivered text, a value that merely occurs inside another leaf is a different
+    leaf value."""
 
     if _leaf_kind(left) != _leaf_kind(right):
         return False
     if _leaf_kind(left) == "number":
         return _decimal(left) == _decimal(right)
+    if isinstance(left, str) and isinstance(right, str):
+        return normalized_text(left) == normalized_text(right)
     return left == right
 
 
@@ -6515,8 +6530,8 @@ def _review_target_edit(
         "value_type": value_type,
         "old": old,
         "new": new,
-        # The broad scan the delivery check uses: an old value inside another
-        # reviewed leaf ("Ja" in "Januari") can reach delivery legitimately.
+        # The scan the delivery check uses: an old value another reviewed leaf
+        # also holds ("Alfa" in "Alfa Bygg AB") can reach delivery legitimately.
         "old_absent_outside_edit": not any(
             _value_occurs(old, str(value)) for leaf, value in leaves if leaf != path
         ),
@@ -6532,43 +6547,88 @@ def _json_number(value: Decimal) -> int | float:
     return int(value) if value == value.to_integral_value() else float(value)
 
 
-def _delivered_amounts(text: str) -> set[Decimal]:
-    """Each formatted amount in `text` as a decimal value.
-
-    A thousands group is joined only by a single (non-breaking) space; a comma
-    or period is a decimal or list separator, never a thousands join, so
-    "7 932,60 kr", "7932.6" and "13,60" read as 7932.6, 7932.6 and 13.6.
-    """
-
-    return {
-        _decimal(re.sub(r"\D", "", match.group(1)) + "." + (match.group(2) or "0"))
-        for match in re.finditer(
-            r"(\d{1,3}(?:[ \u00a0\u202f]\d{3})+|\d+)(?:[.,](\d+))?", text
-        )
-    }
-
-
 def _value_occurs(value: object, text: str) -> bool:
-    """Whether a reviewed string or number appears in `text` (numbers by value)."""
+    """Whether a reviewed string or number appears in `text` as itself, by the
+    one literal rule (`literal_appears`: a number by value, never inside a
+    longer token)."""
 
     if isinstance(value, bool):
         return False
-    if isinstance(value, (int, float)):
-        return _decimal(value) in _delivered_amounts(text)
-    return _normalized_output_text(str(value)) in _normalized_output_text(text)
+    return literal_appears(
+        normalized_text(_value_literal(value)), normalized_text(text)
+    )
+
+
+def _value_literal(value: object) -> str:
+    """A reviewed value as the literal it is delivered as: a number in plain
+    decimal notation, anything else as its string."""
+
+    return (
+        format(_decimal(value), "f") if isinstance(value, (int, float)) else str(value)
+    )
+
+
+def _review_edit_location(
+    evidence: Mapping[str, object], step_order: object, path: Sequence[object]
+) -> object | None:
+    """What the delivered output holds at the reviewed field, as a literal;
+    None when the output does not prove where that field is.
+
+    Only one shape proves it without inference: the reviewed step delivered
+    the run's structured result itself, and the edited path resolves in it to
+    a leaf (`structured_field`). Anything else has no location: free text
+    names no field; a template-filled document's step inputs are not where
+    the document rendered them, and a binding to a list or object above the
+    leaf binds more than the leaf; a structured result another step
+    delivered holds that step's fields, whatever their names.
+    """
+
+    run = evidence.get("run")
+    result = run.get("result") if isinstance(run, Mapping) else None
+    contract = evidence.get("run_contract")
+    final = contract.get("final_output") if isinstance(contract, Mapping) else None
+    if not (
+        isinstance(result, Mapping)
+        and result.get("kind") == "structured"
+        and isinstance(final, Mapping)
+        and isinstance(step_order, int)
+        and cast(Mapping[str, object], final).get("step_order") == step_order
+    ):
+        return None
+    leaf: object = cast(Mapping[str, object], result).get("value")
+    for key in path:
+        if isinstance(key, str) and isinstance(leaf, Mapping):
+            leaf = cast(Mapping[str, object], leaf).get(key)
+        elif (
+            isinstance(key, int)
+            and isinstance(leaf, list)
+            and 0 <= key < len(cast(list[object], leaf))
+        ):
+            leaf = cast(list[object], leaf)[key]
+        else:
+            return None
+    return leaf if _leaf_kind(leaf) in {"string", "number"} else None
 
 
 def _review_edit_delivery_check(evidence: Mapping[str, object] | None) -> JsonObject:
     """The review edit oracle's verdict: every edited target reached delivery.
 
-    The new string or number must appear in the delivered output, and the old
-    one must not where it is attributable: the run had no file inputs, its
-    sent input does not hold it, and no other leaf of the reviewed value holds
-    it (`old_absent_outside_edit`). Otherwise only the new value is scored.
-    Delivery is measured only where an edit was made: a target none of whose
-    leaves is named, a target that cannot be edited, and no checkpoint reached
-    are `not_evaluated`, never a failure, and an edit that did not arrive is
-    the one thing that fails.
+    Gold: the edit the harness made at the checkpoint (`edit_oracle`: the old
+    and the new value of one reviewed leaf). The new value must stand at the
+    reviewed field's location in the delivered output
+    (`_review_edit_location`: the reviewed step's own structured result, at
+    the edited leaf) and the old one nowhere. A new value delivered elsewhere
+    while the field holds something else fails; an output that does not prove
+    the field's location (free text, a template-filled document, another
+    step's result) is `unmeasured`, never a pass, so a new value in a footnote
+    or under another field never passes.
+    An old value still delivered fails the edit where it is attributable to the
+    edit: the run had no file inputs, its sent input does not hold it, and no
+    other leaf of the reviewed value holds it (`old_absent_outside_edit`).
+    Otherwise it may come from the run's inputs: `unmeasured`. Delivery is measured only
+    where an edit was made: a target none of whose leaves is named, a target
+    that cannot be edited, and no checkpoint reached are `not_evaluated`, and
+    an edit that did not arrive is the one thing that fails without both.
     """
 
     evidence = evidence or {}
@@ -6600,15 +6660,34 @@ def _review_edit_delivery_check(evidence: Mapping[str, object] | None) -> JsonOb
                 and not _value_occurs(old, sent_input)
             )
             new_delivered = _value_occurs(new, delivered)
-            old_delivered = (
-                _value_occurs(old, delivered) if attributable else "unattributable"
+            old_delivered = _value_occurs(old, delivered)
+            checkpoint = entry.get("checkpoint")
+            path = oracle.get("path")
+            held = _review_edit_location(
+                evidence,
+                cast(Mapping[str, object], checkpoint).get("step_order")
+                if isinstance(checkpoint, Mapping)
+                else None,
+                cast(list[object], path) if isinstance(path, list) else [],
             )
+            # Exact leaf gold: the harness replaced the whole leaf with `new`, so a value that merely
+            # contains `new` is a different leaf value.
+            at_location = None if held is None else _same_leaf_value(new, held)
             results.append(
                 {
                     **oracle,
                     "new_delivered": new_delivered,
+                    "location": None if held is None else "structured_field",
+                    "new_at_location": at_location,
                     "old_delivered": old_delivered,
-                    "passed": new_delivered and old_delivered is not True,
+                    "old_attributable": attributable,
+                    "passed": (
+                        False
+                        if not new_delivered or at_location is False
+                        else (False if attributable else None)
+                        if old_delivered
+                        else at_location
+                    ),
                 }
             )
     verdicts = [result["passed"] for result in results]
@@ -6620,14 +6699,23 @@ def _review_edit_delivery_check(evidence: Mapping[str, object] | None) -> JsonOb
         if not verdicts or None in verdicts
         else True
     )
+    undecided = any(
+        result.get("new") is not None and result["passed"] is None for result in results
+    )
     return {
         "name": "review_edit_reaches_delivery",
         "passed": passed,
-        **({"status": "not_evaluated"} if passed is None else {}),
+        # An edit was made but where it stands could not be told apart from an
+        # old value the inputs deliver: the grader could not decide.
+        **(
+            {"status": "unmeasured" if undecided else "not_evaluated"}
+            if passed is None
+            else {}
+        ),
         "actual": results or "no reviewed value was edited",
         "expected": (
-            "each edited review target reaches delivery; the old value is absent "
-            "when attributable"
+            "each edited review target reaches delivery and its old value is "
+            "nowhere in it"
         ),
     }
 
@@ -6892,10 +6980,6 @@ _FINAL_FILE_READERS: Mapping[str, Callable[[bytes], str]] = {
 }
 
 
-def _normalized_output_text(value: str) -> str:
-    return _collapse_whitespace(unicodedata.normalize("NFKC", value).casefold())
-
-
 def _delivered_text(runtime_evidence: Mapping[str, object]) -> str | None:
     """The run's delivered output as text: inline text, structured JSON or the file.
 
@@ -6937,9 +7021,11 @@ def _output_report(
 
     It holds the case's final-output runtime predicates, as
     `_runtime_evidence_checks` scored them, and its `expect` oracles: the
-    result must be the declared kind with readable content, and each literal
-    from the case's own fixtures must (or must not) appear in it after
-    normalization.
+    result must be the declared kind with readable content, each literal from
+    the case's own fixtures must (or must not) appear in it as itself
+    (`literal_appears`), and no two required values may have exchanged places
+    (`_value_binding_check`). `output_success` is True when every check
+    passed, False when one failed and None when a check could not decide.
     """
 
     if expect is None or runtime_evidence is None:
@@ -6958,7 +7044,7 @@ def _output_report(
         for value in (run.get("result"), contract.get("final_output"))
     )
     raw_text = _delivered_text(runtime_evidence)
-    text = _normalized_output_text(raw_text) if isinstance(raw_text, str) else ""
+    text = normalized_text(raw_text) if isinstance(raw_text, str) else ""
     outcome = record.get("outcome")
     failure_kinds = [
         str(failure["kind"]) for failure in _mapping_list(record.get("failures"))
@@ -7018,28 +7104,29 @@ def _output_report(
             raw_text if isinstance(raw_text, str) else "",
             required=expect.required_facts,
             forbidden=expect.forbidden,
-            normalize=_normalized_output_text,
+            normalize=normalized_text,
             delivered=isinstance(raw_text, str),
         )
     )
     lines = [
-        _normalized_output_text(line)
+        normalized_text(line)
         for line in (raw_text if isinstance(raw_text, str) else "").splitlines()
     ]
+    associations: list[JsonObject] = []
     for association in expect.associations:
         if not isinstance(raw_text, str):
-            checks.append(
+            associations.append(
                 unassessed_check(
                     "output_association", association.fact, fact=association.fact
                 )
             )
             continue
         fact, with_, not_with = (
-            _normalized_output_text(literal)
+            normalized_text(literal)
             for literal in (association.fact, association.with_, association.not_with)
         )
         holding = [line for line in lines if literal_appears(fact, line)]
-        checks.append(
+        associations.append(
             {
                 "name": "output_association",
                 "fact": association.fact,
@@ -7049,14 +7136,68 @@ def _output_report(
                 f"must hold {association.with_!r} and none {association.not_with!r}",
             }
         )
+    checks.extend(associations)
+    checks.append(
+        _value_binding_check(expect, associations, delivered=isinstance(raw_text, str))
+    )
     checks.extend(
         check
         for check in runtime_checks
         if check.get("name") in _FINAL_OUTPUT_RUNTIME_CHECKS
     )
+    state = _checks_state(checks)
     return {
         "output_checks": checks,
-        "output_success": all(check["passed"] is True for check in checks),
+        "output_success": None if state == "unmeasured" else state == "pass",
+    }
+
+
+def _value_binding_check(
+    expect: OutputExpectation,
+    associations: Sequence[Mapping[str, Any]],
+    *,
+    delivered: bool,
+) -> JsonObject:
+    """Grader: no two required values of the output exchanged places.
+
+    Every required literal may be present while two of them stand at each
+    other's place (a temperature under the other room's name). Gold: the case's
+    associations (`execution.expect.associations`), which bind a fact to what
+    its line must and must not hold. Applies when the case requires two or
+    more facts; it is measured when every pair of them has a bound member, so
+    no swap escapes an association, and it then passes only when every
+    association passed. Otherwise a swap cannot be told from the right output:
+    `unmeasured`, never a pass. Associations need text output, so a structured
+    or document output with two or more facts has no binding gold yet.
+    """
+
+    facts = expect.required_facts
+    if len(facts) < 2:
+        return {
+            "name": OUTPUT_BINDING_GRADER,
+            "passed": True,
+            "reason": "fewer than two required facts: no value can take another's place",
+        }
+    if not delivered:
+        return unassessed_check(OUTPUT_BINDING_GRADER, ", ".join(facts))
+    bound = {normalized_text(association.fact) for association in expect.associations}
+    unbound = [fact for fact in facts if normalized_text(fact) not in bound]
+    if len(unbound) > 1:
+        return {
+            "name": OUTPUT_BINDING_GRADER,
+            "passed": None,
+            "status": "unmeasured",
+            "unbound_facts": unbound,
+            "reason": f"no binding gold for {', '.join(repr(f) for f in unbound)}: "
+            "two of them could exchange places with every literal still present",
+        }
+    verdicts = [check["passed"] for check in associations]
+    passed = False if False in verdicts else None if None in verdicts else True
+    return {
+        "name": OUTPUT_BINDING_GRADER,
+        "passed": passed,
+        **({"status": "unmeasured"} if passed is None else {}),
+        "reason": "the associations bind every pair of required facts",
     }
 
 
@@ -9297,6 +9438,17 @@ def _checks_state(checks: Sequence[Mapping[str, Any]]) -> str:
     return "unmeasured"
 
 
+def _graded_state(checks: Sequence[Mapping[str, Any]], *, grader: str) -> str:
+    """`_checks_state`, but a dimension whose semantic grader did not run is
+    never a pass: its other checks passing measures names, counts and
+    formats, not what the dimension means."""
+
+    state = _checks_state(checks)
+    if state == "pass" and not any(check.get("name") == grader for check in checks):
+        return "unmeasured"
+    return state
+
+
 def _verdict_states(
     bundle: Mapping[str, Any], *, observation_status: str
 ) -> JsonObject:
@@ -9305,9 +9457,12 @@ def _verdict_states(
     Every state is pass, fail or unmeasured; a dimension the case does not ask
     for is `not_required`. A run that delivered nothing, or that the harness
     stopped before any edit, leaves what needs delivery unmeasured, so a case
-    that requires delivery cannot pass without evidence of it. The case is
-    failed by any failed dimension and passed only when every required one
-    passed.
+    that requires delivery cannot pass without evidence of it. A created plan
+    and an output pass only when their semantic grader (`PLAN_CONTENT_GRADER`,
+    `OUTPUT_BINDING_GRADER`) measured them; missing gold leaves them
+    unmeasured however many other checks pass. An edit's plan is its edit
+    gold. The case is failed by any failed dimension and passed only when
+    every required one passed.
     """
 
     def mapping(value: object) -> Mapping[str, Any]:
@@ -9343,7 +9498,10 @@ def _verdict_states(
         # plan for the generic checks to find.
         plan = _checks_state(structural)
     else:
-        plan = _checks_state([c for c in checks if c.get("name") not in delivery_names])
+        plan = _graded_state(
+            [c for c in checks if c.get("name") not in delivery_names],
+            grader=PLAN_CONTENT_GRADER,
+        )
     if not (executes and review_policy.get("mode") == "edit"):
         review_edit = NOT_REQUIRED_STATE
     else:
@@ -9359,7 +9517,7 @@ def _verdict_states(
             *(str(c.get("name")) for c in _mapping_list(report.get("output_checks"))),
             "review_edit_reaches_delivery",
         }
-        output = _checks_state(
+        output = _graded_state(
             [
                 *_mapping_list(report.get("output_checks")),
                 *(
@@ -9368,7 +9526,8 @@ def _verdict_states(
                     if c.get("name") in delivery_names and c.get("name") not in judged
                 ),
                 *(c for c in edit_checks if c.get("category") == "execution"),
-            ]
+            ],
+            grader=OUTPUT_BINDING_GRADER,
         )
     states = {"plan": plan, "review_edit": review_edit, "output": output}
     if observation_status == "acquisition_failure":
@@ -9467,6 +9626,11 @@ def _observation_projection(bundle: JsonObject) -> JsonObject:
         outcome_class = "unclassified"
         observation_status = "completed"
         expectation_verdict = "fail" if raw_failed_checks else "pass"
+    verdict_states = _verdict_states(bundle, observation_status=observation_status)
+    if expectation_verdict == "pass" and verdict_states["case"] == "unmeasured":
+        # Every check passed, but a dimension's grader could not decide it:
+        # the case was not measured, so it is no conformance pass.
+        expectation_verdict = "not_evaluated"
     failed_checks = raw_failed_checks if expectation_verdict in {"pass", "fail"} else []
     report = cast(Mapping[str, Any], report if isinstance(report, Mapping) else {})
     output_success = report.get("output_success")
@@ -9535,9 +9699,7 @@ def _observation_projection(bundle: JsonObject) -> JsonObject:
             if "output_checks" in report
             else None
         ),
-        "verdict_states": _verdict_states(
-            bundle, observation_status=observation_status
-        ),
+        "verdict_states": verdict_states,
         "runtime_cost": _runtime_cost(bundle),
         "identity_failed_check_count": len(failed_identity_checks),
         "identity_failed_checks": failed_identity_checks,
@@ -9997,6 +10159,9 @@ def _reanalyze_bundles(
                     "reanalyzer_harness_sha256": hashlib.sha256(
                         Path(__file__).read_bytes()
                     ).hexdigest(),
+                    # The scorer that wrote these verdicts, as a receipt names it.
+                    "scorer_semantics_version": SCORER_SEMANTICS_VERSION,
+                    "scorer_sha256": _scorer_sha256(),
                     "expectations_sha256": _canonical_sha256(expected),
                 },
                 "plan_summary": summary,
@@ -10036,16 +10201,18 @@ _CALIBRATION_EVIDENCE = ("execution", "run", "run_contract", "final_artifact")
 
 def calibration_run_passed(
     fixture: Mapping[str, Any], evidence: Mapping[str, Any]
-) -> bool:
+) -> bool | None:
     """One calibration run, judged from its kept evidence by the output owner
-    against the seed's own calibration block."""
+    against the seed's own calibration block: True or False, or None when the
+    output owner could not decide it (unmeasured, never a failure)."""
 
     execution = _case_execution(
         fixture["calibration"], manifest=_fixture_manifest(), owner="calibration"
     )
     assert execution is not None
     report = _output_report(execution.expect, evidence, runtime_checks=[])
-    return report.get("output_success") is True
+    success = report.get("output_success")
+    return success if isinstance(success, bool) else None
 
 
 def _run_seed_calibration(
@@ -10082,7 +10249,7 @@ def _run_seed_calibration(
         "space_id": args.space_id,
         "seeds": {},
     }
-    passed = True
+    verdicts: list[bool | None] = []
     for name, edit in sorted(seeds.items()):
         if "calibration" not in edit.fixture:
             raise ValueError(f"{name} has no calibration block.")
@@ -10121,14 +10288,21 @@ def _run_seed_calibration(
                     "runtime_model_id": seeded.runtime_model_id,
                 }
             )
-        passed = passed and all(
+        verdicts += [
             calibration_run_passed(edit.fixture, run["evidence"]) for run in runs
-        )
+        ]
         record["seeds"][name] = {"sha256": edit.seed_flow_sha256, "runs": runs}
     path = output_dir / "seed-calibration.json"
     _write_json_exclusive(path, record)
-    print(f"seed calibration {'passed' if passed else 'FAILED'}: {path}")
-    return 0 if passed else 1
+    state = (
+        "FAILED"
+        if False in verdicts
+        else "UNMEASURED (no binding gold)"
+        if None in verdicts
+        else "passed"
+    )
+    print(f"seed calibration {state}: {path}")
+    return 0 if state == "passed" else 1
 
 
 def _validated_reanalysis_bundle(path: Path, value: object) -> JsonObject:
@@ -12016,6 +12190,40 @@ def _final_output_scoring(
     )
     return runtime_checks, _output_report(
         output_expectation, runtime_evidence, runtime_checks=runtime_checks
+    )
+
+
+def _rescored_output_state(
+    bundle: Mapping[str, Any],
+    output_expectation: OutputExpectation,
+    *,
+    observation_status: str,
+) -> str:
+    """A stored observation's output state with another output expectation.
+
+    `_final_output_scoring` recomputes the output report on the stored runtime
+    evidence and `_verdict_states` reads it as it read the stored report, so
+    every rule of the output dimension holds alike: a run the harness stopped
+    before any edit stays unmeasured, whatever the expectation says.
+    """
+
+    case = bundle.get("case")
+    expected = case.get("expected") if isinstance(case, Mapping) else None
+    _, output_report = _final_output_scoring(
+        cast(Mapping[str, Any], expected if isinstance(expected, Mapping) else {}),
+        bundle.get("runtime_evidence"),
+        output_expectation,
+    )
+    report = bundle.get("quality_report")
+    rescored = {
+        **bundle,
+        "quality_report": {
+            **(cast(Mapping[str, Any], report) if isinstance(report, Mapping) else {}),
+            **output_report,
+        },
+    }
+    return str(
+        _verdict_states(rescored, observation_status=observation_status)["output"]
     )
 
 

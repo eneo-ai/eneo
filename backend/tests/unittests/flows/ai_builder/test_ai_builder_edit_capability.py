@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import copy
 import importlib
 import json
 import sys
@@ -35,6 +36,32 @@ def _run(text: str, **extra: Any) -> dict[str, Any]:
 
 
 PASSING_RUN = _run("Ärende BAB-2026-0588: 57300 kr, beslut senast 2027-01-15.")
+_SEED_LOADER = harness._load_seed_flow_fixture
+
+
+def _bound_seed(name: str) -> dict[str, Any]:
+    """The seed with binding gold in its calibration block: each value tied to
+    what its line holds, so a calibration output can pass."""
+
+    fixture = copy.deepcopy(_SEED_LOADER(name))
+    if name != "edit_seed_g.json":
+        return fixture
+    fixture["calibration"]["expect"]["associations"] = [
+        {"fact": "57300", "with": "kr", "not_with": "ej beviljat"},
+        {"fact": "2027-01-15", "with": "senast", "not_with": "ej beviljat"},
+    ]
+    return fixture
+
+
+@pytest.fixture(autouse=True)
+def _calibration_with_binding_gold(monkeypatch: pytest.MonkeyPatch) -> None:
+    # Seed G's checked-in calibration names three facts and no binding gold,
+    # so its runs are unmeasured (`test_a_seed_without_binding_gold_...`); the
+    # gate's own rules are tested on a seed whose calibration can pass.
+    # The gate imports the harness by name when it runs; patch that module.
+    loaded = importlib.import_module("ai_builder_api_battle_test")
+    monkeypatch.setattr(loaded, "_load_seed_flow_fixture", _bound_seed)
+
 
 MANIFEST = {
     "cases_file": "ai_builder_api_edit_cases.json",
@@ -113,6 +140,26 @@ def test_a_complete_calibrated_passing_corpus_passes_structurally_but_claims_not
     assert report["structural_verdict"] == "pass", report
     assert report["semantic"] == {"tone": "unmeasured"}
     assert report["overall_capability_claim"] is False
+
+
+def test_a_seed_without_binding_gold_calibrates_nothing(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Every literal present, but nothing says which value stands where: an
+    unmeasured calibration run is no passing one and no failed one, so the gate
+    is inconclusive and says why."""
+
+    loaded = importlib.import_module("ai_builder_api_battle_test")
+    monkeypatch.setattr(loaded, "_load_seed_flow_fixture", _SEED_LOADER)
+
+    report = _report()
+
+    assert report["structural_verdict"] == "inconclusive"
+    assert (
+        "seed edit_seed_g.json calibration is unmeasured (no binding gold)"
+        in report["inconclusive"]
+    )
+    assert not any("no passing calibration" in r for r in report["inconclusive"])
 
 
 @pytest.mark.parametrize(

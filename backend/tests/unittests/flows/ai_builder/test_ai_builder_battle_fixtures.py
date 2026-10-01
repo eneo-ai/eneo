@@ -183,16 +183,15 @@ def test_every_audio_fact_is_in_the_script_and_in_the_recording_s_transcript() -
         == hashlib.sha256(recording.read_bytes()).hexdigest()
     )
     script = (FIXTURE_DIR / "mote_uppfoljning_manus.txt").read_text(encoding="utf-8")
-    heard = harness._normalized_output_text(transcript["text"])
-    written = harness._normalized_output_text(script)
-    # Normalized as the harness matches a fact against the delivered text.
+    heard = harness.normalized_text(transcript["text"])
+    written = harness.normalized_text(script)
+    # Matched as the harness matches a fact against the delivered text.
     facts = [
-        harness._normalized_output_text(fact)
-        for fact in case.execution.expect.required_facts
+        harness.normalized_text(fact) for fact in case.execution.expect.required_facts
     ]
     assert facts
-    assert [fact for fact in facts if fact not in written] == []
-    assert [fact for fact in facts if fact not in heard] == []
+    assert [f for f in facts if not harness.literal_appears(f, written)] == []
+    assert [f for f in facts if not harness.literal_appears(f, heard)] == []
 
 
 def test_long_context_cohort_covers_large_municipal_format_journeys() -> None:

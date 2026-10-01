@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import argparse
 import asyncio
+import copy
 import dataclasses
 import hashlib
 import importlib.util
@@ -735,6 +736,35 @@ def test_the_default_persistence_is_the_lifespans_own_start_and_stop(
 # -------------------------------------------------- one observation, end to end
 
 
+def _definition_snapshot(spec: FlowDraftSpecCore) -> dict[str, Any]:
+    return {
+        "steps": [
+            {
+                "step_order": order,
+                "user_description": step.name,
+                "input_source": step.input_source.value,
+                "input_type": step.input_type.value,
+                "output_mode": step.output_mode.value,
+                "output_type": step.output_type.value,
+                "review_policy": None,
+                "input_bindings": None,
+                "assistant_snapshot": {
+                    "instructions": step.assistant_spec.instructions
+                },
+            }
+            for order, step in enumerate(spec.steps, start=1)
+        ],
+        "metadata_json": {"form_schema": {"fields": _form_fields(spec)}},
+    }
+
+
+def _form_fields(spec: FlowDraftSpecCore) -> list[dict[str, Any]]:
+    return [
+        {"name": f.name, "type": f.type, "label": f.label, "required": f.required}
+        for f in spec.form_fields or []
+    ]
+
+
 class _Stack:
     """The API the harness talks to, with a fake provider behind the run.
 
@@ -747,6 +777,9 @@ class _Stack:
         self.input_text = input_text
         self.calls: list[tuple[str, str]] = []
         self.deleted: list[str] = []
+        # The published definition the run executed, as the evidence endpoint
+        # returns it.
+        self.executed = _definition_snapshot(spec)
 
     def request_json(
         self, *, method: str, path: str, payload: Any = None, **_: Any
@@ -768,13 +801,7 @@ class _Stack:
                     }
                     for order, step in enumerate(self.spec.steps, start=1)
                 ],
-                "metadata_json": {
-                    "form_schema": {
-                        "fields": [
-                            {"name": f.name} for f in self.spec.form_fields or []
-                        ]
-                    }
-                },
+                "metadata_json": {"form_schema": {"fields": _form_fields(self.spec)}},
             }
         if path.startswith("/flows/flow-1/assistants/"):
             order = int(path.rstrip("/").rsplit("-", 1)[1])
@@ -801,7 +828,11 @@ class _Stack:
                 },
             }
         if path == "/flows/flow-1/runs/run-1/evidence/":
-            return {"run": {"id": "run-1", "status": "completed"}, "step_results": []}
+            return {
+                "run": {"id": "run-1", "status": "completed"},
+                "step_results": [],
+                "definition_snapshot": self.executed,
+            }
         raise AssertionError((method, path))
 
     def request_no_content(self, *, method: str, path: str, **_: Any) -> None:
@@ -851,6 +882,7 @@ def _run(
     *,
     spec: FlowDraftSpecCore,
     refusal: Exception | None = None,
+    executed: dict[str, Any] | None = None,
 ) -> tuple[dict[str, Any], _Stack, _Materializer]:
     specs = tmp_path / "specs"
     specs.mkdir()
@@ -858,6 +890,8 @@ def _run(
     cases_file = tmp_path / "cases.json"
     cases_file.write_text("{}")
     stack = _Stack(spec, input_text="Ärende om bygglov.")
+    if executed is not None:
+        stack.executed = executed
     materializer = _Materializer(arm, refusal=refusal)
     monkeypatch.setattr(harness, "_request_json", stack.request_json)
     monkeypatch.setattr(harness, "_request_no_content", stack.request_no_content)
@@ -1034,6 +1068,225 @@ def test_a_persisted_flow_that_differs_from_the_spec_is_invalid_evidence(
     assert [c["name"] for c in report["failed_checks"]] == [
         "oracle_persisted_flow_matches_spec"
     ]
+
+
+def _swapped_instructions(spec: FlowDraftSpecCore) -> dict[str, Any]:
+    executed = _definition_snapshot(spec)
+    first, last = (
+        s["assistant_snapshot"] for s in (executed["steps"][0], executed["steps"][-1])
+    )
+    first["instructions"], last["instructions"] = (
+        last["instructions"],
+        first["instructions"],
+    )
+    return executed
+
+
+def test_steps_that_ran_with_each_others_instructions_fail_the_plan(
+    harness: ModuleType,
+    arm: ModuleType,
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    """The platform accepted the gold spec, but the flow the run executed carries
+    the first and last step's instructions swapped: its names and count match."""
+
+    spec = _spec(final_instructions=f"Avsluta med ärendenummer {REQUIRED_FACT}.")
+
+    bundle, _, _ = _run(
+        harness,
+        arm,
+        monkeypatch,
+        tmp_path,
+        spec=spec,
+        executed=_swapped_instructions(spec),
+    )
+
+    [grader] = [
+        c
+        for c in bundle["quality_report"]["checks"]
+        if c["name"] == harness.PLAN_CONTENT_GRADER
+    ]
+    assert grader["passed"] is False
+    assert grader["actual"] == ["step 1 instructions", "step 2 instructions"]
+    assert grader["gold"]["spec_file"] == "case-1.spec.json"
+    assert bundle["observation"]["verdict_states"]["plan"] == "fail"
+    assert bundle["observation"]["verdict_states"]["case"] == "fail"
+
+
+def test_the_plan_grader_reads_the_executed_flow_and_nothing_else(
+    harness: ModuleType, arm: ModuleType, tmp_path: Path
+) -> None:
+    spec = _spec(final_instructions="Skriv beslutet.")
+    gold = arm.load_gold_spec(_freeze(tmp_path, "case-1", spec), "case-1")
+
+    right = arm.plan_step_content_check(
+        harness, gold, {"definition_snapshot": _definition_snapshot(spec)}
+    )
+    renamed = _definition_snapshot(spec)
+    renamed["steps"][0]["user_description"] = "Ett annat namn"
+    no_run = arm.plan_step_content_check(harness, gold, None)
+
+    assert right["passed"] is True
+    assert arm.plan_step_content_check(harness, gold, {"definition_snapshot": renamed})[
+        "actual"
+    ] == ["step 1 name"]
+    assert (no_run["passed"], no_run["status"]) == (None, "unmeasured")
+
+
+def _bound_spec() -> FlowDraftSpecCore:
+    """`_spec` whose last step reads the form field and the first step's output
+    through its bindings, written with plan step refs as an author writes them."""
+
+    spec = _spec(final_instructions="Skriv beslutet.")
+    spec.steps[1].input_bindings = {
+        "question": "Dnr {{ flow_input.diarienummer }}: {{step_a.output.text}}"
+    }
+    spec.form_fields = [
+        FormFieldSpec(name="diarienummer", type="text", label="Dnr", required=True),
+        FormFieldSpec(name="beslutsdatum", type="date", label="Datum"),
+    ]
+    return spec
+
+
+def _bound_executed(spec: FlowDraftSpecCore) -> dict[str, Any]:
+    """The definition the platform stores for `_bound_spec`: the step ref is
+    compiled to the runtime step it names."""
+
+    executed = _definition_snapshot(spec)
+    executed["steps"][1]["input_bindings"] = {
+        "question": "Dnr {{ flow_input.diarienummer }}: {{ step_1.output.text }}"
+    }
+    return executed
+
+
+def _rebind(question: str) -> Callable[[dict[str, Any]], None]:
+    def change(executed: dict[str, Any]) -> None:
+        executed["steps"][1]["input_bindings"] = {"question": question}
+
+    return change
+
+
+def _drop_binding(executed: dict[str, Any]) -> None:
+    executed["steps"][1]["input_bindings"] = None
+
+
+def _move_binding(executed: dict[str, Any]) -> None:
+    first, last = executed["steps"]
+    first["input_bindings"], last["input_bindings"] = last["input_bindings"], None
+
+
+def _form_field(key: str, value: object) -> Callable[[dict[str, Any]], None]:
+    def change(executed: dict[str, Any]) -> None:
+        executed["metadata_json"]["form_schema"]["fields"][0][key] = value
+
+    return change
+
+
+@pytest.mark.parametrize(
+    ("change", "mismatch"),
+    [
+        (
+            _rebind("Dnr {{ flow_input.diarienummer }}: {{ step_2.output.text }}"),
+            "step 2 input_bindings",
+        ),
+        (
+            _rebind("Dnr {{ flow_input.beslutsdatum }}: {{ step_1.output.text }}"),
+            "step 2 input_bindings",
+        ),
+        (_drop_binding, "step 2 input_bindings"),
+        (_move_binding, "step 1 input_bindings"),
+        (_form_field("type", "number"), "form fields"),
+        (_form_field("required", False), "form fields"),
+    ],
+)
+def test_a_plan_whose_bindings_or_form_differ_from_the_gold_fails_the_plan(
+    harness: ModuleType,
+    arm: ModuleType,
+    tmp_path: Path,
+    change: Callable[[dict[str, Any]], None],
+    mismatch: str,
+) -> None:
+    """Every name, step and instruction as the gold spec, but a binding reads
+    another step or field, is dropped or moved, or a form field changed type or
+    requiredness: the flow does not do what the expert wrote."""
+
+    spec = _bound_spec()
+    gold = arm.load_gold_spec(_freeze(tmp_path, "case-1", spec), "case-1")
+    executed = _bound_executed(spec)
+    changed = copy.deepcopy(executed)
+    change(changed)
+
+    right = arm.plan_step_content_check(
+        harness, gold, {"definition_snapshot": executed}
+    )
+    wrong = arm.plan_step_content_check(harness, gold, {"definition_snapshot": changed})
+
+    assert right["passed"] is True
+    assert wrong["passed"] is False
+    assert any(item.startswith(mismatch) for item in wrong["actual"])
+
+
+def _template_bound_spec() -> FlowDraftSpecCore:
+    """`_bound_spec` whose last step fills a DOCX template: one placeholder reads
+    the first step's output by its plan step ref, the other a form field."""
+
+    spec = _bound_spec()
+    spec.steps[1].output_mode = OutputMode.TEMPLATE_FILL
+    spec.steps[1].output_type = OutputType.DOCX
+    spec.steps[1].output_config = {
+        "bindings": {
+            "leverantor": "{{step_a.output.text}}",
+            "kontaktperson": "{{ flow_input.diarienummer }}",
+        }
+    }
+    return spec
+
+
+def _template_bound_executed(spec: FlowDraftSpecCore) -> dict[str, Any]:
+    """The stored definition of `_template_bound_spec`: the step ref compiled to
+    the runtime step it names, beside what the platform adds to the config."""
+
+    executed = _bound_executed(spec)
+    executed["steps"][1]["output_config"] = {
+        "bindings": {
+            "leverantor": "{{ step_1.output.text }}",
+            "kontaktperson": "{{ flow_input.diarienummer }}",
+        },
+        "placeholders": ["leverantor", "kontaktperson"],
+        "template_asset_id": "asset-1",
+        "template_checksum": "c" * 64,
+    }
+    return executed
+
+
+def test_a_template_step_whose_placeholders_read_each_others_values_fails_the_plan(
+    harness: ModuleType, arm: ModuleType, tmp_path: Path
+) -> None:
+    """Every name, step, instruction and input binding as the gold spec, but
+    the DOCX placeholders for the supplier and the contact person are bound to
+    each other's value: the document states each in the other's place."""
+
+    spec = _template_bound_spec()
+    gold = arm.load_gold_spec(_freeze(tmp_path, "case-1", spec), "case-1")
+    executed = _template_bound_executed(spec)
+    swapped = copy.deepcopy(executed)
+    bindings = swapped["steps"][1]["output_config"]["bindings"]
+    bindings["leverantor"], bindings["kontaktperson"] = (
+        bindings["kontaktperson"],
+        bindings["leverantor"],
+    )
+
+    right = arm.plan_step_content_check(
+        harness, gold, {"definition_snapshot": executed}
+    )
+    wrong = arm.plan_step_content_check(harness, gold, {"definition_snapshot": swapped})
+
+    assert right["passed"] is True
+    assert (wrong["passed"], wrong["actual"]) == (
+        False,
+        ["step 2 output_config.bindings"],
+    )
 
 
 def test_the_arms_output_verdict_is_the_quality_reports_on_the_same_evidence(

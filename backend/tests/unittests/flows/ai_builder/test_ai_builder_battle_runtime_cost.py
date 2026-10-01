@@ -8,8 +8,10 @@ sealed and projected as a suite result. Only the evidence page varies.
 from __future__ import annotations
 
 import copy
+import importlib
 import json
 from collections.abc import Callable
+from dataclasses import replace
 from pathlib import Path
 from types import ModuleType
 from typing import Any
@@ -115,11 +117,21 @@ class _Observer:
         edit: Callable[[dict[str, Any]], None] | None = None,
         required_facts: tuple[str, ...] = _FACTS,
         forbidden: tuple[str, ...] = (),
+        bound: bool = True,
     ) -> dict[str, Any]:
         harness = self.harness
         execution = _execution(
             harness, required_facts=required_facts, forbidden=forbidden
         )
+        if bound and len(required_facts) > 1:
+            # Binding gold for the facts, so a right output is a measured pass
+            # (without it two required values leave the output unmeasured).
+            bound = harness.OutputAssociation(
+                fact=required_facts[-1], with_=required_facts[0], not_with="Timrå"
+            )
+            execution = replace(
+                execution, expect=replace(execution.expect, associations=(bound,))
+            )
         case = harness.BattleCase(
             case_id=case_id,
             prompt="Build and run the Flow.",
@@ -420,8 +432,245 @@ def test_a_failed_delivery_fails_where_the_parent_delivered(
 
     assert _failures(report) == {
         "case-a": [
-            "current r1 did not deliver successfully; every baseline observation did"
+            "current r1 did not deliver successfully; no baseline observation "
+            "failed a decided output check"
         ]
+    }
+
+
+def _inconclusive(report: dict[str, Any]) -> dict[str, list[str]]:
+    found = report["runtime_output_inconclusive_cases"]
+    assert isinstance(found, dict)
+    return found
+
+
+def test_a_decided_failure_regresses_against_an_unmeasured_baseline(
+    monkeypatch: MonkeyPatch, tmp_path: Path
+) -> None:
+    """The baseline had no binding gold (its output is unmeasured), the current
+    run failed a decided check: nothing the baseline decided failed, so the
+    current failure is a regression, not hidden by the baseline's gap."""
+
+    observer = _Observer(monkeypatch, tmp_path)
+    parent = [observer.row(bound=False)]
+    candidate = [observer.row(bound=False, run_status="failed")]
+    assert parent[0]["output_success"] is None
+    assert candidate[0]["output_success"] is False
+
+    report = _compare(tmp_path, parent, candidate)
+
+    assert _failures(report) == {
+        "case-a": [
+            "current r1 did not deliver successfully; no baseline observation "
+            "failed a decided output check"
+        ]
+    }
+
+
+def test_an_unmeasured_output_is_inconclusive_never_a_pass_or_a_fail(
+    monkeypatch: MonkeyPatch, tmp_path: Path
+) -> None:
+    observer = _Observer(monkeypatch, tmp_path)
+    unmeasured = [observer.row(bound=False)]
+    passed = [observer.row()]
+    assert unmeasured[0]["output_success"] is None
+
+    both = _compare(tmp_path, unmeasured, unmeasured)
+    lost = _compare(tmp_path, passed, unmeasured)
+
+    assert _failures(both) == {} and _failures(lost) == {}
+    assert _inconclusive(both) == {
+        "case-a": ["current r1 output is unmeasured; baseline unmeasured"]
+    }
+    assert _inconclusive(lost) == {
+        "case-a": ["current r1 output is unmeasured; baseline pass"]
+    }
+    assert (
+        "- case-a (inconclusive): current r1 output is unmeasured; baseline pass"
+        in (
+            _compare_module()._render_markdown(lost, only_changed=False)  # pyright: ignore[reportPrivateUsage]
+        )
+    )
+
+
+def _stopped(row: dict[str, Any]) -> dict[str, Any]:
+    """The row of a run the harness stopped (a review target it could not
+    edit): the scorer's canonical output state is unmeasured, while the legacy
+    `output_success` flag says False."""
+
+    states = {**row["verdict_states"], "output": "unmeasured"}
+    _compare_module()  # puts the scripts directory on the import path
+    states["case"] = importlib.import_module("ai_builder_receipt").case_state(states)
+    return {**row, "verdict_states": states, "output_success": False}
+
+
+def test_the_gate_reads_the_canonical_output_state_never_the_legacy_flag(
+    monkeypatch: MonkeyPatch, tmp_path: Path
+) -> None:
+    observer = _Observer(monkeypatch, tmp_path)
+    passed = [observer.row()]
+    stopped = [_stopped(observer.row())]
+    failed = [observer.row(run_status="failed")]
+    assert failed[0]["verdict_states"]["output"] == "fail"
+
+    # A harness-stopped current run was not measured: no regression.
+    after_pass = _compare(tmp_path, passed, stopped)
+    # A harness-stopped baseline failed nothing it decided: a decided failure
+    # after it regresses.
+    after_stop = _compare(tmp_path, stopped, failed)
+
+    assert _failures(after_pass) == {}
+    assert _inconclusive(after_pass) == {
+        "case-a": ["current r1 output is unmeasured; baseline pass"]
+    }
+    # The executed-output summary reads the same state: unmeasured, not failed.
+    summary = after_pass["executed_output"]["current"]
+    assert (summary["failed_observations"], summary["unmeasured_observations"]) == (
+        [],
+        ["case-a r1"],
+    )
+    assert _failures(after_stop) == {
+        "case-a": [
+            "current r1 did not deliver successfully; no baseline observation "
+            "failed a decided output check"
+        ]
+    }
+
+
+def _undecided(fact: str) -> Callable[[dict[str, Any]], dict[str, Any]]:
+    def change(row: dict[str, Any]) -> dict[str, Any]:
+        return {
+            **row,
+            "output_required_facts": {**row["output_required_facts"], fact: None},
+        }
+
+    return change
+
+
+@mark.parametrize(
+    ("current", "failures", "inconclusive"),
+    [
+        # Every current run left the fact undecided: it may still be there.
+        (
+            (None, None, None),
+            [],
+            [
+                "no current run decides required literal(s) a baseline run "
+                "delivered: ['Njurunda']"
+            ],
+        ),
+        (
+            (False, None, False),
+            [],
+            [
+                "no current run decides required literal(s) a baseline run "
+                "delivered: ['Njurunda']"
+            ],
+        ),
+        # Every current run decided it absent: it vanished.
+        (
+            (False, False, False),
+            [
+                "no current run delivers required literal(s) a baseline run "
+                "delivered: ['Njurunda']"
+            ],
+            [],
+        ),
+    ],
+    ids=["all_undecided", "absent_or_undecided", "all_absent"],
+)
+def test_an_intermittent_literal_vanishes_only_when_every_current_run_decided_it(
+    monkeypatch: MonkeyPatch,
+    tmp_path: Path,
+    current: tuple[bool | None, ...],
+    failures: list[str],
+    inconclusive: list[str],
+) -> None:
+    observer = _Observer(monkeypatch, tmp_path)
+
+    def rep(repetition: int, holds: bool | None) -> dict[str, Any]:
+        # A pdf-declared text never delivers successfully, so only the
+        # literals bind.
+        row = observer.row(
+            repetition=repetition,
+            declared_output="pdf",
+            text=_FULL_TEXT if holds else "Förskolan i Kvissleby avvecklas.",
+        )
+        return _undecided("Njurunda")(row) if holds is None else row
+
+    parent = [rep(1, True), rep(2, True), rep(3, False)]
+
+    report = _compare(
+        tmp_path, parent, [rep(r, holds) for r, holds in enumerate(current, start=1)]
+    )
+
+    assert _failures(report) == ({"case-a": failures} if failures else {})
+    assert _inconclusive(report) == ({"case-a": inconclusive} if inconclusive else {})
+
+
+def _main_exit(monkeypatch: MonkeyPatch, tmp_path: Path) -> object:
+    monkeypatch.setattr(
+        "sys.argv",
+        [
+            "compare",
+            "compare",
+            str(tmp_path / "base.json"),
+            str(tmp_path / "cur.json"),
+            "--runtime-call-allowance",
+            "1",
+        ],
+    )
+    try:
+        _compare_module().main()
+    except SystemExit as exited:
+        return exited.code
+    return 0
+
+
+def test_a_gate_with_only_inconclusive_cases_exits_with_its_own_status(
+    monkeypatch: MonkeyPatch, tmp_path: Path
+) -> None:
+    """Exit 1 is a measured regression; exit 3 says the requested gate could
+    not decide a case and found nothing that regressed."""
+
+    observer = _Observer(monkeypatch, tmp_path)
+    passed = [observer.row()]
+    unmeasured = [observer.row(bound=False)]
+    module = _compare_module()
+
+    _compare(tmp_path, passed, unmeasured)
+    assert _main_exit(monkeypatch, tmp_path) == module.INCONCLUSIVE_EXIT == 3
+    _compare(tmp_path, passed, [observer.row(run_status="failed")])
+    assert _main_exit(monkeypatch, tmp_path) == module.REGRESSION_EXIT == 1
+    # A regression beside an inconclusive case is a regression.
+    _compare(
+        tmp_path,
+        [*passed, observer.row(case_id="case-b")],
+        [*unmeasured, observer.row(case_id="case-b", run_status="failed")],
+    )
+    assert _main_exit(monkeypatch, tmp_path) == 1
+    _compare(tmp_path, passed, passed)
+    assert _main_exit(monkeypatch, tmp_path) == 0
+
+
+def test_a_newly_executable_case_whose_output_is_unmeasured_is_inconclusive(
+    monkeypatch: MonkeyPatch, tmp_path: Path
+) -> None:
+    observer = _Observer(monkeypatch, tmp_path)
+    parent = [observer.row(runs=False)]
+    candidate = [observer.row(bound=False)]
+
+    report = _compare(
+        tmp_path,
+        parent,
+        candidate,
+        new_case_max_runtime_calls=2,
+        new_case_max_runtime_tokens=240,
+    )
+
+    assert _failures(report) == {}
+    assert _inconclusive(report) == {
+        "case-a": ["current r1 output is unmeasured; a newly executable case"]
     }
 
 
@@ -775,6 +1024,21 @@ def test_a_scored_output_without_its_facts_is_refused(
 
     with raises(SystemExit, match="case-a r1: a scored output .* needs output_req"):
         _compare(tmp_path, [observer.row(runs=False)], [unscored_facts])
+
+
+def test_a_run_whose_scorer_stated_no_output_state_is_refused_by_the_gate(
+    monkeypatch: MonkeyPatch, tmp_path: Path
+) -> None:
+    """The gate reads only the canonical output state; a run without one (a
+    receipt from a scorer that stated none) is never read from the legacy
+    flag instead."""
+
+    observer = _Observer(monkeypatch, tmp_path)
+    ran = observer.row()
+    stateless = {key: value for key, value in ran.items() if key != "verdict_states"}
+
+    with raises(SystemExit, match="case-a r1: a run needs its scorer's verdict_states"):
+        _compare(tmp_path, [ran], [stateless])
 
 
 def test_an_acquisition_failure_leaves_the_case_unknown(

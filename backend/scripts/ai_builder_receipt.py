@@ -657,17 +657,25 @@ def executed_output_report(observations: Iterable[Observation]) -> JsonObject:
     A separate measure: it never changes an outcome class, an expectation
     verdict or a release-gate row, and it has no threshold because none was
     pre-registered. Every observation that created a run is executed; one
-    whose output was never scored is unmeasured, never dropped. The gate and
-    the comparator both report it from here.
+    whose output its scorer did not decide is unmeasured, never dropped. The
+    gate and the comparator both report it from here.
     """
 
     executed = [item for item in observations if item.output_executed]
 
-    def slots(verdict: bool | None) -> list[str]:
+    def verdict(item: Observation) -> bool | None:
+        # The scorer's stated output (a run the harness stopped is unmeasured
+        # there, False in the legacy flag); a receipt from before scorers
+        # stated verdicts has only the flag it recorded.
+        if item.verdict_states is None:
+            return item.output_success
+        return {"pass": True, "fail": False}.get(item.verdict_states["output"])
+
+    def slots(wanted: bool | None) -> list[str]:
         return sorted(
             f"{item.case_id} r{item.repetition}"
             for item in executed
-            if item.output_success is verdict
+            if verdict(item) is wanted
         )
 
     failed, unmeasured = slots(False), slots(None)

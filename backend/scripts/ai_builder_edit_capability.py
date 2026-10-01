@@ -189,22 +189,30 @@ def _calibration_gaps(
     for seed, sha256 in sorted(seeds.items()):
         entry = recorded.get(seed) or {}
         runs = cast(list[Mapping[str, Any]], entry.get("runs") or [])
-        if (
-            entry.get("sha256") != sha256
-            or harness._seed_flow_fixture_sha256(seed) != sha256
-            or len(runs) < int(manifest["calibration_runs"])
-            or not all(
-                run.get("runtime_model_id") == runtime_model
-                and harness.calibration_run_passed(
+        recorded_here = (
+            entry.get("sha256") == sha256
+            and harness._seed_flow_fixture_sha256(seed) == sha256
+            and len(runs) >= int(manifest["calibration_runs"])
+            and all(run.get("runtime_model_id") == runtime_model for run in runs)
+        )
+        verdicts = (
+            [
+                harness.calibration_run_passed(
                     harness._load_seed_flow_fixture(seed),
                     cast(Mapping[str, Any], run.get("evidence") or {}),
                 )
                 for run in runs
-            )
-        ):
+            ]
+            if recorded_here
+            else []
+        )
+        if not recorded_here or False in verdicts:
             gaps.append(
                 f"seed {seed} has no passing calibration on these bytes and model"
             )
+        elif None in verdicts:
+            # Every run delivered, but nothing decides where each value stands.
+            gaps.append(f"seed {seed} calibration is unmeasured (no binding gold)")
     return gaps
 
 

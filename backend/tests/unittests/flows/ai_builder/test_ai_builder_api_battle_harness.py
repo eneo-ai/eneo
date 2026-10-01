@@ -3211,6 +3211,11 @@ def test_reanalysis_preserves_live_provenance_and_records_source_hash(
         reanalyzed["reanalysis_provenance"]["source_authenticity"]
         == "unverified_standalone"
     )
+    # The rescored verdicts name the scorer that wrote them, as a receipt does.
+    assert (
+        reanalyzed["reanalysis_provenance"]["scorer_semantics_version"],
+        reanalyzed["reanalysis_provenance"]["scorer_sha256"],
+    ) == (harness.SCORER_SEMANTICS_VERSION, harness._scorer_sha256())
     assert "evidence_report" not in reanalyzed
 
 
@@ -4690,7 +4695,9 @@ def test_suite_receipts_preserve_canonical_case_identity_for_every_outcome(
     }
     assert results_by_case_id["success-case"]["artifact_mode"] == "live_execution"
     assert results_by_case_id["success-case"]["observation_status"] == "completed"
-    assert results_by_case_id["success-case"]["expectation_verdict"] == "pass"
+    # Every check passed, but a Builder plan has no step-content gold: the case
+    # is unmeasured, so no conformance pass (never a failure either).
+    assert results_by_case_id["success-case"]["expectation_verdict"] == "not_evaluated"
     assert results_by_case_id["success-case"]["error"] is None
     assert (
         results_by_case_id["failed-case"]["artifact_mode"] == "live_execution_failure"
@@ -4727,7 +4734,7 @@ def test_suite_receipts_preserve_canonical_case_identity_for_every_outcome(
             "completed": 1,
             "execution_failure": 1,
         },
-        "verdict_counts": {"not_evaluated": 1, "pass": 1},
+        "verdict_counts": {"not_evaluated": 2},
         "state_counts": {
             "plan": {"unmeasured": 2},
             "review_edit": {"not_required": 2},
@@ -5378,7 +5385,9 @@ def test_required_identity_drift_does_not_become_builder_expectation_failure(
     )
     summary = json.loads(summary_path.read_text())
     result = summary["results"][0]
-    assert result["expectation_verdict"] == "pass"
+    # No expectation failure: every check passed (the Builder plan has no
+    # step-content gold, so the case is unmeasured rather than a pass).
+    assert result["expectation_verdict"] == "not_evaluated"
     assert result["failed_expectation_check_count"] == 0
     assert result["identity_failed_check_count"] == 1
     assert summary["expectation_failed_observation_count"] == 0
@@ -12623,6 +12632,14 @@ def _completed_text_run(text: str) -> dict[str, object]:
     }
 
 
+def _completed_structured_run(value: dict[str, object]) -> dict[str, object]:
+    return {
+        "id": "run-1",
+        "status": "completed",
+        "result": {"kind": "structured", "value": value},
+    }
+
+
 def _awaiting_review_run() -> dict[str, object]:
     return {"id": "run-1", "status": "awaiting_review"}
 
@@ -12784,6 +12801,7 @@ def test_execution_edits_a_declared_checkpoint_then_continues_and_checks_output(
         ("output_readable", True),
         ("required_fact", True),
         ("forbidden_literal", True),
+        ("output_value_binding", True),
     ]
     assert report["output_success"] is True
 
@@ -12794,13 +12812,30 @@ def _review_oracle(
     tmp_path: Path,
     *,
     structured: dict[str, object],
-    delivered: str,
+    delivered: str | dict[str, object],
     target_group: list[str],
 ) -> tuple[_RuntimeApi, dict[str, Any], dict[str, Any]]:
-    """Run one reviewed checkpoint through the edit oracle and score it."""
+    """Run one reviewed checkpoint through the edit oracle and score it: the
+    run delivers free text, or a structured value (which names the field) as
+    the reviewed step's own output."""
 
     api = _RuntimeApi(
-        runs=[_awaiting_review_run(), _completed_text_run(delivered)],
+        runs=[
+            _awaiting_review_run(),
+            _completed_text_run(delivered)
+            if isinstance(delivered, str)
+            else _completed_structured_run(delivered),
+        ],
+        contract=(
+            None
+            if isinstance(delivered, str)
+            else {
+                "final_output": {
+                    "output_type": "json",
+                    "step_order": _checkpoint()["step_order"],
+                }
+            }
+        ),
         checkpoints=[
             _checkpoint(
                 output_type="json", current_payload_json={"structured": structured}
@@ -12829,13 +12864,12 @@ _EDITED_PATH = f"{_RUN_PATH}/review-checkpoints/cp-1/"
 
 
 @mark.parametrize(
-    ("structured", "target_group", "edited", "delivered"),
+    ("structured", "target_group", "edited"),
     [
         (
             {"totala_inkomster": 4834, "beraknat_underskott": 13602},
             ["underskott", "beraknat_underskott"],
             {"totala_inkomster": 4834, "beraknat_underskott": 21521},
-            "Beslut: underskottet är 21 521 kr.",
         ),
         # A string leaf is preferred to a number, at any depth.
         (
@@ -12847,7 +12881,6 @@ _EDITED_PATH = f"{_RUN_PATH}/review-checkpoints/cp-1/"
                     {"belopp": 8000, "beslut": "REVIEW-EDIT-cp-1"},
                 ]
             },
-            "Beslut: review-edit-cp-1 för posten.",
         ),
     ],
 )
@@ -12857,7 +12890,6 @@ def test_an_edited_review_target_is_sent_whole_and_must_reach_delivery(
     structured: dict[str, object],
     target_group: list[str],
     edited: dict[str, object],
-    delivered: str,
 ) -> None:
     harness = _battle_harness()
     api, _, oracle = _review_oracle(
@@ -12865,7 +12897,8 @@ def test_an_edited_review_target_is_sent_whole_and_must_reach_delivery(
         monkeypatch,
         tmp_path,
         structured=structured,
-        delivered=delivered,
+        # The flow delivers the reviewed value: each field at its path.
+        delivered=edited,
         target_group=target_group,
     )
 
@@ -12874,33 +12907,38 @@ def test_an_edited_review_target_is_sent_whole_and_must_reach_delivery(
         "edited_value": edited,
     }
     assert oracle["passed"] is True
+    assert oracle["actual"][0]["location"] == "structured_field"
 
 
 @mark.parametrize(
     ("old", "new", "delivered", "run_request", "passed"),
     [
-        (13602, 21521, "Underskott: 21 521 kr.", {}, True),
-        # Stale output: a comma lists amounts, it never joins thousands.
-        (13602, 21521, "21 521 kr; old 13 602, 1 000 kr", {}, False),
-        (13602, 21521, "Beslut: 21 521 kr. Enligt beräkningen: 13 602 kr.", {}, False),
-        (13602, 21521, "Underskott: 13 602 kr.", {}, False),
-        # Decimals compare by value, however they are padded or formatted.
-        (13.6, 7932.6, "Summa: 7 932,60 kr.", {}, True),
-        (13.6, 7932.6, "Summa: 7932.6", {}, True),
-        (13.6, 7932.6, "Summa: 7 932,60 kr; tidigare 13,60 kr.", {}, False),
-        # The old amount is in the run's own input, or files were read:
-        # its presence is not attributable to the reviewed value.
+        # The review replaced the whole leaf with the new number and the reviewed
+        # step delivers its own result: the field must hold exactly that value.
+        (13602, 21521, 21521, {}, True),
+        # Numbers compare by value, however they are padded.
+        (13602, 21521, 21521.0, {}, True),
+        (13.6, 7932.6, 7932.60, {}, True),
+        # A field that merely contains the new amount holds another value.
+        (13602, 21521, "Underskott: 21 521 kr.", {}, False),
+        (13.6, 7932.6, "Summa: 7 932,60 kr.", {}, False),
+        # The old amount, or a new amount extended into another number.
+        (13602, 21521, 13602, {}, False),
+        (13602, 21521, 121521, {}, False),
+        (13602, 21521, 21521.5, {}, False),
+        # The exact leaf decides even when the old amount is in the run's own
+        # input or files were read: the location is the reviewed field itself.
         (
             13602,
             21521,
-            "21 521 kr. Hyran 13 602 kr.",
+            21521,
             {"input_payload_json": {"text": "Hyra: 13 602 kr"}},
             True,
         ),
         (
             13602,
             21521,
-            "21 521 kr. Hyran 13 602 kr.",
+            21521,
             {"step_inputs": {"step-1": {"file_ids": ["file-1"]}}},
             True,
         ),
@@ -12909,18 +12947,22 @@ def test_an_edited_review_target_is_sent_whole_and_must_reach_delivery(
 def test_an_edited_number_must_replace_the_old_one_where_attributable(
     old: float,
     new: float,
-    delivered: str,
+    delivered: object,
     run_request: dict[str, object],
-    passed: bool,
+    passed: bool | None,
 ) -> None:
     harness = _battle_harness()
     evidence = {
-        "run": {"result": {"kind": "inline_text", "text": delivered}},
+        # The delivered value stands at the field the edit names, in the
+        # reviewed step's own delivered result.
+        "run": {"result": {"kind": "structured", "value": {"belopp": delivered}}},
+        "run_contract": {"final_output": {"output_type": "json", "step_order": 2}},
         "execution": {
             "run_request": run_request,
             "checkpoints": [
                 {
                     "action": "edit_target",
+                    "checkpoint": {"step_order": 2},
                     "edit_oracle": {
                         "path": ["belopp"],
                         "value_type": "number",
@@ -12940,23 +12982,38 @@ _DUPLICATED = "reviewed value holds the edited value in more than one place"
 
 
 @mark.parametrize(
-    ("structured", "target_group", "edited", "delivered", "passed"),
+    ("structured", "target_group", "edited", "delivered", "attributable", "passed"),
     [
-        # The old value only occurs inside another leaf: not a duplicate, so it
-        # is edited; that leaf may reach delivery, so the old value there is
-        # not attributed to the reviewed one.
+        # A word holds as text: "Ja" occurs in "Januari", another leaf that may
+        # reach delivery, so the old value there is not attributed to the
+        # reviewed one and where the new value stands is unmeasured.
         (
             {"beslut": "Ja", "datum": "Januari 2026"},
             ["beslut"],
             {"beslut": "REVIEW-EDIT-cp-1", "datum": "Januari 2026"},
             "Beslut: REVIEW-EDIT-cp-1. Datum: Januari 2026.",
-            True,
+            False,
+            None,
         ),
+        # The old value also stands in another leaf, which may reach delivery:
+        # delivered, it is not attributed to the reviewed one, so where the new
+        # value stands is unmeasured.
+        (
+            {"beslut": "Bifall", "motivering": "Bifall enligt plan"},
+            ["beslut"],
+            {"beslut": "REVIEW-EDIT-cp-1", "motivering": "Bifall enligt plan"},
+            "Beslut: REVIEW-EDIT-cp-1. Motivering: Bifall enligt plan.",
+            False,
+            None,
+        ),
+        # A date is one token: the old amount 1 is not inside "2026-09-01", so
+        # no other leaf holds it and an old value delivered would be attributed.
         (
             {"belopp": 1, "datum": "2026-09-01"},
             ["belopp"],
             {"belopp": 7920, "datum": "2026-09-01"},
-            "Belopp: 7 920 kr. Datum: 2026-09-01.",
+            {"belopp": 7920, "datum": "2026-09-01"},
+            True,
             True,
         ),
         # Unique everywhere and still delivered: a stale copy.
@@ -12965,6 +13022,7 @@ _DUPLICATED = "reviewed value holds the edited value in more than one place"
             ["beslut"],
             {"beslut": "REVIEW-EDIT-cp-1", "datum": "2026-09-01"},
             "Beslut: REVIEW-EDIT-cp-1. Tidigare beslut: Avslag.",
+            True,
             False,
         ),
     ],
@@ -12975,8 +13033,9 @@ def test_an_old_value_is_attributed_only_when_no_other_leaf_holds_it(
     structured: dict[str, object],
     target_group: list[str],
     edited: dict[str, object],
-    delivered: str,
-    passed: bool,
+    delivered: str | dict[str, object],
+    attributable: bool,
+    passed: bool | None,
 ) -> None:
     harness = _battle_harness()
     api, evidence, oracle = _review_oracle(
@@ -12990,7 +13049,7 @@ def test_an_old_value_is_attributed_only_when_no_other_leaf_holds_it(
 
     assert api.call("PATCH", _EDITED_PATH)["payload"]["edited_value"] == edited
     assert evidence["execution"]["failures"] == []
-    assert oracle["actual"][0]["old_absent_outside_edit"] is not passed
+    assert oracle["actual"][0]["old_absent_outside_edit"] is attributable
     assert oracle["passed"] is passed
 
 
@@ -13260,7 +13319,10 @@ def test_int08_is_scored_on_its_closing_json_and_only_that(terminal: str) -> Non
     } & set(quality) | {"output_file_count"} & set(output)
     assert bool(document_only) is document
     if not document:
-        assert report["output_success"] is True
+        # Every fact is held; with no gold binding each to its place, which
+        # value stands where is unmeasured, so the output is no pass either.
+        assert report["output_success"] is None
+        assert output[harness.OUTPUT_BINDING_GRADER]["status"] == "unmeasured"
         assert sorted(
             check["fact"]
             for check in report["output_checks"]
@@ -13518,8 +13580,10 @@ def test_execution_reads_and_checks_a_docx_final_artifact(
         ("required_fact", True),
         ("required_fact", True),
         ("forbidden_literal", True),
+        # Two required facts and no gold binding either one to its place.
+        ("output_value_binding", None),
     ]
-    assert report["output_success"] is True
+    assert report["output_success"] is None
 
 
 @mark.parametrize(
@@ -13947,7 +14011,7 @@ def test_a_source_starved_run_fails_output_success_while_the_plan_stays_accepted
 
     result = harness._suite_result(harness.seal_observation(bundle), bundle_path)
 
-    missing = [check for check in report["output_checks"] if not check["passed"]]
+    missing = [check for check in report["output_checks"] if check["passed"] is False]
     assert [check["fact"] for check in missing] == ["Njurunda"]
     assert "Njurunda" in missing[0]["reason"]
     assert result["observation_status"] == "completed"
@@ -14184,7 +14248,7 @@ def _failed_checks(report: dict[str, Any]) -> list[tuple[str, str]]:
     return [
         (check["name"], check.get("fact") or check.get("literal"))
         for check in report["output_checks"]
-        if check["passed"] is not True
+        if check["passed"] is False
     ]
 
 
@@ -14236,7 +14300,9 @@ def test_a_text_register_delivers_each_fact_beside_its_own_context(
     report = _text_output_report(harness, _municipal_expect(harness, case_id), text)
 
     assert _failed_checks(report) == failed
-    assert report["output_success"] is (not failed)
+    # The associations bind two facts; the others have no binding gold, so a
+    # register without a failure is still unmeasured, never a pass.
+    assert report["output_success"] is (None if not failed else False)
 
 
 def test_a_source_dump_fails_through_the_forbidden_literals() -> None:

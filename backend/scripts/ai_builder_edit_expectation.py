@@ -19,12 +19,14 @@ unmeasured here.
 
 from __future__ import annotations
 
+import functools
 import json
 import re
 import string
 import unicodedata
 from collections.abc import Callable, Mapping, Sequence
-from typing import Annotated, Any, Final, Literal, Self, cast, get_args
+from decimal import Decimal
+from typing import Annotated, Any, Final, Literal, NamedTuple, Self, cast, get_args
 
 from pydantic import (
     BaseModel,
@@ -95,7 +97,23 @@ _EDGE = (
     r"|(?:form|sys|run)\.[\w-]+) -> (?P<consumer>[sn][1-9]\d*)"
     r"(?: @(?P<placeholder>[\w.-]+))?$"
 )
-_DIGIT_GROUP = re.compile(r"(?<=\d) (?=\d{3}(?!\d))")
+# A number grouped in thousands by single spaces ("12 345 678"), neither
+# continued nor preceded by another digit run on the same line, so a street
+# number beside a postcode ("17 851 86") is no group. Read before whitespace is
+# collapsed: a line break ends a number, so two table cells are two numbers.
+_DIGIT_GROUPS = re.compile(r"(?<!\d)(?<!\d )\d{1,3}(?: \d{3})+(?! ?\d)")
+# A token of normalized text (`_tokens`): a run of word characters joined by
+# "-" or "/" (a date or an id: "2026-09-30", "ks-2026", "x/8150"), by ".",
+# ":" or "," between digits ("10,6", "12:30", "3.4.1"), or by the sign of an
+# exponent ("8150e+3"); any other visible character is a mark of its own.
+_TOKEN = re.compile(r"\w+(?:(?:[-/]|(?<=\d)[.,:](?=\d)|(?<=\de)[+−](?=\d))\w+)*|\S")
+# A run that is one whole number, exponent included, and the letters of its
+# unit ("8150kr", "22m", "1e3").
+_NUMBER_AND_UNIT = re.compile(r"(\d+(?:[.,]\d+)*(?:e[-+−]?\d+)?)([^\W\d_]*)")
+_DECIMAL_POINTS: Final = frozenset(".,")
+# An ISO 8601 date and time, casefolded ("2026-09-30t10:00z"): its date part.
+_ISO_DATE_TIME = re.compile(r"(\d{4}-\d{2}-\d{2})t\d")
+_SIGNS: Final = frozenset("-+−")
 # A CommonMark backslash escape: a backslash before ASCII punctuation.
 _MARKDOWN_ESCAPE = re.compile(r"\\([" + re.escape(string.punctuation) + r"])")
 # A preview names a model or knowledge by its portable slot ref and the flow
@@ -121,40 +139,180 @@ def closed_object(
 
 
 def normalized_text(value: str) -> str:
-    """Edit fact normalization: also one fact across "48 500" and "48500"."""
+    """The one literal normalization: NFKC, case folded, whitespace collapsed,
+    and a number grouped in thousands written as one ("48 500" is "48500")."""
 
-    collapsed = " ".join(unicodedata.normalize("NFKC", value).casefold().split())
-    return _DIGIT_GROUP.sub("", collapsed)
+    grouped = _DIGIT_GROUPS.sub(
+        lambda match: match.group().replace(" ", ""),
+        unicodedata.normalize("NFKC", value).casefold(),
+    )
+    return " ".join(grouped.split())
 
 
-def literal_list(
-    value: object, *, owner: str, normalize: Callable[[str], str]
-) -> tuple[str, ...]:
+def literal_list(value: object, *, owner: str) -> tuple[str, ...]:
+    """An authored list of literals, each non-empty and written once.
+
+    "Written once" compares spellings (case and whitespace folded), not what
+    `literal_appears` treats as one literal: two spellings of one number
+    ("12 345 678", "12345678") written by a case author are two checks with
+    the same result, never a malformed case.
+    """
+
     if value is None:
         return ()
     if not isinstance(value, list) or not all(
-        isinstance(item, str) and normalize(item) for item in cast(list[object], value)
+        isinstance(item, str) and normalized_text(item)
+        for item in cast(list[object], value)
     ):
         raise ValueError(f"{owner} must be a list of non-empty literals.")
     literals = tuple(cast(list[str], value))
-    if len({normalize(item) for item in literals}) != len(literals):
+    spellings = {" ".join(item.casefold().split()) for item in literals}
+    if len(spellings) != len(literals):
         raise ValueError(f"{owner} repeats a literal.")
     return literals
 
 
 def literal_appears(literal: str, text: str) -> bool:
-    """Whether a normalized literal appears in normalized text.
+    """Whether a normalized literal appears in normalized text as itself.
 
-    The one comparison of every literal check: as written, or with each markdown
-    backslash escape (`\\*`, `\\-`) folded to the character it escapes on both
-    sides, so text delivered with escaping still holds the literal. The
-    as-written match is kept, so folding can only add hits, never remove one; a
-    backslash before anything but ASCII punctuation is no escape and stays.
+    The one comparison of every literal check: required facts, forbidden
+    literals, associations, reviewed values and edit gold. A literal that
+    holds a digit states a value: it holds only as a sequence of whole tokens
+    of the text (`_tokens`), whitespace between them aside. So "30 m" is not
+    in "30 mars", "30 km" or "30 mm", "8 kap. 5 §" not in "18 kap. 5 §", and
+    "30" is not in "2026-09-30", "12:30" or "ks-2026": a date, a time and an id
+    are one token. A number is read whole (its sign, a leading decimal point,
+    its decimals and its exponent) and compares by value: "8150" holds in
+    "8 150,00" and "1000" in "1e3", never in "0,8150", ".8150", "8150.5",
+    "-8150", "8150e3" or "8150e+3". The letters right after a number are its
+    unit, a token of their own: "8150" holds in "8150kr" and "22" in "22m",
+    and "50 %" is "50%". A number whose value is ambiguous ("1,500" may be a group
+    or a decimal, "3.4.1" is none) or that has a leading zero ("007", an
+    identifier) is never guessed: it equals only its own spelling. An ISO date
+    also holds as the date of an ISO date and time. A literal without a digit
+    is a word or a name, which inflects and compounds ("Granbacka" in
+    "Granbackaskolan", a forbidden "Norberg" in "Norbergs"): it holds as text.
+
+    It holds as written, or with each markdown backslash escape (`\\*`, `\\-`)
+    folded to the character it escapes on both sides, so text delivered with
+    escaping still holds the literal. Folding can only add hits, never remove
+    one; a backslash before anything but ASCII punctuation is no escape.
     """
 
-    return literal in text or (
-        _MARKDOWN_ESCAPE.sub(r"\1", literal) in _MARKDOWN_ESCAPE.sub(r"\1", text)
+    return _bounded_occurrence(literal, text) or _bounded_occurrence(
+        _MARKDOWN_ESCAPE.sub(r"\1", literal), _MARKDOWN_ESCAPE.sub(r"\1", text)
     )
+
+
+def _bounded_occurrence(literal: str, text: str) -> bool:
+    if not any(character.isdigit() for character in literal):
+        return literal in text
+    wanted, found = _tokens(literal), _tokens(text)
+    return any(
+        all(_same(token, found[start + index]) for index, token in enumerate(wanted))
+        for start in range(len(found) - len(wanted) + 1)
+    )
+
+
+class _Token(NamedTuple):
+    kind: Literal["number", "word", "mark"]
+    spelling: str
+    value: Decimal | None = None
+    # An ISO date and time also names its date.
+    date: str | None = None
+
+
+def _same(wanted: _Token, found: _Token) -> bool:
+    if wanted.kind != found.kind:
+        return False
+    if wanted.spelling == found.spelling:
+        return True
+    if wanted.kind == "number":
+        return wanted.value is not None and wanted.value == found.value
+    return wanted.kind == "word" and wanted.spelling == found.date
+
+
+@functools.lru_cache(maxsize=256)
+def _tokens(text: str) -> tuple[_Token, ...]:
+    """The tokens of normalized text, in order.
+
+    A run is one number (with its unit) or one word; a run that is not one
+    number keeps a comma as a separator ("10,2026-08-12" is a row's two
+    fields). A decimal point and then a sign belong to the number after them
+    when nothing alphanumeric stands before the mark (".5", "-15", "-.5"; not
+    the "−" of "a−15" nor the "." of "kap.5"), nor right after another point
+    or comma ("...5", a row's ",,5").
+    """
+
+    tokens: list[_Token] = []
+    for match in _TOKEN.finditer(text):
+        run, start = match.group(), match.start()
+        if not (run[0].isalnum() or run[0] == "_"):
+            tokens.append(_Token("mark", run))
+            continue
+        pieces = [run] if _NUMBER_AND_UNIT.fullmatch(run) else run.split(",")
+        for index, piece in enumerate(pieces):
+            if index:
+                tokens.append(_Token("mark", ","))
+            number = _NUMBER_AND_UNIT.fullmatch(piece)
+            if number is None:
+                date = _ISO_DATE_TIME.match(piece)
+                tokens.append(_Token("word", piece, date=date and date.group(1)))
+                continue
+            spelling = number.group(1)
+            if index == 0:
+                at = start
+                for marks in (_DECIMAL_POINTS, _SIGNS):
+                    if (
+                        at > 0
+                        and text[at - 1] in marks
+                        and (
+                            at == 1
+                            or not (
+                                text[at - 2].isalnum()
+                                or text[at - 2] in _DECIMAL_POINTS
+                            )
+                        )
+                    ):
+                        spelling = tokens.pop().spelling + spelling
+                        at -= 1
+            tokens.append(_Token("number", spelling, _number_value(spelling)))
+            if number.group(2):
+                tokens.append(_Token("word", number.group(2)))
+    return tuple(tokens)
+
+
+def _number_value(token: str) -> Decimal | None:
+    """A number's value, or None when its form is ambiguous or an identifier.
+
+    One separator is a decimal point unless exactly three digits follow it
+    ("1,500" may be a thousands group); more than one separator is a list,
+    a section number or a grouped amount, which is not guessed. A leading
+    zero ("007") makes an identifier, not an amount. An exponent scales the
+    value ("1e3" is 1000). The value is built exactly from its digits and
+    exponent, never through a decimal context, which would round long digit
+    strings and flush tiny values to zero; a number too large to represent
+    has no value and equals only its own spelling.
+    """
+
+    negative = token[0] in _SIGNS and token[0] != "+"
+    mantissa, _, exponent = token.lstrip("".join(_SIGNS)).partition("e")
+    parts = re.split(r"[.,]", mantissa)
+    if len(parts) > 2 or (len(parts) == 2 and len(parts[1]) == 3):
+        return None
+    if len(parts[0]) > 1 and parts[0].startswith("0"):
+        return None
+    fraction = parts[1] if len(parts) == 2 else ""
+    try:
+        return Decimal(
+            (
+                int(negative),
+                tuple(int(digit) for digit in parts[0] + fraction),
+                int(exponent.replace("−", "-") or 0) - len(fraction),
+            )
+        )
+    except (ArithmeticError, ValueError):
+        return None
 
 
 def unassessed_check(name: str, subject: str, **fields: str) -> JsonObject:
@@ -286,7 +444,7 @@ class StepOutput(_Closed):
     @field_validator("required_facts", "forbidden")
     @classmethod
     def _literals(cls, value: list[str]) -> list[str]:
-        return list(literal_list(value, owner="step output", normalize=normalized_text))
+        return list(literal_list(value, owner="step output"))
 
 
 class EditExpectation(_Closed):

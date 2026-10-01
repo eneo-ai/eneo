@@ -112,6 +112,8 @@ _VERDICTS = {
     "failed": ("pass", "not_required", "fail", "fail"),
     "not_executed": ("fail", "not_required", "unmeasured", "fail"),
     "invalid": ("unmeasured", "not_required", "unmeasured", "unmeasured"),
+    # Executed, and the scorer could not decide the output.
+    "unmeasured": ("pass", "not_required", "unmeasured", "unmeasured"),
     # A case that asks for no output: valid to the reader, never a selected case.
     "no_output": ("pass", "not_required", "not_required", "pass"),
 }
@@ -836,9 +838,20 @@ def _rows_case0_failed(fulfilled: int) -> list[dict[str, Any]]:
     return rows
 
 
-def test_the_decision_uses_the_corrected_counts_of_both_arms(world: _World) -> None:
+def _frozen_ambient_scorer(totals: ModuleType, monkeypatch: pytest.MonkeyPatch) -> None:
+    """The harness the audit re-scores with is the frozen scorer of `_freeze`."""
+
+    harness = totals._harness()
+    monkeypatch.setattr(harness, "SCORER_SEMANTICS_VERSION", 1)
+    monkeypatch.setattr(harness, "_scorer_sha256", lambda: SCORER_SHA)
+
+
+def test_the_decision_uses_the_corrected_counts_of_both_arms(
+    world: _World, monkeypatch: pytest.MonkeyPatch
+) -> None:
     # case-0 fails in both arms only because its date literal is wrong: the
     # delivered text states the case number and lacks 2026-10-06.
+    _frozen_ambient_scorer(world.totals, monkeypatch)
     texts = {("case-0", r): "Beslut. Ärendenummer IAN-1." for r in (1, 2, 3)}
     legs = [
         _leg(
@@ -867,6 +880,240 @@ def test_the_decision_uses_the_corrected_counts_of_both_arms(world: _World) -> N
     # Both arms are re-scored with the same corrected check: 3 slots each.
     assert (audited["o_audited"], audited["a_audited"]) == ("26/60", "6/60")
     assert audited["outcome"] == "ADVANCE_EXPLORATORY_PILOT"
+
+
+def test_an_audit_re_scored_by_another_scorer_than_the_frozen_one_decides_nothing(
+    world: _World,
+) -> None:
+    """The audit re-scores stored outputs with the harness it imports: when that
+    is not the frozen scorer (version and digest), its lifts and drops are
+    another scorer's verdicts."""
+
+    legs = world.legs(o=24, a=12)
+    fix = _audit(world.totals, world.tmp, _correction())
+
+    refused = world.decide(legs, corrections=fix)
+
+    assert refused["outcome"] == "NO_DECISION"
+    assert any("not the frozen scorer" in p for p in refused["problems"])
+    # Without corrections nothing is re-scored, so nothing is asked of it.
+    assert world.decide(legs)["outcome"] == "ADVANCE_EXPLORATORY_PILOT"
+
+
+def _unmeasured_rows(fulfilled: int, unmeasured: int) -> list[dict[str, Any]]:
+    """60 slots: `fulfilled` pass, then `unmeasured` executed and unmeasured,
+    the rest failed."""
+
+    rows = _rows(fulfilled)
+    for row in rows[fulfilled : fulfilled + unmeasured]:
+        row.update(
+            output_success=None,
+            expectation_verdict="not_evaluated",
+            verdict_states=_verdict_states("unmeasured"),
+        )
+    return rows
+
+
+def test_an_unmeasured_slot_is_counted_apart_and_never_invalid(
+    totals: ModuleType, tmp_path: Path
+) -> None:
+    leg = _leg(totals, tmp_path, "O_luna6", "oracle", _unmeasured_rows(24, 10))
+
+    result = totals.leg_totals(leg, {})
+
+    assert result["unmeasured"] == 10 and result["decided"] == 50
+    assert result["invalid_evidence"] == 0  # not against MAX_INVALID_SLOTS
+    assert totals.invalid_slots(leg) == 0
+    assert result["fulfilled_audited_of_decided"] == "24/50"
+    assert totals.per_case(leg, {})["case-4"] == "PuF"
+
+
+def test_the_rule_divides_each_arm_by_its_decided_slots_and_reports_unmeasured(
+    world: _World,
+) -> None:
+    legs = [
+        _leg(world.totals, world.tmp, "A_luna6", "builder", _unmeasured_rows(12, 4)),
+        _leg(world.totals, world.tmp, "O_luna6", "oracle", _unmeasured_rows(22, 6)),
+    ]
+
+    decision = world.decide(legs)
+
+    # O 22/54 = 40.7% and A 12/56 = 21.4%: over attempted slots O would be 36.7%.
+    assert decision["outcome"] == "NO_ADVANTAGE_FIX_CONTRACTS_FIRST"
+    assert (decision["o_audited"], decision["a_audited"]) == ("22/54", "12/56")
+    assert decision["o_threshold_met"] is True
+    assert decision["unmeasured"] == {"O_luna6": 6, "A_luna6": 4}
+    assert "Unmeasured slots" in world.totals.render_markdown(
+        {"totals": {}, "per_case": {}, "decision": decision}
+    )
+
+
+def test_arms_whose_unmeasured_counts_differ_beyond_the_margin_decide_nothing(
+    world: _World,
+) -> None:
+    margin = world.totals.MAX_UNMEASURED_DIFFERENCE
+    within = [
+        _leg(world.totals, world.tmp, "A_luna6", "builder", _unmeasured_rows(12, 0)),
+        _leg(
+            world.totals, world.tmp, "O_luna6", "oracle", _unmeasured_rows(24, margin)
+        ),
+    ]
+    beyond = [
+        within[0],
+        _leg(
+            world.totals,
+            world.tmp,
+            "O_luna6",
+            "oracle",
+            _unmeasured_rows(24, margin + 1),
+        ),
+    ]
+
+    assert world.decide(within)["outcome"] != "NO_DECISION"
+    refused = world.decide(beyond)
+    assert refused["outcome"] == "NO_DECISION"
+    assert refused["unmeasured"] == {"O_luna6": margin + 1, "A_luna6": 0}
+    assert any(f"by {margin + 1}, more than {margin}" in p for p in refused["problems"])
+
+
+def test_an_audit_that_cannot_decide_a_slot_makes_it_unmeasured_never_dropped(
+    totals: ModuleType, tmp_path: Path
+) -> None:
+    """Every slot of case-1 passed; the correction keeps two required facts
+    that the output holds, with no binding gold between them, so the re-score
+    cannot decide the output: the slots leave the fulfilled count as
+    unmeasured, apart from drops."""
+
+    slots = [(c, r) for r in (1, 2, 3) for c in CASES]
+    leg = _leg(
+        totals, tmp_path, "A_luna6", "builder", [_row(c, r, "pass") for c, r in slots]
+    )
+    keep = _audit(
+        totals,
+        tmp_path,
+        _correction(
+            case_id="case-1",
+            action="replace",
+            check={"name": "required_fact", "fact": "IAN-1"},
+            **{"with": "Ärendenummer IAN-1"},
+        ),
+    )
+
+    audit = totals.audited_states(leg, keep)
+
+    assert set(audit.values()) == {"unmeasured"} and len(audit) == 3
+    result = totals.leg_totals(leg, audit)
+    assert (result["audit_dropped"], result["audit_unmeasured"]) == (0, 3)
+    assert (result["fulfilled_audited"], result["decided"]) == (57, 57)
+    assert totals.per_case(leg, audit)["case-1"] == "uuu"
+
+
+def _case0_unmeasured_leg(totals: ModuleType, tmp_path: Path) -> Any:
+    """Every slot passed except case-0's, which ran and delivered both
+    required facts with no binding gold between them: unmeasured."""
+
+    slots = [(c, r) for r in (1, 2, 3) for c in CASES]
+    rows = [_row(c, r, "pass") for c, r in slots]
+    for row in rows:
+        if row["case_id"] == "case-0":
+            row.update(
+                output_success=None,
+                expectation_verdict="not_evaluated",
+                verdict_states=_verdict_states("unmeasured"),
+            )
+    return _leg(totals, tmp_path, "A_luna6", "builder", rows)
+
+
+def test_an_audit_that_removes_an_unsupported_fact_decides_an_unmeasured_slot(
+    totals: ModuleType, tmp_path: Path
+) -> None:
+    """With one required fact left the reproduced output is decided: it passes,
+    and the totals count the slot as fulfilled and decided."""
+
+    leg = _case0_unmeasured_leg(totals, tmp_path)
+    before = totals.leg_totals(leg, {})
+    remove = _audit(totals, tmp_path, _correction())  # drops 2026-10-06
+
+    audit = totals.audited_states(leg, remove)
+
+    assert set(audit.values()) == {"lifted"} and len(audit) == 3
+    result = totals.leg_totals(leg, audit)
+    assert (before["unmeasured"], before["decided"], before["fulfilled_audited"]) == (
+        3,
+        57,
+        57,
+    )
+    assert (result["unmeasured"], result["decided"]) == (0, 60)
+    assert (result["fulfilled"], result["fulfilled_audited"]) == (57, 60)
+    assert (result["audit_lifted"], result["audit_decided"]) == (3, 3)
+    assert result["fulfilled_audited_of_decided"] == "60/60"
+    assert totals.per_case(leg, audit)["case-0"] == "ppp"
+
+
+@pytest.mark.parametrize("kind", ["review_target_missing", "review_target_unmeasured"])
+def test_an_audit_never_decides_a_delivery_the_harness_stopped_before(
+    totals: ModuleType, tmp_path: Path, kind: str
+) -> None:
+    """The harness stopped case-0's runs before any edit, so the scorer left
+    their output unmeasured; an unrelated expectation correction re-scores
+    the slot through the same dimension scorer, which keeps it unmeasured:
+    never decided_failed, never lifted."""
+
+    slots = [(c, r) for r in (1, 2, 3) for c in CASES]
+    rows = [_row(c, r, "pass") for c, r in slots]
+    stopped = {}
+    for row in rows:
+        if row["case_id"] == "case-0":
+            row.update(
+                output_success=False,
+                expectation_verdict="not_evaluated",
+                verdict_states=_verdict_states("unmeasured"),
+            )
+            evidence = _evidence(TEXT, outcome="awaiting_review")
+            evidence["execution"]["failures"] = [{"kind": kind}]
+            stopped[(row["case_id"], row["repetition"])] = evidence
+    leg = _leg(totals, tmp_path, "A_luna6", "builder", rows, evidence=stopped)
+
+    for correction in (
+        _correction(),  # removes 2026-10-06
+        _correction(
+            action="replace",
+            check={"name": "required_fact", "fact": "IAN-1"},
+            **{"with": "IAN-2"},
+        ),
+    ):
+        audit = totals.audited_states(leg, _audit(totals, tmp_path, correction))
+
+        assert audit == {}
+        result = totals.leg_totals(leg, audit)
+        assert (result["unmeasured"], result["audit_decided"]) == (3, 0)
+        assert totals.per_case(leg, audit)["case-0"] == "uuu"
+
+
+def test_an_audit_that_decides_an_unmeasured_slot_failed_counts_it_decided(
+    totals: ModuleType, tmp_path: Path
+) -> None:
+    leg = _case0_unmeasured_leg(totals, tmp_path)
+    stricter = _audit(
+        totals,
+        tmp_path,
+        _correction(
+            action="replace",
+            check={"name": "required_fact", "fact": "IAN-1"},
+            **{"with": "IAN-2"},
+        ),
+    )
+
+    audit = totals.audited_states(leg, stricter)
+
+    assert set(audit.values()) == {"decided_failed"} and len(audit) == 3
+    result = totals.leg_totals(leg, audit)
+    assert (result["unmeasured"], result["decided"]) == (0, 60)
+    assert (result["fulfilled_audited"], result["audit_decided"]) == (57, 3)
+    assert result["fulfilled_audited_of_decided"] == "57/60"
+    vector = totals.per_case(leg, audit)["case-0"]
+    assert vector == "fff"
+    assert (totals.decided_count(vector), totals.audited_count(vector)) == (3, 0)
 
 
 # ------------------------------------------------------------ report and CLI
@@ -2904,10 +3151,9 @@ def test_a_row_is_read_by_its_final_output_verdict_when_the_scorer_states_one(
 
     assert totals.slot_state(row("pass")) == "fulfilled"
     assert totals.slot_state(row("fail")) == "executed_not_fulfilled"
-    # Executed, and the harness could not judge the output: never a pass or a
-    # quiet failure; the slot is invalid and counts toward the cap.
-    assert totals.slot_state(row("unmeasured")) == "invalid"
-    assert totals.invalid_class(row("unmeasured")) == "output_unmeasured"
+    # Executed, and the scorer could not decide the output: never a pass, a
+    # failure or invalid evidence; an unmeasured slot, counted apart.
+    assert totals.slot_state(row("unmeasured")) == "unmeasured"
     # Nothing ran (a Builder that made no plan): not executed, not invalid.
     assert totals.slot_state(row("unmeasured", executed=False)) == "not_executed"
     # The row's own invalid statuses still win.

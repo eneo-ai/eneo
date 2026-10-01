@@ -23,6 +23,12 @@ report refuses to compare receipts that measure different things — a
 different scoring semantics version or a different model — and reports,
 without refusing, the identity fields that are expected to differ between
 two builds.
+
+Exit status of ``compare``: 0 when every requested gate passed (or none was
+requested); 1 (`REGRESSION_EXIT`) when a requested gate measured a
+regression; 2 when the receipts were refused; 3 (`INCONCLUSIVE_EXIT`) when
+no requested gate found a regression but the runtime gate could not decide a
+case (an unmeasured output or literal), which is never a pass.
 """
 
 from __future__ import annotations
@@ -50,6 +56,7 @@ if _SCRIPTS_DIR not in sys.path:
 
 from ai_builder_receipt import (  # noqa: E402
     ACQUISITION_FAILURE_CLASSES,
+    VERDICT_STATES,
     ReceiptError,
     executed_output_report,
     is_sha256,
@@ -568,57 +575,124 @@ def _runtime_cost_delta(
                 for key, (ceiling, basis) in bounds.items()
                 if cost[key] > ceiling
             )
-    if newly_executable or (
-        ran_before and all(row.get("output_success") is True for row in ran_before)
-    ):
-        reason = (
-            "a newly executable case must"
-            if newly_executable
-            else "every baseline observation did"
-        )
-        failures.extend(
-            f"current r{row.get('repetition')} did not deliver successfully; {reason}"
-            for row in ran_after
-            if row.get("output_success") is not True
-        )
-    baseline_facts = [
-        cast(dict[str, Any], row.get("output_required_facts") or {})
-        for row in ran_before
-    ]
+    # Only decided checks compare: an unmeasured output (the scorer's
+    # canonical state, `_output_state`) or literal (None) is neither a
+    # delivery nor a loss. A current run that failed a decided check regresses
+    # wherever no baseline run failed one, an all-unmeasured baseline
+    # included; a current run that is unmeasured (a harness-stopped run
+    # included) is inconclusive, reported apart and never a pass or a fail.
+    inconclusive: list[str] = []
+    baseline_failed = any(_output_state(row) == "fail" for row in ran_before)
+    for row in ran_after:
+        where = f"current r{row.get('repetition')}"
+        if _output_state(row) == "unmeasured":
+            inconclusive.append(
+                f"{where} output is unmeasured; "
+                + (
+                    "a newly executable case"
+                    if newly_executable
+                    else "baseline "
+                    + "/".join(_output_state(before) for before in ran_before)
+                )
+            )
+        elif _output_state(row) == "fail" and (
+            newly_executable or (ran_before and not baseline_failed)
+        ):
+            failures.append(
+                f"{where} did not deliver successfully; "
+                + (
+                    "a newly executable case must"
+                    if newly_executable
+                    else "no baseline observation failed a decided output check"
+                )
+            )
+    baseline_facts = [_facts(row) for row in ran_before]
     delivered = {
         fact
         for fact in (baseline_facts[0] if baseline_facts else {})
         if all(facts.get(fact) is True for facts in baseline_facts)
     }
     for row in ran_after:
-        facts = cast(dict[str, Any], row.get("output_required_facts") or {})
+        if row.get("output_required_facts") is None:
+            continue  # nothing was scored: its output is reported above
+        facts = _facts(row)
         required = facts if newly_executable else delivered
-        missing = sorted(fact for fact in required if facts.get(fact) is not True)
+        missing = sorted(
+            fact for fact in required if fact not in facts or facts[fact] is False
+        )
+        unmeasured = sorted(
+            fact for fact in required if fact in facts and facts[fact] is None
+        )
         if missing:
             failures.append(
                 f"current r{row.get('repetition')} misses required literal(s)"
                 + ("" if newly_executable else " the baseline delivered")
                 + f": {missing}"
             )
+        if unmeasured:
+            inconclusive.append(
+                f"current r{row.get('repetition')} required literal(s) unmeasured: "
+                f"{unmeasured}"
+            )
     # An intermittent fact may become rarer, never vanish: one baseline run
-    # delivering it binds at least one current run.
-    vanished = sorted(
+    # delivering it binds at least one current run. It vanished only when
+    # every current run decided it absent; a run that left it undecided (or
+    # scored nothing) may still hold it, so the case is inconclusive.
+    current_facts = [
+        None if row.get("output_required_facts") is None else _facts(row)
+        for row in ran_after
+    ]
+    lost = sorted(
         {fact for facts in baseline_facts for fact in facts if facts[fact] is True}
         - delivered
         - {
             fact
-            for row in ran_after
-            for fact, held in _facts(row).items()
+            for facts in current_facts
+            for fact, held in (facts or {}).items()
             if held is True
         }
     )
+    vanished = [
+        fact
+        for fact in lost
+        if all(
+            facts is not None and facts.get(fact, False) is False
+            for facts in current_facts
+        )
+    ]
+    undecided = [fact for fact in lost if fact not in vanished]
     if vanished and ran_after:
         failures.append(
             "no current run delivers required literal(s) a baseline run "
             f"delivered: {vanished}"
         )
+    if undecided and ran_after:
+        inconclusive.append(
+            "no current run decides required literal(s) a baseline run "
+            f"delivered: {undecided}"
+        )
     report["failures"] = failures
+    report["inconclusive"] = inconclusive
     return report
+
+
+def _stated_output(row: dict[str, Any]) -> str | None:
+    """The scorer's canonical final-output state of a row (`verdict_states.
+    output`: pass, fail or unmeasured), or None when the row states none."""
+
+    states = row.get("verdict_states")
+    output = (
+        cast(dict[str, Any], states).get("output") if isinstance(states, dict) else None
+    )
+    return output if output in VERDICT_STATES else None
+
+
+def _output_state(row: dict[str, Any]) -> str:
+    """A run's final-output state as its scorer stated it, never the legacy
+    `output_success` flag: a run the harness stopped is unmeasured there and
+    False in the flag. `_runtime_row_error` refuses a run that states none."""
+
+    return _stated_output(row) or "unmeasured"
 
 
 def _facts(row: dict[str, Any]) -> dict[str, Any]:
@@ -658,6 +732,11 @@ def _runtime_row_error(row: dict[str, Any]) -> str | None:
         return "output_required_facts must be null or an object"
     if not isinstance(row.get("output_executed"), bool):
         return "output_executed must be a boolean"
+    if row["output_executed"] and _stated_output(row) is None:
+        return (
+            "a run needs its scorer's verdict_states.output (pass, fail or "
+            "unmeasured); this receipt's scorer stated none"
+        )
     if isinstance(row.get("output_success"), bool) and not isinstance(
         row.get("output_required_facts"), dict
     ):
@@ -1075,6 +1154,18 @@ def compare(
                 for delta in deltas
                 if (cost := cast(dict[str, Any], delta.get("runtime_cost") or {})).get(
                     "failures"
+                )
+            }
+            if runtime_call_allowance is not None
+            else None
+        ),
+        # Unmeasured outputs are neither a pass nor a regression: named apart.
+        "runtime_output_inconclusive_cases": (
+            {
+                delta["case_id"]: cost["inconclusive"]
+                for delta in deltas
+                if (cost := cast(dict[str, Any], delta.get("runtime_cost") or {})).get(
+                    "inconclusive"
                 )
             }
             if runtime_call_allowance is not None
@@ -1542,10 +1633,20 @@ def _render_markdown(report: dict[str, Any], *, only_changed: bool) -> str:
             "new-case budget {max_calls} calls, {max_tokens} tokens): ".format(
                 **report["new_case_runtime_budget"]
             )
-            + ("FAIL" if runtime_failed else "pass")
+            + (
+                "FAIL"
+                if runtime_failed
+                else "INCONCLUSIVE"
+                if report.get("runtime_output_inconclusive_cases")
+                else "pass"
+            )
         )
         for case_id, reasons in cast(dict[str, list[str]], runtime_failed).items():
             lines.extend(f"- {case_id}: {reason}" for reason in reasons)
+        for case_id, reasons in cast(
+            dict[str, list[str]], report.get("runtime_output_inconclusive_cases") or {}
+        ).items():
+            lines.extend(f"- {case_id} (inconclusive): {reason}" for reason in reasons)
         lines.append("")
     decision_failed = cast(
         dict[str, list[str]], report.get("decision_floor_failed_cases") or {}
@@ -1807,6 +1908,8 @@ def _render_release_markdown(report: dict[str, Any]) -> str:
 
 
 _INVALID_RECEIPT_EXIT = 2
+REGRESSION_EXIT = 1
+INCONCLUSIVE_EXIT = 3
 
 # The token baseline reads only observations the product completed. Acquisition
 # faults never spent a first attempt on the product's behalf, and a turn from
@@ -2475,7 +2578,9 @@ def main() -> None:
             for key in ("failed_cases", "not_a_gate_result", "not_a_gate_cases")
         )
     ):
-        raise SystemExit(1)
+        raise SystemExit(REGRESSION_EXIT)
+    if report.get("runtime_output_inconclusive_cases"):
+        raise SystemExit(INCONCLUSIVE_EXIT)
 
 
 if __name__ == "__main__":
