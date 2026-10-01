@@ -2,6 +2,24 @@
   "$schema": "./releases.schema.json",
   "releases": [
     {
+      "version": "2.3.0",
+      "entries": [
+        {
+          "id": "sharepoint-document-properties",
+          "type": "improved",
+          "area": "knowledge",
+          "title": {
+            "en": "Find SharePoint documents by their properties",
+            "sv": "Hitta SharePoint-dokument på deras egenskaper"
+          },
+          "body": {
+            "en": "Columns from a SharePoint document library, such as document type or business area, now follow each document into Eneo. Assistants find documents on those properties as well as their contents, and the properties are shown on sources in the answer and in the document preview.",
+            "sv": "Kolumner från ett dokumentbibliotek i SharePoint, till exempel dokumenttyp eller verksamhet, följer nu med varje dokument in i Eneo. Assistenter hittar dokument på egenskaperna lika väl som på innehållet, och egenskaperna visas på källorna i svaret och i förhandsvisningen av dokumentet."
+          }
+        }
+      ]
+    },
+    {
       "version": "2.2.0",
       "entries": [
         {

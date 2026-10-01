@@ -4435,5 +4435,6 @@
   "failures": "Fel",
   "resource_file": "fil",
   "select_all": "Välj alla",
-  "sync_failed": "Synkronisering misslyckades"
+  "sync_failed": "Synkronisering misslyckades",
+  "source_metadata_label": "Dokumentegenskaper"
 }

@@ -4435,5 +4435,6 @@
   "failures": "Failures",
   "resource_file": "file",
   "select_all": "Select all",
-  "sync_failed": "Sync failed"
+  "sync_failed": "Sync failed",
+  "source_metadata_label": "Document properties"
 }
