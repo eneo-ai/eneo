@@ -4,7 +4,7 @@ Stores the SCIM Enterprise User extension (RFC 7643 §4.3), keyed by schema URN.
 Additive and nullable: no backfill, no index — nothing queries it.
 
 Revision ID: 202609281000
-Revises: 202609231001
+Revises: 202609291000
 Create Date: 2026-09-28 10:00:00.000000
 """
 
@@ -18,7 +18,7 @@ from sqlalchemy.dialects import postgresql
 from alembic import op
 
 revision: str = "202609281000"
-down_revision: str | None = "202609231001"
+down_revision: str | None = "202609291000"
 branch_labels: str | Sequence[str] | None = None
 depends_on: str | Sequence[str] | None = None
 
