@@ -277,7 +277,7 @@ Files that cannot be processed (images, videos, executables) are skipped during 
 
 ### Document Properties (Library Columns)
 
-Document libraries often carry metadata columns beside each file, for example _Dokumenttyp_, _Verksamhet_ or _Giltig till_. Eneo reads those columns together with the file and stores them as **document properties** on the imported document. They are part of what the assistant searches, so a question about home care routines can find a document whose body never uses those words but whose columns do, and the model sees the properties beside the source title when it answers. In the chat, the properties appear in the tooltip of an inline citation and in the document preview opened from the sources list.
+Document libraries often carry metadata columns beside each file, for example _Dokumenttyp_, _Verksamhet_ or _Giltig till_. Eneo reads those columns together with the file and stores them as **document properties** on the imported document. They are part of what the assistant searches, so a question about home care routines can find a document whose body never uses those words but whose columns do, and the model sees the properties beside the source title when it answers. In the chat, the properties appear in the tooltip of an inline citation and in the document preview opened from the sources list. The import dialog's folder tree shows each file's properties under its name, so you can see what will become searchable before importing.
 
 Which columns are included follows the library's own column settings:
 
@@ -319,6 +319,8 @@ Then append one of these query parameters to the Eneo page URL before opening th
 | `?sharepoint_fixture=representative` | 12 sites with duplicate and long names, Unicode, OneDrive, varied files, empty folders, and deep nesting |
 | `?sharepoint_fixture=large_tenant`   | 152 deterministic results for search, grouping, and rendering validation                                 |
 | `?sharepoint_fixture=empty`          | Empty-result behavior                                                                                    |
+
+Files in the `representative` scenario carry fixture document properties (_Dokumenttyp_, _Verksamhet_, _Giltig till_, _Extern publicering_, _Ansvarig enhet_) so the folder tree shows library columns exactly as it would against a tenant. The OneDrive fixture has none, matching personal drives without a backing list.
 
 Fixture mode is deliberately separate from the real integration:
 

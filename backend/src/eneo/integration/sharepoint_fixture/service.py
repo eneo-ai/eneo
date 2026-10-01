@@ -156,6 +156,7 @@ class SharePointFixtureService:
             size=node.size,
             modified=node.modified,
             web_url=(f"https://sharepoint-fixture.invalid/item/{site.key}/{node.id}"),
+            source_metadata=list(node.source_metadata),
         )
 
     @staticmethod

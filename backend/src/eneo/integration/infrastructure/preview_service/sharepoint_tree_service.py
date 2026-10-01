@@ -1,9 +1,13 @@
-from typing import TYPE_CHECKING, Any, Awaitable, Callable, Dict, List, Optional
+from typing import TYPE_CHECKING, Any, Awaitable, Callable, Dict, List, Optional, cast
 from uuid import UUID
 
 from eneo.integration.domain.entities.oauth_token import SharePointToken
 from eneo.integration.infrastructure.clients.sharepoint_content_client import (
     SharePointContentClient,
+)
+from eneo.integration.infrastructure.content_service.sharepoint_metadata import (
+    SharePointColumnCatalog,
+    extract_source_metadata,
 )
 from eneo.main.logging import get_logger
 
@@ -63,6 +67,10 @@ class SharePointTreeService:
             api_token=token.access_token,
             token_id=token.id,
             token_refresh_callback=self.token_refresh_callback,
+            # Files in the picker show the library columns that will follow
+            # them on import, so people can see what is searchable before
+            # choosing.
+            include_list_item_fields=True,
         ) as content_client:
             actual_drive_id = drive_id
             if not actual_drive_id and site_id:
@@ -146,6 +154,8 @@ class SharePointTreeService:
                     f"Failed to fetch folder items for folder {folder_id}: {str(e)}"
                 ) from e
 
+            catalog = await self._column_catalog(content_client, actual_drive_id)
+
             tree_items: List[Dict[str, Any]] = []
             for item in items:
                 item_name = item.get("name", "")
@@ -167,6 +177,13 @@ class SharePointTreeService:
                     "size": size,
                     "modified": modified,
                     "web_url": web_url,
+                    "source_metadata": (
+                        []
+                        if is_folder
+                        else extract_source_metadata(
+                            cast(Dict[str, Any], item), catalog
+                        )
+                    ),
                 }
                 tree_items.append(tree_item)
 
@@ -215,3 +232,26 @@ class SharePointTreeService:
             )
 
             return result
+
+    @staticmethod
+    async def _column_catalog(
+        content_client: SharePointContentClient, drive_id: str
+    ) -> SharePointColumnCatalog:
+        """The library's admitted columns; empty when they cannot be read.
+
+        Browsing must not fail because a drive has no backing list (personal
+        OneDrive) or the token lacks list access: the tree is simply shown
+        without properties, as the import would store it.
+        """
+        if not content_client.list_item_fields_enabled:
+            return SharePointColumnCatalog()
+        try:
+            definitions = await content_client.get_list_columns(drive_id)
+        except Exception as e:  # noqa: BLE001 - enrichment only
+            logger.warning(
+                "Could not read library columns for drive %s while browsing: %s",
+                drive_id,
+                e,
+            )
+            return SharePointColumnCatalog()
+        return SharePointColumnCatalog.from_graph(definitions)
