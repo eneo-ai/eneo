@@ -10,8 +10,10 @@
   import { buildSharePointSelectionKey } from "./selectionKey";
   import { fetchSharePointFixtureTree, type SharePointFixtureScenario } from "./fixtureMode";
   import {
+    collectSharePointTreeMatches,
     countSharePointTreeMatches,
     createSharePointTreeNode,
+    isSharePointItemCovered,
     normalizeSharePointTreeQuery,
     sharePointTreeNodeVisible,
     type SharePointTreeItem,
@@ -56,6 +58,10 @@
     selectedItemKeys?: string[];
     selectedPaths?: string[];
     onToggleSelect: (item: SharePointTreeItem) => void;
+    /** Selects every given item that is not already covered by the selection. */
+    onSelectMany?: (items: SharePointTreeItem[]) => void;
+    /** Removes the given items from the selection. */
+    onDeselectMany?: (items: SharePointTreeItem[]) => void;
   }
 
   let {
@@ -68,7 +74,9 @@
     fixtureScenario,
     selectedItemKeys = [],
     selectedPaths = [],
-    onToggleSelect
+    onToggleSelect,
+    onSelectMany,
+    onDeselectMany
   }: Props = $props();
 
   const eneo = getEneo();
@@ -87,6 +95,24 @@
     rootItems.filter((item) => sharePointTreeNodeVisible(item, query))
   );
   const matchCount = $derived(countSharePointTreeMatches(rootItems, query));
+  // The smallest set of loaded matches: what "select all matches" adds, so a
+  // matching folder is chosen instead of each file inside it.
+  const matchItems = $derived(collectSharePointTreeMatches(rootItems, query));
+  const allMatchesSelected = $derived(
+    matchItems.length > 0 &&
+      matchItems.every((item) => isSharePointItemCovered(item, selectedItemKeySet, selectedPaths))
+  );
+  const canSelectMatches = $derived(
+    Boolean(onSelectMany && onDeselectMany) && query !== "" && matchItems.length > 0
+  );
+
+  function toggleAllMatches() {
+    if (allMatchesSelected) {
+      onDeselectMany?.(matchItems);
+    } else {
+      onSelectMany?.(matchItems);
+    }
+  }
   let treeGeneration = 0;
   let selectedItemKeySet = $derived.by(() => new Set(selectedItemKeys));
   let siteRootSelected = $derived(selectedItemKeySet.has(siteRootSelectionKey));
@@ -227,16 +253,33 @@
     </InputGroup.Root>
     <!-- Names and document properties of what has been opened so far; folders
          that were never expanded are not fetched just to search them. -->
-    <p id="sharepoint-search-scope" class="text-muted-foreground px-1 text-xs" aria-live="polite">
-      {#if query}
-        {matchCount === 1
-          ? m.sharepoint_search_matches_one({ count: matchCount })
-          : m.sharepoint_search_matches_other({ count: matchCount })}
-        · {m.sharepoint_search_scope_hint()}
-      {:else}
-        {m.sharepoint_search_scope_hint()}
+    <div class="flex flex-wrap items-center justify-between gap-x-3 gap-y-1 px-1">
+      <p id="sharepoint-search-scope" class="text-muted-foreground text-xs" aria-live="polite">
+        {#if query}
+          {matchCount === 1
+            ? m.sharepoint_search_matches_one({ count: matchCount })
+            : m.sharepoint_search_matches_other({ count: matchCount })}
+          · {m.sharepoint_search_scope_hint()}
+        {:else}
+          {m.sharepoint_search_scope_hint()}
+        {/if}
+      </p>
+      {#if canSelectMatches}
+        <!-- One press instead of a checkbox per hit. A matching folder is
+             selected as a whole, like ticking it in the tree. -->
+        <Button
+          variant="outline"
+          size="sm"
+          disabled={siteRootSelected}
+          title={siteRootSelected ? m.sharepoint_selected_by_parent() : undefined}
+          onclick={toggleAllMatches}
+        >
+          {allMatchesSelected
+            ? m.sharepoint_deselect_all_matches()
+            : m.sharepoint_select_all_matches({ count: matchItems.length })}
+        </Button>
       {/if}
-    </p>
+    </div>
   </div>
 
   <div

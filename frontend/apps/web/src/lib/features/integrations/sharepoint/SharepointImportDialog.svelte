@@ -353,6 +353,31 @@
     selectedItems = [...remainingItems, { selectionKey, item, importName: item.name }];
   }
 
+  /** Adds every item not already selected or covered by a selected folder; a folder replaces its selected contents. */
+  function selectManyItems(items: SelectedTreeItem[]) {
+    let next = selectedItems;
+    for (const item of items) {
+      const selectionKey = getSelectionKey(item);
+      if (next.some((entry) => entry.selectionKey === selectionKey)) continue;
+      const covered = next.some(
+        (entry) =>
+          (entry.item.type === "folder" || entry.item.type === "site_root") &&
+          isSharePointDescendantPath(item.path, entry.item.path)
+      );
+      if (covered) continue;
+      if (item.type === "folder") {
+        next = next.filter((entry) => !isSharePointDescendantPath(entry.item.path, item.path));
+      }
+      next = [...next, { selectionKey, item, importName: item.name }];
+    }
+    selectedItems = next;
+  }
+
+  function deselectManyItems(items: SelectedTreeItem[]) {
+    const keys = new Set(items.map(getSelectionKey));
+    selectedItems = selectedItems.filter((entry) => !keys.has(entry.selectionKey));
+  }
+
   let selectedItemKeys = $derived(selectedItems.map((entry) => entry.selectionKey));
   let selectedPaths = $derived(selectedItems.map((entry) => entry.item.path));
   let dedupedSelection = $derived.by(() => {
@@ -661,6 +686,8 @@
             {selectedItemKeys}
             {selectedPaths}
             onToggleSelect={toggleSelectedItem}
+            onSelectMany={selectManyItems}
+            onDeselectMany={deselectManyItems}
           />
 
           {#if dedupedSelection.skippedCount > 0}
