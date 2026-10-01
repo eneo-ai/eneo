@@ -32,6 +32,10 @@ function referenceTo(extensions: readonly string[]) {
 export const fileReference = referenceTo(["csv", "xlsx"]);
 /** A Word document used as a template. */
 export const documentReference = referenceTo(["docx"]);
+/** A document created earlier that a new one replaces. */
+export const earlierDocumentReference = referenceTo(["docx", "pdf"]);
+/** A workbook created earlier that a new one replaces. */
+export const earlierWorkbookReference = referenceTo(["xlsx"]);
 export type FileReference = z.infer<typeof fileReference>;
 
 export type ReferenceAccess = {

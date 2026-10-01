@@ -25,7 +25,7 @@ import { Callout } from 'nextra/components'
 | **Web search** | Lets the assistant search the web and cite live pages | An external MCP search server (for example Tavily or Exa behind an MCP endpoint) |
 | **Image generation** | Lets the assistant create images from a description, and edit or vary images | Either a catalog **image model** called by Eneo itself, or an external MCP image server |
 | **Ask a file** (*Fråga fil*) | Lets the assistant answer questions about attached files: today it inspects, queries, joins and checks CSV and Excel files and exports full results; more formats will follow | The provider **built into Eneo** (the bundled tool runtime), or an external MCP server |
-| **Create files** (*Skapa filer*) | Lets the assistant create Word (DOCX) and PDF documents, optionally from a Word template, and Excel (XLSX) workbooks the user downloads from the chat | The provider **built into Eneo**, or an external MCP server |
+| **Create a file** (*Skapa fil*) | Lets the assistant create Word (DOCX) and PDF documents, optionally from a Word template, and Excel (XLSX) workbooks the user downloads from the chat | The provider **built into Eneo**, or an external MCP server |
 
 The key ideas:
 
@@ -173,7 +173,7 @@ external server.
 
 Each function has a role permission of the same name, edited under **Admin →
 Roles**: **Web search** (`web_search`), **Image generation**
-(`image_generation`), **Ask a file** (`file_analysis`) and **Create files**
+(`image_generation`), **Ask a file** (`file_analysis`) and **Create a file**
 (`file_creation`). The predefined User, AI Configurator and Owner roles have
 all four; custom roles only have the ones an administrator adds. Without the
 permission the tools are never attached for that user, even where an assistant
@@ -402,6 +402,14 @@ to keep each user's parsed files apart.
 - The file travels back inside the tool result as a standard MCP embedded
   resource. The bundled runtime keeps no copy and serves no download links.
 
+### Changing a created file
+
+Ask for the change in the same conversation ("shorten section 2", "add a
+column for 2027"). The assistant passes the earlier file to the tool as the one
+to revise, with the full revised content, and the new file replaces it under
+the same name; a Word file keeps its layout and template. Both versions stay
+in the conversation, as with an image and its edited variation.
+
 ### Word templates
 
 A Word document can be created from a template: the organisation's letterhead,
@@ -431,7 +439,7 @@ function that delivers that type:
 
 | Function | Accepted types |
 |----------|----------------|
-| Create files | DOCX, PDF, XLSX |
+| Create a file | DOCX, PDF, XLSX |
 | Ask a file | CSV (query exports) |
 
 The same file from any other server stays an ordinary result, and file bytes

@@ -13,7 +13,7 @@ It has four endpoints:
 - `/mcp/file-creation`: `create_document`, which renders Word (DOCX) or PDF
   from Markdown, optionally into a Word template from the conversation, and
   `create_spreadsheet`, which builds XLSX workbooks with named sheets and typed
-  cells. It provides **Create files** (`file_creation`).
+  cells. It provides **Create a file** (`file_creation`).
 - `/mcp/charts`: `create_chart`, which draws bar, line, pie and scatter charts
   as PNG images. It is added as an ordinary MCP server.
 
@@ -104,6 +104,16 @@ paragraph in the template reading `{{content}}` marks where the content goes;
 without one the template's body is replaced. Eneo checks the result like any
 other generated document.
 
+## Revising a created file
+
+`create_document` and `create_spreadsheet` take an optional `revises`: the
+signed reference of a file the tool created earlier in the conversation. The
+model passes the complete revised content; the new file replaces the earlier
+one, reuses its filename, and a Word file keeps its layout and the template it
+was made from (the earlier file serves as the template). The result names the
+file it replaces so the answer can say so. Eneo keeps both files, like an image
+and its edited variation.
+
 ## Created documents and spreadsheets
 
 The renderers run in a sandbox child and return the file inside the tool result
@@ -162,7 +172,7 @@ footers.
    **Compute** or **Charts** under *Built into Eneo*. Eneo tests the connection
    and discovers the tools. Review them, then enable the server in the spaces
    that should use it.
-6. In **Admin > Tools > Functions**, the **Ask a file** and **Create files**
+6. In **Admin > Tools > Functions**, the **Ask a file** and **Create a file**
    cards offer the provider built into Eneo: **Turn on** adds it and makes it
    the default when no provider is active yet. Then enable the capabilities in
    spaces and assistants. Their permissions (`file_analysis`, `file_creation`)

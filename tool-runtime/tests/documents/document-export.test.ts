@@ -506,6 +506,65 @@ describe("tools", () => {
     ).rejects.toThrow("Only .docx");
   });
 
+  test("revising a Word document keeps its layout and name and says what it replaces", async () => {
+    sources.set("tpl2", {
+      bytes: await makeTemplate("Mall"),
+      contentType: "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+    });
+    const first = (await tools.create_document!.execute(
+      {
+        title: "Beslut",
+        content: "# Version 1\n\nText.",
+        template: { url: sourceUrl("tpl2"), filename: "mall.docx" },
+      },
+      withOrigin,
+    )) as RichResult;
+    sources.set("v1", {
+      bytes: Buffer.from(first.files[0]!.blob, "base64"),
+      contentType: "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+    });
+    const second = (await tools.create_document!.execute(
+      {
+        title: "Beslut",
+        content: "# Version 2\n\nÄndrad text.",
+        revises: { url: sourceUrl("v1"), filename: "Beslut.docx" },
+      },
+      withOrigin,
+    )) as RichResult;
+    expect(second.structured).toMatchObject({ filename: "Beslut.docx", replaces: "Beslut.docx" });
+    expect(String(second.structured.delivered)).toContain("replaces Beslut.docx");
+    const xml = await unzipText(Buffer.from(second.files[0]!.blob, "base64"), "word/document.xml");
+    expect(xml).toContain("Version 2");
+    expect(xml).not.toContain("Version 1");
+    expect(
+      await unzipText(Buffer.from(second.files[0]!.blob, "base64"), "word/header1.xml"),
+    ).toContain("Sundsvalls kommun");
+    // A PDF has no layout to carry over; the name and the replacement still hold.
+    sources.set("v1pdf", { bytes: Buffer.from("%PDF-1.4"), contentType: "application/pdf" });
+    const pdf = (await tools.create_document!.execute(
+      {
+        title: "Beslut",
+        content: "Text",
+        format: "pdf",
+        revises: { url: sourceUrl("v1pdf"), filename: "Beslut.pdf" },
+      },
+      withOrigin,
+    )) as RichResult;
+    expect(pdf.structured).toMatchObject({ filename: "Beslut.pdf", replaces: "Beslut.pdf" });
+  });
+
+  test("revising a workbook reuses its name and says what it replaces", async () => {
+    const result = (await tools.create_spreadsheet!.execute(
+      {
+        title: "Budget v2",
+        sheets: [{ name: "Blad", columns: ["a"], rows: [[1]] }],
+        revises: { url: sourceUrl("any"), filename: "Budget.xlsx" },
+      },
+      withOrigin,
+    )) as RichResult;
+    expect(result.structured).toMatchObject({ filename: "Budget.xlsx", replaces: "Budget.xlsx" });
+  });
+
   test("the documents endpoint offers only document formats", async () => {
     await expect(
       tools.create_document!.execute({ title: "x", content: "y", format: "xlsx" }, context),

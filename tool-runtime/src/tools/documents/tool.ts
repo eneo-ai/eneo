@@ -5,6 +5,8 @@ import { z } from "zod";
 import { ToolError } from "../../errors";
 import {
   documentReference,
+  earlierDocumentReference,
+  earlierWorkbookReference,
   fetchReference,
   fileReference,
   type ReferenceAccess,
@@ -80,6 +82,8 @@ const filename = z
     "File name without extension, e.g. 'Tjänsteskrivelse trygghet'. Defaults to the title.",
   );
 const cell = z.union([z.string().max(2000), z.number(), z.boolean(), z.null()]);
+/** The name an earlier file was delivered under, without its extension. */
+const stem = (filename: string) => filename.replace(/\.[^.]+$/, "");
 
 /** The file travels back as an MCP embedded resource; Eneo saves it in the conversation. */
 async function produce(
@@ -89,6 +93,7 @@ async function produce(
   name: string,
   document: DocumentRequest,
   sources: Buffer[] = [],
+  replaces?: string,
 ): Promise<RichResult> {
   const { buffer, pages } = await render({
     format,
@@ -103,8 +108,10 @@ async function produce(
       format,
       bytes: buffer.length,
       ...(pages !== undefined ? { pages } : {}),
-      delivered:
-        "The file is attached to this answer for the user to download. Mention it by name; do not paste its content or invent a link.",
+      ...(replaces ? { replaces } : {}),
+      delivered: replaces
+        ? `The file is attached to this answer for the user to download and replaces ${replaces}. Say so, mention it by name; do not paste its content or invent a link.`
+        : "The file is attached to this answer for the user to download. Mention it by name; do not paste its content or invent a link.",
     },
     [
       {
@@ -147,13 +154,18 @@ export function documentTools(
       .describe(
         "Optional Word template: the signed url and filename of a .docx attached in the conversation or by the assistant. The content is rendered into it, keeping its styles, headers, footers and page setup. A paragraph in the template reading {{content}} marks where the content goes; without one the template's body is replaced. Only with format docx.",
       ),
+    revises: earlierDocumentReference
+      .optional()
+      .describe(
+        "To change a document created earlier in this conversation: its signed url and filename, from the reference url you were given for it. Pass the complete revised content. The new file replaces it: a Word file keeps its layout and template, and the filename is reused unless you give another.",
+      ),
   });
   return [
     {
       name: "create_document",
       title: "Create document",
       description:
-        "Produce a real document (Word .docx or PDF) from Markdown. Use it when the user asks for a document, report, memo, letter, tjänsteskrivelse or 'as Word/PDF'; write the complete, well-structured content in Markdown with headings, lists and tables. When the user names a Word template or one is attached for that purpose, pass its signed url as template and output docx. The file is attached to your answer for the user to download: mention it by name and do not paste the whole content back. Every call creates a new file; for a revision call again with the full revised content and say which file replaces which.",
+        "Produce a real document (Word .docx or PDF) from Markdown. Use it when the user asks for a document, report, memo, letter, tjänsteskrivelse or 'as Word/PDF'; write the complete, well-structured content in Markdown with headings, lists and tables. When the user names a Word template or one is attached for that purpose, pass its signed url as template and output docx. To change a document you created earlier, pass it as revises with the full revised content; the result replaces it. The file is attached to your answer for the user to download: mention it by name and do not paste the whole content back.",
       inputSchema: input.shape,
       readOnly: false,
       async execute(raw, ctx) {
@@ -161,20 +173,29 @@ export function documentTools(
         if (args.template && args.format !== "docx")
           throw new ToolError("TEMPLATE_FORMAT", "A template applies to Word (docx) output only.");
         const sources: Buffer[] = [];
-        if (args.template) sources.push((await fetchReference(args.template, ctx, access)).bytes);
+        // The layout comes from the template, else from the Word file being revised, whose
+        // own layout (and the template it was made from) carries over to the new version.
+        const earlierIsDocx = args.revises?.filename.toLowerCase().endsWith(".docx") ?? false;
+        const layout =
+          args.template ?? (earlierIsDocx && args.format === "docx" ? args.revises : undefined);
+        if (layout) sources.push((await fetchReference(layout, ctx, access)).bytes);
         return produce(
           render,
           config,
           args.format,
-          safeFilename(args.filename ?? args.title, args.format),
+          safeFilename(
+            args.filename ?? (args.revises ? stem(args.revises.filename) : args.title),
+            args.format,
+          ),
           {
             kind: "markdown",
             title: args.title,
             content: args.content,
             language: args.language,
-            ...(args.template ? { template: { index: 0 } } : {}),
+            ...(layout ? { template: { index: 0 } } : {}),
           },
           sources,
+          args.revises?.filename,
         );
       },
     },
@@ -229,13 +250,18 @@ export function spreadsheetTools(
       .min(1)
       .max(10),
     filename,
+    revises: earlierWorkbookReference
+      .optional()
+      .describe(
+        "To change a workbook created earlier in this conversation: its signed url and filename, from the reference url you were given for it. Give the sheets that stay as source from that same url (naming each sheet) and the changed ones inline. The new file replaces it and reuses the filename unless you give another.",
+      ),
   });
   return [
     {
       name: "create_spreadsheet",
       title: "Create spreadsheet",
       description:
-        "Produce an Excel workbook (.xlsx) from one or more tables. Give each sheet a name and either columns and rows (small tables you compiled, numbers as numbers) or a source file: the signed url of a CSV or XLSX, such as the export from query_table, so large results never pass through your context. Text is always stored as text (a value starting with = is not a formula). The first row is frozen and bold. The file is attached to your answer for the user to download: mention it by name and do not repeat the rows. Every call creates a new file.",
+        "Produce an Excel workbook (.xlsx) from one or more tables. Give each sheet a name and either columns and rows (small tables you compiled, numbers as numbers) or a source file: the signed url of a CSV or XLSX, such as the export from query_table, so large results never pass through your context. Text is always stored as text (a value starting with = is not a formula). The first row is frozen and bold. To change a workbook you created earlier, pass it as revises; the result replaces it. The file is attached to your answer for the user to download: mention it by name and do not repeat the rows.",
       inputSchema: input.shape,
       readOnly: false,
       async execute(raw, ctx) {
@@ -266,9 +292,13 @@ export function spreadsheetTools(
           render,
           config,
           "xlsx",
-          safeFilename(args.filename ?? args.title, "xlsx"),
+          safeFilename(
+            args.filename ?? (args.revises ? stem(args.revises.filename) : args.title),
+            "xlsx",
+          ),
           { kind: "sheets", title: args.title, sheets },
           sources,
+          args.revises?.filename,
         );
       },
     },
