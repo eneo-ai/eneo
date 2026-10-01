@@ -18949,6 +18949,11 @@ export interface components {
       modified?: string | null;
       /** Web Url */
       web_url?: string | null;
+      /**
+       * Source Metadata
+       * @default []
+       */
+      source_metadata?: components["schemas"]["SourceMetadataEntry"][];
     };
     /** SharePointTreeResponse */
     SharePointTreeResponse: {

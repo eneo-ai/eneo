@@ -208,3 +208,41 @@ class TestSharePointFixtureTree:
                 folder_id="fixture-folder-policies",
                 folder_path="/wrong/path",
             )
+
+
+class TestFixtureSourceMetadata:
+    """Fixture files carry the library columns a real import would store."""
+
+    def test_only_files_carry_properties_and_they_are_well_formed(self):
+        carrying = 0
+        for profile, roots in TREE_BY_PROFILE.items():
+            for node in _walk(roots):
+                if node.item_type == "folder":
+                    assert node.source_metadata == (), node.id
+                    continue
+                for entry in node.source_metadata:
+                    assert entry.name and entry.label, node.id
+                    assert entry.value, node.id
+                    carrying += 1
+        assert carrying > 0
+
+    def test_tree_items_expose_the_properties(self):
+        service = SharePointFixtureService()
+        response = service.get_tree(
+            SharePointFixtureScenario.REPRESENTATIVE,
+            site_id="fixture-site-leadership-se",
+            drive_id=None,
+            folder_id="fixture-folder-policies",
+        )
+
+        by_id = {item.id: item for item in response.items}
+        policy = by_id["fixture-file-information-security-policy"]
+        assert [entry.label for entry in policy.source_metadata][:2] == [
+            "Dokumenttyp",
+            "Verksamhet",
+        ]
+        assert policy.source_metadata[0].value == "Policy"
+        assert policy.source_metadata[1].value == [
+            "Informationssäkerhet",
+            "Hela organisationen",
+        ]

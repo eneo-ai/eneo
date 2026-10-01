@@ -1,4 +1,5 @@
 import { normalizeSharePointPath } from "./selectionKey";
+import type { SourceMetadataEntry } from "$lib/features/knowledge/sourceMetadata";
 
 export type SharePointTreeItem = {
   id: string;
@@ -9,6 +10,8 @@ export type SharePointTreeItem = {
   has_children: boolean;
   size?: number;
   modified?: string;
+  /** Library columns a file carries; what an import stores as document properties. */
+  source_metadata?: SourceMetadataEntry[];
 };
 
 export type SharePointTreeNode = SharePointTreeItem & {

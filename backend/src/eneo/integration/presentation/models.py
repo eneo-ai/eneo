@@ -8,6 +8,7 @@ from pydantic import BaseModel, Field, computed_field
 from eneo.ai_models.embedding_models.embedding_model import (
     EmbeddingModelPublicLegacy,
 )
+from eneo.info_blobs.info_blob import SourceMetadataEntry
 from eneo.integration.domain.value_objects import (
     IntegrationType,
     SkippedDetail,
@@ -132,6 +133,9 @@ class SharePointTreeItem(BaseModel):
     size: Optional[int] = None
     modified: Optional[datetime] = None
     web_url: Optional[str] = None
+    # Library columns of a file, as they will be stored on import. Empty for
+    # folders and for libraries whose columns cannot be read.
+    source_metadata: list[SourceMetadataEntry] = []
 
 
 class SharePointTreeResponse(BaseModel):

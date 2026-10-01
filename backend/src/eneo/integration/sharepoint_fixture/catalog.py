@@ -9,6 +9,7 @@ from dataclasses import dataclass
 from datetime import datetime, timezone
 from typing import Literal
 
+from eneo.info_blobs.info_blob import SourceMetadataEntry
 from eneo.integration.sharepoint_fixture.models import SharePointFixtureScenario
 
 FixtureCategory = Literal["my_teams", "other_sites", "onedrive"]
@@ -35,6 +36,64 @@ class FixtureTreeNode:
     modified: datetime
     size: int | None = None
     children: tuple["FixtureTreeNode", ...] = ()
+    # Library columns a real import would store, so the picker shows the same
+    # thing in fixture mode as against a tenant. Only files carry them.
+    source_metadata: tuple[SourceMetadataEntry, ...] = ()
+
+
+def _properties(
+    *,
+    dokumenttyp: str | None = None,
+    verksamhet: str | list[str] | None = None,
+    giltig_till: str | None = None,
+    extern: bool | None = None,
+    innehallsansvarig_enhet: str | None = None,
+) -> tuple[SourceMetadataEntry, ...]:
+    """The column set of the fixture libraries, in the library's column order."""
+    entries: list[SourceMetadataEntry] = []
+    if dokumenttyp is not None:
+        entries.append(
+            SourceMetadataEntry(
+                name="Dokumenttyp",
+                label="Dokumenttyp",
+                value=dokumenttyp,
+                kind="choice",
+            )
+        )
+    if verksamhet is not None:
+        entries.append(
+            SourceMetadataEntry(
+                name="Verksamhet", label="Verksamhet", value=verksamhet, kind="choice"
+            )
+        )
+    if giltig_till is not None:
+        entries.append(
+            SourceMetadataEntry(
+                name="Giltig_x0020_till",
+                label="Giltig till",
+                value=f"{giltig_till}T00:00:00Z",
+                kind="date",
+            )
+        )
+    if extern is not None:
+        entries.append(
+            SourceMetadataEntry(
+                name="Extern",
+                label="Extern publicering",
+                value="true" if extern else "false",
+                kind="boolean",
+            )
+        )
+    if innehallsansvarig_enhet is not None:
+        entries.append(
+            SourceMetadataEntry(
+                name="Ansvarig_x0020_enhet",
+                label="Ansvarig enhet",
+                value=innehallsansvarig_enhet,
+                kind="text",
+            )
+        )
+    return tuple(entries)
 
 
 def _modified(year: int, month: int, day: int, hour: int = 8) -> datetime:
@@ -203,6 +262,13 @@ STANDARD_TREE: tuple[FixtureTreeNode, ...] = (
                         item_type="file",
                         modified=_modified(2026, 8, 18, 10),
                         size=2_842_711,
+                        source_metadata=_properties(
+                            dokumenttyp="Policy",
+                            verksamhet=["Informationssäkerhet", "Hela organisationen"],
+                            giltig_till="2027-06-30",
+                            extern=False,
+                            innehallsansvarig_enhet="Informationssäkerhet och dataskydd",
+                        ),
                     ),
                     FixtureTreeNode(
                         id="fixture-file-remote-work-policy",
@@ -210,6 +276,13 @@ STANDARD_TREE: tuple[FixtureTreeNode, ...] = (
                         item_type="file",
                         modified=_modified(2026, 6, 3, 16),
                         size=86_432,
+                        source_metadata=_properties(
+                            dokumenttyp="Policy",
+                            verksamhet="HR",
+                            giltig_till="2026-12-31",
+                            extern=True,
+                            innehallsansvarig_enhet="HR & People",
+                        ),
                     ),
                 ),
             ),
@@ -225,6 +298,9 @@ STANDARD_TREE: tuple[FixtureTreeNode, ...] = (
                         item_type="file",
                         modified=_modified(2026, 8, 20, 17),
                         size=734_118,
+                        source_metadata=_properties(
+                            dokumenttyp="Protokoll", verksamhet="Ledning", extern=False
+                        ),
                     ),
                 ),
             ),
@@ -248,6 +324,11 @@ STANDARD_TREE: tuple[FixtureTreeNode, ...] = (
                         item_type="file",
                         modified=_modified(2026, 8, 24, 13),
                         size=8_944_031,
+                        source_metadata=_properties(
+                            dokumenttyp="Statusrapport",
+                            verksamhet=["Projekt Aurora", "Extern samverkan"],
+                            extern=True,
+                        ),
                     ),
                     FixtureTreeNode(
                         id="fixture-file-aurora-risk-register",
@@ -255,6 +336,12 @@ STANDARD_TREE: tuple[FixtureTreeNode, ...] = (
                         item_type="file",
                         modified=_modified(2026, 8, 23, 9),
                         size=248_991,
+                        source_metadata=_properties(
+                            dokumenttyp="Riskregister",
+                            verksamhet="Projekt Aurora",
+                            giltig_till="2026-10-31",
+                            extern=False,
+                        ),
                     ),
                 ),
             ),
@@ -316,6 +403,13 @@ STANDARD_TREE: tuple[FixtureTreeNode, ...] = (
         item_type="file",
         modified=_modified(2026, 8, 10, 11),
         size=4_718_592,
+        source_metadata=_properties(
+            dokumenttyp="Verksamhetsplan",
+            verksamhet="Hela organisationen",
+            giltig_till="2028-12-31",
+            extern=True,
+            innehallsansvarig_enhet="Ledningsgrupp Sverige",
+        ),
     ),
     FixtureTreeNode(
         id="fixture-file-zero-byte",
@@ -330,6 +424,11 @@ STANDARD_TREE: tuple[FixtureTreeNode, ...] = (
         item_type="file",
         modified=_modified(2026, 8, 22, 15),
         size=49_807_361,
+        source_metadata=_properties(
+            dokumenttyp="Uppföljning",
+            verksamhet=["Ekonomi", "Verksamhetsutveckling"],
+            extern=False,
+        ),
     ),
 )
 
@@ -347,6 +446,12 @@ ENGINEERING_TREE: tuple[FixtureTreeNode, ...] = STANDARD_TREE + (
                 item_type="file",
                 modified=_modified(2026, 8, 25, 9),
                 size=12_583_044,
+                source_metadata=_properties(
+                    dokumenttyp="Teknisk dokumentation",
+                    verksamhet="Produkt & utveckling",
+                    extern=False,
+                    innehallsansvarig_enhet="Arkitektur",
+                ),
             ),
             FixtureTreeNode(
                 id="fixture-file-api-export",
@@ -361,6 +466,9 @@ ENGINEERING_TREE: tuple[FixtureTreeNode, ...] = STANDARD_TREE + (
                 item_type="file",
                 modified=_modified(2026, 8, 25, 6),
                 size=318_221,
+                source_metadata=_properties(
+                    dokumenttyp="Testresultat", verksamhet="Produkt & utveckling"
+                ),
             ),
         ),
     ),

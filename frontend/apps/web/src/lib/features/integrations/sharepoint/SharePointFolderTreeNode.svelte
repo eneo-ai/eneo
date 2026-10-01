@@ -14,6 +14,8 @@
   import { Checkbox } from "$lib/components/ui/checkbox/index.js";
   import { m } from "$lib/paraglide/messages";
   import { formatFileSize, formatModifiedDate } from "./format";
+  import SourceMetadataList from "$lib/features/knowledge/components/SourceMetadataList.svelte";
+  import { hasSourceMetadata } from "$lib/features/knowledge/sourceMetadata";
   import { buildSharePointSelectionKey } from "./selectionKey";
   import {
     hasSelectedSharePointDescendant,
@@ -143,7 +145,7 @@
         {@const ext = getFileExtension(currentNode.name)}
         <label
           for={checkboxId}
-          class="flex h-10 min-w-0 flex-1 cursor-pointer items-center gap-2 px-2"
+          class="flex min-h-10 min-w-0 flex-1 cursor-pointer items-center gap-2 px-2 py-1"
         >
           <span class="size-4 shrink-0" aria-hidden="true"></span>
           {#if IMAGE_EXTENSIONS.includes(ext)}
@@ -155,8 +157,17 @@
           {:else}
             <File class="text-muted-foreground size-4 shrink-0" aria-hidden="true" />
           {/if}
-          <span class="min-w-0 flex-1 truncate text-left" title={currentNode.name}>
-            {currentNode.name}
+          <span class="flex min-w-0 flex-1 flex-col text-left">
+            <span class="truncate" title={currentNode.name}>{currentNode.name}</span>
+            {#if hasSourceMetadata(currentNode)}
+              <!-- The library columns that follow the file on import: lets a
+                   person see what becomes searchable before choosing. -->
+              <SourceMetadataList
+                entries={currentNode.source_metadata}
+                variant="inline"
+                class="text-muted-foreground text-xs"
+              />
+            {/if}
           </span>
           {#if currentNode.size != null}
             <span class="text-muted-foreground hidden shrink-0 text-xs tabular-nums md:inline">
