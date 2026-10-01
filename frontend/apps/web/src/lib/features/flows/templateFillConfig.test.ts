@@ -13,6 +13,8 @@ import {
   listTemplateBindingRows,
   listTemplatePlaceholders,
   resolveTemplateAssetSelection,
+  removeOrphanedTemplateBindings,
+  isStructuredTemplateBinding,
   updateTemplateBinding
 } from "./templateFillConfig";
 
@@ -29,6 +31,99 @@ const labels = {
 };
 
 describe("templateFillConfig", () => {
+  it("leaves ambiguous field and step names for the author to choose rather than auto-selecting the last match", () => {
+    expect(
+      buildTemplateBindingAutoSuggestions({
+        placeholders: ["fornamn", "bakgrund", "bedomning"],
+        currentStepOrder: 5,
+        formSchema: {
+          fields: [
+            { name: "fornamn", type: "text" },
+            { name: "for_namn", type: "text" }
+          ]
+        },
+        steps: [
+          { step_order: 1, user_description: "Bakgrund", output_type: "text" },
+          { step_order: 2, user_description: "Bak-grund", output_type: "text" },
+          { step_order: 3, user_description: "Förnamn", output_type: "text" },
+          { step_order: 4, user_description: "Bedömning", output_type: "text" }
+        ]
+      })
+    ).toEqual({ bedomning: "{{step_4.output.text}}" });
+  });
+  it("removes only the mappings the author sees as obsolete, using the shown inventory", () => {
+    const bindings = { name: "{{flow_input.name}}", optional: "", old: "{{step_1.output.text}}" };
+    const inventory = [{ name: "name" }, { name: "optional" }];
+    const config = { template_asset_id: "asset", placeholders: ["name", "optional"], bindings };
+    expect(removeOrphanedTemplateBindings(config, inventory)).toEqual({
+      ...config,
+      placeholders: ["name", "optional"],
+      bindings: { name: "{{flow_input.name}}", optional: "" }
+    });
+    expect(config.bindings.old).toBe("{{step_1.output.text}}");
+    const unknownInventory = { bindings: { body: "text" } };
+    expect(removeOrphanedTemplateBindings(unknownInventory, [])).toBe(unknownInventory);
+  });
+
+  it("cleans up against the non-persisted inspection when the saved inventory is missing or stale", () => {
+    const inspection = {
+      file_id: "f1",
+      file_name: "mall.docx",
+      placeholders: [{ name: "live", location: "body", label: "Live", kind: "text" as const }]
+    };
+    const bindings = { old: "{{step_1.output.text}}", live: "{{flow_input.live}}" };
+    // Builder draft without an inventory: the inspection marks `old` obsolete.
+    const draft = { template_asset_id: "asset", bindings };
+    expect(
+      removeOrphanedTemplateBindings(draft, listTemplatePlaceholders(inspection, draft))
+    ).toEqual({ ...draft, placeholders: ["live"], bindings: { live: "{{flow_input.live}}" } });
+    // Stale saved inventory: the live mapping must not be the one deleted.
+    const stale = { template_asset_id: "asset", placeholders: ["old"], bindings };
+    expect(
+      removeOrphanedTemplateBindings(stale, listTemplatePlaceholders(inspection, stale))
+    ).toEqual({
+      template_asset_id: "asset",
+      placeholders: ["live"],
+      bindings: { live: "{{flow_input.live}}" }
+    });
+  });
+
+  it("auto-matches only when exactly one source exists across form fields and steps", () => {
+    const formSchema = { fields: [{ name: "summary", type: "text" }] };
+    expect(
+      buildTemplateBindingAutoSuggestions({
+        placeholders: ["summary"],
+        currentStepOrder: 3,
+        formSchema,
+        steps: [{ step_order: 1, user_description: "Summary", output_type: "text" }]
+      })
+    ).toEqual({});
+    expect(
+      buildTemplateBindingAutoSuggestions({
+        placeholders: ["summary"],
+        currentStepOrder: 3,
+        formSchema,
+        steps: []
+      })
+    ).toEqual({ summary: "{{flow_input.summary}}" });
+    expect(
+      buildTemplateBindingAutoSuggestions({
+        placeholders: ["summary"],
+        currentStepOrder: 3,
+        formSchema: { fields: [] },
+        steps: [{ step_order: 1, user_description: "Summary", output_type: "text" }]
+      })
+    ).toEqual({ summary: "{{step_1.output.text}}" });
+  });
+
+  it.each([
+    "{{step_1.output}}",
+    "{{step_1.output.structured}}",
+    "{{flow_input}}",
+    "{{flow.input}}"
+  ])("recognizes the whole object %s", (binding) => {
+    expect(isStructuredTemplateBinding(binding)).toBe(true);
+  });
   it("preserves an intentionally empty field when reinspecting a template", () => {
     const config = applyTemplateInspection(
       { bindings: { body: "" } },
@@ -337,6 +432,27 @@ describe("templateFillConfig", () => {
       matched: 2,
       incomplete: true
     });
+  });
+
+  it("does not mark whole structured objects ready, but accepts text paths and intentional empty fields", () => {
+    const config = {
+      placeholders: ["body", "name", "optional", "literal"],
+      bindings: {
+        body: "  {{ step_2.output.structured }}  ",
+        name: "{{step_2.output.structured.name}}",
+        optional: "",
+        literal: "Underlag: {{step_2.output.structured}}"
+      }
+    };
+    expect(getTemplateFillReadiness(config)).toEqual({ total: 4, matched: 3, incomplete: true });
+    const rows = listTemplateBindingRows({
+      inspection: null,
+      currentConfig: config,
+      suggestions: [],
+      labels
+    });
+    expect(rows[0]).toMatchObject({ status: "invalid", sourceOutputType: "json" });
+    expect(rows.slice(1).every((row) => row.status === "matched")).toBe(true);
   });
 
   it("builds rows with missing, matched, and orphaned states", () => {

@@ -48,6 +48,7 @@
   import { buildNextFlowPrompt } from "$lib/features/flows/flowPromptDraft";
   import {
     applyAutoTemplateBindings,
+    removeOrphanedTemplateBindings,
     getTemplateFillOutputConfig,
     isTemplateFillStep,
     updateTemplateBinding
@@ -1287,6 +1288,11 @@
               onBindingChange={(detail) =>
                 handleTemplateBindingChange(detail.placeholder, detail.value)}
               onApplyAllSuggestions={applyAllTemplateSuggestions}
+              onRemoveOrphanedBindings={() =>
+                updateStep(
+                  "output_config",
+                  removeOrphanedTemplateBindings(templateFillConfig, templatePlaceholders)
+                )}
             />
           {:else}
             <FlowStepOutputSection

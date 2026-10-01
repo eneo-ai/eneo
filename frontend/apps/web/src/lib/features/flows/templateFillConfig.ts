@@ -201,6 +201,28 @@ export function updateTemplateBinding(
   };
 }
 
+/**
+ * Drops mappings whose placeholder is not in `inventory`, the same list the mapping
+ * rows are built from (`listTemplatePlaceholders`), so cleanup removes exactly the
+ * rows shown as obsolete, and saves that inventory as `placeholders` so what is
+ * shown, saved and validated agree. An empty inventory means "unknown" and changes
+ * nothing.
+ */
+export function removeOrphanedTemplateBindings(
+  config: TemplateFillOutputConfig,
+  inventory: readonly { name: string }[]
+): TemplateFillOutputConfig {
+  if (inventory.length === 0) return config;
+  const names = new Set(inventory.map((item) => item.name));
+  return {
+    ...config,
+    placeholders: inventory.map((item) => item.name),
+    bindings: Object.fromEntries(
+      Object.entries(config.bindings ?? {}).filter(([name]) => names.has(name))
+    )
+  };
+}
+
 export function listTemplatePlaceholders(
   inspection: FlowTemplateInspection | null,
   currentConfig: TemplateFillOutputConfig
@@ -295,22 +317,24 @@ export function buildTemplateBindingAutoSuggestions(params: {
   currentStepOrder: number;
   formSchema: TemplateBindingFormSchema | undefined;
 }): Record<string, string> {
-  const fieldMatches = new Map<string, string>();
+  const fieldMatches = new Map<string, string | null>();
   for (const field of params.formSchema?.fields ?? []) {
     if (!["text", "number", "date", "select"].includes(field.type)) continue;
     const variableToken = getFlowFormFieldVariableToken(field.name);
     if (variableToken) {
-      fieldMatches.set(normalizeTemplateToken(field.name), variableToken);
+      const key = normalizeTemplateToken(field.name);
+      fieldMatches.set(key, fieldMatches.has(key) ? null : variableToken);
     }
   }
 
-  const stepMatches = new Map<string, string>();
+  const stepMatches = new Map<string, string | null>();
   for (const step of params.steps) {
     if (step.step_order >= params.currentStepOrder || step.output_type !== "text") continue;
     const expression = `{{step_${step.step_order}.output.text}}`;
     const label = step.user_description?.trim();
     if (label) {
-      stepMatches.set(normalizeTemplateToken(label), expression);
+      const key = normalizeTemplateToken(label);
+      stepMatches.set(key, stepMatches.has(key) ? null : expression);
     }
   }
 
@@ -318,13 +342,14 @@ export function buildTemplateBindingAutoSuggestions(params: {
   for (const placeholder of params.placeholders) {
     const normalized = normalizeTemplateToken(placeholder);
     if (!normalized) continue;
-    if (fieldMatches.has(normalized)) {
-      suggestions[placeholder] = fieldMatches.get(normalized)!;
-      continue;
-    }
-    if (stepMatches.has(normalized)) {
-      suggestions[placeholder] = stepMatches.get(normalized)!;
-    }
+    // One clear source across BOTH groups, or the author chooses: a null is an
+    // ambiguous name inside one group, and a form field plus a step collide.
+    const fieldMatch = fieldMatches.get(normalized);
+    const stepMatch = stepMatches.get(normalized);
+    if (fieldMatch === null || stepMatch === null) continue;
+    if (fieldMatch && stepMatch) continue;
+    const match = fieldMatch ?? stepMatch;
+    if (match) suggestions[placeholder] = match;
   }
 
   return suggestions;
@@ -353,14 +378,23 @@ export function applyAutoTemplateBindings(params: {
 export function getTemplateFillReadiness(config: TemplateFillOutputConfig): TemplateFillReadiness {
   const placeholders = [...(config.placeholders ?? [])];
   const bindings = config.bindings ?? {};
-  const matched = placeholders.filter((placeholder) =>
-    Object.prototype.hasOwnProperty.call(bindings, placeholder)
+  const matched = placeholders.filter(
+    (placeholder) =>
+      Object.prototype.hasOwnProperty.call(bindings, placeholder) &&
+      !isStructuredTemplateBinding(bindings[placeholder])
   ).length;
   return {
     total: placeholders.length,
     matched,
     incomplete: placeholders.length > 0 && matched < placeholders.length
   };
+}
+
+/** A whole output object is refused by the renderer; a scalar path or literal remains usable. */
+export function isStructuredTemplateBinding(binding: string): boolean {
+  return /^\s*\{\{\s*(?:step_\d+\.output(?:\.structured)?|flow_input|flow\.input)\s*\}\}\s*$/.test(
+    binding
+  );
 }
 
 export function getTemplateFillTemplateName(
@@ -389,6 +423,7 @@ export function listTemplateBindingRows(params: {
     const hasBinding = Object.prototype.hasOwnProperty.call(currentBindings, placeholder.name);
     const binding = hasBinding ? currentBindings[placeholder.name] : undefined;
     const suggestion = typeof binding === "string" ? suggestionByValue.get(binding) : undefined;
+    const isStructured = typeof binding === "string" && isStructuredTemplateBinding(binding);
     rows.push({
       key: placeholder.name,
       placeholderName: placeholder.name,
@@ -402,12 +437,12 @@ export function listTemplateBindingRows(params: {
         binding === params.labels.emptyValue
           ? params.labels.leaveEmpty
           : (suggestion?.label ?? (binding?.trim() ? binding : null)),
-      status: !hasBinding ? "missing" : "matched",
+      status: !hasBinding ? "missing" : isStructured ? "invalid" : "matched",
       autoSuggested:
         Boolean(params.autoSuggestions?.[placeholder.name]) &&
         params.autoSuggestions?.[placeholder.name] === binding,
       isExplicitEmpty: hasBinding && binding === params.labels.emptyValue,
-      sourceOutputType: suggestion?.outputType ?? null
+      sourceOutputType: isStructured ? "json" : (suggestion?.outputType ?? null)
     });
   }
 

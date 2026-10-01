@@ -1,6 +1,6 @@
 import type { FlowStep } from "@eneo/eneo-js";
 import { hasDeletedInputBindingSourceRefs, getInputBindingQuestion } from "./flowInputBindings";
-import { getTemplateFillOutputConfig } from "./templateFillConfig";
+import { getTemplateFillOutputConfig, isStructuredTemplateBinding } from "./templateFillConfig";
 import { createDefaultHttpConfig } from "./components/http/httpConfigDefaults";
 import { parseHttpAuthoredConfig } from "./components/http/httpConfigTypes";
 import { getOutputModeCompatibilityIssue } from "./flowStepTypes";
@@ -35,6 +35,11 @@ export function computeStepConfigValidationIssues(
           "template_fill_no_template"
         ]);
       } else {
+        if (Object.values(config.bindings ?? {}).some(isStructuredTemplateBinding)) {
+          entries.set(`${prefix}template_fill_structured_mapping:${step.step_order}`, [
+            "template_fill_structured_mapping"
+          ]);
+        }
         // The placeholder inventory is optional draft metadata: the Builder
         // omits it and publication inspects the DOCX itself. Diagnostics are
         // only possible against a known inventory. A placeholder is mapped

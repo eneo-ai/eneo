@@ -1,5 +1,6 @@
 import { describe, it, expect } from "vitest";
 import type { FlowStep } from "@eneo/eneo-js";
+import { removeOrphanedTemplateBindings } from "./templateFillConfig";
 import {
   computeStepConfigValidationIssues,
   hasDeletedStepReferences
@@ -19,6 +20,24 @@ function makeStep(overrides: Record<string, unknown>): FlowStep {
 const PREFIX = "flow:step-config:";
 
 describe("computeStepConfigValidationIssues", () => {
+  it("reports a known structured mapping before a template run", () => {
+    const issues = computeStepConfigValidationIssues(
+      [
+        makeStep({
+          output_mode: "template_fill",
+          output_type: "docx",
+          step_order: 3,
+          output_config: {
+            template_asset_id: "asset",
+            placeholders: ["body"],
+            bindings: { body: "{{step_2.output.structured}}" }
+          }
+        })
+      ],
+      PREFIX
+    );
+    expect([...issues.keys()]).toEqual([`${PREFIX}template_fill_structured_mapping:3`]);
+  });
   it("flags a template_fill step with no template asset", () => {
     const issues = computeStepConfigValidationIssues(
       [makeStep({ output_mode: "template_fill", step_order: 2 })],
@@ -54,6 +73,34 @@ describe("computeStepConfigValidationIssues", () => {
     // An explicit empty mapping is a deliberate choice, not a missing one.
     const complete = computeStepConfigValidationIssues([step({ namn: "x", datum: "" })], PREFIX);
     expect([...complete.keys()]).toEqual([]);
+  });
+
+  it("leaves no mapping errors after obsolete-mapping cleanup, keeping intentional empties", () => {
+    const output_config = {
+      template_asset_id: "asset-1",
+      placeholders: ["old"],
+      bindings: { live: "{{ flow_input.live }}", optional: "", old: "{{ flow_input.old }}" }
+    };
+    const stale = makeStep({ output_mode: "template_fill", output_type: "docx", output_config });
+    expect([...computeStepConfigValidationIssues([stale], PREFIX).keys()]).toEqual([
+      `${PREFIX}template_fill_orphaned_mappings:1`
+    ]);
+
+    const cleaned = removeOrphanedTemplateBindings(output_config, [
+      { name: "live" },
+      { name: "optional" }
+    ]);
+    expect(cleaned).toEqual({
+      template_asset_id: "asset-1",
+      placeholders: ["live", "optional"],
+      bindings: { live: "{{ flow_input.live }}", optional: "" }
+    });
+    const after = makeStep({
+      output_mode: "template_fill",
+      output_type: "docx",
+      output_config: cleaned
+    });
+    expect([...computeStepConfigValidationIssues([after], PREFIX).keys()]).toEqual([]);
   });
 
   it("does not judge mappings without a placeholder inventory (Builder-made drafts)", () => {

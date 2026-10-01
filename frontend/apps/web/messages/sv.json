@@ -5550,12 +5550,11 @@
   "flow_template_fill_group_form": "Formulärfält",
   "flow_template_fill_group_steps": "Steg",
   "flow_template_fill_group_system": "Från körningen",
-  "flow_template_fill_json_warning": "Välj ett enskilt textfält från den strukturerade datan. Hela objekt eller listor kan inte fyllas i som text.",
+  "flow_template_fill_json_warning": "Välj text från ett steg eller ett enskilt textfält från den strukturerade datan. Hela objekt eller listor kan inte fyllas i som text.",
   "flow_template_fill_leave_empty": "Lämna tomt",
   "flow_template_fill_loading_templates": "Laddar mallar…",
   "flow_template_fill_naming_hint": "Ge stegen tydliga namn, så blir det lättare att koppla mallfälten.",
   "flow_template_fill_no_placeholders": "Inga fält hittades i mallen",
-  "flow_template_fill_orphaned_row_warning": "Det här fältet finns inte längre i mallen.",
   "flow_template_fill_orphaned_warning": "{count} fält finns inte längre i mallen.",
   "flow_template_fill_placeholders_title": "Koppla fält i mallen",
   "flow_template_fill_readiness_summary": "{matched} av {total} mallfält kopplade",
@@ -7186,5 +7185,7 @@
   "flow_template_fill_locations_help": "Fälten visas i dokumentets ordning. Välj ett fält för att gå till dess koppling. Rubriken hjälper dig hitta platsen i Word; slutlig sidbrytning och formatering ser du i Word-resultatet.",
   "flow_template_fill_go_to_field": "Gå till fältet {name}",
   "flow_template_fill_under_heading": "Under rubriken ”{heading}”",
-  "flow_template_fill_in_body": "I dokumentets huvudtext"
+  "flow_template_fill_in_body": "I dokumentets huvudtext",
+  "flow_template_fill_orphaned_help": "Kopplingar med samma Word-tagg har behållits. Ta bort de gamla kopplingarna nedan och koppla eventuella nya fält.",
+  "flow_template_fill_remove_orphaned": "Ta bort gamla kopplingar"
 }
