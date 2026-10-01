@@ -11,6 +11,7 @@
   import * as Collapsible from "$lib/components/ui/collapsible/index.js";
   import * as Empty from "$lib/components/ui/empty/index.js";
   import * as Field from "$lib/components/ui/field/index.js";
+  import { Separator } from "$lib/components/ui/separator/index.js";
   import * as Select from "$lib/components/ui/select/index.js";
   import { IconDownload } from "@eneo/icons/download";
   import { m } from "$lib/paraglide/messages";
@@ -121,6 +122,14 @@
       else templateTrigger?.focus();
     }
   }
+
+  function focusTemplateField(index: number) {
+    const target = document.getElementById(
+      `${instanceId}-${isPublished ? "field" : "source"}-${index}`
+    );
+    target?.focus({ preventScroll: true });
+    target?.scrollIntoView({ block: "center" });
+  }
 </script>
 
 <div class="flex flex-col gap-6">
@@ -129,7 +138,7 @@
       <Card.Title role="heading" aria-level={3}
         >{m.flow_template_fill_template_section()}</Card.Title
       >
-      <Card.Description>{m.flow_template_fill_desc()}</Card.Description>
+      <Card.Description class="max-w-prose">{m.flow_template_fill_desc()}</Card.Description>
     </Card.Header>
     <Card.Content class="flex flex-col gap-4">
       <Field.FieldGroup>
@@ -197,7 +206,7 @@
             : m.flow_template_fill_loading_templates()}
         </p>
       {/if}
-      {#if selectedTemplateAsset}
+      {#if selectedTemplateAsset && !busy}
         <div class="flex flex-wrap items-center gap-2">
           <Badge variant="outline"
             >{getTemplateAssetStatusLabel(selectedTemplateAsset.status)}</Badge
@@ -230,68 +239,81 @@
           </Alert.Description>
         </Alert.Root>
       {/if}
-      <Alert.Root role="note">
-        <Alert.Title>{m.flow_template_fill_word_help_title()}</Alert.Title>
-        <Alert.Description class="flex flex-col gap-3">
-          <p>{m.flow_template_fill_word_help_intro()}</p>
-          <Collapsible.Root>
-            <Collapsible.Trigger>
-              {#snippet child({ props })}
-                <Button {...props} variant="outline" size="sm"
-                  >{m.flow_template_fill_word_help_open()}</Button
-                >
-              {/snippet}
-            </Collapsible.Trigger>
-            <Collapsible.Content class="pt-3">
-              <p class="pb-2 font-medium">{m.flow_template_fill_word_help_windows_title()}</p>
-              <ol class="flex list-decimal flex-col gap-2 pl-5">
-                <li>{m.flow_template_fill_word_help_step_one()}</li>
-                <li>{m.flow_template_fill_word_help_step_two()}</li>
-                <li>{m.flow_template_fill_word_help_step_three()}</li>
-                <li>{m.flow_template_fill_word_help_step_four()}</li>
-              </ol>
-              <Alert.Root role="note" class="mt-3">
-                <Alert.Title>{m.flow_template_fill_word_help_mac_title()}</Alert.Title>
-                <Alert.Description class="flex flex-col gap-2">
-                  <p>{m.flow_template_fill_word_help_mac_tab()}</p>
-                  <p>{m.flow_template_fill_word_help_mac_controls()}</p>
-                </Alert.Description>
-              </Alert.Root>
-              <p class="pt-3">{m.flow_template_fill_word_help_migration()}</p>
-              <div class="flex flex-col items-start gap-1 pt-3">
-                <Button
-                  variant="link"
-                  class="h-auto text-left whitespace-normal"
-                  href="https://support.microsoft.com/en-gb/word/show-the-developer-tab-in-word"
-                  target="_blank"
-                  rel="noopener noreferrer">{m.flow_template_fill_word_help_tab_link()}</Button
-                >
-                <Button
-                  variant="link"
-                  class="h-auto text-left whitespace-normal"
-                  href="https://support.microsoft.com/en-us/word/create-a-form-in-word-that-users-can-complete-or-print"
-                  target="_blank"
-                  rel="noopener noreferrer">{m.flow_template_fill_word_help_controls_link()}</Button
-                >
-              </div>
-              <Alert.Root role="note" class="mt-3">
-                <Alert.Title>{m.flow_template_fill_accessibility_title()}</Alert.Title>
-                <Alert.Description>{m.flow_template_fill_accessibility_body()}</Alert.Description>
-              </Alert.Root>
-            </Collapsible.Content>
-          </Collapsible.Root>
+      <Separator />
+      <Collapsible.Root class="flex flex-col gap-3">
+        {#if !templateHasSelection}
+          <p class="max-w-prose text-sm leading-relaxed">
+            {m.flow_template_fill_word_help_intro()}
+          </p>
+        {/if}
+        <div class="flex flex-wrap items-center gap-2">
+          <Collapsible.Trigger>
+            {#snippet child({ props })}
+              <Button {...props} variant="outline" size="sm">
+                {m.flow_template_fill_word_help_open()}
+              </Button>
+            {/snippet}
+          </Collapsible.Trigger>
           <Button
             variant="link"
-            class="self-start"
+            size="sm"
             href={asset("/examples/eneo-word-template.docx")}
             download="eneo-word-template.docx"
           >
             <IconDownload data-icon="inline-start" />
             {m.flow_template_fill_example_action()}
           </Button>
+          <Button
+            variant="link"
+            size="sm"
+            href={asset("/examples/eneo-word-template-fields.docx")}
+            download="eneo-word-template-fields.docx"
+          >
+            <IconDownload data-icon="inline-start" />
+            {m.flow_template_fill_fields_example_action()}
+          </Button>
+        </div>
+        <Collapsible.Content class="flex max-w-prose flex-col gap-4 pt-4 text-sm leading-relaxed">
           <p>{m.flow_template_fill_example_help()}</p>
-        </Alert.Description>
-      </Alert.Root>
+          <p>{m.flow_template_fill_fields_example_help()}</p>
+          <div class="flex flex-col gap-2">
+            <p class="font-medium">{m.flow_template_fill_word_help_windows_title()}</p>
+            <ol class="flex list-decimal flex-col gap-2 pl-5">
+              <li>{m.flow_template_fill_word_help_step_one()}</li>
+              <li>{m.flow_template_fill_word_help_step_two()}</li>
+              <li>{m.flow_template_fill_word_help_step_three()}</li>
+              <li>{m.flow_template_fill_word_help_step_four()}</li>
+            </ol>
+            <p>{m.flow_template_fill_word_control_appearance_help()}</p>
+          </div>
+          <div class="flex flex-col gap-2">
+            <p class="font-medium">{m.flow_template_fill_word_help_mac_title()}</p>
+            <p>{m.flow_template_fill_word_help_mac_tab()}</p>
+            <p>{m.flow_template_fill_word_help_mac_controls()}</p>
+          </div>
+          <p>{m.flow_template_fill_word_help_migration()}</p>
+          <div class="flex flex-col items-start gap-2">
+            <Button
+              variant="link"
+              class="h-auto text-left whitespace-normal"
+              href="https://support.microsoft.com/en-gb/word/show-the-developer-tab-in-word"
+              target="_blank"
+              rel="noopener noreferrer">{m.flow_template_fill_word_help_tab_link()}</Button
+            >
+            <Button
+              variant="link"
+              class="h-auto text-left whitespace-normal"
+              href="https://support.microsoft.com/en-us/word/create-a-form-in-word-that-users-can-complete-or-print"
+              target="_blank"
+              rel="noopener noreferrer">{m.flow_template_fill_word_help_controls_link()}</Button
+            >
+          </div>
+          <Alert.Root role="note">
+            <Alert.Title>{m.flow_template_fill_accessibility_title()}</Alert.Title>
+            <Alert.Description>{m.flow_template_fill_accessibility_body()}</Alert.Description>
+          </Alert.Root>
+        </Collapsible.Content>
+      </Collapsible.Root>
     </Card.Content>
     <Card.Footer class="flex flex-wrap items-center justify-between gap-3">
       <Badge variant="secondary">{m.flow_output_type_docx()}</Badge>
@@ -311,7 +333,7 @@
       <Card.Title role="heading" aria-level={3}
         >{m.flow_template_fill_placeholders_title()}</Card.Title
       >
-      <Card.Description>{m.flow_template_fill_mapping_help()}</Card.Description>
+      <Card.Description class="max-w-prose">{m.flow_template_fill_mapping_help()}</Card.Description>
     </Card.Header>
     <Card.Content class="flex flex-col gap-4">
       {#if templateHasSelection && templateReadiness.total > 0}
@@ -368,166 +390,228 @@
             class="overflow-auto whitespace-pre-wrap">{templateInspection.extracted_text_preview}</pre>
         {/if}
       {:else}
+        {#if templateInspection && !busy && templatePlaceholders.length > 1}
+          <Collapsible.Root class="flex flex-col gap-3">
+            <Collapsible.Trigger>
+              {#snippet child({ props })}
+                <Button {...props} variant="outline" size="sm" class="self-start">
+                  {m.flow_template_fill_locations_action()}
+                </Button>
+              {/snippet}
+            </Collapsible.Trigger>
+            <Collapsible.Content class="flex flex-col gap-3">
+              <p class="text-muted-foreground max-w-prose text-sm leading-relaxed">
+                {m.flow_template_fill_locations_help()}
+              </p>
+              <ol class="flex max-w-prose list-decimal flex-col gap-1 pl-5 text-sm">
+                {#each templateBindingRows as row, index (row.key)}
+                  {#if row.status !== "orphaned"}
+                    <li>
+                      <Button
+                        variant="ghost"
+                        class="h-auto w-full items-start justify-between gap-3 py-3 text-left whitespace-normal"
+                        aria-label={m.flow_template_fill_go_to_field({ name: row.label })}
+                        aria-describedby={row.status === "missing"
+                          ? `${instanceId}-location-status-${index}`
+                          : undefined}
+                        onclick={() => focusTemplateField(index)}
+                      >
+                        <span class="flex min-w-0 flex-col gap-1 break-words">
+                          <span class="font-medium">{row.label}</span>
+                          <span class="text-muted-foreground font-normal">
+                            {row.sectionHeading
+                              ? m.flow_template_fill_under_heading({ heading: row.sectionHeading })
+                              : m.flow_template_fill_in_body()}
+                          </span>
+                        </span>
+                        {#if row.status === "missing"}
+                          <Badge
+                            id={`${instanceId}-location-status-${index}`}
+                            variant="outline"
+                            class="shrink-0"
+                          >
+                            {getTemplateRowStatusText(row.status)}
+                          </Badge>
+                        {/if}
+                      </Button>
+                    </li>
+                  {/if}
+                {/each}
+              </ol>
+            </Collapsible.Content>
+          </Collapsible.Root>
+          <Separator />
+        {/if}
         <Field.FieldGroup>
           {#each templateBindingRows as row, index (row.key)}
-            <Card.Root>
-              <Card.Header>
-                <Card.Title role="heading" aria-level={4} class="break-words"
-                  >{row.label}</Card.Title
-                >
+            {#if index > 0}<Separator />{/if}
+            <Field.FieldSet id={`${instanceId}-field-${index}`} tabindex={-1} class="min-w-0">
+              <Field.FieldLegend>{row.label}</Field.FieldLegend>
+              {#if row.sectionHeading}
+                <Field.FieldDescription class="text-foreground">
+                  {m.flow_template_fill_under_heading({ heading: row.sectionHeading })}
+                </Field.FieldDescription>
+              {/if}
+              <div class="flex flex-wrap items-center gap-2">
                 {#if row.label !== row.placeholderName}
-                  <Card.Description
+                  <Field.FieldDescription
                     >{m.flow_template_fill_word_tag({
                       name: row.placeholderName
-                    })}</Card.Description
+                    })}</Field.FieldDescription
                   >
                 {/if}
-                {#if row.hint && row.hint.length > 240}
-                  <Collapsible.Root>
-                    <Collapsible.Trigger>
-                      {#snippet child({ props })}
-                        <Button {...props} variant="outline" size="sm">
-                          {m.flow_template_fill_example_text_action()}
-                        </Button>
-                      {/snippet}
-                    </Collapsible.Trigger>
-                    <Collapsible.Content class="pt-2">
-                      <Card.Description
-                        class="max-h-64 overflow-auto whitespace-pre-wrap"
-                        tabindex={0}
-                        aria-label={m.flow_template_fill_example_text_action()}
+                {#if row.kind}
+                  <Badge variant="outline"
+                    >{row.kind === "rich"
+                      ? m.flow_template_fill_kind_rich()
+                      : m.flow_template_fill_kind_text()}</Badge
+                  >
+                {/if}
+                <Badge
+                  variant={row.status === "orphaned" || row.status === "invalid"
+                    ? "destructive"
+                    : "secondary"}>{getTemplateRowStatusText(row.status)}</Badge
+                >
+                {#if row.autoSuggested}<Badge variant="outline"
+                    >{m.flow_template_fill_auto_badge()}</Badge
+                  >{/if}
+              </div>
+              <Field.Field data-invalid={row.status === "orphaned" || row.status === "invalid"}>
+                <Field.FieldLabel for={`${instanceId}-source-${index}`}>
+                  {m.flow_template_fill_binding_label({ name: row.label })}
+                </Field.FieldLabel>
+                <Select.Root
+                  type="single"
+                  value={row.binding ?? "__unset__"}
+                  disabled={isPublished}
+                  onValueChange={(value) =>
+                    onBindingChange?.({ placeholder: row.placeholderName, value })}
+                >
+                  <Select.Trigger
+                    id={`${instanceId}-source-${index}`}
+                    class="w-full"
+                    aria-invalid={row.status === "orphaned" || row.status === "invalid"}
+                  >
+                    <span class="min-w-0 truncate">{bindingLabel(row.binding)}</span>
+                  </Select.Trigger>
+                  <Select.Content>
+                    <Select.Group>
+                      <Select.Item value="__unset__" label={m.flow_template_fill_select_source()}
+                        >{m.flow_template_fill_select_source()}</Select.Item
                       >
-                        {row.hint}
-                      </Card.Description>
-                    </Collapsible.Content>
-                  </Collapsible.Root>
-                {:else if row.hint}
-                  <Card.Description>{row.hint}</Card.Description>
-                {/if}
-                <div class="flex flex-wrap gap-2">
-                  {#if row.kind}
-                    <Badge variant="outline"
-                      >{row.kind === "rich"
-                        ? m.flow_template_fill_kind_rich()
-                        : m.flow_template_fill_kind_text()}</Badge
-                    >
-                  {/if}
-                  <Badge variant={row.status === "orphaned" ? "destructive" : "secondary"}
-                    >{getTemplateRowStatusText(row.status)}</Badge
-                  >
-                  {#if row.autoSuggested}<Badge variant="outline"
-                      >{m.flow_template_fill_auto_badge()}</Badge
-                    >{/if}
-                </div>
-              </Card.Header>
-              <Card.Content class="flex flex-col gap-3">
-                <Field.Field data-invalid={row.status === "orphaned"}>
-                  <Field.FieldLabel for={`${instanceId}-source-${index}`}>
-                    {m.flow_template_fill_binding_label({ name: row.label })}
-                  </Field.FieldLabel>
-                  <Select.Root
-                    type="single"
-                    value={row.binding ?? "__unset__"}
-                    disabled={isPublished}
-                    onValueChange={(value) =>
-                      onBindingChange?.({ placeholder: row.placeholderName, value })}
-                  >
-                    <Select.Trigger
-                      id={`${instanceId}-source-${index}`}
-                      class="w-full"
-                      aria-invalid={row.status === "orphaned"}
-                    >
-                      <span class="min-w-0 truncate">{bindingLabel(row.binding)}</span>
-                    </Select.Trigger>
-                    <Select.Content>
+                      <Select.Item value="" label={m.flow_template_fill_leave_empty()}
+                        >{m.flow_template_fill_leave_empty()}</Select.Item
+                      >
+                    </Select.Group>
+                    {#each templateBindingSuggestionGroups as group (group.key)}
                       <Select.Group>
-                        <Select.Item value="__unset__" label={m.flow_template_fill_select_source()}
-                          >{m.flow_template_fill_select_source()}</Select.Item
-                        >
-                        <Select.Item value="" label={m.flow_template_fill_leave_empty()}
-                          >{m.flow_template_fill_leave_empty()}</Select.Item
-                        >
+                        <Select.GroupHeading>{group.label}</Select.GroupHeading>
+                        {#each group.options as option (option.value)}
+                          <Select.Item value={option.value} label={option.label}
+                            >{option.label}</Select.Item
+                          >
+                        {/each}
                       </Select.Group>
-                      {#each templateBindingSuggestionGroups as group (group.key)}
-                        <Select.Group>
-                          <Select.GroupHeading>{group.label}</Select.GroupHeading>
-                          {#each group.options as option (option.value)}
-                            <Select.Item value={option.value} label={option.label}
-                              >{option.label}</Select.Item
-                            >
-                          {/each}
-                        </Select.Group>
-                      {/each}
-                    </Select.Content>
-                  </Select.Root>
-                  {#if row.kind}
-                    <Field.FieldDescription
-                      >{row.kind === "rich"
-                        ? m.flow_template_fill_kind_help_rich()
-                        : m.flow_template_fill_kind_help_text()}</Field.FieldDescription
-                    >
-                  {/if}
-                  {#if row.status === "orphaned"}<Field.FieldError
-                      >{m.flow_template_fill_orphaned_row_warning()}</Field.FieldError
-                    >{/if}
-                  {#if row.sourceOutputType === "json"}<Field.FieldError
-                      >{m.flow_template_fill_json_warning()}</Field.FieldError
-                    >{/if}
-                </Field.Field>
-                {#if row.status === "missing" && templateAutoBindings[row.placeholderName]}
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    class="self-start"
-                    disabled={isPublished}
-                    onclick={() =>
-                      onBindingChange?.({
-                        placeholder: row.placeholderName,
-                        value: templateAutoBindings[row.placeholderName]
-                      })}
+                    {/each}
+                  </Select.Content>
+                </Select.Root>
+                {#if row.kind}
+                  <Field.FieldDescription class="max-w-prose"
+                    >{row.kind === "rich"
+                      ? m.flow_template_fill_kind_help_rich()
+                      : m.flow_template_fill_kind_help_text()}</Field.FieldDescription
                   >
-                    {m.flow_template_fill_apply_suggestion()}
-                  </Button>
                 {/if}
-                {#if isAdvancedMode}
-                  <Collapsible.Root>
-                    <Collapsible.Trigger>
-                      {#snippet child({ props })}
-                        <Button {...props} variant="ghost" size="sm"
-                          >{m.flow_template_fill_show_expression()}</Button
-                        >
-                      {/snippet}
-                    </Collapsible.Trigger>
-                    <Collapsible.Content class="pt-3">
-                      <Field.Field>
-                        <Field.FieldLabel for={`${instanceId}-expression-${index}`}
-                          >{m.flow_template_fill_expression_label()}</Field.FieldLabel
-                        >
-                        <Input
-                          id={`${instanceId}-expression-${index}`}
-                          value={row.binding ?? ""}
-                          disabled={isPublished}
-                          placeholder={m.flow_template_fill_expression_placeholder({
-                            expression: "{{step_1.output.text}}"
+                {#if row.kind === "rich" && templateBindingSuggestionGroups.some((group) => group.key === "form" && group.options.some((option) => option.value === row.binding))}
+                  <Field.FieldDescription class="text-foreground"
+                    >{m.flow_template_fill_form_source_help()}</Field.FieldDescription
+                  >
+                {/if}
+                {#if row.status === "orphaned"}<Field.FieldError
+                    >{m.flow_template_fill_orphaned_row_warning()}</Field.FieldError
+                  >{/if}
+                {#if row.sourceOutputType === "json"}<Field.FieldError
+                    >{m.flow_template_fill_json_warning()}</Field.FieldError
+                  >{/if}
+              </Field.Field>
+              {#if row.hint}
+                <Collapsible.Root>
+                  <Collapsible.Trigger>
+                    {#snippet child({ props })}
+                      <Button {...props} variant="outline" size="sm"
+                        >{m.flow_template_fill_example_text_action()}</Button
+                      >
+                    {/snippet}
+                  </Collapsible.Trigger>
+                  <Collapsible.Content class="pt-3">
+                    <p id={`${instanceId}-preview-label-${index}`} class="mb-2 text-sm font-medium">
+                      {m.flow_template_fill_template_text_label()}
+                    </p>
+                    <Field.FieldDescription
+                      class="bg-muted text-foreground max-h-64 max-w-prose overflow-auto rounded-md p-4 leading-relaxed break-words whitespace-pre-wrap"
+                      role="region"
+                      tabindex={0}
+                      aria-labelledby={`${instanceId}-preview-label-${index}`}
+                      >{row.hint}</Field.FieldDescription
+                    >
+                  </Collapsible.Content>
+                </Collapsible.Root>
+              {/if}
+              {#if row.status === "missing" && templateAutoBindings[row.placeholderName]}
+                <Button
+                  variant="outline"
+                  size="sm"
+                  class="self-start"
+                  disabled={isPublished}
+                  onclick={() =>
+                    onBindingChange?.({
+                      placeholder: row.placeholderName,
+                      value: templateAutoBindings[row.placeholderName]
+                    })}
+                >
+                  {m.flow_template_fill_apply_suggestion()}
+                </Button>
+              {/if}
+              {#if isAdvancedMode}
+                <Collapsible.Root>
+                  <Collapsible.Trigger>
+                    {#snippet child({ props })}
+                      <Button {...props} variant="ghost" size="sm"
+                        >{m.flow_template_fill_show_expression()}</Button
+                      >
+                    {/snippet}
+                  </Collapsible.Trigger>
+                  <Collapsible.Content class="pt-3">
+                    <Field.Field>
+                      <Field.FieldLabel for={`${instanceId}-expression-${index}`}
+                        >{m.flow_template_fill_expression_label()}</Field.FieldLabel
+                      >
+                      <Input
+                        id={`${instanceId}-expression-${index}`}
+                        value={row.binding ?? ""}
+                        disabled={isPublished}
+                        placeholder={m.flow_template_fill_expression_placeholder({
+                          expression: "{{step_1.output.text}}"
+                        })}
+                        oninput={(event) =>
+                          onBindingChange?.({
+                            placeholder: row.placeholderName,
+                            value: event.currentTarget.value
                           })}
-                          oninput={(event) =>
-                            onBindingChange?.({
-                              placeholder: row.placeholderName,
-                              value: event.currentTarget.value
-                            })}
-                        />
-                      </Field.Field>
-                    </Collapsible.Content>
-                  </Collapsible.Root>
-                {/if}
-              </Card.Content>
-            </Card.Root>
+                      />
+                    </Field.Field>
+                  </Collapsible.Content>
+                </Collapsible.Root>
+              {/if}
+            </Field.FieldSet>
           {/each}
         </Field.FieldGroup>
       {/if}
       {#if templateHasSelection && templateReadiness.total > 0 && !templateReadiness.incomplete && templateOrphanedRows.length === 0}
         <Alert.Root role="status"
-          ><Alert.Description>{m.flow_template_fill_ready_to_test()}</Alert.Description></Alert.Root
+          ><Alert.Description class="max-w-prose"
+            >{m.flow_template_fill_ready_to_test()}</Alert.Description
+          ></Alert.Root
         >
       {/if}
     </Card.Content>

@@ -130,6 +130,8 @@ class FileProtocol:
                 limit_name=limit_name,
             )
 
+        # Prior inspection must not truncate the original document we persist.
+        await upload_file.seek(0)
         filepath = Path(
             await self.file_size_service.save_file_to_disk(upload_file.file)
         )

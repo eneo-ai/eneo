@@ -64,6 +64,7 @@ class TemplatePlaceholderSpec:
     kind: ContentControlKind
     hint: str | None
     location: str
+    section_heading: str | None = None
 
 
 def inspect_docx_template_placeholders(
@@ -87,6 +88,7 @@ def inspect_docx_template_placeholders(
             kind=control.kind,
             hint=control.hint or None,
             location=control.location,
+            section_heading=control.section_heading,
         )
         for control in controls
     )
@@ -97,7 +99,7 @@ def inspect_docx_template_bytes(
     *,
     filename: str,
 ) -> list[dict[str, str | None]]:
-    """List the fill targets as plain records: name, label, kind, hint, location."""
+    """List the fill targets and their section context as plain records."""
 
     placeholders = inspect_docx_template_placeholders(template_bytes, filename=filename)
     _require_fill_targets(placeholders)

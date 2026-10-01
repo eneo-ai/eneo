@@ -25954,6 +25954,11 @@ export interface components {
       location: string;
       /** Name */
       name: string;
+      /**
+       * Section Heading
+       * @description Text of the nearest preceding recognized heading (built-in 'Heading N' styles), shortened for display, when present.
+       */
+      section_heading?: string | null;
     };
     /** FlowTemplateReadinessPublic */
     FlowTemplateReadinessPublic: {

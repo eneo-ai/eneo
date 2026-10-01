@@ -1,4 +1,5 @@
 import { expect, test, type APIRequestContext, type Page } from "@playwright/test";
+import { createHash } from "node:crypto";
 import { readFile } from "node:fs/promises";
 import { backendFetch, expectOk, MOCK_REPLY, uniqueName } from "./helpers";
 
@@ -10,6 +11,7 @@ const EXAMPLE = /^(Download example template|Ladda ner exempelmall)$/;
 const TEMPLATE = "Template step";
 const TEXT_STEP = "Source text";
 const FILE = new URL("../static/examples/eneo-word-template.docx", import.meta.url);
+const FIELDS_FILE = new URL("../static/examples/eneo-word-template-fields.docx", import.meta.url);
 
 async function api(page: Page, request: APIRequestContext, path: string, data?: object) {
   const response = await backendFetch(page, request, path, {
@@ -20,13 +22,18 @@ async function api(page: Page, request: APIRequestContext, path: string, data?: 
   return response.json();
 }
 
-async function createFlow(page: Page, request: APIRequestContext) {
+async function createFlow(page: Page, request: APIRequestContext, includeForm = false) {
   const space = await api(page, request, "/api/v1/spaces/type/personal/");
   const flow = await api(page, request, "/api/v1/flows/", {
     space_id: space.id,
     name: uniqueName("E2E Word mapping"),
     steps: [],
-    metadata_json: { wizard: { transcription_enabled: false } }
+    metadata_json: {
+      wizard: { transcription_enabled: false },
+      ...(includeForm
+        ? { form_schema: { fields: [{ name: "brukarens_namn", type: "text", required: false }] } }
+        : {})
+    }
   });
   const steps = [];
   for (const [index, name] of [TEXT_STEP, "Other step", TEMPLATE].entries()) {
@@ -81,6 +88,82 @@ async function savedTemplate(page: Page, request: APIRequestContext, flowId: str
   const flow = await api(page, request, `/api/v1/flows/${flowId}/`);
   return flow.steps[2].output_config;
 }
+
+test("multi-field example shows real locations and keyboard navigation preserves mappings", async ({
+  page,
+  request
+}) => {
+  const flow = await createFlow(page, request, true);
+  await openTemplate(page, flow.id);
+  const downloadPromise = page.waitForEvent("download");
+  await page
+    .getByRole("link", { name: /^(Example with several fields|Exempel med flera fält)$/ })
+    .click();
+  const example = await downloadPromise;
+  expect(example.suggestedFilename()).toBe("eneo-word-template-fields.docx");
+  const filePath = test.info().outputPath("eneo-word-template-fields.docx");
+  await example.saveAs(filePath);
+  expect(await readFile(filePath)).toEqual(await readFile(FIELDS_FILE));
+  await page.locator('input[type="file"][accept=".docx"]').setInputFiles(filePath);
+  const overview = page.getByRole("button", {
+    name: /^(Show places in the template|Visa platser i mallen)$/
+  });
+  await expect(overview).toBeVisible();
+  await overview.focus();
+  await overview.press("Enter");
+  const locations = page
+    .getByRole("list")
+    .filter({ has: page.getByRole("button", { name: /^(Go to field|Gå till fältet) Namn$/ }) });
+  const names = await locations.getByRole("button").allTextContents();
+  expect(names).toHaveLength(4);
+  for (const [index, label] of ["Namn", "Bakgrund", "Bedömning", "Nästa steg"].entries()) {
+    expect(names[index]).toContain(label);
+  }
+  await expect(locations).toContainText(/In the document body|I dokumentets huvudtext/);
+  await expect(locations).toContainText(/Under the heading “Bedömning”|Under rubriken ”Bedömning”/);
+  const target = page.getByRole("button", { name: /^(Go to field|Gå till fältet) Bedömning$/ });
+  await target.focus();
+  await target.press("Enter");
+  const source = page.getByRole("button", { name: /^(Text for|Text till) Bedömning$/ });
+  await expect(source).toBeFocused();
+  await source.press("Enter");
+  await page.getByRole("option", { name: /Source text/ }).click();
+  await expect
+    .poll(async () => (await savedTemplate(page, request, flow.id))?.bindings?.bedomning)
+    .toBe("{{step_1.output.text}}");
+  const nameSource = page.getByRole("button", { name: /^(Text for|Text till) Namn$/ });
+  await nameSource.click();
+  await page.getByRole("option", { name: /^(Field|Fält): brukarens_namn$/ }).click();
+  const nextSource = page.getByRole("button", { name: /^(Text for|Text till) Nästa steg$/ });
+  await nextSource.click();
+  await page.getByRole("option", { name: EMPTY }).click();
+  for (const [width, height] of [
+    [1024, 768],
+    [1440, 1000],
+    [2560, 1080]
+  ]) {
+    await page.setViewportSize({ width, height });
+    await overview.scrollIntoViewIfNeeded();
+    expect(
+      await locations.evaluate((element) => element.scrollWidth <= element.clientWidth + 1)
+    ).toBe(true);
+    await page.screenshot({
+      path: test.info().outputPath(`word-locations-${width}.png`),
+      fullPage: true
+    });
+  }
+  await page.getByRole("button", { name: /^(Refresh|Uppdatera)$/ }).click();
+  await expect(source).toContainText(TEXT_STEP);
+  await expect(nameSource).toContainText("brukarens_namn");
+  await expect(nextSource).toContainText(/Leave empty|Lämna tomt/);
+  await expect
+    .poll(async () => (await savedTemplate(page, request, flow.id)).bindings)
+    .toMatchObject({
+      namn: "{{flow_input.brukarens_namn}}",
+      bedomning: "{{step_1.output.text}}",
+      nasta_steg: ""
+    });
+});
 
 test("invalid Word files show actionable errors and a replacement upload recovers", async ({
   page,
@@ -144,14 +227,37 @@ test("simple mode exposes Word guidance, a valid example and editable field mapp
   ).toBeVisible();
   await page.getByText(/unique tag|unik tagg/).scrollIntoViewIfNeeded();
   await page.screenshot({ path: test.info().outputPath("word-setup-guide.png"), fullPage: true });
-  await upload(page);
+  const downloadedPath = test.info().outputPath("eneo-word-template(1).docx");
+  await example.saveAs(downloadedPath);
+  expect(
+    createHash("sha256")
+      .update(await readFile(downloadedPath))
+      .digest("hex")
+  ).toBe(
+    createHash("sha256")
+      .update(await readFile(FILE))
+      .digest("hex")
+  );
+  await page.locator('input[type="file"][accept=".docx"]').setInputFiles(downloadedPath);
   await expect(page.getByRole("button", { name: SOURCE })).toBeVisible();
+  await expect(page.getByText(/^(Template checked|Mallen är kontrollerad)$/)).toBeVisible();
   const exampleText = page.getByRole("button", {
-    name: /^(Show template text|Visa texten i mallen)$/
+    name: /^(Show text to replace|Visa texten som ersätts)$/
   });
   await expect(exampleText).toHaveAttribute("aria-expanded", "false");
   await exampleText.click();
   await expect(exampleText).toHaveAttribute("aria-expanded", "true");
+  const preview = page.getByRole("region", {
+    name: /This text is replaced|Den här texten ersätts/
+  });
+  await expect(preview).toBeVisible();
+  await expect(preview).toContainText("Exempelmall för Eneo\n\nDen här mallen");
+  await preview.focus();
+  await expect(preview).toBeFocused();
+  await page.screenshot({
+    path: test.info().outputPath("word-readable-preview.png"),
+    fullPage: true
+  });
   await exampleText.click();
   await mapText(page);
   await expect
@@ -268,7 +374,7 @@ test("template fields stay usable on laptops, desktop and ultrawide displays wit
   page,
   request
 }) => {
-  const flow = await createFlow(page, request);
+  const flow = await createFlow(page, request, true);
   await openTemplate(page, flow.id);
   await upload(page);
   const source = page.getByRole("button", { name: SOURCE });
@@ -281,6 +387,11 @@ test("template fields stay usable on laptops, desktop and ultrawide displays wit
   await expect
     .poll(async () => (await savedTemplate(page, request, flow.id))?.bindings?.dokument)
     .toBe("{{datum}}");
+  await source.click();
+  await page.getByRole("option", { name: /^(Field|Fält): brukarens_namn$/ }).click();
+  await expect(
+    page.getByText(/You selected a form field|Du har valt ett formulärfält/)
+  ).toBeVisible();
   for (const [width, height] of [
     [1024, 768],
     [1440, 1000],

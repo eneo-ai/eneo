@@ -59,6 +59,7 @@ export type TemplateBindingRow = {
   label: string;
   kind: "rich" | "text" | null;
   hint: string | null;
+  sectionHeading: string | null;
   binding?: string;
   location: string;
   sourceLabel: string | null;
@@ -394,6 +395,7 @@ export function listTemplateBindingRows(params: {
       label: placeholder.label ?? placeholder.name,
       kind: placeholder.kind ?? null,
       hint: placeholder.hint ?? null,
+      sectionHeading: placeholder.section_heading ?? null,
       binding,
       location: placeholder.location,
       sourceLabel:
@@ -418,6 +420,7 @@ export function listTemplateBindingRows(params: {
       label: placeholderName,
       kind: null,
       hint: null,
+      sectionHeading: null,
       binding,
       location: "template",
       sourceLabel:

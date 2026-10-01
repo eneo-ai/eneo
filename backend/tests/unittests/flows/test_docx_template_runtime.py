@@ -1,15 +1,19 @@
 from __future__ import annotations
 
 import io
+import json
 import zipfile
+from pathlib import Path
 
 import pytest
 from docx import Document
 from docx.oxml import OxmlElement
 from docx.oxml.ns import qn
 
+from eneo.flows.runtime.document_rendering import docx_content_controls
 from eneo.flows.runtime.document_rendering.blocks import DocumentStructureError
 from eneo.flows.runtime.document_rendering.docx_content_controls import (
+    HEADING_PREVIEW_MAX_CHARS,
     DocxTemplateContractError,
     append_rich_control,
     append_text_control,
@@ -62,6 +66,94 @@ def _bytes(document) -> bytes:
 # --- discovery ------------------------------------------------------------------
 
 
+def test_downloadable_field_example_fills_distinct_places_and_keeps_fixed_headings() -> (
+    None
+):
+    template = (
+        Path(__file__).resolve().parents[4]
+        / "frontend/apps/web/static/examples/eneo-word-template-fields.docx"
+    ).read_bytes()
+    fields = inspect_docx_template_bytes(template, filename="example.docx")
+    assert [
+        (field["name"], field["kind"], field["section_heading"]) for field in fields
+    ] == [
+        ("namn", "text", None),
+        ("bakgrund", "rich", "Bakgrund"),
+        ("bedomning", "rich", "Bedömning"),
+        ("nasta_steg", "rich", "Nästa steg"),
+    ]
+
+    result, _ = render_docx_template(
+        template_bytes=template,
+        template_name="example.docx",
+        context={
+            "namn": "Testperson",
+            "bakgrund": "Bakgrund från underlaget.",
+            "bedomning": "# Detaljer\n\nBedömning från underlaget.",
+            "nasta_steg": "",
+        },
+        step_order=1,
+    )
+    assert docx_paragraph_texts(result) == [
+        "Utredningsunderlag",
+        "Namn: Testperson",
+        "Bakgrund",
+        "Bakgrund från underlaget.",
+        "Bedömning",
+        "Detaljer",
+        "Bedömning från underlaget.",
+        "Nästa steg",
+    ]
+
+
+def test_inspection_identifies_nearest_heading_for_inline_and_section_fields() -> None:
+    document = Document()
+    append_text_control(
+        document.add_paragraph("Namn: "), tag="namn", label="Namn", hint="Namn här"
+    )
+    document.add_heading("Bakgrund", level=1)
+    document.add_paragraph("Fast text före fältet.")
+    append_rich_control(document, tag="bakgrund", label="Bakgrund", hint="Text här")
+    heading = document.add_heading("Uppfölj", level=2)
+    heading.add_run("ning").bold = True
+    append_text_control(
+        document.add_paragraph("Ansvarig: "),
+        tag="ansvarig",
+        label="Ansvarig",
+        hint="Ansvarig här",
+    )
+    append_rich_control(document, tag="plan", label="Plan", hint="Plan här")
+
+    fields = inspect_docx_template_bytes(_bytes(document), filename="sections.docx")
+
+    assert [(field["name"], field["section_heading"]) for field in fields] == [
+        ("namn", None),
+        ("bakgrund", "Bakgrund"),
+        ("ansvarig", "Uppföljning"),
+        ("plan", "Uppföljning"),
+    ]
+
+
+def test_control_preview_preserves_paragraphs_inline_runs_breaks_and_tabs() -> None:
+    document = Document()
+    control = append_rich_control(document, tag="dokument", label="Dokument", hint="")
+    content = control.find(qn("w:sdtContent"))
+    content.clear()
+    content.append(document.add_heading("Exempelmall", level=1)._p)
+    paragraph = document.add_paragraph("Första ")
+    paragraph.add_run("stycket").bold = True
+    paragraph.add_run(".").add_break()
+    paragraph.add_run("Nästa rad\tmed tabulator.")
+    content.append(paragraph._p)
+    content.append(document.add_paragraph("Andra stycket.")._p)
+
+    fields = inspect_docx_template_bytes(_bytes(document), filename="example.docx")
+
+    assert fields[0]["hint"] == (
+        "Exempelmall\n\nFörsta stycket.\nNästa rad\tmed tabulator.\n\nAndra stycket."
+    )
+
+
 @pytest.mark.parametrize("text", ["Ordinary source document", "Case: {{ case_id }}"])
 def test_empty_control_discovery_is_allowed_but_template_use_is_rejected(
     text: str,
@@ -101,6 +193,7 @@ def test_inspect_lists_controls_with_kind_label_and_hint_in_document_order() -> 
             "kind": "text",
             "hint": "Rapportens titel",
             "location": "body",
+            "section_heading": None,
         },
         {
             "name": "datum",
@@ -108,6 +201,7 @@ def test_inspect_lists_controls_with_kind_label_and_hint_in_document_order() -> 
             "kind": "text",
             "hint": "ÅÅÅÅ-MM-DD",
             "location": "body",
+            "section_heading": None,
         },
         {
             "name": "sammanfattning",
@@ -115,6 +209,7 @@ def test_inspect_lists_controls_with_kind_label_and_hint_in_document_order() -> 
             "kind": "rich",
             "hint": "Två till fyra stycken.",
             "location": "body",
+            "section_heading": "Sammanfattning",
         },
         {
             "name": "analys",
@@ -122,8 +217,41 @@ def test_inspect_lists_controls_with_kind_label_and_hint_in_document_order() -> 
             "kind": "rich",
             "hint": "Underrubriker och tabeller.",
             "location": "body",
+            "section_heading": "Analys",
         },
     ]
+
+
+def test_inspect_bounds_the_heading_preview_and_reads_each_heading_once(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    document = Document()
+    document.add_heading("Rubrik " * 15_000, level=1)
+    for index in range(100):
+        append_rich_control(
+            document, tag=f"avsnitt_{index}", label=f"Avsnitt {index}", hint=""
+        )
+    buffer = io.BytesIO()
+    document.save(buffer)
+    reads = 0
+    read_heading = docx_content_controls._heading_preview
+
+    def counting(heading: object) -> str | None:
+        nonlocal reads
+        reads += 1
+        return read_heading(heading)
+
+    monkeypatch.setattr(docx_content_controls, "_heading_preview", counting)
+
+    fields = inspect_docx_template_bytes(buffer.getvalue(), filename="stor.docx")
+
+    assert len(fields) == 100
+    assert reads == 1
+    assert {len(field["section_heading"]) for field in fields} == {
+        HEADING_PREVIEW_MAX_CHARS
+    }
+    assert all(field["section_heading"].endswith("…") for field in fields)
+    assert len(json.dumps(fields)) < 100 * (HEADING_PREVIEW_MAX_CHARS + 400)
 
 
 def test_inspect_rejects_macro_enabled_filenames_before_reading() -> None:

@@ -68,6 +68,13 @@ class FlowTemplatePlaceholderPublic(BaseModel):
     kind: Literal["rich", "text"]
     hint: str | None = None
     location: str
+    section_heading: str | None = Field(
+        default=None,
+        description=(
+            "Text of the nearest preceding recognized heading (built-in "
+            "'Heading N' styles), shortened for display, when present."
+        ),
+    )
 
 
 class FlowTemplateInspectionPublic(BaseModel):

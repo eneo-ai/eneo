@@ -35,6 +35,10 @@ from eneo.main.exceptions import BadRequestException
 ContentControlKind = Literal["rich", "text"]
 
 _HEADING_STYLE_NAME = re.compile(r"^heading (\d)$")
+# A heading is shown only to help the author find the place in Word (one line in the
+# mapping list), so the location preview is capped; a template cannot make every
+# control carry a whole heading.
+HEADING_PREVIEW_MAX_CHARS = 200
 _PLACEHOLDER_STYLE_ID = "PlaceholderText"
 _UNSUPPORTED_KIND_TAGS: tuple[tuple[str, str], ...] = (
     ("w:date", "date"),
@@ -72,6 +76,9 @@ class ContentControl:
     heading_level: int
     multiline: bool
     element: Any
+    # Nearest preceding recognized heading (built-in "Heading N" styles), truncated
+    # to HEADING_PREVIEW_MAX_CHARS.
+    section_heading: str | None = None
 
 
 def inspect_content_controls(document: Any) -> tuple[ContentControl, ...]:
@@ -81,6 +88,7 @@ def inspect_content_controls(document: Any) -> tuple[ContentControl, ...]:
     """
 
     style_names = _style_names_by_id(document)
+    heading_previews: dict[Any, str | None] = {}
     body = document.element.body
     seen: dict[str, str] = {}
     controls: list[ContentControl] = []
@@ -159,6 +167,11 @@ def inspect_content_controls(document: Any) -> tuple[ContentControl, ...]:
             multiline = text_properties is not None and text_properties.get(
                 qn("w:multiLine")
             ) in ("1", "true", "on")
+            heading_level, section_heading = _preceding_heading(
+                sdt if parent is body else parent,
+                style_names=style_names,
+                previews=heading_previews,
+            )
             controls.append(
                 ContentControl(
                     name=tag_value,
@@ -166,12 +179,10 @@ def inspect_content_controls(document: Any) -> tuple[ContentControl, ...]:
                     kind=kind,
                     hint=_control_text(sdt),
                     location="body",
-                    heading_level=_preceding_heading_level(
-                        sdt if parent is body else parent,
-                        style_names=style_names,
-                    ),
+                    heading_level=heading_level,
                     multiline=multiline,
                     element=sdt,
+                    section_heading=section_heading,
                 )
             )
     return tuple(controls)
@@ -383,9 +394,43 @@ def _control_text(sdt: Any) -> str:
     content = sdt.find(qn("w:sdtContent"))
     if content is None:
         return ""
-    return " ".join(
-        "".join(text.text or "" for text in content.iter(qn("w:t"))).split()
-    )
+
+    paragraphs = list(content.iter(qn("w:p")))
+    if paragraphs:
+        return "\n\n".join(_inline_text(paragraph) for paragraph in paragraphs)
+    return _inline_text(content)
+
+
+def _inline_pieces(element: Any) -> Iterator[str]:
+    for node in element.iter():
+        if node.tag == qn("w:t"):
+            yield node.text or ""
+        elif node.tag == qn("w:tab"):
+            yield "\t"
+        elif node.tag in (qn("w:br"), qn("w:cr")):
+            yield "\n"
+
+
+def _inline_text(element: Any) -> str:
+    return "".join(_inline_pieces(element)).strip()
+
+
+def _heading_preview(heading: Any) -> str | None:
+    """The heading text, read lazily and cut to ``HEADING_PREVIEW_MAX_CHARS``."""
+
+    pieces: list[str] = []
+    length = 0
+    truncated = False
+    for piece in _inline_pieces(heading):
+        pieces.append(piece)
+        length += len(piece)
+        if length > 4 * HEADING_PREVIEW_MAX_CHARS:
+            truncated = True
+            break
+    text = "".join(pieces).strip()
+    if truncated or len(text) > HEADING_PREVIEW_MAX_CHARS:
+        text = text[: HEADING_PREVIEW_MAX_CHARS - 1].rstrip() + "…"
+    return text or None
 
 
 def _style_names_by_id(document: Any) -> dict[str, str]:
@@ -394,7 +439,18 @@ def _style_names_by_id(document: Any) -> dict[str, str]:
     }
 
 
-def _preceding_heading_level(anchor: Any, *, style_names: dict[str, str]) -> int:
+def _preceding_heading(
+    anchor: Any,
+    *,
+    style_names: dict[str, str],
+    previews: dict[Any, str | None],
+) -> tuple[int, str | None]:
+    """Level and bounded text of the nearest preceding recognized heading.
+
+    Recognized means a built-in "Heading N" style; custom styles that inherit
+    from it are not. Each heading paragraph is read once (``previews``).
+    """
+
     for sibling in anchor.itersiblings(preceding=True):
         if sibling.tag != qn("w:p"):
             continue
@@ -406,5 +462,7 @@ def _preceding_heading_level(anchor: Any, *, style_names: dict[str, str]) -> int
             style_names.get(style.get(qn("w:val"), ""), "")
         )
         if match:
-            return int(match.group(1))
-    return 0
+            if sibling not in previews:
+                previews[sibling] = _heading_preview(sibling)
+            return int(match.group(1)), previews[sibling]
+    return 0, None
