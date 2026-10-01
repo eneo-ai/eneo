@@ -179,6 +179,8 @@ returns `410`. Clients must not treat the preview as complete text.
 
 A run can pause at `awaiting_review`. The runtime then exposes an active review checkpoint that a consumer app can edit, approve, reject, and resume. Initial execution still creates one run for the whole published flow; a later rerun can target one completed step in an existing completed or failed run.
 
+After an edited JSON result is resumed, later steps that read the reviewed result receive the edited content they select. An AI step that reads it directly is also instructed which of the values it reads the reviewer changed or removed, and to keep them rather than restore them from other parts of its input; this is an instruction to the model, not a guarantee of what it writes. The instruction names only the source step, binding, selection and the path of each change inside the selected value, and only for the selections the step reads: never a value, never a replaced value, and a removed key only when the step's output contract declares it (otherwise only its container is named). Numbers are compared by value, so `100.0` sent back as `100` is not a change, and an approval without a change adds nothing. Too many changes for one step fail that step with `typed_io_input_too_large` before any model call, as does a run whose reviewed results exceed the read limit. Not told (unmeasured): a step that reads a speaker-naming result as text, section and summarize calls, speaker-naming calls, and a step that reads a later, transformed result.
+
 For audio-first workflows such as meeting transcript summaries or employee review notes, the intended runtime path is **completed upload first, then one published Flow run**:
 
 - record in the browser or pick an audio file

@@ -61,6 +61,10 @@ from eneo.flows.domain.review_checkpoint_exceptions import (
     FlowReviewRunNoLongerAwaitingReviewError,
     FlowReviewRunNotAwaitingReviewError,
 )
+from eneo.flows.domain.review_edit_references import (
+    ResumedReviewPayload,
+    ReviewedResultKey,
+)
 from eneo.flows.domain.transcript_corrections import FlowTranscriptCorrectionSet
 from eneo.flows.enums import (
     ACTIVE_FLOW_RUN_REVIEW_CHECKPOINT_STATES,
@@ -1700,6 +1704,68 @@ class FlowRunReviewCheckpointRepository:
             )
             for row in rows
         ]
+
+    async def list_resumed_json_review_payloads(
+        self,
+        *,
+        run_id: UUID,
+        tenant_id: UUID,
+        attempts: frozenset[ReviewedResultKey],
+        max_rows: int,
+        max_logical_bytes: int,
+    ) -> tuple[ResumedReviewPayload, ...] | None:
+        """The payloads of the run's RESUMED JSON checkpoints with a changed
+        structured value for exactly these (step_id, attempt_no) pairs, or None
+        when they exceed `max_rows` or
+        `max_logical_bytes`: a partial read never stands in for the whole.
+        Sizes are counted before any payload is loaded."""
+
+        if not attempts:
+            return ()
+        eligible = (
+            FlowRunReviewCheckpoints.flow_run_id == run_id,
+            FlowRunReviewCheckpoints.tenant_id == tenant_id,
+            FlowRunReviewCheckpoints.state
+            == FlowRunReviewCheckpointState.RESUMED.value,
+            FlowRunReviewCheckpoints.output_type == FlowOutputType.JSON.value,
+            # An approval without a change names nothing: never counted or read.
+            FlowRunReviewCheckpoints.original_payload_json[
+                "structured"
+            ].is_distinct_from(
+                FlowRunReviewCheckpoints.current_payload_json["structured"]
+            ),
+            sa.tuple_(
+                FlowRunReviewCheckpoints.step_id, FlowRunReviewCheckpoints.attempt_no
+            ).in_(sorted(attempts)),
+        )
+        sizes = (
+            await self.session.execute(
+                sa.select(
+                    FlowRunReviewCheckpoints.id,
+                    _review_checkpoint_evidence_logical_bytes(),
+                )
+                .where(*eligible)
+                .limit(max_rows + 1)
+            )
+        ).all()
+        if len(sizes) > max_rows or sum(int(size) for _, size in sizes) > (
+            max_logical_bytes
+        ):
+            return None
+        if not sizes:
+            return ()
+        rows = await self.session.execute(
+            sa.select(
+                FlowRunReviewCheckpoints.step_id,
+                FlowRunReviewCheckpoints.attempt_no,
+                FlowRunReviewCheckpoints.original_payload_json,
+                FlowRunReviewCheckpoints.current_payload_json,
+            ).where(FlowRunReviewCheckpoints.id.in_([row_id for row_id, _ in sizes]))
+        )
+        return tuple(
+            (step_id, attempt_no, original, current)
+            for step_id, attempt_no, original, current in rows
+        )
 
     async def list_review_checkpoints_for_run(
         self,

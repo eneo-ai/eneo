@@ -57,6 +57,12 @@ from eneo.flows.domain.review_checkpoint_exceptions import (
     FlowReviewCheckpointRunNotRunningError,
     FlowReviewMultipleActiveCheckpointsError,
 )
+from eneo.flows.domain.review_edit_references import (
+    REVIEWED_EDIT_READ_MAX_LOGICAL_BYTES,
+    REVIEWED_EDIT_READ_MAX_ROWS,
+    reviewed_result_attempts,
+    reviewed_results,
+)
 from eneo.flows.domain.runtime import (
     RunExecutionState,
     RuntimeStep,
@@ -845,8 +851,33 @@ class FlowRunExecutor:
         persisted_results = await self.flow_run_repo.list_step_results(
             run_id=run_id, tenant_id=tenant_id
         )
+        payloads = await self.flow_run_review_checkpoint_repo.list_resumed_json_review_payloads(
+            run_id=run_id,
+            tenant_id=tenant_id,
+            attempts=reviewed_result_attempts(persisted_results),
+            max_rows=REVIEWED_EDIT_READ_MAX_ROWS,
+            max_logical_bytes=REVIEWED_EDIT_READ_MAX_LOGICAL_BYTES,
+        )
+        if payloads is None:
+            code = FlowApiErrorCode.TYPED_IO_INPUT_TOO_LARGE
+            await self._terminalize_run(
+                run_id=run_id,
+                tenant_id=tenant_id,
+                target_status=FlowRunStatus.FAILED,
+                source=FlowRunLifecycleSource.EXECUTOR_FAILED,
+                error=FlowRunError.from_source(
+                    FlowRunLifecycleSource.EXECUTOR_FAILED,
+                    code=code,
+                    message="The run's reviewed edits exceed the read limit.",
+                ),
+            )
+            await self._commit()
+            return {"status": "failed", "error": code.value}
         state = build_run_execution_state(
-            steps=steps, persisted_results=persisted_results, flow_id=flow_id
+            steps=steps,
+            persisted_results=persisted_results,
+            flow_id=flow_id,
+            reviewed_results=reviewed_results(payloads, steps=steps),
         )
         try:
             await self._validate_assistant_snapshots(

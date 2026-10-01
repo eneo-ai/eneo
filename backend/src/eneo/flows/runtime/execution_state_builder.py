@@ -1,8 +1,10 @@
 from __future__ import annotations
 
+from collections.abc import Mapping
 from uuid import UUID
 
 from eneo.flows.domain.flow import FlowStepResult, FlowStepResultStatus
+from eneo.flows.domain.review_edit_references import ReviewedResult, ReviewedResultKey
 from eneo.flows.domain.runtime import RunExecutionState, RuntimeStep
 from eneo.flows.step_lineage import build_step_ref_mapping
 
@@ -12,6 +14,7 @@ def build_run_execution_state(
     steps: list[RuntimeStep],
     persisted_results: list[FlowStepResult],
     flow_id: UUID | None = None,
+    reviewed_results: Mapping[ReviewedResultKey, ReviewedResult] | None = None,
 ) -> RunExecutionState:
     completed = {
         result.step_order: result
@@ -32,4 +35,5 @@ def build_run_execution_state(
             if isinstance(step.user_description, str) and step.user_description.strip()
         },
         step_ref_mapping=build_step_ref_mapping(steps),
+        reviewed_results=dict(reviewed_results or {}),
     )

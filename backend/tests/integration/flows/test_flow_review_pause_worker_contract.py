@@ -1524,6 +1524,400 @@ async def test_an_edit_of_the_compiled_earlier_result_reaches_delivery(
     assert sentinel in delivered
 
 
+def _compiled_price_review_spec() -> FlowDraftSpecCore:
+    """Compare (reviewed) -> decide -> letter; the comparison states the price
+    twice, so a decision step can re-derive an edited price from its sibling."""
+
+    return compile_create_intent_to_spec(
+        parse_create_flow_intent_arguments(
+            {
+                "flow_name": "Grant decision",
+                "plan_rationale": "Compare, decide, write.",
+                "steps": [
+                    {
+                        "name": "Compare offers",
+                        "instructions": "Compare the offers.",
+                        "output_fields": [
+                            {
+                                "name": "price",
+                                "field_type": "string",
+                                "description": "Cheapest price.",
+                            },
+                            {
+                                "name": "comparison",
+                                "field_type": "string",
+                                "description": "Offer comparison.",
+                            },
+                        ],
+                        "review_mode": "edit",
+                    },
+                    {
+                        "name": "Decide grant",
+                        "instructions": "Decide the grant.",
+                        "output_fields": [
+                            {
+                                "name": "decision",
+                                "field_type": "string",
+                                "description": "The decision.",
+                            }
+                        ],
+                    },
+                    {"name": "Write letter", "instructions": "Write the letter."},
+                ],
+            }
+        ),
+        context=CreateCompileContext(
+            runtime_input_type=InputType.TEXT,
+            final_output_type=OutputType.TEXT,
+            checkpoint_intents=(
+                CheckpointIntent(
+                    evidence_level="explicit",
+                    producer_kind="structured_result",
+                    operation="set",
+                    mode=FlowStepReviewMode.EDIT,
+                    confidence="high",
+                    evidence=["quote:user_message:1:Let me correct the price."],
+                ),
+            ),
+        ),
+    )
+
+
+_ORIGINAL_PRICE = "71 200 kr"
+_EDITED_PRICE = "64 900 kr"
+
+
+def _price_deriving_completion_service() -> SimpleNamespace:
+    """A provider that re-derives the price from the comparison text unless its
+    request names the price as set by the reviewer - the failure mechanism of
+    a model step that re-authors reviewed values from its whole input."""
+
+    async def derive(**kwargs: object) -> SimpleNamespace:
+        question = str(kwargs["question"])
+        prompt = str(kwargs.get("prompt_override") or "")
+        call = completion_service.get_response.await_count
+        if call == 1:
+            completion = json.dumps(
+                {
+                    "price": _ORIGINAL_PRICE,
+                    "comparison": f"Offer A at {_ORIGINAL_PRICE} is cheapest.",
+                }
+            )
+        elif call == 2:
+            reviewed = json.loads(question)
+            price = (
+                reviewed["price"]
+                if '["price"] set by the reviewer' in prompt
+                else reviewed["comparison"].split(" at ")[1].split(" is")[0]
+            )
+            completion = json.dumps({"decision": f"Grant at {price}."})
+        else:
+            decided = [line for line in question.splitlines() if "Grant at" in line]
+            completion = f"Letter: {' '.join(decided)}"
+        return SimpleNamespace(completion=completion, total_token_count=10)
+
+    completion_service = SimpleNamespace(get_response=AsyncMock(side_effect=derive))
+    return completion_service
+
+
+async def _pause_edit_price_and_resume(
+    *,
+    session: AsyncSession,
+    completion_service: SimpleNamespace,
+    admin_user,
+    test_tenant,
+    completion_model_factory,
+    space_factory,
+    assistant_factory,
+    edit: bool = True,
+) -> tuple[_ReviewPauseRuntimeContext, int]:
+    context = await _create_review_pause_runtime_context(
+        session=session,
+        admin_user=admin_user,
+        test_tenant=test_tenant,
+        completion_model_factory=completion_model_factory,
+        space_factory=space_factory,
+        assistant_factory=assistant_factory,
+        completion_service=completion_service,
+        compiled_spec=_compiled_price_review_spec(),
+        input_payload_json={"text": "Two offers for a ramp."},
+    )
+    pause_result = await context.executor.execute(
+        run_id=context.run_id,
+        flow_id=context.flow_id,
+        tenant_id=context.tenant_id,
+        run_revision=context.initial_run_revision,
+        dispatch_task_id=f"price-review-pause-{uuid4()}",
+        retry_count=0,
+    )
+    assert pause_result == {"status": FlowRunStatus.AWAITING_REVIEW.value}
+    review_service = context.container.flow_run_review_checkpoint_service()
+    checkpoint = await review_service.get_active_review_checkpoint(
+        flow_id=context.flow_id,
+        run_id=context.run_id,
+    )
+    assert checkpoint is not None
+    revision = checkpoint.revision
+    if edit:
+        edited = await review_service.edit_review_checkpoint(
+            flow_id=context.flow_id,
+            run_id=context.run_id,
+            checkpoint_id=checkpoint.id,
+            expected_checkpoint_revision=checkpoint.revision,
+            edited_value={
+                "price": _EDITED_PRICE,
+                "comparison": f"Offer A at {_ORIGINAL_PRICE} is cheapest.",
+            },
+        )
+        revision = edited.revision
+    resumed = await review_service.approve_and_resume_review_checkpoint(
+        flow_id=context.flow_id,
+        run_id=context.run_id,
+        checkpoint_id=checkpoint.id,
+        expected_checkpoint_revision=revision,
+        idempotency_key=f"price-continue-{uuid4()}",
+    )
+    return context, resumed.run.revision
+
+
+@pytest.mark.asyncio
+@pytest.mark.integration
+async def test_a_reviewer_edit_is_named_to_the_next_model_step_and_reaches_delivery(
+    setup_database,
+    admin_user,
+    test_tenant,
+    completion_model_factory,
+    space_factory,
+    assistant_factory,
+):
+    completion_service = _price_deriving_completion_service()
+    async with sessionmanager.session() as session:
+        context, run_revision = await _pause_edit_price_and_resume(
+            session=session,
+            completion_service=completion_service,
+            admin_user=admin_user,
+            test_tenant=test_tenant,
+            completion_model_factory=completion_model_factory,
+            space_factory=space_factory,
+            assistant_factory=assistant_factory,
+        )
+        completed_result = await context.executor.execute(
+            run_id=context.run_id,
+            flow_id=context.flow_id,
+            tenant_id=context.tenant_id,
+            run_revision=run_revision,
+            dispatch_task_id=f"price-review-resume-{uuid4()}",
+            retry_count=0,
+        )
+        await session.commit()
+
+    run_row, _, step_result_rows, _, _ = await _review_pause_state_from_fresh_session(
+        run_id=context.run_id,
+        tenant_id=context.tenant_id,
+    )
+
+    assert completed_result == {"status": FlowRunStatus.COMPLETED.value}
+    decision_prompt = step_result_rows[1].effective_prompt
+    assert decision_prompt is not None
+    assert 'step 1 "Compare offers"' in decision_prompt
+    assert (
+        'binding "input_source", selection ["output", "structured"]' in decision_prompt
+    )
+    assert '["price"] set by the reviewer' in decision_prompt
+    assert '["comparison"]' not in decision_prompt
+    assert _ORIGINAL_PRICE not in decision_prompt
+    # The compiled letter also binds the reviewed price itself, so it is told
+    # too, relative to its own selection; the unchanged comparison is not named.
+    letter_prompt = step_result_rows[2].effective_prompt or ""
+    assert (
+        'selection ["output", "structured", "price"]: [] set by the reviewer'
+        in letter_prompt
+    )
+    assert '"comparison"]' not in letter_prompt
+    assert _ORIGINAL_PRICE not in letter_prompt
+    assert run_row is not None
+    delivered = run_row.output_payload_json["text"]
+    assert _EDITED_PRICE in delivered
+    assert _ORIGINAL_PRICE not in delivered
+
+
+@pytest.mark.asyncio
+@pytest.mark.integration
+@pytest.mark.parametrize(
+    ("limit_name", "limit_value"),
+    [
+        ("REVIEWED_EDIT_READ_MAX_ROWS", 0),
+        ("REVIEWED_EDIT_READ_MAX_LOGICAL_BYTES", 1),
+    ],
+)
+async def test_an_over_budget_reviewed_edit_read_fails_the_run_before_any_provider_call(
+    setup_database,
+    admin_user,
+    test_tenant,
+    completion_model_factory,
+    space_factory,
+    assistant_factory,
+    monkeypatch,
+    limit_name: str,
+    limit_value: int,
+):
+    completion_service = _price_deriving_completion_service()
+    async with sessionmanager.session() as session:
+        context, run_revision = await _pause_edit_price_and_resume(
+            session=session,
+            completion_service=completion_service,
+            admin_user=admin_user,
+            test_tenant=test_tenant,
+            completion_model_factory=completion_model_factory,
+            space_factory=space_factory,
+            assistant_factory=assistant_factory,
+        )
+        # raising=False: at a base without the limit the run must still fail.
+        monkeypatch.setattr(
+            f"eneo.flows.runtime.executor.{limit_name}", limit_value, raising=False
+        )
+        failed_result = await context.executor.execute(
+            run_id=context.run_id,
+            flow_id=context.flow_id,
+            tenant_id=context.tenant_id,
+            run_revision=run_revision,
+            dispatch_task_id=f"price-review-overflow-{uuid4()}",
+            retry_count=0,
+        )
+        await session.commit()
+
+    (
+        run_row,
+        _,
+        step_result_rows,
+        _,
+        outbox_rows,
+    ) = await _review_pause_state_from_fresh_session(
+        run_id=context.run_id,
+        tenant_id=context.tenant_id,
+    )
+
+    code = FlowApiErrorCode.TYPED_IO_INPUT_TOO_LARGE.value
+    assert failed_result == {"status": "failed", "error": code}
+    # Only the reviewed step ever reached the provider.
+    assert completion_service.get_response.await_count == 1
+    assert run_row is not None
+    assert run_row.status == FlowRunStatus.FAILED.value
+    assert run_row.error_json is not None
+    assert run_row.error_json["code"] == code
+    assert step_result_rows[0].status == FlowStepResultStatus.COMPLETED.value
+    assert all(
+        row.status != FlowStepResultStatus.COMPLETED.value
+        for row in step_result_rows[1:]
+    )
+    assert "flow_run_failed" in {row.action for row in outbox_rows}
+
+
+@pytest.mark.asyncio
+@pytest.mark.integration
+async def test_an_approval_without_a_change_is_never_read_or_counted(
+    setup_database,
+    admin_user,
+    test_tenant,
+    completion_model_factory,
+    space_factory,
+    assistant_factory,
+    monkeypatch,
+):
+    completion_service = _price_deriving_completion_service()
+    async with sessionmanager.session() as session:
+        context, run_revision = await _pause_edit_price_and_resume(
+            session=session,
+            completion_service=completion_service,
+            admin_user=admin_user,
+            test_tenant=test_tenant,
+            completion_model_factory=completion_model_factory,
+            space_factory=space_factory,
+            assistant_factory=assistant_factory,
+            edit=False,
+        )
+        # No row may be read: any counted untouched approval fails the run.
+        monkeypatch.setattr(
+            "eneo.flows.runtime.executor.REVIEWED_EDIT_READ_MAX_ROWS", 0
+        )
+        completed_result = await context.executor.execute(
+            run_id=context.run_id,
+            flow_id=context.flow_id,
+            tenant_id=context.tenant_id,
+            run_revision=run_revision,
+            dispatch_task_id=f"price-review-untouched-{uuid4()}",
+            retry_count=0,
+        )
+        await session.commit()
+
+    run_row, _, step_result_rows, _, _ = await _review_pause_state_from_fresh_session(
+        run_id=context.run_id,
+        tenant_id=context.tenant_id,
+    )
+
+    assert completed_result == {"status": FlowRunStatus.COMPLETED.value}
+    assert run_row is not None
+    assert run_row.status == FlowRunStatus.COMPLETED.value
+    assert all(
+        "set by the reviewer" not in (row.effective_prompt or "")
+        for row in step_result_rows
+    )
+
+
+@pytest.mark.asyncio
+@pytest.mark.integration
+async def test_too_many_reviewed_references_fail_the_reading_step_before_its_provider_call(
+    setup_database,
+    admin_user,
+    test_tenant,
+    completion_model_factory,
+    space_factory,
+    assistant_factory,
+    monkeypatch,
+):
+    completion_service = _price_deriving_completion_service()
+    async with sessionmanager.session() as session:
+        context, run_revision = await _pause_edit_price_and_resume(
+            session=session,
+            completion_service=completion_service,
+            admin_user=admin_user,
+            test_tenant=test_tenant,
+            completion_model_factory=completion_model_factory,
+            space_factory=space_factory,
+            assistant_factory=assistant_factory,
+        )
+        # raising=False: at a base without the limit the run must still fail.
+        monkeypatch.setattr(
+            "eneo.flows.domain.review_edit_references.REVIEWED_EDIT_MAX_REFERENCES",
+            0,
+            raising=False,
+        )
+        failed_result = await context.executor.execute(
+            run_id=context.run_id,
+            flow_id=context.flow_id,
+            tenant_id=context.tenant_id,
+            run_revision=run_revision,
+            dispatch_task_id=f"price-review-reference-overflow-{uuid4()}",
+            retry_count=0,
+        )
+        await session.commit()
+
+    run_row, _, step_result_rows, _, _ = await _review_pause_state_from_fresh_session(
+        run_id=context.run_id,
+        tenant_id=context.tenant_id,
+    )
+
+    code = FlowApiErrorCode.TYPED_IO_INPUT_TOO_LARGE.value
+    assert failed_result["status"] == "failed"
+    assert completion_service.get_response.await_count == 1
+    assert run_row is not None
+    assert run_row.status == FlowRunStatus.FAILED.value
+    assert run_row.error_json is not None
+    assert run_row.error_json["code"] == code
+    assert step_result_rows[1].status == FlowStepResultStatus.FAILED.value
+    assert step_result_rows[1].error_code == code
+
+
 @pytest.mark.asyncio
 @pytest.mark.integration
 async def test_resume_last_step_review_terminalizes_completed_run(

@@ -44,6 +44,7 @@ from eneo.flows.domain.flow import FlowRun, FlowStepResult, FlowStepResultStatus
 from eneo.flows.domain.mapped_execution_policy import SummarizationBudget
 from eneo.flows.domain.provider_call import SummarizationCallInput
 from eneo.flows.domain.rag_evidence import build_step_result_citation_state
+from eneo.flows.domain.review_edit_references import reviewed_edit_prompt_block
 from eneo.flows.domain.runtime import (
     RunExecutionState,
     RuntimeStep,
@@ -1485,6 +1486,19 @@ def build_prepared_completion_call(
             output_contract_instructions(step.output_contract)
         )
         prompt = full_prompt.removesuffix(schema_suffix)
+    # After the schema strip, so the native prompt still drops the schema text.
+    reviewed_block = reviewed_edit_prompt_block(
+        step=step,
+        edges=prepared.resolved_input_edges,
+        reviewed=state.reviewed_results,
+    )
+    if reviewed_block is not None:
+        prompt = f"{prompt}\n\n{reviewed_block}" if prompt.strip() else reviewed_block
+        full_prompt = (
+            f"{full_prompt}\n\n{reviewed_block}"
+            if full_prompt.strip()
+            else reviewed_block
+        )
 
     citation_mode = citation_mode_for_step(step)
     return PreparedCompletionCall(

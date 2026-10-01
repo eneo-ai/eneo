@@ -29,6 +29,10 @@ from eneo.flows.flow_run_provenance import (
 if TYPE_CHECKING:
     from eneo.collections.domain.collection import Collection
     from eneo.files.file_models import File, FileInfo
+    from eneo.flows.domain.review_edit_references import (
+        ReviewedResult,
+        ReviewedResultKey,
+    )
     from eneo.integration.domain.entities.integration_knowledge import (
         IntegrationKnowledge,
     )
@@ -65,6 +69,10 @@ def _empty_integration_knowledge_cache() -> dict[UUID, IntegrationKnowledge]:
 
 
 def _empty_mapped_admission_by_step() -> dict[UUID, FlowStepAttemptMappedAdmission]:
+    return {}
+
+
+def _empty_reviewed_results() -> dict[ReviewedResultKey, ReviewedResult]:
     return {}
 
 
@@ -214,6 +222,10 @@ class RunExecutionState:
         default_factory=_empty_step_names_by_order
     )
     step_ref_mapping: dict[str, int] = field(default_factory=_empty_step_ref_mapping)
+    # Edited reviewed JSON results of this run, by (step_id, current attempt).
+    reviewed_results: Mapping[ReviewedResultKey, ReviewedResult] = field(
+        default_factory=_empty_reviewed_results
+    )
 
     def all_previous_text_before(self, step_order: int) -> str:
         segments: list[str] = []
