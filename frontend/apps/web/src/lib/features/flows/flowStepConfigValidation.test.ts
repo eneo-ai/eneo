@@ -19,6 +19,24 @@ function makeStep(overrides: Record<string, unknown>): FlowStep {
 const PREFIX = "flow:step-config:";
 
 describe("computeStepConfigValidationIssues", () => {
+  it("reports a known structured mapping before a template run", () => {
+    const issues = computeStepConfigValidationIssues(
+      [
+        makeStep({
+          output_mode: "template_fill",
+          output_type: "docx",
+          step_order: 3,
+          output_config: {
+            template_asset_id: "asset",
+            placeholders: ["body"],
+            bindings: { body: "{{step_2.output.structured}}" }
+          }
+        })
+      ],
+      PREFIX
+    );
+    expect([...issues.keys()]).toEqual([`${PREFIX}template_fill_structured_mapping:3`]);
+  });
   it("flags a template_fill step with no template asset", () => {
     const issues = computeStepConfigValidationIssues(
       [makeStep({ output_mode: "template_fill", step_order: 2 })],

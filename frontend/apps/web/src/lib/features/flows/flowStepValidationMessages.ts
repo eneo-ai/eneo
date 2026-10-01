@@ -18,6 +18,7 @@ const CODE_TO_MESSAGE: Record<string, () => string> = {
   template_fill_no_template: () => m.flow_validation_msg_template_fill_no_template(),
   template_fill_missing_mappings: () => m.flow_validation_msg_template_fill_missing_mappings(),
   template_fill_orphaned_mappings: () => m.flow_validation_msg_template_fill_orphaned_mappings(),
+  template_fill_structured_mapping: () => m.flow_template_fill_json_warning(),
   speaker_mapping_no_participants_field: () =>
     m.flow_validation_msg_speaker_mapping_no_participants_field(),
   output_mode_incompatible: () => m.flow_validation_msg_output_mode_incompatible(),

@@ -201,6 +201,19 @@ export function updateTemplateBinding(
   };
 }
 
+export function removeOrphanedTemplateBindings(
+  config: TemplateFillOutputConfig
+): TemplateFillOutputConfig {
+  if (!config.placeholders) return config;
+  const names = new Set(config.placeholders);
+  return {
+    ...config,
+    bindings: Object.fromEntries(
+      Object.entries(config.bindings ?? {}).filter(([name]) => names.has(name))
+    )
+  };
+}
+
 export function listTemplatePlaceholders(
   inspection: FlowTemplateInspection | null,
   currentConfig: TemplateFillOutputConfig
@@ -295,22 +308,24 @@ export function buildTemplateBindingAutoSuggestions(params: {
   currentStepOrder: number;
   formSchema: TemplateBindingFormSchema | undefined;
 }): Record<string, string> {
-  const fieldMatches = new Map<string, string>();
+  const fieldMatches = new Map<string, string | null>();
   for (const field of params.formSchema?.fields ?? []) {
     if (!["text", "number", "date", "select"].includes(field.type)) continue;
     const variableToken = getFlowFormFieldVariableToken(field.name);
     if (variableToken) {
-      fieldMatches.set(normalizeTemplateToken(field.name), variableToken);
+      const key = normalizeTemplateToken(field.name);
+      fieldMatches.set(key, fieldMatches.has(key) ? null : variableToken);
     }
   }
 
-  const stepMatches = new Map<string, string>();
+  const stepMatches = new Map<string, string | null>();
   for (const step of params.steps) {
     if (step.step_order >= params.currentStepOrder || step.output_type !== "text") continue;
     const expression = `{{step_${step.step_order}.output.text}}`;
     const label = step.user_description?.trim();
     if (label) {
-      stepMatches.set(normalizeTemplateToken(label), expression);
+      const key = normalizeTemplateToken(label);
+      stepMatches.set(key, stepMatches.has(key) ? null : expression);
     }
   }
 
@@ -319,12 +334,12 @@ export function buildTemplateBindingAutoSuggestions(params: {
     const normalized = normalizeTemplateToken(placeholder);
     if (!normalized) continue;
     if (fieldMatches.has(normalized)) {
-      suggestions[placeholder] = fieldMatches.get(normalized)!;
+      const match = fieldMatches.get(normalized);
+      if (match) suggestions[placeholder] = match;
       continue;
     }
-    if (stepMatches.has(normalized)) {
-      suggestions[placeholder] = stepMatches.get(normalized)!;
-    }
+    const match = stepMatches.get(normalized);
+    if (match) suggestions[placeholder] = match;
   }
 
   return suggestions;
@@ -353,14 +368,23 @@ export function applyAutoTemplateBindings(params: {
 export function getTemplateFillReadiness(config: TemplateFillOutputConfig): TemplateFillReadiness {
   const placeholders = [...(config.placeholders ?? [])];
   const bindings = config.bindings ?? {};
-  const matched = placeholders.filter((placeholder) =>
-    Object.prototype.hasOwnProperty.call(bindings, placeholder)
+  const matched = placeholders.filter(
+    (placeholder) =>
+      Object.prototype.hasOwnProperty.call(bindings, placeholder) &&
+      !isStructuredTemplateBinding(bindings[placeholder])
   ).length;
   return {
     total: placeholders.length,
     matched,
     incomplete: placeholders.length > 0 && matched < placeholders.length
   };
+}
+
+/** A whole output object is refused by the renderer; a scalar path or literal remains usable. */
+export function isStructuredTemplateBinding(binding: string): boolean {
+  return /^\s*\{\{\s*(?:step_\d+\.output(?:\.structured)?|flow_input|flow\.input)\s*\}\}\s*$/.test(
+    binding
+  );
 }
 
 export function getTemplateFillTemplateName(
@@ -389,6 +413,7 @@ export function listTemplateBindingRows(params: {
     const hasBinding = Object.prototype.hasOwnProperty.call(currentBindings, placeholder.name);
     const binding = hasBinding ? currentBindings[placeholder.name] : undefined;
     const suggestion = typeof binding === "string" ? suggestionByValue.get(binding) : undefined;
+    const isStructured = typeof binding === "string" && isStructuredTemplateBinding(binding);
     rows.push({
       key: placeholder.name,
       placeholderName: placeholder.name,
@@ -402,12 +427,12 @@ export function listTemplateBindingRows(params: {
         binding === params.labels.emptyValue
           ? params.labels.leaveEmpty
           : (suggestion?.label ?? (binding?.trim() ? binding : null)),
-      status: !hasBinding ? "missing" : "matched",
+      status: !hasBinding ? "missing" : isStructured ? "invalid" : "matched",
       autoSuggested:
         Boolean(params.autoSuggestions?.[placeholder.name]) &&
         params.autoSuggestions?.[placeholder.name] === binding,
       isExplicitEmpty: hasBinding && binding === params.labels.emptyValue,
-      sourceOutputType: suggestion?.outputType ?? null
+      sourceOutputType: isStructured ? "json" : (suggestion?.outputType ?? null)
     });
   }
 

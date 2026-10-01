@@ -136,6 +136,17 @@ in document order, with their nearest preceding heading when available. Select
 a field to move focus to its mapping. This helps you find the insertion point;
 the final pagination and layout are checked in the downloaded Word result.
 
+When replacing a template, mappings with the same Word tag are kept, including
+intentional **Leave empty** choices. Fields that no longer exist are listed
+separately. Use **Remove obsolete mappings**, then map any new fields.
+
+Automatic matching requires one clear source for the template tag. If several
+names match, choose the source explicitly.
+
+A whole JSON object is marked **Invalid** rather than ready to run. Choose text
+from a previous step, or use a single text field from structured data in an
+advanced expression. The renderer checks the resolved value when the flow runs.
+
 Word for Mac can use prepared content controls, but its Developer tab does not
 offer the same tools to create them or change their tags. Keep the example's
 prepared control, or prepare new fields in Word for Windows. Mac's legacy form

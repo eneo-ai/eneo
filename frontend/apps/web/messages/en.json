@@ -5548,7 +5548,7 @@
   "flow_template_fill_group_steps": "Steps",
   "flow_template_fill_group_system": "From the run",
   "flow_template_fill_hide_expression": "Hide expression",
-  "flow_template_fill_json_warning": "Select a single text field from the structured data. Whole objects or lists cannot be filled as text.",
+  "flow_template_fill_json_warning": "Choose text from a step or a single text field from the structured data. Whole objects or lists cannot be filled as text.",
   "flow_template_fill_leave_empty": "Leave empty",
   "flow_template_fill_loading_templates": "Loading templates...",
   "flow_template_fill_locked_output_help": "The response format and processing are locked when the step fills in a template.",
@@ -7187,5 +7187,7 @@
   "flow_template_fill_locations_help": "Fields appear in document order. Select a field to go to its mapping. The heading helps you find the place in Word; check final pagination and formatting in the Word result.",
   "flow_template_fill_go_to_field": "Go to field {name}",
   "flow_template_fill_under_heading": "Under the heading “{heading}”",
-  "flow_template_fill_in_body": "In the document body"
+  "flow_template_fill_in_body": "In the document body",
+  "flow_template_fill_orphaned_help": "Mappings with the same Word tag have been kept. Remove the obsolete mappings below, then map any new fields.",
+  "flow_template_fill_remove_orphaned": "Remove obsolete mappings"
 }

@@ -69,7 +69,7 @@
       class="text-secondary size-4 shrink-0 group-data-[state=open]:rotate-180 motion-safe:transition-transform motion-safe:duration-(--duration-quick) motion-safe:ease-(--ease-smooth-out) motion-reduce:transition-none"
     />
   </Collapsible.Trigger>
-  <Collapsible.Content class="collapsible-animate px-2 pt-1 pb-5">
+  <Collapsible.Content class="collapsible-animate px-2 pt-1 pb-5" inert={!open} aria-hidden={!open}>
     {@render children?.()}
   </Collapsible.Content>
 </Collapsible.Root>

@@ -22,7 +22,12 @@ async function api(page: Page, request: APIRequestContext, path: string, data?: 
   return response.json();
 }
 
-async function createFlow(page: Page, request: APIRequestContext, includeForm = false) {
+async function createFlow(
+  page: Page,
+  request: APIRequestContext,
+  includeForm = false,
+  sourceNames: [string, string] = [TEXT_STEP, "Other step"]
+) {
   const space = await api(page, request, "/api/v1/spaces/type/personal/");
   const flow = await api(page, request, "/api/v1/flows/", {
     space_id: space.id,
@@ -36,7 +41,7 @@ async function createFlow(page: Page, request: APIRequestContext, includeForm = 
     }
   });
   const steps = [];
-  for (const [index, name] of [TEXT_STEP, "Other step", TEMPLATE].entries()) {
+  for (const [index, name] of [...sourceNames, TEMPLATE].entries()) {
     const assistant = await api(page, request, `/api/v1/flows/${flow.id}/assistants/`, { name });
     steps.push({
       assistant_id: assistant.id,
@@ -65,9 +70,8 @@ async function openTemplate(page: Page, flowId: string) {
   await page.goto(`/spaces/personal/flows/${flowId}?stage=4`);
   await page.waitForLoadState("networkidle");
   await selectStep(page, TEMPLATE);
-  if (!(await page.getByRole("button", { name: UPLOAD }).isVisible())) {
-    await page.getByRole("button", { name: /^(Result|Resultat)\b/ }).click();
-  }
+  const result = page.getByRole("button", { name: /^(Result|Resultat)\b/ });
+  if ((await result.getAttribute("aria-expanded")) !== "true") await result.click();
   await expect(page.getByRole("button", { name: UPLOAD })).toBeVisible();
 }
 
@@ -88,6 +92,172 @@ async function savedTemplate(page: Page, request: APIRequestContext, flowId: str
   const flow = await api(page, request, `/api/v1/flows/${flowId}/`);
   return flow.steps[2].output_config;
 }
+
+test("ambiguous source names stay unmapped until the author makes an explicit choice", async ({
+  page,
+  request
+}) => {
+  const flow = await createFlow(page, request, false, ["Dokument", "Dokument!"]);
+  await openTemplate(page, flow.id);
+  await upload(page);
+  await expect
+    .poll(async () => (await savedTemplate(page, request, flow.id))?.placeholders)
+    .toEqual(["dokument"]);
+  const source = page.getByRole("button", { name: SOURCE });
+  await expect(source).toContainText(/Select source|Välj källa/);
+  await source.click();
+  await page.getByRole("option", { name: /(?:from|från) Dokument$/ }).click();
+  await expect
+    .poll(async () => (await savedTemplate(page, request, flow.id))?.bindings?.dokument)
+    .toBe("{{step_1.output.text}}");
+});
+
+test("template replacement exposes obsolete mappings and removes only those mappings with keyboard recovery", async ({
+  page,
+  request
+}) => {
+  const flow = await createFlow(page, request);
+  await openTemplate(page, flow.id);
+  await upload(page);
+  await mapText(page);
+  await expect
+    .poll(async () => (await savedTemplate(page, request, flow.id))?.bindings?.dokument)
+    .toBe("{{step_1.output.text}}");
+  await page.locator('input[type="file"][accept=".docx"]').setInputFiles({
+    name: "replacement.docx",
+    mimeType: "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+    buffer: await readFile(FIELDS_FILE)
+  });
+  const remove = page.getByRole("button", {
+    name: /^(Remove obsolete mappings|Ta bort gamla kopplingar)$/
+  });
+  const notice = page.getByRole("alert").filter({ has: remove });
+  await expect(notice).toContainText("dokument");
+  const name = page.getByRole("button", { name: /^(Text for|Text till) Namn$/ });
+  await name.click();
+  await page.getByRole("option", { name: EMPTY }).click();
+  await remove.scrollIntoViewIfNeeded();
+  await page.screenshot({
+    path: test.info().outputPath("word-obsolete-mappings.png"),
+    fullPage: true
+  });
+  await remove.focus();
+  await remove.press("Enter");
+  await expect(name).toBeFocused();
+  await expect(notice).toHaveCount(0);
+  await expect
+    .poll(async () => (await savedTemplate(page, request, flow.id))?.bindings)
+    .toEqual({ namn: "" });
+  await page.reload();
+  await openTemplate(page, flow.id);
+  await expect(remove).toHaveCount(0);
+  await expect(name).toContainText(/Leave empty|Lämna tomt/);
+});
+
+test("whole structured mappings show an accessible error and recover to a valid text source", async ({
+  page,
+  request
+}) => {
+  const flow = await createFlow(page, request);
+  await openTemplate(page, flow.id);
+  await upload(page);
+  await expect
+    .poll(async () => Boolean((await savedTemplate(page, request, flow.id))?.template_asset_id))
+    .toBe(true);
+  const current = await api(page, request, `/api/v1/flows/${flow.id}/`);
+  const response = await backendFetch(page, request, `/api/v1/flows/${flow.id}/`, {
+    method: "PATCH",
+    data: {
+      expected_revision: current.draft_revision,
+      steps: current.steps.map((step: { step_order: number; output_config: object }) => ({
+        ...step,
+        created_at: undefined,
+        updated_at: undefined,
+        ...(step.step_order === 3
+          ? {
+              output_config: { ...step.output_config, bindings: { dokument: "{{step_1.output}}" } }
+            }
+          : {})
+      }))
+    }
+  });
+  await expectOk(response, "saving structured mapping draft");
+  await openTemplate(page, flow.id);
+  const source = page.getByRole("button", { name: SOURCE });
+  await expect(source).toHaveAttribute("aria-invalid", "true");
+  const errorId = await source.getAttribute("aria-describedby");
+  expect(errorId).toBeTruthy();
+  await expect(page.locator(`[id="${errorId}"]`)).toContainText(/Whole objects|Hela objekt/);
+  await expect(
+    page.getByRole("status").filter({ hasText: /All fields are mapped|Alla fält är kopplade/ })
+  ).toHaveCount(0);
+  await source.scrollIntoViewIfNeeded();
+  await page.screenshot({
+    path: test.info().outputPath("word-structured-mapping-error.png"),
+    fullPage: true
+  });
+  await mapText(page);
+  await expect(source).toHaveAttribute("aria-invalid", "false");
+  await expect(
+    page.getByRole("status").filter({ hasText: /All fields are mapped|Alla fält är kopplade/ })
+  ).toBeVisible();
+  await expect
+    .poll(async () => (await savedTemplate(page, request, flow.id))?.bindings?.dokument)
+    .toBe("{{step_1.output.text}}");
+});
+
+test("long template and source names wrap in the picker and selected value at laptop and desktop widths", async ({
+  page,
+  request
+}) => {
+  const flow = await createFlow(page, request);
+  const longName = "Underlag för utredning och genomförande från dokument, hembesök och samtal "
+    .repeat(3)
+    .trim();
+  const response = await backendFetch(page, request, `/api/v1/flows/${flow.id}/`, {
+    method: "PATCH",
+    data: {
+      expected_revision: flow.draft_revision,
+      steps: flow.steps.map((step: { step_order: number }) => ({
+        ...step,
+        created_at: undefined,
+        updated_at: undefined,
+        ...(step.step_order === 1 ? { user_description: longName } : {})
+      }))
+    }
+  });
+  await expectOk(response, "saving long step name");
+  await openTemplate(page, flow.id);
+  const fileName = `${"utredningsunderlag-med-langt-mallnamn-".repeat(5)}.docx`;
+  await upload(page, fileName);
+  const source = page.getByRole("button", { name: SOURCE });
+  for (const [width, height] of [
+    [1024, 768],
+    [1440, 1000],
+    [2560, 1080]
+  ]) {
+    await page.setViewportSize({ width, height });
+    await source.click();
+    const option = page.getByRole("option", { name: new RegExp(longName) });
+    await expect(option).toBeVisible();
+    expect(await option.evaluate((el) => el.scrollWidth <= el.clientWidth + 1)).toBe(true);
+    await page.screenshot({
+      path: test.info().outputPath(`word-long-picker-${width}.png`),
+      fullPage: true
+    });
+    await option.click();
+    await expect(source).toContainText(longName);
+    expect(await source.evaluate((el) => el.scrollWidth <= el.clientWidth + 1)).toBe(true);
+    const template = page.getByRole("button", { name: /^(Template|Mall)$/ });
+    await expect(template).toContainText(fileName);
+    expect(await template.evaluate((el) => el.scrollWidth <= el.clientWidth + 1)).toBe(true);
+    await source.scrollIntoViewIfNeeded();
+    await page.screenshot({
+      path: test.info().outputPath(`word-long-selection-${width}.png`),
+      fullPage: true
+    });
+  }
+});
 
 test("multi-field example shows real locations and keyboard navigation preserves mappings", async ({
   page,
@@ -275,8 +445,8 @@ test("simple mode exposes Word guidance, a valid example and editable field mapp
     .toBe("");
   await page.reload();
   await selectStep(page, TEMPLATE);
-  if (!(await page.getByRole("button", { name: SOURCE }).isVisible()))
-    await page.getByRole("button", { name: /^(Result|Resultat)\b/ }).click();
+  const result = page.getByRole("button", { name: /^(Result|Resultat)\b/ });
+  if ((await result.getAttribute("aria-expanded")) !== "true") await result.click();
   await expect(page.getByRole("button", { name: SOURCE })).toHaveText(
     /^(Leave empty|Lämna tomt)\s*$/
   );
@@ -311,8 +481,8 @@ test("upload remains attached to its originating step while navigation stays usa
     TEXT_STEP
   );
   await selectStep(page, TEMPLATE);
-  if (!(await page.getByRole("button", { name: SOURCE }).isVisible()))
-    await page.getByRole("button", { name: /^(Result|Resultat)\b/ }).click();
+  const result = page.getByRole("button", { name: /^(Result|Resultat)\b/ });
+  if ((await result.getAttribute("aria-expanded")) !== "true") await result.click();
   await expect(page.getByRole("button", { name: SOURCE })).toBeVisible();
   await mapText(page);
   await expect

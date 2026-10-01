@@ -54,7 +54,8 @@
     onTemplateDownload,
     onTemplateRefresh,
     onBindingChange,
-    onApplyAllSuggestions
+    onApplyAllSuggestions,
+    onRemoveOrphanedBindings
   }: {
     isPublished: boolean;
     stepKey: string;
@@ -85,6 +86,7 @@
     onTemplateRefresh?: () => void;
     onBindingChange?: (detail: { placeholder: string; value: string }) => void;
     onApplyAllSuggestions?: () => void;
+    onRemoveOrphanedBindings?: () => void;
   } = $props();
 
   const instanceId = $props.id();
@@ -98,6 +100,9 @@
     selectedTemplateAsset?.name ??
       templateFillConfig.template_name ??
       m.flow_template_fill_select_placeholder()
+  );
+  const currentTemplateRows = $derived(
+    templateBindingRows.filter((row) => row.status !== "orphaned")
   );
 
   function bindingLabel(binding: string | undefined): string {
@@ -130,6 +135,15 @@
     target?.focus({ preventScroll: true });
     target?.scrollIntoView({ block: "center" });
   }
+
+  async function removeOrphanedBindings() {
+    const originKey = stepKey;
+    onRemoveOrphanedBindings?.();
+    await tick();
+    if (stepKey !== originKey) return;
+    if (currentTemplateRows.length > 0) focusTemplateField(0);
+    else templateTrigger?.focus();
+  }
 </script>
 
 <div class="flex flex-col gap-6">
@@ -152,17 +166,23 @@
             disabled={cannotEdit || busy}
             onValueChange={(value) => onTemplateFileSelect?.({ assetId: value })}
           >
-            <Select.Trigger bind:ref={templateTrigger} id={`${instanceId}-template`} class="w-full">
-              <span class="min-w-0 truncate">{templateAssetLabel}</span>
+            <Select.Trigger
+              bind:ref={templateTrigger}
+              id={`${instanceId}-template`}
+              class="min-h-8 w-full text-left data-[size=default]:h-auto"
+            >
+              <span class="min-w-0 break-words whitespace-normal">{templateAssetLabel}</span>
             </Select.Trigger>
-            <Select.Content>
+            <Select.Content
+              class="flex max-h-(--bits-select-content-available-height) w-(--bits-select-anchor-width) flex-col [&_[data-select-viewport]]:h-auto [&_[data-select-viewport]]:min-h-0"
+            >
               <Select.Group>
                 <Select.Item value="" label={m.flow_template_fill_select_placeholder()}>
                   {m.flow_template_fill_select_placeholder()}
                 </Select.Item>
                 {#each availableTemplateFiles as file (file.id)}
                   <Select.Item value={file.id} label={file.name}>
-                    {file.name}
+                    <span class="min-w-0 break-words whitespace-normal">{file.name}</span>
                   </Select.Item>
                 {/each}
               </Select.Group>
@@ -368,7 +388,22 @@
               count: String(templateOrphanedRows.length)
             })}</Alert.Title
           >
-          <Alert.Description>{m.flow_template_fill_orphaned_row_warning()}</Alert.Description>
+          <Alert.Description class="flex flex-col gap-3">
+            <p class="max-w-prose">{m.flow_template_fill_orphaned_help()}</p>
+            <ul class="list-disc pl-5">
+              {#each templateOrphanedRows as row (row.key)}
+                <li class="break-words">{row.label}</li>
+              {/each}
+            </ul>
+            <Button
+              variant="outline"
+              class="self-start"
+              disabled={isPublished || busy}
+              onclick={() => void removeOrphanedBindings()}
+            >
+              {m.flow_template_fill_remove_orphaned()}
+            </Button>
+          </Alert.Description>
         </Alert.Root>
       {/if}
       {#if !templateHasSelection}
@@ -404,38 +439,38 @@
                 {m.flow_template_fill_locations_help()}
               </p>
               <ol class="flex max-w-prose list-decimal flex-col gap-1 pl-5 text-sm">
-                {#each templateBindingRows as row, index (row.key)}
-                  {#if row.status !== "orphaned"}
-                    <li>
-                      <Button
-                        variant="ghost"
-                        class="h-auto w-full items-start justify-between gap-3 py-3 text-left whitespace-normal"
-                        aria-label={m.flow_template_fill_go_to_field({ name: row.label })}
-                        aria-describedby={row.status === "missing"
-                          ? `${instanceId}-location-status-${index}`
-                          : undefined}
-                        onclick={() => focusTemplateField(index)}
-                      >
-                        <span class="flex min-w-0 flex-col gap-1 break-words">
-                          <span class="font-medium">{row.label}</span>
-                          <span class="text-muted-foreground font-normal">
-                            {row.sectionHeading
-                              ? m.flow_template_fill_under_heading({ heading: row.sectionHeading })
-                              : m.flow_template_fill_in_body()}
-                          </span>
+                {#each currentTemplateRows as row, index (row.key)}
+                  <li>
+                    <Button
+                      variant="ghost"
+                      class="h-auto w-full items-start justify-between gap-3 py-3 text-left whitespace-normal"
+                      aria-label={m.flow_template_fill_go_to_field({ name: row.label })}
+                      aria-describedby={row.status !== "matched"
+                        ? `${instanceId}-location-status-${index}`
+                        : undefined}
+                      onclick={() => focusTemplateField(index)}
+                    >
+                      <span class="flex min-w-0 flex-col gap-1 break-words">
+                        <span class="font-medium">{row.label}</span>
+                        <span class="text-muted-foreground font-normal">
+                          {row.sectionHeading
+                            ? m.flow_template_fill_under_heading({ heading: row.sectionHeading })
+                            : m.flow_template_fill_in_body()}
                         </span>
-                        {#if row.status === "missing"}
-                          <Badge
-                            id={`${instanceId}-location-status-${index}`}
-                            variant="outline"
-                            class="shrink-0"
-                          >
-                            {getTemplateRowStatusText(row.status)}
-                          </Badge>
-                        {/if}
-                      </Button>
-                    </li>
-                  {/if}
+                      </span>
+                      {#if row.status !== "matched"}
+                        <Badge
+                          id={`${instanceId}-location-status-${index}`}
+                          variant={row.status === "invalid" ? "secondary" : "outline"}
+                          class={row.status === "invalid"
+                            ? "bg-negative-dimmer text-negative-stronger"
+                            : undefined}
+                        >
+                          {getTemplateRowStatusText(row.status)}
+                        </Badge>
+                      {/if}
+                    </Button>
+                  </li>
                 {/each}
               </ol>
             </Collapsible.Content>
@@ -443,7 +478,7 @@
           <Separator />
         {/if}
         <Field.FieldGroup>
-          {#each templateBindingRows as row, index (row.key)}
+          {#each currentTemplateRows as row, index (row.key)}
             {#if index > 0}<Separator />{/if}
             <Field.FieldSet id={`${instanceId}-field-${index}`} tabindex={-1} class="min-w-0">
               <Field.FieldLegend>{row.label}</Field.FieldLegend>
@@ -468,15 +503,19 @@
                   >
                 {/if}
                 <Badge
-                  variant={row.status === "orphaned" || row.status === "invalid"
-                    ? "destructive"
-                    : "secondary"}>{getTemplateRowStatusText(row.status)}</Badge
+                  variant="secondary"
+                  class={row.status === "invalid"
+                    ? "bg-negative-dimmer text-negative-stronger"
+                    : undefined}>{getTemplateRowStatusText(row.status)}</Badge
                 >
                 {#if row.autoSuggested}<Badge variant="outline"
                     >{m.flow_template_fill_auto_badge()}</Badge
                   >{/if}
               </div>
-              <Field.Field data-invalid={row.status === "orphaned" || row.status === "invalid"}>
+              <Field.Field
+                data-invalid={row.status === "invalid"}
+                class="data-[invalid=true]:text-negative-stronger"
+              >
                 <Field.FieldLabel for={`${instanceId}-source-${index}`}>
                   {m.flow_template_fill_binding_label({ name: row.label })}
                 </Field.FieldLabel>
@@ -489,12 +528,19 @@
                 >
                   <Select.Trigger
                     id={`${instanceId}-source-${index}`}
-                    class="w-full"
-                    aria-invalid={row.status === "orphaned" || row.status === "invalid"}
+                    class="min-h-8 w-full text-left data-[size=default]:h-auto"
+                    aria-invalid={row.status === "invalid"}
+                    aria-describedby={row.sourceOutputType === "json"
+                      ? `${instanceId}-binding-error-${index}`
+                      : undefined}
                   >
-                    <span class="min-w-0 truncate">{bindingLabel(row.binding)}</span>
+                    <span class="min-w-0 break-words whitespace-normal"
+                      >{bindingLabel(row.binding)}</span
+                    >
                   </Select.Trigger>
-                  <Select.Content>
+                  <Select.Content
+                    class="flex max-h-(--bits-select-content-available-height) w-(--bits-select-anchor-width) flex-col [&_[data-select-viewport]]:h-auto [&_[data-select-viewport]]:min-h-0"
+                  >
                     <Select.Group>
                       <Select.Item value="__unset__" label={m.flow_template_fill_select_source()}
                         >{m.flow_template_fill_select_source()}</Select.Item
@@ -508,7 +554,9 @@
                         <Select.GroupHeading>{group.label}</Select.GroupHeading>
                         {#each group.options as option (option.value)}
                           <Select.Item value={option.value} label={option.label}
-                            >{option.label}</Select.Item
+                            ><span class="min-w-0 break-words whitespace-normal"
+                              >{option.label}</span
+                            ></Select.Item
                           >
                         {/each}
                       </Select.Group>
@@ -527,10 +575,9 @@
                     >{m.flow_template_fill_form_source_help()}</Field.FieldDescription
                   >
                 {/if}
-                {#if row.status === "orphaned"}<Field.FieldError
-                    >{m.flow_template_fill_orphaned_row_warning()}</Field.FieldError
-                  >{/if}
                 {#if row.sourceOutputType === "json"}<Field.FieldError
+                    id={`${instanceId}-binding-error-${index}`}
+                    class="text-negative-stronger"
                     >{m.flow_template_fill_json_warning()}</Field.FieldError
                   >{/if}
               </Field.Field>
@@ -607,7 +654,7 @@
           {/each}
         </Field.FieldGroup>
       {/if}
-      {#if templateHasSelection && templateReadiness.total > 0 && !templateReadiness.incomplete && templateOrphanedRows.length === 0}
+      {#if templateHasSelection && !busy && !templateConfigError && templateReadiness.total > 0 && !templateReadiness.incomplete && templateOrphanedRows.length === 0}
         <Alert.Root role="status"
           ><Alert.Description class="max-w-prose"
             >{m.flow_template_fill_ready_to_test()}</Alert.Description
