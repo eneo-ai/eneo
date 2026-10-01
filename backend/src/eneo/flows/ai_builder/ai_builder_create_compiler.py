@@ -15,6 +15,8 @@ from eneo.flows.ai_builder.ai_builder_assembly import (
 from eneo.flows.ai_builder.ai_builder_checkpoint_contract import (
     checkpoint_intent_mismatches,
     project_checkpoint_intents,
+    structured_result_review_mode,
+    structured_review_declaration,
 )
 from eneo.flows.ai_builder.ai_builder_create_compile_context import CreateCompileContext
 from eneo.flows.ai_builder.ai_builder_domain_models import LintWarning
@@ -41,12 +43,14 @@ from eneo.flows.ai_builder.ai_builder_primary_input_fields import (
 from eneo.flows.ai_builder.ai_builder_proposal_intent import (
     AttestedResultField,
     CreateFlowIntent,
+    ProposalIntentArgumentError,
     ProposalObligationProjection,
     attested_result_contract_violations,
     attested_result_fields_from_drafts,
     attested_violation_message,
     resolve_attested_result_contract,
 )
+from eneo.flows.ai_builder.ai_builder_proposal_tool_contracts import display_value
 from eneo.flows.ai_builder.ai_builder_runtime_input_fields import (
     RuntimeInputFieldHint,
 )
@@ -81,6 +85,14 @@ def compile_create_intent_to_spec(
     field_diagnostics: list[LintWarning] | None = None,
     obligation_projection: ProposalObligationProjection | None = None,
 ) -> FlowDraftSpecCore:
+    checkpoint_intents = (
+        context.checkpoint_intents if context is not None else None
+    ) or ()
+    declared_step, declaration_issues = structured_review_declaration(
+        [step.review_mode for step in intent.steps], checkpoint_intents
+    )
+    if declaration_issues:
+        raise ProposalIntentArgumentError(declaration_issues)
     envelope_output_fields = (
         context.result_contract_output_fields if context is not None else ()
     )
@@ -174,6 +186,11 @@ def compile_create_intent_to_spec(
         speaker_naming_review=(
             context.speaker_naming_review if context is not None else False
         ),
+        inferred_structured_review=(
+            structured_result_review_mode(checkpoint_intents)
+            if declared_step is None
+            else None
+        ),
     )
     if isinstance(assembly_spec, CreateAssemblyRejection):
         raise AIBuilderArchitectureError(
@@ -260,13 +277,34 @@ def compile_create_intent_to_spec(
                             "mismatch_count": len(mismatches),
                         },
                     )
+                missing_kinds = sorted(
+                    {m.producer_kind for m in mismatches if m.producer_kind}
+                )
+                problems: list[str] = []
+                if declared_step is not None and "structured_result" in missing_kinds:
+                    # Only a structured-result binding failure is the declared
+                    # step's: it did not stay a structured JSON result.
+                    missing_kinds.remove("structured_result")
+                    problems.append(
+                        f"step {declared_step} "
+                        f"'{display_value(intent.steps[declared_step - 1].name)}' "
+                        "sets review_mode but does not stay a structured JSON "
+                        "result, so set it on a step whose result stays JSON"
+                    )
+                if missing_kinds or not problems:
+                    problems.append(
+                        "add the missing "
+                        + (" and ".join(missing_kinds) or "semantic result")
+                        + " producer"
+                    )
                 raise AIBuilderArchitectureError(
                     public_code="architecture_materialization_failed",
                     repair_disposition="model_correctable",
                     detail=(
-                        "The compiled Flow cannot place every requested review checkpoint "
-                        "on its typed output producer. Add the missing semantic result "
-                        "producer and try again."
+                        "The compiled Flow cannot place every requested review "
+                        "checkpoint on its typed output producer: "
+                        + "; ".join(problems)
+                        + "."
                     ),
                     log_context={
                         "failure_code": "checkpoint_intent_mismatch",

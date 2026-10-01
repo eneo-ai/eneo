@@ -2,12 +2,20 @@ from __future__ import annotations
 
 import json
 from datetime import datetime, timezone
-from uuid import UUID
+from typing import Literal
+from uuid import UUID, uuid4
 
 import pytest
 
 from eneo.authentication.principal_types import PrincipalType
+from eneo.completion_models.domain.model_capacity import ModelCapacity
 from eneo.files.file_models import File, FileType
+from eneo.flows.ai_builder.ai_builder_architecture_commit import (
+    finalize_architecture_commit,
+)
+from eneo.flows.ai_builder.ai_builder_architecture_derivation import (
+    derive_architecture_commit_draft,
+)
 from eneo.flows.ai_builder.ai_builder_attachment_context import (
     attachment_file_roles,
     build_ai_builder_attachment_context,
@@ -15,6 +23,7 @@ from eneo.flows.ai_builder.ai_builder_attachment_context import (
 from eneo.flows.ai_builder.ai_builder_discovery_runtime import (
     _apply_attachment_output_evidence,
 )
+from eneo.flows.ai_builder.ai_builder_domain_models import ConversationMessage
 from eneo.flows.ai_builder.ai_builder_event_models import (
     RequirementsSummaryPayload,
 )
@@ -24,9 +33,14 @@ from eneo.flows.ai_builder.ai_builder_output_sections_signals import (
 from eneo.flows.ai_builder.ai_builder_plan_proposal_task import (
     build_plan_proposal_system_prompt,
 )
+from eneo.flows.ai_builder.ai_builder_planner_request_preparation import (
+    ProposalPrepared,
+    build_proposal_prepared,
+)
 from eneo.flows.ai_builder.ai_builder_proposal_intent import (
     ProposalStructuredFieldIntent,
 )
+from eneo.flows.ai_builder.ai_builder_requirements_state import RequirementsState
 from eneo.flows.ai_builder.ai_builder_resource_catalog import (
     AIBuilderResourceCatalog,
     build_ai_builder_resource_catalog,
@@ -39,6 +53,8 @@ from eneo.flows.ai_builder.ai_builder_schema_evidence import (
     build_schema_evidence,
 )
 from eneo.flows.ai_builder.ai_builder_tools import (
+    ProposalToolArgumentsError,
+    build_native_strict_tool_schema,
     build_propose_flow_tool_schema,
     validate_propose_flow_tool_arguments,
 )
@@ -58,8 +74,10 @@ from eneo.flows.ai_builder.planning_state import (
     SlotSource,
     StepTriple,
 )
+from eneo.flows.domain.flow import Flow, FlowStep
 from eneo.flows.flow_review_policy import FlowStepReviewMode
 from tests.docx_template_fixtures import control_template_bytes
+from tests.unittests.flows.ai_builder.test_ai_builder_planner import _budget_policy
 
 
 def _requirements(**overrides: object) -> RequirementsSummaryPayload:
@@ -189,6 +207,144 @@ def test_create_prompt_asks_for_step_reads_exactly_when_the_schema_offers_them(
 
     assert ("uses_form_fields" in prompt) is asks_for_reads
     assert ("uses_form_fields" in step_properties) is asks_for_reads
+
+
+def _structured_review_state(
+    operation: Literal["set", "clear"], mode: FlowStepReviewMode | None
+) -> PlanningState:
+    state = PlanningState.empty()
+    state.checkpoint_intents = [
+        CheckpointIntent(
+            evidence_level="explicit",
+            producer_kind="structured_result",
+            operation=operation,
+            mode=mode,
+            confidence="high",
+            evidence=["quote:user_message:1:Let me correct the comparison first."],
+        )
+    ]
+    return state
+
+
+def _pure_audio_with_structured_review() -> PlanningState:
+    state = _structured_review_state("set", FlowStepReviewMode.EDIT)
+    for name, value in (
+        ("primary_runtime_input", "audio"),
+        ("terminal_output", "structured_text"),
+        ("post_processing_goal", "stop_after_primary_operation"),
+    ):
+        state.resolved_slots[name] = ResolvedSlot(
+            name=name, value=value, source="structured_answer", confidence="high"
+        )
+    draft = derive_architecture_commit_draft(state)
+    assert draft is not None
+    state.architecture_commit = finalize_architecture_commit(draft)
+    return state
+
+
+@pytest.mark.parametrize(
+    ("state", "is_edit_mode", "offered_mode"),
+    [
+        (_structured_review_state("set", FlowStepReviewMode.EDIT), False, "edit"),
+        (_pure_audio_with_structured_review(), False, None),
+        (_structured_review_state("set", FlowStepReviewMode.VIEW), False, "view"),
+        (_structured_review_state("set", FlowStepReviewMode.EDIT), True, None),
+        (_structured_review_state("clear", None), False, None),
+        (PlanningState.empty(), False, None),
+    ],
+    ids=["edit", "pure-audio", "view", "edit-session", "clear", "no-intent"],
+)
+def test_create_offers_the_reviewed_result_declaration_exactly_when_requested(
+    state: PlanningState,
+    is_edit_mode: bool,
+    offered_mode: str | None,
+) -> None:
+    prepared = build_proposal_prepared(
+        requirements_state=RequirementsState(),
+        ui_language="en",
+        slot_classification_metadata=None,
+        conversation=[ConversationMessage(role="user", content="Build the flow.")],
+        planning_state=state,
+        attachment_context=None,
+        flow_context=None,
+        is_edit_mode=is_edit_mode,
+        resource_catalog=_empty_catalog(),
+        flow=_edit_flow() if is_edit_mode else None,
+        assistant_snapshots=None,
+        plan_edit_context=None,
+        prior_plan_for_revision=None,
+        litellm_model="model",
+        capacity=ModelCapacity(100_000, 1024),
+        budget_policy=_budget_policy(),
+        attachment_file_count=0,
+        current_turn_start=0,
+    )
+    assert isinstance(prepared, ProposalPrepared)
+    prompt = prepared.llm_messages[0]["content"]
+    schema = prepared.proposal_tool_schema
+    baseline = build_propose_flow_tool_schema(resource_catalog=_empty_catalog())
+    if offered_mode is None:
+        assert "Set review_mode to" not in str(prompt)
+        if not is_edit_mode:
+            assert "review_mode" not in json.dumps(schema)
+        return
+    assert f"Set review_mode to '{offered_mode}' on the one step" in str(prompt)
+    assert "Do not set review_mode" not in str(prompt)
+    step_properties = schema["function"]["parameters"]["properties"]["steps"]["items"][
+        "properties"
+    ]
+    assert step_properties["review_mode"]["enum"] == [offered_mode, None]
+    strict_step = build_native_strict_tool_schema(schema)["function"]["parameters"][
+        "properties"
+    ]["steps"]["items"]
+    assert "review_mode" in strict_step["required"]
+    step = {
+        "name": "Compare offers",
+        "instructions": "Compare the offers.",
+        "output_fields": [
+            {"name": "comparison", "field_type": "string", "description": "x."}
+        ],
+    }
+    arguments = {"flow_name": "Flow", "plan_rationale": "Why.", "steps": [step]}
+    validate_propose_flow_tool_arguments(
+        arguments={**arguments, "steps": [{**step, "review_mode": offered_mode}]},
+        tool_schema=schema,
+    )
+    for wrong in ("none", "approve", True, 1):
+        with pytest.raises(ProposalToolArgumentsError):
+            validate_propose_flow_tool_arguments(
+                arguments={**arguments, "steps": [{**step, "review_mode": wrong}]},
+                tool_schema=schema,
+            )
+    with pytest.raises(ProposalToolArgumentsError):
+        validate_propose_flow_tool_arguments(
+            arguments={**arguments, "steps": [{**step, "review_mode": offered_mode}]},
+            tool_schema=baseline,
+        )
+
+
+def _edit_flow() -> Flow:
+    return Flow(
+        id=uuid4(),
+        tenant_id=uuid4(),
+        space_id=uuid4(),
+        name="Saved",
+        published_version=1,
+        steps=[
+            FlowStep.model_validate(
+                {
+                    "id": uuid4(),
+                    "assistant_id": uuid4(),
+                    "step_order": 1,
+                    "user_description": "Compare offers",
+                    "input_source": "flow_input",
+                    "input_type": "text",
+                    "output_mode": "pass_through",
+                    "output_type": "json",
+                }
+            )
+        ],
+    )
 
 
 def test_runtime_input_projection_preserves_long_and_delimited_names_exactly() -> None:

@@ -1011,7 +1011,6 @@ class TestBuildToolSchema:
         [
             ("root", "input_fields", [], "input_fields"),
             ("step", "output_type", "text", "steps.0.output_type"),
-            ("step", "review_mode", "view", "steps.0.review_mode"),
             (
                 "step",
                 "uses_previous_fields",

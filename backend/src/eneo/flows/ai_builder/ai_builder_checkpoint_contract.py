@@ -1,9 +1,11 @@
 """Canonical requested-versus-compiled checkpoint predicate.
 
-Producer resolution contract: each ``CheckpointProducerKind`` names the
-TERMINAL eligible producer of that kind in the compiled spec — the last JSON
-step for ``structured_result`` and the last referenced body-writer (else last
-compose/pass-through text step) for ``report_text``. ``transcript`` requires
+Producer resolution contract: ``structured_result`` names the one JSON step
+(speaker mapping excluded) that carries a review — on create the step the plan
+declared, else assembly's only authored JSON result — and none or several name
+no producer;
+``report_text`` names the last referenced body-writer (else last
+compose/pass-through text step). ``transcript`` requires
 exactly one backend-inserted transcription step; any other transcript topology
 is a planning/architecture contradiction, not a repairable plan defect.
 
@@ -17,7 +19,10 @@ An intent overrides the baseline checkpoint of its producer kind on BOTH
 sides — the baseline producer's old expectation is released (so a producer
 that changes type, moves, or disappears does not pin its stale review) and
 the candidate producer carries the requested mode (``set``) or no review
-(``clear``). Every other step must keep exactly its baseline review. The
+(``clear``). A single saved structured-result review that survives the edit
+as a JSON step stays the step the intent acts on. Every other step must keep
+exactly its baseline review; several saved structured-result reviews are
+refused before the proposal provider call. The
 baseline is the canonical Flow authoring snapshot
 (``current_flow_authoring_spec``), which reconstructs document body-writer
 identity, so baseline and candidate producer resolution share one owner.
@@ -57,6 +62,8 @@ if TYPE_CHECKING:
 
 CheckpointMismatchKind = Literal[
     "producer_missing",
+    # A JSON step exists, but not exactly one carries the review.
+    "producer_unbound",
     "review_missing",
     "review_mode_mismatch",
     "template_fill_review_forbidden",
@@ -85,6 +92,43 @@ def transcript_checkpoint_requires_audio(
     return any(
         intent.producer_kind == "transcript" and intent.operation == "set"
         for intent in checkpoint_intents
+    )
+
+
+def structured_result_review_mode(
+    checkpoint_intents: Sequence[CheckpointIntent],
+) -> FlowStepReviewMode | None:
+    """The mode a create plan declares on its reviewed JSON step, if requested."""
+
+    return next(
+        (
+            intent.mode
+            for intent in checkpoint_intents
+            if intent.producer_kind == "structured_result" and intent.operation == "set"
+        ),
+        None,
+    )
+
+
+def structured_review_declaration(
+    declared_modes: Sequence[FlowStepReviewMode | None],
+    checkpoint_intents: Sequence[CheckpointIntent],
+) -> tuple[int | None, tuple[str, ...]]:
+    """A create plan's declared reviewed step (1-based) and admission issues:
+    at most one step, with the requested structured-result mode, and only
+    when that review was requested."""
+
+    requested = structured_result_review_mode(checkpoint_intents)
+    declared = [n for n, mode in enumerate(declared_modes, start=1) if mode is not None]
+    if len(declared) < 2 and all(declared_modes[n - 1] is requested for n in declared):
+        return (declared[0] if declared else None), ()
+    expected = (
+        f"'{requested.value}' on exactly one step, the result the person reviews"
+        if requested is not None
+        else "null: no structured-result review was requested"
+    )
+    return None, tuple(
+        f"steps.{n}.review_mode: use {expected} [value_error]" for n in declared
     )
 
 
@@ -141,7 +185,9 @@ def checkpoint_intent_mismatches(
 
     Edit apply passes ``enforce_unrequested_reviews=False`` without a
     baseline: requested intents are re-checked against the approved spec, and
-    non-requested reviews are the critic-approved preserved state.
+    non-requested reviews are the critic-approved preserved state. Both judge
+    a structured-result intent alike: ``set`` needs exactly one reviewed JSON
+    step, ``clear`` none.
     """
 
     mismatches: list[CheckpointIntentMismatch] = []
@@ -167,6 +213,44 @@ def checkpoint_intent_mismatches(
                     or baseline_producer.plan_step_ref,
                     None,
                 )
+        if intent.producer_kind == "structured_result":
+            reviewed = _reviewed_structured_results(spec)
+            saved = _surviving_saved_result(spec, baseline_spec)
+            if (
+                intent.operation == "set"
+                and saved is not None
+                and saved not in reviewed
+            ):
+                # The intent changes the saved review where it is: moving it
+                # to another step was not requested.
+                mismatches.append(
+                    CheckpointIntentMismatch(
+                        kind="review_missing",
+                        producer_kind=intent.producer_kind,
+                        step_ref=saved.plan_step_ref,
+                        expected_mode=intent.mode,
+                        actual_mode=None,
+                    )
+                )
+            unbound = reviewed or _structured_result_candidates(spec)
+            if intent.operation == "clear" or len(reviewed) == 1:
+                # A clear expects no review on every reviewed JSON step.
+                expected_by_step_ref.update(
+                    (step.plan_step_ref, intent) for step in reviewed
+                )
+                continue
+            if unbound:
+                mismatches.extend(
+                    CheckpointIntentMismatch(
+                        kind="producer_unbound",
+                        producer_kind=intent.producer_kind,
+                        step_ref=step.plan_step_ref,
+                        expected_mode=intent.mode,
+                        actual_mode=None,
+                    )
+                    for step in unbound
+                )
+                continue
         producer = _checkpoint_producer_step(spec, intent.producer_kind)
         if producer is None:
             if intent.operation == "set":
@@ -266,6 +350,26 @@ def baseline_spec_from_flow_steps(
     )
 
 
+class AmbiguousSavedStructuredReviewsError(ValueError):
+    """A structured-result change on a Flow with several such saved reviews
+    would change or remove one nobody named; only the user can say which."""
+
+    def __init__(self, names: Sequence[str]) -> None:
+        self.names = tuple(names)
+        super().__init__(f"{len(self.names)} saved structured-result reviews")
+
+
+def refuse_ambiguous_structured_review_baseline(
+    steps: Sequence["FlowStep"],
+    checkpoint_intents: Sequence[CheckpointIntent],
+) -> None:
+    if not any(i.producer_kind == "structured_result" for i in checkpoint_intents):
+        return
+    saved = _reviewed_structured_results(baseline_spec_from_flow_steps(steps))
+    if len(saved) > 1:
+        raise AmbiguousSavedStructuredReviewsError([step.name for step in saved])
+
+
 def _expected_checkpoints_by_step_ref(
     spec: FlowDraftSpecCore,
     checkpoint_intents: Sequence[CheckpointIntent],
@@ -297,14 +401,8 @@ def _checkpoint_producer_step(
             return following[0]
         return spec.steps[producers[0]]
     if producer_kind == "structured_result":
-        return next(
-            (
-                step
-                for step in reversed(spec.steps)
-                if step.output_type == OutputType.JSON
-            ),
-            None,
-        )
+        reviewed = _reviewed_structured_results(spec)
+        return reviewed[0] if len(reviewed) == 1 else None
 
     body_writer_refs = set(spec.document_body_writer_step_refs or ())
     if body_writer_refs:
@@ -327,6 +425,42 @@ def _checkpoint_producer_step(
                 OutputMode.PASS_THROUGH,
                 OutputMode.COMPOSE_TEXT,
             }
+        ),
+        None,
+    )
+
+
+def _structured_result_candidates(spec: FlowDraftSpecCore) -> list[StepSpec]:
+    return [
+        step
+        for step in spec.steps
+        if step.output_type == OutputType.JSON
+        and step.output_mode != OutputMode.SPEAKER_MAPPING
+    ]
+
+
+def _reviewed_structured_results(spec: FlowDraftSpecCore) -> list[StepSpec]:
+    return [
+        step
+        for step in _structured_result_candidates(spec)
+        if step.review_policy is not None
+    ]
+
+
+def _surviving_saved_result(
+    spec: FlowDraftSpecCore, baseline_spec: FlowDraftSpecCore | None
+) -> StepSpec | None:
+    """The one saved reviewed JSON step, when the edit keeps it a JSON step."""
+
+    saved = _reviewed_structured_results(baseline_spec) if baseline_spec else []
+    if len(saved) != 1:
+        return None
+    saved_ref = saved[0].existing_step_ref or saved[0].plan_step_ref
+    return next(
+        (
+            step
+            for step in _structured_result_candidates(spec)
+            if step.existing_step_ref == saved_ref
         ),
         None,
     )

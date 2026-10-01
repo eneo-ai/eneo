@@ -33,6 +33,7 @@ from eneo.flows.ai_builder.ai_builder_tool_parsing import (
     extract_assumptions,
     extract_plan_rationale,
 )
+from eneo.flows.flow_review_policy import FlowStepReviewMode
 from eneo.flows.output_processing import build_schema_validator, validate_schema_syntax
 from eneo.main.exceptions import TypedIOValidationException
 
@@ -72,6 +73,7 @@ def build_propose_flow_tool_schema(
     confirmed_runtime_inputs: tuple[ConfirmedRuntimeInputRequirement, ...] = (),
     review_scope: "ReviewEditScope | None" = None,
     permissions: "EditOperationPermissions | None" = None,
+    structured_review_mode: FlowStepReviewMode | None = None,
 ) -> ProposalToolSchema:
     if current_steps is None:
         return cast(
@@ -81,6 +83,7 @@ def build_propose_flow_tool_schema(
                 tool_name=PROPOSE_FLOW_TOOL_NAME,
                 is_pure_audio_transcription=is_pure_audio_transcription,
                 confirmed_runtime_inputs=confirmed_runtime_inputs,
+                structured_review_mode=structured_review_mode,
             ),
         )
     return cast(

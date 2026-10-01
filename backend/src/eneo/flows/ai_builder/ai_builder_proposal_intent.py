@@ -556,6 +556,9 @@ class _CreateSemanticStepArguments(BaseModel):
     knowledge_refs: list[str] | None = None
     uses_form_fields: list[str] | None = None
     citations_requested: bool = False
+    # The step whose JSON result the person reviews; only offered, and only
+    # admitted, when a structured-result review was requested.
+    review_mode: FlowStepReviewMode | None = None
 
 
 class ProposalStructuredFieldIntent(BaseModel):
@@ -907,11 +910,12 @@ def build_create_flow_tool_schema(
     tool_name: str,
     is_pure_audio_transcription: bool = False,
     confirmed_runtime_inputs: tuple[ConfirmedRuntimeInputRequirement, ...] = (),
+    structured_review_mode: FlowStepReviewMode | None = None,
 ) -> dict[str, Any]:
     kb_refs = resource_catalog.small_ref_enum_for_kind("knowledge_base")
     step_schema = build_semantic_step_schema(
         include_output_type=False,
-        include_review_mode=False,
+        include_review_mode=structured_review_mode is not None,
         include_form_field_refs=False,
         kb_refs=kb_refs,
     )
@@ -940,6 +944,14 @@ def build_create_flow_tool_schema(
                     "list keeps only the input's purpose placement."
                 ),
             }
+        if structured_review_mode is not None:
+            step_schema["properties"]["review_mode"].update(
+                enum=[structured_review_mode.value, None],
+                description=(
+                    "Set on the one step whose JSON result the person checks and "
+                    "corrects before later steps use it; null on every other step."
+                ),
+            )
         step_schema["properties"]["output_fields"]["minItems"] = 1
         # Keep the only recursive step property last on the wire. Non-strict
         # providers are less likely to strand later step properties at the

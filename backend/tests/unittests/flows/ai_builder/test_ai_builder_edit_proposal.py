@@ -6885,3 +6885,60 @@ async def test_failure_repair_compilation_accepts_instructions_but_refuses_contr
             result.compiled.content.spec.steps[3].output_type
             == prior.steps[3].output_type
         )
+
+
+def _flow_with_two_saved_structured_reviews() -> SimpleNamespace:
+    contract = {"type": "object", "properties": {"note": {"type": "string"}}}
+    comparison, decision = (
+        _flow_step(
+            step_order=order,
+            user_description=name,
+            input_source="flow_input" if order == 1 else "previous_step",
+            input_type="text" if order == 1 else "json",
+            output_type="json",
+            output_contract=contract,
+        ).model_copy(update={"review_policy": FlowStepReviewPolicy(mode=mode)})
+        for order, name, mode in (
+            (1, "Compare offers", FlowStepReviewMode.VIEW),
+            (2, "Decide grant", FlowStepReviewMode.EDIT),
+        )
+    )
+    letter = _flow_step(
+        step_order=3,
+        user_description="Write letter",
+        input_source="previous_step",
+        input_type="json",
+    )
+    return _flow(comparison, decision, letter)
+
+
+_RENAME_LETTER = {
+    "plan_rationale": "Rename the letter step.",
+    "steps": [
+        {"kind": "modify", "existing_step_ref": "existing_step_1"},
+        {"kind": "modify", "existing_step_ref": "existing_step_2"},
+        {
+            "kind": "modify",
+            "existing_step_ref": "existing_step_3",
+            "name": "Write decision letter",
+        },
+    ],
+}
+
+
+@pytest.mark.asyncio
+async def test_an_edit_without_a_review_request_keeps_every_saved_review() -> None:
+    result = await _process(
+        flow=_flow_with_two_saved_structured_reviews(),
+        arguments=_RENAME_LETTER,
+        planning_state=PlanningState.empty(),
+    )
+
+    assert isinstance(result, ProposalReady)
+    steps = result.compiled.content.spec.steps
+    assert [step.review_policy for step in steps] == [
+        FlowStepReviewPolicy(mode=FlowStepReviewMode.VIEW),
+        FlowStepReviewPolicy(mode=FlowStepReviewMode.EDIT),
+        None,
+    ]
+    assert steps[2].name == "Write decision letter"

@@ -292,6 +292,19 @@ _USER_ACTION_MESSAGES: Final[dict[NonPlanKind, dict[str, str]]] = {
             "and try again."
         ),
     },
+    # Always names several steps: one saved review is never ambiguous.
+    "structured_review_target_ambiguous": {
+        "sv": (
+            "Stegen {names} har var sin granskning av ett strukturerat resultat, "
+            "så jag kan inte avgöra vilken granskning ändringen gäller. Ändra "
+            "granskningen i stegredigeraren."
+        ),
+        "en": (
+            "The steps {names} each have a review of a structured result, so I "
+            "can't tell which review the change is about. Change the review in "
+            "the step editor."
+        ),
+    },
     "edit_blocked_by_unsupported_step": {
         "sv": (
             "Steget {names} är av en typ som jag inte kan ändra här. Öppna "
@@ -365,6 +378,24 @@ _NO_EDIT_PROPOSALS_WHILE_THEY_EXIST: Final[dict[str, str]] = {
     "sv": "Så länge de stegen finns kan jag inte föreslå ändringar i det här flödet.",
     "en": "I can't propose edits to this flow while those steps exist.",
 }
+
+
+def ambiguous_saved_structured_reviews_answer(
+    names: Sequence[str], *, ui_language: str | None
+) -> ProposalAnswer:
+    """The answer for a review change on a flow with several saved
+    structured-result reviews: only the user can say which one it means."""
+
+    outcome = non_plan_outcome(
+        "structured_review_target_ambiguous", "edit_in_step_editor", affected=names
+    )
+    language = "en" if _uses_english(ui_language) else "sv"
+    return ProposalAnswer(
+        answer=_USER_ACTION_MESSAGES[outcome.kind][language].format(
+            names=_name_list(outcome.affected, outcome.affected_remaining, language)
+        ),
+        outcome=outcome,
+    )
 
 
 def saved_steps_not_editable_answer(

@@ -12,6 +12,9 @@ from eneo.flows.ai_builder.ai_builder_attachment_context import (
     AIBuilderAttachmentContextPolicy,
     build_ai_builder_attachment_context_for_model,
 )
+from eneo.flows.ai_builder.ai_builder_checkpoint_contract import (
+    AmbiguousSavedStructuredReviewsError,
+)
 from eneo.flows.ai_builder.ai_builder_conversation_compaction import (
     compact_ai_builder_conversation,
 )
@@ -56,6 +59,7 @@ from eneo.flows.ai_builder.ai_builder_flow_review import (
     FlowReviewEvidence,
 )
 from eneo.flows.ai_builder.ai_builder_non_plan_outcome import (
+    ambiguous_saved_structured_reviews_answer,
     persist_non_plan_turn,
     saved_steps_not_editable_answer,
     stale_saved_step_revision_message,
@@ -347,7 +351,7 @@ class AIBuilderPlanner:
     async def _answer_saved_steps_not_editable(
         self,
         *,
-        error: UnsupportedSavedStepsError,
+        error: UnsupportedSavedStepsError | AmbiguousSavedStructuredReviewsError,
         turn: "SessionSendTurn",
         conversation: list[ConversationMessage],
         new_messages_start: int,
@@ -364,25 +368,30 @@ class AIBuilderPlanner:
         state over its cap completes the turn through the typed size error.
         """
 
-        logger.info(
-            "Saved flow has steps outside the authoring vocabulary",
-            extra={
-                "steps": [
-                    {"step_order": step.step_order, "fields": dict(step.fields)}
-                    for step in error.steps
-                ]
-            },
-        )
-        answer = saved_steps_not_editable_answer(
-            [step.name for step in error.steps],
-            ui_language=resolve_ui_language(conversation),
-            edit_asked_for_another_step=(
-                plan_edit_context is not None
-                and plan_edit_context.scope == "step"
-                and plan_edit_context.target_existing_step_ref
-                not in {step.existing_step_ref for step in error.steps}
-            ),
-        )
+        if isinstance(error, AmbiguousSavedStructuredReviewsError):
+            answer = ambiguous_saved_structured_reviews_answer(
+                error.names, ui_language=resolve_ui_language(conversation)
+            )
+        else:
+            logger.info(
+                "Saved flow has steps outside the authoring vocabulary",
+                extra={
+                    "steps": [
+                        {"step_order": step.step_order, "fields": dict(step.fields)}
+                        for step in error.steps
+                    ]
+                },
+            )
+            answer = saved_steps_not_editable_answer(
+                [step.name for step in error.steps],
+                ui_language=resolve_ui_language(conversation),
+                edit_asked_for_another_step=(
+                    plan_edit_context is not None
+                    and plan_edit_context.scope == "step"
+                    and plan_edit_context.target_existing_step_ref
+                    not in {step.existing_step_ref for step in error.steps}
+                ),
+            )
         try:
             events = await persist_non_plan_turn(
                 repo=self.repo,
@@ -925,7 +934,10 @@ class AIBuilderPlanner:
                                     dispatch_result.action_kind == "revise_architecture"
                                 ),
                             )
-                        except UnsupportedSavedStepsError as error:
+                        except (
+                            UnsupportedSavedStepsError,
+                            AmbiguousSavedStructuredReviewsError,
+                        ) as error:
                             # The dispatcher already committed the planning state;
                             # the answer is stored on the continuation turn, at the
                             # version that commit produced.

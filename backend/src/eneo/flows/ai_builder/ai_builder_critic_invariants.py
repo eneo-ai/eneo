@@ -209,9 +209,10 @@ _CHECKPOINT_INTENT_MISMATCH = CriticInvariant(
     evidence=_checkpoint_intent_mismatch_evidence,
     remediation=(
         "Place each requested review checkpoint on the actual transcript, structured "
-        "result, or report-text producer with the requested review mode, apply "
-        "requested checkpoint removals, and do not add, move, or remove review "
-        "checkpoints the user did not ask to change."
+        "result, or report-text producer with the requested review mode (a "
+        "structured-result review on exactly one JSON step: the result the person "
+        "reviews), apply requested checkpoint removals, and do not add, move, or "
+        "remove review checkpoints the user did not ask to change."
     ),
 )
 

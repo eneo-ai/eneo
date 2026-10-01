@@ -701,6 +701,7 @@ def test_template_checkpoint_targets_used_structured_result() -> None:
                 {
                     "name": "Prepare decision content",
                     "instructions": "Prepare the source-grounded decision text.",
+                    "review_mode": "edit",
                     "output_fields": [
                         {
                             "name": "decision_text",
@@ -4008,7 +4009,7 @@ def test_compiler_projects_typed_checkpoint_intents_onto_actual_producers() -> N
     assert renderer.review_policy is None
 
 
-def test_structured_checkpoint_lands_on_terminal_json_producer_only() -> None:
+def test_structured_checkpoint_lands_on_the_declared_json_producer_only() -> None:
     state = PlanningState.empty()
     state.resolved_slots = {
         "primary_runtime_input": _slot("primary_runtime_input", "audio"),
@@ -4046,6 +4047,7 @@ def test_structured_checkpoint_lands_on_terminal_json_producer_only() -> None:
                 {
                     "name": "Refine decisions",
                     "instructions": "Deduplicate and refine the decisions.",
+                    "review_mode": "view",
                     "output_fields": [
                         {
                             "name": "decisions",

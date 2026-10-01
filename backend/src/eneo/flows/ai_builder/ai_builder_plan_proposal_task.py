@@ -56,6 +56,7 @@ from eneo.flows.ai_builder.planning_state import (
     PlanningState,
     ResolvedSlot,
 )
+from eneo.flows.flow_review_policy import FlowStepReviewMode
 from eneo.flows.runtime.document_rendering.guidance import (
     section_markdown_guidance,
     text_field_guidance,
@@ -99,6 +100,7 @@ def build_plan_proposal_system_prompt(
     requested_output_sections: RequestedOutputSections | None = None,
     confirmed_runtime_inputs: tuple[ConfirmedRuntimeInputRequirement, ...] = (),
     can_decline: bool = False,
+    structured_review_mode: FlowStepReviewMode | None = None,
 ) -> str:
     submission_tool = PROPOSE_FLOW_TOOL_NAME
     resource_material = build_ai_builder_resource_reference_material(
@@ -127,7 +129,15 @@ def build_plan_proposal_system_prompt(
         [
             "- In create mode, describe semantic flow intent in propose_flow; do not choose Flow mechanics.",
             audio_create_rule,
-            "- Human review checkpoints are compiler-owned in create mode: the backend places confirmed review intents on their producing steps. Do not set review_mode, and do not model human review as a separate AI step or as instruction prose. "
+            "- Human review checkpoints are compiler-owned in create mode: the backend places confirmed review intents on their producing steps. "
+            + (
+                f"Set review_mode to '{structured_review_mode.value}' on the one "
+                "step whose JSON result the person checks and corrects before "
+                "later steps use it, and null on every other step; "
+                if structured_review_mode is not None
+                else "Do not set review_mode, and "
+            )
+            + "do not model human review as a separate AI step or as instruction prose. "
             + _confirmed_checkpoints_sentence(planning_state),
             "- Do not author field-level previous-step paths or text-output refs in create mode; the backend owns those underlag channels from the proposed step outputs and committed architecture.",
             "- The backend compiles step topology, backend-owned refs, underlag/input_bindings, runtime input, step refs, output modes, and document delivery.",

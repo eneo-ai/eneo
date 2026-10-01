@@ -60,6 +60,8 @@ The Builder cannot edit a saved Flow that has a step which fetches data over HTT
 
 When a modified step's patch names a review mode (`view` or `edit`), it changes the mode only: a review deadline saved on the step stays, and the approval lists the step as unchanged when the mode is the one already saved. Setting the mode to `none` removes the review step, deadline included. AI Builder cannot set or reset a review deadline; to return to the default, remove the review and add it again.
 
+When you ask to check and correct a structured (JSON) result before the flow continues, the review goes on the step whose result you named, even when later steps also produce structured results: the plan marks that step, and when only one of the plan's own steps produces a structured result, the review goes there. If the plan cannot say which step it is, AI Builder asks for a new plan instead of guessing. On a saved flow, a request to change or remove that review acts on the step that already has it. When several steps of a saved flow review structured results, AI Builder answers with their names and a pointer to the step editor before it asks the model for a proposal, so no other saved review changes.
+
 ## Typical workflow
 
 1. Start an AI Builder session in a space.

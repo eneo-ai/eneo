@@ -56,6 +56,9 @@ def _merge_report_writer_semantics(
         citations_requested=(
             planned_step.citations_requested or semantic_step.citations_requested
         ),
+        # The merged writer carries the authored writer's work, so it carries
+        # its reviewed-result declaration too (only ever set on a JSON step).
+        review_mode=planned_step.review_mode or semantic_step.review_mode,
     )
 
 

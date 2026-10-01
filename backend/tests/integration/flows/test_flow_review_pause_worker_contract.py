@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 from dataclasses import dataclass
 from types import SimpleNamespace
 from unittest.mock import AsyncMock
@@ -25,7 +26,23 @@ from eneo.database.tables.flow_tables import (
     FlowStepResults,
     FlowSteps,
 )
+from eneo.flows.ai_builder.ai_builder_create_compile_context import (
+    CreateCompileContext,
+)
+from eneo.flows.ai_builder.ai_builder_create_compiler import (
+    compile_create_intent_to_spec,
+)
+from eneo.flows.ai_builder.ai_builder_proposal_intent import (
+    parse_create_flow_intent_arguments,
+)
+from eneo.flows.ai_builder.planning_state import CheckpointIntent
 from eneo.flows.api.flow_assembler import FlowAssembler
+from eneo.flows.application.flow_draft_materialization import (
+    compile_flow_draft_changeset,
+)
+from eneo.flows.application.flow_draft_materialization_executor import (
+    build_flow_steps,
+)
 from eneo.flows.assistant_execution_snapshot import build_assistant_execution_snapshot
 from eneo.flows.domain.flow import (
     Flow,
@@ -46,6 +63,7 @@ from eneo.flows.enums import (
     FlowRunReviewCheckpointState,
 )
 from eneo.flows.flow_api_error_code import FlowApiErrorCode
+from eneo.flows.flow_authoring_spec import FlowDraftSpecCore, InputType, OutputType
 from eneo.flows.flow_review_policy import FlowStepReviewMode, FlowStepReviewPolicy
 from eneo.flows.flow_run_error import FlowRunError
 from eneo.flows.infrastructure.flow_repo import FlowRepository
@@ -223,6 +241,8 @@ def _definition_step(
     }
     if step.review_policy is not None:
         payload["review_policy"] = step.review_policy.model_dump(mode="json")
+    if step.input_contract is not None:
+        payload["input_contract"] = step.input_contract
     if step.output_contract is not None:
         payload["output_contract"] = step.output_contract
     return payload
@@ -241,6 +261,8 @@ async def _create_review_pause_runtime_context(
     first_step_output_type: str = "text",
     first_step_output_contract: dict[str, object] | None = None,
     first_step_review_mode: FlowStepReviewMode = FlowStepReviewMode.VIEW,
+    compiled_spec: FlowDraftSpecCore | None = None,
+    input_payload_json: FlowPersistedJsonObject | None = None,
 ) -> _ReviewPauseRuntimeContext:
     enable_autobegin_for_flow_task_session(session)
     setup_container = Container(
@@ -258,19 +280,38 @@ async def _create_review_pause_runtime_context(
     )
     flow_repo = FlowRepository(session=session)
     version_repo = FlowVersionRepository(session=session)
-    flow = await flow_repo.create(
-        flow=_build_review_pause_flow(
-            tenant_id=admin_user.tenant_id,
-            space_id=space.id,
-            user_id=admin_user.id,
-            assistant_id=assistant.id,
-            include_downstream_steps=include_downstream_steps,
-            first_step_output_type=first_step_output_type,
-            first_step_output_contract=first_step_output_contract,
-            first_step_review_mode=first_step_review_mode,
-        ),
+    flow = _build_review_pause_flow(
         tenant_id=admin_user.tenant_id,
+        space_id=space.id,
+        user_id=admin_user.id,
+        assistant_id=assistant.id,
+        include_downstream_steps=include_downstream_steps,
+        first_step_output_type=first_step_output_type,
+        first_step_output_contract=first_step_output_contract,
+        first_step_review_mode=first_step_review_mode,
     )
+    if compiled_spec is not None:
+        # The rows the authoring materializer writes for a compiled spec.
+        flow = flow.model_copy(
+            update={
+                "metadata_json": None,
+                "steps": [
+                    step.model_copy(
+                        update={"flow_id": uuid4(), "tenant_id": admin_user.tenant_id}
+                    )
+                    for step in build_flow_steps(
+                        compiled_steps=compile_flow_draft_changeset(
+                            compiled_spec, None
+                        ).compiled_steps,
+                        ref_to_assistant_id={
+                            step.plan_step_ref: assistant.id
+                            for step in compiled_spec.steps
+                        },
+                    )
+                ],
+            }
+        )
+    flow = await flow_repo.create(flow=flow, tenant_id=admin_user.tenant_id)
     assert flow.id is not None
     first_step = flow.steps[0]
     assert first_step.id is not None
@@ -311,7 +352,7 @@ async def _create_review_pause_runtime_context(
     )
     create_result = await setup_container.flow_run_service().create_run(
         flow_id=flow.id,
-        input_payload_json={"question": "What needs review?"},
+        input_payload_json=input_payload_json or {"question": "What needs review?"},
         expected_flow_version=1,
         step_inputs=None,
         idempotency_key=f"review-pause-{uuid4()}",
@@ -1321,6 +1362,166 @@ async def test_edit_approve_resume_uses_edited_payload_for_downstream_steps(
         "flow_run_review_checkpoint_resumed",
         "flow_run_completed",
     ]
+
+
+@pytest.mark.asyncio
+@pytest.mark.integration
+async def test_an_edit_of_the_compiled_earlier_result_reaches_delivery(
+    setup_database,
+    admin_user,
+    test_tenant,
+    completion_model_factory,
+    space_factory,
+    assistant_factory,
+):
+    """Built from the compiled comparison -> decision -> letter flow: the gate
+    sits on the comparison, and a schema-valid edit of it is what the decision
+    and the delivered letter are derived from."""
+
+    spec = compile_create_intent_to_spec(
+        parse_create_flow_intent_arguments(
+            {
+                "flow_name": "Grant decision",
+                "plan_rationale": "Compare, decide, write.",
+                "steps": [
+                    {
+                        "name": "Compare offers",
+                        "instructions": "Compare the offers.",
+                        "output_fields": [
+                            {
+                                "name": "comparison",
+                                "field_type": "string",
+                                "description": "Offer comparison.",
+                            }
+                        ],
+                        "review_mode": "edit",
+                    },
+                    {
+                        "name": "Decide grant",
+                        "instructions": "Decide the grant.",
+                        "output_fields": [
+                            {
+                                "name": "decision",
+                                "field_type": "string",
+                                "description": "The decision.",
+                            }
+                        ],
+                    },
+                    {"name": "Write letter", "instructions": "Write the letter."},
+                ],
+            }
+        ),
+        context=CreateCompileContext(
+            runtime_input_type=InputType.TEXT,
+            final_output_type=OutputType.TEXT,
+            checkpoint_intents=(
+                CheckpointIntent(
+                    evidence_level="explicit",
+                    producer_kind="structured_result",
+                    operation="set",
+                    mode=FlowStepReviewMode.EDIT,
+                    confidence="high",
+                    evidence=["quote:user_message:1:Let me correct the comparison."],
+                ),
+            ),
+        ),
+    )
+    sentinel = "Offer B is cheapest at 12 500 kr (edited)."
+
+    async def derive(**kwargs: object) -> SimpleNamespace:
+        # A provider whose answer is derived from the input it receives.
+        question = str(kwargs["question"])
+        call = completion_service.get_response.await_count
+        if call == 1:
+            completion = '{"comparison": "Offer A is cheapest."}'
+        elif call == 2:
+            completion = json.dumps({"decision": f"Grant based on: {question}"})
+        else:
+            completion = f"Letter: {question}"
+        return SimpleNamespace(completion=completion, total_token_count=10)
+
+    completion_service = SimpleNamespace(get_response=AsyncMock(side_effect=derive))
+
+    async with sessionmanager.session() as session:
+        context = await _create_review_pause_runtime_context(
+            session=session,
+            admin_user=admin_user,
+            test_tenant=test_tenant,
+            completion_model_factory=completion_model_factory,
+            space_factory=space_factory,
+            assistant_factory=assistant_factory,
+            completion_service=completion_service,
+            compiled_spec=spec,
+            input_payload_json={"text": "Two offers for a ramp."},
+        )
+        pause_result = await context.executor.execute(
+            run_id=context.run_id,
+            flow_id=context.flow_id,
+            tenant_id=context.tenant_id,
+            run_revision=context.initial_run_revision,
+            dispatch_task_id=f"compiled-review-pause-{uuid4()}",
+            retry_count=0,
+        )
+        review_service = context.container.flow_run_review_checkpoint_service()
+        checkpoint = await review_service.get_active_review_checkpoint(
+            flow_id=context.flow_id,
+            run_id=context.run_id,
+        )
+        assert checkpoint is not None
+        edited = await review_service.edit_review_checkpoint(
+            flow_id=context.flow_id,
+            run_id=context.run_id,
+            checkpoint_id=checkpoint.id,
+            expected_checkpoint_revision=checkpoint.revision,
+            edited_value={"comparison": sentinel},
+        )
+        resumed = await review_service.approve_and_resume_review_checkpoint(
+            flow_id=context.flow_id,
+            run_id=context.run_id,
+            checkpoint_id=checkpoint.id,
+            expected_checkpoint_revision=edited.revision,
+            idempotency_key=f"compiled-continue-{uuid4()}",
+        )
+        completed_result = await context.executor.execute(
+            run_id=context.run_id,
+            flow_id=context.flow_id,
+            tenant_id=context.tenant_id,
+            run_revision=resumed.run.revision,
+            dispatch_task_id=f"compiled-review-resume-{uuid4()}",
+            retry_count=0,
+        )
+        step_result_rows = (
+            (
+                await session.execute(
+                    sa.select(FlowStepResults)
+                    .where(FlowStepResults.flow_run_id == context.run_id)
+                    .order_by(FlowStepResults.step_order.asc())
+                )
+            )
+            .scalars()
+            .all()
+        )
+        run_row = await session.scalar(
+            sa.select(FlowRuns).where(FlowRuns.id == context.run_id)
+        )
+
+    assert pause_result == {"status": FlowRunStatus.AWAITING_REVIEW.value}
+    # The checkpoint is the compiled comparison step, not the later decision.
+    assert checkpoint.step_id == context.first_step_id
+    assert completed_result == {"status": FlowRunStatus.COMPLETED.value}
+    assert step_result_rows[0].output_payload_json["structured"] == {
+        "comparison": sentinel
+    }
+    decision_input = step_result_rows[1].input_payload_json["text"]
+    assert sentinel in decision_input
+    assert "Offer A is cheapest." not in decision_input
+    letter_input = step_result_rows[2].input_payload_json["text"]
+    assert sentinel in letter_input
+    assert "Offer A is cheapest." not in letter_input
+    assert run_row is not None
+    delivered = run_row.output_payload_json["text"]
+    assert delivered == f"Letter: {letter_input}"
+    assert sentinel in delivered
 
 
 @pytest.mark.asyncio

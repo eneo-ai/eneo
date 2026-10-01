@@ -16,6 +16,9 @@ from uuid import uuid4
 import pytest
 
 from eneo.completion_models.domain.model_capacity import ModelCapacity
+from eneo.flows.ai_builder.ai_builder_checkpoint_contract import (
+    AmbiguousSavedStructuredReviewsError,
+)
 from eneo.flows.ai_builder.ai_builder_conversation_metadata import (
     SlotClassificationMetadata,
 )
@@ -54,6 +57,7 @@ from eneo.flows.ai_builder.ai_builder_slot_classification_contract import (
 )
 from eneo.flows.ai_builder.ai_builder_turn_controller import ReviseArchitecture
 from eneo.flows.ai_builder.planning_state import (
+    CheckpointIntent,
     PlanningState,
     PlanningStatePayloadTooLargeError,
 )
@@ -126,14 +130,16 @@ def _scoped_to(step: FlowStep) -> ResolvedAIBuilderEditContext:
 
 
 def _build(
-    flow: Flow, context: ResolvedAIBuilderEditContext | None
+    flow: Flow,
+    context: ResolvedAIBuilderEditContext | None,
+    planning_state: PlanningState | None = None,
 ) -> ProposalPrepared:
     return build_proposal_prepared(
         requirements_state=RequirementsState(),
         ui_language="en",
         slot_classification_metadata=None,
         conversation=[ConversationMessage(role="user", content="Improve the flow.")],
-        planning_state=PlanningState.empty(),
+        planning_state=planning_state or PlanningState.empty(),
         attachment_context=None,
         flow_context=None,
         is_edit_mode=True,
@@ -422,3 +428,84 @@ def _server_output_prepared_revising(state: PlanningState) -> Any:
         server_decision=ReviseArchitecture(architecture_commit=_architecture_commit()),
         planning_state=state,
     )
+
+
+def _two_saved_structured_reviews() -> Flow:
+    return _flow(
+        *(
+            _step(
+                order,
+                output_type="json",
+                user_description=name,
+                review_policy={"mode": "edit"},
+            )
+            for order, name in ((1, "Compare offers"), (2, "Decide grant"))
+        ),
+        _step(3, user_description="Write letter"),
+    )
+
+
+def _structured_review_request() -> PlanningState:
+    state = PlanningState.empty()
+    state.checkpoint_intents = [
+        CheckpointIntent(
+            evidence_level="explicit",
+            producer_kind="structured_result",
+            operation="clear",
+            mode=None,
+            confidence="high",
+            evidence=["quote:user_message:1:Stop pausing for the data."],
+        )
+    ]
+    return state
+
+
+def test_the_proposal_boundary_refuses_a_change_to_one_of_several_saved_reviews() -> (
+    None
+):
+    flow = _two_saved_structured_reviews()
+
+    with pytest.raises(AmbiguousSavedStructuredReviewsError) as caught:
+        _build(flow, None, _structured_review_request())
+
+    assert caught.value.names == ("Compare offers", "Decide grant")
+    # Without a structured-result request the saved reviews are no obstacle.
+    assert isinstance(_build(flow, None), ProposalPrepared)
+
+
+@pytest.mark.asyncio
+async def test_a_refused_review_change_answers_without_a_proposal_call(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    planner = _make_planner()
+    _configure_minimal_send_message(planner, monkeypatch, _server_output_prepared())
+    flow = _two_saved_structured_reviews()
+    with pytest.raises(AmbiguousSavedStructuredReviewsError) as caught:
+        _build(flow, None, _structured_review_request())
+
+    async def prepare(_: object) -> object:
+        return SavedStepsNotEditablePrepared(
+            requirements_state=RequirementsState(),
+            ui_language="en",
+            slot_classification_metadata=None,
+            error=caught.value,
+            planning_state=_structured_review_request(),
+        )
+
+    monkeypatch.setattr(
+        "eneo.flows.ai_builder.ai_builder_planner.prepare_planner_request", prepare
+    )
+
+    events = await _send(planner, flow)
+
+    assert [event.event for event in events] == ["text", "done"]
+    assert "`Compare offers`" in events[0].data.text
+    planner.repo.mark_session_turn_processing.assert_not_awaited()
+    commit = planner.repo.commit_turn.await_args.kwargs
+    [assistant] = [m for m in commit["new_messages"] if m.role == "assistant"]
+    assert assistant.metadata["non_plan_outcome"] == {
+        "kind": "structured_review_target_ambiguous",
+        "required_action": "edit_in_step_editor",
+        "affected": ["Compare offers", "Decide grant"],
+        "affected_remaining": 0,
+    }

@@ -400,6 +400,7 @@ NonPlanKind: TypeAlias = Literal[
     "form_field_conflicts_with_run_input",
     "edit_blocked_by_custom_underlag",
     "edit_blocked_by_unsupported_step",
+    "structured_review_target_ambiguous",
 ]
 RequiredAction: TypeAlias = Literal[
     "none",

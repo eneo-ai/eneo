@@ -18,6 +18,11 @@ from eneo.flows.ai_builder.ai_builder_attachment_context import (
     build_ai_builder_attachment_context_for_model,
     fit_ai_builder_attachment_context,
 )
+from eneo.flows.ai_builder.ai_builder_checkpoint_contract import (
+    AmbiguousSavedStructuredReviewsError,
+    refuse_ambiguous_structured_review_baseline,
+    structured_result_review_mode,
+)
 from eneo.flows.ai_builder.ai_builder_conversation_metadata import (
     SlotClassificationMetadata,
     latest_turn_is_review_command,
@@ -266,7 +271,7 @@ class SavedStepsNotEditablePrepared(_PreparedBase):
     """The turn was read and would have proposed, but the saved flow holds
     steps the Builder cannot edit. The reading is kept like any other turn's."""
 
-    error: UnsupportedSavedStepsError
+    error: UnsupportedSavedStepsError | AmbiguousSavedStructuredReviewsError
     planning_state: PlanningState
 
 
@@ -485,7 +490,7 @@ async def prepare_planner_request(
             attachment_file_count=len(request.attachment_files),
             current_turn_start=request.current_turn_start,
         )
-    except UnsupportedSavedStepsError as error:
+    except (UnsupportedSavedStepsError, AmbiguousSavedStructuredReviewsError) as error:
         return SavedStepsNotEditablePrepared(
             requirements_state=requirements_state,
             ui_language=ui_language,
@@ -633,6 +638,10 @@ def build_proposal_prepared(
     # No edit of these steps is supported, and no proposal is paid for first.
     if flow is not None and (unsupported := unsupported_saved_steps(flow.steps)):
         raise UnsupportedSavedStepsError(unsupported)
+    if flow is not None:
+        refuse_ambiguous_structured_review_baseline(
+            flow.steps, planning_state.checkpoint_intents
+        )
     confirmed_requirements = latest_confirmed_requirements(conversation)
     # Only the user's own wording names an output topology. The disclosure
     # renders evidence back to the user — including headings observed in an
@@ -714,6 +723,12 @@ def build_proposal_prepared(
         planning_state,
         is_edit_mode=is_edit_mode,
     )
+    # One predicate offers the reviewed-result declaration in schema and prompt.
+    structured_review_mode = (
+        None
+        if is_pure_audio_transcription
+        else structured_result_review_mode(planning_state.checkpoint_intents)
+    )
     proposal_tool_schema = build_propose_flow_tool_schema(
         current_steps=None if flow is None else list(flow.steps),
         resource_catalog=resource_catalog,
@@ -727,6 +742,7 @@ def build_proposal_prepared(
             if compile_context is not None and not is_edit_mode
             else ()
         ),
+        structured_review_mode=structured_review_mode,
     )
     # A review-backed proposal carries run excerpts: the tenant's review-evidence
     # cap bounds this whole request (prompt, attachments, conversation, tools)
@@ -782,6 +798,7 @@ def build_proposal_prepared(
                 else ()
             ),
             can_decline=decline_tool_schema is not None,
+            structured_review_mode=structured_review_mode,
         )
 
     turn_tool_schemas = proposal_turn_tool_schemas(

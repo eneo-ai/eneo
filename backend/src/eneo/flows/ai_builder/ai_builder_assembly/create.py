@@ -60,6 +60,7 @@ from eneo.flows.ai_builder.ai_builder_proposal_intent import (
     CreateFlowIntent,
     SemanticStepIntent,
 )
+from eneo.flows.ai_builder.ai_builder_proposal_tool_contracts import display_value
 from eneo.flows.ai_builder.ai_builder_result_contract import (
     ResultOutputFieldRole,
     structured_field_names_satisfy_result_field,
@@ -88,6 +89,7 @@ from eneo.flows.flow_authoring_spec import (
     OutputMode,
     OutputType,
 )
+from eneo.flows.flow_review_policy import FlowStepReviewMode
 from eneo.json_types import JsonObject
 from eneo.main.logging import get_logger
 
@@ -135,6 +137,7 @@ CreateAssemblyRejectionReason = Literal[
     "section_writer_structured_source_ambiguous",
     "source_file_first_step_requires_json",
     "step_output_type_mismatch",
+    "structured_review_target_ambiguous",
     "terminal_schema_requires_json_terminal",
     "structured_fan_in_exceeds_limit",
     "unsupported_aggregation_intent",
@@ -146,6 +149,10 @@ CreateAssemblyRejectionReason = Literal[
 ]
 
 _REJECTION_FEEDBACK: dict[CreateAssemblyRejectionReason, str] = {
+    "structured_review_target_ambiguous": (
+        "Several steps produce structured results. Set review_mode on exactly "
+        "the one whose result the person reviews."
+    ),
     "structured_fan_in_exceeds_limit": (
         "The plan carries too many distinct structured fields forward between "
         "steps. Consolidate earlier JSON steps or reduce their output_fields so "
@@ -265,6 +272,7 @@ _REJECTION_REPAIR_DISPOSITION: dict[
     "section_writer_structured_source_ambiguous": "server_defect",
     "source_file_first_step_requires_json": "model_correctable",
     "step_output_type_mismatch": "model_correctable",
+    "structured_review_target_ambiguous": "model_correctable",
     "terminal_schema_requires_json_terminal": "user_action",
     "structured_fan_in_exceeds_limit": "model_correctable",
     "unsupported_aggregation_intent": "user_action",
@@ -345,7 +353,19 @@ def try_compile_create_intent_with_assembly(
     field_provenance: dict[str, FlowInputFieldProvenance] | None = None,
     field_diagnostics: list[LintWarning] | None = None,
     speaker_naming_review: bool = False,
+    inferred_structured_review: FlowStepReviewMode | None = None,
 ) -> FlowDraftSpecCore | CreateAssemblyRejection:
+    if inferred_structured_review is not None:
+        # The plan declared no reviewed step: each authored step offers the
+        # declaration, and the declaration rule decides where each would land.
+        intent = intent.model_copy(
+            update={
+                "steps": [
+                    step.model_copy(update={"review_mode": inferred_structured_review})
+                    for step in intent.steps
+                ]
+            }
+        )
     try:
         plan = _assemble_create_intent(
             intent,
@@ -375,6 +395,26 @@ def try_compile_create_intent_with_assembly(
         )
         if isinstance(plan, CreateAssemblyRejection):
             return plan
+        if inferred_structured_review is not None:
+            carriers = [
+                step
+                for step in plan.steps
+                if step.review_mode is not None
+                and step.output_mode is not OutputMode.SPEAKER_MAPPING
+            ]
+            if len(carriers) > 1:
+                names = ", ".join(
+                    f"'{display_value(intent.steps[step.proposal_steps[0] - 1].name)}'"
+                    for step in carriers
+                )
+                return _reject(
+                    "structured_review_target_ambiguous",
+                    detail=(
+                        f"Several steps produce structured results ({names}). Set "
+                        "review_mode on exactly the one whose result the person "
+                        "reviews."
+                    ),
+                )
         return lower_assembly_plan(plan, field_diagnostics=field_diagnostics)
     except ValueError as error:
         return _reject("plan_invariant_failed", detail=str(error))
@@ -721,6 +761,7 @@ def _assemble_create_intent(
             output_fields=tuple(semantic_step.output_fields or ()),
             knowledge_refs=tuple(semantic_step.knowledge_refs),
             citations_requested=semantic_step.citations_requested,
+            review_mode=_declared_structured_review(semantic_step, step_output_type),
         )
         planned_steps.append(planned_step)
         previous_output_type = step_output_type
@@ -1325,6 +1366,7 @@ def _assemble_docx_template_fill(
             output_fields=tuple(semantic_step.output_fields or ()),
             knowledge_refs=tuple(semantic_step.knowledge_refs),
             citations_requested=semantic_step.citations_requested,
+            review_mode=_declared_structured_review(semantic_step, step_output_type),
         )
         semantic_steps.append(planned_step)
         previous_step = planned_step
@@ -1732,6 +1774,16 @@ def _place_runtime_form_fields(
         )
         for index, step in enumerate(planned_steps)
     )
+
+
+def _declared_structured_review(
+    step: SemanticStepIntent, output_type: OutputType
+) -> FlowStepReviewMode | None:
+    """A plan's reviewed-result declaration lands only on a JSON step: a text
+    descendant of the declared step (a split writer, a folded terminal) is
+    never the structured result, so the declaration is lost there, not moved."""
+
+    return step.review_mode if output_type is OutputType.JSON else None
 
 
 def _proposal_steps(step: SemanticStepIntent) -> tuple[int, ...]:

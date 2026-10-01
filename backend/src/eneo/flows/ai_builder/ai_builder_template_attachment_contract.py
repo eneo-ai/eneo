@@ -851,10 +851,9 @@ def _drop_unused_template_predecessor(
     if (
         candidate.output_mode is not OutputMode.PASS_THROUGH
         or candidate.output_type not in {OutputType.JSON, OutputType.TEXT}
-        or (
-            candidate.output_type is OutputType.TEXT
-            and candidate.review_policy is not None
-        )
+        # A review pauses the run for a person: the step is used even when
+        # the template reads none of its fields.
+        or candidate.review_policy is not None
     ):
         return steps
 
