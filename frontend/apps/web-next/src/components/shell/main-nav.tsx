@@ -8,10 +8,10 @@ import { Kbd } from "@astryxdesign/core/Kbd";
 import { SideNavItem, SideNavSection, useSideNavCollapse } from "@astryxdesign/core/SideNav";
 import { Skeleton } from "@astryxdesign/core/Skeleton";
 import { Tooltip } from "@astryxdesign/core/Tooltip";
-import { Bot, LayoutGrid, Plus, Search, SquarePen, User } from "lucide-react";
+import { Bot, LayoutGrid, Plus, RotateCcw, Search, SquarePen, User } from "lucide-react";
 import { usePathname } from "next/navigation";
 import { useTranslations } from "next-intl";
-import { useMemo, useRef } from "react";
+import { useEffect, useMemo, useRef } from "react";
 import { EntityAvatar } from "@/components/composites/entity-avatar";
 import { useAppContext } from "@/components/providers/app-context";
 import type { RecentConversation } from "@/lib/api/conversations";
@@ -111,8 +111,20 @@ function SpacesSection() {
   const { can } = useAppContext();
   const { openCreateSpace } = useShell();
   const { isCollapsed } = useSideNavCollapse();
-  const { spaces, isPending } = useNavSpaces();
+  const { spaces, isPending, isError, isFetching, refetch } = useNavSpaces();
   const currentRouteId = target.kind === "space" ? target.routeId : null;
+  const focusAfterRetry = useRef(false);
+  const firstSpaceRef = useRef<HTMLElement>(null);
+  const allSpacesRef = useRef<HTMLElement>(null);
+
+  useEffect(() => {
+    if (!isError && focusAfterRetry.current) {
+      // The retry button leaves the DOM after recovery. Give its focus to the
+      // newly available first space, or the stable "Alla ytor" link.
+      (firstSpaceRef.current ?? allSpacesRef.current)?.focus();
+      focusAfterRetry.current = false;
+    }
+  }, [isError]);
 
   // Keep the list short; the current space stays visible even past the cap.
   const shown = spaces.slice(0, MAX_SPACES_IN_NAV);
@@ -142,22 +154,50 @@ function SpacesSection() {
         href="/spaces/personal/overview"
         isSelected={currentRouteId === "personal"}
       />
-      {spaces.length === 0 && isPending && !isCollapsed ? (
+      {spaces.length === 0 && isPending && !isError && !isCollapsed ? (
         <div aria-hidden="true" className="flex flex-col gap-2 px-2 py-1.5">
           <Skeleton height={16} width="70%" radius={1} />
           <Skeleton height={16} width="55%" radius={1} />
         </div>
       ) : null}
-      {shown.map((space) => (
+      {shown.map((space, index) => (
         <SideNavItem
           key={space.id}
+          ref={index === 0 ? firstSpaceRef : undefined}
           label={space.name}
           icon={<EntityAvatar id={space.id} name={space.name} size="sm" />}
           href={`/spaces/${space.id}/overview`}
           isSelected={space.id === currentRouteId}
         />
       ))}
+      {isError ? (
+        <div className={cn("flex flex-col gap-1 px-2 py-1.5", isCollapsed && "items-center px-0")}>
+          <p className={cn("text-ax-error text-xs", isCollapsed && "sr-only")}>
+            {t("shell_spaces_load_failed")}
+          </p>
+          <Button
+            variant="ghost"
+            size="sm"
+            label={t("shell_spaces_retry")}
+            icon={<Icon icon={RotateCcw} />}
+            isIconOnly={isCollapsed}
+            tooltip={isCollapsed ? t("shell_spaces_retry") : undefined}
+            isLoading={isFetching}
+            isInterruptible
+            className="pointer-coarse:min-h-11 pointer-coarse:min-w-11"
+            onClick={(event) => {
+              if (isFetching) return;
+              focusAfterRetry.current = document.activeElement === event.currentTarget;
+              void refetch?.();
+            }}
+            onBlur={() => {
+              focusAfterRetry.current = false;
+            }}
+          />
+        </div>
+      ) : null}
       <SideNavItem
+        ref={allSpacesRef}
         label={t("shell_all_spaces")}
         icon={LayoutGrid}
         href="/spaces/list"

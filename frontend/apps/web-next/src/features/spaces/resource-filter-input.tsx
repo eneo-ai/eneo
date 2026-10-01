@@ -4,7 +4,7 @@ import { useAnnounce } from "@astryxdesign/core/hooks";
 import { TextInput } from "@/components/astryx/text-input";
 import { Search } from "lucide-react";
 import { useTranslations } from "next-intl";
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, type Ref } from "react";
 import { cn } from "@/lib/utils";
 
 /**
@@ -21,6 +21,7 @@ export function ResourceFilterInput({
   placeholder,
   label,
   resultCount,
+  inputRef,
   className
 }: {
   value: string;
@@ -30,6 +31,8 @@ export function ResourceFilterInput({
   label: string;
   /** Items matching `value`; announced whenever the query or the count changes. */
   resultCount: number;
+  /** Optional focus target for an empty state's clear action. */
+  inputRef?: Ref<HTMLInputElement>;
   className?: string;
 }) {
   const t = useTranslations();
@@ -51,6 +54,7 @@ export function ResourceFilterInput({
   return (
     <div className={cn("w-full max-w-sm", className)}>
       <TextInput
+        ref={inputRef}
         label={label}
         isLabelHidden
         value={value}

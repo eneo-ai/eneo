@@ -98,18 +98,23 @@ export function RenameSessionDialog({
   onSave: (name: string) => void;
 }) {
   const t = useTranslations();
-  const [draft, setDraft] = useState<{ id: string; name: string } | null>(null);
-  // The conversation whose save found the name empty.
-  const [submittedFor, setSubmittedFor] = useState<string | null>(null);
+  // Tie local state to this opening of the dialog, not just the conversation id.
+  // Reopening the same conversation must start from its current saved name.
+  const [draft, setDraft] = useState<{ session: typeof session; name: string } | null>(null);
+  const [submittedFor, setSubmittedFor] = useState<typeof session>(null);
   const inputRef = useRef<HTMLInputElement>(null);
-  const value = draft && draft.id === session?.id ? draft.name : (session?.name ?? "");
-  const problem =
-    session && submittedFor === session.id && !value.trim() ? t("required_field") : null;
+  const value = draft?.session === session ? draft.name : (session?.name ?? "");
+  const problem = session && submittedFor === session && !value.trim() ? t("required_field") : null;
+  const close = () => {
+    setDraft(null);
+    setSubmittedFor(null);
+    onCancel();
+  };
   const save = () => {
     if (pending || !session) return;
     if (!value.trim()) {
       // Rendered before focus moves, so the field is read with its error.
-      flushSync(() => setSubmittedFor(session.id));
+      flushSync(() => setSubmittedFor(session));
       inputRef.current?.focus();
       return;
     }
@@ -119,7 +124,7 @@ export function RenameSessionDialog({
   return (
     <Dialog
       isOpen={session !== null}
-      onOpenChange={(open) => !open && onCancel()}
+      onOpenChange={(open) => !open && close()}
       purpose="form"
       width={440}
     >
@@ -128,7 +133,7 @@ export function RenameSessionDialog({
           <DialogHeader
             title={t("chat_history_rename")}
             subtitle={t("chat_history_rename_description")}
-            onOpenChange={(open) => !open && onCancel()}
+            onOpenChange={(open) => !open && close()}
           />
         }
         content={
@@ -137,7 +142,7 @@ export function RenameSessionDialog({
               ref={inputRef}
               label={t("chat_history_name_label")}
               value={value}
-              onChange={(next) => session && setDraft({ id: session.id, name: next })}
+              onChange={(next) => session && setDraft({ session, name: next })}
               onEnter={save}
               isRequired
               status={problem ? { type: "error", message: problem } : undefined}
@@ -147,7 +152,7 @@ export function RenameSessionDialog({
         footer={
           <LayoutFooter>
             <HStack gap={2} hAlign="end">
-              <Button label={t("cancel")} variant="secondary" onClick={onCancel} />
+              <Button label={t("cancel")} variant="secondary" onClick={close} />
               <Button
                 label={t("save")}
                 variant="primary"

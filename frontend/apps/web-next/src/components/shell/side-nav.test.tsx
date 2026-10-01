@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { cleanup, fireEvent, screen, within } from "@testing-library/react";
+import { act, cleanup, fireEvent, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { browserApi } from "@/lib/api/browser";
 import { recentConversationsQueryOptions, type RecentConversation } from "@/lib/api/conversations";
@@ -111,6 +111,7 @@ beforeEach(() => setRoute("/spaces/personal/chat"));
 afterEach(() => {
   cleanup();
   document.cookie = `${SIDE_NAV_COLLAPSED_COOKIE}=; max-age=0; path=/`;
+  vi.restoreAllMocks();
 });
 
 describe("DesktopSideNav (main)", () => {
@@ -262,6 +263,62 @@ describe("DesktopSideNav (main)", () => {
     renderNav({ conversations: [] });
     expect(screen.queryByRole("group", { name: "Senaste" })).toBeNull();
   });
+
+  it.each([false, true])(
+    "shows a recoverable spaces error while keeping cached links (cached: %s)",
+    async (cached) => {
+      const queryClient = testQueryClient();
+      queryClient.setQueryData(recentConversationsQueryOptions(browserApi).queryKey, CONVERSATIONS);
+      if (cached) {
+        queryClient.setQueryData(["spaces"], SPACES, { updatedAt: Date.now() - 60_000 });
+      }
+
+      let finishRetry: (() => void) | undefined;
+      const retryResponse = new Promise((resolve) => {
+        finishRetry = () =>
+          resolve({
+            data: { items: SPACES },
+            error: undefined,
+            response: new Response("{}", { status: 200 })
+          });
+      });
+      let attempts = 0;
+      vi.spyOn(browserApi, "GET").mockImplementation(((path: string) => {
+        if (path !== "/api/v1/spaces/") throw new Error(`Unexpected request: ${path}`);
+        attempts += 1;
+        if (attempts === 1) return Promise.reject(new Error("offline"));
+        return retryResponse;
+      }) as unknown as typeof browserApi.GET);
+
+      const { container } = renderInApp(<DesktopSideNav variant="main" navId="side-nav" />, {
+        queryClient
+      });
+      const spaces = within(screen.getByRole("navigation", { name: "Huvudmeny" })).getByRole(
+        "group",
+        { name: "Ytor" }
+      );
+      expect(await within(spaces).findByText("Ytorna kunde inte laddas.")).toBeTruthy();
+      expect(within(spaces).getByRole("link", { name: "Personligt" })).toBeTruthy();
+      expect(within(spaces).getByRole("link", { name: "Alla ytor" })).toBeTruthy();
+      expect(Boolean(within(spaces).queryByRole("link", { name: "Upphandling" }))).toBe(cached);
+
+      const retry = within(spaces).getByRole("button", { name: "Försök ladda ytorna igen" });
+      retry.focus();
+      fireEvent.click(retry);
+      await waitFor(() => expect(retry.getAttribute("aria-busy")).toBe("true"));
+      expect(document.activeElement).toBe(retry);
+      expect(within(spaces).getByText("Ytorna kunde inte laddas.")).toBeTruthy();
+      await act(async () => finishRetry?.());
+      await waitFor(() => {
+        expect(within(spaces).getByRole("link", { name: "Upphandling" })).toBeTruthy();
+        expect(within(spaces).queryByText("Ytorna kunde inte laddas.")).toBeNull();
+      });
+      expect(document.activeElement).toBe(
+        within(spaces).getByRole("link", { name: "Upphandling" })
+      );
+      await expectNoAxeViolations(container);
+    }
+  );
 
   it("collapses to an icon rail (disclosure) and remembers it", async () => {
     const { container } = renderNav();

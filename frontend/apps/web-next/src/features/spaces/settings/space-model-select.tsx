@@ -1,12 +1,12 @@
 "use client";
 
+import { Button as AstryxButton } from "@astryxdesign/core/Button";
 import { Brain, ChevronDown, ChevronRight, Eye, Wrench } from "lucide-react";
 import { useTranslations } from "next-intl";
-import { useMemo, useState } from "react";
+import { useId, useMemo, useRef, useState } from "react";
 import { ProviderLogo } from "@/components/ai-elements/provider-logo";
 import { Button } from "@/components/ui/button";
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
-import { Input } from "@/components/ui/input";
 import { Switch } from "@/components/ui/switch";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import {
@@ -14,6 +14,7 @@ import {
   formatCostPerMinute
 } from "@/features/ai-models/format-model-stats";
 import { cn } from "@/lib/utils";
+import { ResourceFilterInput } from "../resource-filter-input";
 
 export type SelectableModel = {
   id: string;
@@ -30,7 +31,8 @@ export type SelectableModel = {
   cost_per_minute?: string | number | null;
 };
 
-type ModelKind = "completion" | "embedding" | "transcription";
+export type ModelKind = "completion" | "embedding" | "transcription";
+export type ModelSelectionChange = (currentIds: string[]) => string[];
 
 const SEARCH_THRESHOLD = 6;
 
@@ -38,8 +40,8 @@ function label(model: SelectableModel): string {
   return model.nickname ?? model.name;
 }
 
-function groupName(model: SelectableModel): string {
-  const raw = model.org || model.provider_type || "Other";
+function groupName(model: SelectableModel, fallback: string): string {
+  const raw = model.org || model.provider_type || fallback;
   return raw.charAt(0).toUpperCase() + raw.slice(1);
 }
 
@@ -91,7 +93,6 @@ export function SpaceModelSelect({
   title,
   description,
   kind,
-  pending,
   onChange
 }: {
   models: SelectableModel[];
@@ -99,13 +100,14 @@ export function SpaceModelSelect({
   title: string;
   description: string;
   kind: ModelKind;
-  pending: boolean;
-  onChange: (ids: string[]) => void;
+  onChange: (change: ModelSelectionChange) => void;
 }) {
   const t = useTranslations();
   const [isOpen, setIsOpen] = useState(false);
   const [search, setSearch] = useState("");
   const [openOverride, setOpenOverride] = useState<Record<string, boolean>>({});
+  const searchRef = useRef<HTMLInputElement>(null);
+  const reasonPrefix = useId();
 
   const selected = useMemo(() => new Set(selectedIds), [selectedIds]);
   const selectedModels = models.filter((model) => selected.has(model.id));
@@ -113,50 +115,53 @@ export function SpaceModelSelect({
   const moreSelected = selectedIds.length - selectedPreview.length;
   const query = search.trim().toLowerCase();
   const searching = query !== "";
+  const otherProvider = t("space_models_other_provider");
 
   const groups = useMemo(() => {
     const map = new Map<string, SelectableModel[]>();
     for (const model of models) {
-      const key = groupName(model);
+      const key = groupName(model, otherProvider);
       const list = map.get(key) ?? [];
       list.push(model);
       map.set(key, list);
     }
     return [...map.entries()].map(([name, list]) => ({ name, models: list }));
-  }, [models]);
+  }, [models, otherProvider]);
+  const visibleGroups = groups
+    .map((group) => ({
+      ...group,
+      visible:
+        !searching || group.name.toLowerCase().includes(query)
+          ? group.models
+          : group.models.filter(
+              (model) =>
+                label(model).toLowerCase().includes(query) ||
+                (model.provider_type?.toLowerCase().includes(query) ?? false)
+            )
+    }))
+    .filter((group) => group.visible.length > 0);
 
-  // The control whose change is saving: busy, it stays enabled so it keeps
-  // focus; while a change saves, presses are ignored.
-  const [changing, setChanging] = useState<string | null>(null);
-  function change(control: string, ids: string[]) {
-    if (pending) return;
-    setChanging(control);
-    onChange(ids);
-  }
-  const busyOn = (control: string) => (pending && changing === control) || undefined;
-
-  function toggleOne(id: string) {
-    change(
-      `model:${id}`,
-      selected.has(id) ? selectedIds.filter((x) => x !== id) : [...selectedIds, id]
+  function toggleOne(id: string, group: string) {
+    // Keep the focused switch mounted when this was the group's last selection.
+    setOpenOverride((prev) => ({ ...prev, [group]: true }));
+    onChange((current) =>
+      current.includes(id) ? current.filter((selectedId) => selectedId !== id) : [...current, id]
     );
   }
 
-  function setWholeGroup(group: string, groupModels: SelectableModel[], on: boolean) {
+  function setWholeGroup(groupModels: SelectableModel[]) {
     const ids = groupModels
       .filter((model) => model.meets_security_classification ?? true)
       .map((model) => model.id);
-    if (on) {
-      const merged = new Set(selectedIds);
-      ids.forEach((id) => merged.add(id));
-      change(`group:${group}`, [...merged]);
-    } else {
-      const remove = new Set(ids);
-      change(
-        `group:${group}`,
-        selectedIds.filter((id) => !remove.has(id))
-      );
-    }
+    onChange((current) => {
+      const selected = new Set(current);
+      if (ids.every((id) => selected.has(id))) {
+        const remove = new Set(ids);
+        return current.filter((id) => !remove.has(id));
+      }
+      ids.forEach((id) => selected.add(id));
+      return [...selected];
+    });
   }
 
   return (
@@ -212,21 +217,33 @@ export function SpaceModelSelect({
       <CollapsibleContent className="border-t p-4">
         <div className="flex flex-col gap-2">
           {models.length > SEARCH_THRESHOLD && (
-            <Input
-              className="h-9"
-              placeholder={t("search_models")}
+            <ResourceFilterInput
+              inputRef={searchRef}
               value={search}
-              onChange={(event) => setSearch(event.target.value)}
-              aria-label={t("search_models")}
+              onChange={setSearch}
+              label={t("search_models_and_providers")}
+              placeholder={t("search_models_and_providers")}
+              resultCount={visibleGroups.reduce((count, group) => count + group.visible.length, 0)}
+              className="max-w-none"
             />
           )}
 
-          {groups.map((group) => {
-            const visible = searching
-              ? group.models.filter((model) => label(model).toLowerCase().includes(query))
-              : group.models;
-            if (visible.length === 0) return null;
+          {searching && visibleGroups.length === 0 && (
+            <div className="border-ax-border rounded-ax-element flex flex-col items-start gap-2 border p-4">
+              <p className="text-ax-text-secondary text-sm">{t("space_models_no_matches")}</p>
+              <AstryxButton
+                label={t("space_models_clear_search")}
+                variant="ghost"
+                size="sm"
+                onClick={() => {
+                  setSearch("");
+                  searchRef.current?.focus();
+                }}
+              />
+            </div>
+          )}
 
+          {visibleGroups.map((group) => {
             const selectedCount = group.models.filter((model) => selected.has(model.id)).length;
             const selectable = group.models.filter(
               (model) => model.meets_security_classification ?? true
@@ -261,11 +278,13 @@ export function SpaceModelSelect({
                     />
                     <span className="truncate text-sm font-medium">{group.name}</span>
                   </CollapsibleTrigger>
-                  <span
-                    className="text-muted-foreground shrink-0 text-xs tabular-nums"
-                    aria-label={t("models_selected_count", { count: selectedCount })}
-                  >
-                    {selectedCount} / {group.models.length}
+                  <span className="text-muted-foreground shrink-0 text-xs tabular-nums">
+                    <span aria-hidden="true">
+                      {selectedCount} / {group.models.length}
+                    </span>
+                    <span className="sr-only">
+                      {t("models_selected_count", { count: selectedCount })}
+                    </span>
                   </span>
                   <Button
                     type="button"
@@ -273,32 +292,33 @@ export function SpaceModelSelect({
                     size="sm"
                     className="shrink-0"
                     disabled={selectable.length === 0}
-                    aria-busy={busyOn(`group:${group.name}`)}
-                    onClick={() => setWholeGroup(group.name, group.models, !allSelected)}
+                    onClick={() => setWholeGroup(group.models)}
                   >
                     {allSelected ? t("deselect_all") : t("select_all")}
                   </Button>
                 </div>
 
-                <CollapsibleContent>
+                <CollapsibleContent className="space-model-collapse" inert={!isOpen}>
                   <div className="border-t">
-                    {visible.map((model) => {
+                    {group.visible.map((model) => {
                       const meets = model.meets_security_classification ?? true;
                       const cost = costText(model, kind);
+                      const reasonId = meets ? undefined : `${reasonPrefix}-${model.id}`;
                       return (
                         <div
                           key={model.id}
-                          className={cn(
-                            "flex items-center gap-3 border-b px-3 py-2 last:border-b-0",
-                            !meets && "opacity-60"
-                          )}
-                          title={
-                            meets ? undefined : t("model_does_not_meet_security_classification")
-                          }
+                          className="flex items-center gap-3 border-b px-3 py-2 last:border-b-0"
                         >
-                          <span className="min-w-0 flex-1 truncate text-sm font-medium">
-                            {label(model)}
-                          </span>
+                          <div className="min-w-0 flex-1">
+                            <span className="block truncate text-sm font-medium">
+                              {label(model)}
+                            </span>
+                            {reasonId && (
+                              <p id={reasonId} className="text-ax-text-secondary mt-0.5 text-xs">
+                                {t("model_does_not_meet_security_classification")}
+                              </p>
+                            )}
+                          </div>
                           <CapabilityIcons model={model} />
                           {cost && (
                             <span className="text-muted-foreground bg-muted inline-flex items-center rounded-md border px-1.5 py-0.5 font-mono text-[11px] tabular-nums">
@@ -308,9 +328,9 @@ export function SpaceModelSelect({
                           <Switch
                             checked={selected.has(model.id)}
                             disabled={!meets}
-                            aria-busy={busyOn(`model:${model.id}`)}
-                            onCheckedChange={() => toggleOne(model.id)}
+                            onCheckedChange={() => toggleOne(model.id, group.name)}
                             aria-label={label(model)}
+                            aria-describedby={reasonId}
                           />
                         </div>
                       );

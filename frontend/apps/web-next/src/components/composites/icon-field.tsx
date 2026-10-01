@@ -90,6 +90,7 @@ export function IconField({
       <input
         ref={fileInput}
         type="file"
+        aria-label={t("upload")}
         accept="image/png,image/jpeg,image/webp"
         className="hidden"
         onChange={(event) => {

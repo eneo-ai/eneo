@@ -310,6 +310,39 @@
   }
 }
 
+/* Radix keeps closing content mounted until its exit keyframe ends. */
+@layer components {
+  .space-model-collapse {
+    overflow: hidden;
+  }
+
+  .space-model-collapse[data-state="open"] {
+    animation: space-model-open var(--duration-fast-max) ease-out;
+  }
+
+  .space-model-collapse[data-state="closed"] {
+    animation: space-model-close var(--duration-fast-max) ease-in;
+  }
+}
+
+@keyframes space-model-open {
+  from {
+    height: 0;
+  }
+  to {
+    height: var(--radix-collapsible-content-height);
+  }
+}
+
+@keyframes space-model-close {
+  from {
+    height: var(--radix-collapsible-content-height);
+  }
+  to {
+    height: 0;
+  }
+}
+
 .driver-popover.eneo-spotlight {
   background: var(--background);
   color: var(--foreground);

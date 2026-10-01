@@ -47,9 +47,11 @@ export function SettingsGroup({
  * better beside its label on one line. Pass `htmlFor` when the row wraps a single
  * labelable control so the title is a real `<label>`; omit it for groups, lists,
  * or custom widgets and the title labels the control region via `role="group"`.
+ * `id` gives a save error a direct link to this row.
  * Omit `title` entirely for a row whose label would just repeat the card header.
  */
 export function SettingsRow({
+  id,
   title,
   tour,
   description,
@@ -57,6 +59,7 @@ export function SettingsRow({
   inline,
   children
 }: {
+  id?: string;
   title?: string;
   tour?: string;
   description?: string;
@@ -97,7 +100,11 @@ export function SettingsRow({
 
   if (inline && hasLabel) {
     return (
-      <div data-tour={tour} className="flex items-center justify-between gap-4">
+      <div
+        id={id}
+        data-tour={tour}
+        className="flex scroll-mt-32 items-center justify-between gap-4"
+      >
         {label}
         <div className="flex min-w-0 shrink-0 flex-col items-end gap-2" {...groupAttrs}>
           {children}
@@ -107,7 +114,7 @@ export function SettingsRow({
   }
 
   return (
-    <div data-tour={tour} className="flex flex-col gap-2">
+    <div id={id} data-tour={tour} className="flex scroll-mt-32 flex-col gap-2">
       {label}
       <div className="flex w-full min-w-0 flex-col gap-2" {...groupAttrs}>
         {children}

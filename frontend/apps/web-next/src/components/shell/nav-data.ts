@@ -34,7 +34,15 @@ export function useNavSpaces() {
     combine: ([query]) => ({
       spaces: (query?.data ?? []).filter((space) => !space.personal && !space.organization),
       // Before hydration there is no query yet: loading, as the server rendered it.
-      isPending: query?.isPending ?? true
+      isPending: query?.isPending ?? true,
+      // A retry without cached data temporarily becomes "pending" and clears
+      // isError. Keep the recovery control mounted until the retry succeeds, so
+      // keyboard focus does not fall off its button.
+      isError: query
+        ? query.isError || (query.isFetching && query.errorUpdatedAt > query.dataUpdatedAt)
+        : false,
+      isFetching: query?.isFetching ?? false,
+      refetch: query?.refetch
     })
   });
 }

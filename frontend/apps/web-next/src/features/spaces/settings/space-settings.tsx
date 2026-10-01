@@ -1,5 +1,7 @@
 "use client";
 
+import { Banner } from "@astryxdesign/core/Banner";
+import { Button as AxButton } from "@astryxdesign/core/Button";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
@@ -15,7 +17,9 @@ import {
   TriangleAlert
 } from "lucide-react";
 import { ConfirmDialog } from "@/components/composites/confirm-dialog";
+import { FieldProblem, fieldProblemProps } from "@/components/composites/field-problem";
 import { IconField } from "@/components/composites/icon-field";
+import { LoadingState } from "@/components/composites/loading-state";
 import { SaveStatusIndicator, SaveStatusProvider } from "@/components/composites/save-status";
 import {
   SectionedSettings,
@@ -57,6 +61,7 @@ import {
   toggleCapability
 } from "@/features/capabilities/capabilities";
 import { mcpServersQueryOptions } from "@/features/admin/mcp/mcp";
+import type { Space } from "@/features/spaces/space";
 import { useSpace } from "@/features/spaces/use-space";
 import { PageHeader } from "@/components/composites/page-header";
 import {
@@ -70,7 +75,7 @@ import {
   securityImpactRows,
   securityImpactTotal
 } from "./security-impact";
-import { SpaceModelSelect } from "./space-model-select";
+import { SpaceModelSelect, type ModelKind, type ModelSelectionChange } from "./space-model-select";
 
 type SpaceUpdate = Schema<"PartialUpdateSpaceRequest">;
 const SECURITY_IMPACT_LABEL_KEYS: Record<SpaceSecurityImpactKey, string> = {
@@ -85,13 +90,67 @@ const SECURITY_IMPACT_LABEL_KEYS: Record<SpaceSecurityImpactKey, string> = {
 };
 
 const sortedKey = (ids: Iterable<string>) => JSON.stringify([...ids].sort());
+const modelKinds: ModelKind[] = ["completion", "embedding", "transcription"];
+
+function modelIds(space: Space, kind: ModelKind): string[] {
+  switch (kind) {
+    case "completion":
+      return space.completion_models.map((model) => model.id);
+    case "embedding":
+      return space.embedding_models.map((model) => model.id);
+    case "transcription":
+      return space.transcription_models.map((model) => model.id);
+  }
+}
+
+function modelUpdate(kind: ModelKind, ids: string[]): SpaceUpdate {
+  const refs = ids.map((id) => ({ id }));
+  switch (kind) {
+    case "completion":
+      return { completion_models: refs };
+    case "embedding":
+      return { embedding_models: refs };
+    case "transcription":
+      return { transcription_models: refs };
+  }
+}
+
+function SettingsLoadFailure({
+  title,
+  retrying,
+  onRetry
+}: {
+  title: string;
+  retrying: boolean;
+  onRetry: () => void;
+}) {
+  const t = useTranslations();
+  return (
+    <Banner
+      status="error"
+      title={title}
+      endContent={
+        <AxButton
+          label={t("try_again")}
+          aria-label={t("space_settings_retry_named", { section: title })}
+          variant="secondary"
+          isLoading={retrying}
+          isInterruptible
+          onClick={() => {
+            if (!retrying) onRetry();
+          }}
+        />
+      }
+    />
+  );
+}
 
 function useUpdateSpace() {
   const { space, routeId } = useSpace();
   const queryClient = useQueryClient();
 
   // Feedback is owned by the caller's autosave wrapper (useAutosave); this
-  // mutation only refreshes the cache.
+  // mutation writes the server's full response to the detail cache.
   return useMutation({
     scope: { id: `space:${space.id}` },
     mutationFn: (body: SpaceUpdate) =>
@@ -101,9 +160,12 @@ function useUpdateSpace() {
           body
         })
       ),
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["spaces", routeId] });
-      queryClient.invalidateQueries({ queryKey: ["spaces"], exact: true });
+    onSuccess: async (saved) => {
+      // PATCH returns the authoritative full space. An older GET must not
+      // replace it while the detail query is being refreshed.
+      await queryClient.cancelQueries({ queryKey: ["spaces", routeId], exact: true });
+      queryClient.setQueryData(["spaces", routeId], saved);
+      void queryClient.invalidateQueries({ queryKey: ["spaces"], exact: true });
     }
   });
 }
@@ -125,6 +187,9 @@ function GeneralSection() {
     value: space.description ?? "",
     save: (value) => update.mutateAsync({ description: value })
   });
+  const [nameVisited, setNameVisited] = useState(false);
+  const nameProblem =
+    nameVisited && !name.value.trim() ? t("shell_create_space_name_required") : null;
 
   return (
     <SettingsGroup title={t("general")}>
@@ -133,9 +198,13 @@ function GeneralSection() {
           id="space-name"
           value={name.value}
           onChange={(event) => name.setValue(event.target.value)}
-          // A space must keep a name — revert an emptied field on blur.
-          onBlur={() => (name.value.trim() ? name.commit() : name.reset())}
+          onBlur={() => {
+            setNameVisited(true);
+            void name.commit();
+          }}
+          {...fieldProblemProps("space-name", nameProblem)}
         />
+        <FieldProblem id="space-name" problem={nameProblem} />
       </SettingsRow>
       <SettingsRow
         title={t("description")}
@@ -204,7 +273,13 @@ function SecuritySection() {
     impact: SpaceSecurityImpact;
   } | null>(null);
 
-  const { data: security } = useQuery({
+  const {
+    data: security,
+    isPending: securityPending,
+    isError: securityError,
+    isFetching: securityFetching,
+    refetch: refetchSecurity
+  } = useQuery({
     queryKey: ["security-classifications"],
     queryFn: () => unwrap(browserApi.GET("/api/v1/security-classifications/"))
   });
@@ -262,6 +337,14 @@ function SecuritySection() {
 
   return (
     <SettingsGroup title={t("security_and_privacy")}>
+      {securityPending ? <LoadingState rows={1} /> : null}
+      {securityError ? (
+        <SettingsLoadFailure
+          title={t("space_security_load_failed")}
+          retrying={securityFetching}
+          onRetry={() => void refetchSecurity()}
+        />
+      ) : null}
       {security?.security_enabled && (
         <SettingsRow
           title={t("security_classification")}
@@ -331,6 +414,11 @@ function RetentionSection() {
   const t = useTranslations();
   const { space } = useSpace();
   const update = useUpdateSpace();
+  const [daysVisited, setDaysVisited] = useState(false);
+
+  const validDays = (value: string) =>
+    value === "" ||
+    (/^[0-9]+$/.test(value) && Number.isSafeInteger(Number(value)) && Number(value) >= 1);
 
   const days = useAutosaveField({
     key: "retention-days",
@@ -338,41 +426,142 @@ function RetentionSection() {
     save: (value) =>
       update.mutateAsync({ data_retention_days: value === "" ? null : Number(value) }),
     // Empty means "keep forever"; otherwise require a positive whole number.
-    validate: (value) => value === "" || (Number.isInteger(Number(value)) && Number(value) >= 1)
+    validate: validDays
   });
+  const daysProblem = daysVisited && !validDays(days.value) ? t("space_retention_invalid") : null;
 
   return (
     <SettingsRow
       title={t("conversation_retention_title")}
       description={t("conversation_retention_space_description")}
+      htmlFor="retention-days"
     >
-      <div className="flex items-center gap-2">
-        <Label htmlFor="retention-days" className="sr-only">
-          {t("conversation_retention_title")}
-        </Label>
+      <div className="flex flex-wrap items-center gap-2">
         <Input
           id="retention-days"
-          type="number"
-          min={1}
+          type="text"
+          inputMode="numeric"
           className="w-32"
           value={days.value}
           placeholder={t("space_retention_no_limit_placeholder")}
           onChange={(event) => days.setValue(event.target.value)}
-          onBlur={() => days.commit()}
+          onBlur={() => {
+            setDaysVisited(true);
+            void days.commit();
+          }}
+          {...fieldProblemProps("retention-days", daysProblem)}
         />
         <span className="text-muted-foreground text-sm">{t("days")}</span>
       </div>
+      <FieldProblem id="retention-days" problem={daysProblem} />
     </SettingsRow>
   );
 }
 
 function ModelsSection() {
   const t = useTranslations();
-  const { space } = useSpace();
+  const { space, routeId } = useSpace();
+  const queryClient = useQueryClient();
   const update = useUpdateSpace();
   const autosave = useAutosave("models");
+  type ModelOverride = { ids: string[]; pending: boolean };
+  type ModelOverrides = Partial<Record<ModelKind, ModelOverride>>;
+  const [overrides, setOverrides] = useState<ModelOverrides>({});
+  const overridesRef = useRef<ModelOverrides>({});
+  const queueRef = useRef<ModelKind[]>([]);
+  const drainingRef = useRef(false);
+  const [failedKind, setFailedKind] = useState<ModelKind | null>(null);
 
-  const { data: models } = useQuery({
+  function setOverride(kind: ModelKind, value: ModelOverride) {
+    const next = { ...overridesRef.current, [kind]: value };
+    overridesRef.current = next;
+    setOverrides(next);
+  }
+
+  // The PATCH scope serializes writes to this space. This queue also coalesces
+  // rapid model clicks, so every new intent is visible and the latest one wins.
+  async function drainModelChanges() {
+    let failedRequest: ModelKind | null = null;
+    const saved = await autosave(async () => {
+      while (queueRef.current.length > 0) {
+        const kind = queueRef.current.shift();
+        if (!kind) continue;
+        const entry = overridesRef.current[kind];
+        if (!entry?.pending) continue;
+
+        const requested = entry.ids;
+        const response = await update.mutateAsync(modelUpdate(kind, requested)).catch((error) => {
+          failedRequest = kind;
+          throw error;
+        });
+        const accepted = modelIds(response, kind);
+        const latest = overridesRef.current[kind];
+        if (
+          latest &&
+          (sortedKey(latest.ids) === sortedKey(requested) ||
+            sortedKey(latest.ids) === sortedKey(accepted))
+        ) {
+          queueRef.current = queueRef.current.filter((queued) => queued !== kind);
+          // Keep the accepted value visible until useSpace receives the cache update.
+          setOverride(kind, { ids: accepted, pending: false });
+        } else if (latest && !queueRef.current.includes(kind)) {
+          queueRef.current.push(kind);
+        }
+      }
+      return true;
+    });
+
+    if (!saved) {
+      queueRef.current = [];
+      overridesRef.current = {};
+      setOverrides({});
+      setFailedKind(failedRequest);
+      void queryClient.invalidateQueries({ queryKey: ["spaces", routeId], exact: true });
+    }
+    drainingRef.current = false;
+    // A click can arrive while useAutosave is finishing, after the loop empties.
+    if (queueRef.current.length > 0) {
+      drainingRef.current = true;
+      void drainModelChanges();
+    }
+  }
+
+  function changeModels(kind: ModelKind, change: ModelSelectionChange) {
+    const current = overridesRef.current[kind]?.ids ?? modelIds(space, kind);
+    const next = change(current);
+    if (sortedKey(next) === sortedKey(current)) return;
+    setFailedKind(null);
+    setOverride(kind, { ids: next, pending: true });
+    if (!queueRef.current.includes(kind)) queueRef.current.push(kind);
+    if (!drainingRef.current) {
+      drainingRef.current = true;
+      void drainModelChanges();
+    }
+  }
+
+  useEffect(() => {
+    const next = { ...overridesRef.current };
+    let changed = false;
+    for (const kind of modelKinds) {
+      const entry = next[kind];
+      if (entry && !entry.pending && sortedKey(entry.ids) === sortedKey(modelIds(space, kind))) {
+        delete next[kind];
+        changed = true;
+      }
+    }
+    if (changed) {
+      overridesRef.current = next;
+      setOverrides(next);
+    }
+  }, [space, overrides]);
+
+  const {
+    data: models,
+    isPending: modelsPending,
+    isError: modelsError,
+    isFetching: modelsFetching,
+    refetch: refetchModels
+  } = useQuery({
     queryKey: ["ai-models", space.id],
     queryFn: () =>
       unwrap(browserApi.GET("/api/v1/ai-models/", { params: { query: { space_id: space.id } } }))
@@ -388,40 +577,56 @@ function ModelsSection() {
     (model) => model.is_org_enabled && !model.is_deprecated && !model.migrated_to_model_id
   );
 
-  const toIds = (modelIds: string[]) => modelIds.map((id) => ({ id }));
-
   return (
     <SettingsGroup
       title={t("space_settings_models_title")}
       description={t("space_settings_models_description")}
     >
-      <SpaceModelSelect
-        kind="completion"
-        title={t("space_settings_chat_models")}
-        description={t("space_settings_chat_models_description")}
-        models={completionModels}
-        selectedIds={space.completion_models.map((model) => model.id)}
-        pending={update.isPending}
-        onChange={(ids) => autosave(() => update.mutateAsync({ completion_models: toIds(ids) }))}
-      />
-      <SpaceModelSelect
-        kind="embedding"
-        title={t("space_settings_embedding_models")}
-        description={t("space_settings_embedding_models_description")}
-        models={embeddingModels}
-        selectedIds={space.embedding_models.map((model) => model.id)}
-        pending={update.isPending}
-        onChange={(ids) => autosave(() => update.mutateAsync({ embedding_models: toIds(ids) }))}
-      />
-      <SpaceModelSelect
-        kind="transcription"
-        title={t("space_settings_transcription_models")}
-        description={t("space_settings_transcription_models_description")}
-        models={transcriptionModels}
-        selectedIds={space.transcription_models.map((model) => model.id)}
-        pending={update.isPending}
-        onChange={(ids) => autosave(() => update.mutateAsync({ transcription_models: toIds(ids) }))}
-      />
+      {modelsPending ? <LoadingState rows={3} /> : null}
+      {modelsError ? (
+        <SettingsLoadFailure
+          title={t("space_models_load_failed")}
+          retrying={modelsFetching}
+          onRetry={() => void refetchModels()}
+        />
+      ) : null}
+      {models ? (
+        <>
+          <SpaceModelSelect
+            kind="completion"
+            title={t("space_settings_chat_models")}
+            description={t("space_settings_chat_models_description")}
+            models={completionModels}
+            selectedIds={overrides.completion?.ids ?? modelIds(space, "completion")}
+            onChange={(change) => changeModels("completion", change)}
+          />
+          {failedKind === "completion" && (
+            <Banner status="error" title={t("space_models_save_failed")} />
+          )}
+          <SpaceModelSelect
+            kind="embedding"
+            title={t("space_settings_embedding_models")}
+            description={t("space_settings_embedding_models_description")}
+            models={embeddingModels}
+            selectedIds={overrides.embedding?.ids ?? modelIds(space, "embedding")}
+            onChange={(change) => changeModels("embedding", change)}
+          />
+          {failedKind === "embedding" && (
+            <Banner status="error" title={t("space_models_save_failed")} />
+          )}
+          <SpaceModelSelect
+            kind="transcription"
+            title={t("space_settings_transcription_models")}
+            description={t("space_settings_transcription_models_description")}
+            models={transcriptionModels}
+            selectedIds={overrides.transcription?.ids ?? modelIds(space, "transcription")}
+            onChange={(change) => changeModels("transcription", change)}
+          />
+          {failedKind === "transcription" && (
+            <Banner status="error" title={t("space_models_save_failed")} />
+          )}
+        </>
+      ) : null}
     </SettingsGroup>
   );
 }
@@ -439,9 +644,15 @@ function McpServersSection() {
   const t = useTranslations();
   const { space } = useSpace();
   const update = useUpdateSpace();
-  const autosave = useAutosave("models");
+  const autosave = useAutosave("mcp-servers");
 
-  const { data: mcpServers, isPending } = useQuery(mcpServersQueryOptions(browserApi));
+  const {
+    data: mcpServers,
+    isPending,
+    isError,
+    isFetching,
+    refetch
+  } = useQuery(mcpServersQueryOptions(browserApi));
   const savedIds = (space.mcp_servers ?? []).map((server) => server.id);
   const [selected, setSelected] = useState<Set<string>>(() => new Set(savedIds));
 
@@ -480,9 +691,26 @@ function McpServersSection() {
   }
 
   return (
-    <SettingsRow title={t("mcp_servers")} description={t("select_mcp_servers_description")}>
+    <SettingsRow
+      id="mcp-servers"
+      title={t("mcp_servers")}
+      description={t("select_mcp_servers_description")}
+    >
+      {isError && mcpServers ? (
+        <SettingsLoadFailure
+          title={t("space_mcp_servers_load_failed")}
+          retrying={isFetching}
+          onRetry={() => void refetch()}
+        />
+      ) : null}
       {isPending ? (
-        <p className="text-muted-foreground text-sm">{t("loading")}</p>
+        <LoadingState rows={2} />
+      ) : isError && !mcpServers ? (
+        <SettingsLoadFailure
+          title={t("space_mcp_servers_load_failed")}
+          retrying={isFetching}
+          onRetry={() => void refetch()}
+        />
       ) : candidates.length === 0 ? (
         <div className="flex flex-wrap items-center gap-2">
           <p className="text-muted-foreground text-sm">{t("enable_mcp_servers_in_admin")}</p>
@@ -647,7 +875,13 @@ export function SpaceSettings() {
           }
         ]
       : []),
-    { id: "models", label: t("space_settings_models_title"), icon: Bot, node: <ModelsSection /> },
+    {
+      id: "models",
+      label: t("space_settings_models_title"),
+      icon: Bot,
+      // Pending model overrides belong to one space; remount when navigating.
+      node: <ModelsSection key={space.id} />
+    },
     { id: "tools", label: t("space_settings_tools_title"), icon: Plug, node: <ToolsSection /> },
     ...(!isOrgSpace
       ? [

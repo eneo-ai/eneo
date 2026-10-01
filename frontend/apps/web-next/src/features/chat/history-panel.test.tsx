@@ -199,18 +199,17 @@ describe("HistoryAside", () => {
 describe("RenameSessionDialog", () => {
   it("renames with a visible label and saves on Enter", () => {
     const onSave = vi.fn();
-    renderInApp(
-      <RenameSessionDialog
-        session={{ id: "s1", name: "Gammalt namn" }}
-        pending={false}
-        onCancel={vi.fn()}
-        onSave={onSave}
-      />
+    const session = { id: "s1", name: "Gammalt namn" };
+    const { rerender } = renderInApp(
+      <RenameSessionDialog session={session} pending={false} onCancel={vi.fn()} onSave={onSave} />
     );
     const input = screen.getByLabelText(/^Namn/);
     fireEvent.change(input, { target: { value: "Nytt namn" } });
     fireEvent.keyDown(input, { key: "Enter" });
     expect(onSave).toHaveBeenCalledWith("Nytt namn");
+
+    rerender(<RenameSessionDialog session={session} pending onCancel={vi.fn()} onSave={onSave} />);
+    expect((screen.getByLabelText(/^Namn/) as HTMLInputElement).value).toBe("Nytt namn");
   });
 
   it("shows an empty name at the field on save, which takes focus", async () => {
@@ -237,5 +236,35 @@ describe("RenameSessionDialog", () => {
     expect(document.activeElement).toBe(input);
     expect(onSave).not.toHaveBeenCalled();
     await expectNoAxeViolations(dialog);
+  });
+
+  it("discards an unsaved name and validation when the same dialog reopens", () => {
+    const session = { id: "s1", name: "Gammalt namn" };
+    const onCancel = vi.fn();
+    const onSave = vi.fn();
+    const dialog = (current: typeof session | null) => (
+      <RenameSessionDialog session={current} pending={false} onCancel={onCancel} onSave={onSave} />
+    );
+    const { rerender } = renderInApp(dialog(session));
+
+    fireEvent.change(screen.getByLabelText(/^Namn/), { target: { value: "Osparat namn" } });
+    fireEvent.click(screen.getByRole("button", { name: "Avbryt" }));
+    rerender(dialog(null));
+    rerender(dialog(session));
+    expect((screen.getByLabelText(/^Namn/) as HTMLInputElement).value).toBe("Gammalt namn");
+
+    const input = screen.getByLabelText(/^Namn/);
+    fireEvent.change(input, { target: { value: "  " } });
+    fireEvent.click(screen.getByRole("button", { name: "Spara" }));
+    expect(input.getAttribute("aria-invalid")).toBe("true");
+    fireEvent.click(screen.getByRole("button", { name: "Avbryt" }));
+    rerender(dialog(null));
+    rerender(dialog(session));
+
+    const reopened = screen.getByLabelText(/^Namn/) as HTMLInputElement;
+    expect(reopened.value).toBe("Gammalt namn");
+    expect(reopened.getAttribute("aria-invalid")).not.toBe("true");
+    expect(screen.queryByText("Detta fält är obligatoriskt")).toBeNull();
+    expect(onSave).not.toHaveBeenCalled();
   });
 });
