@@ -73,7 +73,7 @@ from eneo.database.tables.spaces_table import (
     SpacesUsers,
 )
 from eneo.database.tables.user_groups_table import UserGroups
-from eneo.database.tables.users_table import Users
+from eneo.database.tables.users_table import Users, usergroups_users_table
 from eneo.database.tables.websites_spaces_table import WebsitesSpaces
 from eneo.database.tables.websites_table import Websites as WebsitesTable
 from eneo.files.file_content_loader import FileAttachmentGroup, FileContentLoader
@@ -2383,60 +2383,14 @@ class SpaceRepository:
         if space is None:
             raise NotFoundException("Website not found")
 
-        member_rows = await self.session.execute(
-            sa.select(SpacesUsers.user_id, SpacesUsers.role)
-            .join(Users, Users.id == SpacesUsers.user_id)
-            .where(
-                SpacesUsers.space_id == space.id,
-                SpacesUsers.user_id == user.id,
-                Users.deleted_at.is_(None),
-            )
-        )
-        group_rows = await self.session.execute(
-            sa.select(SpacesUserGroups.user_group_id, SpacesUserGroups.role)
-            .join(UserGroups, UserGroups.id == SpacesUserGroups.user_group_id)
-            .where(SpacesUserGroups.space_id == space.id)
-            .where(SpacesUserGroups.user_group_id.in_(user.user_groups_ids))
-            .where(
-                sa.or_(
-                    UserGroups.state.is_(None),
-                    UserGroups.state != UserGroupState.DELETED.value,
-                )
-            )
-        )
-        assistant_ids: Sequence[UUID] = ()
-        app_ids: Sequence[UUID] = ()
-        key = user.active_api_key
-        if key is not None and key.scope_type == ApiKeyScopeType.ASSISTANT:
-            assistant_ids = (
-                await self.session.scalars(
-                    sa.select(Assistants.id).where(
-                        Assistants.space_id == space.id,
-                        Assistants.id == key.scope_id,
-                        Assistants.is_default.is_(False),
-                    )
-                )
-            ).all()
-        elif key is not None and key.scope_type == ApiKeyScopeType.APP:
-            app_ids = (
-                await self.session.scalars(
-                    sa.select(Apps.id).where(
-                        Apps.space_id == space.id, Apps.id == key.scope_id
-                    )
-                )
-            ).all()
-        return SpaceAccessFacts(
-            id=space.id,
-            user_id=space.user_id,
+        return await _caller_space_access_facts(
+            self.session,
+            user=user,
+            space_id=space.id,
+            owner_user_id=space.user_id,
             tenant_space_id=space.tenant_space_id,
-            members={id: SpaceRoleFact(id=id, role=role) for id, role in member_rows},
-            group_members={
-                id: SpaceRoleFact(id=id, role=role) for id, role in group_rows
-            },
-            # Website access never uses the default assistant's identity.
-            default_assistant_id=None,
-            assistant_ids=frozenset(assistant_ids),
-            app_ids=frozenset(app_ids),
+            include_hidden_assistants=True,
+            caller_group_ids=user.user_groups_ids,
         )
 
     async def get_space_by_website(self, website_id: UUID) -> Space:
@@ -2545,3 +2499,105 @@ class SpaceRepository:
         await self.session.execute(sa.delete(wss).where(wss.website_id == website_id))
 
         await self.session.execute(sa.delete(ws).where(ws.id == website_id))
+
+
+async def read_space_access_facts(
+    session: AsyncSession, *, user: "UserInDB", space_id: UUID
+) -> SpaceAccessFacts | None:
+    """This caller's access facts for one space of their tenant, or None.
+
+    Reads plain rows, never the Space entity: a session that already holds the
+    space (members loaded) would otherwise answer from what it loaded before.
+    A key scoped to a hidden (flow-managed) assistant is not a key of the
+    space's assistants, exactly as ``Space.assistants`` decides for
+    ``SpaceActor``. Group roles count only through the caller's current
+    memberships, not the group list loaded with the principal, so a removed
+    membership is not a role.
+    """
+    space = (
+        await session.execute(
+            sa.select(Spaces.user_id, Spaces.tenant_space_id).where(
+                Spaces.id == space_id, Spaces.tenant_id == user.tenant_id
+            )
+        )
+    ).one_or_none()
+    if space is None:
+        return None
+    owner_user_id, tenant_space_id = space
+    return await _caller_space_access_facts(
+        session,
+        user=user,
+        space_id=space_id,
+        owner_user_id=owner_user_id,
+        tenant_space_id=tenant_space_id,
+        include_hidden_assistants=False,
+        caller_group_ids=sa.select(usergroups_users_table.c.user_group_id).where(
+            usergroups_users_table.c.user_id == user.id
+        ),
+    )
+
+
+async def _caller_space_access_facts(
+    session: AsyncSession,
+    *,
+    user: "UserInDB",
+    space_id: UUID,
+    owner_user_id: UUID | None,
+    tenant_space_id: UUID | None,
+    include_hidden_assistants: bool,
+    caller_group_ids: "AbstractSet[UUID] | sa.Select[tuple[UUID]]",
+) -> SpaceAccessFacts:
+    """The caller's direct and group roles in the space, and the scoped API
+    key's resource in it: everything ``SpaceActor`` needs to decide."""
+    member_rows = await session.execute(
+        sa.select(SpacesUsers.user_id, SpacesUsers.role)
+        .join(Users, Users.id == SpacesUsers.user_id)
+        .where(
+            SpacesUsers.space_id == space_id,
+            SpacesUsers.user_id == user.id,
+            Users.deleted_at.is_(None),
+        )
+    )
+    group_rows = await session.execute(
+        sa.select(SpacesUserGroups.user_group_id, SpacesUserGroups.role)
+        .join(UserGroups, UserGroups.id == SpacesUserGroups.user_group_id)
+        .where(SpacesUserGroups.space_id == space_id)
+        .where(SpacesUserGroups.user_group_id.in_(caller_group_ids))
+        .where(
+            sa.or_(
+                UserGroups.state.is_(None),
+                UserGroups.state != UserGroupState.DELETED.value,
+            )
+        )
+    )
+    assistant_ids: Sequence[UUID] = ()
+    app_ids: Sequence[UUID] = ()
+    key = user.active_api_key
+    if key is not None and key.scope_type == ApiKeyScopeType.ASSISTANT:
+        assistant_query = sa.select(Assistants.id).where(
+            Assistants.space_id == space_id,
+            Assistants.id == key.scope_id,
+            Assistants.is_default.is_(False),
+        )
+        if not include_hidden_assistants:
+            assistant_query = assistant_query.where(Assistants.hidden.is_(False))
+        assistant_ids = (await session.scalars(assistant_query)).all()
+    elif key is not None and key.scope_type == ApiKeyScopeType.APP:
+        app_ids = (
+            await session.scalars(
+                sa.select(Apps.id).where(
+                    Apps.space_id == space_id, Apps.id == key.scope_id
+                )
+            )
+        ).all()
+    return SpaceAccessFacts(
+        id=space_id,
+        user_id=owner_user_id,
+        tenant_space_id=tenant_space_id,
+        members={id: SpaceRoleFact(id=id, role=role) for id, role in member_rows},
+        group_members={id: SpaceRoleFact(id=id, role=role) for id, role in group_rows},
+        # No caller of these facts authorizes as the default assistant.
+        default_assistant_id=None,
+        assistant_ids=frozenset(assistant_ids),
+        app_ids=frozenset(app_ids),
+    )

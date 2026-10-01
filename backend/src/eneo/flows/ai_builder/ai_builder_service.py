@@ -100,6 +100,7 @@ from eneo.flows.ai_builder.ai_builder_plan_lifecycle import (
     raise_persisted_flow_mcp_plan_error,
 )
 from eneo.flows.ai_builder.ai_builder_planner import AIBuilderPlanner
+from eneo.flows.ai_builder.ai_builder_read_access import ensure_flow_in_space
 from eneo.flows.ai_builder.ai_builder_repo import AIBuilderRepository
 from eneo.flows.ai_builder.ai_builder_resource_catalog import (
     AIBuilderAvailableKnowledgeBaseResource,
@@ -255,7 +256,7 @@ class AIBuilderService:
 
         if flow_id is not None:
             flow = await self.flow_service.get_flow(flow_id)
-            self._assert_flow_in_space(flow=flow, space_id=space_id)
+            ensure_flow_in_space(flow_space_id=flow.space_id, space_id=space_id)
 
         should_resume_existing = target_kind == TargetKind.EDIT and not force_new
         if should_resume_existing:
@@ -576,7 +577,7 @@ class AIBuilderService:
         assistant_snapshots = None
         if session.flow_id is not None:
             flow = await self.flow_service.get_flow(session.flow_id)
-            self._assert_flow_in_space(flow=flow, space_id=session.space_id)
+            ensure_flow_in_space(flow_space_id=flow.space_id, space_id=session.space_id)
             assistant_snapshots = await self.flow_service.get_flow_assistant_snapshots(
                 flow
             )
@@ -625,14 +626,6 @@ class AIBuilderService:
             review_evidence=review_evidence,
             evidence_floor=evidence_floor,
         )
-
-    @staticmethod
-    def _assert_flow_in_space(*, flow: Any, space_id: UUID) -> None:
-        if getattr(flow, "space_id", None) != space_id:
-            raise AIBuilderBadRequestException(
-                "Flow space does not match the AI builder session space.",
-                code=AIBuilderErrorCode.FLOW_SPACE_MISMATCH,
-            )
 
     async def _resolve_review_evidence(
         self,

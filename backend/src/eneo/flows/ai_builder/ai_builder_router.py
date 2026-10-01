@@ -6,7 +6,7 @@ from collections.abc import AsyncGenerator, Awaitable, Callable, Coroutine, Mapp
 from contextlib import asynccontextmanager
 from dataclasses import dataclass
 from types import SimpleNamespace
-from typing import TYPE_CHECKING, Annotated, Any, NoReturn, cast, get_args
+from typing import TYPE_CHECKING, Annotated, Any, cast, get_args
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, Path, Query, Request, status
@@ -124,6 +124,11 @@ from eneo.flows.ai_builder.ai_builder_flow_review_suggestions import (
     FlowReviewSuggestions,
 )
 from eneo.flows.ai_builder.ai_builder_proposal_telemetry import FailureProducer
+from eneo.flows.ai_builder.ai_builder_read_access import (
+    AIBuilderAuthorization,
+    BuilderReadAccess,
+    scope_for_session,
+)
 from eneo.flows.ai_builder.ai_builder_service import (
     AIBuilderService,
     PreparedMessageContext,
@@ -152,7 +157,6 @@ from eneo.flows.domain.flow import FlowRun
 from eneo.flows.flow_access_policy import (
     FlowAccessFilterMode,
     FlowApiAction,
-    require_ai_builder_space_scope,
     require_flow_action,
 )
 from eneo.main.container.container import Container
@@ -207,6 +211,52 @@ def _public_error_code_from_exception(
     return coerce_ai_builder_error_code(getattr(error, "code", None), default=default)
 
 
+_PUBLIC_ERROR_TYPES = (
+    BadRequestException,
+    UnknownModelCapacityError,
+    UnauthorizedException,
+    NotFoundException,
+)
+
+
+@dataclass(frozen=True)
+class _PublicError:
+    message: str
+    code: AIBuilderErrorCode
+    context: Mapping[str, object] | None
+
+
+def _public_error(
+    error: BadRequestException
+    | UnknownModelCapacityError
+    | UnauthorizedException
+    | NotFoundException,
+    *,
+    request_id: str | None,
+    surface: str,
+) -> _PublicError:
+    """The public code, message and context of a domain refusal, the same for a
+    route response and a stream error event."""
+    if isinstance(error, UnknownModelCapacityError):
+        error = translate_unknown_model_capacity(error)
+    if isinstance(error, UnauthorizedException):
+        default, kind = AIBuilderErrorCode.INSUFFICIENT_SPACE_PERMISSION, "unauthorized"
+        fallback = "You do not have permission to use this AI Builder resource."
+    elif isinstance(error, NotFoundException):
+        default, kind = AIBuilderErrorCode.NOT_FOUND, "not_found"
+        fallback = "AI Builder resource not found."
+    else:
+        default, kind = AIBuilderErrorCode.BAD_REQUEST, "bad_request"
+        fallback = "The AI Builder request could not be processed."
+    return _PublicError(
+        message=str(error) or fallback,
+        code=_public_error_code_from_exception(
+            error, default=default, request_id=request_id, surface=f"{surface}_{kind}"
+        ),
+        context=error.context,
+    )
+
+
 class AIBuilderEnvelopedError(Exception):
     """Carries a prepared AI Builder error response past the dependency stack.
 
@@ -235,53 +285,16 @@ class AIBuilderPublicErrorRoute(APIRoute):
         async def ai_builder_route_handler(request: Request) -> Response:
             try:
                 return await original_route_handler(request)
-            except (BadRequestException, UnknownModelCapacityError) as error:
-                if isinstance(error, UnknownModelCapacityError):
-                    error = translate_unknown_model_capacity(error)
-                request_id = extract_request_id(request)
+            except _PUBLIC_ERROR_TYPES as error:
+                public = _public_error(
+                    error, request_id=extract_request_id(request), surface="route"
+                )
                 raise AIBuilderEnvelopedError(
                     _ai_builder_json_error_response(
                         request=request,
-                        message=str(error)
-                        or "The AI Builder request could not be processed.",
-                        code=_public_error_code_from_exception(
-                            error,
-                            default=AIBuilderErrorCode.BAD_REQUEST,
-                            request_id=request_id,
-                            surface="route_bad_request",
-                        ),
-                        exception_context=error.context,
-                    )
-                ) from error
-            except UnauthorizedException as error:
-                request_id = extract_request_id(request)
-                raise AIBuilderEnvelopedError(
-                    _ai_builder_json_error_response(
-                        request=request,
-                        message=str(error)
-                        or "You do not have permission to use this AI Builder resource.",
-                        code=_public_error_code_from_exception(
-                            error,
-                            default=AIBuilderErrorCode.INSUFFICIENT_SPACE_PERMISSION,
-                            request_id=request_id,
-                            surface="route_unauthorized",
-                        ),
-                        exception_context=error.context,
-                    )
-                ) from error
-            except NotFoundException as error:
-                request_id = extract_request_id(request)
-                raise AIBuilderEnvelopedError(
-                    _ai_builder_json_error_response(
-                        request=request,
-                        message=str(error) or "AI Builder resource not found.",
-                        code=_public_error_code_from_exception(
-                            error,
-                            default=AIBuilderErrorCode.NOT_FOUND,
-                            request_id=request_id,
-                            surface="route_not_found",
-                        ),
-                        exception_context=error.context,
+                        message=public.message,
+                        code=public.code,
+                        exception_context=public.context,
                     )
                 ) from error
 
@@ -310,11 +323,6 @@ ContainerWithUserExplicitTransactionDep = Annotated[
 ]
 
 
-@dataclass(frozen=True)
-class AIBuilderAuthorization:
-    space: "Space | None" = None
-
-
 async def _coerce_event_stream(
     stream: EventStream | Awaitable[EventStream],
 ) -> EventStream:
@@ -340,14 +348,12 @@ async def _current_usage_event(
 # ---------------------------------------------------------------------------
 
 
-def _ensure_space_flow_edit_permission(container: Container, space: "Space") -> None:
-    actor = container.actor_manager().get_space_actor_from_space(space)
-    if not actor.can_edit_flows():
-        raise AIBuilderUnauthorizedException(
-            "You do not have permission to use the AI builder in this space.",
-            code=AIBuilderErrorCode.INSUFFICIENT_SPACE_PERMISSION,
-            context={"auth_layer": "space_membership"},
-        )
+def _builder_read_access(container: Container) -> BuilderReadAccess:
+    return BuilderReadAccess(
+        user=container.user(),
+        space_service=container.space_service,
+        actor_manager=container.actor_manager(),
+    )
 
 
 async def _authorize_ai_builder_request(
@@ -360,27 +366,14 @@ async def _authorize_ai_builder_request(
     require_creator: bool = False,
     filter_mode: FlowAccessFilterMode | None = None,
 ) -> AIBuilderAuthorization:
-    require_flow_action(container.user(), action)
-    scope_filter = get_scope_filter(request)
-
-    if filter_mode == FlowAccessFilterMode.VISIBLE:
-        return AIBuilderAuthorization()
-
-    if space_id is None:
-        if require_creator and session is not None:
-            _ensure_session_creator(container, session)
-        return AIBuilderAuthorization()
-
-    require_ai_builder_space_scope(
-        scope_filter,
+    return await _builder_read_access(container).authorize(
+        get_scope_filter(request),
+        action=action,
         space_id=space_id,
-        raise_scope_mismatch=_raise_scope_mismatch,
+        session=session,
+        require_creator=require_creator,
+        filter_mode=filter_mode,
     )
-    space = await container.space_service().get_space(space_id)
-    _ensure_space_flow_edit_permission(container, space)
-    if require_creator and session is not None:
-        _ensure_session_creator(container, session)
-    return AIBuilderAuthorization(space=space)
 
 
 def _authorized_space(authorization: AIBuilderAuthorization) -> "Space":
@@ -396,26 +389,6 @@ async def _active_provider_ids(container: Container) -> set[UUID]:
     off."""
     providers = await container.model_provider_repository().all(active_only=True)
     return {provider.id for provider in providers}
-
-
-def _ensure_session_creator(
-    container: Container,
-    session: BuilderSession,
-) -> None:
-    if session.actor_user_id != container.user().id:
-        raise AIBuilderUnauthorizedException(
-            "Only the session creator can access this AI builder session.",
-            code=AIBuilderErrorCode.SESSION_CREATOR_REQUIRED,
-            context={"auth_layer": "session_creator"},
-        )
-
-
-def _raise_scope_mismatch() -> NoReturn:
-    raise AIBuilderUnauthorizedException(
-        "API key space scope does not match requested AI builder resource.",
-        code=AIBuilderErrorCode.INSUFFICIENT_SCOPE,
-        context={"auth_layer": "api_key_scope"},
-    )
 
 
 def _get_ai_builder_service(container: Container) -> AIBuilderService:
@@ -1453,33 +1426,37 @@ async def send_message(
                     review_evidence_audit=audit,
                 )
 
+            # Access is decided again where the session's content is read,
+            # not inherited from the first transaction: a role can change in
+            # between, and reading runs to propose an edit needs the review
+            # permission and edit access while evidence viewing can be granted
+            # by run ownership alone. The grant reads its own fresh snapshot
+            # on its own connection and is taken before the evidence snapshot
+            # opens: inside it the turn would hold one pooled connection while
+            # waiting for a second, and concurrent reviews would starve each
+            # other. The snapshot's first read still follows the grant.
+            read_access = _builder_read_access(container)
+            read_scope = scope_for_session(
+                turn_preflight.session, get_scope_filter(request)
+            )
             try:
+                await read_access.open_grant(
+                    read_scope,
+                    FlowApiAction.BUILDER_REVIEW
+                    if review_turn
+                    else FlowApiAction.BUILDER_MESSAGE_SEND,
+                )
                 if review_turn:
-                    # The turn reads run content again, so the reads, their
-                    # audit rows and the authorization share one snapshot and
-                    # the rows commit before the planner may see any of it.
-                    # Access is re-decided here rather than inherited from the
-                    # earlier transaction: evidence viewing can be granted by
-                    # run ownership alone, while reading runs to propose an
-                    # edit needs the review permission and edit access, and a
-                    # role can change between the two transactions.
+                    # The turn reads run content again, so the reads and their
+                    # audit rows share one snapshot and the rows commit before
+                    # the planner may see any of it.
                     async with audited_evidence_snapshot(
                         container,
                         container.user(),
                         evidence_detail="ai_builder_review_investigation",
                     ) as audit:
-                        review_space = _authorized_space(
-                            await _authorize_ai_builder_request(
-                                request,
-                                container,
-                                action=FlowApiAction.BUILDER_REVIEW,
-                                space_id=turn_preflight.session.space_id,
-                                session=turn_preflight.session,
-                                require_creator=True,
-                            )
-                        )
                         prepared_context: PreparedMessageContext = await _prepare(
-                            audit, review_space
+                            audit, space
                         )
                 else:
                     async with database_session.begin():
@@ -1605,19 +1582,14 @@ async def send_message(
                     data=wire_done_event["data"],
                     event=wire_done_event["event"],
                 )
-        except (BadRequestException, UnknownModelCapacityError) as error:
-            if isinstance(error, UnknownModelCapacityError):
-                error = translate_unknown_model_capacity(error)
-            message = str(error) or "The AI Builder request could not be processed."
+        except _PUBLIC_ERROR_TYPES as error:
+            # A refused grant (role, key scope, creator) or a flow gone since
+            # the first transaction keeps its public code, as on any route.
             request_id = extract_request_id(request)
-            code = _public_error_code_from_exception(
-                error,
-                default=AIBuilderErrorCode.BAD_REQUEST,
-                request_id=request_id,
-                surface="event_stream_bad_request",
-            )
+            public = _public_error(error, request_id=request_id, surface="event_stream")
+            message, code = public.message, public.code
             diagnostic_context, details = _merged_ai_builder_error_fields(
-                exception_context=getattr(error, "context", None),
+                exception_context=public.context,
                 diagnostic_context={
                     "session_id": str(session_id),
                     "space_id": str(session.space_id),

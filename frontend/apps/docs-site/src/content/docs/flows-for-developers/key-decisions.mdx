@@ -66,7 +66,20 @@ Every tenant-owned query filters by tenant, and composite foreign keys enforce
 ownership for Flow/run/file/checkpoint relationships. User and service-principal
 actor shapes are mutually exclusive and explicitly attributed. Authorization
 checks are repeated at evidence, artifact, review, package, and execution
-boundaries.
+boundaries. An AI Builder read of a session's flow or runs later in the same
+request is decided again by the Builder read seam
+(`flows/ai_builder/ai_builder_read_access.py`): each grant reads the caller's
+space role (group roles through the caller's current group memberships) and
+the flow's ownership row, never its content, in its own short transaction,
+never from the Space or group list the request already loaded or the evidence
+snapshot it reads in, so a role lowered or removed meanwhile is refused before
+any content is read. A grant refused in a message stream keeps its public code
+(for example `insufficient_space_permission` or `not_found`) in the stream's error
+event.
+A review turn takes its grant before its evidence snapshot opens, so a turn
+never holds one pooled connection while it waits for a second. A key scoped to
+a hidden (flow-managed) assistant is refused by the grant as it is by the
+request's authorization.
 
 ## 9. JSONB needs a typed owner
 

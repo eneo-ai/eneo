@@ -354,6 +354,16 @@ class FlowRepository:
             ),
         )
 
+    async def get_space_id(self, *, flow_id: UUID, tenant_id: UUID) -> UUID | None:
+        """The space of a live flow of this tenant, or None: the ownership row
+        alone, never the flow's content."""
+        return await self.session.scalar(
+            sa.select(Flows.space_id)
+            .where(Flows.id == flow_id)
+            .where(Flows.tenant_id == tenant_id)
+            .where(Flows.deleted_at.is_(None))
+        )
+
     async def get(self, flow_id: UUID, tenant_id: UUID) -> Flow:
         stmt = (
             self._select_flows_with_run_history_retention()
@@ -560,12 +570,7 @@ class FlowRepository:
         bindings: tuple[LocalResourceBinding, ...],
         source: FlowResourceBindingSource,
     ) -> None:
-        flow_space_id = await self.session.scalar(
-            sa.select(Flows.space_id)
-            .where(Flows.id == flow_id)
-            .where(Flows.tenant_id == tenant_id)
-            .where(Flows.deleted_at.is_(None))
-        )
+        flow_space_id = await self.get_space_id(flow_id=flow_id, tenant_id=tenant_id)
         if flow_space_id is None:
             raise NotFoundException("Flow not found.")
 

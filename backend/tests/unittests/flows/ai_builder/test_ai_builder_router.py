@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import itertools
 import json
 import logging
 from collections.abc import Iterator
@@ -17,6 +18,7 @@ from fastapi import APIRouter, FastAPI
 from fastapi.routing import APIRoute
 from fastapi.testclient import TestClient
 
+from eneo.actors.actors.space_actor import SpaceAccessFacts
 from eneo.audit.domain.action_types import ActionType
 from eneo.audit.domain.entity_types import EntityType
 from eneo.completion_models.domain.model_capacity import ModelCapacity
@@ -28,6 +30,7 @@ from eneo.completion_models.infrastructure.completion_service import (
     ResolvedCompletionModelRoute,
 )
 from eneo.files.file_models import FilePublic
+from eneo.flows.ai_builder import ai_builder_read_access
 from eneo.flows.ai_builder import ai_builder_router as ai_builder_router_module
 from eneo.flows.ai_builder.ai_builder_api_models import (
     ApplyPlanRequest,
@@ -76,6 +79,7 @@ from eneo.flows.ai_builder.ai_builder_provider_call import (
     ProviderCallTiming,
     ProviderSilenceExpired,
 )
+from eneo.flows.ai_builder.ai_builder_read_access import BuilderAccessSnapshot
 from eneo.flows.ai_builder.ai_builder_router import (
     AIBuilderEnvelopedError,
     AIBuilderPublicErrorRoute,
@@ -117,7 +121,11 @@ from eneo.flows.ai_builder.planning_state import (
     PlanningState,
     StepTriple,
 )
-from eneo.flows.flow_access_policy import FlowApiAction
+from eneo.flows.flow_access_policy import (
+    FlowAccessFilterMode,
+    FlowApiAction,
+    user_can_perform_flow_action,
+)
 from eneo.main.exceptions import (
     AuditLoggingUnavailableException,
     BadRequestException,
@@ -372,6 +380,50 @@ def test_ai_builder_route_class_logs_raw_public_exception_fallback() -> None:
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
+
+
+_FRESH_GRANT_READS: list[tuple[UUID, UUID | None]] = []
+
+
+@pytest.fixture(autouse=True)
+def _fresh_access_snapshot(monkeypatch: pytest.MonkeyPatch) -> Iterator[None]:
+    """A grant's fresh snapshot needs the database; here it reports the
+    session's own space and flow, and the container's actor decides."""
+
+    async def read(user, *, space_id: UUID, flow_id: UUID | None):
+        _FRESH_GRANT_READS.append((space_id, flow_id))
+        return BuilderAccessSnapshot(
+            space=SpaceAccessFacts(
+                id=space_id,
+                user_id=None,
+                tenant_space_id=None,
+                members={},
+                group_members={},
+                default_assistant_id=None,
+                assistant_ids=frozenset(),
+                app_ids=frozenset(),
+            ),
+            flow_space_id=None if flow_id is None else space_id,
+        )
+
+    _FRESH_GRANT_READS.clear()
+    monkeypatch.setattr(ai_builder_read_access, "read_access_snapshot", read)
+    yield
+    _FRESH_GRANT_READS.clear()
+
+
+def _assert_refusal(
+    event: dict[str, object],
+    code: str,
+    category: str,
+    details: dict[str, object] | None = None,
+) -> None:
+    """A refused grant reaches the client under its own public code and
+    context, never as a planner failure."""
+    payload = event["data"]
+    assert isinstance(payload, dict)
+    assert (payload["code"], payload["category"]) == (code, category)
+    assert payload.get("details") == details
 
 
 def _send_message_request(
@@ -772,6 +824,126 @@ class TestAuthorizeAIBuilderRequest:
                 action=FlowApiAction.BUILDER_SESSION_CREATE,
                 space_id=uuid4(),
             )
+
+    @pytest.mark.anyio
+    async def test_every_combination_keeps_its_outcome_and_precedence(self):
+        """principal x key scope x space role x Builder action x session x
+        require_creator x visible filter: status code, error code, auth layer
+        and which check refuses first. Space-less and visible requests never
+        load a space."""
+        space_id = uuid4()
+        principals = {
+            "builder": [Permission.FLOWS, Permission.FLOWS_AI_BUILDER_REVIEW],
+            "no_builder": [Permission.FLOWS_MANAGE],
+            "service_key": [],
+        }
+        scopes = {
+            "none": None,
+            "tenant": ("tenant", None),
+            "space_match": ("space", space_id),
+            "space_mismatch": ("space", uuid4()),
+        }
+        edit_roles = {"editor", "admin", "owner"}
+        builder_actions = [
+            action for action in FlowApiAction if action.value.startswith("builder_")
+        ]
+        layers = {
+            "flow_service_key_principal_not_supported": "service_key_principal",
+            "insufficient_tenant_permission": "tenant_role",
+            "insufficient_scope": "api_key_scope",
+            "insufficient_space_permission": "space_membership",
+            "session_creator_required": "session_creator",
+        }
+
+        def expected(principal, action, scope, role, with_space, who, creator, visible):
+            if principal == "service_key":
+                return "flow_service_key_principal_not_supported"
+            if not user_can_perform_flow_action(
+                SimpleNamespace(permissions=principals[principal]), action
+            ):
+                return "insufficient_tenant_permission"
+            if visible:
+                return None
+            creator_refused = creator and who == "other"
+            if not with_space:
+                return "session_creator_required" if creator_refused else None
+            if scope == "space_mismatch":
+                return "insufficient_scope"
+            if role not in edit_roles:
+                return "insufficient_space_permission"
+            return "session_creator_required" if creator_refused else None
+
+        cases = 0
+        for combination in itertools.product(
+            principals,
+            builder_actions,
+            scopes,
+            ("viewer", "editor", "admin", "owner"),
+            (True, False),
+            ("none", "own", "other"),
+            (True, False),
+            (True, False),
+        ):
+            principal, action, scope, role, with_space, who, creator, visible = (
+                combination
+            )
+            container = _make_container(can_edit_flows=role in edit_roles)
+            user = container.user.return_value
+            user.permissions = principals[principal]
+            user.active_api_key = (
+                SimpleNamespace(
+                    id=uuid4(),
+                    ownership="service",
+                    service_principal_id=uuid4(),
+                    scope_type="tenant",
+                    scope_id=None,
+                    permission="admin",
+                )
+                if principal == "service_key"
+                else None
+            )
+            request = MagicMock()
+            request.state = (
+                SimpleNamespace()
+                if scopes[scope] is None
+                else SimpleNamespace(
+                    api_key_scope_type=scopes[scope][0],
+                    api_key_scope_id=scopes[scope][1],
+                )
+            )
+            session = (
+                None
+                if who == "none"
+                else _make_session_domain(
+                    space_id=space_id,
+                    actor_user_id=user.id if who == "own" else uuid4(),
+                )
+            )
+            try:
+                authorization = await _authorize_ai_builder_request(
+                    request,
+                    container,
+                    action=action,
+                    space_id=space_id if with_space else None,
+                    session=session,
+                    require_creator=creator,
+                    filter_mode=FlowAccessFilterMode.VISIBLE if visible else None,
+                )
+                refused = None
+            except UnauthorizedException as error:
+                refused = error
+            want = expected(*combination)
+            assert (refused.code if refused else None) == want, combination
+            if refused is not None:
+                assert refused.context is not None
+                assert refused.context["auth_layer"] == layers[want], combination
+            elif visible or not with_space:
+                assert authorization.space is None, combination
+                container.space_service.return_value.get_space.assert_not_called()
+            else:
+                assert authorization.space is not None, combination
+            cases += 1
+        assert cases == 3 * len(builder_actions) * 4 * 4 * 2 * 3 * 2 * 2
 
 
 # ---------------------------------------------------------------------------
@@ -2449,6 +2621,8 @@ class TestSendMessageEndpoint:
         ]
         service = container.ai_builder_service.return_value
         service.get_session.side_effect = [session, telemetry_session]
+        # The locked preflight row the turn's grant is opened on.
+        service.get_session.return_value = session
 
         async def mock_events(*args, **kwargs):
             yield _make_plan_stream_event()
@@ -2882,7 +3056,8 @@ class TestSendMessageEndpoint:
         Evidence viewing can be granted by run ownership alone; reading runs
         in order to propose an edit needs the review permission and edit
         access. A role can change between the first transaction and the
-        snapshot the reads run in, so the snapshot asks again.
+        snapshot the reads run in, and the operation's session still holds
+        the Space it loaded, so the grant reads a fresh snapshot of its own.
         """
         from eneo.flows.ai_builder.ai_builder_flow_review import (
             AIBuilderReviewContext,
@@ -2897,17 +3072,9 @@ class TestSendMessageEndpoint:
         )
         service = container.ai_builder_service.return_value
         service.get_session.return_value = session
-
-        granted = container.space_service.return_value.get_space
-        calls = {"n": 0}
-
-        async def _get_space(*args, **kwargs):
-            calls["n"] += 1
-            if calls["n"] > 1:
-                raise UnauthorizedException("space access revoked")
-            return granted.return_value
-
-        container.space_service.return_value.get_space = _get_space
+        # The first transaction decided on the loaded Space; the fresh
+        # snapshot of the second grant no longer carries edit access.
+        container.actor_manager.return_value.get_space_actor.return_value.can_edit_flows.return_value = False
 
         async def mock_events(*args, **kwargs):
             yield build_done_event()
@@ -2930,8 +3097,188 @@ class TestSendMessageEndpoint:
         )
         events = await _read_sse_events(response)
 
+        assert _FRESH_GRANT_READS == [(session.space_id, session.flow_id)]
+        container.space_service.return_value.get_space.assert_awaited_once()
         service.prepare_message_context.assert_not_called()
-        assert any("error" in str(event) for event in events)
+        service.send_message.assert_not_called()
+        container.audit_service.return_value.log.assert_not_called()
+        assert [event["event"] for event in events] == ["error", "done"]
+        _assert_refusal(
+            events[0],
+            "insufficient_space_permission",
+            "unauthorized",
+            {"auth_layer": "space_membership"},
+        )
+
+    @pytest.mark.anyio
+    async def test_a_send_rechecks_access_before_it_reads_the_session_content(
+        self,
+    ):
+        container = _make_container()
+        session = _make_session_domain(
+            flow_id=uuid4(),
+            actor_user_id=container.user.return_value.id,
+        )
+        service = container.ai_builder_service.return_value
+        service.get_session.return_value = session
+        container.actor_manager.return_value.get_space_actor.return_value.can_edit_flows.return_value = False
+
+        response = await send_message(
+            request=MagicMock(),
+            session_id=session.id,
+            body=_send_message_request("Lägg till ett steg"),
+            container=container,
+        )
+        events = await _read_sse_events(response)
+
+        assert _FRESH_GRANT_READS == [(session.space_id, session.flow_id)]
+        service.prepare_message_context.assert_not_called()
+        service.send_message.assert_not_called()
+        assert [event["event"] for event in events] == ["error", "done"]
+        _assert_refusal(
+            events[0],
+            "insufficient_space_permission",
+            "unauthorized",
+            {"auth_layer": "space_membership"},
+        )
+
+    @pytest.mark.anyio
+    async def test_a_send_whose_flow_was_deleted_meanwhile_is_refused_as_not_found(
+        self, monkeypatch: pytest.MonkeyPatch
+    ):
+        container = _make_container()
+        session = _make_session_domain(
+            flow_id=uuid4(),
+            actor_user_id=container.user.return_value.id,
+        )
+        service = container.ai_builder_service.return_value
+        service.get_session.return_value = session
+        fresh = ai_builder_read_access.read_access_snapshot
+
+        async def flow_deleted(user, *, space_id: UUID, flow_id: UUID | None):
+            snapshot = await fresh(user, space_id=space_id, flow_id=flow_id)
+            return BuilderAccessSnapshot(space=snapshot.space, flow_space_id=None)
+
+        monkeypatch.setattr(
+            ai_builder_read_access, "read_access_snapshot", flow_deleted
+        )
+
+        response = await send_message(
+            request=MagicMock(),
+            session_id=session.id,
+            body=_send_message_request("Lägg till ett steg"),
+            container=container,
+        )
+        events = await _read_sse_events(response)
+
+        assert _FRESH_GRANT_READS == [(session.space_id, session.flow_id)]
+        service.prepare_message_context.assert_not_called()
+        service.send_message.assert_not_called()
+        assert [event["event"] for event in events] == ["error", "done"]
+        _assert_refusal(events[0], "not_found", "not_found")
+
+    @pytest.mark.anyio
+    async def test_a_review_turn_takes_its_grant_before_the_evidence_snapshot_opens(
+        self, monkeypatch: pytest.MonkeyPatch
+    ):
+        """The grant reads on a connection of its own. Taken inside the
+        snapshot, the turn would hold one pooled connection while waiting for
+        a second, and concurrent reviews would starve each other."""
+        from contextlib import asynccontextmanager
+
+        from eneo.flows.ai_builder.ai_builder_flow_review import (
+            AIBuilderReviewContext,
+        )
+
+        container = _make_container()
+        session = _make_session_domain(
+            flow_id=uuid4(),
+            actor_user_id=container.user.return_value.id,
+        )
+        service = container.ai_builder_service.return_value
+        service.get_session.return_value = session
+        order: list[str] = []
+
+        @asynccontextmanager
+        async def snapshot(*_: object, **__: object):
+            order.append(f"snapshot after {len(_FRESH_GRANT_READS)} grant reads")
+            yield AsyncMock()
+
+        monkeypatch.setattr(
+            ai_builder_router_module, "audited_evidence_snapshot", snapshot
+        )
+
+        async def mock_events(*args, **kwargs):
+            yield build_done_event()
+
+        service.send_message.return_value = mock_events()
+
+        response = await send_message(
+            request=MagicMock(),
+            session_id=session.id,
+            body=SendMessageRequest(
+                client_turn_id=uuid4(),
+                message="Undersök …",
+                review_context=AIBuilderReviewContext(
+                    flow_version=1,
+                    definition_checksum="sum",
+                    finding_ids=["f1f1f1f1f1f1f1f1"],
+                ),
+            ),
+            container=container,
+        )
+        await _read_sse_events(response)
+
+        assert order == ["snapshot after 1 grant reads"]
+        assert _FRESH_GRANT_READS == [(session.space_id, session.flow_id)]
+        service.prepare_message_context.assert_awaited_once()
+
+    @pytest.mark.anyio
+    async def test_a_send_grant_pins_the_locked_session_row(self):
+        container = _make_container()
+        first_read = _make_session_domain(
+            flow_id=uuid4(),
+            actor_user_id=container.user.return_value.id,
+        )
+        locked_read = _make_session_domain(
+            session_id=first_read.id,
+            space_id=first_read.space_id,
+            flow_id=uuid4(),
+            actor_user_id=first_read.actor_user_id,
+        )
+        service = container.ai_builder_service.return_value
+        service.get_session.return_value = first_read
+
+        async def locked_preflight(**_: object) -> SessionTurnPreflight:
+            return SessionTurnPreflight(
+                session=locked_read,
+                baseline=SessionTurnPreparationBaseline(
+                    session_status=locked_read.status,
+                    latest_plan_id=None,
+                    planning_state_version=locked_read.planning_state_version,
+                    latest_turn_id=None,
+                    latest_turn_state=None,
+                    attachment_file_ids=(),
+                ),
+            )
+
+        service.preflight_message_turn.side_effect = locked_preflight
+
+        async def mock_events(*args, **kwargs):
+            yield build_done_event()
+
+        service.send_message.return_value = mock_events()
+
+        response = await send_message(
+            request=MagicMock(),
+            session_id=first_read.id,
+            body=_send_message_request("Lägg till ett steg"),
+            container=container,
+        )
+        await _read_sse_events(response)
+
+        assert _FRESH_GRANT_READS == [(locked_read.space_id, locked_read.flow_id)]
+        service.prepare_message_context.assert_awaited_once()
 
     @pytest.mark.anyio
     async def test_a_suggestion_turn_retains_only_the_investigation_text(self):

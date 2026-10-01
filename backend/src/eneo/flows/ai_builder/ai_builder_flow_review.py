@@ -62,6 +62,7 @@ from eneo.flows.ai_builder.ai_builder_flow_review_suggestions import (
     FlowReviewSuggestionKind,
 )
 from eneo.flows.ai_builder.ai_builder_plan_edit_context import EditOperationPermissions
+from eneo.flows.ai_builder.ai_builder_read_access import ensure_flow_in_space
 from eneo.flows.application.flow_run_access_policy import FlowRunAccessKind
 from eneo.flows.application.flow_run_evidence_bundle import RedactedEvidenceBundle
 from eneo.flows.domain.flow import Flow, FlowRun, FlowRunStatusSnapshot, FlowVersion
@@ -2099,11 +2100,7 @@ class AIBuilderFlowReviewService:
     ) -> tuple[Flow, FlowVersion]:
         tenant_id = self.user.tenant_id
         flow = await self.flow_repo.get(flow_id=flow_id, tenant_id=tenant_id)
-        if flow.space_id != space_id:
-            raise AIBuilderBadRequestException(
-                "Flow space does not match the AI builder session space.",
-                code=AIBuilderErrorCode.FLOW_SPACE_MISMATCH,
-            )
+        ensure_flow_in_space(flow_space_id=flow.space_id, space_id=space_id)
         published_version = flow.published_version
         if published_version is None:
             raise AIBuilderBadRequestException(
