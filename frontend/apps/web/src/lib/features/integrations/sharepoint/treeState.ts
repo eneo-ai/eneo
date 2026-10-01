@@ -1,5 +1,9 @@
 import { buildSharePointSelectionKey, normalizeSharePointPath } from "./selectionKey";
+import type { components } from "@eneo/eneo-js";
 import type { SourceMetadataEntry } from "$lib/features/knowledge/sourceMetadata";
+
+/** A library column a person can filter on without typing: yes/no or a fixed choice. */
+export type SharePointFilterColumn = components["schemas"]["SharePointFilterColumn"];
 
 export type SharePointTreeItem = {
   id: string;
@@ -50,37 +54,6 @@ export function normalizeSharePointTreeQuery(query: string): string {
   return query.trim().toLowerCase();
 }
 
-/** True when the node's own name or one of its document properties contains the query. */
-export function sharePointTreeItemMatches(item: SharePointTreeItem, query: string): boolean {
-  if (!query) return true;
-  if (item.name.toLowerCase().includes(query)) return true;
-  return (item.source_metadata ?? []).some((entry) => {
-    if (entry.label.toLowerCase().includes(query)) return true;
-    const values = Array.isArray(entry.value) ? entry.value : [entry.value];
-    return values.some((value) => value.toLowerCase().includes(query));
-  });
-}
-
-/**
- * True when the node matches itself or through a loaded descendant. Folders
- * whose contents have not been fetched cannot match through their contents;
- * the tree says so beside the search field.
- */
-export function sharePointTreeNodeVisible(node: SharePointTreeNode, query: string): boolean {
-  if (!query) return true;
-  if (sharePointTreeItemMatches(node, query)) return true;
-  return (node.children ?? []).some((child) => sharePointTreeNodeVisible(child, query));
-}
-
-/** True when a loaded descendant matches, so the folder should open during a search. */
-export function sharePointTreeHasMatchingDescendant(
-  node: SharePointTreeNode,
-  query: string
-): boolean {
-  if (!query) return false;
-  return (node.children ?? []).some((child) => sharePointTreeNodeVisible(child, query));
-}
-
 /**
  * `text` cut into the parts that match the query and the parts that do not,
  * in order, so a renderer can wrap the matches. Case-insensitive, every
@@ -105,27 +78,6 @@ export function splitSharePointMatches(
   return segments;
 }
 
-/**
- * The loaded nodes that match the query, as the smallest set that covers them:
- * a matching folder stands for its contents, so matches below it are left out.
- * Order follows the tree.
- */
-export function collectSharePointTreeMatches(
-  nodes: readonly SharePointTreeNode[],
-  query: string
-): SharePointTreeItem[] {
-  if (!query) return [];
-  const matches: SharePointTreeItem[] = [];
-  for (const node of nodes) {
-    if (sharePointTreeItemMatches(node, query)) {
-      matches.push(node);
-      continue;
-    }
-    matches.push(...collectSharePointTreeMatches(node.children ?? [], query));
-  }
-  return matches;
-}
-
 /** True when the item is selected itself or sits under a selected folder or the site root. */
 export function isSharePointItemCovered(
   item: SharePointTreeItem,
@@ -134,18 +86,4 @@ export function isSharePointItemCovered(
 ): boolean {
   if (selectedKeys.has(buildSharePointSelectionKey(item))) return true;
   return selectedPaths.some((selectedPath) => isSharePointDescendantPath(item.path, selectedPath));
-}
-
-/** Loaded files and folders that match the query themselves. */
-export function countSharePointTreeMatches(
-  nodes: readonly SharePointTreeNode[],
-  query: string
-): number {
-  if (!query) return 0;
-  let count = 0;
-  for (const node of nodes) {
-    if (sharePointTreeItemMatches(node, query)) count += 1;
-    count += countSharePointTreeMatches(node.children ?? [], query);
-  }
-  return count;
 }

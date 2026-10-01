@@ -189,6 +189,72 @@ class SharePointContentClient(BaseClient):
                 return await self.client.get(endpoint, headers=self.headers)
             raise
 
+    async def _get_paged_items_capped(
+        self,
+        endpoint: str,
+        *,
+        max_items: int,
+        headers: Optional[dict[str, str]] = None,
+    ) -> tuple[list[dict[str, Any]], bool]:
+        """Pages until ``max_items`` rows are in hand; True when more were available."""
+        rows: list[dict[str, Any]] = []
+        next_link: Optional[str] = endpoint
+        while next_link:
+            if next_link.startswith("http"):
+                next_link = _relative_graph_link(next_link)
+            response = await self.client.get(
+                next_link, headers={**self.headers, **(headers or {})}
+            )
+            rows.extend(cast(list[dict[str, Any]], response.get("value", [])))
+            next_link = cast(Optional[str], response.get("@odata.nextLink"))
+            if len(rows) >= max_items:
+                return rows[:max_items], bool(next_link) or len(rows) > max_items
+        return rows, False
+
+    async def get_list_items_filtered(
+        self, drive_id: str, odata_filter: Optional[str], *, max_items: int
+    ) -> tuple[list[dict[str, Any]], bool]:
+        """List items of a library with their columns and drive item.
+
+        ``odata_filter`` compares ``fields/<Column>``; Graph evaluates it for
+        indexed columns and, with the Prefer header, tries non-indexed ones too.
+        """
+        endpoint = f"v1.0/drives/{drive_id}/list/items?$expand=fields,driveItem"
+        if odata_filter:
+            endpoint += f"&$filter={odata_filter}"
+        prefer = {"Prefer": "HonorNonIndexedQueriesWarningMayFailRandomly"}
+        try:
+            return await self._get_paged_items_capped(
+                endpoint, max_items=max_items, headers=prefer
+            )
+        except aiohttp.ClientResponseError as e:
+            if e.status == 401 and self.token_refresh_callback and self.token_id:
+                await self.refresh_token()
+                return await self._get_paged_items_capped(
+                    endpoint, max_items=max_items, headers=prefer
+                )
+            raise
+
+    async def search_drive_items(
+        self, drive_id: str, text: str, *, max_items: int
+    ) -> tuple[list[dict[str, Any]], bool]:
+        """Drive items whose name or content matches ``text``, with list item columns when enabled."""
+        quoted = text.replace("'", "''")
+        endpoint = self._with_item_expand(
+            f"v1.0/drives/{drive_id}/root/search(q='{quoted}')"
+        )
+        try:
+            return await self._get_paged_items_capped(endpoint, max_items=max_items)
+        except aiohttp.ClientResponseError as e:
+            if self._disable_item_expand_after(e):
+                return await self._get_paged_items_capped(
+                    _strip_query_param(endpoint, "$expand"), max_items=max_items
+                )
+            if e.status == 401 and self.token_refresh_callback and self.token_id:
+                await self.refresh_token()
+                return await self._get_paged_items_capped(endpoint, max_items=max_items)
+            raise
+
     async def get_list_columns(self, drive_id: str) -> list[dict[str, Any]]:
         """Column definitions of the list behind a document library."""
         endpoint = f"v1.0/drives/{drive_id}/list/columns"

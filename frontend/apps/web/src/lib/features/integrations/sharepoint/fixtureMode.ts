@@ -149,6 +149,40 @@ type FixtureTreeRequest = {
   folderPath?: string;
 };
 
+export type FixtureSearchRequest = {
+  siteId?: string;
+  driveId?: string;
+  text: string;
+  filters: Record<string, string>;
+};
+
+export type SharePointFixtureSearchResponse =
+  components["schemas"]["SharePointFixtureSearchResponse"];
+
+export async function fetchSharePointFixtureSearch(
+  client: Eneo["client"],
+  scenario: SharePointFixtureScenario,
+  request: FixtureSearchRequest
+): Promise<SharePointFixtureSearchResponse> {
+  const response = await client.fetch(
+    "/api/v1/integrations/sharepoint/fixtures/{scenario}/search/",
+    {
+      method: "get",
+      params: {
+        path: { scenario },
+        query: {
+          site_id: request.siteId,
+          drive_id: request.driveId,
+          q: request.text,
+          filter: Object.entries(request.filters).map(([name, value]) => `${name}:${value}`)
+        }
+      }
+    }
+  );
+  assertSharePointFixtureEnvelope(response, scenario);
+  return response;
+}
+
 export async function fetchSharePointFixtureTree(
   client: Eneo["client"],
   scenario: SharePointFixtureScenario,

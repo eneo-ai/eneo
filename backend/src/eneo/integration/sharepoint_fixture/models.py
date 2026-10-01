@@ -4,6 +4,7 @@ from typing import Literal
 from eneo.integration.presentation.models import (
     BaseListModel,
     IntegrationPreviewData,
+    SharePointSearchResponse,
     SharePointTreeResponse,
 )
 
@@ -20,5 +21,10 @@ class SharePointFixturePreviewResponse(BaseListModel[IntegrationPreviewData]):
 
 
 class SharePointFixtureTreeResponse(SharePointTreeResponse):
+    fixture: Literal[True] = True
+    scenario: SharePointFixtureScenario
+
+
+class SharePointFixtureSearchResponse(SharePointSearchResponse):
     fixture: Literal[True] = True
     scenario: SharePointFixtureScenario
