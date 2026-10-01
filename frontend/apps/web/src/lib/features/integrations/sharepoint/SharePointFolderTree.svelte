@@ -4,6 +4,7 @@
   import { Button } from "$lib/components/ui/button/index.js";
   import { Checkbox } from "$lib/components/ui/checkbox/index.js";
   import * as InputGroup from "$lib/components/ui/input-group/index.js";
+  import SharePointFilterChips from "./SharePointFilterChips.svelte";
   import SharePointFilterMenu from "./SharePointFilterMenu.svelte";
   import type { components } from "@eneo/eneo-js";
   import SharePointFolderTreeNode from "./SharePointFolderTreeNode.svelte";
@@ -334,8 +335,10 @@
   </p>
 
   <div class="flex flex-col gap-2">
-    <div class="flex flex-wrap items-center gap-2">
-      <InputGroup.Root class="bg-background min-w-56 flex-1">
+    <!-- The search field and the filter button keep their place; chosen
+         filters appear on their own row below so nothing shifts when added. -->
+    <div class="flex items-center gap-2">
+      <InputGroup.Root class="bg-background min-w-0 flex-1">
         <InputGroup.Addon>
           <Search class="size-4 shrink-0 opacity-60" aria-hidden="true" />
         </InputGroup.Addon>
@@ -348,9 +351,9 @@
           autocomplete="off"
         />
       </InputGroup.Root>
-      <!-- Every filterable column lives behind one button; chosen values show as chips. -->
       <SharePointFilterMenu {columns} {facets} onChange={(next) => (facets = next)} />
     </div>
+    <SharePointFilterChips {columns} {facets} onChange={(next) => (facets = next)} />
     <div class="flex flex-wrap items-center justify-between gap-x-3 gap-y-1 px-1">
       <p id="sharepoint-search-help" class="text-muted-foreground text-xs" aria-live="polite">
         {#if searching && !searchLoading && !searchError}
