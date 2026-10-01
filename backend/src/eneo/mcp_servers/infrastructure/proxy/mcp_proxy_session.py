@@ -881,6 +881,17 @@ class MCPProxySession:
             return False
         return bool(entry[0].is_internal)
 
+    def is_bundled_tool(self, prefixed_tool_name: str) -> bool:
+        """Whether a prefixed tool belongs to a server built into Eneo.
+
+        Decided by ``MCPServer.is_bundled`` (the row's auth type), never by
+        the server's name. Unknown tools are external.
+        """
+        entry = self._tool_registry.get(prefixed_tool_name)
+        if entry is None:
+            return False
+        return bool(entry[0].is_bundled)
+
     def get_tool_purpose(self, prefixed_tool_name: str) -> str | None:
         """The capability a tool call serves, or None for general servers.
 

@@ -127,6 +127,10 @@ class _FakeMCPProxy:
         del prefixed_tool_name
         return False
 
+    def is_bundled_tool(self, prefixed_tool_name: str) -> bool:
+        del prefixed_tool_name
+        return False
+
     def get_tool_purpose(self, prefixed_tool_name: str) -> str | None:
         del prefixed_tool_name
         return None
@@ -170,11 +174,19 @@ class _InternalMCPProxy(_FakeMCPProxy):
     def is_internal_tool(self, prefixed_tool_name: str) -> bool:
         return prefixed_tool_name == "knowledge__search_knowledge"
 
+    def is_bundled_tool(self, prefixed_tool_name: str) -> bool:
+        del prefixed_tool_name
+        return False
+
 
 class _ExternalServerNamedKnowledgeProxy(_InternalMCPProxy):
     """An admin-registered server whose name collides with the internal one."""
 
     def is_internal_tool(self, prefixed_tool_name: str) -> bool:
+        del prefixed_tool_name
+        return False
+
+    def is_bundled_tool(self, prefixed_tool_name: str) -> bool:
         del prefixed_tool_name
         return False
 
@@ -190,6 +202,10 @@ class _MixedMCPProxy(_FakeMCPProxy):
 
     def is_internal_tool(self, prefixed_tool_name: str) -> bool:
         return prefixed_tool_name == "knowledge__search_knowledge"
+
+    def is_bundled_tool(self, prefixed_tool_name: str) -> bool:
+        del prefixed_tool_name
+        return False
 
 
 def _make_adapter() -> TenantModelAdapter:

@@ -353,6 +353,16 @@ class MCPServer(Entity):
         return self._is_loopback or is_builtin_provider(self.http_auth_type)
 
     @property
+    def is_bundled(self) -> bool:
+        """Whether this server runs in the bundled tool runtime (built into Eneo).
+
+        Decided by the row's auth type, which only the bundled-server preset
+        can set, never by its name: an admin may rename the row freely and
+        clients still label its calls as Eneo's own.
+        """
+        return is_bundled_server(self.http_auth_type)
+
+    @property
     def user_group_ids(self) -> list[UUID]:
         return [group.id for group in self.user_groups]
 

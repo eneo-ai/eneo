@@ -248,6 +248,8 @@ def test_internal_tools_are_identified_by_the_server_flag_not_its_name():
     assert proxy.is_internal_tool("image_studio__generate_image") is True
     assert proxy.is_internal_tool("knowledge__search_knowledge") is False
     assert proxy.is_internal_tool("unknown__tool") is False
+    assert proxy.is_bundled_tool("files__read_file") is False
+    assert proxy.is_bundled_tool("unknown__tool") is False
     assert proxy.get_tool_info("knowledge__search_knowledge") == (
         "knowledge",
         "search_knowledge",
@@ -270,6 +272,51 @@ def test_internal_tools_are_identified_by_the_server_flag_not_its_name():
         ],
     )
     assert MCPProxySession([files_impostor])._files_read_file_entry() is None
+
+
+def test_bundled_tools_are_identified_by_the_server_flag_not_its_name():
+    """A server built into Eneo is known by its auth type. An external server
+    an admin named after it is not, and the built-in loopback servers are
+    internal rather than bundled."""
+    bundled_id = uuid4()
+    bundled = MCPServer(
+        id=bundled_id,
+        tenant_id=uuid4(),
+        name="Ask a file",
+        http_url="http://tool-runtime:3010/mcp/file-analysis",
+        http_auth_type="bundled",
+        purpose="file_analysis",
+        tools=[
+            MCPServerTool(
+                mcp_server_id=bundled_id,
+                name="query_table",
+                input_schema={"type": "object", "properties": {}},
+                is_enabled_by_default=True,
+            )
+        ],
+    )
+    impostor_id = uuid4()
+    impostor = MCPServer(
+        id=impostor_id,
+        tenant_id=bundled.tenant_id,
+        name="Built into Eneo",
+        http_url="https://provider.example/mcp",
+        http_auth_type="bearer",
+        purpose="web_search",
+        tools=[
+            MCPServerTool(
+                mcp_server_id=impostor_id,
+                name="search",
+                input_schema={"type": "object", "properties": {}},
+                is_enabled_by_default=True,
+            )
+        ],
+    )
+    proxy = MCPProxySession([bundled, impostor])
+
+    assert proxy.is_bundled_tool("ask_a_file__query_table") is True
+    assert proxy.is_internal_tool("ask_a_file__query_table") is False
+    assert proxy.is_bundled_tool("built_into_eneo__search") is False
 
 
 def test_tool_purpose_names_the_capability_whichever_server_backs_it():

@@ -14,6 +14,8 @@ type ToolCallLike = {
   server_name: string;
   purpose?: string | null;
   is_internal?: boolean | null;
+  /** Stamped by the backend for a server built into Eneo (the bundled tool runtime). */
+  is_bundled?: boolean | null;
 };
 
 type CatalogLabels = { title: () => string; description: () => string };
@@ -274,6 +276,9 @@ export function capabilityProviderDetail(call: ToolCallLike): string | null {
   if (capabilityPurpose(call.purpose) === null || isInternalToolCall(call)) {
     return null;
   }
+  // A provider built into Eneo is Eneo's own: say so in the user's language
+  // rather than showing the row's admin-typed name.
+  if (call.is_bundled) return m.mcp_auth_bundled();
   return call.server_name;
 }
 

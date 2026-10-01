@@ -55,6 +55,7 @@
           result_status?: string;
           purpose?: string | null;
           is_internal?: boolean | null;
+          is_bundled?: boolean | null;
         }>
       | undefined
   );

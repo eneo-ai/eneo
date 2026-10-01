@@ -87,6 +87,18 @@ describe("labels", () => {
     ).toBeNull();
     expect(capabilityProviderDetail({ server_name: "Jira", purpose: null })).toBeNull();
   });
+
+  it("names a provider built into Eneo as Eneo's own, not by its row name", () => {
+    const bundled = {
+      server_name: "Ask a file",
+      purpose: "file_analysis",
+      is_internal: false,
+      is_bundled: true
+    };
+    expect(capabilityProviderDetail(bundled)).not.toBe("Ask a file");
+    expect(capabilityProviderDetail({ ...bundled, is_bundled: false })).toBe("Ask a file");
+    expect(capabilityProviderDetail({ ...bundled, is_bundled: null })).toBe("Ask a file");
+  });
 });
 
 /**

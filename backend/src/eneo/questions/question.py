@@ -122,6 +122,9 @@ class ToolCallInfo(BaseModel):
     # on rows persisted before this field existed; clients then fall back to
     # the server name.
     is_internal: Optional[bool] = None
+    # Whether the call ran on a server built into Eneo (the bundled tool
+    # runtime). None on rows persisted before this field existed.
+    is_bundled: Optional[bool] = None
     # The tool result's MCP `_meta`, as sent by the server (size-capped by the
     # client). Model-backed tools report their own usage here under the
     # OpenTelemetry GenAI attribute names, e.g. `gen_ai.usage.input_tokens`,

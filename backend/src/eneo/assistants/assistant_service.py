@@ -2333,6 +2333,7 @@ class AssistantService:
                                                 mcp_tool_name=tc.mcp_tool_name,
                                                 purpose=tc.purpose,
                                                 is_internal=tc.is_internal,
+                                                is_bundled=tc.is_bundled,
                                                 meta=tc.meta,
                                             )
                                         )
@@ -2378,6 +2379,7 @@ class AssistantService:
                                                 mcp_tool_name=tc.mcp_tool_name,
                                                 purpose=tc.purpose,
                                                 is_internal=tc.is_internal,
+                                                is_bundled=tc.is_bundled,
                                             )
                                         )
                             yield chunk
@@ -2416,6 +2418,7 @@ class AssistantService:
                                                 mcp_tool_name=tc.mcp_tool_name,
                                                 purpose=tc.purpose,
                                                 is_internal=tc.is_internal,
+                                                is_bundled=tc.is_bundled,
                                             )
                                         )
                             yield chunk
@@ -2625,6 +2628,7 @@ class AssistantService:
                             mcp_tool_name=tc.mcp_tool_name,
                             purpose=tc.purpose,
                             is_internal=tc.is_internal,
+                            is_bundled=tc.is_bundled,
                             meta=tc.meta,
                         )
                         for tc in non_streaming_tool_metadata

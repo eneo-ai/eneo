@@ -118,6 +118,10 @@ class ToolCallMetadata:
     # which an admin is free to set to "files" or "knowledge" on an external
     # server. Clients use it to tell Eneo's tools from look-alikes.
     is_internal: Optional[bool] = None
+    # Whether the call ran on a server built into Eneo (the bundled tool
+    # runtime), decided by the server's auth type, never by its name. Clients
+    # label the provider as Eneo's own in the user's language.
+    is_bundled: Optional[bool] = None
     # The tool result's MCP `_meta` (capped by the client). Servers use it for
     # out-of-band facts about the call, e.g. OpenTelemetry GenAI usage
     # attributes (`gen_ai.usage.input_tokens`) from a model-backed tool.

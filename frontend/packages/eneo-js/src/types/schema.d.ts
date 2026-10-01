@@ -21071,6 +21071,8 @@ export interface components {
       purpose?: string | null;
       /** Is Internal */
       is_internal?: boolean | null;
+      /** Is Bundled */
+      is_bundled?: boolean | null;
       /** Meta */
       meta?: {
         [key: string]: unknown;
@@ -28946,6 +28948,8 @@ export interface operations {
                     purpose?: string | null;
                     /** Is Internal */
                     is_internal?: boolean | null;
+                    /** Is Bundled */
+                    is_bundled?: boolean | null;
                     /** Meta */
                     meta?: {
                       [key: string]: unknown;
@@ -29007,6 +29011,8 @@ export interface operations {
                     purpose?: string | null;
                     /** Is Internal */
                     is_internal?: boolean | null;
+                    /** Is Bundled */
+                    is_bundled?: boolean | null;
                     /** Meta */
                     meta?: {
                       [key: string]: unknown;
@@ -29068,6 +29074,8 @@ export interface operations {
                     purpose?: string | null;
                     /** Is Internal */
                     is_internal?: boolean | null;
+                    /** Is Bundled */
+                    is_bundled?: boolean | null;
                     /** Meta */
                     meta?: {
                       [key: string]: unknown;

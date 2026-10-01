@@ -1526,6 +1526,7 @@ class TenantModelAdapter(CompletionModelAdapter):
                                 mcp_tool_name=call.name,
                                 purpose=mcp_proxy.get_tool_purpose(call.name),
                                 is_internal=mcp_proxy.is_internal_tool(call.name),
+                                is_bundled=mcp_proxy.is_bundled_tool(call.name),
                                 meta=result.get("meta") or None,
                             )
                         )
@@ -1743,6 +1744,9 @@ class TenantModelAdapter(CompletionModelAdapter):
             def _tool_is_internal(name: str) -> bool:
                 return mcp_proxy.is_internal_tool(name) if mcp_proxy else False
 
+            def _tool_is_bundled(name: str) -> bool:
+                return mcp_proxy.is_bundled_tool(name) if mcp_proxy else False
+
             # Shared state for tool call accumulation and usage across stream draining
             class _StreamResult:
                 def __init__(self) -> None:
@@ -1892,6 +1896,7 @@ class TenantModelAdapter(CompletionModelAdapter):
                                             mcp_tool_name=name,
                                             purpose=_tool_purpose(name),
                                             is_internal=_tool_is_internal(name),
+                                            is_bundled=_tool_is_bundled(name),
                                         )
                                     ],
                                 )
@@ -2078,6 +2083,7 @@ class TenantModelAdapter(CompletionModelAdapter):
                                         result_status="deferred",
                                         purpose=_tool_purpose(call.name),
                                         is_internal=_tool_is_internal(call.name),
+                                        is_bundled=_tool_is_bundled(call.name),
                                         result=json.dumps(
                                             {
                                                 "deferred": True,
@@ -2153,6 +2159,7 @@ class TenantModelAdapter(CompletionModelAdapter):
                                 mcp_tool_name=name,
                                 purpose=mcp_proxy.get_tool_purpose(name),
                                 is_internal=mcp_proxy.is_internal_tool(name),
+                                is_bundled=mcp_proxy.is_bundled_tool(name),
                             )
                         )
                     tool_args_by_call_id: dict[str, dict[str, Any] | None] = {}
@@ -2244,6 +2251,7 @@ class TenantModelAdapter(CompletionModelAdapter):
                                         mcp_tool_name=tm.mcp_tool_name,
                                         purpose=tm.purpose,
                                         is_internal=tm.is_internal,
+                                        is_bundled=tm.is_bundled,
                                     )
                                     for tm in approval_metadata
                                 ],
@@ -2273,6 +2281,7 @@ class TenantModelAdapter(CompletionModelAdapter):
                                     mcp_tool_name=tm.mcp_tool_name,
                                     purpose=tm.purpose,
                                     is_internal=tm.is_internal,
+                                    is_bundled=tm.is_bundled,
                                 )
                                 for tm in tool_metadata
                             ],
@@ -2303,6 +2312,7 @@ class TenantModelAdapter(CompletionModelAdapter):
                                     mcp_tool_name=tm.mcp_tool_name,
                                     purpose=tm.purpose,
                                     is_internal=tm.is_internal,
+                                    is_bundled=tm.is_bundled,
                                 )
                                 for tm in tool_metadata
                             ],
@@ -2417,6 +2427,9 @@ class TenantModelAdapter(CompletionModelAdapter):
                                     is_internal=mcp_proxy.is_internal_tool(
                                         tc["function"]["name"]
                                     ),
+                                    is_bundled=mcp_proxy.is_bundled_tool(
+                                        tc["function"]["name"]
+                                    ),
                                     meta=result_data.get("meta") or None,
                                 )
                             )
@@ -2477,6 +2490,9 @@ class TenantModelAdapter(CompletionModelAdapter):
                                     tc["function"]["name"]
                                 ),
                                 is_internal=mcp_proxy.is_internal_tool(
+                                    tc["function"]["name"]
+                                ),
+                                is_bundled=mcp_proxy.is_bundled_tool(
                                     tc["function"]["name"]
                                 ),
                             )
@@ -2577,6 +2593,7 @@ class TenantModelAdapter(CompletionModelAdapter):
                                     mcp_tool_name=name,
                                     purpose=_tool_purpose(name),
                                     is_internal=_tool_is_internal(name),
+                                    is_bundled=_tool_is_bundled(name),
                                 )
                             )
                         yield Completion(

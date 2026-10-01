@@ -113,6 +113,12 @@ def test_tool_sse_tells_the_client_which_server_is_eneos_own(response_type):
                 ToolCallMetadata(
                     server_name="files", tool_name="echo", is_internal=False
                 ),
+                ToolCallMetadata(
+                    server_name="Ask a file",
+                    tool_name="query_table",
+                    is_internal=False,
+                    is_bundled=True,
+                ),
             ],
         ),
         uuid4(),
@@ -120,7 +126,8 @@ def test_tool_sse_tells_the_client_which_server_is_eneos_own(response_type):
 
     tools = json.loads(event.data)["tools"]
 
-    assert [tool["is_internal"] for tool in tools] == [True, False]
+    assert [tool["is_internal"] for tool in tools] == [True, False, False]
+    assert [tool["is_bundled"] for tool in tools] == [None, None, True]
 
 
 def test_token_usage_sse_separates_turn_cost_from_context_headroom():

@@ -62,6 +62,10 @@ class _FakeMCPProxy:
         del name
         return False
 
+    def is_bundled_tool(self, name: str) -> bool:
+        del name
+        return False
+
     def get_tool_purpose(self, name: str) -> str | None:
         del name
         return None
