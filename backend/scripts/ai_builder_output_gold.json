@@ -1,0 +1,80 @@
+{
+  "version": 1,
+  "entries": [
+    {
+      "subject": "seed:edit_seed_a.json",
+      "sources_sha256": "0b2b595cbfb42b98fb5fa740b6546212fe5c5695c9dd18d5dd01df12ca2cd299",
+      "gold": {
+        "output_kind": "text",
+        "facts": [
+          {
+            "id": "diarienummer",
+            "type": "text",
+            "value": "BAB-2026-0417",
+            "forms": ["BAB-2026-0417"],
+            "location": {"kind": "field", "labels": ["diarienummer", "diarienumret"]}
+          },
+          {
+            "id": "sokande",
+            "type": "text",
+            "value": "Ingrid Wästberg",
+            "forms": ["Ingrid Wästberg"]
+          },
+          {
+            "id": "sokt_belopp",
+            "type": "number",
+            "value": "48500",
+            "unit": "kr",
+            "unit_required": false,
+            "forms": ["48500"],
+            "location": {"kind": "field", "labels": ["belopp"]}
+          },
+          {
+            "id": "sista_datum",
+            "type": "date",
+            "value": "2026-11-30",
+            "forms": ["2026-11-30"],
+            "location": {"kind": "field", "labels": ["sista datum", "senast"]}
+          }
+        ],
+        "forbidden": ["51200", "BAB-2025-0913"]
+      }
+    },
+    {
+      "subject": "seed:edit_seed_g.json",
+      "sources_sha256": "008500320ce2e60c1150fb12c1ebfadb158c9f8a27649a113e0e17697c0bfbf0",
+      "gold": {
+        "output_kind": "text",
+        "facts": [
+          {
+            "id": "diarienummer",
+            "type": "text",
+            "value": "BAB-2026-0588",
+            "forms": ["BAB-2026-0588"],
+            "location": {
+              "kind": "field",
+              "labels": ["diarienummer", "diarienumret", "ärende"]
+            }
+          },
+          {
+            "id": "belopp_kr",
+            "type": "number",
+            "value": "57300",
+            "unit": "kr",
+            "unit_required": false,
+            "forms": ["57300"],
+            "location": {"kind": "field", "labels": ["belopp"]}
+          },
+          {
+            "id": "sista_datum",
+            "type": "date",
+            "value": "2027-01-15",
+            "forms": ["2027-01-15"],
+            "location": {"kind": "field", "labels": ["sista datum", "senast"]}
+          }
+        ],
+        "forbidden": ["12400"]
+      }
+    }
+  ]
+}

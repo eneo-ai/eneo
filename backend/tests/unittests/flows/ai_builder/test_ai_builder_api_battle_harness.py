@@ -14260,16 +14260,16 @@ def _failed_checks(report: dict[str, Any]) -> list[tuple[str, str]]:
             "mc_utb01_specialkost",
             _UTB01_REGISTER.replace("Onsdag", "Tisdag").replace("Fredag", "Onsdag"),
             [
-                ("output_association", "jordnötssås"),
-                ("output_association", "mandelbotten"),
+                ("output_fact_location", "jordnötssås"),
+                ("output_fact_location", "mandelbotten"),
             ],
         ),
         (
             "mc_utb01_specialkost",
             "Onsdag och fredag: jordnötssås, mandelbotten\nElla Nordin, Kvarnbäckens skola",
             [
-                ("output_association", "jordnötssås"),
-                ("output_association", "mandelbotten"),
+                ("output_fact_location", "jordnötssås"),
+                ("output_fact_location", "mandelbotten"),
             ],
         ),
         ("mc_int13_delegationsbeslut", _INT13_REGISTER, []),
@@ -14279,8 +14279,8 @@ def _failed_checks(report: dict[str, Any]) -> list[tuple[str, str]]:
             .replace("Frida Sundin", "Tobias Grahn")
             .replace("X", "Frida Sundin"),
             [
-                ("output_association", "VON 2026/00588"),
-                ("output_association", "VON 2026/00612"),
+                ("output_fact_location", "VON 2026/00588"),
+                ("output_fact_location", "VON 2026/00612"),
             ],
         ),
     ],
@@ -14320,7 +14320,7 @@ def test_a_source_dump_fails_through_the_forbidden_literals() -> None:
     assert all(
         check["passed"]
         for check in report["output_checks"]
-        if check["name"] == "output_association"
+        if check["name"] == "output_fact_location"
     )
     assert ("forbidden_literal", "Astrid Wikman") in _failed_checks(report)
     assert report["output_success"] is False

@@ -143,7 +143,7 @@ def test_a_complete_calibrated_passing_corpus_passes_structurally_but_claims_not
 
 
 def test_a_seed_without_binding_gold_calibrates_nothing(
-    monkeypatch: pytest.MonkeyPatch,
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
     """Every literal present, but nothing says which value stands where: an
     unmeasured calibration run is no passing one and no failed one, so the gate
@@ -151,6 +151,11 @@ def test_a_seed_without_binding_gold_calibrates_nothing(
 
     loaded = importlib.import_module("ai_builder_api_battle_test")
     monkeypatch.setattr(loaded, "_load_seed_flow_fixture", _SEED_LOADER)
+    empty = tmp_path / "gold.json"
+    empty.write_text('{"version": 1, "entries": []}', encoding="utf-8")
+    monkeypatch.setattr(
+        importlib.import_module("ai_builder_output_gold"), "GOLD_FILE", empty
+    )
 
     report = _report()
 
@@ -160,6 +165,35 @@ def test_a_seed_without_binding_gold_calibrates_nothing(
         in report["inconclusive"]
     )
     assert not any("no passing calibration" in r for r in report["inconclusive"])
+
+
+@pytest.mark.parametrize(
+    ("text", "verdict"),
+    [
+        (
+            "Diarienummer BAB-2026-0588. Belopp 57300 kr, sista datum 2027-01-15.",
+            "pass",
+        ),
+        # Every literal present, the amount under the case-number label.
+        (PASSING_RUN["evidence"]["run"]["result"]["text"], "inconclusive"),
+    ],
+    ids=["labelled", "amount_under_another_label"],
+)
+def test_the_checked_in_seed_gold_decides_its_calibration(
+    monkeypatch: pytest.MonkeyPatch, text: str, verdict: str
+) -> None:
+    loaded = importlib.import_module("ai_builder_api_battle_test")
+    monkeypatch.setattr(loaded, "_load_seed_flow_fixture", _SEED_LOADER)
+    calibration = copy.deepcopy(CALIBRATION)
+    calibration["seeds"]["edit_seed_g.json"]["runs"] = [_run(text)] * 3
+
+    report = _report(calibration=calibration)
+
+    assert report["structural_verdict"] == verdict
+    assert (
+        "seed edit_seed_g.json has no passing calibration on these bytes and model"
+        in report["inconclusive"]
+    ) is (verdict == "inconclusive")
 
 
 @pytest.mark.parametrize(

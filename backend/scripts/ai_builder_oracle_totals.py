@@ -67,7 +67,7 @@ import random
 import sys
 from collections import Counter
 from collections.abc import Mapping, Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import Any, cast
 
@@ -960,30 +960,69 @@ def _harness() -> Any:
     return importlib.import_module(name)
 
 
-def corrected_expectation(
-    expect: Mapping[str, Any], corrections: Sequence[Correction]
-) -> JsonObject:
-    """A case's recorded `execution.expect` with its corrections applied.
+def corrected_expectation(expect: Any, corrections: Sequence[Correction]) -> Any:
+    """A stored output expectation with its corrections applied to the gold it
+    was scored by (`_scoring_gold`: the authored gold, or the case's literals).
 
-    A correction that names a check the case does not have is refused: an audit
-    corrects an existing check, it never invents one.
+    A required-fact correction names the check's `fact`: the gold fact id,
+    which for a case literal is the literal. A replacement keeps the fact's
+    typed contract (type, unit, location) and is validated as that type. A correction that names a check
+    the case does not have is refused: an audit corrects an existing check, it
+    never invents one.
     """
 
-    result: JsonObject = json.loads(json.dumps(expect))
+    gold = _harness()._scoring_gold(expect)
+    facts, forbidden = list(gold.facts), list(gold.forbidden)
     for correction in corrections:
-        key = "required_facts" if correction.kind == "required_fact" else "forbidden"
-        values = list(result.get(key) or [])
-        if correction.subject not in values:
+        names = (
+            [fact.id for fact in facts]
+            if correction.kind == "required_fact"
+            else forbidden
+        )
+        if correction.subject not in names:
             raise ExperimentError(
                 f"{correction.case_id}: {correction.kind} {correction.subject!r} is not a check of the case"
             )
-        index = values.index(correction.subject)
-        if correction.action == "remove":
-            del values[index]
+        index = names.index(correction.subject)
+        if correction.kind == "forbidden_literal":
+            if correction.action == "remove":
+                del forbidden[index]
+            else:
+                forbidden[index] = cast(str, correction.replacement)
+        elif correction.action == "remove":
+            location = facts[index].location
+            if location is not None and location.kind == "field":
+                # Its labels bound the other fields' spans: removing the fact
+                # would hand its value to a neighbouring field.
+                raise ExperimentError(
+                    f"{correction.case_id}: {correction.subject!r} has a field "
+                    "location; removing it would move the other fields' "
+                    "boundaries, so this audit cannot remove it"
+                )
+            del facts[index]
         else:
-            values[index] = cast(str, correction.replacement)
-        result[key] = values
-    return result
+            literal = cast(str, correction.replacement)
+            fact = facts[index]
+            try:
+                # The corrected fact keeps its typed contract (type, unit,
+                # location); its value and only form are the replacement,
+                # validated as that type. A case literal is its own id.
+                facts[index] = type(fact).model_validate(
+                    {
+                        **fact.model_dump(by_alias=True),
+                        "id": literal if fact.id == fact.value else fact.id,
+                        "value": literal,
+                        "forms": [literal],
+                    }
+                )
+            except ValueError as error:
+                raise ExperimentError(
+                    f"{correction.case_id}: {literal!r} is no {fact.type} value "
+                    f"of {correction.subject!r}: {error}"
+                ) from error
+    return replace(
+        expect, gold=gold.model_copy(update={"facts": facts, "forbidden": forbidden})
+    )
 
 
 def audited_states(leg: Leg, corrections: Sequence[Correction]) -> dict[SlotKey, str]:
@@ -1021,13 +1060,13 @@ def audited_states(leg: Leg, corrections: Sequence[Correction]) -> dict[SlotKey,
             continue
         bundle = leg_bundle(leg, row)
         case = cast(Mapping[str, Any], bundle["case"])
+        # The gold the stored verdict was scored by, then corrected.
         expect = corrected_expectation(
-            cast(Mapping[str, Any], case["execution"]["expect"]), by_case[case_id]
+            harness._observed_output_expectation(case, owner=f"audit {case_id}"),
+            by_case[case_id],
         )
         output = harness._rescored_output_state(
-            bundle,
-            harness._output_expectation(expect, owner=f"audit {case_id}"),
-            observation_status=str(row.get("observation_status")),
+            bundle, expect, observation_status=str(row.get("observation_status"))
         )
         key = (case_id, int(row["repetition"]))
         if output not in ("pass", "fail"):

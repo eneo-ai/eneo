@@ -220,6 +220,8 @@ class _Token(NamedTuple):
     value: Decimal | None = None
     # An ISO date and time also names its date.
     date: str | None = None
+    # The letters right after a number, with nothing between: its unit.
+    glued: bool = False
 
 
 def _same(wanted: _Token, found: _Token) -> bool:
@@ -278,7 +280,7 @@ def _tokens(text: str) -> tuple[_Token, ...]:
                         at -= 1
             tokens.append(_Token("number", spelling, _number_value(spelling)))
             if number.group(2):
-                tokens.append(_Token("word", number.group(2)))
+                tokens.append(_Token("word", number.group(2), glued=True))
     return tuple(tokens)
 
 
@@ -331,38 +333,55 @@ def unassessed_check(name: str, subject: str, **fields: str) -> JsonObject:
 def literal_checks(
     text: str,
     *,
-    required: Sequence[str],
+    required: Sequence[str | GoldFact],
     forbidden: Sequence[str],
     normalize: Callable[[str], str],
     delivered: bool,
+    structured: object = None,
 ) -> list[JsonObject]:
-    """Each literal must (or must not) appear in the normalized text.
+    """Each required fact must be delivered, and no forbidden literal may
+    appear in the normalized text.
 
-    `delivered` says whether there is an output to inspect at all, which the
-    text cannot say: an output that came out empty is delivered, its required
-    facts missing and its forbidden literals absent. With nothing delivered
-    (no run, a failed run, an unreadable file) every literal is `not_evaluated`:
-    the run neither held a fact nor lost it, and neither leaked nor kept clear
-    of a forbidden literal.
+    A required fact is a gold fact or an authored literal, which is the fact
+    with that one form; it is delivered as `fact_delivered` decides (a
+    pointer into the `structured` result by its typed leaf, anything else in
+    the text). `delivered`
+    says whether there is an output to inspect at all, which the text cannot
+    say: an output that came out empty is delivered, its required facts
+    missing and its forbidden literals absent. With nothing delivered (no run,
+    a failed run, an unreadable file) every literal is `not_evaluated`: the
+    run neither held a fact nor lost it, and neither leaked nor kept clear of
+    a forbidden literal.
     """
 
     normalized = normalize(text) if text else ""
     checks: list[JsonObject] = []
-    for name, key, literals, must_appear in (
-        ("required_fact", "fact", required, True),
-        ("forbidden_literal", "literal", forbidden, False),
+    for name, key, facts, must_appear in (
+        ("required_fact", "fact", [_as_fact(item) for item in required], True),
+        ("forbidden_literal", "literal", [_as_fact(item) for item in forbidden], False),
     ):
-        for literal in literals:
+        for fact in facts:
             if not delivered:
-                checks.append(unassessed_check(name, literal, **{key: literal}))
+                checks.append(unassessed_check(name, fact.id, **{key: fact.id}))
                 continue
-            present = literal_appears(normalize(literal), normalized)
+            present = (
+                fact_delivered(fact, normalized, structured)
+                if must_appear
+                else fact_in_text(fact, normalized)
+            )
             checks.append(
                 {
                     "name": name,
-                    key: literal,
+                    key: fact.id,
                     "passed": present == must_appear,
-                    "reason": f"{literal!r} "
+                    # A delivered amount says whether it stated its unit; a
+                    # bare one leaves the unit unmeasured, never correct.
+                    **(
+                        {"unit": _delivered_unit(fact, normalized, structured)}
+                        if must_appear and present and fact.unit is not None
+                        else {}
+                    ),
+                    "reason": f"{fact.id!r} "
                     + ("appears in" if present else "is missing from")
                     + " the final output",
                 }
@@ -370,11 +389,517 @@ def literal_checks(
     return checks
 
 
-# --- Gold ---------------------------------------------------------------------
+def _as_fact(item: str | GoldFact) -> GoldFact:
+    return item if isinstance(item, GoldFact) else GoldFact.literal(item)
+
+
+def leaf_kind(value: object) -> str | None:
+    """A JSON leaf's kind: boolean, number or (non-blank) string; None otherwise."""
+
+    if isinstance(value, bool):
+        return "boolean"
+    if isinstance(value, (int, float)):
+        return "number"
+    return "string" if isinstance(value, str) and value.strip() else None
+
+
+def same_leaf_value(left: object, right: object) -> bool:
+    """Exact, type-aware leaf equality: the same JSON type and value, numbers as
+    decimals, strings through the one text normalizer (`normalized_text`, as
+    every literal check reads text). Unlike `literal_appears`, which scans
+    delivered text, a value that merely occurs inside another leaf is a
+    different leaf value."""
+
+    if leaf_kind(left) != leaf_kind(right):
+        return False
+    if leaf_kind(left) == "number":
+        return Decimal(str(left)) == Decimal(str(right))
+    if isinstance(left, str) and isinstance(right, str):
+        return normalized_text(left) == normalized_text(right)
+    return left == right
+
+
+# --- Output gold (eneo-jk6t.51) ---------------------------------------------------
+#
+# One closed representation of what a run's output must deliver and where: a
+# typed fact, its accepted surface forms and unit spellings (the case's own
+# data, never a global unit or synonym table) and its location. The
+# required-fact check and every location decide through the same two
+# comparisons: `fact_in_text` (an accepted spelling appears as itself,
+# `literal_appears`) and `fact_at_leaf` (`same_leaf_value`).
+#
+# Current limits, all fail-closed (a false fail, never a false pass): a field
+# reads the text after its label, so a markdown table whose labels are its
+# header row, and prose that states a value before its label, fail; a number
+# grouped by dots ("48.500") is not read as 48500 (`_number_value` never
+# guesses a separator).
+#
+# A unit is only the letters glued to a number ("48500kr"), as `_tokens` reads
+# it. A glued unit must be one of the fact's unit spellings ("48500euro" and
+# "48500öre" fail), and every occurrence counts: one wrong glued unit fails
+# the fact however many correct ones stand beside it. A bare number holds
+# unless the fact has `unit_required`; where it holds bare, its unit is
+# unmeasured, never counted as stated. A JSON number leaf states no unit, so
+# it never holds a required one. By the no-word-list rule a spaced word after
+# a number is never read as its unit, so a spaced wrong unit ("48500 euro")
+# is not detected unless `unit_required` is true (then only an accepted
+# spelling, glued or spaced, holds).
 
 
 class _Closed(BaseModel):
     model_config = ConfigDict(extra="forbid", frozen=True)
+
+
+_TEXT_OUTPUTS: Final = frozenset({"text", "docx", "pdf"})
+_DECIMAL = re.compile(r"-?\d+(?:\.\d+)?")
+_ISO_DATE = re.compile(r"\d{4}-\d{2}-\d{2}")
+# A complete RFC 6901 JSON pointer: "" is the root, "/" the member named "",
+# and "~" only escapes "~0" and "~1".
+_POINTER = re.compile(r"^(?:/(?:[^~/]|~[01])*)*$")
+
+
+class FieldLocation(_Closed):
+    """In text or a document: the fact stands after one of its labels and
+    before the next label of another field (`fact_located`). `placeholder`
+    names the DOCX template placeholder the field fills (grounding only)."""
+
+    kind: Literal["field"]
+    labels: list[str] = Field(min_length=1)
+    placeholder: str | None = None
+
+    @field_validator("labels")
+    @classmethod
+    def _labels(cls, value: list[str]) -> list[str]:
+        labels = literal_list(value, owner="field labels")
+        if any(character.isdigit() for label in labels for character in label):
+            # A label names a value; a digit would make it one.
+            raise ValueError("a field label holds no digit")
+        return list(labels)
+
+
+class LineLocation(_Closed):
+    """In text: some line holding the fact holds one of `with`, and no line
+    holding it holds one of `not_with` (a row of a table)."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True, populate_by_name=True)
+
+    kind: Literal["line"]
+    with_: list[str] = Field(alias="with", min_length=1)
+    not_with: list[str] = []
+
+    @field_validator("with_", "not_with")
+    @classmethod
+    def _literals(cls, value: list[str]) -> list[str]:
+        return list(literal_list(value, owner="line literals"))
+
+
+class PointerLocation(_Closed):
+    """In a structured result: the leaf at an RFC 6901 pointer is the value."""
+
+    kind: Literal["pointer"]
+    pointer: Annotated[str, StringConstraints(pattern=_POINTER.pattern)]
+
+
+Location = Annotated[
+    FieldLocation | LineLocation | PointerLocation, Field(discriminator="kind")
+]
+
+
+class GoldFact(_Closed):
+    """One value the output must deliver.
+
+    `value` is typed: a number in plain decimal notation, an ISO date, or
+    text (a name, an id). `forms` are every spelling the case accepts in
+    delivered text; a number's forms each hold the number itself. A number
+    with a `unit` has the number alone as its forms and the case's unit
+    spellings (`unit`, then `unit_forms`: "kr", "kronor") apart; it is read
+    by `unit_state`. A unit glued to the number must be one of them
+    ("48500euro" fails). With `unit_required` the number holds only followed
+    by one of them (glued or spaced); without it a bare number also holds,
+    its unit unmeasured. A spaced word is never read as a unit (no word
+    list), so "48500 öre" is not caught unless the unit is required. Without
+    a location the fact must appear somewhere; with one it must stand there.
+    """
+
+    id: Annotated[str, StringConstraints(min_length=1)]
+    type: Literal["number", "date", "text"]
+    value: Annotated[str, StringConstraints(min_length=1)]
+    unit: str | None = None
+    unit_forms: list[str] = []
+    unit_required: bool = False
+    forms: list[str] = Field(min_length=1)
+    location: Location | None = None
+
+    @field_validator("forms", "unit_forms")
+    @classmethod
+    def _forms(cls, value: list[str]) -> list[str]:
+        return list(literal_list(value, owner="fact forms"))
+
+    @field_validator("unit")
+    @classmethod
+    def _unit(cls, value: str | None) -> str | None:
+        # The same literal rule as every unit spelling: never blank.
+        return None if value is None else literal_list([value], owner="fact unit")[0]
+
+    @model_validator(mode="after")
+    def _typed(self) -> Self:
+        if self.type == "number":
+            if not _DECIMAL.fullmatch(self.value):
+                raise ValueError(f"{self.id}: a number value is a plain decimal")
+            stray = [
+                form
+                for form in self.forms
+                if not literal_appears(self.value, normalized_text(form))
+                or (self.unit is not None and any(c.isalpha() for c in form))
+            ]
+            if stray:
+                raise ValueError(
+                    f"{self.id}: forms {stray} are not the number {self.value}"
+                    + (" alone (its unit is apart)" if self.unit else "")
+                )
+        elif self.unit is not None:
+            raise ValueError(f"{self.id}: only a number has a unit")
+        if (self.unit_forms or self.unit_required) and self.unit is None:
+            raise ValueError(f"{self.id}: unit_forms and unit_required need a unit")
+        if any(c.isdigit() for u in self.units for c in u):
+            raise ValueError(f"{self.id}: a unit holds no digit")
+        if self.type == "date":
+            if not _ISO_DATE.fullmatch(self.value):
+                raise ValueError(f"{self.id}: a date value is an ISO date")
+            # Each form is the same date, written as an ISO date (or date and
+            # time): a form naming any other date, or no readable date, is no
+            # spelling of this one.
+            other = [
+                form
+                for form in self.forms
+                if {_iso_date(token) for token in _tokens(normalized_text(form))}
+                - {None}
+                != {self.value}
+            ]
+            if other:
+                raise ValueError(
+                    f"{self.id}: forms {other} are not the date {self.value}"
+                )
+        return self
+
+    @property
+    def units(self) -> list[str]:
+        return [] if self.unit is None else [self.unit, *self.unit_forms]
+
+    @property
+    def spellings(self) -> list[str]:
+        """Every spelling the case accepts: a form followed by a unit spelling
+        when the fact has a unit, and the bare form unless the unit is
+        required."""
+
+        stated = [f"{form} {unit}" for form in self.forms for unit in self.units]
+        return stated if self.unit_required else [*stated, *self.forms]
+
+    @classmethod
+    def literal(cls, literal: str) -> GoldFact:
+        """An authored literal: the fact that is exactly that one form."""
+
+        return cls(id=literal, type="text", value=literal, forms=[literal])
+
+
+class OutputGold(_Closed):
+    """What one run's output must deliver: facts, each where it must stand,
+    and the literals it must not hold."""
+
+    output_kind: Literal["text", "json", "docx", "pdf"] | None = None
+    facts: list[GoldFact] = []
+    forbidden: list[str] = []
+
+    @field_validator("forbidden")
+    @classmethod
+    def _forbidden(cls, value: list[str]) -> list[str]:
+        return list(literal_list(value, owner="forbidden literals"))
+
+    @model_validator(mode="after")
+    def _consistent(self) -> Self:
+        ids = [fact.id for fact in self.facts]
+        if len(set(ids)) != len(ids):
+            raise ValueError("a fact id is written once")
+        for fact in self.facts:
+            location = fact.location
+            if location is None:
+                continue
+            wanted = (
+                {"json"} if isinstance(location, PointerLocation) else _TEXT_OUTPUTS
+            )
+            if isinstance(location, FieldLocation) and location.placeholder:
+                wanted = {"docx"}
+            if self.output_kind not in wanted:
+                raise ValueError(
+                    f"{fact.id}: a {location.kind} location needs "
+                    f"{' or '.join(sorted(wanted))} output"
+                )
+        labels = [
+            (fact.id, normalized_text(label))
+            for fact in self.facts
+            if isinstance(fact.location, FieldLocation)
+            for label in fact.location.labels
+        ]
+        clashes = sorted(
+            {
+                f"{owner}/{other}"
+                for owner, label in labels
+                for other, inner in labels
+                if owner != other and inner in label
+            }
+            | {
+                f"{owner}/{fact.id}"
+                for owner, label in labels
+                for fact in self.facts
+                for form in fact.forms
+                if label in normalized_text(form)
+            }
+        )
+        if clashes:
+            # Overlapping labels would open one field inside another.
+            raise ValueError(f"field labels overlap a label or a form: {clashes}")
+        return self
+
+
+def fact_in_text(fact: GoldFact, text: str) -> bool:
+    """Whether a fact holds in normalized text: one of its accepted forms
+    appears there as itself (`literal_appears`); a number with a unit as
+    `unit_state` reads it. The one comparison of a fact in delivered text,
+    for the required-fact check and every text location."""
+
+    if fact.unit is not None:
+        return unit_state(fact, text) is not None
+    return any(literal_appears(normalized_text(form), text) for form in fact.forms)
+
+
+def unit_state(fact: GoldFact, text: str) -> Literal["stated", "unmeasured"] | None:
+    """How a number with a unit holds in normalized text, read over EVERY
+    occurrence of one of its forms: None (it does not hold) when any
+    occurrence carries a glued unit that is no accepted spelling
+    ("48500euro"), which a correct occurrence never outvotes; `stated` when
+    an occurrence is followed by one of its unit spellings; `unmeasured` when
+    it only stands bare (no glued unit; allowed unless `unit_required`)."""
+
+    units = [_tokens(normalized_text(unit)) for unit in fact.units]
+    stated = bare = False
+    for variant in {text, _MARKDOWN_ESCAPE.sub(r"\1", text)}:
+        found = _tokens(variant)
+        for form in fact.forms:
+            wanted = _tokens(normalized_text(form))
+            for start in range(len(found) - len(wanted) + 1):
+                if not all(
+                    _same(token, found[start + index])
+                    for index, token in enumerate(wanted)
+                ):
+                    continue
+                # Read in place: at most a unit's length of lookahead.
+                end = start + len(wanted)
+                if any(
+                    end + len(unit) <= len(found)
+                    and all(
+                        _same(token, found[end + index])
+                        for index, token in enumerate(unit)
+                    )
+                    for unit in units
+                ):
+                    stated = True
+                elif end < len(found) and found[end].glued:
+                    return None
+                else:
+                    bare = True
+    if stated:
+        return "stated"
+    return "unmeasured" if bare and not fact.unit_required else None
+
+
+def fact_delivered(fact: GoldFact, text: str, structured: object) -> bool:
+    """Whether a required fact was delivered: a fact located by a pointer in a
+    structured result is its typed leaf there (`json_at`, `fact_at_leaf`),
+    never its spelling in the serialized JSON; any other fact holds in the
+    normalized delivered text (`fact_in_text`)."""
+
+    if isinstance(fact.location, PointerLocation) and structured is not None:
+        found, leaf = json_at(structured, pointer_keys(fact.location.pointer))
+        return found and fact_at_leaf(fact, leaf)
+    return fact_in_text(fact, text)
+
+
+def _delivered_unit(fact: GoldFact, text: str, structured: object) -> str:
+    """`stated` or `unmeasured`: whether a delivered amount stated its unit."""
+
+    if isinstance(fact.location, PointerLocation) and structured is not None:
+        leaf = json_at(structured, pointer_keys(fact.location.pointer))[1]
+        text = normalized_text(leaf) if isinstance(leaf, str) else ""
+    return unit_state(fact, text) or "unmeasured"
+
+
+def fact_at_leaf(fact: GoldFact, leaf: object) -> bool:
+    """Whether a structured leaf is the fact: a number by value (never when
+    the fact's unit is required: a JSON number states none), anything else
+    as exactly one of its accepted spellings (`same_leaf_value`)."""
+
+    if fact.type == "number" and leaf_kind(leaf) == "number":
+        # A JSON number carries no unit: it never holds a required one.
+        return not fact.unit_required and Decimal(str(leaf)) == Decimal(fact.value)
+    return any(same_leaf_value(form, leaf) for form in fact.spellings)
+
+
+def fact_located(
+    fact: GoldFact, gold: OutputGold, *, text: str | None, structured: object
+) -> bool | None:
+    """Whether a located fact stands at its location in the delivered output;
+    None when the output has no such location to read.
+
+    `text` is the delivered text as the required-fact check reads it (inline
+    text, a document's text, a structured result's JSON). A field's span is
+    the text after one of the fact's labels up to the next label of any field
+    of the gold. The fact stands at its field when a span of its own holds it,
+    no span of its own holds another value of its kind (another number, ISO
+    date, or id of the same shape: a label written twice with two values
+    fails), and no span of another field holds it (a value moved under
+    another field fails). A line is a line of `text`. A pointer resolves in
+    the structured result (`json_at`).
+    """
+
+    location = fact.location
+    if isinstance(location, PointerLocation):
+        if structured is None:
+            return None
+        found, leaf = json_at(structured, pointer_keys(location.pointer))
+        return found and fact_at_leaf(fact, leaf)
+    if text is None:
+        return None
+    if isinstance(location, LineLocation):
+        holding = [
+            line
+            for line in (normalized_text(raw) for raw in text.splitlines())
+            if fact_in_text(fact, line)
+        ]
+        return any(
+            literal_appears(normalized_text(literal), line)
+            for literal in location.with_
+            for line in holding
+        ) and not any(
+            literal_appears(normalized_text(literal), line)
+            for literal in location.not_with
+            for line in holding
+        )
+    spans = _field_spans(normalized_text(text), gold)
+    own = [span for owner, span in spans if owner == fact.id]
+    return (
+        any(fact_in_text(fact, span) for span in own)
+        and not any(_other_value(fact, span) for span in own)
+        and not any(
+            fact_in_text(fact, span) for owner, span in spans if owner != fact.id
+        )
+    )
+
+
+def _other_value(fact: GoldFact, span: str) -> bool:
+    """Whether a span holds a value of the fact's kind that is not the fact: a
+    number of another value, another ISO date, or (for a text fact holding
+    digits, an id) a token of the same shape spelled otherwise. A text fact
+    without a digit (a name) has no kind to compare."""
+
+    found = _tokens(span)
+    if fact.type == "number":
+        value = Decimal(fact.value)
+        return any(token.kind == "number" and token.value != value for token in found)
+    if fact.type == "date":
+        return any(
+            (date := _iso_date(token)) is not None and date != fact.value
+            for token in found
+        )
+    own = {
+        token.spelling
+        for form in fact.spellings
+        for token in _tokens(normalized_text(form))
+        if any(character.isdigit() for character in token.spelling)
+    }
+    shapes = {_shape(spelling) for spelling in own}
+    return any(
+        token.kind == "word"
+        and token.spelling not in own
+        and _shape(token.spelling) in shapes
+        for token in found
+    )
+
+
+def _iso_date(token: _Token) -> str | None:
+    if token.kind != "word":
+        return None
+    return token.date or (
+        token.spelling if _ISO_DATE.fullmatch(token.spelling) else None
+    )
+
+
+def _shape(spelling: str) -> str:
+    return "".join(
+        "0" if character.isdigit() else "a" if character.isalpha() else character
+        for character in spelling
+    )
+
+
+def _field_spans(text: str, gold: OutputGold) -> list[tuple[str, str]]:
+    """(field, text after its label up to the next label of any field)."""
+
+    marks = sorted(
+        (start, start + len(label), fact.id)
+        for fact in gold.facts
+        if isinstance(fact.location, FieldLocation)
+        for label in map(normalized_text, fact.location.labels)
+        for start in _occurrences(label, text)
+    )
+    return [
+        (owner, text[end : marks[index + 1][0] if index + 1 < len(marks) else None])
+        for index, (_, end, owner) in enumerate(marks)
+    ]
+
+
+def _occurrences(label: str, text: str) -> list[int]:
+    found: list[int] = []
+    start = text.find(label)
+    while start >= 0:
+        found.append(start)
+        start = text.find(label, start + 1)
+    return found
+
+
+# An RFC 6901 array index: ASCII digits, no leading zero, and no longer than
+# any array could need (read before it is converted).
+_ARRAY_INDEX = re.compile(r"0|[1-9][0-9]{0,14}", re.ASCII)
+
+
+def pointer_keys(pointer: str) -> list[str]:
+    """The reference tokens of an RFC 6901 JSON pointer, unescaped."""
+
+    return [raw.replace("~1", "/").replace("~0", "~") for raw in pointer.split("/")[1:]]
+
+
+def json_at(value: object, path: Sequence[object]) -> tuple[bool, object]:
+    """The one walk of a JSON value: (found, leaf). An object member by its
+    string key; an array element by an int or an RFC 6901 index ("01", "²",
+    "-1" and out-of-range indexes are no element). Never raises."""
+
+    for key in path:
+        if isinstance(value, Mapping) and isinstance(key, str) and key in value:
+            value = cast(Mapping[str, object], value)[key]
+            continue
+        items = cast(list[object], value) if isinstance(value, list) else None
+        index = (
+            key
+            if isinstance(key, int) and not isinstance(key, bool)
+            else int(key)
+            if isinstance(key, str) and _ARRAY_INDEX.fullmatch(key)
+            else None
+        )
+        if items is None or index is None or not 0 <= index < len(items):
+            return False, None
+        value = items[index]
+    return True, value
+
+
+# --- Gold ---------------------------------------------------------------------
 
 
 class FieldScope(_Closed):

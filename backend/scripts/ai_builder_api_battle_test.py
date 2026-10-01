@@ -154,12 +154,18 @@ OBSERVATION_INPUT_IDENTITY_SEMANTICS_VERSION = 4
 # token, a number by value); a dimension passes only when its semantic grader
 # measured it (`PLAN_CONTENT_GRADER`, `OUTPUT_BINDING_GRADER`, the review-edit
 # location), so missing gold leaves it unmeasured.
-SCORER_SEMANTICS_VERSION = 2
+# v3: an output is scored by its gold (`_scoring_gold`): typed facts with the
+# case's accepted forms and locations, authored per subject in the output gold
+# corpus (`ai_builder_output_gold`, whose digest is `output_gold_sha256`);
+# associations are line locations (`output_fact_location`).
+SCORER_SEMANTICS_VERSION = 3
 # The scoring modules beside the harness: what a verdict means is written in
 # their bytes too, so a receipt records them with the harness's own digest.
 _SCORER_MODULES = (
     "ai_builder_edit_expectation.py",
     "ai_builder_oracle_arm.py",
+    "ai_builder_output_gold.json",
+    "ai_builder_output_gold.py",
     "ai_builder_receipt.py",
 )
 # The semantic graders a dimension needs before it can pass (`_graded_state`).
@@ -206,18 +212,26 @@ _require_local_eneo_checkout()
 LOCAL_APP_VERSION = os.getenv("ENEO_APP_VERSION") or _local_app_version()
 
 # Keep standalone script execution on the same production models as the API.
+import ai_builder_output_gold as output_gold  # noqa: E402
 from ai_builder_code_identity import require_code_from_tree  # noqa: E402
 from ai_builder_edit_expectation import (  # noqa: E402
     PERSISTED_STEP_KEYS,
     EditExpectation,
+    GoldFact,
+    LineLocation,
+    OutputGold,
     add_execution,
     closed_object,
     evaluate_edit,
+    fact_located,
+    json_at,
+    leaf_kind,
     literal_appears,
     literal_checks,
     literal_list,
     normalized_text,
     parse_edit_expectation,
+    same_leaf_value,
     seed_view,
     snapshot_view,
     unassessed_check,
@@ -519,12 +533,77 @@ class OutputAssociation:
 
 @dataclass(frozen=True, slots=True)
 class OutputExpectation:
-    """Oracles for the final output of a run over the case's own fixtures."""
+    """Oracles for the final output of a run over the case's own fixtures.
+
+    `gold` is the output gold authored from exactly these sources
+    (`ai_builder_output_gold`), which the scorer reads in place of the
+    literals (`_scoring_gold`); it is no part of the case contract.
+    """
 
     output_kind: str | None
     required_facts: tuple[str, ...] = ()
     forbidden: tuple[str, ...] = ()
     associations: tuple[OutputAssociation, ...] = ()
+    gold: OutputGold | None = None
+
+
+def _scoring_gold(expect: OutputExpectation) -> OutputGold:
+    """The one gold an output is scored by: the authored gold, or the case's
+    own literals read as gold (a required literal is the fact of that one
+    form; an association places its fact on a line)."""
+
+    if expect.gold is not None:
+        return expect.gold
+    lines = {
+        normalized_text(item.fact): LineLocation.model_validate(
+            {"kind": "line", "with": [item.with_], "not_with": [item.not_with]}
+        )
+        for item in expect.associations
+    }
+    if len(lines) != len(expect.associations) or not set(lines) <= {
+        normalized_text(fact) for fact in expect.required_facts
+    }:
+        raise ValueError("an output association places a required fact, each once")
+    return OutputGold(
+        output_kind=cast(Any, expect.output_kind),
+        facts=[
+            GoldFact.literal(literal).model_copy(
+                update={"location": lines.get(normalized_text(literal))}
+            )
+            for literal in expect.required_facts
+        ],
+        forbidden=list(expect.forbidden),
+    )
+
+
+def _observed_output_expectation(
+    case: Mapping[str, Any], *, owner: str
+) -> OutputExpectation:
+    """A stored observation's output expectation as its verdict is scored: its
+    recorded expect block, with the gold authored from its own case contract."""
+
+    return _with_authored_gold(
+        _output_expectation(case["execution"]["expect"], owner=owner),
+        _canonical_sha256(_observed_case_contract_payload(case)),
+    )
+
+
+def _with_authored_gold(
+    expect: OutputExpectation, sources_sha256: str
+) -> OutputExpectation:
+    """The expectation with the gold authored from these sources, if any.
+
+    Gold refines the case's literals and never drops one
+    (`output_gold.expectation_problems`): a corpus whose gold would is
+    refused."""
+
+    gold = output_gold.authored_gold(sources_sha256)
+    if gold is None:
+        return expect
+    problems = output_gold.expectation_problems(gold, expect)
+    if problems:
+        raise ValueError(f"output gold for {sources_sha256}: {problems}")
+    return replace(expect, gold=gold)
 
 
 @dataclass(frozen=True, slots=True)
@@ -2461,6 +2540,16 @@ def _read_cases_file(path: Path) -> list[BattleCase]:
             raise ValueError(
                 f"{path} case {case_id} cannot execute without apply_plan=true."
             )
+        if case.execution is not None:
+            case = replace(
+                case,
+                execution=replace(
+                    case.execution,
+                    expect=_with_authored_gold(
+                        case.execution.expect, _case_contract_sha256(case)
+                    ),
+                ),
+            )
         cases.append(case)
     return cases
 
@@ -2618,7 +2707,8 @@ def _expected_checkpoint(value: object, *, owner: str) -> ExpectedCheckpoint:
 
 
 def _output_expectation(value: object, *, owner: str) -> OutputExpectation:
-    raw = closed_object(value, _field_names(OutputExpectation), owner=owner)
+    # Gold is authored in the output gold corpus, never in a case.
+    raw = closed_object(value, _field_names(OutputExpectation) - {"gold"}, owner=owner)
     output_kind = raw.get("output_kind")
     if output_kind is not None:
         _one_of(output_kind, _OUTPUT_KINDS, owner=f"{owner}.output_kind")
@@ -2640,12 +2730,17 @@ def _output_expectation(value: object, *, owner: str) -> OutputExpectation:
     if associations and output_kind != FlowOutputType.TEXT.value:
         # A DOCX or PDF reader does not keep a table row on one line.
         raise ValueError(f"{owner}.associations need text output.")
-    return OutputExpectation(
+    expectation = OutputExpectation(
         output_kind=output_kind,
         required_facts=required_facts,
         forbidden=literal_list(raw.get("forbidden"), owner=f"{owner}.forbidden"),
         associations=associations,
     )
+    try:
+        _scoring_gold(expectation)
+    except ValueError as error:
+        raise ValueError(f"{owner}: {error}") from error
+    return expectation
 
 
 def _output_association(value: object, *, owner: str) -> OutputAssociation:
@@ -3745,6 +3840,7 @@ def _suite_evaluator_identity(
         ),
         "scorer_semantics_version": SCORER_SEMANTICS_VERSION,
         "scorer_sha256": _scorer_sha256(),
+        "output_gold_sha256": output_gold.gold_sha256(),
         "source_revision": build.get("source_revision"),
         "harness_sha256": build.get("harness_sha256"),
         "cases_sha256": build.get("cases_sha256"),
@@ -6443,30 +6539,6 @@ def _json_leaves(
         yield path, value
 
 
-def _leaf_kind(value: object) -> str | None:
-    if isinstance(value, bool):
-        return "boolean"
-    if isinstance(value, (int, float)):
-        return "number"
-    return "string" if isinstance(value, str) and value.strip() else None
-
-
-def _same_leaf_value(left: object, right: object) -> bool:
-    """Exact, type-aware leaf equality: the same JSON type and value, numbers as
-    decimals, strings through the harness's one text normalizer (`normalized_text`,
-    as every literal check reads text). Unlike `_value_occurs`, which scans
-    delivered text, a value that merely occurs inside another leaf is a different
-    leaf value."""
-
-    if _leaf_kind(left) != _leaf_kind(right):
-        return False
-    if _leaf_kind(left) == "number":
-        return _decimal(left) == _decimal(right)
-    if isinstance(left, str) and isinstance(right, str):
-        return normalized_text(left) == normalized_text(right)
-    return left == right
-
-
 def _review_target_edit(
     current_payload: object,
     target_names: tuple[str, ...],
@@ -6499,7 +6571,7 @@ def _review_target_edit(
             next((key for key in reversed(path) if isinstance(key, str)), "")
         )
         in wanted
-        and (kind := _leaf_kind(value)) is not None
+        and (kind := leaf_kind(value)) is not None
     ]
     if not named:
         return {"missing": "the reviewed value has no leaf the target group names"}
@@ -6509,7 +6581,7 @@ def _review_target_edit(
         "case-specific wording gold"
         if value_type == "boolean"
         else "reviewed value holds the edited value in more than one place"
-        if sum(_same_leaf_value(old, value) for _, value in leaves) > 1
+        if sum(same_leaf_value(old, value) for _, value in leaves) > 1
         else None
     )
     if unmeasured is not None:
@@ -6595,19 +6667,8 @@ def _review_edit_location(
         and cast(Mapping[str, object], final).get("step_order") == step_order
     ):
         return None
-    leaf: object = cast(Mapping[str, object], result).get("value")
-    for key in path:
-        if isinstance(key, str) and isinstance(leaf, Mapping):
-            leaf = cast(Mapping[str, object], leaf).get(key)
-        elif (
-            isinstance(key, int)
-            and isinstance(leaf, list)
-            and 0 <= key < len(cast(list[object], leaf))
-        ):
-            leaf = cast(list[object], leaf)[key]
-        else:
-            return None
-    return leaf if _leaf_kind(leaf) in {"string", "number"} else None
+    found, leaf = json_at(cast(Mapping[str, object], result).get("value"), path)
+    return leaf if found and leaf_kind(leaf) in {"string", "number"} else None
 
 
 def _review_edit_delivery_check(evidence: Mapping[str, object] | None) -> JsonObject:
@@ -6672,7 +6733,7 @@ def _review_edit_delivery_check(evidence: Mapping[str, object] | None) -> JsonOb
             )
             # Exact leaf gold: the harness replaced the whole leaf with `new`, so a value that merely
             # contains `new` is a different leaf value.
-            at_location = None if held is None else _same_leaf_value(new, held)
+            at_location = None if held is None else same_leaf_value(new, held)
             results.append(
                 {
                     **oracle,
@@ -7023,9 +7084,10 @@ def _output_report(
     `_runtime_evidence_checks` scored them, and its `expect` oracles: the
     result must be the declared kind with readable content, each literal from
     the case's own fixtures must (or must not) appear in it as itself
-    (`literal_appears`), and no two required values may have exchanged places
-    (`_value_binding_check`). `output_success` is True when every check
-    passed, False when one failed and None when a check could not decide.
+    (`literal_checks` over the case's gold, `_scoring_gold`), and no two
+    required values may have exchanged places (`_value_binding_check`).
+    `output_success` is True when every check passed, False when one failed
+    and None when a check could not decide.
     """
 
     if expect is None or runtime_evidence is None:
@@ -7099,46 +7161,49 @@ def _output_report(
                 "reason": f"the run delivered {file_count} final file(s); one is read",
             }
         )
+    gold = _scoring_gold(expect)
+    # The delivered output as each check reads it: a structured result's
+    # value at a pointer, any other result's text (inline, or the file's text
+    # as `_read_final_file` read it: a DOCX through the product's own reader).
+    structured = result.get("value") if result.get("kind") == "structured" else None
     checks.extend(
         literal_checks(
             raw_text if isinstance(raw_text, str) else "",
-            required=expect.required_facts,
-            forbidden=expect.forbidden,
+            required=gold.facts,
+            forbidden=gold.forbidden,
             normalize=normalized_text,
             delivered=isinstance(raw_text, str),
+            structured=structured,
         )
     )
-    lines = [
-        normalized_text(line)
-        for line in (raw_text if isinstance(raw_text, str) else "").splitlines()
-    ]
-    associations: list[JsonObject] = []
-    for association in expect.associations:
-        if not isinstance(raw_text, str):
-            associations.append(
-                unassessed_check(
-                    "output_association", association.fact, fact=association.fact
-                )
-            )
+    located: list[JsonObject] = []
+    for fact in gold.facts:
+        if fact.location is None:
             continue
-        fact, with_, not_with = (
-            normalized_text(literal)
-            for literal in (association.fact, association.with_, association.not_with)
-        )
-        holding = [line for line in lines if literal_appears(fact, line)]
-        associations.append(
+        if not isinstance(raw_text, str):
+            located.append(unassessed_check(_FACT_LOCATION, fact.id, fact=fact.id))
+            continue
+        held = fact_located(fact, gold, text=raw_text, structured=structured)
+        located.append(
             {
-                "name": "output_association",
-                "fact": association.fact,
-                "passed": any(literal_appears(with_, line) for line in holding)
-                and not any(literal_appears(not_with, line) for line in holding),
-                "reason": f"{len(holding)} line(s) hold {association.fact!r}; one "
-                f"must hold {association.with_!r} and none {association.not_with!r}",
+                "name": _FACT_LOCATION,
+                "fact": fact.id,
+                "location": fact.location.model_dump(by_alias=True),
+                "passed": held,
+                **({"status": "unmeasured"} if held is None else {}),
+                "reason": f"{fact.id!r} "
+                + (
+                    "has no such location in this output"
+                    if held is None
+                    else "stands at its location"
+                    if held
+                    else "does not stand (only) at its location"
+                ),
             }
         )
-    checks.extend(associations)
+    checks.extend(located)
     checks.append(
-        _value_binding_check(expect, associations, delivered=isinstance(raw_text, str))
+        _value_binding_check(gold, located, delivered=isinstance(raw_text, str))
     )
     checks.extend(
         check
@@ -7152,26 +7217,30 @@ def _output_report(
     }
 
 
+# A located fact's check: it stands at its gold location (`fact_located`).
+_FACT_LOCATION = "output_fact_location"
+
+
 def _value_binding_check(
-    expect: OutputExpectation,
-    associations: Sequence[Mapping[str, Any]],
+    gold: OutputGold,
+    located: Sequence[Mapping[str, Any]],
     *,
     delivered: bool,
 ) -> JsonObject:
     """Grader: no two required values of the output exchanged places.
 
     Every required literal may be present while two of them stand at each
-    other's place (a temperature under the other room's name). Gold: the case's
-    associations (`execution.expect.associations`), which bind a fact to what
-    its line must and must not hold. Applies when the case requires two or
-    more facts; it is measured when every pair of them has a bound member, so
-    no swap escapes an association, and it then passes only when every
-    association passed. Otherwise a swap cannot be told from the right output:
-    `unmeasured`, never a pass. Associations need text output, so a structured
-    or document output with two or more facts has no binding gold yet.
+    other's place (a temperature under the other room's name). Gold: each
+    fact's location (`OutputGold`: a field after its labels, a line, a JSON
+    pointer), decided through the same comparison as the required-fact check
+    (`fact_located`). Applies when the output must deliver two or more facts;
+    it is measured when every pair of them has a located member, so no swap
+    escapes a location, and it then passes only when every located fact
+    stands at its location. Otherwise a swap cannot be told from the right
+    output: `unmeasured`, never a pass.
     """
 
-    facts = expect.required_facts
+    facts = [fact.id for fact in gold.facts]
     if len(facts) < 2:
         return {
             "name": OUTPUT_BINDING_GRADER,
@@ -7180,8 +7249,7 @@ def _value_binding_check(
         }
     if not delivered:
         return unassessed_check(OUTPUT_BINDING_GRADER, ", ".join(facts))
-    bound = {normalized_text(association.fact) for association in expect.associations}
-    unbound = [fact for fact in facts if normalized_text(fact) not in bound]
+    unbound = [fact.id for fact in gold.facts if fact.location is None]
     if len(unbound) > 1:
         return {
             "name": OUTPUT_BINDING_GRADER,
@@ -7191,13 +7259,13 @@ def _value_binding_check(
             "reason": f"no binding gold for {', '.join(repr(f) for f in unbound)}: "
             "two of them could exchange places with every literal still present",
         }
-    verdicts = [check["passed"] for check in associations]
+    verdicts = [check["passed"] for check in located]
     passed = False if False in verdicts else None if None in verdicts else True
     return {
         "name": OUTPUT_BINDING_GRADER,
         "passed": passed,
         **({"status": "unmeasured"} if passed is None else {}),
-        "reason": "the associations bind every pair of required facts",
+        "reason": "the gold locates a member of every pair of required facts",
     }
 
 
@@ -10064,10 +10132,7 @@ def _rescored_evidence(
             else None
         ),
         output_expectation=(
-            _output_expectation(
-                case["execution"]["expect"],
-                owner=f"{path} case.execution.expect",
-            )
+            _observed_output_expectation(case, owner=f"{path} case.execution.expect")
             if isinstance(case, Mapping) and isinstance(case.get("execution"), Mapping)
             else None
         ),
@@ -10162,6 +10227,7 @@ def _reanalyze_bundles(
                     # The scorer that wrote these verdicts, as a receipt names it.
                     "scorer_semantics_version": SCORER_SEMANTICS_VERSION,
                     "scorer_sha256": _scorer_sha256(),
+                    "output_gold_sha256": output_gold.gold_sha256(),
                     "expectations_sha256": _canonical_sha256(expected),
                 },
                 "plan_summary": summary,
@@ -10203,14 +10269,18 @@ def calibration_run_passed(
     fixture: Mapping[str, Any], evidence: Mapping[str, Any]
 ) -> bool | None:
     """One calibration run, judged from its kept evidence by the output owner
-    against the seed's own calibration block: True or False, or None when the
-    output owner could not decide it (unmeasured, never a failure)."""
+    against the seed's own calibration block and the gold authored from this
+    seed: True or False, or None when the output owner could not decide it
+    (unmeasured, never a failure)."""
 
     execution = _case_execution(
         fixture["calibration"], manifest=_fixture_manifest(), owner="calibration"
     )
     assert execution is not None
-    report = _output_report(execution.expect, evidence, runtime_checks=[])
+    expect = _with_authored_gold(
+        execution.expect, output_gold.seed_sources_sha256(fixture)
+    )
+    report = _output_report(expect, evidence, runtime_checks=[])
     success = report.get("output_success")
     return success if isinstance(success, bool) else None
 

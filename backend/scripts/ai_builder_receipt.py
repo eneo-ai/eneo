@@ -192,6 +192,11 @@ def verdict_state_counts(
     }
 
 
+# The first scorer that scores outputs by the output gold corpus: its
+# receipts must record that corpus's digest.
+OUTPUT_GOLD_SCORER_VERSION = 3
+
+
 def scorer_states_verdicts(summary: Mapping[str, Any], *, where: str) -> bool:
     """Whether the scorer that wrote this receipt states its verdicts per
     dimension, after checking the identity it recorded.
@@ -218,6 +223,13 @@ def scorer_states_verdicts(summary: Mapping[str, Any], *, where: str) -> bool:
         raise ReceiptError(
             f"{where}: scorer_sha256 must be a SHA-256 digest beside the "
             "scorer_semantics_version it was recorded with."
+        )
+    if version >= OUTPUT_GOLD_SCORER_VERSION and not is_sha256(
+        identity.get("output_gold_sha256")
+    ):
+        raise ReceiptError(
+            f"{where}: a scorer {version} receipt must name the output gold it "
+            "was scored under (output_gold_sha256)."
         )
     return True
 

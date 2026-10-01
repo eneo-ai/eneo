@@ -752,6 +752,188 @@ def test_an_audit_overturning_every_failed_check_lifts_the_slot_in_both_arms(
         assert totals.per_case(leg, audit)["case-0"] == "ppp"
 
 
+def test_an_audit_refuses_to_remove_a_fact_whose_labels_bound_other_fields(
+    totals: ModuleType, tmp_path: Path
+) -> None:
+    """Removing the height fact would drop its field boundary, so the
+    distance field's span would absorb 22: refused. A fact without a field
+    location is still removed."""
+
+    harness = totals._harness()
+    gold = harness.OutputGold.model_validate(
+        {
+            "output_kind": "text",
+            "facts": [
+                {
+                    "id": "distance",
+                    "type": "number",
+                    "value": "30",
+                    "forms": ["30"],
+                    "location": {"kind": "field", "labels": ["distance"]},
+                },
+                {
+                    "id": "height",
+                    "type": "number",
+                    "value": "22",
+                    "forms": ["22"],
+                    "location": {"kind": "field", "labels": ["height"]},
+                },
+                {
+                    "id": "note",
+                    "type": "text",
+                    "value": "Kvissleby",
+                    "forms": ["Kvissleby"],
+                },
+            ],
+        }
+    )
+    expect = harness.OutputExpectation(
+        output_kind="text", required_facts=("30", "22", "Kvissleby"), gold=gold
+    )
+
+    def removal(fact: str) -> Any:
+        return _audit(
+            totals,
+            tmp_path,
+            _correction(check={"name": "required_fact", "fact": fact}),
+        )
+
+    with pytest.raises(totals.ExperimentError, match="field location"):
+        totals.corrected_expectation(expect, removal("height"))
+    kept = totals.corrected_expectation(expect, removal("note"))
+    assert [fact.id for fact in kept.gold.facts] == ["distance", "height"]
+
+
+def test_a_corrected_value_keeps_its_typed_contract(
+    totals: ModuleType, tmp_path: Path
+) -> None:
+    """Replacing a number's value keeps it a number with its unit and pointer:
+    the corrected leaf 48501 passes, and a replacement that is no such number
+    is refused."""
+
+    harness = totals._harness()
+    gold = harness.OutputGold.model_validate(
+        {
+            "output_kind": "json",
+            "facts": [
+                {
+                    "id": "amount",
+                    "type": "number",
+                    "value": "48500",
+                    "unit": "kr",
+                    "forms": ["48500"],
+                    "location": {"kind": "pointer", "pointer": "/amount"},
+                }
+            ],
+        }
+    )
+    expect = harness.OutputExpectation(
+        output_kind="json", required_facts=("48500",), gold=gold
+    )
+    fix = _audit(
+        totals,
+        tmp_path,
+        _correction(
+            check={"name": "required_fact", "fact": "amount"},
+            action="replace",
+            **{"with": "48501"},
+        ),
+    )
+
+    corrected = totals.corrected_expectation(expect, fix)
+
+    [fact] = corrected.gold.facts
+    assert (fact.id, fact.type, fact.value, fact.unit) == (
+        "amount",
+        "number",
+        "48501",
+        "kr",
+    )
+    report = harness._output_report(
+        corrected,
+        {
+            "execution": {"outcome": "completed", "failures": []},
+            "run": {
+                "status": "completed",
+                "result": {"kind": "structured", "value": {"amount": 48501}},
+            },
+            "run_contract": {"final_output": {"output_type": "json"}},
+            "final_artifact": {},
+        },
+        runtime_checks=[],
+    )
+    assert [
+        c["passed"] for c in report["output_checks"] if c["name"] == "required_fact"
+    ] == [True]
+    bad = _audit(
+        totals,
+        tmp_path,
+        _correction(
+            check={"name": "required_fact", "fact": "amount"},
+            action="replace",
+            **{"with": "48501 kr"},
+        ),
+    )
+    with pytest.raises(totals.ExperimentError, match="no number value"):
+        totals.corrected_expectation(expect, bad)
+
+
+def test_an_audit_rescores_with_the_gold_the_stored_verdict_used(
+    totals: ModuleType, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """With authored gold for the case's contract, a required-fact check
+    carries the gold fact id: the audit corrects that id, and the literal
+    the gold refined is no longer a check of the case."""
+
+    a, _ = _two_check_legs(totals, tmp_path)
+    harness = totals._harness()
+    gold_module = importlib.import_module("ai_builder_output_gold")
+    row = next(r for r in a.rows if r["case_id"] == "case-0")
+    case = totals.leg_bundle(a, row)["case"]
+    expect = case["execution"]["expect"]
+    facts = [
+        {"id": f"fact{i}", "type": "text", "value": literal, "forms": [literal]}
+        for i, literal in enumerate(expect["required_facts"])
+    ]
+    gold = tmp_path / "gold.json"
+    gold.write_text(
+        json.dumps(
+            {
+                "version": 1,
+                "entries": [
+                    {
+                        "subject": "case:cases.json:case-0",
+                        "sources_sha256": harness._canonical_sha256(
+                            harness._observed_case_contract_payload(case)
+                        ),
+                        "gold": {
+                            "output_kind": expect.get("output_kind"),
+                            "facts": facts,
+                            "forbidden": expect.get("forbidden") or [],
+                        },
+                    }
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(gold_module, "GOLD_FILE", gold)
+    by_id = _audit(
+        totals,
+        tmp_path,
+        *(
+            _correction(check={"name": "required_fact", "fact": fact["id"]})
+            for fact in facts
+        ),
+    )
+
+    audit = totals.audited_states(a, by_id)
+
+    assert set(audit.values()) == {"lifted"} and len(audit) == 3
+    with pytest.raises(totals.ExperimentError, match="not a check of the case"):
+        totals.audited_states(a, _audit(totals, tmp_path, _correction()))
+
+
 def test_a_slot_failing_another_check_never_lifts_and_a_stricter_check_drops(
     totals: ModuleType, tmp_path: Path
 ) -> None:
@@ -802,9 +984,9 @@ def test_a_correction_must_name_an_existing_check_with_class_and_evidence(
         _correction(action="replace"),  # a replacement needs `with`
         _correction(case_id="not-selected"),
         _correction(check={"name": "run_completed"}),
-        _correction(check={"name": "output_association", "fact": "x"}),
+        _correction(check={"name": "output_fact_location", "fact": "x"}),
         _correction(
-            check={"name": "output_association", "fact": "x"},
+            check={"name": "output_fact_location", "fact": "x"},
             action="replace",
             **{"with": "y"},
         ),

@@ -796,14 +796,19 @@ _GATED_RUN_CONTEXT_FIELDS: tuple[str, ...] = (
     "ui_language",
 )
 
-# What scored the receipt: the declared meaning of its verdicts, and the bytes
-# of the scoring modules beside the harness (`--allow-harness-change` waives
-# that digest like the harness's own, never the declared version). The
-# receipts of the first scorer recorded neither, so both absent is one scorer
-# and comparable, while one absent beside a recorded scorer is a different one.
+# What scored the receipt: the declared meaning of its verdicts, the bytes of
+# the scoring modules beside the harness (`--allow-harness-change` waives that
+# digest like the harness's own, never the declared version) and the output
+# gold corpus every case was scored by (never waived: gold is no part of a case
+# contract, so a gold change moves no contract hash). The receipts of the
+# first scorer recorded none, so all absent is one scorer and comparable, while
+# one absent beside a recorded one is a different scorer. Two receipts scored
+# differently are INCOMPARABLE until both arms are rescored (`--reanalyze`)
+# under the same scorer and gold.
 _SCORER_IDENTITY_FIELDS: tuple[str, ...] = (
     "scorer_semantics_version",
     "scorer_sha256",
+    "output_gold_sha256",
 )
 
 # Differences here are expected and reported, never fatal.
@@ -1001,8 +1006,10 @@ def compare(
     )
     if incompatible:
         raise SystemExit(
-            "Refusing to compare receipts whose evaluator identity differs on "
-            f"{', '.join(incompatible)}; they do not measure the same thing. "
+            "INCOMPARABLE: refusing to compare receipts whose evaluator identity "
+            f"differs on {', '.join(incompatible)}; they do not measure the same "
+            "thing. A historical comparison needs both arms rescored under the "
+            "same scorer and output gold. "
             "Pass --allow-harness-change only when scoring-affecting harness "
             "edits are confined to cases with changed contract hashes. "
             f"baseline={_identity_marker(baseline_summary)!r} "

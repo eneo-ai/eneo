@@ -66,7 +66,7 @@ def harness() -> ModuleType:
 def _expect(harness: ModuleType, **overrides: Any) -> Any:
     return harness.OutputExpectation(
         output_kind="text",
-        required_facts=("Njurunda", "Skogsmo"),
+        required_facts=("Njurunda", "Skogsmo", "Kod 17 03 01*"),
         associations=(
             harness.OutputAssociation(
                 fact="Kod 17 03 01*", with_="asfalt", not_with="betong"
@@ -88,7 +88,7 @@ def _output_checks(
 
 
 @mark.parametrize("delivery", sorted(_NO_DELIVERY))
-@mark.parametrize("name", ["required_fact", "output_association"])
+@mark.parametrize("name", ["required_fact", "output_fact_location"])
 def test_a_check_of_the_delivered_text_is_not_evaluated_when_nothing_was_delivered(
     harness: ModuleType, delivery: str, name: str
 ) -> None:
@@ -114,7 +114,7 @@ def test_a_run_without_output_is_no_success_and_its_facts_are_no_failures(
     assert report["output_success"] is False
     failed = [c["name"] for c in report["output_checks"] if c["passed"] is False]
     assert "required_fact" not in failed
-    assert "output_association" not in failed
+    assert "output_fact_location" not in failed
     assert "run_completed" in failed
 
 
@@ -153,12 +153,12 @@ def test_a_run_that_delivered_an_empty_output_lost_its_facts_and_leaked_nothing(
     )
     by_name = {
         name: [c for c in report["output_checks"] if c["name"] == name]
-        for name in ("required_fact", "forbidden_literal", "output_association")
+        for name in ("required_fact", "forbidden_literal", "output_fact_location")
     }
 
-    assert [c["passed"] for c in by_name["required_fact"]] == [False, False]
+    assert [c["passed"] for c in by_name["required_fact"]] == [False, False, False]
     assert [c["passed"] for c in by_name["forbidden_literal"]] == [True]
-    assert [c["passed"] for c in by_name["output_association"]] == [False]
+    assert [c["passed"] for c in by_name["output_fact_location"]] == [False]
     assert all("status" not in c for checks in by_name.values() for c in checks)
     assert report["output_success"] is False
     assert [
@@ -175,11 +175,11 @@ def test_a_run_with_no_result_still_leaves_every_literal_check_unassessed(
     assert {
         (c["name"], c["passed"])
         for c in report["output_checks"]
-        if c["name"] in {"required_fact", "forbidden_literal", "output_association"}
+        if c["name"] in {"required_fact", "forbidden_literal", "output_fact_location"}
     } == {
         ("required_fact", None),
         ("forbidden_literal", None),
-        ("output_association", None),
+        ("output_fact_location", None),
     }
 
 
@@ -215,9 +215,10 @@ def test_a_delivered_text_still_fails_a_fact_it_lacks(harness: ModuleType) -> No
     assert [(c["fact"], c["passed"]) for c in facts] == [
         ("Njurunda", True),
         ("Skogsmo", False),
+        ("Kod 17 03 01*", True),
     ]
     assert all("status" not in c for c in facts)
-    associations = _output_checks(harness, delivered, "output_association")
+    associations = _output_checks(harness, delivered, "output_fact_location")
     assert [c["passed"] for c in associations] == [True]
 
 
@@ -237,7 +238,7 @@ def test_an_association_reads_the_text_as_a_literal_check_does(
     harness: ModuleType, line: str, passed: bool
 ) -> None:
     checks = _output_checks(
-        harness, _completed(f"Njurunda\n{line}"), "output_association"
+        harness, _completed(f"Njurunda\n{line}"), "output_fact_location"
     )
 
     assert [c["passed"] for c in checks] == [passed]
@@ -1812,9 +1813,11 @@ def test_an_association_reads_a_line_with_the_same_literal_rule(
 ) -> None:
     association = harness.OutputAssociation(fact=literal, with_="✓", not_with="✗")
 
-    report = _text_report(harness, f"{text} ✓", associations=(association,))
+    report = _text_report(
+        harness, f"{text} ✓", required=(literal,), associations=(association,)
+    )
 
-    assert _passed(report, "output_association") == [holds]
+    assert _passed(report, "output_fact_location") == [holds]
 
 
 _KYL_FACTS = ("10,6", "8,6")
