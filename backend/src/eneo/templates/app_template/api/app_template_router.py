@@ -1,5 +1,10 @@
 from fastapi import APIRouter, Depends
 
+from eneo.authentication.endpoint_access import (
+    Authentication,
+    Authorization,
+    endpoint_access,
+)
 from eneo.main.container.container import Container
 from eneo.server.dependencies.container import get_container
 from eneo.server.protocol import responses
@@ -33,6 +38,11 @@ Returns paginated list of templates with basic information for gallery display.
     """,
     responses=responses.get_responses([401]),
     response_model_exclude_none=True,
+)
+@endpoint_access(
+    authentication=Authentication.USER,
+    authorization=Authorization.AUTHENTICATED,
+    reason="Tenant members may read published app templates.",
 )
 async def get_templates(
     container: Container = USER_CONTAINER,

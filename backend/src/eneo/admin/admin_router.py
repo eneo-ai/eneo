@@ -6,6 +6,7 @@ import sqlalchemy as sa
 from fastapi import APIRouter, Body, Depends, HTTPException, Response, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from eneo.admin import admin_crawler_router
 from eneo.admin.admin_models import (
     AdminApiKeysQueryParams,
     AdminApiKeyUsageQueryParams,
@@ -55,12 +56,14 @@ from eneo.authentication.auth_models import (
     ExpiringKeySummaryItem,
     SuperApiKeyStatus,
 )
+from eneo.authentication.endpoint_access import Authentication, endpoint_access
 from eneo.database.tables.users_table import Users
 from eneo.main.config import get_settings
 from eneo.main.container.container import Container
 from eneo.main.exceptions import BadRequestException
 from eneo.main.logging import get_logger
 from eneo.main.models import CursorPaginatedResponse, DeleteResponse
+from eneo.roles.permissions import Permission
 from eneo.roles.role import RolePublic
 from eneo.server.dependencies.container import get_container
 from eneo.server.protocol import responses
@@ -73,6 +76,10 @@ from eneo.users.user import (
 
 logger = get_logger(__name__)
 router = APIRouter()
+_ORGANIZATION_ADMIN_ACCESS_REASON = (
+    "Organization administration requires the admin permission."
+)
+router.include_router(admin_crawler_router.router, prefix="/crawler", tags=["admin"])
 AdminContainer = Annotated[Container, Depends(get_container(with_user=True))]
 AdminApiKeyMutationContainer = Annotated[
     Container,
@@ -264,6 +271,11 @@ GET /api/v1/admin/users/?sort_by=email&sort_order=asc
         403: {"description": "Admin permissions required"},
     },
 )
+@endpoint_access(
+    authentication=Authentication.USER,
+    authorization=Permission.ADMIN,
+    reason=_ORGANIZATION_ADMIN_ACCESS_REASON,
+)
 async def get_users(
     query_params: Annotated[AdminUsersQueryParams, Depends()],
     container: AdminContainer,
@@ -315,6 +327,11 @@ async def get_users(
         403: {"description": "Admin permissions required"},
         409: {"description": "Username or email already exists in your tenant"},
     },
+)
+@endpoint_access(
+    authentication=Authentication.USER,
+    authorization=Permission.ADMIN,
+    reason=_ORGANIZATION_ADMIN_ACCESS_REASON,
 )
 async def register_user(
     new_user: UserAddAdmin,
@@ -413,6 +430,11 @@ async def register_user(
         404: {"description": "User not found in your tenant (may be soft-deleted)"},
     },
 )
+@endpoint_access(
+    authentication=Authentication.USER,
+    authorization=Permission.ADMIN,
+    reason=_ORGANIZATION_ADMIN_ACCESS_REASON,
+)
 async def get_user(
     username: str,
     container: AdminContainer,
@@ -467,6 +489,11 @@ async def get_user(
         404: {"description": "User not found in your tenant (may be soft-deleted)"},
         409: {"description": "Email already exists in your tenant"},
     },
+)
+@endpoint_access(
+    authentication=Authentication.USER,
+    authorization=Permission.ADMIN,
+    reason=_ORGANIZATION_ADMIN_ACCESS_REASON,
 )
 async def update_user(
     username: str,
@@ -609,6 +636,11 @@ async def update_user(
         },
     },
 )
+@endpoint_access(
+    authentication=Authentication.USER,
+    authorization=Permission.ADMIN,
+    reason=_ORGANIZATION_ADMIN_ACCESS_REASON,
+)
 async def delete_user(username: str, container: AdminApiKeyMutationContainer):
     """
     Soft delete a user account.
@@ -690,6 +722,11 @@ async def delete_user(username: str, container: AdminApiKeyMutationContainer):
         404: {"description": "User not found in your tenant"},
     },
 )
+@endpoint_access(
+    authentication=Authentication.USER,
+    authorization=Permission.ADMIN,
+    reason=_ORGANIZATION_ADMIN_ACCESS_REASON,
+)
 async def deactivate_user(
     username: str,
     container: AdminApiKeyMutationContainer,
@@ -757,6 +794,11 @@ async def deactivate_user(
         404: {"description": "User not found in your tenant"},
     },
 )
+@endpoint_access(
+    authentication=Authentication.USER,
+    authorization=Permission.ADMIN,
+    reason=_ORGANIZATION_ADMIN_ACCESS_REASON,
+)
 async def reactivate_user(username: str, container: AdminContainer):
     """
     Reactivate a user account to restore full access.
@@ -821,6 +863,11 @@ async def reactivate_user(username: str, container: AdminContainer):
         403: {"description": "Admin permissions required"},
     },
 )
+@endpoint_access(
+    authentication=Authentication.USER,
+    authorization=Permission.ADMIN,
+    reason=_ORGANIZATION_ADMIN_ACCESS_REASON,
+)
 async def get_inactive_users(
     container: AdminContainer,
 ):
@@ -858,6 +905,11 @@ async def get_inactive_users(
         401: {"description": "Authentication required (invalid or missing API key)"},
         403: {"description": "Admin permissions required"},
     },
+)
+@endpoint_access(
+    authentication=Authentication.USER,
+    authorization=Permission.ADMIN,
+    reason=_ORGANIZATION_ADMIN_ACCESS_REASON,
 )
 async def get_deleted_users(
     container: AdminContainer,
@@ -900,6 +952,11 @@ async def get_deleted_users(
         403: {"description": "Admin permissions required"},
     },
 )
+@endpoint_access(
+    authentication=Authentication.USER,
+    authorization=Permission.ADMIN,
+    reason=_ORGANIZATION_ADMIN_ACCESS_REASON,
+)
 async def get_predefined_roles(container: AdminContainer):
     """Get all default roles for your tenant (backward-compatible endpoint)."""
     admin_service = container.admin_service()
@@ -915,6 +972,11 @@ async def get_predefined_roles(container: AdminContainer):
     response_model=TenantPublic,
     description="Update the tenant's privacy policy URL (admin only).",
     responses=responses.get_responses([400, 401, 403]),
+)
+@endpoint_access(
+    authentication=Authentication.USER,
+    authorization=Permission.ADMIN,
+    reason=_ORGANIZATION_ADMIN_ACCESS_REASON,
 )
 async def update_privacy_policy(url: PrivacyPolicy, container: AdminContainer):
     service = container.admin_service()
@@ -1110,6 +1172,11 @@ async def _enrich_api_keys_with_user_snapshots(
         **error_responses([401, 403, 429]),
     },
 )
+@endpoint_access(
+    authentication=Authentication.USER,
+    authorization=Permission.ADMIN,
+    reason=_ORGANIZATION_ADMIN_ACCESS_REASON,
+)
 async def get_api_key_policy(
     container: AdminContainer,
 ):
@@ -1146,6 +1213,11 @@ async def get_api_key_policy(
         },
         **error_responses([400, 401, 403, 429]),
     },
+)
+@endpoint_access(
+    authentication=Authentication.USER,
+    authorization=Permission.ADMIN,
+    reason=_ORGANIZATION_ADMIN_ACCESS_REASON,
 )
 async def update_api_key_policy(
     request: Annotated[
@@ -1216,6 +1288,11 @@ async def update_api_key_policy(
         **error_responses([401, 403, 429]),
     },
 )
+@endpoint_access(
+    authentication=Authentication.USER,
+    authorization=Permission.ADMIN,
+    reason=_ORGANIZATION_ADMIN_ACCESS_REASON,
+)
 async def get_api_key_notification_policy(
     container: AdminContainer,
 ):
@@ -1243,6 +1320,11 @@ async def get_api_key_notification_policy(
         200: {"description": "Updated notification policy."},
         **error_responses([400, 401, 403, 429]),
     },
+)
+@endpoint_access(
+    authentication=Authentication.USER,
+    authorization=Permission.ADMIN,
+    reason=_ORGANIZATION_ADMIN_ACCESS_REASON,
 )
 async def update_api_key_notification_policy(
     request: Annotated[
@@ -1327,6 +1409,11 @@ async def update_api_key_notification_policy(
         **error_responses([400, 401, 403, 429]),
     },
 )
+@endpoint_access(
+    authentication=Authentication.USER,
+    authorization=Permission.ADMIN,
+    reason=_ORGANIZATION_ADMIN_ACCESS_REASON,
+)
 async def update_model_pricing_visibility(
     request: ModelPricingVisibility,
     container: AdminContainer,
@@ -1385,6 +1472,11 @@ async def update_model_pricing_visibility(
         **error_responses([401, 403, 429]),
     },
 )
+@endpoint_access(
+    authentication=Authentication.USER,
+    authorization=Permission.ADMIN,
+    reason=_ORGANIZATION_ADMIN_ACCESS_REASON,
+)
 async def get_super_api_key_status(
     container: AdminContainer,
 ):
@@ -1411,6 +1503,11 @@ async def get_super_api_key_status(
         },
         **error_responses([400, 401, 403, 429]),
     },
+)
+@endpoint_access(
+    authentication=Authentication.USER,
+    authorization=Permission.ADMIN,
+    reason=_ORGANIZATION_ADMIN_ACCESS_REASON,
 )
 async def list_api_keys_admin(
     query: Annotated[AdminApiKeysQueryParams, Depends()],
@@ -1492,6 +1589,11 @@ async def list_api_keys_admin(
         **error_responses([401, 403, 429]),
     },
 )
+@endpoint_access(
+    authentication=Authentication.USER,
+    authorization=Permission.ADMIN,
+    reason=_ORGANIZATION_ADMIN_ACCESS_REASON,
+)
 async def get_expiring_keys_admin(
     query: Annotated[AdminExpiringKeysQueryParams, Depends()],
     container: AdminContainer,
@@ -1530,6 +1632,11 @@ async def get_expiring_keys_admin(
         },
         **error_responses([400, 401, 403, 404, 429]),
     },
+)
+@endpoint_access(
+    authentication=Authentication.USER,
+    authorization=Permission.ADMIN,
+    reason=_ORGANIZATION_ADMIN_ACCESS_REASON,
 )
 async def lookup_api_key_admin(
     payload: ApiKeyExactLookupRequest,
@@ -1582,6 +1689,11 @@ async def lookup_api_key_admin(
         },
         **error_responses([401, 403, 404, 429]),
     },
+)
+@endpoint_access(
+    authentication=Authentication.USER,
+    authorization=Permission.ADMIN,
+    reason=_ORGANIZATION_ADMIN_ACCESS_REASON,
 )
 async def get_api_key_usage_admin(
     id: UUID,
@@ -1636,6 +1748,11 @@ async def get_api_key_usage_admin(
         **error_responses([401, 403, 404, 429]),
     },
 )
+@endpoint_access(
+    authentication=Authentication.USER,
+    authorization=Permission.ADMIN,
+    reason=_ORGANIZATION_ADMIN_ACCESS_REASON,
+)
 async def get_api_key_admin(
     id: UUID,
     container: AdminContainer,
@@ -1675,6 +1792,11 @@ async def get_api_key_admin(
         **error_responses([400, 401, 403, 404, 429]),
     },
 )
+@endpoint_access(
+    authentication=Authentication.USER,
+    authorization=Permission.ADMIN,
+    reason=_ORGANIZATION_ADMIN_ACCESS_REASON,
+)
 async def update_api_key_admin(
     id: UUID,
     payload: ApiKeyUpdateRequest,
@@ -1707,6 +1829,11 @@ async def update_api_key_admin(
     },
     deprecated=True,
     description="Deprecated. Use POST /api/v1/admin/api-keys/{id}/revoke with reason body.",
+)
+@endpoint_access(
+    authentication=Authentication.USER,
+    authorization=Permission.ADMIN,
+    reason=_ORGANIZATION_ADMIN_ACCESS_REASON,
 )
 async def revoke_api_key_admin_deprecated(
     id: UUID,
@@ -1743,6 +1870,11 @@ async def revoke_api_key_admin_deprecated(
         },
         **error_responses([400, 401, 403, 404, 429]),
     },
+)
+@endpoint_access(
+    authentication=Authentication.USER,
+    authorization=Permission.ADMIN,
+    reason=_ORGANIZATION_ADMIN_ACCESS_REASON,
 )
 async def revoke_api_key_admin(
     id: UUID,
@@ -1784,6 +1916,11 @@ async def revoke_api_key_admin(
         **error_responses([400, 401, 403, 404, 429]),
     },
 )
+@endpoint_access(
+    authentication=Authentication.USER,
+    authorization=Permission.ADMIN,
+    reason=_ORGANIZATION_ADMIN_ACCESS_REASON,
+)
 async def suspend_api_key_admin(
     id: UUID,
     container: AdminApiKeyMutationContainer,
@@ -1820,6 +1957,11 @@ async def suspend_api_key_admin(
         **error_responses([400, 401, 403, 404, 429]),
     },
 )
+@endpoint_access(
+    authentication=Authentication.USER,
+    authorization=Permission.ADMIN,
+    reason=_ORGANIZATION_ADMIN_ACCESS_REASON,
+)
 async def reactivate_api_key_admin(
     id: UUID,
     container: AdminApiKeyMutationContainer,
@@ -1852,6 +1994,11 @@ async def reactivate_api_key_admin(
         },
         **error_responses([400, 401, 403, 404, 429]),
     },
+)
+@endpoint_access(
+    authentication=Authentication.USER,
+    authorization=Permission.ADMIN,
+    reason=_ORGANIZATION_ADMIN_ACCESS_REASON,
 )
 async def rotate_api_key_admin(
     id: UUID,
@@ -1887,6 +2034,11 @@ async def rotate_api_key_admin(
         },
         **error_responses([400, 401, 403, 404, 429]),
     },
+)
+@endpoint_access(
+    authentication=Authentication.USER,
+    authorization=Permission.ADMIN,
+    reason=_ORGANIZATION_ADMIN_ACCESS_REASON,
 )
 async def extend_api_key_expiration_admin(
     id: UUID,
@@ -1925,6 +2077,11 @@ async def extend_api_key_expiration_admin(
         204: {"description": "API key permanently deleted."},
         **error_responses([400, 401, 403, 404, 429]),
     },
+)
+@endpoint_access(
+    authentication=Authentication.USER,
+    authorization=Permission.ADMIN,
+    reason=_ORGANIZATION_ADMIN_ACCESS_REASON,
 )
 async def purge_api_key_admin(
     id: UUID,

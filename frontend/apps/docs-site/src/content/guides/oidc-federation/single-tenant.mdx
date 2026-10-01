@@ -18,7 +18,7 @@ import { Callout, Steps, Tabs, Cards } from 'nextra/components'
 </Cards>
 
 <Callout type="info">
-  Not sure which to choose? Start with **Environment Variables** - it's simpler. Switch to the API later if you need runtime updates or `allowed_domains`.
+  Not sure which to choose? Start with **Environment Variables** - it's simpler. Switch to the API later if you need runtime updates.
 </Callout>
 
 Both methods use the same login flow: the login page redirects straight to your IdP, and the IdP sends the user back to `{PUBLIC_ORIGIN}/login/callback`.
@@ -126,6 +126,10 @@ OIDC_DISCOVERY_ENDPOINT=https://login.microsoftonline.com/{tenant-id}/v2.0/.well
 OIDC_CLIENT_ID=your-client-id
 OIDC_CLIENT_SECRET=your-client-secret
 
+# Eneo tenant ID (not the IdP's tenant ID), required by the global login endpoint
+# Find it with GET /api/v1/sysadmin/tenants/ using the super admin API key
+OIDC_TENANT_ID=your-eneo-tenant-uuid
+
 # Keep the default
 FEDERATION_ENABLED=false
 ```
@@ -156,7 +160,7 @@ To update your OIDC settings:
 If you need to change settings without restarting, use the [API configuration](#api-configuration) instead.
 
 <Callout type="info">
-  Environment-variable configuration has no email domain restriction: anyone who signs in through the IdP is accepted as long as their Eneo user exists (or JIT provisioning is enabled). Use the API configuration if you need `allowed_domains`.
+  Set `OIDC_ALLOWED_DOMAINS` to a JSON array such as `["your-company.com"]` to restrict global OIDC logins by email domain. The default `[]` applies no domain filter to existing active members of `OIDC_TENANT_ID`, but prevents creation of new accounts through JIT.
 </Callout>
 
 ---
@@ -274,9 +278,25 @@ curl "https://your-domain.com/api/v1/sysadmin/tenants/{tenant_id}/federation" \
 
 ## User Provisioning
 
-Eneo matches the signing-in user to an existing Eneo user by the `email` claim of the ID token. By default a user who does not exist is rejected with `403 User not found. Contact your administrator for access.`
+Eneo matches the signing-in user to an existing Eneo user by the `email` claim of the ID token. By default a user who does not exist is rejected with `403 User not found. Provision the account through SCIM or contact your administrator for access.`
 
-To create users automatically on first sign-in (JIT provisioning), enable `provisioning` on the tenant and set a default role:
+For deployments using SCIM, keep tenant `provisioning` set to `false` (the default). SCIM creates and manages accounts; OIDC signs users in to their existing active account. A user whose account has not arrived through SCIM must wait for provisioning. Enabling SCIM does not automatically change the tenant's JIT setting.
+
+For deployments without SCIM, JIT can create a user on first sign-in only when all of these conditions hold:
+
+- Tenant `provisioning` is explicitly `true`.
+- A non-empty domain list admits the user's email domain: `OIDC_ALLOWED_DOMAINS` for environment-variable configuration, or `allowed_domains` for API configuration.
+- The validated ID token carries the boolean claim `email_verified: true` for its `email` address. Missing, false, numeric or string values do not satisfy this check.
+
+Existing active accounts do not require `email_verified` to sign in. Inactive or removed accounts cannot be reactivated or recreated through JIT; SCIM or an administrator must restore them. If the IdP does not supply verified-email claims, provision accounts through SCIM or administration.
+
+For environment-variable configuration, set for example:
+
+```bash
+OIDC_ALLOWED_DOMAINS=["your-company.com"]
+```
+
+Restart the backend after changing this variable. Then enable `provisioning` on the tenant and set a default role:
 
 ```bash
 curl -X POST "https://your-domain.com/api/v1/sysadmin/tenants/{tenant_id}/" \
@@ -346,11 +366,11 @@ curl -X PATCH "https://your-domain.com/api/v1/sysadmin/tenants/{tenant_id}/feder
   -d '{"allowed_domains": ["domain1.com", "domain2.com"]}'
 ```
 
-### "User not found. Contact your administrator for access."
+### "User not found. Provision the account through SCIM or contact your administrator for access."
 
 The user authenticated successfully but doesn't exist in Eneo (`403`).
 
-**Fix:** Create or invite the user first, or enable [JIT provisioning](#user-provisioning).
+**Fix:** Provision the account through SCIM, create or invite the user, or configure all [JIT requirements](#user-provisioning). Do not enable JIT as a workaround for a SCIM sync failure.
 
 ### "Email claim not found in ID token"
 

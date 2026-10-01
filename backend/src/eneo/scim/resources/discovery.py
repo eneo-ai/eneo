@@ -1,5 +1,10 @@
 from fastapi import APIRouter, Depends
 
+from eneo.authentication.endpoint_access import (
+    Authentication,
+    Authorization,
+    endpoint_access,
+)
 from eneo.scim.auth import require_scim_auth
 from eneo.scim.constants import (
     SCIM_BULK_MAX_OPERATIONS,
@@ -18,6 +23,11 @@ router = APIRouter(dependencies=[Depends(require_scim_auth)], tags=["SCIM Discov
     description="Get the SCIM service provider capabilities.",
     responses=scim_responses(401, 500),
     response_model=dict[str, object],
+)
+@endpoint_access(
+    authentication=Authentication.SCIM,
+    authorization=Authorization.SCIM,
+    reason="The SCIM token authorizes provisioning only within its bound tenant.",
 )
 async def service_provider_config() -> dict[str, object]:
     return {
@@ -241,6 +251,11 @@ _GROUP_SCHEMA = {
     responses=scim_responses(401, 500),
     response_model=ListResponse,
 )
+@endpoint_access(
+    authentication=Authentication.SCIM,
+    authorization=Authorization.SCIM,
+    reason="The SCIM token authorizes provisioning only within its bound tenant.",
+)
 async def schemas() -> ListResponse:
     resources = [_USER_SCHEMA, _ENTERPRISE_USER_SCHEMA, _GROUP_SCHEMA]
     return ListResponse(
@@ -253,6 +268,11 @@ async def schemas() -> ListResponse:
     description="List the SCIM resource types supported by this service.",
     responses=scim_responses(401, 500),
     response_model=ListResponse,
+)
+@endpoint_access(
+    authentication=Authentication.SCIM,
+    authorization=Authorization.SCIM,
+    reason="The SCIM token authorizes provisioning only within its bound tenant.",
 )
 async def resource_types() -> ListResponse:
     resources = [

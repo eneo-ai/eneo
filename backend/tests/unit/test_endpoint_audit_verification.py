@@ -5,7 +5,6 @@ wired. These are STRUCTURAL tests that inspect actual router/endpoint objects
 to prevent regression.
 """
 
-import ast
 import importlib
 import inspect
 from types import SimpleNamespace
@@ -13,6 +12,8 @@ from types import SimpleNamespace
 import pytest
 
 from eneo.authentication.auth_dependencies import FILES_READ_OVERRIDES
+from eneo.authentication.endpoint_access import access_for
+from eneo.roles.permissions import Permission
 from tests.unit.api_key_test_utils import (
     route_dependency_closures,
     runtime_app_routes,
@@ -83,44 +84,15 @@ def _get_eneo_src_path():
 
 
 class TestUserAdminEndpointGuards:
-    """Verify /users/admin/* endpoints have validate_permission(Permission.ADMIN).
+    """Every user-administration operation has an explicit ADMIN contract."""
 
-    These endpoints use inline validate_permission() calls in the function body
-    instead of Depends(require_permission()) to avoid double-auth overhead.
-    """
+    def test_admin_endpoints_require_admin(self):
+        from eneo.users.user_router import delete_user, invite_user, update_user
 
-    def test_admin_endpoints_have_validate_permission_guard(self):
-        """invite_user, update_user, delete_user all call validate_permission in their body."""
-        eneo_src = _get_eneo_src_path()
-        source = (eneo_src / "users" / "user_router.py").read_text()
-        tree = ast.parse(source)
-
-        # Find the three endpoint function definitions and check for validate_permission call in body
-        target_fns = {"invite_user", "update_user", "delete_user"}
-        found_guards = {}
-
-        for node in ast.walk(tree):
-            if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
-                if node.name not in target_fns:
-                    continue
-                # Check function body for validate_permission(...) call
-                has_guard = False
-                for stmt in ast.walk(node):
-                    if isinstance(stmt, ast.Call):
-                        func = stmt.func
-                        func_name = getattr(func, "id", getattr(func, "attr", ""))
-                        if func_name == "validate_permission":
-                            has_guard = True
-                            break
-                found_guards[node.name] = has_guard
-
-        for fn_name in target_fns:
-            assert fn_name in found_guards, (
-                f"{fn_name} function not found in user_router.py"
-            )
-            assert found_guards[fn_name], (
-                f"{fn_name} missing validate_permission() guard in function body"
-            )
+        for endpoint in (invite_user, update_user, delete_user):
+            policy = access_for(endpoint)
+            assert policy is not None
+            assert policy.authorization is Permission.ADMIN
 
 
 # ---------------------------------------------------------------------------
@@ -129,45 +101,31 @@ class TestUserAdminEndpointGuards:
 
 
 class TestModelRouterAdminChecks:
-    """Verify model provider and tenant model mutation endpoints have admin checks.
+    """Check each registered operation, never the number of guards in a file."""
 
-    These endpoints use inline validate_permission(user, Permission.ADMIN) calls
-    inside the function body. We verify this via AST inspection of the source files.
-    """
-
-    _ROUTER_FILES = [
-        ("model_providers/presentation/model_provider_router.py", 3),
-        ("completion_models/presentation/tenant_completion_models_router.py", 3),
-        ("embedding_models/presentation/tenant_embedding_models_router.py", 3),
-        ("transcription_models/presentation/tenant_transcription_models_router.py", 3),
-        ("image_models/presentation/tenant_image_models_router.py", 3),
-    ]
-
-    @pytest.mark.parametrize("rel_path,expected_count", _ROUTER_FILES)
-    def test_mutation_endpoints_have_admin_check(self, rel_path, expected_count):
-        """Each model router file must have validate_permission(user, Permission.ADMIN) calls."""
-        eneo_src = _get_eneo_src_path()
-        full_path = eneo_src / rel_path
-
-        source = full_path.read_text()
-        tree = ast.parse(source)
-
-        admin_check_count = 0
-        for node in ast.walk(tree):
-            if isinstance(node, ast.Call):
-                func = node.func
-                if isinstance(func, ast.Name) and func.id == "validate_permission":
-                    admin_check_count += 1
-                elif (
-                    isinstance(func, ast.Attribute)
-                    and func.attr == "validate_permission"
-                ):
-                    admin_check_count += 1
-
-        assert admin_check_count >= expected_count, (
-            f"{rel_path}: expected >= {expected_count} validate_permission calls, "
-            f"found {admin_check_count}"
-        )
+    def test_model_administration_and_probes_require_admin(self):
+        checked = set()
+        for route in runtime_router_routes():
+            if not route.path.startswith(
+                ("/admin/model-providers", "/admin/tenant-models")
+            ):
+                continue
+            if not (route.methods or set()) & {
+                "POST",
+                "PUT",
+                "PATCH",
+                "DELETE",
+            } and not route.path.endswith("/{provider_id}/models/"):
+                continue
+            policy = access_for(route.endpoint)
+            assert policy is not None, route.path
+            assert policy.authorization is Permission.ADMIN, route.path
+            checked.add(route.path)
+        assert {
+            "/admin/model-providers/{provider_id}/models/",
+            "/admin/model-providers/{provider_id}/test/",
+            "/admin/model-providers/{provider_id}/validate-model/",
+        } <= checked
 
 
 # ---------------------------------------------------------------------------

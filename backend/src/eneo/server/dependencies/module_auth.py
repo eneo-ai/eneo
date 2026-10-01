@@ -6,6 +6,7 @@ from fastapi.security.utils import get_authorization_scheme_param
 
 from eneo.authentication.api_key_resolver import ApiKeyValidationError
 from eneo.authentication.api_key_router_helpers import raise_api_key_http_error
+from eneo.authentication.endpoint_access import Authentication, authenticates
 from eneo.main.config import get_settings
 from eneo.main.container.container import Container
 from eneo.main.container.container_overrides import override_user
@@ -54,6 +55,7 @@ async def authenticate_module_request(
     return container
 
 
+@authenticates(Authentication.MODULE)
 async def get_module_request_container(
     module_key: str,
     request: Request,
@@ -78,6 +80,7 @@ def require_module_request(
     enforcing this dependency on the resource operation itself.
     """
 
+    @authenticates(Authentication.MODULE)
     async def _dependency(
         request: Request,
         container: Annotated[Container, Depends(get_container())],

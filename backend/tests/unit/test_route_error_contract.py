@@ -38,10 +38,12 @@ from fastapi import APIRouter
 from fastapi.routing import APIRoute
 from pydantic import BaseModel
 
+from eneo.authentication.endpoint_access import Authentication, access_for
 from eneo.main.exceptions import EXCEPTION_MAP
+from eneo.roles.permissions import Permission
 from tests.unit.api_key_test_utils import route_dependency_callables, runtime_app_routes
 
-# Dependency __name__ (or require_permission's inner qualname) -> required code.
+# Dependency __name__ -> required code.
 # These raise HTTPException/UnauthorizedException/AuthenticationException directly
 # and are NOT in EXCEPTION_MAP.
 AUTH_DEP_CODES: dict[str, int] = {
@@ -49,16 +51,13 @@ AUTH_DEP_CODES: dict[str, int] = {
     "require_scim_auth": 401,
     "require_user_for_creation": 403,
     "require_user_identity": 403,
-    "require_session_auth": 403,
+    "require_active_storage_identity": 403,
 }
 # NOTE: API-key scope/resource/permission deps (_scope_check_dep,
 # _resource_permission_dep, _api_key_permission_dep, _stash) are intentionally
 # NOT mapped here: some self-filter instead of raising 403, and their contract
 # is already covered by the api-key matrix tests. Adding them would create false
 # positives. Their 403 behaviour stays out of this guardrail.
-# require_permission(...) returns an inner `_dep`; match on qualname to avoid
-# colliding with any other generic `_dep`.
-REQUIRE_PERMISSION_QUALNAME_FRAGMENT = "require_permission.<locals>"
 
 # Domain exception class name -> HTTP status (from the single source of truth).
 EXCEPTION_NAME_TO_CODE: dict[str, int] = {
@@ -108,12 +107,15 @@ def _dep_callables(route: APIRoute) -> list[Any]:
 
 def _auth_required_codes(route: APIRoute) -> set[int]:
     required: set[int] = set()
+    policy = access_for(route.endpoint)
+    if policy is not None and (
+        isinstance(policy.authorization, Permission)
+        or policy.authentication in (Authentication.SESSION, Authentication.API_KEY)
+    ):
+        required.add(403)
     for fn in _dep_callables(route):
         name = getattr(fn, "__name__", "")
-        qualname = getattr(fn, "__qualname__", "")
-        if REQUIRE_PERMISSION_QUALNAME_FRAGMENT in qualname:
-            required.add(403)
-        elif name in AUTH_DEP_CODES:
+        if name in AUTH_DEP_CODES:
             required.add(AUTH_DEP_CODES[name])
     return required
 

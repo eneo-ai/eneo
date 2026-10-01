@@ -5,7 +5,7 @@
   import { Switch } from "$lib/components/ui/switch/index.js";
   import { LockKeyhole } from "@lucide/svelte";
   import type { CapabilityDescriptor, CapabilityPurpose } from "$lib/features/mcp/capabilities";
-  import { readinessMessage } from "$lib/features/mcp/readiness";
+  import { modelSupportsToolCalling, readinessMessage } from "$lib/features/mcp/readiness";
   let {
     capability,
     selectedModel,
@@ -27,8 +27,8 @@
   const blockingMessage = $derived(
     !offered
       ? readinessMessage("space_disabled")
-      : selectedModel?.supports_tool_calling === false
-        ? m.model_does_not_support_tools()
+      : selectedModel != null && !modelSupportsToolCalling(selectedModel)
+        ? readinessMessage("model_no_tool_calling")
         : !availability?.available
           ? readinessMessage(availability?.reason ?? "no_active_provider")
           : ""

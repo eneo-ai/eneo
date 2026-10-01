@@ -46,10 +46,10 @@ class BaseRepoImpl(Generic[T, DB, M]):
     async def one_or_none(
         self, id: "UUID | None" = None, **filters: object
     ) -> T | None:
+        if id is not None:
+            filters = {**filters, "id": id}
         if not filters:
-            if id is None:
-                raise ValueError("No filter is specified")
-            filters = {"id": id}
+            raise ValueError("No filter is specified")
 
         query = select(self._db_model).filter_by(**filters).options(*self._options)
         record = await self.session.scalar(query)

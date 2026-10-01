@@ -1,15 +1,15 @@
 from typing import TYPE_CHECKING, Any, Dict, Optional
 from uuid import UUID
 
-from eneo.main.exceptions import BadRequestException, NotFoundException
+from eneo.main.exceptions import BadRequestException
 from eneo.main.logging import get_logger
 
 if TYPE_CHECKING:
     from eneo.integration.application.sharepoint_auth_router import (
         SharePointAuthRouter,
     )
-    from eneo.integration.domain.repositories.user_integration_repo import (
-        UserIntegrationRepository,
+    from eneo.integration.application.user_integration_service import (
+        UserIntegrationService,
     )
     from eneo.spaces.space_repo import SpaceRepository
 
@@ -17,19 +17,19 @@ logger = get_logger(__name__)
 
 
 class SharePointTreeService:
-    """Service for browsing SharePoint folder structure with hybrid auth support.
+    """Service for browsing SharePoint with an authorized integration.
 
     Supports both user OAuth and tenant app authentication via SharePointAuthRouter.
     """
 
     def __init__(
         self,
-        user_integration_repo: "UserIntegrationRepository",
+        user_integration_service: "UserIntegrationService",
         sharepoint_auth_router: "SharePointAuthRouter",
         space_repo: "SpaceRepository",
     ) -> None:
         super().__init__()
-        self.user_integration_repo = user_integration_repo
+        self.user_integration_service = user_integration_service
         self.sharepoint_auth_router = sharepoint_auth_router
         self.space_repo = space_repo
 
@@ -42,11 +42,11 @@ class SharePointTreeService:
         folder_id: Optional[str] = None,
         folder_path: str = "",
     ) -> dict[str, Any]:
-        """Get folder tree from SharePoint site or OneDrive using hybrid authentication.
+        """Get a SharePoint or OneDrive folder tree with the approved connection.
 
         Args:
             user_integration_id: User's integration ID
-            space_id: Space context (determines auth method)
+            space_id: Space where the caller must have integration import rights
             site_id: SharePoint site ID (required for SharePoint sites)
             drive_id: Direct drive ID (required for OneDrive)
             folder_id: Folder ID to browse (None for root)
@@ -59,6 +59,8 @@ class SharePointTreeService:
             BadRequestException: integration not authenticated, token acquisition
                 failed, or neither site_id nor drive_id provided.
             NotFoundException: user integration or space not found.
+            UnauthorizedException: caller cannot import into the space or use
+                organization credentials.
         """
         if not site_id and not drive_id:
             raise BadRequestException("Either site_id or drive_id must be provided")
@@ -78,59 +80,13 @@ class SharePointTreeService:
             },
         )
 
-        try:
-            user_integration = await self.user_integration_repo.one(
-                id=user_integration_id
-            )
-            logger.debug(
-                "User integration found",
-                extra={
-                    "integration_id": str(user_integration.id),
-                    "authenticated": user_integration.authenticated,
-                    "auth_type": user_integration.auth_type,
-                    "tenant_id": str(user_integration.tenant_integration.tenant_id),
-                },
-            )
-        except Exception as e:
-            logger.error(
-                f"Failed to fetch user integration: {type(e).__name__}: {str(e)}",
-                extra={"user_integration_id": str(user_integration_id)},
-                exc_info=True,
-            )
-            raise NotFoundException(
-                f"User integration {user_integration_id} not found"
-            ) from e
-
-        if not user_integration.authenticated:
-            logger.error(
-                "User integration not authenticated",
-                extra={"user_integration_id": str(user_integration_id)},
-            )
-            raise BadRequestException(
-                f"User integration {user_integration_id} is not authenticated"
-            )
-
-        try:
-            space = await self.space_repo.one(id=space_id)
-            logger.debug(
-                "Space found",
-                extra={
-                    "space_id": str(space.id),
-                    "is_personal": space.is_personal(),
-                    "is_organization": space.is_organization(),
-                },
-            )
-        except Exception as e:
-            logger.error(
-                f"Failed to fetch space: {type(e).__name__}: {str(e)}",
-                extra={"space_id": str(space_id)},
-                exc_info=True,
-            )
-            raise NotFoundException(f"Space {space_id} not found") from e
-
-        if not space:
-            logger.error("Space is None after fetch", extra={"space_id": str(space_id)})
-            raise NotFoundException(f"Space {space_id} not found")
+        space = await self.space_repo.one(id=space_id)
+        connection = await self.user_integration_service.get_authorized_integration(
+            user_integration_id, space=space
+        )
+        user_integration = connection.integration
+        if user_integration.integration_type != "sharepoint":
+            raise BadRequestException("Integration is not a SharePoint connection")
 
         space_type = (
             "personal"
@@ -148,7 +104,7 @@ class SharePointTreeService:
 
         try:
             token = await self.sharepoint_auth_router.get_token_for_integration(
-                user_integration=user_integration, space=space
+                connection=connection
             )
             assert token is not None
             logger.info(

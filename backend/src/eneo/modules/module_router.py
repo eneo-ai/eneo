@@ -2,10 +2,7 @@ from typing import Annotated
 
 from fastapi import APIRouter, Depends, Path
 
-from eneo.authentication.auth_dependencies import (
-    require_permission,
-    require_session_auth,
-)
+from eneo.authentication.endpoint_access import Authentication, endpoint_access
 from eneo.main.container.container import Container
 from eneo.main.models import PaginatedResponse
 from eneo.modules.module import (
@@ -20,10 +17,6 @@ from eneo.server.dependencies.container import get_container
 from eneo.server.protocol import responses
 
 router = APIRouter(
-    dependencies=[
-        Depends(require_permission(Permission.MODULES)),
-        Depends(require_session_auth),
-    ],
     responses=responses.get_responses([401, 403]),
 )
 
@@ -47,6 +40,11 @@ _ModuleKey = Annotated[
     ),
     responses=responses.get_responses([]),
 )
+@endpoint_access(
+    authentication=Authentication.SESSION,
+    authorization=Permission.MODULES,
+    reason="Module administration requires a real user session with the modules permission.",
+)
 async def list_module_installations(
     container: _ReadContainer,
 ) -> PaginatedResponse[ModuleInstallation]:
@@ -65,6 +63,11 @@ async def list_module_installations(
         "installed but severs ticket exchange until a key is bound again."
     ),
     responses=responses.get_responses([400]),
+)
+@endpoint_access(
+    authentication=Authentication.SESSION,
+    authorization=Permission.MODULES,
+    reason="Module administration requires a real user session with the modules permission.",
 )
 async def install_module(
     module_key: _ModuleKey,
@@ -88,6 +91,11 @@ async def install_module(
         "safe and report changed=false."
     ),
     responses=responses.get_responses([404]),
+)
+@endpoint_access(
+    authentication=Authentication.SESSION,
+    authorization=Permission.MODULES,
+    reason="Module administration requires a real user session with the modules permission.",
 )
 async def uninstall_module(
     module_key: _ModuleKey,

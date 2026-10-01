@@ -4,6 +4,7 @@ from typing import TYPE_CHECKING
 from eneo.integration.domain.entities.tenant_integration import TenantIntegration
 from eneo.integration.presentation.models import TenantIntegrationFilter
 from eneo.main.exceptions import BadRequestException
+from eneo.roles.permissions import Permission, validate_permissions
 
 logger = logging.getLogger(__name__)
 
@@ -51,6 +52,7 @@ class TenantIntegrationService:
             )
         return tenant_integrations
 
+    @validate_permissions(Permission.ADMIN)
     async def create_tenant_integration(
         self,
         integration_id: "UUID",
@@ -66,8 +68,15 @@ class TenantIntegrationService:
         tenant_integration = await self.tenant_integration_repo.add(obj=obj)
         return tenant_integration
 
-    async def remove_tenant_integration(self, tenant_integration_id: "UUID") -> None:
-        """Remove an existing tenant integration (tenant-bound)."""
+    @validate_permissions(Permission.ADMIN)
+    async def remove_tenant_integration(
+        self, tenant_integration_id: "UUID"
+    ) -> "TenantIntegration":
+        """Remove a tenant integration and return its snapshot for auditing."""
+        integration = await self.tenant_integration_repo.one(
+            id=tenant_integration_id, tenant_id=self.user.tenant_id
+        )
         await self.tenant_integration_repo.delete_by_tenant(
             id=tenant_integration_id, tenant_id=self.user.tenant_id
         )
+        return integration

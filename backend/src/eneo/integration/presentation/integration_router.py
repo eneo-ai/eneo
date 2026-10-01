@@ -7,6 +7,11 @@ from fastapi import APIRouter, Depends, Query
 from eneo.audit.application.audit_metadata import AuditMetadata
 from eneo.audit.domain.action_types import ActionType
 from eneo.audit.domain.entity_types import EntityType
+from eneo.authentication.endpoint_access import (
+    Authentication,
+    Authorization,
+    endpoint_access,
+)
 from eneo.integration.presentation.models import (
     Integration,
     IntegrationList,
@@ -33,6 +38,11 @@ router = APIRouter()
     description="List all available integrations.",
     responses=responses.get_responses([]),
 )
+@endpoint_access(
+    authentication=Authentication.USER,
+    authorization=Authorization.AUTHENTICATED,
+    reason="Integration services enforce tenant, user and space access for this operation.",
+)
 async def get_integrations(
     container: Annotated[Container, Depends(get_container(with_user=True))],
 ):
@@ -52,6 +62,11 @@ async def get_integrations(
     description="List the tenant's integrations, optionally filtered.",
     responses=responses.get_responses([]),
 )
+@endpoint_access(
+    authentication=Authentication.USER,
+    authorization=Authorization.AUTHENTICATED,
+    reason="Integration services enforce tenant, user and space access for this operation.",
+)
 async def get_tenant_integrations(
     container: Annotated[Container, Depends(get_container(with_user=True))],
     filter: Optional[TenantIntegrationFilter] = None,
@@ -70,8 +85,13 @@ async def get_tenant_integrations(
     "/tenant/add/{integration_id}/",
     response_model=TenantIntegration,
     status_code=200,
-    description="Add an integration to the tenant.",
-    responses=responses.get_responses([400, 404]),
+    description="Add an integration to the tenant. Requires administrator permission.",
+    responses=responses.get_responses([400, 403, 404]),
+)
+@endpoint_access(
+    authentication=Authentication.USER,
+    authorization=Authorization.AUTHENTICATED,
+    reason="Integration services enforce tenant, user and space access for this operation.",
 )
 async def add_tenant_integration(
     integration_id: UUID,
@@ -108,8 +128,13 @@ async def add_tenant_integration(
 @router.delete(
     "/tenant/remove/{tenant_integration_id}/",
     status_code=204,
-    description="Remove an integration from the tenant.",
-    responses=responses.get_responses([404]),
+    description="Remove an integration from the tenant. Requires administrator permission.",
+    responses=responses.get_responses([403, 404]),
+)
+@endpoint_access(
+    authentication=Authentication.USER,
+    authorization=Authorization.AUTHENTICATED,
+    reason="Integration services enforce tenant, user and space access for this operation.",
 )
 async def remove_tenant_integration(
     tenant_integration_id: UUID,
@@ -118,15 +143,9 @@ async def remove_tenant_integration(
     service = container.tenant_integration_service()
     user = container.user()
 
-    # Get tenant integration info BEFORE deletion (snapshot pattern)
-    # Use tenant_id filter to prevent cross-tenant deletion
-    tenant_integration_repo = container.tenant_integration_repo()
-    tenant_integration = await tenant_integration_repo.one(
-        id=tenant_integration_id, tenant_id=user.tenant_id
+    tenant_integration = await service.remove_tenant_integration(
+        tenant_integration_id=tenant_integration_id
     )
-
-    # Delete tenant integration
-    await service.remove_tenant_integration(tenant_integration_id=tenant_integration_id)
 
     # Audit logging
     audit_service = container.audit_service()
@@ -151,6 +170,11 @@ async def remove_tenant_integration(
     status_code=200,
     description="List the current user's personal integrations.",
     responses=responses.get_responses([]),
+)
+@endpoint_access(
+    authentication=Authentication.USER,
+    authorization=Authorization.AUTHENTICATED,
+    reason="Integration services enforce tenant, user and space access for this operation.",
 )
 async def get_user_integrations(
     container: Annotated[Container, Depends(get_container(with_user=True))],
@@ -190,7 +214,12 @@ async def get_user_integrations(
     response_model=UserIntegrationList,
     status_code=200,
     description="List integrations available for a specific space.",
-    responses=responses.get_responses([404]),
+    responses=responses.get_responses([403, 404]),
+)
+@endpoint_access(
+    authentication=Authentication.USER,
+    authorization=Authorization.AUTHENTICATED,
+    reason="SpaceService checks current space read access before listing available integrations.",
 )
 async def get_available_integrations_for_space(
     space_id: UUID,
@@ -201,8 +230,7 @@ async def get_available_integrations_for_space(
     - Personal spaces: Only user OAuth integrations
     - Shared/Organization spaces: Both tenant app and user OAuth integrations
     """
-    space_repo = container.space_repo()
-    space = await space_repo.one(id=space_id)
+    space = await container.space_service().get_space(space_id)
     user = container.user()
 
     service = container.user_integration_service()
@@ -225,6 +253,11 @@ async def get_available_integrations_for_space(
     description="Disconnect the current user's integration.",
     responses=responses.get_responses([403, 404]),
 )
+@endpoint_access(
+    authentication=Authentication.USER,
+    authorization=Authorization.AUTHENTICATED,
+    reason="Integration services enforce tenant, user and space access for this operation.",
+)
 async def disconnect_user_integration(
     user_integration_id: UUID,
     container: Annotated[Container, Depends(get_container(with_user=True))],
@@ -232,12 +265,9 @@ async def disconnect_user_integration(
     service = container.user_integration_service()
     user = container.user()
 
-    # Get user integration info BEFORE deletion (snapshot pattern)
-    user_integration_repo = container.user_integration_repo()
-    user_integration = await user_integration_repo.one(id=user_integration_id)
-
-    # Disconnect integration
-    await service.disconnect_integration(user_integration_id=user_integration_id)
+    user_integration = await service.disconnect_integration(
+        user_integration_id=user_integration_id
+    )
 
     # Audit logging
     audit_service = container.audit_service()
@@ -264,7 +294,12 @@ async def disconnect_user_integration(
     response_model=PaginatedSyncLogList,
     status_code=200,
     description="Get paginated sync history for an integration knowledge.",
-    responses=responses.get_responses([]),
+    responses=responses.get_responses([404]),
+)
+@endpoint_access(
+    authentication=Authentication.USER,
+    authorization=Authorization.AUTHENTICATED,
+    reason="Integration services enforce tenant, user and space access for this operation.",
 )
 async def get_sync_logs(
     integration_knowledge_id: UUID,
@@ -275,16 +310,22 @@ async def get_sync_logs(
     ] = 10,
 ):
     """Get paginated sync history for an integration knowledge."""
+    service = container.integration_knowledge_service()
+    await service.require_sync_log_access(integration_knowledge_id)
     sync_log_repo = container.sync_log_repo()
+    tenant_id = container.user().tenant_id
 
     # Get total count
     total_count = await sync_log_repo.count_by_integration_knowledge(
-        integration_knowledge_id=integration_knowledge_id
+        integration_knowledge_id=integration_knowledge_id, tenant_id=tenant_id
     )
 
     # Get paginated logs
     sync_logs = await sync_log_repo.get_by_integration_knowledge(
-        integration_knowledge_id=integration_knowledge_id, limit=limit, offset=skip
+        integration_knowledge_id=integration_knowledge_id,
+        tenant_id=tenant_id,
+        limit=limit,
+        offset=skip,
     )
 
     # Convert domain entities to presentation models
@@ -313,7 +354,12 @@ async def get_sync_logs(
     response_model=IntegrationPreviewDataList,
     status_code=200,
     description="Get preview data for a user integration.",
-    responses=responses.get_responses([400, 404]),
+    responses=responses.get_responses([400, 403, 404]),
+)
+@endpoint_access(
+    authentication=Authentication.USER,
+    authorization=Authorization.AUTHENTICATED,
+    reason="Integration services enforce tenant, user and space access for this operation.",
 )
 async def get_integration_preview(
     user_integration_id: UUID,
@@ -334,11 +380,18 @@ async def get_integration_preview(
     response_model=SharePointTreeResponse,
     status_code=200,
     description="Get SharePoint/OneDrive folder tree for a user integration.",
-    responses=responses.get_responses([400, 404]),
+    responses=responses.get_responses([400, 403, 404]),
+)
+@endpoint_access(
+    authentication=Authentication.USER,
+    authorization=Authorization.AUTHENTICATED,
+    reason="Integration services enforce tenant, user and space access for this operation.",
 )
 async def get_sharepoint_folder_tree(
     user_integration_id: UUID,
-    space_id: Annotated[UUID, Query(description="Space ID (for auth routing)")],
+    space_id: Annotated[
+        UUID, Query(description="Space ID (requires integration import rights)")
+    ],
     container: Annotated[Container, Depends(get_container(with_user=True))],
     site_id: Annotated[
         Optional[str],
@@ -352,16 +405,18 @@ async def get_sharepoint_folder_tree(
     ] = None,
     folder_path: Annotated[str, Query(description="Current folder path")] = "",
 ):
-    """Get SharePoint/OneDrive folder tree with hybrid authentication support.
+    """Browse an authorized SharePoint/OneDrive connection in an importable space.
 
-    Authentication is determined by space type:
-    - Personal space: Uses user OAuth
-    - Shared/Org space with tenant app: Uses tenant app (no person-dependency)
-    - Shared/Org space without tenant app: Falls back to user OAuth
+    Uses the selected connection's identity after ownership, tenant and space
+    authorization. Organization connections additionally require admin permission.
 
     Provide site_id for SharePoint sites, or drive_id for OneDrive.
     """
-    from eneo.main.exceptions import BadRequestException, NotFoundException
+    from eneo.main.exceptions import (
+        BadRequestException,
+        NotFoundException,
+        UnauthorizedException,
+    )
     from eneo.main.logging import get_logger
 
     logger = get_logger(__name__)
@@ -385,7 +440,7 @@ async def get_sharepoint_folder_tree(
             folder_path=folder_path,
         )
         return SharePointTreeResponse(**tree_data)
-    except (NotFoundException, BadRequestException):
+    except (NotFoundException, BadRequestException, UnauthorizedException):
         # The service raises typed domain exceptions with the correct HTTP status;
         # let them propagate to the global handlers instead of remapping by string.
         raise
@@ -409,6 +464,11 @@ async def get_sharepoint_folder_tree(
     status_code=200,
     description="Get a single integration by ID.",
     responses=responses.get_responses([404]),
+)
+@endpoint_access(
+    authentication=Authentication.USER,
+    authorization=Authorization.AUTHENTICATED,
+    reason="Integration services enforce tenant, user and space access for this operation.",
 )
 async def get_integration_by_id(
     integration_id: UUID,

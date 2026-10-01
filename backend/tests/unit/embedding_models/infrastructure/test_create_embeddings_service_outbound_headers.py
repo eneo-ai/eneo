@@ -127,7 +127,7 @@ class TestFreshness:
             ]
         )
         monkeypatch.setattr(litellm_provider, "load_active_litellm_provider", load)
-        model = SimpleNamespace(name="embed", provider_id=provider_id)
+        model = SimpleNamespace(id=uuid4(), name="embed", provider_id=provider_id)
         service = _service(_user(), session=object())
 
         first = await service._get_adapter(model)  # type: ignore[arg-type]
@@ -145,7 +145,7 @@ class TestFreshness:
             return_value=_provider(provider_id, _stored("{{user.department}}"))
         )
         monkeypatch.setattr(litellm_provider, "load_active_litellm_provider", load)
-        model = SimpleNamespace(name="embed", provider_id=provider_id)
+        model = SimpleNamespace(id=uuid4(), name="embed", provider_id=provider_id)
 
         # Each request's container carries that request's user.
         before = await _service(

@@ -334,6 +334,9 @@ class _FakeMCPProxy:
     def get_tool_purpose(self, prefixed_tool_name: str) -> str | None:
         return None
 
+    def is_internal_tool(self, prefixed_tool_name: str) -> bool:
+        return False
+
     def get_tools_for_llm(self) -> list[dict[str, Any]]:
         return []
 
@@ -542,11 +545,19 @@ class TestEmbedding:
         assert not request.names() & set(EXPECTED_ON_WIRE)
 
     async def test_redirects_are_not_followed(
-        self, loopback: LoopbackProvider, second_loopback: LoopbackProvider
+        self,
+        loopback: LoopbackProvider,
+        second_loopback: LoopbackProvider,
+        monkeypatch: pytest.MonkeyPatch,
     ):
         loopback.redirect_to = f"http://127.0.0.1:{second_loopback.server.server_port}"
         adapter = _embedding_adapter(loopback.base_url, _headers())
-        adapter._get_embeddings.retry.stop = lambda _: True  # type: ignore[attr-defined]
+        # The retry policy is shared by every adapter, so it must be restored.
+        monkeypatch.setattr(
+            adapter._get_embeddings.retry,  # type: ignore[attr-defined]
+            "stop",
+            lambda _: True,
+        )
 
         with pytest.raises(Exception):
             await adapter.get_embedding_for_query("q")
@@ -833,4 +844,4 @@ class TestMasking:
         safe = adapter._mask_sensitive_params(dict(self.PARAMS))
 
         assert safe["extra_headers"] == {"X-Credential": "***", "X-Org-Unit": "***"}
-        assert safe["api_key"] == "...1234"
+        assert "api_key" not in safe

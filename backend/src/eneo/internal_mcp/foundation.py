@@ -7,9 +7,10 @@ An internal MCP server is a FastMCP app the backend both *hosts* (mounted at
 ``/internal-mcp/<name>``) and *connects to* as an MCP client during a
 completion, so built-in tools ride the exact same proxy plumbing as any
 external MCP server. Authentication rides in the bearer token: a short-lived
-access token that authenticates the user and carries an ``assistant_id``
-claim fixing the scope, so tools take no scope arguments and cannot be
-pointed at another assistant.
+token minted for the loopback audience (the rest of the API refuses it) that
+authenticates the user and carries an ``assistant_id`` claim fixing the
+scope, so tools take no scope arguments and cannot be pointed at another
+assistant.
 
 Internal servers are stateless (``stateless_http=True``): no MCP protocol
 session id is ever assigned, and any backend worker can serve a loopback
@@ -27,13 +28,14 @@ from contextlib import asynccontextmanager
 from typing import Any, NamedTuple
 from uuid import UUID, uuid4
 
-import jwt
 from dependency_injector import providers
 from mcp.server.fastmcp import Context, FastMCP
 
+from eneo.authentication.auth_service import INTERNAL_MCP_AUDIENCE, AuthService
 from eneo.database.database import sessionmanager
 from eneo.main.config import get_settings
 from eneo.mcp_servers.domain.entities.mcp_server import MCPServer, MCPServerTool
+from eneo.mcp_servers.infrastructure.client.mcp_client import loopback_endpoint
 
 
 class ToolContext(NamedTuple):
@@ -54,11 +56,11 @@ def bearer_from_ctx(ctx: Context) -> str:
 
 def assistant_id_from_token(token: str) -> UUID:
     settings = get_settings()
-    claims = jwt.decode(
+    _, claims = AuthService().get_jwt_payload_with_claims(
         token,
         key=str(settings.jwt_secret),
-        audience=settings.jwt_audience,
-        algorithms=[settings.jwt_algorithm],
+        aud=INTERNAL_MCP_AUDIENCE,
+        algs=[settings.jwt_algorithm],
     )
     raw = claims.get("assistant_id")
     if not raw:
@@ -69,11 +71,11 @@ def assistant_id_from_token(token: str) -> UUID:
 def mcp_server_id_from_token(token: str) -> UUID:
     """The built-in provider row this token was minted for."""
     settings = get_settings()
-    claims = jwt.decode(
+    _, claims = AuthService().get_jwt_payload_with_claims(
         token,
         key=str(settings.jwt_secret),
-        audience=settings.jwt_audience,
-        algorithms=[settings.jwt_algorithm],
+        aud=INTERNAL_MCP_AUDIENCE,
+        algs=[settings.jwt_algorithm],
     )
     raw = claims.get("mcp_server_id")
     if not raw:
@@ -100,7 +102,7 @@ async def internal_tool_context(ctx: Context):
     async with sessionmanager.session() as session:
         async with session.begin():
             container = Container(session=providers.Object(session))
-            user = await container.user_service().authenticate(token=token)
+            user = await container.user_service().authenticate_internal_mcp_token(token)
             override_user(container=container, user=user)
             yield ToolContext(container=container, user=user, assistant_id=assistant_id)
 
@@ -132,7 +134,6 @@ async def build_ephemeral_server(
     appends per-completion enrichment to the named tools' descriptions
     (enrichment only appends; the shared docstring always leads).
     """
-    settings = get_settings()
     server_id = uuid4()
     suffixes = tool_description_suffixes or {}
     tools = [
@@ -155,11 +156,10 @@ async def build_ephemeral_server(
         tenant_id=tenant_id,
         name=name,
         description=description,
-        http_url=(
-            f"{settings.internal_mcp_base_url.rstrip('/')}/internal-mcp/{name}/mcp"
-        ),
+        http_url=loopback_endpoint(name),
         http_auth_type="bearer",
         http_auth_config_schema={"token": token},
         is_enabled=True,
         tools=tools,
+        is_internal=True,
     )

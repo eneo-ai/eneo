@@ -1,7 +1,8 @@
-from fastapi import FastAPI, HTTPException, Request
+from fastapi import Depends, FastAPI, HTTPException, Request
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
 
+from eneo.authentication.endpoint_access import require_endpoint_access
 from eneo.main.logging import get_logger
 from eneo.scim.domain.errors import (
     ScimHttpError,
@@ -9,6 +10,7 @@ from eneo.scim.domain.errors import (
     ScimValidationError,
 )
 from eneo.scim.router import router as scim_router
+from eneo.server.endpoint_routes import declare_framework_documentation_access
 
 _SCIM_ERROR_SCHEMA = "urn:ietf:params:scim:api:messages:2.0:Error"
 logger = get_logger(__name__)
@@ -32,7 +34,9 @@ scim_app = FastAPI(
     description="RFC 7644 compliant SCIM provisioning API. Authenticate with the tenant SCIM bearer token.",
     docs_url="/docs",
     redoc_url="/redoc",
+    dependencies=[Depends(require_endpoint_access)],
 )
+declare_framework_documentation_access(scim_app)
 
 scim_app.include_router(scim_router)
 

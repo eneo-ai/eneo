@@ -197,6 +197,7 @@ class TestReadFileAuthorization:
             expires_at=int(time.time()) - 10,
             content_disposition=ContentDisposition.ATTACHMENT,
             tenant_id=uuid4(),
+            issued_at=int(time.time()) - 100,
         )
         url = (
             f"https://eneo.example/api/v1/files/{file_id}/original/download/"

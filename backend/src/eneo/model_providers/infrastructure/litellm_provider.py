@@ -1,6 +1,8 @@
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from collections.abc import Mapping
+from dataclasses import dataclass
+from dataclasses import field as dataclass_field
 from typing import TYPE_CHECKING, Any
 from uuid import UUID
 
@@ -25,6 +27,27 @@ if TYPE_CHECKING:
     from eneo.settings.encryption_service import EncryptionService
     from eneo.users.user import UserInDB
 
+_OPTIONAL_PROVIDER_FIELDS = ("api_type", "organization")
+
+
+def embedding_provider_configuration(
+    provider_type: str,
+    credentials: Mapping[str, object],
+    config: Mapping[str, object],
+) -> dict[str, object]:
+    """Effective embedding route options; API-key rotation preserves vectors."""
+    fields = {field["name"] for field in get_field_definitions(provider_type)}
+    fields.update(_OPTIONAL_PROVIDER_FIELDS)
+    fields.difference_update({"api_key", "deployment_name"})
+    values: dict[str, object] = {}
+    for field in fields:
+        value = credentials.get(field)
+        if value is None:
+            value = config.get(field)
+        if value:
+            values[field] = value
+    return values
+
 
 @dataclass(frozen=True)
 class ResolvedLiteLLMProvider:
@@ -34,7 +57,9 @@ class ResolvedLiteLLMProvider:
     provider_type: str
     credentials: dict[str, Any]
     config: dict[str, Any]
-    outbound_headers: list[dict[str, Any]] | None = field(default=None, repr=False)
+    outbound_headers: list[dict[str, Any]] | None = dataclass_field(
+        default=None, repr=False
+    )
 
     def create_outbound_headers(
         self,
@@ -100,7 +125,7 @@ def _build_litellm_provider_kwargs(
 
     # Existing provider records may contain these optional LiteLLM settings
     # even though they are not rendered as setup fields.
-    for field in ("api_type", "organization"):
+    for field in _OPTIONAL_PROVIDER_FIELDS:
         value = credential_resolver.get_credential_field(field=field)
         if value:
             kwargs[field] = value
