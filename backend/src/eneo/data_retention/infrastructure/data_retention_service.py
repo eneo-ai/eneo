@@ -13,6 +13,10 @@ from eneo.database.tables.audit_retention_policy_table import AuditRetentionPoli
 from eneo.database.tables.questions_table import Questions
 from eneo.database.tables.sessions_table import Sessions
 from eneo.database.tables.spaces_table import Spaces
+from eneo.questions.generated_files import (
+    delete_unreferenced_files,
+    generated_file_ids,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -121,13 +125,24 @@ class DataRetentionService:
             batch_subquery = base_subquery.order_by(record_table.id).limit(  # type: ignore[attr-defined]
                 RETENTION_BATCH_SIZE
             )
-            query = sa.delete(record_table).where(record_table.id.in_(batch_subquery))  # type: ignore[attr-defined]
+            batch_ids = list(await self.session.scalars(batch_subquery))
+            if not batch_ids:
+                break
+            # An answer owns the files its tools generated. Its file links
+            # cascade with it but the files do not, so collect them first.
+            generated = (
+                await generated_file_ids(self.session, Questions.id.in_(batch_ids))
+                if record_table is Questions
+                else []
+            )
+            query = sa.delete(record_table).where(record_table.id.in_(batch_ids))  # type: ignore[attr-defined]
             result = await self.session.execute(query)
             batch_deleted = affected_row_count(result)
 
             if batch_deleted == 0:
                 break
 
+            await delete_unreferenced_files(self.session, generated)
             total_deleted += batch_deleted
             logger.debug(
                 f"Deleted batch of {batch_deleted} {record_type} (total: {total_deleted})"

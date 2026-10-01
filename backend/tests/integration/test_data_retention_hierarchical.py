@@ -21,7 +21,8 @@ from eneo.data_retention.infrastructure.data_retention_service import (
 from eneo.database.tables.app_table import AppRuns, Apps
 from eneo.database.tables.assistant_table import Assistants
 from eneo.database.tables.audit_retention_policy_table import AuditRetentionPolicy
-from eneo.database.tables.questions_table import Questions
+from eneo.database.tables.files_table import Files
+from eneo.database.tables.questions_table import Questions, QuestionsFiles
 from eneo.database.tables.sessions_table import Sessions
 from eneo.database.tables.spaces_table import Spaces
 
@@ -774,3 +775,64 @@ async def test_tenant_enabled_but_days_null_keeps_forever(
     assert exists is not None, (
         "Question should be kept when tenant has enabled=True but days=NULL"
     )
+
+
+async def test_retention_removes_generated_files_and_keeps_uploads(
+    async_session: AsyncSession,
+    test_assistant: Assistants,
+    test_tenant,
+    admin_user,
+    retention_service: DataRetentionService,
+):
+    """A deleted answer takes the files its tools generated with it.
+
+    Uploads stay (the user manages those), and so does a generated file that
+    an answer inside the retention period still links.
+    """
+    test_assistant.data_retention_days = 30
+    async_session.add(test_assistant)
+    await async_session.flush()
+
+    old_question = await create_old_question(
+        async_session, test_assistant.id, test_tenant.id, admin_user.id, days_old=60
+    )
+    recent_question = await create_old_question(
+        async_session, test_assistant.id, test_tenant.id, admin_user.id, days_old=10
+    )
+
+    def new_file(name: str) -> Files:
+        return Files(
+            name=name,
+            mimetype="application/pdf",
+            user_id=admin_user.id,
+            tenant_id=test_tenant.id,
+        )
+
+    upload, generated, shared = new_file("upload"), new_file("made"), new_file("kept")
+    async_session.add_all([upload, generated, shared])
+    await async_session.flush()
+    upload_id, generated_id, shared_id = upload.id, generated.id, shared.id
+    async_session.add_all(
+        [
+            QuestionsFiles(question_id=old_question.id, file_id=upload_id, type="user"),
+            QuestionsFiles(
+                question_id=old_question.id, file_id=generated_id, type="assistant"
+            ),
+            QuestionsFiles(
+                question_id=old_question.id, file_id=shared_id, type="assistant"
+            ),
+            QuestionsFiles(
+                question_id=recent_question.id, file_id=shared_id, type="assistant"
+            ),
+        ]
+    )
+    await async_session.flush()
+
+    assert await retention_service.delete_old_questions() == 1
+
+    remaining = set(
+        await async_session.scalars(
+            select(Files.id).where(Files.id.in_([upload_id, generated_id, shared_id]))
+        )
+    )
+    assert remaining == {upload_id, shared_id}
