@@ -11,25 +11,16 @@ const columns: SharePointFilterColumn[] = [
 ];
 
 describe("SharePointFilterMenu", () => {
-  it("shows chosen values as removable chips and reports changes", async () => {
-    const onChange = vi.fn();
+  it("counts the chosen filters on the button", async () => {
     render(SharePointFilterMenu, {
       columns,
       facets: { Dokumenttyp: "Policy", Extern: "true" },
-      onChange
+      onChange: vi.fn()
     });
 
     await expect
       .element(page.getByRole("button", { name: m.sharepoint_filters_aria({ count: "2" }) }))
       .toBeVisible();
-    await expect.element(page.getByText("Policy")).toBeVisible();
-    await expect.element(page.getByText(m.yes())).toBeVisible();
-
-    await page
-      .getByRole("button", { name: m.sharepoint_filter_remove({ column: "Extern publicering" }) })
-      .click();
-
-    expect(onChange).toHaveBeenCalledWith({ Dokumenttyp: "Policy" });
   });
 
   it("opens every column in one list instead of spreading them across the page", async () => {

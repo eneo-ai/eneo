@@ -1,18 +1,19 @@
 <script lang="ts">
-  import { ListFilter, Search, X } from "@lucide/svelte";
+  import { ListFilter, Search } from "@lucide/svelte";
   import { Badge } from "$lib/components/ui/badge/index.js";
   import { Button, buttonVariants } from "$lib/components/ui/button/index.js";
   import * as InputGroup from "$lib/components/ui/input-group/index.js";
   import * as Popover from "$lib/components/ui/popover/index.js";
   import * as Select from "$lib/components/ui/select/index.js";
   import { m } from "$lib/paraglide/messages";
+  import { activeFacets, facetValueLabel, withFacet } from "./filterFacets";
   import type { SharePointFilterColumn } from "./treeState";
 
   /**
    * Column filters for a library search. One button opens every filterable
    * column in a scrolling list, so a library with thirty columns takes the same
-   * room as one with two; the chosen values sit beside the search as chips a
-   * person can remove one at a time.
+   * room as one with two. The button keeps its place beside the search field;
+   * the chosen values are shown by SharePointFilterChips on their own row.
    */
   let {
     columns,
@@ -28,26 +29,16 @@
   const COLUMN_SEARCH_THRESHOLD = 6;
 
   let columnSearch = $state("");
-  const active = $derived(
-    columns
-      .map((column) => ({ column, value: facets[column.name] ?? "" }))
-      .filter((entry) => entry.value !== "")
-  );
+  const active = $derived(activeFacets(columns, facets));
+  const labels = $derived({ yes: m.yes(), no: m.no() });
   const visibleColumns = $derived.by(() => {
     const needle = columnSearch.trim().toLowerCase();
     if (!needle) return columns;
     return columns.filter((column) => column.label.toLowerCase().includes(needle));
   });
 
-  function valueLabel(column: SharePointFilterColumn, value: string): string {
-    if (column.kind === "boolean") return value === "true" ? m.yes() : m.no();
-    return value;
-  }
-
   function setFacet(name: string, value: string) {
-    const next = { ...facets, [name]: value };
-    if (!value) delete next[name];
-    onChange(next);
+    onChange(withFacet(facets, name, value));
   }
 </script>
 
@@ -55,7 +46,7 @@
   <Popover.Root>
     <Popover.Trigger
       class={buttonVariants({ variant: active.length > 0 ? "secondary" : "outline" }) +
-        " h-10 gap-1.5"}
+        " h-10 shrink-0 gap-1.5"}
       aria-label={m.sharepoint_filters_aria({ count: String(active.length) })}
     >
       <ListFilter class="size-4" aria-hidden="true" />
@@ -98,7 +89,7 @@
             >
               <Select.Trigger {id} class="w-full">
                 {facets[column.name]
-                  ? valueLabel(column, facets[column.name])
+                  ? facetValueLabel(column, facets[column.name], labels)
                   : m.sharepoint_filter_any()}
               </Select.Trigger>
               <Select.Content>
@@ -129,25 +120,4 @@
       {/if}
     </Popover.Content>
   </Popover.Root>
-{/if}
-
-{#if active.length > 0}
-  <ul class="flex flex-wrap items-center gap-1.5" aria-label={m.sharepoint_filters_active()}>
-    {#each active as entry (entry.column.name)}
-      <li>
-        <Badge variant="secondary" class="h-7 gap-1 pr-1 pl-2.5 text-xs">
-          <span class="text-muted-foreground">{entry.column.label}:</span>
-          <span class="font-medium">{valueLabel(entry.column, entry.value)}</span>
-          <button
-            type="button"
-            class="hover:bg-muted focus-visible:ring-ring/50 inline-flex size-5 items-center justify-center rounded-full outline-none focus-visible:ring-[3px]"
-            aria-label={m.sharepoint_filter_remove({ column: entry.column.label })}
-            onclick={() => setFacet(entry.column.name, "")}
-          >
-            <X class="size-3.5" aria-hidden="true" />
-          </button>
-        </Badge>
-      </li>
-    {/each}
-  </ul>
 {/if}
