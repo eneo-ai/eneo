@@ -340,6 +340,8 @@ FLOW_PACKAGE_IMPORT_CONFLICT_EXAMPLES: dict[str, dict[str, object]] = {
 }
 
 _FLOW_PACKAGE_EXPORT_BAD_REQUEST_MESSAGES = {
+    FlowPackageExportErrorCode.TEMPLATE_BINDINGS_INCOMPLETE: "Review the Word step: map every template field and remove obsolete mappings before exporting.",
+    FlowPackageExportErrorCode.TEMPLATE_FILE_INVALID: "The Word template is unavailable or invalid; upload it again before exporting.",
     FlowPackageExportErrorCode.MISSING_ASSISTANT_SNAPSHOT: (
         "Flow package export requires assistant authoring snapshots for every step."
     ),

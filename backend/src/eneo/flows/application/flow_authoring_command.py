@@ -31,6 +31,7 @@ from eneo.flows.flow_authoring_spec import (
 from eneo.flows.flow_resource_bindings import (
     FlowResourceBindingSource,
     LocalResourceBinding,
+    ResourceSlotRef,
 )
 from eneo.flows.flow_validators import validate_step_count
 from eneo.main.exceptions import BadRequestException
@@ -68,6 +69,14 @@ class TemplateAttachmentIntent(BaseModel):
     terminal_plan_step_ref: str
 
 
+class TemplateImportIntent(BaseModel):
+    """Verified template bytes to create within the new Flow's transaction."""
+
+    slot_ref: ResourceSlotRef
+    filename: str
+    content: bytes
+
+
 class CreateFlowAuthoringCommand(BaseModel):
     kind: Literal["create"] = "create"
     space_id: UUID
@@ -76,6 +85,7 @@ class CreateFlowAuthoringCommand(BaseModel):
     resource_bindings: tuple[LocalResourceBinding, ...] = ()
     default_transcription_model_id: UUID | None = None
     template_attachment_intent: TemplateAttachmentIntent | None = None
+    template_imports: tuple[TemplateImportIntent, ...] = ()
 
 
 class EditFlowAuthoringCommand(BaseModel):
@@ -234,6 +244,11 @@ class FlowAuthoringCommandService:
             resource_bindings=prepared.command.resource_bindings,
             binding_source=_binding_source_for_origin(prepared.command.origin),
             template_attachment_intent=(prepared.command.template_attachment_intent),
+            template_imports=(
+                prepared.command.template_imports
+                if isinstance(prepared.command, CreateFlowAuthoringCommand)
+                else ()
+            ),
             template_asset_service=template_asset_service,
             progress_callback=progress_callback,
         )

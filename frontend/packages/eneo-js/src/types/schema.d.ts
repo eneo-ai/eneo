@@ -14381,6 +14381,11 @@ export interface components {
        * @description Portable `.eneopkg` bundle. The server validates the package structure, checksum, schema versions, and local-resource portability.
        */
       package_file: string;
+      /**
+       * Template Uploads
+       * @description JSON file containing replacement DOCX uploads for templates omitted from the package.
+       */
+      template_uploads?: string | null;
     };
     /** Body_create_icon_api_v1_icons__post */
     Body_create_icon_api_v1_icons__post: {
@@ -18803,6 +18808,12 @@ export interface components {
        */
       description?: string;
       /**
+       * Include Templates
+       * @description Include referenced DOCX templates. When false, the importer must upload templates with matching Word fields.
+       * @default true
+       */
+      include_templates?: boolean;
+      /**
        * Name
        * @description Human-readable package name shown on import.
        */
@@ -18959,6 +18970,13 @@ export interface components {
       /** @description Load-bearing target-space state from the reviewed plan. A changed audio transcription default requires a fresh plan. */
       expected_target_state: components["schemas"]["FlowPackageImportTargetState"];
       /**
+       * Expected Template Upload Checksums
+       * @description Checksums of uploaded replacement templates from the reviewed import plan.
+       */
+      expected_template_upload_checksums?: {
+        [key: string]: string;
+      };
+      /**
        * Package Base64
        * @description Base64-encoded `.eneopkg` bytes. The decoded package must stay within the Flow package upload byte cap.
        */
@@ -18968,6 +18986,8 @@ export interface components {
        * @description Local target resources selected for package dependency slots. Knowledge slots may target `collection`, `website`, or `integration_knowledge` resources.
        */
       selected_bindings?: components["schemas"]["FlowPackageImportResourceBindingRequest"][];
+      /** Template Uploads */
+      template_uploads?: components["schemas"]["FlowPackageTemplateUpload"][];
     };
     /** FlowPackageImportResourceBindingRequest */
     FlowPackageImportResourceBindingRequest: {
@@ -19237,8 +19257,13 @@ export interface components {
       status: components["schemas"]["FlowPackageImportPlanStatus"];
       /** Suggestions */
       suggestions: components["schemas"]["FlowPackageLocalCandidate"][];
+      template?: components["schemas"]["FlowPackageTemplateDescriptor"] | null;
       /** Total Candidate Count */
       total_candidate_count: number;
+      /** Upload Checksum */
+      upload_checksum?: string | null;
+      /** Upload Filename */
+      upload_filename?: string | null;
       /** Used By Steps */
       used_by_steps?: string[];
     };
@@ -19250,6 +19275,38 @@ export interface components {
       replacement_notes?: string | null;
       /** Summary */
       summary?: string | null;
+    };
+    /** FlowPackageTemplateDescriptor */
+    FlowPackageTemplateDescriptor: {
+      /** Asset Path */
+      asset_path?: string | null;
+      /** Checksum */
+      checksum: string;
+      /** Fields */
+      fields: components["schemas"]["FlowPackageTemplateField"][];
+      /** Filename */
+      filename: string;
+      /** Size Bytes */
+      size_bytes: number;
+    };
+    /** FlowPackageTemplateField */
+    FlowPackageTemplateField: {
+      /**
+       * Kind
+       * @enum {string}
+       */
+      kind: "text" | "rich";
+      /** Name */
+      name: string;
+    };
+    /** FlowPackageTemplateUpload */
+    FlowPackageTemplateUpload: {
+      /** Content Base64 */
+      content_base64: string;
+      /** Filename */
+      filename: string;
+      /** Template Ref */
+      template_ref: string;
     };
     /**
      * FlowPackageValidationPublic

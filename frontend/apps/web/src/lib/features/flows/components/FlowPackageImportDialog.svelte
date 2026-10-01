@@ -4,6 +4,7 @@
   import {
     EneoError,
     type FlowPackageDependencyResolution,
+    type FlowPackageTemplateUpload,
     type FlowPackageImportResult,
     type Eneo
   } from "@eneo/eneo-js";
@@ -21,6 +22,7 @@
   import { Badge } from "$lib/components/ui/badge/index.js";
   import { Button } from "$lib/components/ui/button/index.js";
   import * as Card from "$lib/components/ui/card/index.js";
+  import * as Field from "$lib/components/ui/field/index.js";
   import * as Dialog from "$lib/components/ui/dialog/index.js";
   import { Input } from "$lib/components/ui/input/index.js";
   import * as Select from "$lib/components/ui/select/index.js";
@@ -75,6 +77,8 @@
     null
   );
   let selections = $state<FlowPackageImportSelectionState>({});
+  let templateUploads = $state<Record<string, FlowPackageTemplateUpload>>({});
+  let templateErrors = $state<Record<string, string>>({});
   let loadError = $state<string | null>(null);
   let importError = $state<string | null>(null);
   let loadingPlan = $state(false);
@@ -94,6 +98,7 @@
   );
 
   function handleOpenChange(next: boolean) {
+    if (importing && !next) return;
     open = next;
     if (!next) reset();
   }
@@ -129,6 +134,8 @@
     selectedFile = null;
     plan = null;
     selections = {};
+    templateUploads = {};
+    templateErrors = {};
     loadError = null;
     importError = null;
     loadingPlan = false;
@@ -145,6 +152,8 @@
     selectedFile = file;
     plan = null;
     selections = {};
+    templateUploads = {};
+    templateErrors = {};
     loadError = null;
     importError = null;
     const controller = new AbortController();
@@ -172,24 +181,80 @@
     return requestId === planRequestId && !signal.aborted;
   }
 
-  async function loadImportPlan(file: File, requestId: number, signal: AbortSignal) {
+  async function loadImportPlan(
+    file: File,
+    requestId: number,
+    signal: AbortSignal,
+    uploads: Record<string, FlowPackageTemplateUpload> = {},
+    templateSlot?: string
+  ) {
     loadingPlan = true;
+    loadError = null;
+    importError = null;
     try {
-      const nextPlan = await eneo.flows.packages.createImportPlan({ spaceId, file, signal });
+      const nextPlan = await eneo.flows.packages.createImportPlan({
+        spaceId,
+        file,
+        signal,
+        templateUploads: Object.values(uploads)
+      });
       if (!isCurrentPlanLoad(requestId, signal)) return;
       plan = nextPlan;
-      selections = createInitialFlowPackageImportSelections(nextPlan);
+      selections = { ...createInitialFlowPackageImportSelections(nextPlan), ...selections };
+      templateUploads = uploads;
     } catch (error) {
       if (!isCurrentPlanLoad(requestId, signal)) return;
       const message =
         mapFlowPackageImportError(error) ??
         (error instanceof EneoError ? error.getReadableMessage() : String(error));
-      loadError = m.flow_package_import_plan_failed({ message });
+      if (templateSlot)
+        templateErrors = {
+          ...templateErrors,
+          [templateSlot]: m.flow_package_template_not_applied({ message })
+        };
+      else loadError = m.flow_package_import_plan_failed({ message });
     } finally {
       if (isCurrentPlanLoad(requestId, signal)) {
         loadingPlan = false;
         planAbortController = null;
       }
+    }
+  }
+
+  async function handleTemplateChange(event: Event, slotKey: string) {
+    const input = event.currentTarget as HTMLInputElement;
+    const file = input.files?.[0];
+    input.value = "";
+    if (!file || !selectedFile) return;
+    templateErrors = { ...templateErrors, [slotKey]: "" };
+    if (!file.name.toLowerCase().endsWith(".docx") || file.size > 5 * 1024 * 1024) {
+      templateErrors = { ...templateErrors, [slotKey]: m.flow_package_template_file_help() };
+      return;
+    }
+    cancelPlanLoad();
+    const controller = new AbortController();
+    const requestId = ++planRequestId;
+    planAbortController = controller;
+    loadingPlan = true;
+    try {
+      const content = await encodeFlowPackageFileToBase64(file);
+      if (!isCurrentPlanLoad(requestId, controller.signal)) return;
+      await loadImportPlan(
+        selectedFile,
+        requestId,
+        controller.signal,
+        {
+          ...templateUploads,
+          [slotKey]: { template_ref: slotKey, filename: file.name, content_base64: content }
+        },
+        slotKey
+      );
+    } catch (error) {
+      if (isCurrentPlanLoad(requestId, controller.signal)) {
+        templateErrors = { ...templateErrors, [slotKey]: m.flow_package_template_read_failed() };
+      }
+    } finally {
+      if (isCurrentPlanLoad(requestId, controller.signal)) loadingPlan = false;
     }
   }
 
@@ -213,7 +278,15 @@
         packageBase64,
         expectedContentChecksum: plan.content_checksum,
         expectedTargetState: plan.target_state,
-        selectedBindings
+        selectedBindings,
+        templateUploads: Object.values(templateUploads),
+        expectedTemplateUploadChecksums: Object.fromEntries(
+          dependencyResolutions.flatMap((resolution) =>
+            resolution.kind === "template_asset" && resolution.upload_checksum
+              ? [[getFlowPackageResolutionSlotKey(resolution), resolution.upload_checksum]]
+              : []
+          )
+        )
       });
       toast.success(m.flow_package_import_success());
       open = false;
@@ -353,6 +426,13 @@
   <Dialog.Content
     class="grid max-h-[92vh] !max-w-2xl grid-rows-[auto_minmax(0,1fr)_auto] !gap-0 overflow-hidden !p-0 lg:!max-w-3xl"
     closeLabel={m.close()}
+    showCloseButton={!importing}
+    onEscapeKeydown={(event) => {
+      if (importing) event.preventDefault();
+    }}
+    onInteractOutside={(event) => {
+      if (importing) event.preventDefault();
+    }}
   >
     <header class="border-default flex items-start gap-3 border-b px-5 py-4 sm:px-6 sm:py-5">
       <div
@@ -379,7 +459,7 @@
         accept={FILE_ACCEPT}
         disabled={importing}
         onchange={handleFileChange}
-        class="sr-only"
+        class="sr-only !h-px !w-px !p-0"
       />
 
       {#if !selectedFile}
@@ -542,7 +622,9 @@
                         {/if}
                         {#each readiness.blockingReasons as reason (`${reason.slotKey}:${reason.code}`)}
                           <li>
-                            {#if reason.code === "template_asset_unsupported"}
+                            {#if reason.code === "template_upload_missing"}
+                              {m.flow_package_template_upload_missing({ name: reason.slotLabel })}
+                            {:else if reason.code === "template_asset_unsupported"}
                               {m.flow_package_template_unsupported()}
                             {:else if reason.code === "dependency_unsupported"}
                               {m.flow_package_dependency_unsupported({
@@ -612,7 +694,13 @@
                           <Badge variant="secondary" class="h-5 font-medium">
                             {requirementKindLabel(resolution.kind)}
                           </Badge>
-                          {#if resolution.selection_required_for_install}
+                          {#if resolution.kind === "template_asset" && resolution.template}
+                            <Badge variant="outline"
+                              >{resolution.install_blocks
+                                ? m.flow_package_required()
+                                : m.flow_package_template_ready()}</Badge
+                            >
+                          {:else if resolution.selection_required_for_install}
                             <span
                               class="border-warning-default/40 bg-warning-dimmer/50 text-warning-stronger inline-flex h-5 items-center gap-1 rounded-full border px-1.5 text-xs font-medium"
                             >
@@ -669,7 +757,49 @@
                       </div>
 
                       <div class="w-full sm:w-72 sm:shrink-0">
-                        {#if resolution.status === "unsupported"}
+                        {#if resolution.kind === "template_asset" && resolution.template}
+                          <div class="grid gap-2 text-sm">
+                            <p class="text-primary font-medium break-all">
+                              {resolution.upload_filename ?? resolution.template.filename}
+                            </p>
+                            <p class="text-secondary">
+                              {resolution.template.asset_path
+                                ? m.flow_package_template_included()
+                                : m.flow_package_template_replacement_help()}
+                            </p>
+                            <p class="text-secondary break-words">
+                              {m.flow_package_template_expected_fields({
+                                fields: resolution.template.fields
+                                  .map((field) => field.name)
+                                  .join(", ")
+                              })}
+                            </p>
+                            {#if !resolution.template.asset_path}
+                              <Field.Field>
+                                <Field.Label for={`template-upload-${slotKey}`}
+                                  >{m.flow_package_template_choose({
+                                    name: slotLabel
+                                  })}</Field.Label
+                                >
+                                <Input
+                                  id={`template-upload-${slotKey}`}
+                                  type="file"
+                                  accept=".docx,application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+                                  disabled={importing || loadingPlan}
+                                  onchange={(event) => handleTemplateChange(event, slotKey)}
+                                  aria-describedby={`template-upload-help-${slotKey}`}
+                                  aria-invalid={!!templateErrors[slotKey]}
+                                />
+                                <Field.Description id={`template-upload-help-${slotKey}`}
+                                  >{m.flow_package_template_file_help()}</Field.Description
+                                >
+                                {#if templateErrors[slotKey]}<Field.Error role="alert"
+                                    >{templateErrors[slotKey]}</Field.Error
+                                  >{/if}
+                              </Field.Field>
+                            {/if}
+                          </div>
+                        {:else if resolution.status === "unsupported"}
                           <div class="text-destructive flex items-start gap-1.5 text-sm">
                             <AlertTriangle class="mt-0.5 size-4 shrink-0" />
                             <span>

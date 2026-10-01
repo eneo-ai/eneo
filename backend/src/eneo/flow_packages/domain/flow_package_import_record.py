@@ -18,12 +18,22 @@ def _empty_bindings() -> list[LocalResourceBinding]:
     return []
 
 
+class FlowPackageTemplateUploadIdentity(BaseModel):
+    model_config = ConfigDict(extra="forbid", strict=True)
+
+    checksum: str
+    filename: str
+
+
 class FlowPackageImportSelection(BaseModel):
     model_config = ConfigDict(extra="forbid", strict=True)
 
     selected_bindings: list[LocalResourceBinding] = Field(
         default_factory=_empty_bindings,
         description="Local target resources selected for package dependency slots.",
+    )
+    template_uploads: dict[str, FlowPackageTemplateUploadIdentity] = Field(
+        default_factory=dict, exclude_if=lambda value: not value
     )
 
     def bindings_tuple(self) -> tuple[LocalResourceBinding, ...]:

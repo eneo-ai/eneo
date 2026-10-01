@@ -228,6 +228,24 @@ describe("flows templates endpoint", () => {
     );
   });
 
+  it("sends Word replacements as a JSON file part in import plans", async () => {
+    const fetch = vi.fn(async () => ({ package_id: "se.demo.report" }));
+    const flows = initFlows({ fetch });
+    const templateUploads = [
+      { template_ref: "template_asset.report", filename: "report.docx", content_base64: "UEsDBAo=" }
+    ];
+    await flows.packages.createImportPlan({
+      spaceId: "space-1",
+      file: new File(["pkg"], "report.eneopkg"),
+      templateUploads
+    });
+    const uploads =
+      fetch.mock.calls[0][1].requestBody["multipart/form-data"].get("template_uploads");
+    expect(uploads.name).toBe("templates.json");
+    expect(uploads.type.split(";")[0]).toBe("application/json");
+    expect(JSON.parse(await uploads.text())).toEqual(templateUploads);
+  });
+
   it("imports packages as drafts with selected resource bindings", async () => {
     const fetch = vi.fn(async () => ({ flow_id: "flow-1" }));
     const flows = initFlows({ fetch });
@@ -263,7 +281,9 @@ describe("flows templates endpoint", () => {
             audio_transcription_required: false,
             default_transcription_model_id: null
           },
-          selected_bindings: selectedBindings
+          selected_bindings: selectedBindings,
+          template_uploads: [],
+          expected_template_upload_checksums: {}
         }
       }
     });
@@ -300,7 +320,8 @@ describe("flows templates endpoint", () => {
           package_id: "se.demo.report",
           package_version: "1.0.0",
           name: "Report",
-          description: "Reusable report flow"
+          description: "Reusable report flow",
+          include_templates: true
         }
       },
       signal: undefined

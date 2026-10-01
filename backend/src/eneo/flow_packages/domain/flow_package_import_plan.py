@@ -29,6 +29,9 @@ from eneo.flow_packages.domain.flow_package_requirements import (
     FlowPackageTemplateAssetGuidance,
     serialize_flow_package_slot_ref,
 )
+from eneo.flow_packages.domain.flow_package_templates import (
+    FlowPackageTemplateDescriptor,
+)
 from eneo.flows.flow_resource_bindings import LocalResourceKind, ResourceSlotRef
 
 MAX_IMPORT_PLAN_SUGGESTIONS: Final[int] = 10
@@ -211,6 +214,9 @@ class FlowPackageTemplateAssetDependencyResolution(
         FlowPackageRequirementKind.TEMPLATE_ASSET
     )
     guidance: FlowPackageTemplateAssetGuidance | None = None
+    template: FlowPackageTemplateDescriptor | None = None
+    upload_checksum: str | None = None
+    upload_filename: str | None = None
 
 
 FlowPackageDependencyResolutionEntry: TypeAlias = Annotated[

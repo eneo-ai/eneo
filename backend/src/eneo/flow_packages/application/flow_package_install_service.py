@@ -1,7 +1,8 @@
 from __future__ import annotations
 
-from collections.abc import Iterable
-from dataclasses import dataclass
+from collections.abc import Iterable, Mapping
+from dataclasses import dataclass, field
+from typing import TYPE_CHECKING
 from uuid import UUID
 
 from eneo.flow_packages.application.flow_package_import_planner import (
@@ -9,6 +10,9 @@ from eneo.flow_packages.application.flow_package_import_planner import (
 )
 from eneo.flow_packages.application.flow_package_model_matching import (
     hard_model_candidate_rejection_reasons,
+)
+from eneo.flow_packages.application.flow_package_template_uploads import (
+    resolve_flow_package_template_files,
 )
 from eneo.flow_packages.domain.flow_package_draft import normalize_flow_package_spec
 from eneo.flow_packages.domain.flow_package_envelope import FlowPackageEnvelope
@@ -24,16 +28,19 @@ from eneo.flow_packages.domain.flow_package_import_plan import (
 )
 from eneo.flow_packages.domain.flow_package_import_record import (
     FlowPackageImportSelection,
+    FlowPackageTemplateUploadIdentity,
 )
 from eneo.flow_packages.domain.flow_package_requirements import (
     FlowPackageKnowledgeRequirement,
     FlowPackageModelRequirement,
     FlowPackageTemplateAssetRequirement,
 )
+from eneo.flow_packages.domain.flow_package_templates import FlowPackageTemplateFile
 from eneo.flows.application.flow_authoring_command import (
     CreateFlowAuthoringCommand,
     FlowAuthoringCommandService,
     FlowPackageAuthoringOrigin,
+    TemplateImportIntent,
 )
 from eneo.flows.application.flow_service import FlowService
 from eneo.flows.flow_authoring_spec import FlowDraftSpecCore, StepSpec
@@ -43,6 +50,9 @@ from eneo.flows.flow_resource_bindings import (
     ResourceSlotRef,
     index_local_resource_bindings,
 )
+
+if TYPE_CHECKING:
+    from eneo.flows.flow_template_asset_service import FlowTemplateAssetService
 
 
 @dataclass(frozen=True, slots=True)
@@ -69,6 +79,9 @@ class ResolvedFlowPackageInstallCommand:
     import_plan: FlowPackageImportPlan
     install_spec: FlowDraftSpecCore
     selection: FlowPackageImportSelection
+    template_files: Mapping[str, FlowPackageTemplateFile] = field(
+        default_factory=lambda: dict[str, FlowPackageTemplateFile]()
+    )
 
     @property
     def default_transcription_model_id(self) -> UUID | None:
@@ -83,6 +96,8 @@ def resolve_flow_package_install_command(
     expected_target_state: FlowPackageImportTargetState,
     selection: FlowPackageImportSelection,
     candidates: FlowPackageImportPlannerCandidates,
+    template_files: Mapping[str, FlowPackageTemplateFile] | None = None,
+    expected_template_upload_checksums: dict[str, str] | None = None,
 ) -> ResolvedFlowPackageInstallCommand:
     if (
         expected_content_checksum != envelope.content_checksum
@@ -112,10 +127,29 @@ def resolve_flow_package_install_command(
             },
         )
 
+    files = (
+        template_files
+        if template_files is not None
+        else resolve_flow_package_template_files(envelope)
+    )
+    upload_checksums = {
+        requirement.slot_ref.ref: files[requirement.slot_ref.ref].checksum
+        for requirement in envelope.requirements.requirements
+        if isinstance(requirement, FlowPackageTemplateAssetRequirement)
+        and requirement.template is not None
+        and requirement.template.asset_path is None
+        and requirement.slot_ref.ref in files
+    }
+    if upload_checksums != (expected_template_upload_checksums or {}):
+        raise FlowPackageValidationError(
+            code=FlowPackageErrorCode.CHECKSUM_MISMATCH,
+            message="The Word template uploads changed after import planning.",
+        )
     validated_selection = validate_flow_package_install_selection(
         envelope=envelope,
         selected_bindings=selection.bindings_tuple(),
         candidates=candidates,
+        ready_template_refs=frozenset(files),
     )
     optional_knowledge_slot_refs = frozenset(
         requirement.slot_ref.ref
@@ -133,8 +167,15 @@ def resolve_flow_package_install_command(
         import_plan=import_plan,
         install_spec=install_spec,
         selection=FlowPackageImportSelection(
-            selected_bindings=list(validated_selection.resource_bindings)
+            selected_bindings=list(validated_selection.resource_bindings),
+            template_uploads={
+                ref: FlowPackageTemplateUploadIdentity(
+                    checksum=checksum, filename=files[ref].filename
+                )
+                for ref, checksum in upload_checksums.items()
+            },
         ),
+        template_files=files,
     )
 
 
@@ -170,6 +211,7 @@ class FlowPackageInstallService:
         command: ResolvedFlowPackageInstallCommand,
         flow_service: FlowService,
         space_id: UUID,
+        template_asset_service: FlowTemplateAssetService | None = None,
     ) -> FlowPackageInstallResult:
         envelope = command.envelope
         authoring_command = CreateFlowAuthoringCommand(
@@ -182,10 +224,21 @@ class FlowPackageInstallService:
             ),
             resource_bindings=command.selection.bindings_tuple(),
             default_transcription_model_id=command.default_transcription_model_id,
+            template_imports=tuple(
+                TemplateImportIntent(
+                    slot_ref=requirement.slot_ref,
+                    filename=command.template_files[requirement.slot_ref.ref].filename,
+                    content=command.template_files[requirement.slot_ref.ref].content,
+                )
+                for requirement in envelope.requirements.requirements
+                if isinstance(requirement, FlowPackageTemplateAssetRequirement)
+                and requirement.template is not None
+            ),
         )
         materialized = await self._authoring_service.apply(
             command=authoring_command,
             flow_service=flow_service,
+            template_asset_service=template_asset_service,
         )
         return FlowPackageInstallResult(
             flow_id=materialized.flow_id,
@@ -194,7 +247,8 @@ class FlowPackageInstallService:
             package_version=envelope.manifest.package_version,
             content_checksum=envelope.content_checksum,
             steps_created=materialized.steps_created,
-            resource_bindings_count=len(command.selection.selected_bindings),
+            resource_bindings_count=len(command.selection.selected_bindings)
+            + len(command.template_files),
         )
 
 
@@ -203,6 +257,7 @@ def validate_flow_package_install_selection(
     envelope: FlowPackageEnvelope,
     selected_bindings: tuple[LocalResourceBinding, ...],
     candidates: FlowPackageImportPlannerCandidates,
+    ready_template_refs: frozenset[str] = frozenset(),
 ) -> ValidatedFlowPackageInstallSelection:
     selected_bindings_by_ref = index_local_resource_bindings(selected_bindings)
     selected_slot_refs = frozenset(selected_bindings_by_ref)
@@ -214,6 +269,27 @@ def validate_flow_package_install_selection(
         selected_slot_refs=selected_slot_refs,
         declared_slot_refs=declared_slot_refs,
     )
+    for requirement in envelope.requirements.requirements:
+        if (
+            isinstance(requirement, FlowPackageTemplateAssetRequirement)
+            and requirement.template is not None
+        ):
+            if requirement.slot_ref.ref in selected_slot_refs:
+                raise FlowPackageValidationError(
+                    code=FlowPackageErrorCode.IMPORT_UNKNOWN_RESOURCE_BINDING,
+                    message="Package Word templates are installed from verified files, not local resource selections.",
+                    context={"slot_ref": requirement.slot_ref.ref},
+                )
+            if requirement.slot_ref.ref not in ready_template_refs:
+                raise FlowPackageValidationError(
+                    code=FlowPackageErrorCode.TEMPLATE_UPLOAD_REQUIRED,
+                    message="Upload the missing Word template before importing the flow.",
+                    context={
+                        "slot_ref": requirement.slot_ref.ref,
+                        "filename": requirement.template.filename,
+                    },
+                )
+    selected_slot_refs = selected_slot_refs | ready_template_refs
     canonical_bindings = tuple(
         LocalResourceBinding(
             slot_ref=declared_slot_refs[slot_ref],
@@ -283,7 +359,10 @@ def _spec_with_unbound_optional_knowledge_refs_removed(
 
 def _reject_template_asset_requirements(envelope: FlowPackageEnvelope) -> None:
     for requirement in envelope.requirements.requirements:
-        if isinstance(requirement, FlowPackageTemplateAssetRequirement):
+        if (
+            isinstance(requirement, FlowPackageTemplateAssetRequirement)
+            and requirement.template is None
+        ):
             raise FlowPackageValidationError(
                 code=FlowPackageErrorCode.IMPORT_TEMPLATE_ASSETS_UNSUPPORTED,
                 message="Flow package import does not support template asset installation yet.",

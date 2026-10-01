@@ -8,6 +8,9 @@ FlowPackageErrorContext = Mapping[str, FlowPackageErrorContextValue]
 
 
 class FlowPackageErrorCode(StrEnum):
+    TEMPLATE_FILE_INVALID = "flow_package_template_file_invalid"
+    TEMPLATE_FIELDS_MISMATCH = "flow_package_template_fields_mismatch"
+    TEMPLATE_UPLOAD_REQUIRED = "flow_package_template_upload_required"
     BASE64_INVALID = "flow_package_base64_invalid"
     ZIP_UNSAFE = "flow_package_zip_unsafe"
     MANIFEST_INVALID = "flow_package_manifest_invalid"
@@ -35,6 +38,8 @@ class FlowPackageErrorCode(StrEnum):
 
 
 class FlowPackageExportErrorCode(StrEnum):
+    TEMPLATE_BINDINGS_INCOMPLETE = "flow_package_export_template_bindings_incomplete"
+    TEMPLATE_FILE_INVALID = "flow_package_export_template_file_invalid"
     MISSING_ASSISTANT_SNAPSHOT = "flow_package_export_missing_assistant_snapshot"
     UNSUPPORTED_STEP_IO = "flow_package_export_unsupported_step_io"
     STEP_CONFIG_NOT_PORTABLE = "flow_package_export_step_config_not_portable"

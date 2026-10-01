@@ -1652,3 +1652,173 @@ def test_flow_package_import_metadata_matches_import_record_contract() -> None:
         "content_checksum",
         "created_at",
     )
+
+
+@pytest.mark.asyncio
+@pytest.mark.integration
+@pytest.mark.parametrize("size_failure", [False, True])
+async def test_word_package_late_failure_rolls_back_files_and_retry_replays_one_asset(
+    size_failure: bool,
+    db_container,
+    completion_model_factory,
+    space_factory,
+    admin_user,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from eneo.database.tables.files_table import Files
+    from eneo.database.tables.flow_tables import FlowTemplateAssets
+    from eneo.flow_packages.infrastructure.flow_package_zip_writer import (
+        write_flow_package,
+    )
+    from eneo.main.exceptions import BadRequestException, FileTooLargeException
+    from eneo.server.dependencies.container import load_container_upload_admission
+    from tests.unittests.flow_packages.test_flow_package_templates import (
+        _template_envelope,
+    )
+
+    envelope = _template_envelope(shared=True)
+    payload = _import_request(base64.b64encode(write_flow_package(envelope)).decode())
+    async with db_container() as container:
+        await load_container_upload_admission(container)
+        session = container.session()
+        space = await _create_space(
+            session=session,
+            completion_model_factory=completion_model_factory,
+            space_factory=space_factory,
+        )
+        await _add_space_membership(
+            session=session, space_id=space.id, user_id=admin_user.id
+        )
+        _patch_import_access(monkeypatch, target_space_id=space.id)
+
+        async def counts() -> tuple[int, int, int]:
+            values = []
+            for table in (Files, FlowTemplateAssets, Flows):
+                value = await session.scalar(
+                    sa.select(sa.func.count(table.id)).where(
+                        table.tenant_id == admin_user.tenant_id
+                    )
+                )
+                values.append(int(value or 0))
+            return tuple(values)
+
+        before = await counts()
+        original = FlowService.replace_resource_bindings
+
+        async def fail_after_template_upload(self, **kwargs: object) -> None:
+            if size_failure:
+                raise FileTooLargeException(
+                    "The configured upload limit was exceeded.",
+                    file_size=4096,
+                    max_size=1024,
+                )
+            raise BadRequestException("Simulated late package failure.")
+
+        monkeypatch.setattr(
+            FlowService, "replace_resource_bindings", fail_after_template_upload
+        )
+        failed = await flow_package_router.import_flow_package_as_draft(
+            id=space.id,
+            import_request=payload,
+            request=_request(),
+            container=cast(Container, container),
+        )
+        assert isinstance(failed, JSONResponse)
+        assert failed.status_code == 400
+        if size_failure:
+            assert json.loads(failed.body)["code"] == "file_too_large"
+        assert await counts() == before
+
+        monkeypatch.setattr(FlowService, "replace_resource_bindings", original)
+        imported = await flow_package_router.import_flow_package_as_draft(
+            id=space.id,
+            import_request=payload,
+            request=_request(),
+            container=cast(Container, container),
+        )
+        assert not isinstance(imported, JSONResponse)
+        after = await counts()
+        assert after == tuple(count + 1 for count in before)
+        flow = await container.flow_service().get_flow(flow_id=imported.flow_id)
+        assert len(flow.steps) == 2
+        assert (
+            flow.steps[0].output_config["template_asset_id"]
+            == flow.steps[1].output_config["template_asset_id"]
+        )
+
+        replayed = await flow_package_router.import_flow_package_as_draft(
+            id=space.id,
+            import_request=payload,
+            request=_request(),
+            container=cast(Container, container),
+        )
+        assert not isinstance(replayed, JSONResponse)
+        assert replayed.flow_id == imported.flow_id
+        assert await counts() == after
+
+
+@pytest.mark.asyncio
+@pytest.mark.integration
+async def test_word_replacement_json_file_exceeds_multipart_text_limit(
+    client,
+    db_container,
+    completion_model_factory,
+    space_factory,
+    admin_user,
+    patch_auth_service_jwt,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from eneo.flow_packages.infrastructure.flow_package_zip_writer import (
+        write_flow_package,
+    )
+    from tests.unittests.flow_packages.test_flow_package_templates import (
+        _template_envelope,
+    )
+
+    _ = patch_auth_service_jwt
+    async with db_container() as container:
+        space = await _create_space(
+            session=container.session(),
+            completion_model_factory=completion_model_factory,
+            space_factory=space_factory,
+        )
+        token = container.auth_service().create_access_token_for_user(admin_user)
+        space_id = space.id
+        await container.session().commit()
+    _patch_import_access(monkeypatch, target_space_id=space_id)
+    original = next(iter(_template_envelope().template_payloads.values()))
+    payload = BytesIO()
+    with (
+        zipfile.ZipFile(BytesIO(original)) as source,
+        zipfile.ZipFile(payload, "w", zipfile.ZIP_STORED) as target,
+    ):
+        for name in source.namelist():
+            target.writestr(name, source.read(name))
+        target.writestr("word/media/package-size-test.bin", b"x" * (1024 * 1024))
+    uploads = json.dumps(
+        [
+            {
+                "template_ref": "template_asset.report",
+                "filename": "Large.docx",
+                "content_base64": base64.b64encode(payload.getvalue()).decode(),
+            }
+        ]
+    ).encode()
+    assert len(uploads) > 1024 * 1024
+    response = await client.post(
+        f"/api/v1/spaces/{space_id}/flow-packages/import-plan/",
+        headers={"Authorization": f"Bearer {token}"},
+        files={
+            "package_file": (
+                "report.eneopkg",
+                write_flow_package(_template_envelope(included=False)),
+                "application/vnd.eneo.package+zip",
+            ),
+            "template_uploads": ("templates.json", uploads, "application/json"),
+        },
+    )
+    assert response.status_code == 200, response.text
+    assert response.json()["can_install_as_draft"] is True
+    assert (
+        response.json()["dependency_resolutions"][0]["upload_filename"] == "Large.docx"
+    )

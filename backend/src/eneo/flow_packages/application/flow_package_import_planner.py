@@ -1,7 +1,8 @@
 from __future__ import annotations
 
 from collections import Counter
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
+from dataclasses import replace
 from typing import Final, TypeVar, assert_never
 from uuid import UUID
 
@@ -9,6 +10,9 @@ from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from eneo.flow_packages.application.flow_package_model_matching import (
     resolve_model_requirement,
+)
+from eneo.flow_packages.application.flow_package_template_uploads import (
+    resolve_flow_package_template_files,
 )
 from eneo.flow_packages.domain.flow_package_draft import normalize_flow_package_spec
 from eneo.flow_packages.domain.flow_package_envelope import FlowPackageEnvelope
@@ -35,6 +39,7 @@ from eneo.flow_packages.domain.flow_package_requirements import (
     FlowPackageRequirementKind,
     FlowPackageTemplateAssetRequirement,
 )
+from eneo.flow_packages.domain.flow_package_templates import FlowPackageTemplateFile
 from eneo.flows.application.flow_draft_materialization import (
     build_flow_draft_metadata_json,
 )
@@ -125,6 +130,7 @@ def build_flow_package_import_plan(
     *,
     candidates: FlowPackageImportPlannerCandidates,
     default_transcription_model_id: UUID | None = None,
+    template_files: Mapping[str, FlowPackageTemplateFile] | None = None,
 ) -> FlowPackageImportPlan:
     envelope.validated_resource_contract()
     audio_transcription_required = requires_audio_transcription(envelope.spec.steps)
@@ -135,8 +141,15 @@ def build_flow_package_import_plan(
         envelope,
         default_transcription_model_id=effective_transcription_model_id,
     )
+    resolved_template_files = (
+        template_files
+        if template_files is not None
+        else resolve_flow_package_template_files(envelope)
+    )
     dependency_resolutions = [
-        _resolve_requirement(requirement, candidates)
+        _resolve_requirement(
+            requirement, candidates, template_files=resolved_template_files
+        )
         for requirement in envelope.active_requirements()
     ]
     return FlowPackageImportPlan(
@@ -168,6 +181,26 @@ def _validate_installable_draft(
         )
     try:
         steps = flow_step_validation_views_from_draft_spec(spec.steps)
+        template_refs = {
+            requirement.slot_ref.ref
+            for requirement in envelope.requirements.requirements
+            if isinstance(requirement, FlowPackageTemplateAssetRequirement)
+            and requirement.template is not None
+        }
+        # Package references are already validated by the envelope. This ID is
+        # confined to syntax validation; materialization supplies the real asset.
+        steps = [
+            replace(
+                step,
+                output_config={
+                    **(step.output_config or {}),
+                    "template_asset_id": str(UUID(int=0)),
+                },
+            )
+            if (step.output_config or {}).get("template_ref") in template_refs
+            else step
+            for step in steps
+        ]
     except InputBindingContractError as exc:
         raise _invalid_flow_draft(FLOW_INPUT_BINDING_UNSUPPORTED_KEY, str(exc)) from exc
     metadata_json = build_flow_draft_metadata_json(
@@ -228,6 +261,8 @@ def _package_summary(envelope: FlowPackageEnvelope) -> FlowPackageImportPlanSumm
 def _resolve_requirement(
     requirement: FlowPackageRequirementEntry,
     candidates: FlowPackageImportPlannerCandidates,
+    *,
+    template_files: Mapping[str, FlowPackageTemplateFile],
 ) -> FlowPackageDependencyResolutionEntry:
     match requirement:
         case FlowPackageModelRequirement():
@@ -238,7 +273,9 @@ def _resolve_requirement(
         case FlowPackageKnowledgeRequirement():
             return _resolve_knowledge_requirement(requirement, candidates)
         case FlowPackageTemplateAssetRequirement():
-            return _resolve_unsupported_template_requirement(requirement)
+            return _resolve_template_requirement(
+                requirement, template_files=template_files
+            )
         case _:
             assert_never(requirement)
 
@@ -273,22 +310,44 @@ def _resolve_knowledge_requirement(
     )
 
 
-def _resolve_unsupported_template_requirement(
+def _resolve_template_requirement(
     requirement: FlowPackageTemplateAssetRequirement,
+    *,
+    template_files: Mapping[str, FlowPackageTemplateFile],
 ) -> FlowPackageTemplateAssetDependencyResolution:
+    file = template_files.get(requirement.slot_ref.ref)
+    supported = requirement.template is not None
+    resolved = supported and file is not None
     return FlowPackageTemplateAssetDependencyResolution(
         slot_ref=requirement.slot_ref,
         required=requirement.required,
         used_by_steps=list(requirement.used_by_steps),
         data_sensitivity=requirement.data_sensitivity,
         guidance=requirement.guidance,
-        status=FlowPackageImportPlanStatus.UNSUPPORTED,
-        install_blocks=True,
-        publish_blocks=True,
+        status=(
+            FlowPackageImportPlanStatus.RESOLVED_EXACT
+            if resolved
+            else FlowPackageImportPlanStatus.UNRESOLVED_REQUIRED
+            if supported
+            else FlowPackageImportPlanStatus.UNSUPPORTED
+        ),
+        install_blocks=not resolved,
+        publish_blocks=not resolved,
         selection_required_for_install=False,
         auto_select_allowed=False,
         suggestions=[],
         total_candidate_count=0,
+        template=requirement.template,
+        upload_checksum=file.checksum
+        if file is not None
+        and requirement.template is not None
+        and requirement.template.asset_path is None
+        else None,
+        upload_filename=file.filename
+        if file is not None
+        and requirement.template is not None
+        and requirement.template.asset_path is None
+        else None,
     )
 
 

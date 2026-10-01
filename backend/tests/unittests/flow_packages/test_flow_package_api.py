@@ -514,6 +514,7 @@ async def test_import_flow_package_as_draft_returns_typed_response_and_audit(
             command: ResolvedFlowPackageInstallCommand,
             flow_service: object,
             space_id: UUID,
+            template_asset_service: object = None,
         ) -> FlowPackageInstallResult:
             captured_install_bindings.append(command.selection.bindings_tuple())
             assert command.default_transcription_model_id is None
@@ -1310,7 +1311,13 @@ async def test_export_flow_package_checks_access_before_exporting(
         )
 
     class FakeExportService:
-        def __init__(self, *, flow_service: object, package_writer: object) -> None:
+        def __init__(
+            self,
+            *,
+            flow_service: object,
+            package_writer: object,
+            template_asset_service: object = None,
+        ) -> None:
             assert flow_service is _FLOW_SERVICE_SENTINEL
 
         async def export_to_bytes(
@@ -1319,6 +1326,7 @@ async def test_export_flow_package_checks_access_before_exporting(
             flow_id: UUID,
             flow: Flow,
             manifest_metadata: object,
+            include_templates: bool = True,
         ) -> FlowPackageExportResult:
             export_calls.append(flow_id)
             return result
@@ -1393,7 +1401,13 @@ async def test_export_flow_package_returns_no_bytes_when_required_audit_fails(
     session = _FakeSession()
 
     class FakeExportService:
-        def __init__(self, *, flow_service: object, package_writer: object) -> None:
+        def __init__(
+            self,
+            *,
+            flow_service: object,
+            package_writer: object,
+            template_asset_service: object = None,
+        ) -> None:
             pass
 
         async def export_to_bytes(
@@ -1402,6 +1416,7 @@ async def test_export_flow_package_returns_no_bytes_when_required_audit_fails(
             flow_id: UUID,
             flow: Flow,
             manifest_metadata: object,
+            include_templates: bool = True,
         ) -> FlowPackageExportResult:
             return result
 
@@ -1446,7 +1461,13 @@ async def test_export_flow_package_translates_audit_commit_failure(
     session = _FakeSession(commit_error=RuntimeError("audit commit unavailable"))
 
     class FakeExportService:
-        def __init__(self, *, flow_service: object, package_writer: object) -> None:
+        def __init__(
+            self,
+            *,
+            flow_service: object,
+            package_writer: object,
+            template_asset_service: object = None,
+        ) -> None:
             pass
 
         async def export_to_bytes(
@@ -1455,6 +1476,7 @@ async def test_export_flow_package_translates_audit_commit_failure(
             flow_id: UUID,
             flow: Flow,
             manifest_metadata: object,
+            include_templates: bool = True,
         ) -> FlowPackageExportResult:
             return result
 
@@ -1487,20 +1509,35 @@ async def test_export_flow_package_translates_audit_commit_failure(
 
 
 @pytest.mark.anyio
+@pytest.mark.parametrize(
+    "error_code",
+    [
+        FlowPackageExportErrorCode.STEP_CONFIG_NOT_PORTABLE,
+        FlowPackageExportErrorCode.TEMPLATE_BINDINGS_INCOMPLETE,
+        FlowPackageExportErrorCode.TEMPLATE_FILE_INVALID,
+    ],
+)
 async def test_export_flow_package_translates_export_errors_without_audit(
     monkeypatch: pytest.MonkeyPatch,
+    error_code: FlowPackageExportErrorCode,
 ) -> None:
     flow_id = UUID("aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa")
     export_error = FlowPackageExportError(
-        code=FlowPackageExportErrorCode.STEP_CONFIG_NOT_PORTABLE,
-        message="Flow package export found step configuration that is not safely portable.",
+        code=error_code,
+        message="The flow step needs attention before export.",
         context={"step_order": 2, "config_field": "input_config"},
     )
 
     _patch_export_access(monkeypatch, flow_id=flow_id)
 
     class FakeExportService:
-        def __init__(self, *, flow_service: object, package_writer: object) -> None:
+        def __init__(
+            self,
+            *,
+            flow_service: object,
+            package_writer: object,
+            template_asset_service: object = None,
+        ) -> None:
             pass
 
         async def export_to_bytes(
@@ -1509,6 +1546,7 @@ async def test_export_flow_package_translates_export_errors_without_audit(
             flow_id: UUID,
             flow: Flow,
             manifest_metadata: object,
+            include_templates: bool = True,
         ) -> FlowPackageExportResult:
             raise export_error
 
@@ -1547,7 +1585,13 @@ async def test_export_flow_package_translates_oversized_exports_without_audit(
     _patch_export_access(monkeypatch, flow_id=flow_id)
 
     class FakeExportService:
-        def __init__(self, *, flow_service: object, package_writer: object) -> None:
+        def __init__(
+            self,
+            *,
+            flow_service: object,
+            package_writer: object,
+            template_asset_service: object = None,
+        ) -> None:
             pass
 
         async def export_to_bytes(
@@ -1556,6 +1600,7 @@ async def test_export_flow_package_translates_oversized_exports_without_audit(
             flow_id: UUID,
             flow: Flow,
             manifest_metadata: object,
+            include_templates: bool = True,
         ) -> FlowPackageExportResult:
             raise export_error
 

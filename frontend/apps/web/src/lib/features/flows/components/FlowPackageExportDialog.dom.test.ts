@@ -21,6 +21,22 @@ afterEach(() => {
 });
 
 describe("FlowPackageExportDialog", () => {
+  it("includes Word templates by default and passes the author's choice to export", async () => {
+    const exportPackage = vi.fn(async () => exportedPackageWithMcpOmissions());
+    render(FlowPackageExportDialog, { flow: flow(true), eneo: eneo(exportPackage) });
+    await fireEvent.click(screen.getByRole("button", { name: m.flow_package_export_button() }));
+    const checkbox = screen.getByRole("checkbox", { name: m.flow_package_include_templates() });
+    expect(checkbox.getAttribute("aria-checked")).toBe("true");
+    await fireEvent.click(checkbox);
+    await waitFor(() => expect(checkbox.getAttribute("aria-checked")).toBe("false"));
+    expect(screen.getByText(m.flow_package_templates_omitted_help())).toBeTruthy();
+    const buttons = screen.getAllByRole("button", { name: m.flow_package_export_button() });
+    await fireEvent.click(buttons[buttons.length - 1]);
+    expect(exportPackage).toHaveBeenCalledWith(
+      expect.objectContaining({ includeTemplates: false })
+    );
+  });
+
   it("exports a typed package ID in the form export accepts instead of failing", async () => {
     const exportPackage = vi.fn(async () => exportedPackageWithMcpOmissions());
     render(FlowPackageExportDialog, {
@@ -89,12 +105,12 @@ describe("FlowPackageExportDialog", () => {
   });
 });
 
-function flow(): Flow {
+function flow(word = false): Flow {
   return {
     id: "flow-1",
     name: "Demo flow",
     description: "Reusable demo flow.",
-    steps: []
+    steps: word ? [{ output_mode: "template_fill" }] : []
   } as unknown as Flow;
 }
 

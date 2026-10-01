@@ -14,6 +14,9 @@ from pydantic import (
 from typing_extensions import TypedDict
 
 from eneo.flow_packages.domain.flow_package_checksum import json_object_from_model
+from eneo.flow_packages.domain.flow_package_templates import (
+    FlowPackageTemplateDescriptor,
+)
 from eneo.flows.flow_resource_bindings import ResourceSlotKind, ResourceSlotRef
 from eneo.json_types import JsonObject
 
@@ -280,6 +283,9 @@ class FlowPackageTemplateAssetRequirement(FlowPackageRequirementBase):
         FlowPackageRequirementKind.TEMPLATE_ASSET
     )
     guidance: FlowPackageTemplateAssetGuidance | None = None
+    template: FlowPackageTemplateDescriptor | None = Field(
+        default=None, exclude_if=lambda value: value is None
+    )
 
     @model_validator(mode="after")
     def validate_template_asset_slot(self) -> "FlowPackageTemplateAssetRequirement":

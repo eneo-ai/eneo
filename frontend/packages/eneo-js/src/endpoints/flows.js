@@ -416,12 +416,18 @@ export function initFlows(client) {
 
       /**
        * Preview package dependency resolution for a target space.
-       * @param {{spaceId: string, file: File, signal?: AbortSignal}} params
+       * @param {{spaceId: string, file: File, templateUploads?: import('../types/resources').FlowPackageTemplateUpload[], signal?: AbortSignal}} params
        * @throws {EneoError}
        */
-      createImportPlan: async ({ spaceId, file, signal }) => {
+      createImportPlan: async ({ spaceId, file, templateUploads = [], signal }) => {
         const formData = new FormData();
         formData.append("package_file", file);
+        if (templateUploads.length)
+          formData.append(
+            "template_uploads",
+            new Blob([JSON.stringify(templateUploads)], { type: "application/json" }),
+            "templates.json"
+          );
         return _fetch("/api/v1/spaces/{id}/flow-packages/import-plan/", {
           method: "post",
           params: { path: { id: spaceId } },
@@ -432,7 +438,7 @@ export function initFlows(client) {
 
       /**
        * Import a package into a target space as a draft Flow.
-       * @param {{spaceId: string, packageBase64: string, expectedContentChecksum: string, expectedTargetState: import('../types/resources').FlowPackageImportTargetState, selectedBindings?: import('../types/resources').FlowPackageImportResourceBinding[]}} params
+       * @param {{spaceId: string, packageBase64: string, expectedContentChecksum: string, expectedTargetState: import('../types/resources').FlowPackageImportTargetState, selectedBindings?: import('../types/resources').FlowPackageImportResourceBinding[], templateUploads?: import('../types/resources').FlowPackageTemplateUpload[], expectedTemplateUploadChecksums?: Record<string, string>}} params
        * @throws {EneoError}
        */
       importDraft: async ({
@@ -440,7 +446,9 @@ export function initFlows(client) {
         packageBase64,
         expectedContentChecksum,
         expectedTargetState,
-        selectedBindings = []
+        selectedBindings = [],
+        templateUploads = [],
+        expectedTemplateUploadChecksums = {}
       }) => {
         return _fetch("/api/v1/spaces/{id}/flow-packages/imports/", {
           method: "post",
@@ -450,7 +458,9 @@ export function initFlows(client) {
               package_base64: packageBase64,
               expected_content_checksum: expectedContentChecksum,
               expected_target_state: expectedTargetState,
-              selected_bindings: selectedBindings
+              selected_bindings: selectedBindings,
+              template_uploads: templateUploads,
+              expected_template_upload_checksums: expectedTemplateUploadChecksums
             }
           }
         });
@@ -458,11 +468,19 @@ export function initFlows(client) {
 
       /**
        * Export a draft Flow as a portable package bundle.
-       * @param {{id: string, packageId: string, packageVersion: string, name: string, description?: string, signal?: AbortSignal}} params
+       * @param {{id: string, packageId: string, packageVersion: string, name: string, description?: string, includeTemplates?: boolean, signal?: AbortSignal}} params
        * @returns {Promise<import('../types/resources').FlowPackageExportResponse>}
        * @throws {EneoError}
        */
-      export: async ({ id, packageId, packageVersion, name, description = "", signal }) => {
+      export: async ({
+        id,
+        packageId,
+        packageVersion,
+        name,
+        description = "",
+        includeTemplates = true,
+        signal
+      }) => {
         const response = await _binaryFetch("/api/v1/flows/{id}/package-exports/", {
           method: "post",
           params: { path: { id } },
@@ -471,7 +489,8 @@ export function initFlows(client) {
               package_id: packageId,
               package_version: packageVersion,
               name,
-              description
+              description,
+              include_templates: includeTemplates
             }
           },
           signal

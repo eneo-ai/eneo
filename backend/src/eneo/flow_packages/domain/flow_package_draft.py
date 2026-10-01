@@ -78,6 +78,9 @@ class FlowPackageStepOutputConfig(BaseModel):
     citation_mode: Literal["off", "inline_inref_sidecar"] | None = None
     speaker_mapping: FlowPackageSpeakerMappingConfig | None = None
     retrieval_policy: FlowStepRetrievalPolicy | None = None
+    template_ref: StrictStr | None = None
+    placeholders: list[StrictStr] | None = None
+    bindings: dict[StrictStr, StrictStr] | None = None
 
 
 class FlowPackageFlowDraft(BaseModel):

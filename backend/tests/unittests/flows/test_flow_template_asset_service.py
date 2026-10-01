@@ -679,3 +679,48 @@ async def test_delete_asset_hides_wrong_flow_asset(user) -> None:
 
     flow_version_repo.has_template_asset_reference.assert_not_awaited()
     template_asset_repo.soft_delete.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("fails", [False, True])
+async def test_create_asset_from_bytes_reuses_upload_and_closes_stream(
+    user, fails: bool
+) -> None:
+    service = FlowTemplateAssetService(
+        user=user,
+        flow_repo=AsyncMock(),
+        file_repo=AsyncMock(),
+        file_content_loader=AsyncMock(),
+        file_service=AsyncMock(),
+        template_asset_repo=AsyncMock(),
+        flow_version_repo=AsyncMock(),
+    )
+    flow_id = uuid4()
+    payload = _build_template_bytes()
+    captured = []
+    result = object()
+
+    async def upload_asset(*, flow_id: object, upload_file: UploadFile):
+        captured.append(upload_file)
+        assert upload_file.filename == "Report.docx"
+        assert upload_file.content_type == DOCX_MIME
+        assert await upload_file.read() == payload
+        if fails:
+            raise FileTooLargeException("Upload limit exceeded.")
+        return result
+
+    service.upload_asset = AsyncMock(side_effect=upload_asset)
+    if fails:
+        with pytest.raises(FileTooLargeException):
+            await service.create_asset_from_bytes(
+                flow_id=flow_id, filename="Report.docx", content=payload
+            )
+    else:
+        assert (
+            await service.create_asset_from_bytes(
+                flow_id=flow_id, filename="Report.docx", content=payload
+            )
+            is result
+        )
+    service.upload_asset.assert_awaited_once()
+    assert captured[0].file.closed

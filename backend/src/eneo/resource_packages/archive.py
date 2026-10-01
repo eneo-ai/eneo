@@ -63,6 +63,15 @@ def read_bounded_json_archive(
     *,
     limits: ResourcePackageArchiveLimits,
 ) -> dict[str, bytes]:
+    return read_bounded_archive(package_bytes, limits=limits)
+
+
+def read_bounded_archive(
+    package_bytes: bytes,
+    *,
+    limits: ResourcePackageArchiveLimits,
+    json_paths: frozenset[str] | None = None,
+) -> dict[str, bytes]:
     try:
         package = zipfile.ZipFile(BytesIO(package_bytes))
     except zipfile.BadZipFile as exc:
@@ -137,7 +146,9 @@ def read_bounded_json_archive(
                     ratio=limits.max_decompression_ratio + 1,
                     max_ratio=limits.max_decompression_ratio,
                 )
-            if len(payload) > limits.max_json_bytes:
+            if (json_paths is None or normalized_path in json_paths) and len(
+                payload
+            ) > limits.max_json_bytes:
                 raise ResourcePackageArchiveError(
                     ResourcePackageArchiveUnsafeReason.JSON_TOO_LARGE,
                     path=normalized_path,
@@ -150,6 +161,20 @@ def read_bounded_json_archive(
 
 def write_json_archive(
     documents: Mapping[str, BaseModel],
+    *,
+    ordered_paths: Sequence[str],
+) -> bytes:
+    return write_archive(
+        {
+            path: canonical_json_bytes(json_object_from_model(document))
+            for path, document in documents.items()
+        },
+        ordered_paths=ordered_paths,
+    )
+
+
+def write_archive(
+    documents: Mapping[str, bytes],
     *,
     ordered_paths: Sequence[str],
 ) -> bytes:
@@ -166,7 +191,7 @@ def write_json_archive(
         for path in ordered_paths:
             package.writestr(
                 _package_entry(path),
-                canonical_json_bytes(json_object_from_model(documents[path])),
+                documents[path],
             )
     return buffer.getvalue()
 

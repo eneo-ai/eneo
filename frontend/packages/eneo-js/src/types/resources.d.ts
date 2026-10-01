@@ -267,6 +267,7 @@ export type FlowPackageExportResponse = EneoBinaryResponse & {
   omissions: FlowPackageOmission[];
 };
 export type FlowPackageImportPlan = components["schemas"]["FlowPackageImportPlan"];
+export type FlowPackageTemplateUpload = components["schemas"]["FlowPackageTemplateUpload"];
 export type FlowPackageImportPlanSummary = components["schemas"]["FlowPackageImportPlanSummary"];
 export type FlowPackageImportPlanStatus = components["schemas"]["FlowPackageImportPlanStatus"];
 export type FlowPackageImportTargetState = components["schemas"]["FlowPackageImportTargetState"];

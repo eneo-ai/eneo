@@ -44,6 +44,10 @@
   let exporting = $state(false);
   let pendingExport = $state<FlowPackageExportResponse | null>(null);
   let omissionsAcknowledged = $state(false);
+  let includeTemplates = $state(true);
+  const templateStepCount = $derived(
+    flow.steps?.filter((step) => step.output_mode === "template_fill").length ?? 0
+  );
 
   const trimmedId = $derived(packageId.trim());
   const trimmedVersion = $derived(packageVersion.trim());
@@ -65,6 +69,7 @@
       packageName = flow.name;
       packageDescription = flow.description ?? "";
       packageIdManuallyEdited = false;
+      includeTemplates = true;
       exportError = null;
       pendingExport = null;
       omissionsAcknowledged = false;
@@ -114,7 +119,8 @@
         packageId: normalizePackageId(),
         packageVersion: trimmedVersion,
         name: trimmedName,
-        description: packageDescription.trim()
+        description: packageDescription.trim(),
+        includeTemplates
       });
       if (getFlowPackageMcpOmissionCount(response.omissions) > 0) {
         pendingExport = response;
@@ -240,7 +246,6 @@
           </Field.Group>
         </section>
 
-        <!-- A linen summary block, not a card inside the dialog's card. -->
         <div class="bg-secondary grid gap-3 rounded-[9px] px-4 py-3.5">
           <div>
             <h3 class="text-primary text-sm font-semibold tracking-tight">
@@ -270,6 +275,27 @@
             </li>
           </ul>
         </div>
+
+        {#if templateStepCount > 0}
+          <Field.Field orientation="horizontal">
+            <Checkbox
+              id="flow-package-include-templates"
+              bind:checked={includeTemplates}
+              disabled={formLocked}
+              aria-describedby="flow-package-templates-help"
+            />
+            <Field.Content>
+              <Field.Label for="flow-package-include-templates"
+                >{m.flow_package_include_templates()}</Field.Label
+              >
+              <Field.Description id="flow-package-templates-help">
+                {includeTemplates
+                  ? m.flow_package_templates_included_help()
+                  : m.flow_package_templates_omitted_help()}
+              </Field.Description>
+            </Field.Content>
+          </Field.Field>
+        {/if}
 
         {#if pendingExport && omittedMcpAssistantCount > 0}
           <Alert.Root>
