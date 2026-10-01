@@ -4441,5 +4441,7 @@
   "sharepoint_search_scope_hint": "Searches names and properties in folders that have been opened.",
   "sharepoint_search_no_matches": "Nothing loaded matches the search. Open more folders or change the search.",
   "sharepoint_search_matches_one": "{count} match",
-  "sharepoint_search_matches_other": "{count} matches"
+  "sharepoint_search_matches_other": "{count} matches",
+  "sharepoint_select_all_matches": "Select all matches ({count})",
+  "sharepoint_deselect_all_matches": "Deselect the matches"
 }

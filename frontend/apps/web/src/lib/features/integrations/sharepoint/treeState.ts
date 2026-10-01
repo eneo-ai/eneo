@@ -1,4 +1,4 @@
-import { normalizeSharePointPath } from "./selectionKey";
+import { buildSharePointSelectionKey, normalizeSharePointPath } from "./selectionKey";
 import type { SourceMetadataEntry } from "$lib/features/knowledge/sourceMetadata";
 
 export type SharePointTreeItem = {
@@ -103,6 +103,37 @@ export function splitSharePointMatches(
   }
   if (from < text.length) segments.push({ text: text.slice(from), match: false });
   return segments;
+}
+
+/**
+ * The loaded nodes that match the query, as the smallest set that covers them:
+ * a matching folder stands for its contents, so matches below it are left out.
+ * Order follows the tree.
+ */
+export function collectSharePointTreeMatches(
+  nodes: readonly SharePointTreeNode[],
+  query: string
+): SharePointTreeItem[] {
+  if (!query) return [];
+  const matches: SharePointTreeItem[] = [];
+  for (const node of nodes) {
+    if (sharePointTreeItemMatches(node, query)) {
+      matches.push(node);
+      continue;
+    }
+    matches.push(...collectSharePointTreeMatches(node.children ?? [], query));
+  }
+  return matches;
+}
+
+/** True when the item is selected itself or sits under a selected folder or the site root. */
+export function isSharePointItemCovered(
+  item: SharePointTreeItem,
+  selectedKeys: ReadonlySet<string>,
+  selectedPaths: readonly string[]
+): boolean {
+  if (selectedKeys.has(buildSharePointSelectionKey(item))) return true;
+  return selectedPaths.some((selectedPath) => isSharePointDescendantPath(item.path, selectedPath));
 }
 
 /** Loaded files and folders that match the query themselves. */

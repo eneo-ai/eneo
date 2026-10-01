@@ -1,9 +1,12 @@
 import { describe, expect, it } from "vitest";
+import { buildSharePointSelectionKey } from "./selectionKey";
 import {
+  collectSharePointTreeMatches,
   countSharePointTreeMatches,
   createSharePointTreeNode,
   hasSelectedSharePointDescendant,
   isSharePointDescendantPath,
+  isSharePointItemCovered,
   normalizeSharePointTreeQuery,
   sharePointTreeHasMatchingDescendant,
   sharePointTreeItemMatches,
@@ -132,5 +135,56 @@ describe("splitSharePointMatches", () => {
   it("returns the text untouched without a query or a hit", () => {
     expect(splitSharePointMatches("Policy", "")).toEqual([{ text: "Policy", match: false }]);
     expect(splitSharePointMatches("Policy", "larm")).toEqual([{ text: "Policy", match: false }]);
+  });
+});
+
+describe("select all matches", () => {
+  const folder = (name: string, children: ReturnType<typeof createSharePointTreeNode>[]) => {
+    const node = createSharePointTreeNode({
+      id: name,
+      name,
+      type: "folder",
+      path: `/${name}`,
+      has_children: true
+    });
+    node.children = children;
+    return node;
+  };
+  const file = (name: string, parent = "") =>
+    createSharePointTreeNode({
+      id: name,
+      name,
+      type: "file",
+      path: `${parent}/${name}`,
+      has_children: false
+    });
+
+  it("collects the smallest covering set: a matching folder stands for its contents", () => {
+    const tree = [
+      folder("Larmrutiner", [
+        file("Larm natt.docx", "/Larmrutiner"),
+        file("Brand.docx", "/Larmrutiner")
+      ]),
+      folder("Övrigt", [file("Larmlista.xlsx", "/Övrigt"), file("Lön.xlsx", "/Övrigt")]),
+      file("Larm.pdf")
+    ];
+
+    expect(collectSharePointTreeMatches(tree, "larm").map((item) => item.path)).toEqual([
+      "/Larmrutiner",
+      "/Övrigt/Larmlista.xlsx",
+      "/Larm.pdf"
+    ]);
+    expect(collectSharePointTreeMatches(tree, "")).toEqual([]);
+  });
+
+  it("treats items under a selected folder or the site root as covered", () => {
+    const item = file("Larm natt.docx", "/Larmrutiner");
+    expect(isSharePointItemCovered(item, new Set(), [])).toBe(false);
+    expect(isSharePointItemCovered(item, new Set(), ["/Larmrutiner"])).toBe(true);
+    expect(isSharePointItemCovered(item, new Set(), ["/"])).toBe(true);
+    expect(isSharePointItemCovered(item, new Set(), ["/Larm"])).toBe(false);
+    expect(isSharePointItemCovered(item, new Set([buildSharePointSelectionKey(item)]), [])).toBe(
+      true
+    );
   });
 });
