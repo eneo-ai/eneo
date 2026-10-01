@@ -15,7 +15,7 @@ from eneo.integration.sharepoint_fixture.models import SharePointFixtureScenario
 FixtureCategory = Literal["my_teams", "other_sites", "onedrive"]
 FixtureResourceType = Literal["site", "onedrive"]
 FixtureTreeItemType = Literal["file", "folder"]
-FixtureTreeProfile = Literal["standard", "engineering", "onedrive", "empty"]
+FixtureTreeProfile = Literal["standard", "engineering", "records", "onedrive", "empty"]
 
 
 @dataclass(frozen=True)
@@ -101,6 +101,14 @@ def _modified(year: int, month: int, day: int, hour: int = 8) -> datetime:
 
 
 REPRESENTATIVE_SITES: tuple[FixtureSite, ...] = (
+    FixtureSite(
+        key="fixture-site-records-centre",
+        name="Dokumentcenter – metadatatungt bibliotek",
+        resource_type="site",
+        category="my_teams",
+        tree_profile="records",
+        url="https://sharepoint-fixture.invalid/sites/records-centre",
+    ),
     FixtureSite(
         key="fixture-site-leadership-se",
         name="Ledningsgrupp Sverige",
@@ -475,6 +483,223 @@ ENGINEERING_TREE: tuple[FixtureTreeNode, ...] = STANDARD_TREE + (
 )
 
 
+def _records(
+    *,
+    dokumenttyp: str,
+    status: str,
+    sekretess: str = "Öppen",
+    sprak: str = "Svenska",
+    malgrupp: list[str] | None = None,
+    omrade: str = "Socialtjänst",
+    process: str = "Handläggning",
+    region: str = "Hela kommunen",
+    kanal: str = "Intranät",
+    format_: str = "Word",
+    arendetyp: str = "Rutinärende",
+    nyckelord: list[str] | None = None,
+    extern: bool = False,
+    granskad: bool = True,
+    arkiveras: bool = False,
+    tillganglighetsanpassad: bool = True,
+    version: str = "1.0",
+    diarienummer: str = "KS 2026/0001",
+    beslutad_av: str = "Kommunstyrelsen",
+    lagrum: str = "SoL 4 kap. 1 §",
+    giltig_fran: str = "2026-01-01",
+    giltig_till: str = "2027-12-31",
+    senast_granskad: str = "2026-06-01",
+    nasta_granskning: str = "2027-06-01",
+) -> tuple[SourceMetadataEntry, ...]:
+    """A records-management library: 24 columns of mixed kinds, so the filter
+    UI can be checked against a library wider than the picker was drawn for."""
+
+    def choice(name: str, label: str, value: str | list[str]) -> SourceMetadataEntry:
+        return SourceMetadataEntry(name=name, label=label, value=value, kind="choice")
+
+    def yes_no(name: str, label: str, value: bool) -> SourceMetadataEntry:
+        return SourceMetadataEntry(
+            name=name, label=label, value="true" if value else "false", kind="boolean"
+        )
+
+    def text(name: str, label: str, value: str) -> SourceMetadataEntry:
+        return SourceMetadataEntry(name=name, label=label, value=value, kind="text")
+
+    def date(name: str, label: str, value: str) -> SourceMetadataEntry:
+        return SourceMetadataEntry(
+            name=name, label=label, value=f"{value}T00:00:00Z", kind="date"
+        )
+
+    return (
+        choice("Dokumenttyp", "Dokumenttyp", dokumenttyp),
+        choice("Status", "Status", status),
+        choice("Sekretess", "Sekretess", sekretess),
+        choice("Sprak", "Språk", sprak),
+        choice("Malgrupp", "Målgrupp", malgrupp or ["Medarbetare"]),
+        choice("Omrade", "Område", omrade),
+        choice("Process", "Process", process),
+        choice("Region", "Region", region),
+        choice("Kanal", "Publiceringskanal", kanal),
+        choice("Format", "Format", format_),
+        choice("Arendetyp", "Ärendetyp", arendetyp),
+        choice("Nyckelord", "Nyckelord", nyckelord or ["rutin"]),
+        yes_no("Extern", "Extern publicering", extern),
+        yes_no("Granskad", "Granskad", granskad),
+        yes_no("Arkiveras", "Ska arkiveras", arkiveras),
+        yes_no("Tillganglig", "Tillgänglighetsanpassad", tillganglighetsanpassad),
+        text("Version_x0020_nr", "Versionsnummer", version),
+        text("Diarienummer", "Diarienummer", diarienummer),
+        text("Beslutad_x0020_av", "Beslutad av", beslutad_av),
+        text("Lagrum", "Lagrum", lagrum),
+        date("Giltig_x0020_fran", "Giltig från", giltig_fran),
+        date("Giltig_x0020_till", "Giltig till", giltig_till),
+        date("Senast_x0020_granskad", "Senast granskad", senast_granskad),
+        date("Nasta_x0020_granskning", "Nästa granskning", nasta_granskning),
+    )
+
+
+RECORDS_TREE: tuple[FixtureTreeNode, ...] = (
+    FixtureTreeNode(
+        id="fixture-folder-records-routines",
+        name="Rutiner",
+        item_type="folder",
+        modified=_modified(2026, 9, 2),
+        children=(
+            FixtureTreeNode(
+                id="fixture-file-records-routine-home-care",
+                name="Rutin för larm inom hemtjänsten.docx",
+                item_type="file",
+                modified=_modified(2026, 9, 2, 9),
+                size=184_220,
+                source_metadata=_records(
+                    dokumenttyp="Rutin",
+                    status="Gällande",
+                    omrade="Äldreomsorg",
+                    process="Hemtjänst",
+                    malgrupp=["Medarbetare", "Chefer"],
+                    nyckelord=["larm", "hemtjänst", "trygghet"],
+                    diarienummer="SN 2026/0142",
+                    beslutad_av="Socialnämnden",
+                ),
+            ),
+            FixtureTreeNode(
+                id="fixture-file-records-routine-medication",
+                name="Rutin för läkemedelshantering.docx",
+                item_type="file",
+                modified=_modified(2026, 8, 18, 11),
+                size=240_118,
+                source_metadata=_records(
+                    dokumenttyp="Rutin",
+                    status="Under revidering",
+                    sekretess="Intern",
+                    omrade="Hälso- och sjukvård",
+                    process="Läkemedel",
+                    granskad=False,
+                    nyckelord=["läkemedel", "delegering"],
+                    diarienummer="SN 2025/0981",
+                    beslutad_av="Medicinskt ansvarig sjuksköterska",
+                    lagrum="HSLF-FS 2017:37",
+                ),
+            ),
+            FixtureTreeNode(
+                id="fixture-file-records-routine-english",
+                name="Routine for incident reporting.pdf",
+                item_type="file",
+                modified=_modified(2026, 7, 30, 15),
+                size=96_410,
+                source_metadata=_records(
+                    dokumenttyp="Rutin",
+                    status="Gällande",
+                    sprak="Engelska",
+                    kanal="Extern webb",
+                    format_="PDF",
+                    extern=True,
+                    malgrupp=["Medarbetare", "Leverantörer"],
+                    nyckelord=["incident", "avvikelse"],
+                    diarienummer="KS 2026/0310",
+                ),
+            ),
+        ),
+    ),
+    FixtureTreeNode(
+        id="fixture-folder-records-policies",
+        name="Styrdokument",
+        item_type="folder",
+        modified=_modified(2026, 6, 12),
+        children=(
+            FixtureTreeNode(
+                id="fixture-file-records-policy-data-protection",
+                name="Dataskyddspolicy.pdf",
+                item_type="file",
+                modified=_modified(2026, 6, 12, 8),
+                size=512_332,
+                source_metadata=_records(
+                    dokumenttyp="Policy",
+                    status="Gällande",
+                    sekretess="Öppen",
+                    omrade="Hela organisationen",
+                    process="Dataskydd",
+                    kanal="Extern webb",
+                    format_="PDF",
+                    arendetyp="Styrande",
+                    extern=True,
+                    arkiveras=True,
+                    nyckelord=["GDPR", "personuppgifter"],
+                    diarienummer="KS 2024/1187",
+                    lagrum="GDPR art. 5",
+                    giltig_fran="2024-09-01",
+                    giltig_till="2028-08-31",
+                ),
+            ),
+            FixtureTreeNode(
+                id="fixture-file-records-policy-archived",
+                name="Riktlinje för distansarbete 2021 (upphävd).docx",
+                item_type="file",
+                modified=_modified(2024, 1, 10, 10),
+                size=77_912,
+                source_metadata=_records(
+                    dokumenttyp="Riktlinje",
+                    status="Upphävd",
+                    omrade="HR",
+                    process="Arbetsmiljö",
+                    arendetyp="Styrande",
+                    arkiveras=True,
+                    tillganglighetsanpassad=False,
+                    nyckelord=["distansarbete"],
+                    diarienummer="KS 2021/0455",
+                    version="2.3",
+                    giltig_fran="2021-03-01",
+                    giltig_till="2023-12-31",
+                    senast_granskad="2023-11-15",
+                    nasta_granskning="2023-11-15",
+                ),
+            ),
+        ),
+    ),
+    FixtureTreeNode(
+        id="fixture-file-records-minutes",
+        name="Protokoll socialnämnden 2026-08-27.pdf",
+        item_type="file",
+        modified=_modified(2026, 8, 28, 9),
+        size=1_204_551,
+        source_metadata=_records(
+            dokumenttyp="Protokoll",
+            status="Gällande",
+            sekretess="Delvis sekretess",
+            omrade="Socialtjänst",
+            process="Nämndadministration",
+            kanal="Intranät",
+            format_="PDF",
+            arendetyp="Beslut",
+            arkiveras=True,
+            nyckelord=["protokoll", "socialnämnden"],
+            diarienummer="SN 2026/0001",
+            beslutad_av="Socialnämnden",
+            lagrum="KL 5 kap.",
+        ),
+    ),
+)
+
+
 ONEDRIVE_TREE: tuple[FixtureTreeNode, ...] = (
     FixtureTreeNode(
         id="fixture-folder-onedrive-documents",
@@ -540,6 +765,7 @@ SITES_BY_SCENARIO: dict[SharePointFixtureScenario, tuple[FixtureSite, ...]] = {
 TREE_BY_PROFILE: dict[FixtureTreeProfile, tuple[FixtureTreeNode, ...]] = {
     "standard": STANDARD_TREE,
     "engineering": ENGINEERING_TREE,
+    "records": RECORDS_TREE,
     "onedrive": ONEDRIVE_TREE,
     "empty": EMPTY_TREE,
 }

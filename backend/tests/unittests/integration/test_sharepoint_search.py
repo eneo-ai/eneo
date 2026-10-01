@@ -266,3 +266,41 @@ class TestFixtureSearch:
             drive_id=None,
         )
         assert nothing.items == []
+
+
+class TestRecordsFixture:
+    """The metadata-heavy site exists to exercise the picker with many columns."""
+
+    def test_exposes_more_than_a_dozen_filterable_columns_with_their_values(self):
+        response = SharePointFixtureService().get_tree(
+            SharePointFixtureScenario.REPRESENTATIVE,
+            site_id="fixture-site-records-centre",
+            drive_id=None,
+        )
+        by_name = {column.name: column for column in response.columns}
+        assert len(by_name) >= 16
+        assert by_name["Status"].choices == ["Gällande", "Under revidering", "Upphävd"]
+        assert by_name["Granskad"].kind == "boolean"
+        assert "Lagrum" not in by_name, "free-text columns are searched, not filtered"
+
+    def test_filters_combine_across_many_columns(self):
+        service = SharePointFixtureService()
+        hits = service.get_search(
+            SharePointFixtureScenario.REPRESENTATIVE,
+            site_id="fixture-site-records-centre",
+            drive_id=None,
+            filters={"Dokumenttyp": "Rutin", "Status": "Gällande", "Extern": "false"},
+        )
+        assert [item.name for item in hits.items] == [
+            "Rutin för larm inom hemtjänsten.docx"
+        ]
+        archived = service.get_search(
+            SharePointFixtureScenario.REPRESENTATIVE,
+            site_id="fixture-site-records-centre",
+            drive_id=None,
+            text="2021",
+            filters={"Arkiveras": "true"},
+        )
+        assert [item.name for item in archived.items] == [
+            "Riktlinje för distansarbete 2021 (upphävd).docx"
+        ]

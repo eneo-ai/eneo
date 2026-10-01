@@ -87,7 +87,7 @@ class TestSharePointFixturePreview:
         response = self.service.get_preview(SharePointFixtureScenario.REPRESENTATIVE)
 
         assert response.fixture is True
-        assert response.count == 12
+        assert response.count == 13
         assert {item.category for item in response.items} == {
             "my_teams",
             "other_sites",
@@ -105,7 +105,7 @@ class TestSharePointFixturePreview:
         second = self.service.get_preview(SharePointFixtureScenario.LARGE_TENANT)
 
         assert first == second
-        assert first.count == 152
+        assert first.count == 153
         assert len({item.key for item in first.items}) == first.count
         assert sum(item.category == "my_teams" for item in first.items) >= 30
 
