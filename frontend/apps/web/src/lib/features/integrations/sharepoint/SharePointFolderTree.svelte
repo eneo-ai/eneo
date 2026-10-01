@@ -4,7 +4,7 @@
   import { Button } from "$lib/components/ui/button/index.js";
   import { Checkbox } from "$lib/components/ui/checkbox/index.js";
   import * as InputGroup from "$lib/components/ui/input-group/index.js";
-  import * as Select from "$lib/components/ui/select/index.js";
+  import SharePointFilterMenu from "./SharePointFilterMenu.svelte";
   import type { components } from "@eneo/eneo-js";
   import SharePointFolderTreeNode from "./SharePointFolderTreeNode.svelte";
   import SharePointSearchResults from "./SharePointSearchResults.svelte";
@@ -348,43 +348,8 @@
           autocomplete="off"
         />
       </InputGroup.Root>
-      <!-- Library columns with fixed values: a person picks instead of typing. -->
-      {#each columns as column (column.name)}
-        <Select.Root
-          type="single"
-          value={facets[column.name] ?? ""}
-          onValueChange={(value) => (facets = { ...facets, [column.name]: value })}
-        >
-          <Select.Trigger
-            aria-label={m.sharepoint_filter_label({ column: column.label })}
-            class="h-10 max-w-64 min-w-40"
-          >
-            <span class="text-muted-foreground">{column.label}:</span>
-            {#if column.kind === "boolean"}
-              {facets[column.name] === "true"
-                ? m.yes()
-                : facets[column.name] === "false"
-                  ? m.no()
-                  : m.sharepoint_filter_any()}
-            {:else}
-              {facets[column.name] || m.sharepoint_filter_any()}
-            {/if}
-          </Select.Trigger>
-          <Select.Content>
-            <Select.Item value="" label={m.sharepoint_filter_any()}>
-              {m.sharepoint_filter_any()}
-            </Select.Item>
-            {#if column.kind === "boolean"}
-              <Select.Item value="true" label={m.yes()}>{m.yes()}</Select.Item>
-              <Select.Item value="false" label={m.no()}>{m.no()}</Select.Item>
-            {:else}
-              {#each column.choices as choice (choice)}
-                <Select.Item value={choice} label={choice}>{choice}</Select.Item>
-              {/each}
-            {/if}
-          </Select.Content>
-        </Select.Root>
-      {/each}
+      <!-- Every filterable column lives behind one button; chosen values show as chips. -->
+      <SharePointFilterMenu {columns} {facets} onChange={(next) => (facets = next)} />
     </div>
     <div class="flex flex-wrap items-center justify-between gap-x-3 gap-y-1 px-1">
       <p id="sharepoint-search-help" class="text-muted-foreground text-xs" aria-live="polite">
