@@ -190,6 +190,25 @@ class TestListBundled:
         assert all(tool.mcp_server_id is None for tool in tools)
 
 
+class TestRefreshBundled:
+    async def test_refreshed_definitions_are_approved_without_review(
+        self, monkeypatch, runtime_configured
+    ):
+        service, repo, user = _make_service(monkeypatch)
+        server = _bundled_server(user.tenant_id)
+        repo.one = AsyncMock(return_value=server)
+        monkeypatch.setattr(
+            service, "discover_and_sync_tools", AsyncMock(return_value="synced")
+        )
+        approve = AsyncMock(return_value=[])
+        monkeypatch.setattr(service, "approve_all_tool_changes", approve)
+
+        result = await service.refresh_tools(server.id)
+
+        assert result == "synced"
+        approve.assert_awaited_once_with(server.id)
+
+
 class TestUpdateBundled:
     @pytest.mark.parametrize(
         "change",

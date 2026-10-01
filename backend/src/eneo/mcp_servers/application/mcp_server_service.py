@@ -15,6 +15,7 @@ from eneo.main.exceptions import (
     UnauthorizedException,
 )
 from eneo.main.models import NOT_PROVIDED, NotProvided
+from eneo.mcp_servers.application.bundled_tools import forget_catalogs
 from eneo.mcp_servers.domain.entities.mcp_server import (
     AUDIENCE_EVERYONE,
     AUDIENCE_GROUPS,
@@ -1235,10 +1236,15 @@ class MCPServerService:
             )
 
         result = await self.discover_and_sync_tools(mcp_server, auth_credentials)
-        if is_builtin_provider(mcp_server.http_auth_type):
+        if is_builtin_provider(mcp_server.http_auth_type) or is_bundled_server(
+            mcp_server.http_auth_type
+        ):
             # The approval gate guards against a compromised remote; a built-in
-            # provider's definitions are Eneo's own code.
+            # provider's and the bundled runtime's definitions are Eneo's own
+            # code. Completions list the runtime live, so forget what they
+            # cached and let the next answer see the refreshed catalog too.
             await self.approve_all_tool_changes(mcp_server_id)
+            forget_catalogs()
         return result
 
     @validate_permissions(Permission.ADMIN)

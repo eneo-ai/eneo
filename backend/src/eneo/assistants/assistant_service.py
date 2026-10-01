@@ -71,6 +71,7 @@ from eneo.main.models import (
     ResourcePermission,
     is_provided,
 )
+from eneo.mcp_servers.application.bundled_tools import with_live_bundled_tools
 from eneo.mcp_servers.application.capability_resolver import (
     general_servers_for_space,
     resolve_capability_servers,
@@ -83,6 +84,7 @@ from eneo.mcp_servers.domain.entities.mcp_server import (
     allowed_capability_purposes,
     duplicate_capability_purposes,
     is_builtin_provider,
+    is_bundled_server,
     is_capability_purpose,
 )
 from eneo.prompts.api.prompt_models import PromptCreate
@@ -3289,6 +3291,20 @@ class AssistantService:
                 else "no knowledge"
             ),
         )
+
+        # Servers built into Eneo expose the running runtime's tool catalog,
+        # not the snapshot the admin last synced; the admin's per-tool
+        # decisions are kept. Other servers pass through untouched.
+        if any(
+            is_bundled_server(getattr(server, "http_auth_type", None))
+            for server in mcp_servers_override
+        ):
+            mcp_servers_override = [
+                await with_live_bundled_tools(server) for server in mcp_servers_override
+            ]
+        capability_mcp_servers = [
+            await with_live_bundled_tools(server) for server in capability_mcp_servers
+        ]
 
         try:
             response, datastore_result = await assistant_to_ask.ask(

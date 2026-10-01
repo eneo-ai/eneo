@@ -270,15 +270,16 @@ export function serverDisplayName(
 /**
  * The provider's own name for a capability call served by an external
  * provider ("GDM Safe Search"), shown as the step's detail so the source
- * stays visible; null for Eneo's own servers and general tools.
+ * stays visible; null for Eneo's own servers (loopback or built in), and
+ * for general tools.
  */
 export function capabilityProviderDetail(call: ToolCallLike): string | null {
   if (capabilityPurpose(call.purpose) === null || isInternalToolCall(call)) {
     return null;
   }
-  // A provider built into Eneo is Eneo's own: say so in the user's language
-  // rather than showing the row's admin-typed name.
-  if (call.is_bundled) return m.mcp_auth_bundled();
+  // A provider built into Eneo is Eneo's own, like the loopback servers: the
+  // step label already says what happened, so no provider is named.
+  if (call.is_bundled) return null;
   return call.server_name;
 }
 
