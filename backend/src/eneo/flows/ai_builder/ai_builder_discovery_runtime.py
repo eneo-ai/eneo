@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import json
-from collections.abc import Awaitable, Callable, Collection, Mapping
+from collections.abc import Collection, Mapping
 from dataclasses import dataclass, replace
 from typing import TYPE_CHECKING, Any
 from uuid import UUID
@@ -48,6 +48,7 @@ from eneo.flows.ai_builder.ai_builder_framework_policy import (
     slot_names_blocked_by_explicit_uncertainty,
 )
 from eneo.flows.ai_builder.ai_builder_proposal_telemetry import ProposalTurnTelemetry
+from eneo.flows.ai_builder.ai_builder_provider_call import ProviderWorkGate
 from eneo.flows.ai_builder.ai_builder_question_state import (
     assistant_question_id,
     last_answered_question,
@@ -559,7 +560,7 @@ async def build_runtime_discovery_context(
     allow_classification: bool = True,
     attachment_context: AIBuilderAttachmentContext | None = None,
     usage_tracker: ProposalTurnTelemetry | None = None,
-    before_provider_call: Callable[[], Awaitable[None]] | None = None,
+    provider_gate: ProviderWorkGate | None = None,
     mapped_execution_policy: FlowMappedExecutionPolicy | None = None,
     prepared_schema_candidates: tuple[DeclaredSchemaCandidate, ...] | None = None,
     capacity: ModelCapacity,
@@ -776,7 +777,7 @@ async def build_runtime_discovery_context(
         bias=bias,
         structured_output_mode=structured_output_mode,
         usage_tracker=usage_tracker,
-        before_provider_call=before_provider_call,
+        provider_gate=provider_gate,
         capacity=capacity,
         budget_policy=budget_policy,
         read_declarations=read_declarations,
@@ -1017,7 +1018,7 @@ async def build_discovery_runtime_result(
     tenant_id: UUID,
     attachment_context: AIBuilderAttachmentContext | None = None,
     usage_tracker: ProposalTurnTelemetry | None = None,
-    before_provider_call: Callable[[], Awaitable[None]] | None = None,
+    provider_gate: ProviderWorkGate | None = None,
     mapped_execution_policy: FlowMappedExecutionPolicy | None = None,
     prepared_schema_candidates: tuple[DeclaredSchemaCandidate, ...] | None = None,
     persisted_planning_state: PlanningState | None = None,
@@ -1035,7 +1036,7 @@ async def build_discovery_runtime_result(
         allow_classification=allow_classification,
         attachment_context=attachment_context,
         usage_tracker=usage_tracker,
-        before_provider_call=before_provider_call,
+        provider_gate=provider_gate,
         mapped_execution_policy=mapped_execution_policy,
         prepared_schema_candidates=prepared_schema_candidates,
         capacity=capacity,

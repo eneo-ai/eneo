@@ -145,6 +145,15 @@ Two sends on the _same_ session id still conflict: the second is refused with
 `session_send_in_progress` while the first turn is with the provider. Give each
 concurrent client its own session id.
 
+Cancelling a session also stops the turn that is with the provider. While the
+server can read the session, the call in flight is closed within about 12
+seconds plus a 1 second stream close, and that turn's stream then ends with
+`session_send_lease_lost` after the turn's cleanup, which may take up to 30
+seconds when the database is slow. Noticing the cancel needs a successful read
+of the session, so while the database keeps failing there is no finite
+detection guarantee.
+The provider may still finish and bill work it had already started.
+
 ## Reliable message sends and retries
 
 Each message send has one `client_turn_id`. A client creates this UUID once and

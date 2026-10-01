@@ -2,6 +2,9 @@
 
 from __future__ import annotations
 
+import asyncio
+from collections.abc import Awaitable, Callable
+from unittest.mock import AsyncMock
 from uuid import UUID, uuid4
 
 from eneo.completion_models.domain.model_capacity import ModelCapacity
@@ -32,6 +35,7 @@ from eneo.flows.ai_builder.ai_builder_proposal_tool_contracts import (
     ProposalTurnContext,
     ToolRetryInvocation,
 )
+from eneo.flows.ai_builder.ai_builder_provider_call import ProviderWorkGate
 from eneo.flows.ai_builder.ai_builder_session_turn import (
     SessionSendLease,
     SessionSendTurn,
@@ -261,4 +265,22 @@ def _make_flow_spec(
                 output_type=OutputType.TEXT,
             )
         ],
+    )
+
+
+def provider_work_gate(
+    admit: Callable[[], Awaitable[None]] | None = None,
+    *,
+    ownership_lost: asyncio.Event | None = None,
+) -> ProviderWorkGate:
+    """A send turn's provider gate for tests: admits, and stops on demand."""
+
+    return ProviderWorkGate(
+        admit=admit if admit is not None else AsyncMock(),
+        ownership_lost=ownership_lost
+        if ownership_lost is not None
+        else asyncio.Event(),
+        lease_lost=asyncio.Event(),
+        session_id="test-session",
+        request_id="test-request",
     )

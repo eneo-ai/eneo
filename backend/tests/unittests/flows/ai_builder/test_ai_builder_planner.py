@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import json
-from collections.abc import AsyncGenerator, Callable
+from collections.abc import AsyncGenerator, Awaitable, Callable
 from dataclasses import replace
 from datetime import datetime, timezone
 from types import SimpleNamespace
@@ -112,6 +112,7 @@ from eneo.flows.ai_builder.ai_builder_proposal_tool_contracts import (
     fit_proposal_request_budget,
     flatten_proposal_message_groups,
 )
+from eneo.flows.ai_builder.ai_builder_provider_call import ProviderWorkGate
 from eneo.flows.ai_builder.ai_builder_requirements_disclosure import (
     build_requirements_disclosure,
 )
@@ -232,6 +233,7 @@ from eneo.tokens.token_utils import (
     measure_provider_input_reserve,
 )
 from tests.unittests.flows.ai_builder.conftest import SendLockReleaseSpy
+from tests.unittests.flows.ai_builder.proposal_turn_builders import provider_work_gate
 
 _DISCOVERY_STATUSES = {"understanding_request", "reading_sources"}
 
@@ -450,7 +452,7 @@ async def _prepare_planner_request_for_test(
     prior_plan_for_revision: BuilderPlan | None = None,
     persisted_planning_state: PlanningState | None = None,
     mapped_execution_policy: FlowMappedExecutionPolicy | None = None,
-    before_provider_call: AsyncMock | None = None,
+    provider_gate: ProviderWorkGate | None = None,
     prepared_attachment_context: AIBuilderAttachmentContext | None = None,
     prepared_schema_candidates: tuple[DeclaredSchemaCandidate, ...] | None = None,
     review_evidence: object = None,
@@ -487,7 +489,7 @@ async def _prepare_planner_request_for_test(
                 model=completion_model_route.litellm_model,
                 target_kind=TargetKind.CREATE,
             ),
-            before_provider_call=before_provider_call,
+            provider_gate=provider_gate or provider_work_gate(),
             prepared_attachment_context=prepared_attachment_context,
             prepared_schema_candidates=prepared_schema_candidates,
         )
@@ -1982,7 +1984,7 @@ async def test_prepare_planner_request_asks_when_attachment_schema_direction_is_
                 mimetype="application/json",
             ),
         ],
-        before_provider_call=provider_callback,
+        provider_gate=provider_work_gate(provider_callback),
         max_input_tokens=100_000,
     )
 
@@ -2043,7 +2045,7 @@ async def test_prepare_planner_request_rejects_canonical_schema_expansion_before
             conversation=[ConversationMessage(role="user", content="Build a flow")],
             completion_model_route=_route(),
             attachment_files=[attachment],
-            before_provider_call=provider_callback,
+            provider_gate=provider_work_gate(provider_callback),
         )
 
     assert exc_info.value.code is AIBuilderErrorCode.SCHEMA_LIMIT_EXCEEDED
@@ -2296,7 +2298,7 @@ async def test_prepare_planner_request_requires_fresh_confirmation_after_attachm
             planner,
             conversation=conversation,
             completion_model_route=_route(),
-            before_provider_call=provider_callback,
+            provider_gate=provider_work_gate(provider_callback),
         )
 
     assert isinstance(prepared, ServerOutputPrepared)
@@ -4254,7 +4256,9 @@ async def test_stream_proposal_events_commits_planning_state_payload_too_large(
             ),
             flow=None,
             assistant_snapshots=None,
-            before_provider_call=AsyncMock(),
+            provider_gate=provider_work_gate(
+                AsyncMock(), ownership_lost=asyncio.Event()
+            ),
         )
     ]
 
@@ -4290,7 +4294,9 @@ async def _stream_proposal_error_turn(
             usage_tracker=usage_tracker,
             flow=None,
             assistant_snapshots=None,
-            before_provider_call=AsyncMock(),
+            provider_gate=provider_work_gate(
+                AsyncMock(), ownership_lost=asyncio.Event()
+            ),
         )
     ]
 
@@ -7150,3 +7156,183 @@ async def test_admission_is_told_when_a_turn_attaches_files(
             pass
 
     assert captured["sends_files"] is True
+
+
+def _hanging_provider_call(
+    reached: asyncio.Event, cancelled: asyncio.Event
+) -> Callable[..., Awaitable[object]]:
+    async def hangs(**_: object) -> object:
+        reached.set()
+        try:
+            await asyncio.Event().wait()
+        except asyncio.CancelledError:
+            cancelled.set()
+            raise
+        return None
+
+    return hangs
+
+
+@pytest.mark.parametrize(
+    "answered_before_hang",
+    [
+        pytest.param(0, id="initial-proposal"),
+        # A prose answer without the tool call is repaired by one more call.
+        pytest.param(1, id="repair"),
+    ],
+)
+@pytest.mark.asyncio
+async def test_lost_ownership_stops_the_proposal_call_in_flight(
+    answered_before_hang: int,
+) -> None:
+    planner = _make_planner()
+    reached, cancelled, stop = asyncio.Event(), asyncio.Event(), asyncio.Event()
+    hangs = _hanging_provider_call(reached, cancelled)
+    prose = SimpleNamespace(
+        choices=[
+            SimpleNamespace(
+                message=SimpleNamespace(
+                    content="I would build a summary flow.", tool_calls=None
+                ),
+                finish_reason="stop",
+            )
+        ]
+    )
+    scripted: list[object] = [prose] * answered_before_hang
+
+    async def provider(**kwargs: object) -> object:
+        if scripted:
+            return scripted.pop(0)
+        return await hangs(**kwargs)
+
+    planner.litellm_client.acompletion.side_effect = provider
+    turn = cast(Any, SimpleNamespace(session_id=uuid4()))
+
+    async def stream() -> list[AIBuilderStreamEvent]:
+        return [
+            event
+            async for event in planner._stream_proposal_events(  # pyright: ignore[reportPrivateUsage]
+                turn=turn,
+                conversation=[],
+                new_messages_start=0,
+                proposal_request=_stream_proposal_request(),
+                completion_model_route=_route(),
+                request_id="stopped-proposal-turn",
+                usage_tracker=ProposalTurnTelemetry(
+                    request_id="stopped-proposal-turn",
+                    model="openai/gpt-5.4",
+                    target_kind=TargetKind.CREATE,
+                ),
+                flow=None,
+                assistant_snapshots=None,
+                provider_gate=provider_work_gate(AsyncMock(), ownership_lost=stop),
+            )
+        ]
+
+    running = asyncio.create_task(stream())
+    await asyncio.wait_for(reached.wait(), timeout=5)
+    stop.set()
+    with pytest.raises(AIBuilderBadRequestException) as raised:
+        await asyncio.wait_for(running, timeout=5)
+
+    assert raised.value.code is AIBuilderErrorCode.SESSION_SEND_LEASE_LOST
+    assert cancelled.is_set()
+    assert planner.litellm_client.acompletion.await_count == answered_before_hang + 1
+    planner.repo.complete_session_turn.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_send_message_hands_the_claims_stop_signal_to_the_proposal_call(
+    monkeypatch: pytest.MonkeyPatch,
+    send_lock_release: SendLockReleaseSpy,
+) -> None:
+    """A cancel that the ownership probe confirms reaches the provider call."""
+
+    planner = _make_planner()
+    reached, cancelled = asyncio.Event(), asyncio.Event()
+    planner.litellm_client.acompletion.side_effect = _hanging_provider_call(
+        reached, cancelled
+    )
+    _configure_minimal_send_message(planner, monkeypatch, _stream_proposal_request())
+    monkeypatch.setattr(
+        "eneo.flows.ai_builder.ai_builder_send_lease."
+        "_SEND_OWNERSHIP_PROBE_INTERVAL_SECONDS",
+        0.01,
+    )
+
+    async def cancel_once_reached() -> None:
+        await asyncio.wait_for(reached.wait(), timeout=5)
+        send_lock_release.owned = False
+
+    canceller = asyncio.create_task(cancel_once_reached())
+    with pytest.raises(AIBuilderBadRequestException) as raised:
+        await asyncio.wait_for(
+            _collect_send_message_events(planner, session_id=uuid4()), timeout=5
+        )
+    await canceller
+
+    assert raised.value.code is AIBuilderErrorCode.SESSION_SEND_LEASE_LOST
+    assert cancelled.is_set()
+    assert planner.litellm_client.acompletion.await_count == 1
+    send_lock_release.assert_released_once()
+
+
+@pytest.mark.asyncio
+async def test_a_proposal_continuing_a_server_decision_gets_the_claims_stop_signal(
+    monkeypatch: pytest.MonkeyPatch,
+    send_lock_release: SendLockReleaseSpy,
+) -> None:
+    planner = _make_planner()
+    continuation_state = PlanningState.empty()
+    _configure_minimal_send_message(
+        planner,
+        monkeypatch,
+        replace(
+            _server_output_prepared(),
+            requirements_state=_requirements_state_confirmed(),
+            server_decision=ReviseArchitecture(
+                architecture_commit=_architecture_commit()
+            ),
+            planning_state=continuation_state,
+        ),
+    )
+    monkeypatch.setattr(
+        "eneo.flows.ai_builder.ai_builder_send_lease."
+        "_SEND_OWNERSHIP_PROBE_INTERVAL_SECONDS",
+        0.01,
+    )
+
+    async def fake_dispatch(
+        _: ServerDecisionDispatchRequest,
+    ) -> ServerDecisionDispatchResult:
+        return ServerDecisionDispatchResult(
+            action_kind="revise_architecture",
+            events=(),
+            new_planning_state_version=9,
+            proposal_continuation=ServerDecisionProposalContinuation(
+                planning_state=continuation_state,
+                new_messages_start=0,
+            ),
+        )
+
+    async def stopped_once_ownership_is_lost(
+        **kwargs: object,
+    ) -> AsyncGenerator[AIBuilderStreamEvent, None]:
+        send_lock_release.owned = False
+        gate = cast(ProviderWorkGate, kwargs["provider_gate"])
+        await asyncio.wait_for(gate.ownership_lost.wait(), timeout=5)
+        yield build_text_event("stopped")
+
+    monkeypatch.setattr(
+        "eneo.flows.ai_builder.ai_builder_planner.dispatch_server_decision",
+        fake_dispatch,
+    )
+    monkeypatch.setattr(
+        planner._proposal_submission,  # pyright: ignore[reportPrivateUsage]
+        "run_active_submission_attempt",
+        stopped_once_ownership_is_lost,
+    )
+
+    events = await _collect_send_message_events(planner, session_id=uuid4())
+
+    assert [event["event"] for event in events] == ["text", "done"]

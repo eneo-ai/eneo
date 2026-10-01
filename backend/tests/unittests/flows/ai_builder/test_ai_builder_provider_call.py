@@ -26,6 +26,9 @@ from eneo.flows.ai_builder.ai_builder_provider_call import (
     complete_with_silence_deadline,
     provider_error_fields,
 )
+from tests.unittests.flows.ai_builder.proposal_turn_builders import (  # noqa: E402
+    provider_work_gate,
+)
 
 _MESSAGES = [{"role": "user", "content": "Propose a flow."}]
 _REQUEST = {"model": "gpt-test", "messages": _MESSAGES}
@@ -1348,3 +1351,191 @@ async def test_each_request_of_a_retried_call_is_timed_on_its_own() -> None:
     assert observed.value.provider_elapsed_ms < 100
     assert observed.value.first_chunk_ms is not None
     assert observed.value.first_chunk_ms < 100
+
+
+# The turn's stop signal: ownership of the turn was confirmed lost, so the
+# provider work in flight is stopped at once, whichever wait it is in, and the
+# stream is closed. Never a timeout and never a provider failure.
+
+
+def _hangs_before_answering(started: asyncio.Event, cancelled: asyncio.Event):
+    async def hangs(**_kwargs: object) -> object:
+        started.set()
+        try:
+            await asyncio.Event().wait()
+        except asyncio.CancelledError:
+            cancelled.set()
+            raise
+        return None
+
+    return SimpleNamespace(acompletion=AsyncMock(side_effect=hangs))
+
+
+@pytest.mark.asyncio
+async def test_the_stop_signal_ends_a_wait_for_the_first_response() -> None:
+    from eneo.flows.ai_builder.ai_builder_provider_call import ProviderCallStopped
+
+    started, cancelled, stop = asyncio.Event(), asyncio.Event(), asyncio.Event()
+    observed = ObservedTiming()
+    client = _hangs_before_answering(started, cancelled)
+
+    call = asyncio.create_task(
+        complete_with_silence_deadline(
+            client,
+            silence_deadline_seconds=60.0,
+            ceiling_seconds=120.0,
+            request=_REQUEST,
+            observe_timing=observed,
+            gate=provider_work_gate(ownership_lost=stop),
+        )
+    )
+    await asyncio.wait_for(started.wait(), timeout=1)
+    stop.set()
+
+    with pytest.raises(ProviderCallStopped) as raised:
+        await asyncio.wait_for(call, timeout=1)
+    assert not isinstance(raised.value, TimeoutError)
+    assert cancelled.is_set()
+    assert observed.value is not None
+    client.acompletion.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_the_stop_signal_ends_an_answer_that_keeps_flowing_and_closes_it() -> (
+    None
+):
+    from eneo.flows.ai_builder.ai_builder_provider_call import ProviderCallStopped
+
+    closed = _Closed()
+    stop = asyncio.Event()
+    flowing = asyncio.Event()
+
+    async def endless():
+        try:
+            yield _tool_chunk('{"name": "A', first=True, finish=None)
+            while True:
+                flowing.set()
+                await asyncio.sleep(0)
+                yield _tool_chunk("a", first=False, finish=None)
+        finally:
+            closed.closed = True
+
+    call = asyncio.create_task(
+        complete_with_silence_deadline(
+            _stream_client(endless()),
+            silence_deadline_seconds=60.0,
+            ceiling_seconds=120.0,
+            request=_REQUEST,
+            gate=provider_work_gate(ownership_lost=stop),
+        )
+    )
+    await asyncio.wait_for(flowing.wait(), timeout=1)
+    stop.set()
+
+    with pytest.raises(ProviderCallStopped):
+        await asyncio.wait_for(call, timeout=1)
+    assert closed.closed is True
+
+
+@pytest.mark.asyncio
+async def test_a_stop_signalled_before_the_call_sends_nothing() -> None:
+    from eneo.flows.ai_builder.ai_builder_provider_call import ProviderCallStopped
+
+    stop = asyncio.Event()
+    stop.set()
+    client = SimpleNamespace(acompletion=AsyncMock())
+
+    with pytest.raises(ProviderCallStopped):
+        await complete_with_silence_deadline(
+            client,
+            silence_deadline_seconds=1.0,
+            ceiling_seconds=5.0,
+            request=_REQUEST,
+            gate=provider_work_gate(ownership_lost=stop),
+        )
+    client.acompletion.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_an_unset_stop_signal_leaves_the_deadlines_naming_their_own_expiry() -> (
+    None
+):
+    async def never(**_kwargs: object) -> object:
+        await asyncio.Event().wait()
+        return None
+
+    whole = SimpleNamespace(
+        choices=[SimpleNamespace(message=SimpleNamespace(content="ok"))]
+    )
+    with pytest.raises(ProviderSilenceExpired):
+        await complete_with_silence_deadline(
+            SimpleNamespace(acompletion=AsyncMock(side_effect=never)),
+            silence_deadline_seconds=0.05,
+            ceiling_seconds=5.0,
+            request=_REQUEST,
+            gate=provider_work_gate(),
+        )
+    response = await complete_with_silence_deadline(
+        SimpleNamespace(acompletion=AsyncMock(return_value=whole)),
+        silence_deadline_seconds=1.0,
+        ceiling_seconds=5.0,
+        request=_REQUEST,
+        gate=provider_work_gate(),
+    )
+    assert response is whole
+
+
+@pytest.mark.asyncio
+async def test_every_request_is_admitted_right_before_it_is_sent() -> None:
+    """A replacement without a refused control is admitted like the first."""
+
+    sent: list[str] = []
+    admitted: list[int] = []
+
+    async def admit() -> None:
+        admitted.append(len(sent))
+
+    async def provider(**kwargs: object) -> object:
+        sent.append("temperature" if "temperature" in kwargs else "replacement")
+        if len(sent) == 1:
+            raise _rejection(
+                {"error": {"param": "temperature", "code": "unsupported_value"}}
+            )
+        return SimpleNamespace(
+            choices=[SimpleNamespace(message=SimpleNamespace(content="ok"))]
+        )
+
+    await complete_with_silence_deadline(
+        SimpleNamespace(acompletion=AsyncMock(side_effect=provider)),
+        silence_deadline_seconds=1.0,
+        ceiling_seconds=5.0,
+        request={**_REQUEST, "temperature": 0.2},
+        retry_without_refused_control=_admit,
+        gate=provider_work_gate(admit),
+    )
+
+    assert sent == ["temperature", "replacement"]
+    # Each admission happened with nothing yet sent for that request.
+    assert admitted == [0, 1]
+
+
+@pytest.mark.asyncio
+async def test_a_refused_admission_sends_nothing_and_carries_the_turns_error() -> None:
+    from eneo.flows.ai_builder.ai_builder_provider_call import (
+        ProviderRequestNotAdmitted,
+    )
+
+    lost = RuntimeError("lease lost")
+    client = SimpleNamespace(acompletion=AsyncMock())
+
+    with pytest.raises(ProviderRequestNotAdmitted) as raised:
+        await complete_with_silence_deadline(
+            client,
+            silence_deadline_seconds=1.0,
+            ceiling_seconds=5.0,
+            request=_REQUEST,
+            gate=provider_work_gate(AsyncMock(side_effect=lost)),
+        )
+
+    assert raised.value.error is lost
+    client.acompletion.assert_not_called()

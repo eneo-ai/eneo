@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from collections.abc import Awaitable, Callable, Mapping, Sequence
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from typing import Any, cast
 
@@ -17,6 +17,7 @@ from eneo.flows.ai_builder.ai_builder_error_contract import (
     AIBuilderProviderRequestEvidence,
     classify_ai_builder_provider_failure,
     prepare_ai_builder_provider_kwargs,
+    provider_call_stopped_error,
     record_ai_builder_provider_failure,
 )
 from eneo.flows.ai_builder.ai_builder_proposal_telemetry import (
@@ -33,7 +34,10 @@ from eneo.flows.ai_builder.ai_builder_proposal_tool_contracts import (
 )
 from eneo.flows.ai_builder.ai_builder_provider_call import (
     ObservedTiming,
+    ProviderCallStopped,
     ProviderCallTiming,
+    ProviderRequestNotAdmitted,
+    ProviderWorkGate,
     complete_with_silence_deadline,
 )
 from eneo.flows.ai_builder.ai_builder_token_usage import (
@@ -88,7 +92,7 @@ async def call_proposal_completion(
     request: ProposalCompletionRequest,
     usage_tracker: ProposalTurnTelemetry | None = None,
     call_kind: ProposalCallKind | None = None,
-    before_provider_call: Callable[[], Awaitable[None]] | None = None,
+    provider_gate: ProviderWorkGate | None = None,
 ) -> LLMCompletionResponse:
     tool_schemas = _outbound_proposal_tool_schemas(request)
     fitted_message_groups, request_budget = fit_proposal_request_budget(
@@ -115,8 +119,6 @@ async def call_proposal_completion(
     if dropped_response_format is not None:
         logger.debug("ai_builder_proposal_completion_dropped_response_format")
     incident_evidence: AIBuilderProviderRequestEvidence | None = None
-    if before_provider_call is not None:
-        await before_provider_call()
     if usage_tracker is not None:
         usage_tracker.start_attempt(
             counts_as_repair=request.counts_as_repair,
@@ -167,7 +169,18 @@ async def call_proposal_completion(
             retry_without_refused_control=admit_request_without_refused_control,
             observe_sdk_input=observe_sdk_input,
             observe_timing=timing,
+            gate=provider_gate,
         )
+    except ProviderRequestNotAdmitted as not_admitted:
+        raise not_admitted.error
+    except ProviderCallStopped as stopped:
+        assert provider_gate is not None
+        raise provider_call_stopped_error(
+            provider_gate,
+            call_kind=call_kind or "proposal",
+            model=request.route.litellm_model,
+            timing=timing.value,
+        ) from stopped
     except Exception as error:
         failure = record_ai_builder_provider_failure(
             error,
@@ -248,7 +261,7 @@ def make_usage_tracked_proposal_completion(
     litellm_client: Any,
     usage_tracker: ProposalTurnTelemetry | None,
     call_kind: ProposalCallKind | None = None,
-    before_provider_call: Callable[[], Awaitable[None]] | None = None,
+    provider_gate: ProviderWorkGate | None = None,
 ) -> ProposalCompletionFn:
     async def _tracked_completion(
         request: ProposalCompletionRequest,
@@ -258,7 +271,7 @@ def make_usage_tracked_proposal_completion(
             request=request,
             usage_tracker=usage_tracker,
             call_kind=call_kind,
-            before_provider_call=before_provider_call,
+            provider_gate=provider_gate,
         )
 
     return _tracked_completion

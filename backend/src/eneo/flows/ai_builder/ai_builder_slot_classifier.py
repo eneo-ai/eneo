@@ -4,7 +4,7 @@ import hashlib
 import json
 import os
 import time
-from collections.abc import Awaitable, Callable, Collection, Iterable, Mapping
+from collections.abc import Collection, Iterable, Mapping
 from dataclasses import replace
 from enum import Enum
 from pathlib import Path
@@ -32,6 +32,7 @@ from eneo.flows.ai_builder.ai_builder_error_contract import (
     build_ai_builder_request_budget_exhausted_error,
     classify_ai_builder_provider_failure,
     prepare_ai_builder_provider_kwargs,
+    provider_call_stopped_error,
     record_ai_builder_provider_failure,
 )
 from eneo.flows.ai_builder.ai_builder_litellm_completion import (
@@ -44,7 +45,10 @@ from eneo.flows.ai_builder.ai_builder_proposal_tool_contracts import (
 )
 from eneo.flows.ai_builder.ai_builder_provider_call import (
     ObservedTiming,
+    ProviderCallStopped,
     ProviderCallTiming,
+    ProviderRequestNotAdmitted,
+    ProviderWorkGate,
     complete_with_silence_deadline,
 )
 from eneo.flows.ai_builder.ai_builder_result_contract import RESULT_OBLIGATION_VALUES
@@ -189,7 +193,7 @@ async def classify_slots(
     bias: SlotClassificationBias | None = None,
     structured_output_mode: StructuredOutputMode | SlotClassificationTransport,
     usage_tracker: ProposalTurnTelemetry | None = None,
-    before_provider_call: Callable[[], Awaitable[None]] | None = None,
+    provider_gate: ProviderWorkGate | None = None,
     capacity: ModelCapacity,
     budget_policy: AIBuilderBudgetPolicy,
     read_declarations: bool = True,
@@ -298,8 +302,6 @@ async def classify_slots(
             build_ai_builder_request_budget_exhausted_error(request_id=None)
         )
     completion_kwargs["max_tokens"] = request_budget.provider_output_cap_tokens
-    if before_provider_call is not None:
-        await before_provider_call()
     call = (
         usage_tracker.begin_call(
             call_kind="slot_classification",
@@ -341,7 +343,18 @@ async def classify_slots(
             },
             retry_without_refused_control=admit_request_without_refused_control,
             observe_timing=timing,
+            gate=provider_gate,
         )
+    except ProviderRequestNotAdmitted as not_admitted:
+        raise not_admitted.error
+    except ProviderCallStopped as stopped:
+        assert provider_gate is not None
+        raise provider_call_stopped_error(
+            provider_gate,
+            call_kind="slot_classification",
+            model=litellm_model,
+            timing=timing.value,
+        ) from stopped
     except Exception as error:
         failure = record_ai_builder_provider_failure(
             error,

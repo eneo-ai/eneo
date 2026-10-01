@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-from collections.abc import Awaitable, Callable
 from dataclasses import replace
 from typing import TYPE_CHECKING, Any, AsyncGenerator, assert_never
 from uuid import UUID
@@ -93,6 +92,7 @@ from eneo.flows.ai_builder.ai_builder_proposal_submission import (
     ProposalSubmissionOwner,
 )
 from eneo.flows.ai_builder.ai_builder_proposal_telemetry import ProposalTurnTelemetry
+from eneo.flows.ai_builder.ai_builder_provider_call import ProviderWorkGate
 from eneo.flows.ai_builder.ai_builder_repo import AIBuilderRepository
 from eneo.flows.ai_builder.ai_builder_resource_catalog import (
     AIBuilderAvailableKnowledgeBaseResource,
@@ -232,7 +232,7 @@ class AIBuilderPlanner:
         usage_tracker: ProposalTurnTelemetry,
         flow: "Flow | None",
         assistant_snapshots: AssistantAuthoringSnapshots | None,
-        before_provider_call: Callable[[], Awaitable[None]],
+        provider_gate: ProviderWorkGate,
     ) -> AsyncGenerator[AIBuilderStreamEvent, None]:
         try:
             assistant_metadata = build_assistant_message_metadata(conversation)
@@ -265,7 +265,7 @@ class AIBuilderPlanner:
                 compile_context=proposal_request.compile_context,
                 plan_edit_context=proposal_request.plan_edit_context,
                 prior_spec_for_revision=proposal_request.prior_spec_for_revision,
-                before_provider_call=before_provider_call,
+                provider_gate=provider_gate,
                 proposal_request_budget=replace(
                     proposal_request.request_budget,
                     request_id=request_id,
@@ -633,7 +633,7 @@ class AIBuilderPlanner:
                 model=completion_model_route.litellm_model,
                 target_kind=TargetKind.EDIT if flow is not None else TargetKind.CREATE,
             )
-            lease_lost_event = claimed_turn.lease_lost_event
+            provider_gate = claimed_turn.provider_gate
             accepted_message = claimed_turn.user_message
             accepted_session = await self.repo.get_session(
                 session_id=session_id,
@@ -646,9 +646,6 @@ class AIBuilderPlanner:
                 if persisted_message.message_id == accepted_message.message_id
             )
             user_message = conversation[new_messages_start]
-
-            async def mark_provider_work_started() -> None:
-                await self.repo.mark_session_turn_processing(turn=turn)
 
             if session_status == SessionStatus.AWAITING_APPROVAL.value:
                 await self.repo.update_session_status(
@@ -740,7 +737,7 @@ class AIBuilderPlanner:
                         tenant_id=self.user.tenant_id,
                         current_turn_start=new_messages_start,
                         usage_tracker=usage_tracker,
-                        before_provider_call=mark_provider_work_started,
+                        provider_gate=provider_gate,
                         prepared_attachment_context=prepared_attachment_context,
                         prepared_schema_candidates=prepared_schema_candidates,
                     )
@@ -813,7 +810,7 @@ class AIBuilderPlanner:
                         usage_tracker=usage_tracker,
                         flow=flow,
                         assistant_snapshots=assistant_snapshots,
-                        before_provider_call=mark_provider_work_started,
+                        provider_gate=provider_gate,
                     ):
                         yield event
                     yield build_done_event()
@@ -875,7 +872,9 @@ class AIBuilderPlanner:
                             yield build_done_event()
                             return
                         raise
-                    if lease_lost_event.is_set():
+                    # Dispatch is not stopped mid-await; a lease that cannot
+                    # be trusted any more only fences its result.
+                    if provider_gate.lease_lost.is_set():
                         yield build_session_send_lease_lost_event(request_id=request_id)
                         yield build_done_event()
                         return
@@ -961,7 +960,7 @@ class AIBuilderPlanner:
                             usage_tracker=usage_tracker,
                             flow=flow,
                             assistant_snapshots=assistant_snapshots,
-                            before_provider_call=mark_provider_work_started,
+                            provider_gate=provider_gate,
                         ):
                             if isinstance(event, AIBuilderStatusEvent):
                                 yield event

@@ -186,6 +186,7 @@ from eneo.roles.role import RoleCreate
 from eneo.users.user import UserUpdate
 from tests.fixtures import mint_v2_api_key
 from tests.integration.flows.conftest import assert_call_evidence_after_own_details
+from tests.unittests.flows.ai_builder.proposal_turn_builders import provider_work_gate
 from tests.unittests.flows.ai_builder.requirements_card_test_support import (
     pending_card_message,
 )
@@ -4937,6 +4938,252 @@ async def test_ai_builder_cancel_serializes_attachment_cleanup_with_turn_accepta
 
 @pytest.mark.integration
 @pytest.mark.asyncio
+async def test_a_healthy_provider_call_outlives_ownership_probes_and_completes(
+    client,
+    bearer_token,
+    completion_model_factory,
+    db_container,
+    monkeypatch: pytest.MonkeyPatch,
+):
+    """Probes that find the row still the turn's never stop its work."""
+    from eneo.flows.ai_builder import ai_builder_send_lease
+
+    monkeypatch.setattr(
+        ai_builder_send_lease, "_SEND_OWNERSHIP_PROBE_INTERVAL_SECONDS", 0.02
+    )
+    probe = ai_builder_send_lease._probe_session_send_ownership
+    probe_answers: list[bool] = []
+    several_probes_answered = asyncio.Event()
+
+    async def counted_probe(**kwargs: Any) -> bool:
+        owned = await probe(**kwargs)
+        probe_answers.append(owned)
+        if len(probe_answers) >= 3:
+            several_probes_answered.set()
+        return owned
+
+    monkeypatch.setattr(
+        ai_builder_send_lease, "_probe_session_send_ownership", counted_probe
+    )
+    space_id = await _create_space_with_planner_model(
+        client=client,
+        bearer_token=bearer_token,
+        db_container=db_container,
+        completion_model_factory=completion_model_factory,
+        space_name="AI Builder Healthy Call Outlives Probes",
+        planner_model_overrides={"max_input_tokens": 128_000},
+        planner_model_is_only_space_model=True,
+    )
+    session_id = await _create_ai_builder_session(
+        client=client,
+        bearer_token=bearer_token,
+        space_id=space_id,
+    )
+
+    async def answers_after_several_probes(**_: object) -> object:
+        await asyncio.wait_for(several_probes_answered.wait(), timeout=30)
+        return _make_llm_response(content="Jag kan hjälpa dig bygga flödet.")
+
+    completion = AsyncMock(side_effect=answers_after_several_probes)
+    with (
+        patch(
+            "eneo.flows.ai_builder.ai_builder_service.litellm.acompletion",
+            new=completion,
+        ),
+        patch(
+            "eneo.completion_models.infrastructure.completion_service.CompletionService.resolve_model_route",
+            new=AsyncMock(return_value=_route(kwargs={"api_key": "sk-test"})),
+        ),
+    ):
+        events = await _send_builder_message(
+            client=client,
+            bearer_token=bearer_token,
+            session_id=session_id,
+            message="Hjälp mig bygga ett flöde.",
+        )
+
+    assert completion.await_count == 1
+    assert len(probe_answers) >= 3
+    assert all(probe_answers)
+    outcome = [event["event"] for event in events if event["event"] != "status"]
+    assert "error" not in outcome, _builder_event_outline(events)
+    assert outcome[-1] == "done"
+
+
+@pytest.mark.integration
+@pytest.mark.asyncio
+async def test_the_ownership_probe_reads_the_lease_without_touching_it(
+    client,
+    bearer_token,
+    completion_model_factory,
+    db_container,
+):
+    space_id = await _create_space_with_planner_model(
+        client=client,
+        bearer_token=bearer_token,
+        db_container=db_container,
+        completion_model_factory=completion_model_factory,
+        space_name="AI Builder Ownership Probe",
+    )
+    async with db_container() as container:
+        repo = AIBuilderRepository(container.session())
+        user = container.user()
+        session = await repo.create_session(
+            tenant_id=user.tenant_id,
+            space_id=UUID(space_id),
+            actor_user_id=user.id,
+            target_kind=TargetKind.CREATE,
+            flow_id=None,
+        )
+        lease = SessionSendLease(request_id=uuid4(), lock_token=uuid4())
+        await _claim_session_send_turn(
+            repo=repo,
+            session_id=session.id,
+            tenant_id=user.tenant_id,
+            lease=lease,
+        )
+        held_lock = await _load_session_send_lock(
+            repo, session_id=session.id, tenant_id=user.tenant_id
+        )
+
+        assert await repo.owns_session_send_lease(
+            session_id=session.id, tenant_id=user.tenant_id, lease=lease
+        )
+        assert (
+            await _load_session_send_lock(
+                repo, session_id=session.id, tenant_id=user.tenant_id
+            )
+            == held_lock
+        )
+        for other in (
+            SessionSendLease(request_id=lease.request_id, lock_token=uuid4()),
+            SessionSendLease(request_id=uuid4(), lock_token=lease.lock_token),
+        ):
+            assert not await repo.owns_session_send_lease(
+                session_id=session.id, tenant_id=user.tenant_id, lease=other
+            )
+        assert not await repo.owns_session_send_lease(
+            session_id=session.id, tenant_id=uuid4(), lease=lease
+        )
+
+        await repo.cancel_session(session_id=session.id, tenant_id=user.tenant_id)
+
+        assert not await repo.owns_session_send_lease(
+            session_id=session.id, tenant_id=user.tenant_id, lease=lease
+        )
+
+
+@pytest.mark.integration
+@pytest.mark.asyncio
+async def test_cancelling_the_session_stops_the_provider_call_in_flight(
+    client,
+    bearer_token,
+    completion_model_factory,
+    db_container,
+    monkeypatch: pytest.MonkeyPatch,
+):
+    """A cancel stops the turn's provider work, not only its next call.
+
+    The send-lock was cleared at once, but the call in flight kept the model
+    busy until its own silence deadline or ceiling for a turn nobody waited
+    for. The ownership probe confirms the row is gone and the call is
+    cancelled within the probe's interval and wait budget; the stream ends with
+    the lease error and no further provider call is made.
+    """
+    from eneo.flows.ai_builder import ai_builder_send_lease
+
+    probe_interval_seconds = 0.05
+    monkeypatch.setattr(
+        ai_builder_send_lease,
+        "_SEND_OWNERSHIP_PROBE_INTERVAL_SECONDS",
+        probe_interval_seconds,
+        raising=False,
+    )
+    probe_wait_seconds = getattr(
+        ai_builder_send_lease, "_SEND_OWNERSHIP_PROBE_TIMEOUT_SECONDS", 5.0
+    )
+    space_id = await _create_space_with_planner_model(
+        client=client,
+        bearer_token=bearer_token,
+        db_container=db_container,
+        completion_model_factory=completion_model_factory,
+        space_name="AI Builder Cancel Stops Provider Work",
+        # The first provider call of a turn is the requirement classifier.
+        planner_model_overrides={"max_input_tokens": 128_000},
+        planner_model_is_only_space_model=True,
+    )
+    session_id = await _create_ai_builder_session(
+        client=client,
+        bearer_token=bearer_token,
+        space_id=space_id,
+    )
+    reached_the_provider = asyncio.Event()
+    provider_saw_the_cancel = asyncio.Event()
+
+    async def never_answers(**_: object) -> NoReturn:
+        reached_the_provider.set()
+        try:
+            await asyncio.Event().wait()
+        except asyncio.CancelledError:
+            provider_saw_the_cancel.set()
+            raise
+        raise AssertionError("unreachable")
+
+    completion = AsyncMock(side_effect=never_answers)
+    with (
+        patch(
+            "eneo.flows.ai_builder.ai_builder_service.litellm.acompletion",
+            new=completion,
+        ),
+        patch(
+            "eneo.completion_models.infrastructure.completion_service.CompletionService.resolve_model_route",
+            new=AsyncMock(return_value=_route(kwargs={"api_key": "sk-test"})),
+        ),
+    ):
+        sending = asyncio.create_task(
+            _send_builder_message(
+                client=client,
+                bearer_token=bearer_token,
+                session_id=session_id,
+                message="Hjälp mig bygga ett flöde.",
+            )
+        )
+        await asyncio.wait_for(reached_the_provider.wait(), timeout=60)
+        cancel_response = await client.post(
+            f"/api/v1/flows/ai-builder/sessions/{session_id}/cancel",
+            headers={"Authorization": f"Bearer {bearer_token}"},
+        )
+        assert cancel_response.status_code == 200, cancel_response.text
+        events = await asyncio.wait_for(
+            sending, timeout=probe_interval_seconds + probe_wait_seconds + 2
+        )
+
+    assert provider_saw_the_cancel.is_set()
+    assert completion.await_count == 1
+    outcome = [event for event in events if event["event"] != "status"]
+    assert [event["event"] for event in outcome] == ["error", "done"], (
+        _builder_event_outline(events)
+    )
+    assert cast(dict[str, object], outcome[0]["data"])["code"] == (
+        "session_send_lease_lost"
+    )
+    async with sessionmanager.session() as verification_session:
+        async with verification_session.begin():
+            row = (
+                await verification_session.execute(
+                    select(BuilderSessions).where(
+                        BuilderSessions.id == UUID(session_id)
+                    )
+                )
+            ).scalar_one()
+            assert row.status == SessionStatus.CANCELLED.value
+            assert row.active_request_id is None
+            assert row.lock_token is None
+            assert row.lock_expires_at is None
+
+
+@pytest.mark.integration
+@pytest.mark.asyncio
 async def test_send_message_releases_the_lock_when_the_client_disconnects(
     client,
     bearer_token,
@@ -5887,7 +6134,7 @@ async def test_classified_output_drift_revises_before_persisting_question(
                     model=route.litellm_model,
                     target_kind=TargetKind.CREATE,
                 ),
-                before_provider_call=mark_provider_work_started,
+                provider_gate=provider_work_gate(mark_provider_work_started),
             )
         )
 
@@ -7194,7 +7441,7 @@ async def test_handle_edit_flow_with_lost_lease_rolls_back(
                     flow=flow,
                     assistant_snapshots=None,
                     planning_state=PlanningState.empty(),
-                    before_provider_call=mark_provider_work_started,
+                    provider_gate=provider_work_gate(mark_provider_work_started),
                 )
             ]
 

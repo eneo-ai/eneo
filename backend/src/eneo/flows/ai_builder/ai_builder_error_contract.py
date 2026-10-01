@@ -33,6 +33,7 @@ from eneo.flows.ai_builder.ai_builder_provider_call import (
     ProviderRejection,
     ProviderSilenceExpired,
     ProviderStreamIncomplete,
+    ProviderWorkGate,
     provider_error_fields,
 )
 from eneo.main.exceptions import (
@@ -259,6 +260,39 @@ def translate_unknown_model_capacity(
         message,
         code=code,
         context={"missing_dimensions": ",".join(error.missing_dimensions)},
+    )
+
+
+def provider_call_stopped_error(
+    gate: ProviderWorkGate,
+    *,
+    call_kind: str,
+    model: str,
+    timing: ProviderCallTiming | None,
+) -> AIBuilderBadRequestException:
+    """A provider call the turn stopped because its session is no longer its own.
+
+    The lease-guarded writes report the same loss with the same code; the
+    stopped call is not a provider failure and is never recorded as one. This
+    line is the stop's only trace: the turn's call accounting does not record
+    the abandoned call.
+    """
+
+    logger.warning(
+        "ai_builder_provider_call_stopped",
+        extra={
+            "session_id": gate.session_id,
+            "request_id": gate.request_id,
+            "call_kind": call_kind,
+            "model": model,
+            "provider_elapsed_ms": (
+                timing.provider_elapsed_ms if timing is not None else None
+            ),
+        },
+    )
+    return AIBuilderBadRequestException(
+        "The AI Builder session lease was lost during provider work.",
+        code=AIBuilderErrorCode.SESSION_SEND_LEASE_LOST,
     )
 
 

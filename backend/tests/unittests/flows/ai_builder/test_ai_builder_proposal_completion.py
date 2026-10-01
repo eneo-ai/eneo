@@ -93,7 +93,10 @@ from eneo.model_providers.infrastructure.litellm_provider import (
     ResolvedLiteLLMProvider,
 )
 from eneo.tenants.tenant import TenantInDB
-from tests.unittests.flows.ai_builder.proposal_turn_builders import _make_context
+from tests.unittests.flows.ai_builder.proposal_turn_builders import (
+    _make_context,
+    provider_work_gate,
+)
 
 
 def _route(
@@ -872,7 +875,7 @@ async def test_proposal_provider_failure_uses_typed_disposition(
                     temperature=0.2,
                 ),
                 usage_tracker=tracker,
-                before_provider_call=before_provider_call,
+                provider_gate=provider_work_gate(before_provider_call),
             )
 
     assert isinstance(exc_info.value, expected_exception)
@@ -1361,7 +1364,7 @@ async def test_protected_only_overflow_rejects_before_provider_work_or_call_slot
         await call_proposal_completion(
             litellm_client=litellm_client,
             request=ctx.completion_request(temperature=0.2),
-            before_provider_call=before_provider_call,
+            provider_gate=provider_work_gate(before_provider_call),
         )
 
     assert (
@@ -1421,7 +1424,7 @@ async def test_final_strict_tool_payload_is_admitted_before_provider_work(
         await call_proposal_completion(
             litellm_client=litellm_client,
             request=ctx.completion_request(temperature=0.2),
-            before_provider_call=before_provider_call,
+            provider_gate=provider_work_gate(before_provider_call),
         )
 
     assert (
@@ -1695,7 +1698,7 @@ async def test_repair_time_overflow_uses_same_completion_boundary_rejection(
                 temperature=0.2,
                 counts_as_repair=True,
             ),
-            before_provider_call=before_provider_call,
+            provider_gate=provider_work_gate(before_provider_call),
         )
 
     assert call_budget.calls_started == 1
@@ -1769,7 +1772,7 @@ async def test_second_repair_overflow_rechecks_the_shared_completion_boundary(
                 message_groups=message_groups,
                 counts_as_repair=counts_as_repair,
             ),
-            before_provider_call=before_provider_call,
+            provider_gate=provider_work_gate(before_provider_call),
         )
 
     with pytest.raises(AIBuilderKnownProviderRejectionException) as exc_info:
@@ -1780,7 +1783,7 @@ async def test_second_repair_overflow_rechecks_the_shared_completion_boundary(
                 message_groups=second_repair_groups,
                 counts_as_repair=True,
             ),
-            before_provider_call=before_provider_call,
+            provider_gate=provider_work_gate(before_provider_call),
         )
 
     assert (
@@ -2184,7 +2187,7 @@ async def test_local_reasoning_refusal_preserves_known_rejection_without_startin
     completion = make_usage_tracked_proposal_completion(
         litellm_client=client,
         usage_tracker=tracker,
-        before_provider_call=before_provider_call,
+        provider_gate=provider_work_gate(before_provider_call),
     )
     with pytest.raises(AIBuilderKnownProviderRejectionException) as error:
         await completion(request)
@@ -2407,3 +2410,323 @@ async def test_a_refused_request_and_its_replacement_each_carry_their_own_timing
     assert "first_chunk_ms" not in refused
     assert answered["provider_elapsed_ms"] < 100
     assert answered["first_chunk_ms"] < 100
+
+
+@pytest.mark.asyncio
+async def test_a_proposal_call_stopped_by_lost_ownership_ends_as_lease_lost_not_as_a_provider_failure() -> (
+    None
+):
+    """The turn's ownership was confirmed lost while the provider worked.
+
+    The call in flight is cancelled at once and the turn ends with the lease
+    error the lease-guarded writes raise; nothing is charged to the provider.
+    """
+
+    reached, cancelled, stop = asyncio.Event(), asyncio.Event(), asyncio.Event()
+
+    async def hangs(**_kwargs: object) -> object:
+        reached.set()
+        try:
+            await asyncio.Event().wait()
+        except asyncio.CancelledError:
+            cancelled.set()
+            raise
+        return None
+
+    litellm_client = SimpleNamespace(acompletion=AsyncMock(side_effect=hangs))
+    tracker = ProposalTurnTelemetry(
+        request_id="req-stopped",
+        model="private-model",
+        target_kind=TargetKind.CREATE,
+    )
+
+    with (
+        patch.object(error_contract_module.logger, "info") as event_log,
+        patch.object(error_contract_module.logger, "warning") as stop_log,
+    ):
+        call = asyncio.create_task(
+            call_proposal_completion(
+                litellm_client=litellm_client,
+                request=_completion_request(
+                    messages=[{"role": "user", "content": "Build a flow."}],
+                    tool_schemas=[{"function": {"name": PROPOSE_FLOW_TOOL_NAME}}],
+                    route=_route(),
+                    max_output_tokens=1024,
+                    temperature=0.2,
+                ),
+                usage_tracker=tracker,
+                call_kind="proposal_initial",
+                provider_gate=provider_work_gate(AsyncMock(), ownership_lost=stop),
+            )
+        )
+        await asyncio.wait_for(reached.wait(), timeout=1)
+        stop.set()
+        with pytest.raises(AIBuilderBadRequestException) as exc_info:
+            await asyncio.wait_for(call, timeout=1)
+
+    assert exc_info.value.code is AIBuilderErrorCode.SESSION_SEND_LEASE_LOST
+    assert not isinstance(exc_info.value, AIBuilderProviderOutcomeUnknownException)
+    assert cancelled.is_set()
+    assert litellm_client.acompletion.await_count == 1
+    assert [
+        call for call in event_log.call_args_list if call.args == ("failure_event",)
+    ] == []
+    assert all(record.provider_failure_kind is None for record in tracker.call_records)
+    # One trace line at the stop; the call itself is not accounted (V1.9a-3).
+    stop_log.assert_called_once()
+    assert stop_log.call_args.args == ("ai_builder_provider_call_stopped",)
+    stopped = stop_log.call_args.kwargs["extra"]
+    assert stopped["session_id"] == "test-session"
+    assert stopped["request_id"] == "test-request"
+    assert stopped["call_kind"] == "proposal_initial"
+    assert stopped["model"] == _route().litellm_model
+    assert isinstance(stopped["provider_elapsed_ms"], int)
+
+
+@pytest.mark.asyncio
+async def test_ownership_lost_before_a_replacement_request_sends_no_second_request() -> (
+    None
+):
+    """The replacement without a refused control is admitted like the first.
+
+    Ownership is lost while the first request is refused for a sampling
+    control: no second request may be sent and no answer returned.
+    """
+
+    gate = provider_work_gate()
+    answers: list[object] = []
+
+    async def provider(**_: object) -> object:
+        if not answers:
+            answers.append("refused")
+            gate.ownership_lost.set()
+            raise _refusal_of_temperature()
+        return _make_response_with_text("{}")
+
+    client = SimpleNamespace(acompletion=AsyncMock(side_effect=provider))
+
+    with pytest.raises(AIBuilderBadRequestException) as exc_info:
+        await call_proposal_completion(
+            litellm_client=client,
+            request=_completion_request(
+                messages=[{"role": "user", "content": "Build a flow"}],
+                tool_schemas=[],
+                route=_route(),
+                max_output_tokens=100,
+                temperature=0.0,
+                call_budget=ProposalCallBudget(call_limit=2),
+            ),
+            call_kind="proposal_initial",
+            provider_gate=gate,
+        )
+
+    assert exc_info.value.code is AIBuilderErrorCode.SESSION_SEND_LEASE_LOST
+    assert client.acompletion.await_count == 1
+
+
+@pytest.mark.asyncio
+async def test_a_refused_admission_raises_the_turns_own_error_not_a_provider_failure() -> (
+    None
+):
+    lost = AIBuilderBadRequestException(
+        "The AI Builder session lease was lost before provider work.",
+        code=AIBuilderErrorCode.SESSION_SEND_LEASE_LOST,
+    )
+    client = SimpleNamespace(acompletion=AsyncMock())
+    tracker = ProposalTurnTelemetry(
+        request_id="req-refused", model="gpt-test", target_kind=TargetKind.CREATE
+    )
+
+    with patch.object(error_contract_module.logger, "info") as event_log:
+        with pytest.raises(AIBuilderBadRequestException) as exc_info:
+            await call_proposal_completion(
+                litellm_client=client,
+                usage_tracker=tracker,
+                request=_completion_request(
+                    messages=[{"role": "user", "content": "Build a flow"}],
+                    tool_schemas=[],
+                    route=_route(),
+                    max_output_tokens=100,
+                    temperature=0.0,
+                ),
+                provider_gate=provider_work_gate(AsyncMock(side_effect=lost)),
+            )
+
+    assert exc_info.value is lost
+    client.acompletion.assert_not_called()
+    assert [
+        call for call in event_log.call_args_list if call.args == ("failure_event",)
+    ] == []
+
+
+def _slow_admission(
+    seconds: float, *, refuse_on: int | None = None
+) -> tuple[Any, list[int]]:
+    """An admission that takes ``seconds``; the ``refuse_on``-th one is refused."""
+
+    admissions: list[int] = []
+
+    async def admit() -> None:
+        admissions.append(len(admissions) + 1)
+        await asyncio.sleep(seconds)
+        if admissions[-1] == refuse_on:
+            raise AIBuilderBadRequestException(
+                "The AI Builder session lease was lost before provider work.",
+                code=AIBuilderErrorCode.SESSION_SEND_LEASE_LOST,
+            )
+
+    return admit, admissions
+
+
+async def _admitted_proposal_call(
+    *responses: object, admit: Any, call_limit: int = 1
+) -> tuple[ProposalTurnTelemetry, Any, Any]:
+    tracker = ProposalTurnTelemetry(
+        request_id="req-admission", model="gpt-test", target_kind=TargetKind.CREATE
+    )
+    client = SimpleNamespace(acompletion=AsyncMock(side_effect=list(responses)))
+    with patch.object(error_contract_module.logger, "info") as event_log:
+        try:
+            outcome: Any = await call_proposal_completion(
+                litellm_client=client,
+                usage_tracker=tracker,
+                request=_completion_request(
+                    messages=[{"role": "user", "content": "Build a flow"}],
+                    tool_schemas=[],
+                    route=_route(),
+                    max_output_tokens=100,
+                    temperature=0.0,
+                    call_budget=ProposalCallBudget(call_limit=call_limit),
+                    request_budget=_deadline_budget(
+                        timeout_seconds=0.05, ceiling_seconds=0.05
+                    ),
+                ),
+                call_kind="proposal_initial",
+                provider_gate=provider_work_gate(admit),
+            )
+        except Exception as error:  # the outcome under test
+            outcome = error
+    failure_events = [
+        call for call in event_log.call_args_list if call.args == ("failure_event",)
+    ]
+    assert failure_events == []
+    return tracker, client, outcome
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("replacement", [False, True], ids=["first", "replacement"])
+async def test_an_admission_longer_than_the_ceiling_is_not_the_providers_time(
+    replacement: bool,
+) -> None:
+    """The admission is the turn's wait: no provider ceiling or timing runs."""
+
+    refusal = [_refusal_of_temperature()] if replacement else []
+    admit, admissions = _slow_admission(0.12)
+
+    tracker, client, outcome = await _admitted_proposal_call(
+        *refusal, _make_response_with_text("{}"), admit=admit, call_limit=2
+    )
+
+    assert not isinstance(outcome, Exception), outcome
+    assert admissions == ([1, 2] if replacement else [1])
+    assert client.acompletion.await_count == len(refusal) + 1
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("replacement", [False, True], ids=["first", "replacement"])
+async def test_a_slow_admission_that_is_refused_sends_nothing_and_is_no_provider_failure(
+    replacement: bool,
+) -> None:
+    refusal = [_refusal_of_temperature()] if replacement else []
+    admit, _ = _slow_admission(0.12, refuse_on=2 if replacement else 1)
+
+    tracker, client, outcome = await _admitted_proposal_call(
+        *refusal, _make_response_with_text("{}"), admit=admit, call_limit=2
+    )
+
+    assert isinstance(outcome, AIBuilderBadRequestException)
+    assert outcome.code is AIBuilderErrorCode.SESSION_SEND_LEASE_LOST
+    assert not isinstance(outcome, AIBuilderProviderOutcomeUnknownException)
+    assert client.acompletion.await_count == len(refusal)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("replacement", [False, True], ids=["first", "replacement"])
+async def test_provider_elapsed_time_excludes_the_admission(replacement: bool) -> None:
+    refusal = [_refusal_of_temperature()] if replacement else []
+    admit, _ = _slow_admission(0.06)
+
+    tracker, _, outcome = await _admitted_proposal_call(
+        *refusal, _make_response_with_text("{}"), admit=admit, call_limit=2
+    )
+
+    assert not isinstance(outcome, Exception), outcome
+    answered = tracker.build_planner_telemetry()["call_records"][-1]
+    assert answered["provider_elapsed_ms"] < 30
+    if replacement:
+        refused = tracker.build_planner_telemetry()["call_records"][0]
+        assert refused["provider_elapsed_ms"] < 30
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("replacement", [False, True], ids=["first", "replacement"])
+async def test_an_admission_interrupted_by_lost_ownership_publishes_no_provider_time_for_it(
+    replacement: bool,
+) -> None:
+    """Provider timing exists only from a dispatch.
+
+    The stop trace names the last request actually sent: none for an
+    interrupted first admission, the refused first request for an
+    interrupted replacement admission, never the admission wait.
+    """
+
+    gate = provider_work_gate()
+    admissions = 0
+
+    async def admit() -> None:
+        nonlocal admissions
+        admissions += 1
+        if admissions == (2 if replacement else 1):
+            # The admission takes its time, and the loss is confirmed while it
+            # runs; its wait must never read as provider time.
+            await asyncio.sleep(0.06)
+            gate.ownership_lost.set()
+
+    gate = provider_work_gate(admit, ownership_lost=gate.ownership_lost)
+    client = SimpleNamespace(
+        acompletion=AsyncMock(
+            side_effect=[_refusal_of_temperature(), _make_response_with_text("{}")]
+            if replacement
+            else [_make_response_with_text("{}")]
+        )
+    )
+
+    with patch.object(error_contract_module.logger, "warning") as stop_log:
+        with pytest.raises(AIBuilderBadRequestException) as exc_info:
+            await call_proposal_completion(
+                litellm_client=client,
+                request=_completion_request(
+                    messages=[{"role": "user", "content": "Build a flow"}],
+                    tool_schemas=[],
+                    route=_route(),
+                    max_output_tokens=100,
+                    temperature=0.0,
+                    call_budget=ProposalCallBudget(call_limit=2),
+                ),
+                call_kind="proposal_initial",
+                provider_gate=gate,
+            )
+
+    assert exc_info.value.code is AIBuilderErrorCode.SESSION_SEND_LEASE_LOST
+    assert client.acompletion.await_count == (1 if replacement else 0)
+    [stopped] = [
+        call.kwargs["extra"]
+        for call in stop_log.call_args_list
+        if call.args == ("ai_builder_provider_call_stopped",)
+    ]
+    if replacement:
+        # The refused first request's own, near-instant time.
+        assert isinstance(stopped["provider_elapsed_ms"], int)
+        assert stopped["provider_elapsed_ms"] < 30
+    else:
+        assert stopped["provider_elapsed_ms"] is None

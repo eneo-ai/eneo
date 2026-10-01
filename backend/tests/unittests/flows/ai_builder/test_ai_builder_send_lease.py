@@ -118,6 +118,15 @@ class _FakeHeartbeatRepo:
         self.released_state: BuilderTurnState | None = None
         self.release_never_returns = False
 
+    async def owns_session_send_lease(
+        self,
+        *,
+        session_id: UUID,
+        tenant_id: UUID,
+        lease: SessionSendLease,
+    ) -> bool:
+        return True
+
     async def refresh_session_send_lease(
         self,
         *,
@@ -294,7 +303,8 @@ async def test_claim_ai_builder_send_turn_refreshes_with_independent_session_bef
         preparation_baseline=_preparation_baseline(),
     ) as claimed:
         assert claimed.turn.base_planning_state_version == 11
-        assert claimed.lease_lost_event.is_set() is False
+        assert claimed.provider_gate.lease_lost.is_set() is False
+        assert claimed.provider_gate.ownership_lost.is_set() is False
         await asyncio.wait_for(request_repo.refresh_started.wait(), timeout=1)
         request_repo.finish_refresh.set()
 
@@ -447,6 +457,7 @@ async def test_lease_maintenance_stops_without_refresh_when_already_stopped(
         lease=SessionSendLease(request_id=uuid4(), lock_token=uuid4()),
         stop_event=stop_event,
         lease_lost_event=lease_lost_event,
+        ownership_lost_event=asyncio.Event(),
     )
 
     assert lease_lost_event.is_set() is False
@@ -463,6 +474,7 @@ async def test_lease_maintenance_marks_loss_after_failed_refresh(
     lease = SessionSendLease(request_id=uuid4(), lock_token=uuid4())
     stop_event = asyncio.Event()
     lease_lost_event = asyncio.Event()
+    ownership_lost_event = asyncio.Event()
     calls: list[dict[str, object]] = []
 
     monkeypatch.setattr(
@@ -504,6 +516,7 @@ async def test_lease_maintenance_marks_loss_after_failed_refresh(
             lease=lease,
             stop_event=stop_event,
             lease_lost_event=lease_lost_event,
+            ownership_lost_event=ownership_lost_event,
         )
 
     assert calls == [
@@ -515,6 +528,10 @@ async def test_lease_maintenance_marks_loss_after_failed_refresh(
         }
     ]
     assert lease_lost_event.is_set() is True
+    # A refresh that finds the row is no longer this turn's confirms the loss
+    # and stops the work in flight; a refresh that failed proves nothing, so it
+    # only fences later commits (the heartbeat stops renewing either way).
+    assert ownership_lost_event.is_set() is (refresh_outcome is False)
     if isinstance(refresh_outcome, Exception):
         assert len(caplog.records) == 1
         record = caplog.records[0]
@@ -557,6 +574,7 @@ async def test_lease_maintenance_continues_after_refresh_until_stopped(
         lease=SessionSendLease(request_id=uuid4(), lock_token=uuid4()),
         stop_event=stop_event,
         lease_lost_event=lease_lost_event,
+        ownership_lost_event=asyncio.Event(),
     )
 
     assert refresh_count == 1
@@ -629,3 +647,370 @@ def _preparation_baseline() -> SessionTurnPreparationBaseline:
         latest_turn_state=None,
         attachment_file_ids=(),
     )
+
+
+# The ownership probe: a read-only check, on its own short interval, that the
+# row is still this turn's. Only a probe that answers "not ours" stops the work
+# in flight; a probe that fails or hangs is logged and tried again.
+
+
+async def _watch(
+    monkeypatch: pytest.MonkeyPatch,
+    outcomes: list[object],
+    *,
+    lease: SessionSendLease,
+    on_probe: list[tuple[bool, bool]],
+    ownership_lost_event: asyncio.Event,
+    lease_lost_event: asyncio.Event,
+) -> None:
+    monkeypatch.setattr(
+        ai_builder_send_lease, "_SEND_OWNERSHIP_PROBE_INTERVAL_SECONDS", 0
+    )
+    monkeypatch.setattr(
+        ai_builder_send_lease, "_SEND_OWNERSHIP_PROBE_TIMEOUT_SECONDS", 0.01
+    )
+
+    async def probe(**kwargs: object) -> bool:
+        assert kwargs["lease"] == lease
+        on_probe.append((ownership_lost_event.is_set(), lease_lost_event.is_set()))
+        outcome = outcomes.pop(0)
+        if outcome == "hang":
+            await asyncio.Event().wait()
+        if isinstance(outcome, Exception):
+            raise outcome
+        return cast(bool, outcome)
+
+    monkeypatch.setattr(ai_builder_send_lease, "_probe_session_send_ownership", probe)
+    await asyncio.wait_for(
+        ai_builder_send_lease._watch_send_ownership(
+            session_id=uuid4(),
+            tenant_id=uuid4(),
+            lease=lease,
+            stop_event=asyncio.Event(),
+            lease_lost_event=lease_lost_event,
+            ownership_lost_event=ownership_lost_event,
+        ),
+        timeout=5,
+    )
+
+
+@pytest.mark.asyncio
+async def test_a_probe_that_finds_the_row_taken_stops_the_turns_work(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    lease = SessionSendLease(request_id=uuid4(), lock_token=uuid4())
+    ownership_lost_event, lease_lost_event = asyncio.Event(), asyncio.Event()
+    on_probe: list[tuple[bool, bool]] = []
+
+    await _watch(
+        monkeypatch,
+        [True, False],
+        lease=lease,
+        on_probe=on_probe,
+        ownership_lost_event=ownership_lost_event,
+        lease_lost_event=lease_lost_event,
+    )
+
+    assert on_probe == [(False, False), (False, False)]
+    assert ownership_lost_event.is_set()
+    assert lease_lost_event.is_set()
+
+
+@pytest.mark.asyncio
+async def test_a_probe_that_fails_or_hangs_is_retried_without_stopping_healthy_work(
+    monkeypatch: pytest.MonkeyPatch,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    import logging as std_logging
+
+    log_name = "test.ai_builder_send_lease.probe"
+    monkeypatch.setattr(
+        ai_builder_send_lease, "logger", std_logging.getLogger(log_name)
+    )
+    lease = SessionSendLease(request_id=uuid4(), lock_token=uuid4())
+    ownership_lost_event, lease_lost_event = asyncio.Event(), asyncio.Event()
+    on_probe: list[tuple[bool, bool]] = []
+
+    with caplog.at_level("WARNING", logger=log_name):
+        await _watch(
+            monkeypatch,
+            [RuntimeError("pool exhausted"), "hang", True, False],
+            lease=lease,
+            on_probe=on_probe,
+            ownership_lost_event=ownership_lost_event,
+            lease_lost_event=lease_lost_event,
+        )
+
+    # Neither the failure nor the hang stopped anything; the probe after them
+    # still found the loss.
+    assert on_probe == [(False, False)] * 4
+    assert ownership_lost_event.is_set()
+    # The turn's first failure is logged in full; the second falls inside the
+    # summary interval.
+    probe_records = [
+        record for record in caplog.records if "probe" in record.getMessage()
+    ]
+    assert len(probe_records) == 1
+    assert probe_records[0].exc_info is not None
+
+
+@pytest.mark.asyncio
+async def test_repeated_probe_failures_are_summarised_not_logged_in_full(
+    monkeypatch: pytest.MonkeyPatch,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    import logging as std_logging
+
+    log_name = "test.ai_builder_send_lease.probe_summary"
+    monkeypatch.setattr(
+        ai_builder_send_lease, "logger", std_logging.getLogger(log_name)
+    )
+    monkeypatch.setattr(
+        ai_builder_send_lease, "_SEND_OWNERSHIP_PROBE_FAILURE_SUMMARY_SECONDS", 0
+    )
+    lease = SessionSendLease(request_id=uuid4(), lock_token=uuid4())
+
+    with caplog.at_level("WARNING", logger=log_name):
+        await _watch(
+            monkeypatch,
+            [RuntimeError("one"), RuntimeError("two"), TimeoutError(), False],
+            lease=lease,
+            on_probe=[],
+            ownership_lost_event=asyncio.Event(),
+            lease_lost_event=asyncio.Event(),
+        )
+
+    probe_records = [
+        record for record in caplog.records if "probe" in record.getMessage()
+    ]
+    assert [record.exc_info is not None for record in probe_records] == [
+        True,
+        False,
+        False,
+    ]
+    assert [
+        (
+            getattr(record, "probe_failures"),
+            getattr(record, "probe_failures_since_last_log"),
+            getattr(record, "last_probe_error"),
+        )
+        for record in probe_records[1:]
+    ] == [(2, 1, "RuntimeError"), (3, 1, "TimeoutError")]
+
+
+@pytest.mark.asyncio
+async def test_a_refresh_that_never_returns_does_not_keep_the_lock(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The heartbeat is drained within its own bound, then the row is released.
+
+    A refresh stuck on the database must not spend the release's budget: the
+    lock would then stay for the whole lease although the turn had ended.
+    """
+
+    request_repo = _FakeSendLeaseRepo()
+    request_repo.fail_request_refresh = True
+    heartbeat_repo = _FakeHeartbeatRepo(request_repo)
+    _force_fast_send_lock_refresh(monkeypatch)
+    _install_independent_session(monkeypatch, request_repo, heartbeat_repo)
+    monkeypatch.setattr(
+        ai_builder_send_lease,
+        "_SEND_HEARTBEAT_DRAIN_TIMEOUT_SECONDS",
+        0.01,
+        raising=False,
+    )
+    monkeypatch.setattr(
+        ai_builder_send_lease, "_SEND_LOCK_RELEASE_TIMEOUT_SECONDS", 0.5
+    )
+
+    started = monotonic()
+    async with claim_ai_builder_send_turn(
+        repo=cast(AIBuilderRepository, request_repo),
+        session_id=uuid4(),
+        tenant_id=uuid4(),
+        accepted_turn=_accepted_turn(uuid4()),
+        preparation_baseline=_preparation_baseline(),
+    ):
+        await asyncio.wait_for(request_repo.refresh_started.wait(), timeout=1)
+
+    assert monotonic() - started < 0.5
+    assert heartbeat_repo.released_lease == request_repo.claimed_lease
+    assert "refresh-end" not in request_repo.events
+
+
+@pytest.mark.asyncio
+async def test_a_blocked_refresh_and_a_blocked_release_leave_the_lock_to_its_lease(
+    monkeypatch: pytest.MonkeyPatch,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """Both bounds hold together; nothing of the lease keeps running after."""
+
+    import logging as std_logging
+
+    log_name = "test.ai_builder_send_lease.blocked"
+    monkeypatch.setattr(
+        ai_builder_send_lease, "logger", std_logging.getLogger(log_name)
+    )
+    request_repo = _FakeSendLeaseRepo()
+    request_repo.fail_request_refresh = True
+    heartbeat_repo = _FakeHeartbeatRepo(request_repo)
+    heartbeat_repo.release_never_returns = True
+    _force_fast_send_lock_refresh(monkeypatch)
+    _install_independent_session(monkeypatch, request_repo, heartbeat_repo)
+    monkeypatch.setattr(
+        ai_builder_send_lease,
+        "_SEND_HEARTBEAT_DRAIN_TIMEOUT_SECONDS",
+        0.01,
+        raising=False,
+    )
+    monkeypatch.setattr(
+        ai_builder_send_lease, "_SEND_LOCK_RELEASE_TIMEOUT_SECONDS", 0.05
+    )
+
+    before = asyncio.all_tasks()
+    started = monotonic()
+    with caplog.at_level("ERROR", logger=log_name):
+        async with claim_ai_builder_send_turn(
+            repo=cast(AIBuilderRepository, request_repo),
+            session_id=uuid4(),
+            tenant_id=uuid4(),
+            accepted_turn=_accepted_turn(uuid4()),
+            preparation_baseline=_preparation_baseline(),
+        ):
+            await asyncio.wait_for(request_repo.refresh_started.wait(), timeout=1)
+
+    assert monotonic() - started < 1
+    assert heartbeat_repo.released_lease is None
+    assert any("release timed out" in record.getMessage() for record in caplog.records)
+    await asyncio.sleep(0)
+    assert [task for task in asyncio.all_tasks() - before if not task.done()] == []
+
+
+@pytest.mark.asyncio
+async def test_a_heartbeat_that_ignores_cancellation_is_named_and_kept_while_the_row_is_released(
+    monkeypatch: pytest.MonkeyPatch,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """The drain is one bound, cancellation included; nothing is left unreferenced."""
+
+    import logging as std_logging
+
+    log_name = "test.ai_builder_send_lease.stubborn"
+    monkeypatch.setattr(
+        ai_builder_send_lease, "logger", std_logging.getLogger(log_name)
+    )
+    request_repo = _FakeSendLeaseRepo()
+    request_repo.fail_request_refresh = True
+    heartbeat_repo = _FakeHeartbeatRepo(request_repo)
+    _force_fast_send_lock_refresh(monkeypatch)
+    _install_independent_session(monkeypatch, request_repo, heartbeat_repo)
+    monkeypatch.setattr(
+        ai_builder_send_lease, "_SEND_HEARTBEAT_DRAIN_TIMEOUT_SECONDS", 0.05
+    )
+    let_go = asyncio.Event()
+
+    async def refresh_ignoring_cancellation(**_: object) -> bool:
+        request_repo.refresh_started.set()
+        while not let_go.is_set():
+            try:
+                await let_go.wait()
+            except asyncio.CancelledError:
+                continue
+        return True
+
+    monkeypatch.setattr(
+        ai_builder_send_lease,
+        "_refresh_session_send_lease",
+        refresh_ignoring_cancellation,
+    )
+
+    started = monotonic()
+    try:
+        with caplog.at_level("ERROR", logger=log_name):
+            async with claim_ai_builder_send_turn(
+                repo=cast(AIBuilderRepository, request_repo),
+                session_id=uuid4(),
+                tenant_id=uuid4(),
+                accepted_turn=_accepted_turn(uuid4()),
+                preparation_baseline=_preparation_baseline(),
+            ):
+                await asyncio.wait_for(request_repo.refresh_started.wait(), timeout=1)
+        elapsed = monotonic() - started
+        kept = list(ai_builder_send_lease._UNFINISHED_HEARTBEAT_TASKS)
+    finally:
+        # The stubborn task must end whatever the assertions find, or the
+        # test's event loop could never close.
+        let_go.set()
+
+    assert elapsed < 1
+    assert heartbeat_repo.released_lease == request_repo.claimed_lease
+    ignored = [
+        record
+        for record in caplog.records
+        if "ignored its cancellation" in record.getMessage()
+    ]
+    assert len(ignored) == 1
+    task_name = getattr(ignored[0], "task_name")
+    assert task_name.startswith("ai-builder-send-lease-refresh-")
+    assert [task.get_name() for task in kept] == [task_name]
+    await asyncio.wait(kept, timeout=1)
+    assert ai_builder_send_lease._UNFINISHED_HEARTBEAT_TASKS == set()
+
+
+@pytest.mark.asyncio
+async def test_a_loss_behind_a_slow_stale_positive_probe_is_noticed_within_the_stated_bound(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The worst case the bound names: interval + two whole probe waits.
+
+    The first probe reads the row just before the loss and answers "owned" at
+    the end of its wait; the next probe, an interval later, answers "not
+    owned" at the end of its own wait.
+    """
+
+    # The published bound is derived from the probe constants, not written.
+    assert ai_builder_send_lease.SEND_OWNERSHIP_LOSS_DETECTION_SECONDS == (
+        ai_builder_send_lease._SEND_OWNERSHIP_PROBE_INTERVAL_SECONDS
+        + 2 * ai_builder_send_lease._SEND_OWNERSHIP_PROBE_TIMEOUT_SECONDS
+    )
+    interval, wait = 0.1, 0.2
+    monkeypatch.setattr(
+        ai_builder_send_lease, "_SEND_OWNERSHIP_PROBE_INTERVAL_SECONDS", interval
+    )
+    monkeypatch.setattr(
+        ai_builder_send_lease, "_SEND_OWNERSHIP_PROBE_TIMEOUT_SECONDS", wait
+    )
+    bound = interval + 2 * wait
+    loop = asyncio.get_running_loop()
+    lost_at: list[float] = []
+    answers = [True, False]
+
+    async def slow_probe(**_: object) -> bool:
+        if not lost_at:
+            lost_at.append(loop.time())
+        await asyncio.sleep(wait * 0.9)
+        return answers.pop(0)
+
+    monkeypatch.setattr(
+        ai_builder_send_lease, "_probe_session_send_ownership", slow_probe
+    )
+    ownership_lost_event = asyncio.Event()
+
+    await asyncio.wait_for(
+        ai_builder_send_lease._watch_send_ownership(
+            session_id=uuid4(),
+            tenant_id=uuid4(),
+            lease=SessionSendLease(request_id=uuid4(), lock_token=uuid4()),
+            stop_event=asyncio.Event(),
+            lease_lost_event=asyncio.Event(),
+            ownership_lost_event=ownership_lost_event,
+        ),
+        timeout=5,
+    )
+    noticed_after = loop.time() - lost_at[0]
+
+    assert ownership_lost_event.is_set()
+    # Longer than one interval plus one wait, the bound the first version
+    # stated; within the bound the module names (with scheduling slack).
+    assert noticed_after > interval + wait
+    assert noticed_after <= bound + 0.15

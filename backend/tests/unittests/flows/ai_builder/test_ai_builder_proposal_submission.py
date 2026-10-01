@@ -115,6 +115,7 @@ from tests.unittests.flows.ai_builder.proposal_turn_builders import (
     _make_retry_invocation,
     _plan_stream_event,
     _proposal_request_budget,
+    provider_work_gate,
 )
 from tests.unittests.flows.ai_builder.proposal_turn_test_doubles import (
     _flow_with_description,
@@ -529,6 +530,7 @@ def _decision_report_attempt_kwargs(
         proposal_temperature=0.2,
         request_id=request_id,
         usage_tracker=usage_tracker,
+        provider_gate=provider_work_gate(),
         planning_state=planning_state,
         compile_context=create_compile_context_from_planning_state(
             planning_state,
@@ -1170,6 +1172,7 @@ async def test_an_edit_only_the_user_can_fix_is_answered_after_one_provider_call
                     resource_catalog=resource_catalog,
                     proposal_tool_schema=_proposal_tool_schema_double(),
                     proposal_request_budget=_proposal_request_budget(8_192),
+                    provider_gate=provider_work_gate(),
                     proposal_temperature=0.2,
                     request_id="req-shadow",
                     usage_tracker=usage_tracker,

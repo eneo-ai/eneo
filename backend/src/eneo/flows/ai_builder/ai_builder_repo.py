@@ -1450,6 +1450,25 @@ class AIBuilderRepository:
                     code=AIBuilderErrorCode.SESSION_SEND_LEASE_LOST,
                 )
 
+    async def owns_session_send_lease(
+        self,
+        *,
+        session_id: UUID,
+        tenant_id: UUID,
+        lease: SessionSendLease,
+    ) -> bool:
+        """Whether the row is still this turn's: a read, no row lock, no write."""
+
+        async with self._transaction():
+            owner = await self.session.scalar(
+                select(BuilderSessions.id).where(
+                    BuilderSessions.id == session_id,
+                    BuilderSessions.tenant_id == tenant_id,
+                    *_lease_filters(lease),
+                )
+            )
+            return owner is not None
+
     async def refresh_session_send_lease(
         self,
         *,

@@ -41,6 +41,7 @@ from eneo.flows.ai_builder.ai_builder_proposal_telemetry import (
     ProposalTurnTelemetry,
     ToolProcessingFailureKind,
 )
+from eneo.flows.ai_builder.ai_builder_provider_call import ProviderWorkGate
 from eneo.flows.ai_builder.ai_builder_resource_catalog import AIBuilderResourceCatalog
 from eneo.flows.ai_builder.ai_builder_session_turn import SessionSendTurn
 from eneo.flows.ai_builder.ai_builder_settings import (
@@ -601,7 +602,7 @@ class ProposalTurnContext:
     plan_edit_context: ResolvedAIBuilderEditContext | None = None
     prior_spec_for_revision: FlowDraftSpecCore | None = None
     obligation_projection: ProposalObligationProjection | None = None
-    before_provider_call: Callable[[], Awaitable[None]] | None = None
+    provider_gate: ProviderWorkGate | None = None
     proposal_call_budget: ProposalCallBudget = field(default_factory=ProposalCallBudget)
     compile_context: "CreateCompileContext | None" = None
     decline_tool_schema: ProposalToolSchema | None = None

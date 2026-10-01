@@ -19,6 +19,12 @@ contract applies instead of an SDK count passing as the provider's.
 A client that answers whole (a provider route without streaming, a test
 double) is accepted as it is.
 
+The turn that owns the call may stop it: once its stop signal is set (its
+ownership of the session was confirmed lost), every wait, for the first
+response and for each chunk, ends at once, the stream is closed, and
+``ProviderCallStopped`` is raised. It is not a timeout and not a provider
+failure; the caller reports it as the lost lease it is.
+
 A provider that refuses the request while it is being established, because
 of one optional sampling control (temperature, top_p, reasoning_effort, ...),
 has done no work; when the caller admits another request, the call is sent
@@ -128,6 +134,91 @@ class ProviderCallCeilingExpired(TimeoutError):
     """The whole provider call exceeded its ceiling while still producing."""
 
 
+class ProviderCallStopped(Exception):
+    """The turn that owns the call stopped it; the call was cancelled."""
+
+
+class ProviderRequestNotAdmitted(Exception):
+    """The owning turn refused to admit a request; nothing was sent.
+
+    ``error`` is the turn's own error (a lost lease, a failed write); it is
+    not a provider failure and callers raise it as it is.
+    """
+
+    def __init__(self, error: Exception) -> None:
+        super().__init__(str(error))
+        self.error = error
+
+
+@dataclass(frozen=True, slots=True)
+class ProviderWorkGate:
+    """What a send turn's provider work answers to; the send lease mints it.
+
+    The provider-call seam owns its use: before every outbound request, a
+    replacement sent without a refused control included, it checks
+    ``ownership_lost`` and awaits ``admit``, a lease-guarded write that raises
+    ``session_send_lease_lost`` once the turn no longer owns its session. The
+    two signals mean different things: ``ownership_lost`` is set only when the
+    session is confirmed to be no longer the turn's, and stops the provider
+    work in flight; ``lease_lost`` is set whenever the lease can no longer be
+    trusted (that loss, or a refresh that failed) and is read only by the
+    planner's post-dispatch result fencing (a server decision's result is not
+    emitted once it is set).
+    """
+
+    admit: Callable[[], Awaitable[None]]
+    ownership_lost: asyncio.Event
+    lease_lost: asyncio.Event
+    session_id: str
+    request_id: str
+
+
+class _StopRace:
+    """Races every wait inside it against the turn's stop signal.
+
+    A signal already set sends nothing. Once it is set, the wait in progress
+    is cancelled the way ``asyncio.timeout`` cancels on expiry, so cleanup
+    around the wait (closing the stream) runs as for any other ending.
+    """
+
+    def __init__(self, gate: ProviderWorkGate | None) -> None:
+        self._stop_signal = gate.ownership_lost if gate is not None else None
+        self._scope: asyncio.Timeout | None = None
+        self._watcher: asyncio.Task[None] | None = None
+
+    async def __aenter__(self) -> None:
+        stop_signal = self._stop_signal
+        if stop_signal is None:
+            return
+        if stop_signal.is_set():
+            raise ProviderCallStopped
+        scope = asyncio.timeout(None)
+        await scope.__aenter__()
+        self._scope = scope
+        loop = asyncio.get_running_loop()
+
+        async def stop_when_signalled() -> None:
+            await stop_signal.wait()
+            scope.reschedule(loop.time())
+
+        self._watcher = asyncio.create_task(stop_when_signalled())
+
+    async def __aexit__(
+        self,
+        exc_type: type[BaseException] | None,
+        exc: BaseException | None,
+        tb: Any,
+    ) -> bool | None:
+        if self._scope is None:
+            return None
+        if self._watcher is not None:
+            self._watcher.cancel()
+        try:
+            return await self._scope.__aexit__(exc_type, exc, tb)
+        except TimeoutError as stopped:
+            raise ProviderCallStopped from stopped
+
+
 @dataclass(frozen=True, slots=True)
 class ProviderCallTiming:
     """When the provider's answer arrived, measured from sending the request.
@@ -190,6 +281,38 @@ class _ChunkClock:
         )
 
 
+class _DispatchedRequests:
+    """Provider timing of a call's requests; it exists only from a dispatch.
+
+    No clock runs while the turn admits a request: a request's clock starts
+    when it is sent, and ends (frozen into its own measurement) before the
+    next request is admitted. A call that sent nothing has no provider timing.
+    """
+
+    def __init__(self) -> None:
+        self._current: _ChunkClock | None = None
+        self._finished: ProviderCallTiming | None = None
+
+    def dispatch(self) -> _ChunkClock:
+        self._current = _ChunkClock()
+        return self._current
+
+    def end_request(self) -> ProviderCallTiming | None:
+        """Freeze the request in flight into its own measurement."""
+
+        if self._current is not None:
+            self._finished = self._current.timing()
+            self._current = None
+        return self._finished
+
+    def last(self) -> ProviderCallTiming | None:
+        """The timing of the last request sent, or None when none was sent."""
+
+        if self._current is not None:
+            return self._current.timing()
+        return self._finished
+
+
 def _ms(seconds: float) -> int:
     return max(0, int(seconds * 1000))
 
@@ -203,21 +326,29 @@ async def complete_with_silence_deadline(
     retry_without_refused_control: RetryAdmission | None = None,
     observe_sdk_input: Callable[[Mapping[str, Any]], None] | None = None,
     observe_timing: Callable[[ProviderCallTiming], None] | None = None,
+    gate: ProviderWorkGate | None = None,
 ) -> Any:
     """The provider's complete answer, streamed under a silence deadline.
 
     ``silence_deadline_seconds`` is the longest wait for the next yielded
-    chunk; ``ceiling_seconds`` bounds the whole call, a retried request
-    included. Each expiry raises its own ``TimeoutError`` subclass, which the
+    chunk; ``ceiling_seconds`` bounds the provider's time on the whole call, a
+    retried request included; waits for the turn to admit a request are not
+    the provider's time and run under neither deadline nor the timing. Each
+    expiry raises its own ``TimeoutError`` subclass, which the
     failure classifier records as a timeout with an unknown provider outcome.
     The stream is closed on every exit, within a bounded wait that never
     hides the original error. ``retry_without_refused_control`` is asked, with
     the refused control's name, the provider's error and the refused request's
     own timing, whether one more request without that control may be sent;
     without it every refusal is raised. ``observe_timing`` receives the timing
-    of the request the call ended on, once, however the call ends, before the
-    stream is closed; a refused request's timing goes to the admission callback
-    only, and the replacement is timed from its own start.
+    of the last request sent, once, however the call ends, before the stream
+    is closed, and is not called when no request was sent; a refused
+    request's timing goes to the admission callback only, and the replacement
+    is timed from its own dispatch. ``gate`` is the
+    owning turn's: every request is admitted through it right before it is
+    sent (a refusal ends the call with ``ProviderRequestNotAdmitted``), and
+    once its ``ownership_lost`` is set the call ends with
+    ``ProviderCallStopped``.
     """
 
     if not (math.isfinite(silence_deadline_seconds) and silence_deadline_seconds > 0):
@@ -237,12 +368,30 @@ async def complete_with_silence_deadline(
         "timeout": silence_deadline_seconds,
     }
     response: Any = None
-    ceiling = asyncio.timeout(ceiling_seconds)
-    clock = _ChunkClock()
+    loop = asyncio.get_running_loop()
+    # The ceiling and the timing are the provider's: they run only while a
+    # request is the provider's, never while the turn admits one.
+    ceiling = asyncio.timeout(None)
+    provider_seconds_left = ceiling_seconds
+    requests = _DispatchedRequests()
+
+    async def admit_and_dispatch() -> _ChunkClock:
+        """Admit the next request, then start the provider's ceiling and clock."""
+
+        nonlocal provider_seconds_left
+        deadline = ceiling.when()
+        if deadline is not None:
+            provider_seconds_left = max(0.0, deadline - loop.time())
+        ceiling.reschedule(None)
+        await _admit(gate)
+        ceiling.reschedule(loop.time() + provider_seconds_left)
+        return requests.dispatch()
+
     async with ProviderStreamCollector() as collector:
         try:
-            async with ceiling:
+            async with _StopRace(gate), ceiling:
                 try:
+                    clock = await admit_and_dispatch()
                     if observe_sdk_input is not None:
                         observe_sdk_input(outbound)
                     response = await _under_silence(
@@ -251,16 +400,17 @@ async def complete_with_silence_deadline(
                 except BadRequestError as error:
                     rejection = provider_error_fields(error)
                     parameter = rejected_sampling_parameter(rejection)
+                    refused_timing = requests.end_request()
                     if (
                         parameter is None
                         or parameter not in outbound
                         or retry_without_refused_control is None
+                        or refused_timing is None
                         or not retry_without_refused_control(
-                            parameter, error, clock.timing()
+                            parameter, error, refused_timing
                         )
                     ):
                         raise
-                    clock = _ChunkClock()
                     logger.warning(
                         "ai_builder_provider_sampling_parameter_rejected",
                         extra={
@@ -278,6 +428,7 @@ async def complete_with_silence_deadline(
                         for key, value in outbound.items()
                         if key != parameter
                     }
+                    clock = await admit_and_dispatch()
                     if observe_sdk_input is not None:
                         observe_sdk_input(outbound)
                     response = await _under_silence(
@@ -305,8 +456,9 @@ async def complete_with_silence_deadline(
                 raise ProviderCallCeilingExpired(ceiling_seconds) from error
             raise
         finally:
-            if observe_timing is not None:
-                observe_timing(clock.timing())
+            timing = requests.last()
+            if observe_timing is not None and timing is not None:
+                observe_timing(timing)
 
 
 def rejected_sampling_parameter(rejection: ProviderRejection) -> str | None:
@@ -558,6 +710,21 @@ def safe_provider_correlation_id(value: object) -> str | None:
     return (
         value if re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._:-]*", value, re.ASCII) else None
     )
+
+
+async def _admit(gate: ProviderWorkGate | None) -> None:
+    """Admit one outbound request through the owning turn, right before it."""
+
+    if gate is None:
+        return
+    try:
+        await gate.admit()
+    except Exception as error:
+        raise ProviderRequestNotAdmitted(error) from error
+    # A loss confirmed before or while the admission ran stops the request
+    # even when the write still found the row (it read before the loss).
+    if gate.ownership_lost.is_set():
+        raise ProviderCallStopped
 
 
 async def _under_silence(awaitable: Awaitable[Any], seconds: float) -> Any:

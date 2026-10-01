@@ -105,6 +105,7 @@ from eneo.model_providers.infrastructure.litellm_provider import (
 )
 from eneo.tenants.tenant import TenantInDB
 from eneo.tokens.token_utils import TokenCount, TokenCountSource
+from tests.unittests.flows.ai_builder.proposal_turn_builders import provider_work_gate
 
 
 def _resolved_slots(
@@ -3304,7 +3305,7 @@ async def test_slot_classification_provider_failure_uses_typed_disposition(
                 allowed_slot_values={"primary_runtime_input": {"audio", "documents"}},
                 tenant_id=tenant_id,
                 usage_tracker=usage_tracker,
-                before_provider_call=before_provider_call,
+                provider_gate=provider_work_gate(before_provider_call),
             )
 
     expected_exception = (
@@ -6811,7 +6812,7 @@ async def test_local_reasoning_refusal_preserves_known_rejection_before_classifi
             allowed_slot_values={"primary_runtime_input": {"audio", "documents"}},
             tenant_id=uuid4(),
             usage_tracker=tracker,
-            before_provider_call=before_provider_call,
+            provider_gate=provider_work_gate(before_provider_call),
         )
     assert error.value.public_error.code is AIBuilderErrorCode.PLANNER_UPSTREAM_ERROR
     assert error.value.public_error.details["provider_disposition"] == "known_rejection"
@@ -7447,7 +7448,7 @@ async def test_strict_classifier_reserves_outbound_tools_in_admission_and_dispat
         capacity=ModelCapacity(800, 200),
         budget_policy=policy,
         usage_tracker=tracker,
-        before_provider_call=before_call,
+        provider_gate=provider_work_gate(before_call),
     )
     with patch.object(
         classifier, "measure_provider_input_reserve", side_effect=measured
@@ -7568,3 +7569,134 @@ def test_an_inexact_citation_of_unread_text_still_refuses_the_update() -> None:
     )
 
     assert result is None
+
+
+@pytest.mark.asyncio
+async def test_a_classification_stopped_by_lost_ownership_ends_as_lease_lost_not_as_a_provider_failure() -> (
+    None
+):
+    from eneo.flows.ai_builder.ai_builder_error_contract import AIBuilderErrorCode
+
+    reached, cancelled, stop = asyncio.Event(), asyncio.Event(), asyncio.Event()
+
+    async def hangs(**_kwargs: object) -> object:
+        reached.set()
+        try:
+            await asyncio.Event().wait()
+        except asyncio.CancelledError:
+            cancelled.set()
+            raise
+        return None
+
+    litellm_client = MagicMock()
+    litellm_client.acompletion = AsyncMock(side_effect=hangs)
+    usage_tracker = ProposalTurnTelemetry(
+        request_id="req-slot-stopped",
+        model="private-model",
+        target_kind=TargetKind.CREATE,
+    )
+
+    with (
+        patch.object(error_contract_module.logger, "info") as event_log,
+        patch.object(error_contract_module.logger, "warning") as stop_log,
+    ):
+        call = asyncio.create_task(
+            classify_slots(
+                litellm_client=litellm_client,
+                completion_model_route=_route(model="private-model"),
+                classification_input=_classification_input(
+                    f"private-user-content-{uuid4()}"
+                ),
+                allowed_slot_values={"primary_runtime_input": {"audio", "documents"}},
+                tenant_id=uuid4(),
+                usage_tracker=usage_tracker,
+                provider_gate=provider_work_gate(AsyncMock(), ownership_lost=stop),
+            )
+        )
+        await asyncio.wait_for(reached.wait(), timeout=1)
+        stop.set()
+        with pytest.raises(AIBuilderBadRequestException) as exc_info:
+            await asyncio.wait_for(call, timeout=1)
+
+    assert exc_info.value.code is AIBuilderErrorCode.SESSION_SEND_LEASE_LOST
+    assert not isinstance(exc_info.value, AIBuilderProviderOutcomeUnknownException)
+    assert cancelled.is_set()
+    assert litellm_client.acompletion.await_count == 1
+    event_log.assert_not_called()
+    assert all(
+        record.provider_failure_kind is None for record in usage_tracker.call_records
+    )
+    # One trace line at the stop; the call itself is not accounted (V1.9a-3).
+    stop_log.assert_called_once()
+    assert stop_log.call_args.args == ("ai_builder_provider_call_stopped",)
+    stopped = stop_log.call_args.kwargs["extra"]
+    assert stopped["session_id"] == "test-session"
+    assert stopped["request_id"] == "test-request"
+    assert stopped["call_kind"] == "slot_classification"
+    assert stopped["model"] == "private-model"
+    assert isinstance(stopped["provider_elapsed_ms"], int)
+
+
+@pytest.mark.asyncio
+async def test_ownership_lost_before_a_classifier_replacement_request_sends_no_second_request() -> (
+    None
+):
+    from litellm.exceptions import BadRequestError as LiteLLMBadRequestError
+
+    from eneo.flows.ai_builder.ai_builder_error_contract import AIBuilderErrorCode
+
+    gate = provider_work_gate()
+    body = {"error": {"param": "temperature", "code": "unsupported_value"}}
+
+    async def provider(**kwargs: object) -> object:
+        assert "temperature" in kwargs, "only the first request carries it"
+        gate.ownership_lost.set()
+        raise LiteLLMBadRequestError(
+            message="temperature",
+            model="gpt-test",
+            llm_provider="azure",
+            body=body,
+        )
+
+    litellm_client = MagicMock()
+    litellm_client.acompletion = AsyncMock(side_effect=provider)
+
+    with pytest.raises(AIBuilderBadRequestException) as exc_info:
+        await classify_slots(
+            litellm_client=litellm_client,
+            completion_model_route=_route(),
+            classification_input=_classification_input(f"text-{uuid4()}"),
+            allowed_slot_values={"primary_runtime_input": {"audio", "documents"}},
+            tenant_id=uuid4(),
+            provider_gate=gate,
+        )
+
+    assert exc_info.value.code is AIBuilderErrorCode.SESSION_SEND_LEASE_LOST
+    assert litellm_client.acompletion.await_count == 1
+
+
+@pytest.mark.asyncio
+async def test_a_refused_classifier_admission_raises_the_turns_own_error() -> None:
+    from eneo.flows.ai_builder.ai_builder_error_contract import AIBuilderErrorCode
+
+    lost = AIBuilderBadRequestException(
+        "The AI Builder session lease was lost before provider work.",
+        code=AIBuilderErrorCode.SESSION_SEND_LEASE_LOST,
+    )
+    litellm_client = MagicMock()
+    litellm_client.acompletion = AsyncMock()
+
+    with patch.object(error_contract_module.logger, "info") as event_log:
+        with pytest.raises(AIBuilderBadRequestException) as exc_info:
+            await classify_slots(
+                litellm_client=litellm_client,
+                completion_model_route=_route(),
+                classification_input=_classification_input(f"text-{uuid4()}"),
+                allowed_slot_values={"primary_runtime_input": {"audio", "documents"}},
+                tenant_id=uuid4(),
+                provider_gate=provider_work_gate(AsyncMock(side_effect=lost)),
+            )
+
+    assert exc_info.value is lost
+    litellm_client.acompletion.assert_not_called()
+    event_log.assert_not_called()

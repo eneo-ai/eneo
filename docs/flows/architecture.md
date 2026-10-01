@@ -241,6 +241,61 @@ allow at least this silence; see the failure telemetry above for how such a
 timeout is recognised (`local_deadline` names the timer that expired, silence
 or ceiling, when one did).
 
+A turn that no longer owns its session stops its provider work at once. The
+send lease mints one gate per turn that every provider call of the turn goes
+through: it admits each request (a lease-guarded write) and carries two
+signals. *Ownership lost* is set only when the session is confirmed to be no
+longer the turn's, and stops the work in flight; *lease lost* is set whenever
+the lease can no longer be trusted (that loss, or a refresh that failed) and
+is read only by the planner's post-dispatch result fencing: a server
+decision's result is not emitted once it is set. Proposal results are fenced
+by the lease-guarded writes, not by this signal. Three bounds are kept
+apart:
+
+- *Stopping work.* Besides the lock-extending refresh (a third of
+  `AI_BUILDER_SEND_LOCK_LEASE_SECONDS`), the send lease runs a read-only
+  ownership probe every 2 s that waits at most 5 s for its answer. When the
+  probe, or a refresh, finds the row is no longer this turn's (the session was
+  cancelled, or another turn took the lock after the lease ran out), every wait
+  of the call in flight, for the first response and for each chunk, ends and
+  the stream is closed. While probes answer, a loss is noticed within
+  `SEND_OWNERSHIP_LOSS_DETECTION_SECONDS` (one probe interval plus two probe
+  waits, 12 s at the defaults: a probe that read the row just before the loss
+  may still answer "owned" at the end of its wait, and the next probe follows
+  an interval later), assuming a timed-out probe's cancellation ends promptly;
+  the stream then closes within its own close bound (1 s). A probe that fails
+  or times out proves nothing; it is tried again, so a database hiccup cannot
+  cancel healthy work, but probes that keep failing give no finite detection
+  guarantee: only a refresh that finds the row gone confirms the loss then.
+  The turn's first probe failure is logged in full, later ones as a summary at
+  most once a minute. Each outbound request, a replacement sent without a
+  refused sampling control included, is admitted through the gate right
+  before it is sent, so no request leaves after the loss is known; the
+  admission is the turn's own wait, so the silence deadline, the call
+  ceiling and the call's timing start only once a request is admitted, and
+  a refused admission is the turn's own error, never a provider failure. The
+  stopped call is not a provider failure and is not recorded as one; it
+  leaves one `ai_builder_provider_call_stopped` log line (session, request,
+  call kind, model, and the provider time of the last request sent, absent
+  when none was sent). Accounting the abandoned call in the
+  turn's usage totals is left to the aggregate turn budget (V1.9a-3).
+- *Ending the stream.* The turn then ends with `session_send_lease_lost` and
+  `done`, after the turn's cleanup below.
+- *Releasing ownership.* The cleanup is shielded from a client disconnect and
+  bounded at 30 s. It spends at most 5 s in all stopping the heartbeat (half
+  for a beat in progress to finish, the rest for a cancelled one to end), so a
+  refresh stuck on the database cannot hold the release; a heartbeat task
+  that ignores its cancellation is logged by name and kept referenced until
+  it ends. The cleanup then clears the row if it is still this turn's. When
+  the database cannot release it within the bound, the lock is left to its
+  lease, which the next claim recovers from.
+
+These probe, drain and release bounds are mechanism constants of the send
+lease, not tenant policy. A cancelled call may still complete and bill at the
+provider. Server-side orchestration between provider calls is still fenced by
+the lease-guarded writes and the post-dispatch result fencing, not stopped
+mid-await.
+
 A stream that ends without a terminal finish reason is an incomplete answer
 with an unknown provider outcome, even when what arrived parses; it is never
 accepted and never retried by the call itself. Usage keeps its provenance:

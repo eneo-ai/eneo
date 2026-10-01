@@ -26,6 +26,18 @@ class SendLockReleaseSpy:
 
     released_leases: list[SessionSendLease] = field(default_factory=list)
     released_state: BuilderTurnState | None = None
+    # What the read-only ownership probe finds: False once the row is no
+    # longer this turn's (a cancel or a takeover).
+    owned: bool = True
+
+    async def owns_session_send_lease(
+        self,
+        *,
+        session_id: UUID,
+        tenant_id: UUID,
+        lease: SessionSendLease,
+    ) -> bool:
+        return self.owned
 
     async def refresh_session_send_lease(
         self,

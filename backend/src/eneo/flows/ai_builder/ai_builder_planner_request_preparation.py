@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import json
 import time
-from collections.abc import Awaitable, Callable
+from collections.abc import Callable
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any, TypeAlias, cast
 from uuid import UUID
@@ -108,6 +108,7 @@ from eneo.flows.ai_builder.ai_builder_proposal_tool_contracts import (
     outbound_proposal_tool_schemas,
     proposal_turn_tool_schemas,
 )
+from eneo.flows.ai_builder.ai_builder_provider_call import ProviderWorkGate
 from eneo.flows.ai_builder.ai_builder_requirements_disclosure import (
     build_requirements_disclosure,
 )
@@ -200,7 +201,9 @@ class PlannerRequestPreparationInput:
     persisted_planning_state: PlanningState | None
     current_turn_start: int
     usage_tracker: ProposalTurnTelemetry
-    before_provider_call: Callable[[], Awaitable[None]] | None = None
+    # The turn's own: classification asks it before sending and stops when
+    # the turn loses its session.
+    provider_gate: ProviderWorkGate
     prepared_attachment_context: AIBuilderAttachmentContext | None = None
     prepared_schema_candidates: tuple[DeclaredSchemaCandidate, ...] | None = None
     review_evidence: FlowReviewEvidence | None = None
@@ -374,7 +377,7 @@ async def prepare_planner_request(
             and not review_command_turn,
             attachment_context=attachment_context_result,
             usage_tracker=request.usage_tracker,
-            before_provider_call=request.before_provider_call,
+            provider_gate=request.provider_gate,
             mapped_execution_policy=request.mapped_execution_policy,
             prepared_schema_candidates=schema_candidates,
             persisted_planning_state=request.persisted_planning_state,

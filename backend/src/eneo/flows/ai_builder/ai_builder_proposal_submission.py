@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from collections.abc import AsyncGenerator, Awaitable, Callable
+from collections.abc import AsyncGenerator
 from dataclasses import dataclass, replace
 from typing import TYPE_CHECKING, Any
 
@@ -102,6 +102,7 @@ from eneo.flows.ai_builder.ai_builder_proposal_tool_contracts import (
     ToolRetryConfig,
     ToolRetryInvocation,
 )
+from eneo.flows.ai_builder.ai_builder_provider_call import ProviderWorkGate
 from eneo.flows.ai_builder.ai_builder_repo import AIBuilderRepository
 from eneo.flows.ai_builder.ai_builder_resource_catalog import (
     AIBuilderResourceCatalog,
@@ -237,7 +238,7 @@ class ProposalSubmissionOwner:
         obligation_projection: ProposalObligationProjection | None = None,
         plan_edit_context: ResolvedAIBuilderEditContext | None = None,
         prior_spec_for_revision: FlowDraftSpecCore | None = None,
-        before_provider_call: Callable[[], Awaitable[None]] | None = None,
+        provider_gate: ProviderWorkGate,
         proposal_request_budget: AIBuilderRequestBudget,
     ) -> AsyncGenerator[AIBuilderStreamEvent, None]:
         ctx = ProposalTurnContext(
@@ -261,7 +262,7 @@ class ProposalSubmissionOwner:
             usage_tracker=usage_tracker,
             plan_edit_context=plan_edit_context,
             prior_spec_for_revision=prior_spec_for_revision,
-            before_provider_call=before_provider_call,
+            provider_gate=provider_gate,
             proposal_request_budget=proposal_request_budget,
         )
         # Said before the provider is asked, so the client learns what is
@@ -275,7 +276,7 @@ class ProposalSubmissionOwner:
                 request=ctx.completion_request(
                     temperature=proposal_temperature,
                 ),
-                before_provider_call=before_provider_call,
+                provider_gate=provider_gate,
             )
         except ProposalCallBudgetExhausted as error:
             raise RuntimeError(
@@ -662,7 +663,7 @@ class ProposalSubmissionOwner:
                 litellm_client=self.litellm_client,
                 usage_tracker=ctx.usage_tracker,
                 call_kind="proposal_repair",
-                before_provider_call=ctx.before_provider_call,
+                provider_gate=ctx.provider_gate,
             ),
         )
 
@@ -957,7 +958,7 @@ class ProposalSubmissionOwner:
                     litellm_client=self.litellm_client,
                     usage_tracker=ctx.usage_tracker,
                     call_kind="forced_tool_continuation",
-                    before_provider_call=ctx.before_provider_call,
+                    provider_gate=ctx.provider_gate,
                 ),
                 error_phase=AIBuilderErrorPhase.PROPOSAL,
             )
