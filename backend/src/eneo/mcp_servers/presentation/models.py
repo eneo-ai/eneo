@@ -120,6 +120,8 @@ class BundledToolList(BaseListModel[BundledToolPublic]):
 class BundledServerCreate(BaseModel):
     # Capability providers only: switch it in as the tenant default right away.
     activate: bool = False
+    # The row's initial name, in the admin's language; editable afterwards.
+    name: Optional[str] = Field(default=None, min_length=1, max_length=255)
 
 
 class MCPServerCreate(BaseModel):
