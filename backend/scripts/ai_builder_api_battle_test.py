@@ -162,7 +162,12 @@ OBSERVATION_INPUT_IDENTITY_SEMANTICS_VERSION = 5
 # case's accepted forms and locations, authored per subject in the output gold
 # corpus (`ai_builder_output_gold`, whose digest is `output_gold_sha256`);
 # associations are line locations (`output_fact_location`).
-SCORER_SEMANTICS_VERSION = 3
+# v4: a reviewed step's field names no longer decide its plan: the per-case
+# name lists stay the edit picker's (`_review_target_edit`), and the review
+# target check is its output type; mechanism diagnostics
+# (`ai_builder_plan_mechanisms`) ride along in every Builder observation's
+# report (not the oracle arm's) and decide nothing.
+SCORER_SEMANTICS_VERSION = 4
 # The scoring modules beside the harness: what a verdict means is written in
 # their bytes too, so a receipt records them with the harness's own digest.
 _SCORER_MODULES = (
@@ -170,6 +175,7 @@ _SCORER_MODULES = (
     "ai_builder_oracle_arm.py",
     "ai_builder_output_gold.json",
     "ai_builder_output_gold.py",
+    "ai_builder_plan_mechanisms.py",
     "ai_builder_receipt.py",
     "ai_builder_runtime_lineage.py",
 )
@@ -242,6 +248,7 @@ from ai_builder_edit_expectation import (  # noqa: E402
     unassessed_check,
 )
 from ai_builder_intake_answers import intake_message  # noqa: E402
+from ai_builder_plan_mechanisms import plan_mechanisms  # noqa: E402
 from ai_builder_release_gate import replacement_limit  # noqa: E402
 from ai_builder_runtime_lineage import (  # noqa: E402
     RuntimeLineageStatus,
@@ -9645,6 +9652,11 @@ def _observation_projection(bundle: JsonObject) -> JsonObject:
             else None
         ),
         "verdict_states": verdict_states,
+        "mechanisms": (
+            report.get("mechanisms")
+            if isinstance(report.get("mechanisms"), Mapping)
+            else None
+        ),
         "runtime_cost": _runtime_cost(bundle),
         "identity_failed_check_count": len(failed_identity_checks),
         "identity_failed_checks": failed_identity_checks,
@@ -12569,6 +12581,8 @@ def _quality_report(
     )
     checks.extend(runtime_checks)
     delivery_check_names.extend(str(check["name"]) for check in runtime_checks)
+    # Observations of the run's wiring, beside the checks: no verdict reads them.
+    mechanisms = plan_mechanisms(runtime_evidence)
     if expected.get("expected_persisted_named_results") is True:
         persisted_named_results = _persisted_named_result_names(classifier_diagnostics)
         add_check(
@@ -12630,6 +12644,7 @@ def _quality_report(
             "checks": checks,
             "delivery_check_names": delivery_check_names,
             "warnings": warnings,
+            "mechanisms": mechanisms,
             **decision_report,
             **output_report,
         }
@@ -12977,6 +12992,7 @@ def _quality_report(
         "delivery_check_names": delivery_check_names,
         "warnings": warnings,
         "metrics": _source_context_metrics(summary),
+        "mechanisms": mechanisms,
         **decision_report,
         **output_report,
     }
@@ -13041,29 +13057,12 @@ def _review_policy_checks(
     target = review_steps[0] if len(review_steps) == 1 else None
     expected_mode = _optional_string(expected, "mode")
     expected_output_type = _optional_string(expected, "target_output_type")
-    expected_field_groups = _field_groups_from_expected_key(
-        expected,
-        "target_field_groups",
-    )
-    # Property names at every depth, as `expected_leaf_output_field_groups` reads
-    # them: a reviewed list of records is found by its own name.
     target_fields = _output_fields([target]) if target is not None else []
-    missing_field_groups = [
-        group
-        for group in expected_field_groups
-        if not any(
-            _field_name_matches(expected_name, actual_name)
-            for expected_name in group
-            for actual_name in target_fields
-        )
-    ]
-    target_matches = (
-        target is not None
-        and (
-            expected_output_type is None
-            or target.get("output_type") == expected_output_type
-        )
-        and not missing_field_groups
+    # The field names a model gives the reviewed value never decide the plan: a
+    # per-case name list fails valid names and passes a wrong step that reuses one.
+    target_matches = target is not None and (
+        expected_output_type is None
+        or target.get("output_type") == expected_output_type
     )
     target_order = _int_value(target.get("order")) if target is not None else None
     target_is_terminal_or_delivery = target is None or (
@@ -13104,10 +13103,7 @@ def _review_policy_checks(
             "name": f"{scope}_review_policy_target",
             "passed": target_matches,
             "actual": actual_target,
-            "expected": {
-                "output_type": expected_output_type,
-                "field_groups": expected_field_groups,
-            },
+            "expected": {"output_type": expected_output_type},
         },
         {
             "name": f"{scope}_review_policy_not_terminal_or_delivery",

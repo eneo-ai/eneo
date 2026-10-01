@@ -152,13 +152,18 @@ class _ReaderExport(_Strict):
     run: _ReaderRun
 
 
-class RuntimeInputEvidence(_Strict):
-    run_contract: _RunContract
-    uploaded_files: Annotated[tuple[_UploadedFile, ...], _distinct("id")]
+class StepAttemptEvidence(_Strict):
+    """A run's step results and attempts: what every per-step reader needs."""
+
     step_results: Annotated[tuple[_StepResult, ...], _distinct("step_id")]
     step_attempts: Annotated[
         tuple[_StepAttempt, ...], _distinct("id"), _distinct("step_id", "attempt_no")
     ]
+
+
+class RuntimeInputEvidence(StepAttemptEvidence):
+    run_contract: _RunContract
+    uploaded_files: Annotated[tuple[_UploadedFile, ...], _distinct("id")]
     debug_export: _ReaderExport | None
 
 
@@ -173,7 +178,7 @@ _SECTION_REASONS: Mapping[str, RuntimeLineageStatus] = {
 _Model = TypeVar("_Model", bound=BaseModel)
 
 
-def _strict_json(model: type[_Model], value: object) -> _Model:
+def strict_json(model: type[_Model], value: object) -> _Model:
     """Strict JSON-mode validation, nested product models included: ints
     exclude booleans and floats, enums and literals need their exact value; a
     valid UUID in any representation is normalized.
@@ -184,13 +189,27 @@ def _strict_json(model: type[_Model], value: object) -> _Model:
 def parse_runtime_input_evidence(
     raw: object,
 ) -> RuntimeInputEvidence | RuntimeLineageStatus:
+    return _parse_sections(RuntimeInputEvidence, raw)
+
+
+def parse_step_attempt_evidence(
+    raw: object,
+) -> StepAttemptEvidence | RuntimeLineageStatus:
+    return _parse_sections(StepAttemptEvidence, raw)
+
+
+def _parse_sections(model: type[_Model], raw: object) -> _Model | RuntimeLineageStatus:
     if not isinstance(raw, Mapping):
         return RuntimeLineageStatus.RUNTIME_EVIDENCE_MALFORMED
     fields = cast(Mapping[str, object], raw)
     try:
-        return _strict_json(
-            RuntimeInputEvidence,
-            {key: fields[key] for key in _SECTION_REASONS if key in fields},
+        return strict_json(
+            model,
+            {
+                key: fields[key]
+                for key in _SECTION_REASONS
+                if key in fields and key in model.model_fields
+            },
         )
     except ValidationError as error:
         location = error.errors()[0]["loc"]
@@ -283,24 +302,11 @@ def _judge(
             return RuntimeLineageStatus.CURRENT_STEP_UNREAD
         return RuntimeLineageStatus.NOT_REACHED
 
-    if (
-        result.current_attempt_no is None
-        or result.runtime_input_file_ids != uploaded_ids
-    ):
+    if result.runtime_input_file_ids != uploaded_ids:
         return RuntimeLineageStatus.CURRENT_STEP_INVALID
-    current = next(
-        (
-            a
-            for a in evidence.step_attempts
-            if a.step_id == step_id and a.attempt_no == result.current_attempt_no
-        ),
-        None,
-    )
-    if current is None or current.status is not FlowStepAttemptStatus.COMPLETED:
-        return RuntimeLineageStatus.CURRENT_ATTEMPT_INVALID
-    lineage = current.resolved_input_lineage
-    if not isinstance(lineage, FlowResolvedInputLineageTracked):
-        return RuntimeLineageStatus.CURRENT_LINEAGE_NOT_TRACKED
+    lineage = current_tracked_lineage(evidence, result)
+    if isinstance(lineage, RuntimeLineageStatus):
+        return lineage
 
     sizes = {file.id: file.size for file in uploaded}
     positions = {file_id: position for position, file_id in enumerate(uploaded_ids)}
@@ -332,3 +338,26 @@ def _judge(
     if not global_ordinals and not per_source_ordinals:
         return RuntimeLineageStatus.CURRENT_LINEAGE_INVALID
     return tuple(checksums[file_id] for file_id in uploaded_ids)
+
+
+def current_tracked_lineage(
+    evidence: StepAttemptEvidence, result: _StepResult
+) -> FlowResolvedInputLineageTracked | RuntimeLineageStatus:
+    """The tracked input lineage of the attempt a completed step result names
+    as current. An earlier attempt is history, never what the step consumed."""
+    if result.current_attempt_no is None:
+        return RuntimeLineageStatus.CURRENT_STEP_INVALID
+    current = next(
+        (
+            a
+            for a in evidence.step_attempts
+            if a.step_id == result.step_id and a.attempt_no == result.current_attempt_no
+        ),
+        None,
+    )
+    if current is None or current.status is not FlowStepAttemptStatus.COMPLETED:
+        return RuntimeLineageStatus.CURRENT_ATTEMPT_INVALID
+    lineage = current.resolved_input_lineage
+    if not isinstance(lineage, FlowResolvedInputLineageTracked):
+        return RuntimeLineageStatus.CURRENT_LINEAGE_NOT_TRACKED
+    return lineage

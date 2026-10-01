@@ -579,9 +579,13 @@ def test_a_review_the_harness_could_not_edit_is_unmeasured_never_a_pass(
     assert row["output_required_facts"] == {"Njurunda": None}
 
 
-def test_a_wrong_placement_fails_the_plan_beside_an_unmeasured_delivery(
+def test_reviewed_field_names_no_case_list_holds_leave_the_plan_unmeasured(
     harness: ModuleType, monkeypatch: MonkeyPatch, tmp_path: Path
 ) -> None:
+    """A name list cannot tell a wrong reviewed step from a right one with other
+    names: the plan is unmeasured, never failed by it. The edit picker still
+    finds nothing to edit, so the delivery stays unmeasured too."""
+
     case = _review_case(harness, _PLACEMENT_WRONG)
     evidence = _review_run(
         harness,
@@ -600,10 +604,10 @@ def test_a_wrong_placement_fails_the_plan_beside_an_unmeasured_delivery(
     row = _sealed_row(harness, tmp_path, case, evidence=evidence, name="misplaced")
 
     assert _states(row) == {
-        "plan": "fail",
+        "plan": "unmeasured",
         "review_edit": "unmeasured",
         "output": "unmeasured",
-        "case": "fail",
+        "case": "unmeasured",
     }
 
 
@@ -1182,6 +1186,7 @@ def test_receipts_of_these_graders_name_scorer_semantics_2_or_later(
     [
         "ai_builder_edit_expectation.py",
         "ai_builder_oracle_arm.py",
+        "ai_builder_plan_mechanisms.py",
         "ai_builder_receipt.py",
         "ai_builder_runtime_lineage.py",
     ],

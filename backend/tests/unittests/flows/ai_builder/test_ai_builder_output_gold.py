@@ -952,7 +952,7 @@ def test_case_gold_is_read_by_the_case_contract_at_load_and_refused_if_it_drops_
 # --- identity: a receipt names the gold it was scored under ---------------------
 
 
-def test_scorer_3_names_its_output_gold_and_digests_the_corpus(
+def test_the_scorer_names_its_output_gold_and_digests_the_corpus(
     harness: ModuleType, gold_module: ModuleType
 ) -> None:
     identity = harness._suite_evaluator_identity(  # pyright: ignore[reportPrivateUsage]
@@ -961,7 +961,7 @@ def test_scorer_3_names_its_output_gold_and_digests_the_corpus(
         expected_observations=[],
     )
 
-    assert harness.SCORER_SEMANTICS_VERSION == 3
+    assert harness.SCORER_SEMANTICS_VERSION == 4
     assert identity["output_gold_sha256"] == gold_module.gold_sha256()
     assert {"ai_builder_output_gold.json", "ai_builder_output_gold.py"} <= set(
         harness._SCORER_MODULES  # pyright: ignore[reportPrivateUsage]

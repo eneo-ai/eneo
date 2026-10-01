@@ -7843,12 +7843,11 @@ def test_release_inventory_owns_required_dimensions_and_named_cases() -> None:
     }
 
 
-def test_a_review_target_modelled_as_a_record_array_is_found_by_its_own_name() -> None:
-    """`hypotheses: [{hypothesis, confidence}]` has no leaf called hypotheses.
-
-    A correct design may review a list of records; the target group names the
-    list, so the review target is matched by property names at every depth, as
-    `expected_leaf_output_field_groups` is, in the proposed and the applied flow.
+def test_a_review_target_is_judged_by_its_output_type_never_its_field_names() -> None:
+    """The names a model gives the reviewed value are no verdict: a per-case
+    name list fails valid names and passes a wrong step that reuses one. The
+    target check holds the reviewed step's output type, in the proposed and the
+    applied flow; the name list only picks the value the run-time edit changes.
     """
 
     harness = _battle_harness()
@@ -7915,15 +7914,21 @@ def test_a_review_target_modelled_as_a_record_array_is_found_by_its_own_name() -
             )
         }
         assert checks[f"{scope}_review_policy_target"]["passed"] is True, scope
+        assert checks[f"{scope}_review_policy_target"]["expected"] == {
+            "output_type": "json"
+        }
 
-    missing = {**expected, "target_field_groups": [["timeline"]]}
-    checks = {
-        check["name"]: check
-        for check in harness._review_policy_checks(
-            scope="proposed", summary=harness._summarize_plan(plan), expected=missing
-        )
-    }
-    assert checks["proposed_review_policy_target"]["passed"] is False
+    def target_passes(policy: Mapping[str, Any]) -> bool:
+        checks = {
+            check["name"]: check
+            for check in harness._review_policy_checks(
+                scope="proposed", summary=harness._summarize_plan(plan), expected=policy
+            )
+        }
+        return checks["proposed_review_policy_target"]["passed"]
+
+    assert target_passes({**expected, "target_field_groups": [["timeline"]]})
+    assert not target_passes({**expected, "target_output_type": "text"})
 
 
 def _reviewed_step_plan(
@@ -7989,69 +7994,6 @@ def _reviewed_step_plan(
         },
     ]
     return {"proposal": {"spec": {"flow_name": "Reviewed case", "steps": steps}}}
-
-
-def _municipal_review_policy(case_id: str) -> Mapping[str, Any]:
-    harness = _battle_harness()
-    cases_path = (
-        Path(__file__).resolve().parents[4]
-        / "scripts"
-        / "ai_builder_api_municipal_cases.json"
-    )
-    case = next(
-        case for case in harness._read_cases_file(cases_path) if case.case_id == case_id
-    )
-    assert case.expected is not None
-    return case.expected["expected_review_policy"]
-
-
-def _review_target_passes(
-    expected: Mapping[str, Any], reviewed_fields: list[str]
-) -> bool:
-    harness = _battle_harness()
-    plan = _reviewed_step_plan(reviewed_fields=reviewed_fields)
-    checks = {
-        check["name"]: check
-        for check in harness._review_policy_checks(
-            scope="proposed", summary=harness._summarize_plan(plan), expected=expected
-        )
-    }
-    return checks["proposed_review_policy_target"]["passed"]
-
-
-@mark.parametrize(
-    ("case_id", "reviewed_field"),
-    [
-        # Names the screening models gave the reviewed value, each checked by hand
-        # against its bundle (screenrr-{a,b}-luna/r1, screenrr-c-gemma/r1).
-        ("mc_oms01_ekonomiskt_bistand", "beraknat_underskott"),
-        ("mc_oms03_lss", "forslag_till_beslut_bifall_eller_avslag_med_skal"),
-        ("mc_oms04_orosanmalan", "akut_skyddsbehov_enligt_rutin"),
-        ("mc_oms04_orosanmalan", "akut_skyddssignal_finns"),
-        ("mc_oms04_orosanmalan", "akut_skyddsbehov_analys"),
-        ("mc_byg20_bostadsanpassning", "lagsta_skaliga_kostnad"),
-    ],
-)
-def test_an_observed_reviewed_value_name_is_an_explicit_gold_alias(
-    case_id: str, reviewed_field: str
-) -> None:
-    expected = _municipal_review_policy(case_id)
-
-    assert _review_target_passes(expected, ["other_value", reviewed_field])
-
-
-def test_date_fields_never_stand_in_for_the_decision() -> None:
-    """Gold names match exactly: two date fields leave the decision group unmet."""
-
-    expected = _municipal_review_policy("md_allt_angivet")
-
-    assert not _review_target_passes(
-        expected, ["beslutsdatum", "decision_date", "motivering", "handlaggare"]
-    )
-    # `en_motivering`: observed alias (screenrrfloor-luna r1, "Ta fram beslutsförslag").
-    assert _review_target_passes(
-        expected, ["beslut", "beslutsdatum", "en_motivering", "handlaggare"]
-    )
 
 
 def test_a_writer_after_the_reviewed_step_is_a_warning_not_a_failed_check() -> None:
