@@ -4477,5 +4477,12 @@
   "sharepoint_search_results_label": "Search results",
   "sharepoint_search_clear": "Clear search and filters",
   "sharepoint_filter_any": "Any",
-  "sharepoint_filter_label": "Filter by {column}"
+  "sharepoint_filters": "Filters",
+  "sharepoint_filters_aria": "Filter by document properties, {count} active",
+  "sharepoint_filters_title": "Filter by document properties",
+  "sharepoint_filters_search": "Search columns",
+  "sharepoint_filters_no_column_match": "No column matches.",
+  "sharepoint_filters_clear": "Clear filters",
+  "sharepoint_filters_active": "Active filters",
+  "sharepoint_filter_remove": "Remove the {column} filter"
 }

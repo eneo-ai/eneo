@@ -4477,5 +4477,12 @@
   "sharepoint_search_results_label": "Sökträffar",
   "sharepoint_search_clear": "Rensa sökning och filter",
   "sharepoint_filter_any": "Alla",
-  "sharepoint_filter_label": "Filtrera på {column}"
+  "sharepoint_filters": "Filter",
+  "sharepoint_filters_aria": "Filtrera på dokumentegenskaper, {count} aktiva",
+  "sharepoint_filters_title": "Filtrera på dokumentegenskaper",
+  "sharepoint_filters_search": "Sök kolumn",
+  "sharepoint_filters_no_column_match": "Ingen kolumn matchar.",
+  "sharepoint_filters_clear": "Rensa filter",
+  "sharepoint_filters_active": "Aktiva filter",
+  "sharepoint_filter_remove": "Ta bort filtret {column}"
 }
