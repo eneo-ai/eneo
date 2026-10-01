@@ -11248,8 +11248,6 @@ export interface components {
        * @default false
        */
       activate?: boolean;
-      /** Name */
-      name?: string | null;
     };
     /** BundledToolList */
     BundledToolList: {

@@ -656,7 +656,7 @@ class MCPServerService:
 
     @validate_permissions(Permission.ADMIN)
     async def create_bundled_mcp_server(
-        self, tool: str, activate: bool = False, name: str | None = None
+        self, tool: str, activate: bool = False
     ) -> MCPServerCreateResult:
         """Add one of the bundled tool runtime's servers to this tenant.
 
@@ -664,8 +664,7 @@ class MCPServerService:
         test and tool discovery as any other. A general server is then enabled
         per space like any other; a capability provider is saved inactive
         unless ``activate`` switches it in as the tenant's default. Only its
-        URL and credential come from the deployment instead of the admin;
-        ``name`` lets the admin UI name the row in its own language.
+        URL and credential come from the deployment instead of the admin.
         """
         if tool not in BUNDLED_TOOLS:
             raise NotFoundException(f"Unknown bundled tool '{tool}'")
@@ -682,7 +681,7 @@ class MCPServerService:
         ):
             raise NameCollisionException(f"The bundled '{tool}' server already exists")
         return await self.create_mcp_server(
-            name=(name or "").strip() or BUNDLED_TOOL_NAMES[tool],
+            name=BUNDLED_TOOL_NAMES[tool],
             http_url=url,
             http_auth_type=BUNDLED_AUTH_TYPE,
             purpose=BUNDLED_TOOLS[tool].purpose,

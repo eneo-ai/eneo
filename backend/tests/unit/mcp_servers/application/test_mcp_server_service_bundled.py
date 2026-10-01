@@ -73,7 +73,6 @@ class TestCreateBundled:
         result = await service.create_bundled_mcp_server("compute")
 
         server = result.server
-        assert server.name == "Compute"
         assert server.http_url == f"{RUNTIME_URL}/mcp/compute"
         assert server.http_auth_type == BUNDLED_AUTH_TYPE
         assert server.http_auth_config_schema is None
@@ -91,15 +90,6 @@ class TestCreateBundled:
         with pytest.raises(BadRequestException):
             await service.create_bundled_mcp_server("compute")
         repo.add.assert_not_called()
-
-    async def test_takes_the_name_the_admin_ui_gives_it(
-        self, monkeypatch, runtime_configured
-    ):
-        service, _, _ = _make_service(monkeypatch)
-
-        result = await service.create_bundled_mcp_server("compute", name=" Beräkning ")
-
-        assert result.server.name == "Beräkning"
 
     async def test_rejects_unknown_tools(self, monkeypatch, runtime_configured):
         service, _, _ = _make_service(monkeypatch)

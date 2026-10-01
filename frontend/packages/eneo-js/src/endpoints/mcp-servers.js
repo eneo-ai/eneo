@@ -266,18 +266,15 @@ export function initMCPServers(client) {
      * @param {Object} params
      * @param {string} params.tool The bundled tool, e.g. "compute" or "file-analysis"
      * @param {boolean} [params.activate] Capability providers: activate as the tenant default
-     * @param {string} [params.name] The server's initial name, in the admin's language
      * @throws {EneoError}
      * */
-    createBundled: async ({ tool, activate, name }) => {
+    createBundled: async ({ tool, activate }) => {
       const res = await client.fetch("/api/v1/mcp-servers/bundled/{tool}/", {
         method: "post",
         params: {
           path: { tool }
         },
-        requestBody: {
-          "application/json": { activate: activate ?? false, ...(name ? { name } : {}) }
-        }
+        requestBody: { "application/json": { activate: activate ?? false } }
       });
       return res;
     },

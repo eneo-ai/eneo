@@ -140,12 +140,7 @@
     messagePurpose = capability?.purpose ?? null;
     const name = capability ? m.mcp_auth_bundled() : bundledServerLabel(tool);
     try {
-      // The row is named in the admin's language; the chat shows it next to tool calls.
-      await data.eneo.mcpServers.createBundled({
-        tool,
-        activate,
-        name: capability ? capability.label() : bundledServerLabel(tool)
-      });
+      await data.eneo.mcpServers.createBundled({ tool, activate });
       if (!capability) notice = m.tools_bundled_added({ name });
       else if (activate)
         notice = m.tools_builtin_turned_on({

@@ -340,9 +340,7 @@ async def create_bundled_mcp_server(
     assembler = container.mcp_server_assembler()
     activate = data.activate
 
-    result = await service.create_bundled_mcp_server(
-        tool, activate=activate, name=data.name
-    )
+    result = await service.create_bundled_mcp_server(tool, activate=activate)
     if not result.connection.success:
         raise BadRequestException(
             result.connection.error_message
