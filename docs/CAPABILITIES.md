@@ -5,7 +5,7 @@
 
 Capabilities are functions an assistant can use: **Webbsökning**
 (`web_search`), **Bildgenerering** (`image_generation`), **Fråga fil**
-(`file_analysis`) and **Skapa filer** (`file_creation`). Image generation can
+(`file_analysis`) and **Skapa fil** (`file_creation`). Image generation can
 run through a configured image model or an external MCP server; web search
 uses an external server; file analysis and file creation run in the bundled
 tool runtime or an external MCP server.

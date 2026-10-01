@@ -9,8 +9,6 @@
   import { writable } from "svelte/store";
   import { untrack } from "svelte";
   import {
-    Calculator,
-    ChartColumn,
     ChevronDown,
     Package,
     Plus,
@@ -28,6 +26,7 @@
   } from "@lucide/svelte";
   import { m } from "$lib/paraglide/messages";
   import { CAPABILITIES } from "$lib/features/mcp/capabilities";
+  import { BUNDLED_SERVERS, bundledIdentity, bundledServerLabel } from "$lib/features/mcp/bundled";
   import { readinessMessage } from "$lib/features/mcp/readiness";
   import { getErrorMessage } from "$lib/core/errors/getErrorMessage";
   import { setSecurityContext } from "$lib/features/security-classifications/SecurityContext";
@@ -66,24 +65,6 @@
   );
   const bundledProviderFor = (purpose: string) =>
     bundledToAdd.find((tool) => tool.purpose === purpose);
-  // Names and blurbs of the general bundled servers; capability providers are named by
-  // their capability instead.
-  const BUNDLED_SERVERS: Record<
-    string,
-    { label: () => string; description: () => string; icon: typeof Calculator }
-  > = {
-    compute: {
-      label: m.tools_bundled_compute,
-      description: m.tools_bundled_compute_description,
-      icon: Calculator
-    },
-    charts: {
-      label: m.tools_bundled_charts,
-      description: m.tools_bundled_charts_description,
-      icon: ChartColumn
-    }
-  };
-  const bundledServerLabel = (tool: string) => BUNDLED_SERVERS[tool]?.label() ?? tool;
   const DEPLOYMENT_GUIDE_URL =
     "https://docs.eneo.ai/docs/builtin-tool-servers#bundled-isolated-providers";
   let addingBundled = $state(false);
@@ -372,7 +353,9 @@
                     </Button>
                     <div class="min-w-0">
                       <div class="flex flex-wrap items-center gap-2">
-                        <h3 class="text-default text-sm font-medium">{source.name}</h3>
+                        <h3 class="text-default text-sm font-medium">
+                          {bundledIdentity(source)?.name ?? source.name}
+                        </h3>
                         {#if source.http_auth_type === "bundled"}
                           <span class="text-secondary bg-secondary rounded px-2 py-0.5 text-xs">
                             {m.mcp_auth_bundled()}
@@ -393,8 +376,7 @@
                             · {source.image_model.provider_name}{/if}
                         {:else if source.http_auth_type === "bundled"}
                           <!-- The runtime address is deployment plumbing; say what the provider does. -->
-                          {source.description ||
-                            capability.bundledDescription?.() ||
+                          {bundledIdentity(source)?.description ||
                             m.tools_builtin_menu_description()}
                         {:else}{m.tools_source_external()} · {source.http_url}{/if}
                       </p>

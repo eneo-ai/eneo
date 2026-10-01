@@ -626,8 +626,13 @@
               </fieldset>
             {/if}
 
-            <!-- Server Identity Section -->
-            <fieldset class="space-y-4">
+            <!-- Server Identity Section. A server built into Eneo is named in
+                 the UI language from the tool it serves; its stored row keeps
+                 the backend default and is not edited here. -->
+            {#if isBundled}
+              <p class="text-muted text-xs leading-relaxed">{m.mcp_bundled_identity_hint()}</p>
+            {/if}
+            <fieldset class="space-y-4" class:hidden={isBundled}>
               <legend class="sr-only">{m.mcp_server_info_legend()}</legend>
 
               <div>

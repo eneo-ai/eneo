@@ -16,6 +16,7 @@
     UsersRound
   } from "@lucide/svelte";
   import { getCapability } from "$lib/features/mcp/capabilities";
+  import { bundledIdentity } from "$lib/features/mcp/bundled";
 
   type Props = {
     mcpServer: {
@@ -87,6 +88,10 @@
   // Capability providers carry their purpose as a chip so they stand out
   // from ordinary tool servers in the same list.
   const capability = $derived(getCapability(mcpServer.purpose));
+  // A server built into Eneo is named in the UI language, not by its stored row.
+  const builtin = $derived(bundledIdentity(mcpServer));
+  const displayName = $derived(builtin?.name ?? mcpServer.name);
+  const displayDescription = $derived(builtin?.description ?? mcpServer.description);
   // Who a capability provider serves: the tenant default, or named groups.
   const audienceGroups = $derived(
     capability && mcpServer.audience === "groups" ? (mcpServer.user_groups ?? []) : []
@@ -95,7 +100,7 @@
 
 <div class="flex min-w-0 flex-col gap-1 py-0.5">
   <div class="flex items-center gap-2.5">
-    <span class="text-default truncate leading-tight font-medium">{mcpServer.name}</span>
+    <span class="text-default truncate leading-tight font-medium">{displayName}</span>
     <span
       class="inline-flex shrink-0 items-center gap-1 rounded-md px-2 py-0.5 text-[11px] font-medium {authConfig.classes}"
       role="status"
@@ -142,8 +147,8 @@
       </span>
     {/if}
   </div>
-  {#if mcpServer.description}
-    <p class="text-muted line-clamp-1 text-sm leading-snug">{mcpServer.description}</p>
+  {#if displayDescription}
+    <p class="text-muted line-clamp-1 text-sm leading-snug">{displayDescription}</p>
   {/if}
   {#if mcpServer.http_auth_type === "internal"}
     <!-- A built-in provider's endpoint is Eneo's own loopback: plumbing, not

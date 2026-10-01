@@ -166,7 +166,7 @@ BUNDLED_TOOL_NAMES: dict[str, str] = {
     "compute": "Compute",
     "charts": "Charts",
     "file-analysis": "Ask a file",
-    "file-creation": "Create files",
+    "file-creation": "Create a file",
 }
 BUNDLED_TOOL_DESCRIPTIONS: dict[str, str] = {
     "charts": (
