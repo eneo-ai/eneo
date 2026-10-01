@@ -4461,5 +4461,6 @@
   "material_open_when_needed": "Open on demand",
   "material_read_directly": "Load directly",
   "config_attachment_meter_scope": "Estimate for prompt text and directly loaded attachments. Chat history, skills, tools and retrieved content use additional context.",
-  "material_attachments_description": "Files attached to the assistant. Each file shows whether it is loaded before every answer or opened on demand."
+  "material_attachments_description": "Files attached to the assistant. Each file shows whether it is loaded before every answer or opened on demand.",
+  "source_metadata_label": "Document properties"
 }

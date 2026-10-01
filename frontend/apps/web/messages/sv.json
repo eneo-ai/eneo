@@ -4461,5 +4461,6 @@
   "material_open_when_needed": "Öppna vid behov",
   "material_read_directly": "Läs in direkt",
   "config_attachment_meter_scope": "Uppskattning för instruktionstext och bilagor som läses in direkt. Chatthistorik, skills, verktyg och hämtat innehåll tillkommer.",
-  "material_attachments_description": "Filer som är bifogade till assistenten. Varje fil visar om den läses in inför varje svar eller öppnas vid behov."
+  "material_attachments_description": "Filer som är bifogade till assistenten. Varje fil visar om den läses in inför varje svar eller öppnas vid behov.",
+  "source_metadata_label": "Dokumentegenskaper"
 }

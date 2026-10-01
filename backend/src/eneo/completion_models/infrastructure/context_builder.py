@@ -1,7 +1,7 @@
 import json
 import logging
 from collections import defaultdict
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Any, Collection, Optional, Protocol, Sequence
 from uuid import UUID
 
@@ -29,6 +29,8 @@ from eneo.completion_models.infrastructure.static_prompts import (
     TRANSCRIPTION_PROMPT,
 )
 from eneo.files.file_models import File, FileType
+from eneo.info_blobs.info_blob import SourceMetadataEntry
+from eneo.info_blobs.source_metadata import format_source_metadata_lines
 from eneo.questions.question import ToolCallInfo
 from eneo.sessions.session import SessionInDB
 from eneo.tokens.token_utils import (
@@ -154,11 +156,33 @@ class _InfoBlobChunkLike(Protocol):
     info_blob_id: UUID
     info_blob_title: str | None
 
+    @property
+    def info_blob_source_metadata(self) -> Sequence[SourceMetadataEntry]: ...
+
 
 class _InformationChunkLike(Protocol):
     id: UUID
     title: str
     content: str
+
+    @property
+    def source_metadata(self) -> Sequence[SourceMetadataEntry]: ...
+
+
+def _source_header(
+    title: str | None, source_id: UUID, source_metadata: Sequence[SourceMetadataEntry]
+) -> str:
+    """The attribution line(s) a source carries in the prompt.
+
+    Source properties follow the title so the model can tell a policy from a
+    meeting note and say so, in the same words retrieval matched on and the
+    reference UI shows.
+    """
+    header = "source_title: {}, source_id: {}".format(title, str(source_id)[:8])
+    properties = format_source_metadata_lines(source_metadata)
+    if properties:
+        header += "\nsource_properties: " + "; ".join(properties)
+    return header
 
 
 USER_FILES_PREAMBLE = (
@@ -275,6 +299,9 @@ class ChunkGrouping:
     content: str
     chunk_count: int
     relevance_score: float = 0.0
+    source_metadata: list[SourceMetadataEntry] = field(
+        default_factory=list[SourceMetadataEntry]
+    )
 
 
 class _Prompt:
@@ -400,8 +427,12 @@ class _Prompt:
 
                 # Count the tokens for the metadata
                 chunk_tokens += count_tokens(
-                    '"""source_title: {}, source_id: {}\n"""'.format(
-                        chunk.info_blob_title, str(chunk.info_blob_id)[:8]
+                    '"""{}\n"""'.format(
+                        _source_header(
+                            chunk.info_blob_title,
+                            chunk.info_blob_id,
+                            chunk.info_blob_source_metadata,
+                        )
                     ),
                     self.model_name,
                 )
@@ -451,6 +482,7 @@ class _Prompt:
                     end_chunk=group[-1].chunk_no,
                     content=full_text,
                     chunk_count=len(group),
+                    source_metadata=list(group[0].info_blob_source_metadata),
                 )
 
                 # Calculate score based on the position of chunks in the original input
@@ -485,9 +517,8 @@ class _Prompt:
             return ""
 
         return "\n".join(
-            '"""source_title: {}, source_id: {}\n{}"""'.format(
-                chunk.title,
-                str(chunk.id)[:8],
+            '"""{}\n{}"""'.format(
+                _source_header(chunk.title, chunk.id, chunk.source_metadata),
                 chunk.content,
             )
             for chunk in information_chunks

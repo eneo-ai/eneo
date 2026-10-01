@@ -8,7 +8,7 @@ from uuid import UUID
 
 from sqlalchemy import event
 
-from eneo.info_blobs.info_blob import InfoBlobAdd, InfoBlobUpdate
+from eneo.info_blobs.info_blob import InfoBlobAdd, InfoBlobUpdate, SourceMetadataEntry
 from eneo.integration.domain.entities.oauth_token import OauthToken
 from eneo.integration.domain.entities.sync_log import SyncLog
 from eneo.integration.domain.entities.tenant_sharepoint_app import (
@@ -25,6 +25,11 @@ from eneo.integration.infrastructure.content_service.parsing import (
     safe_int,
     sanitize_text_for_db,
     unsupported_file_reason,
+)
+from eneo.integration.infrastructure.content_service.sharepoint_metadata import (
+    SharePointColumnCatalog,
+    extract_source_metadata,
+    source_metadata_fingerprint,
 )
 from eneo.integration.infrastructure.content_service.types import (
     SharePointItem,
@@ -178,6 +183,10 @@ class SharePointContentService:
         # Strong refs to in-flight post-commit ChangeKey flush tasks so the event
         # loop does not GC them before they run.
         self._pending_change_key_tasks: set["asyncio.Task[None]"] = set()
+        # Library column definitions per drive, fetched once per service
+        # instance (one sync job). An empty catalog is cached too, so a drive
+        # whose columns cannot be read is asked only once.
+        self._column_catalogs: dict[str, SharePointColumnCatalog] = {}
 
     async def _refresh_service_account_access_token(
         self, tenant_app: TenantSharePointApp
@@ -306,6 +315,7 @@ class SharePointContentService:
                         token_refresh_callback=(
                             self.token_refresh_callback if oauth_token_id else None
                         ),
+                        include_list_item_fields=True,
                     ) as content_client:
                         actual_drive_id = resolved_drive_id
                         if not actual_drive_id and resolved_site_id:
@@ -453,6 +463,7 @@ class SharePointContentService:
                 token_refresh_callback=(
                     self.token_refresh_callback if oauth_token_id else None
                 ),
+                include_list_item_fields=True,
             ) as content_client:
                 actual_drive_id = resolved_drive_id
                 if not actual_drive_id and resolved_site_id:
@@ -581,7 +592,14 @@ class SharePointContentService:
                     item_id = item.get("id")
                     is_deleted = has_graph_facet(item, "deleted")
                     is_folder = has_graph_facet(item, "folder")
-                    change_key = item.get("cTag")
+                    source_metadata: list[SourceMetadataEntry] = []
+                    if not is_deleted and not is_folder:
+                        source_metadata = await self._source_metadata_for(
+                            content_client, actual_drive_id, item
+                        )
+                    change_key = self._change_key_with_metadata(
+                        item.get("cTag"), source_metadata
+                    )
 
                     logger.debug(
                         f"  - Item: {item_name} (deleted={is_deleted}, folder={is_folder}, changeKey={change_key})"
@@ -729,6 +747,7 @@ class SharePointContentService:
                                 url=web_url,
                                 integration_knowledge=integration_knowledge,
                                 sharepoint_item_id=item_id,
+                                source_metadata=source_metadata,
                             )
                             stats["files_processed"] += 1
 
@@ -870,6 +889,7 @@ class SharePointContentService:
                 token_refresh_callback=(
                     self.token_refresh_callback if oauth_token_id else None
                 ),
+                include_list_item_fields=True,
             ) as content_client:
                 actual_drive_id = drive_id
                 if not actual_drive_id and site_id_value:
@@ -980,6 +1000,11 @@ class SharePointContentService:
                                 url=item_info.get("webUrl", ""),
                                 integration_knowledge=integration_knowledge,
                                 sharepoint_item_id=integration_knowledge.folder_id,
+                                source_metadata=await self._source_metadata_for(
+                                    content_client,
+                                    actual_drive_id,
+                                    cast(SharePointItem, item_info),
+                                ),
                             )
                             stats["files_processed"] += 1
                         else:
@@ -1104,6 +1129,9 @@ class SharePointContentService:
                         url=document.get("webUrl", ""),
                         integration_knowledge=integration_knowledge,
                         sharepoint_item_id=item_id,
+                        source_metadata=await self._source_metadata_for(
+                            client, drive_id, document
+                        ),
                     )
                     stats["files_processed"] += 1
                 else:
@@ -1151,6 +1179,80 @@ class SharePointContentService:
                     {"file": page_name, "reason": "Empty or unreadable content"}
                 )
 
+    async def _column_catalog(
+        self, client: SharePointContentClient, drive_id: Optional[str]
+    ) -> SharePointColumnCatalog:
+        """The drive's admitted columns, read once per sync.
+
+        Source metadata is enrichment: a library whose columns cannot be read
+        (OneDrive roots, Sites.Selected grants without list access, a Graph
+        hiccup) still syncs its documents, just without properties.
+        """
+        if not drive_id or not client.list_item_fields_enabled:
+            return SharePointColumnCatalog()
+        cached = self._column_catalogs.get(drive_id)
+        if cached is not None:
+            return cached
+        try:
+            definitions = await client.get_list_columns(drive_id)
+            catalog = SharePointColumnCatalog.from_graph(definitions)
+        except Exception as e:  # noqa: BLE001 - enrichment must never fail a sync
+            logger.warning(
+                "Could not read library columns for drive %s; syncing without "
+                "source metadata: %s",
+                drive_id,
+                e,
+            )
+            catalog = SharePointColumnCatalog()
+        self._column_catalogs[drive_id] = catalog
+        return catalog
+
+    async def _source_metadata_for(
+        self,
+        client: SharePointContentClient,
+        drive_id: Optional[str],
+        item: SharePointItem,
+    ) -> list[SourceMetadataEntry]:
+        catalog = await self._column_catalog(client, drive_id)
+        try:
+            return extract_source_metadata(cast(dict[str, object], item), catalog)
+        except Exception as e:  # noqa: BLE001 - malformed payload must not fail a sync
+            logger.warning(
+                "Could not extract source metadata for item %s: %s",
+                item.get("id"),
+                e,
+            )
+            return []
+
+    @staticmethod
+    def _content_hash(
+        sanitized_text: str, source_metadata: list[SourceMetadataEntry]
+    ) -> bytes:
+        """Digest of what gets embedded: the text, and the properties if any.
+
+        The properties are part of the embedded header, so a changed column
+        value must re-embed. Documents without properties keep the plain text
+        digest, so existing rows are not all re-embedded after the upgrade.
+        """
+        digest = hashlib.sha256(sanitized_text.encode("utf-8"))
+        if source_metadata:
+            digest.update(b"\x00source_metadata:")
+            digest.update(source_metadata_fingerprint(source_metadata).encode("ascii"))
+        return digest.digest()
+
+    @staticmethod
+    def _change_key_with_metadata(
+        change_key: Optional[str], source_metadata: list[SourceMetadataEntry]
+    ) -> Optional[str]:
+        """Graph's cTag only moves on content changes; fold the properties in.
+
+        Otherwise editing a column value in SharePoint would be skipped as a
+        duplicate by the ChangeKey cache and never reach the index.
+        """
+        if not change_key or not source_metadata:
+            return change_key
+        return f"{change_key}#{source_metadata_fingerprint(source_metadata)}"
+
     async def _process_info_blob(
         self,
         title: str,
@@ -1158,6 +1260,7 @@ class SharePointContentService:
         url: str,
         integration_knowledge: "IntegrationKnowledge",
         sharepoint_item_id: Optional[str] = None,
+        source_metadata: Optional[list[SourceMetadataEntry]] = None,
     ) -> None:
         existing_blob = None
         if sharepoint_item_id:
@@ -1174,7 +1277,8 @@ class SharePointContentService:
         previous_blob_size = safe_int(existing_blob.size) if existing_blob else 0
 
         sanitized_text = sanitize_text_for_db(text)
-        content_hash = hashlib.sha256(sanitized_text.encode("utf-8")).digest()
+        source_metadata = source_metadata or []
+        content_hash = self._content_hash(sanitized_text, source_metadata)
 
         # Skip the (expensive) re-chunk + re-embed when the content is byte-for-byte
         # unchanged. SharePoint emits delta changes for metadata edits, moves and
@@ -1189,13 +1293,18 @@ class SharePointContentService:
             # re-embed. Still cheaply refresh title/url if they drifted (e.g. a
             # rename/move surfaced by a full sync, which has no cTag dedup) so the
             # displayed name and citation URL do not go stale.
-            if existing_blob.title != title or existing_blob.url != url:
+            if (
+                existing_blob.title != title
+                or existing_blob.url != url
+                or (existing_blob.source_metadata or []) != source_metadata
+            ):
                 await self.info_blob_service.repo.update(
                     InfoBlobUpdate(
                         id=existing_blob.id,
                         user_id=self.user.id,
                         title=title,
                         url=url,
+                        source_metadata=source_metadata,
                     )
                 )
             logger.debug(
@@ -1216,6 +1325,7 @@ class SharePointContentService:
             integration_knowledge_id=integration_knowledge.id,
             sharepoint_item_id=sharepoint_item_id,
             content_hash=content_hash,
+            source_metadata=source_metadata or None,
         )
 
         info_blob = await self.info_blob_service.publish_info_blob_without_validation(
@@ -1711,6 +1821,9 @@ class SharePointContentService:
                     url=web_url,
                     integration_knowledge=integration_knowledge,
                     sharepoint_item_id=item_id,
+                    source_metadata=await self._source_metadata_for(
+                        client, drive_id, item
+                    ),
                 )
                 stats["files_processed"] += 1
             elif item_id and self._is_positive_unextractable_result(

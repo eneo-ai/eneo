@@ -14305,6 +14305,11 @@ export interface components {
       website_id?: string | null;
       /** Original Available */
       original_available: boolean;
+      /**
+       * Source Metadata
+       * @default []
+       */
+      source_metadata?: components["schemas"]["SourceMetadataEntry"][];
       /** Score */
       score: number;
     };
@@ -14352,6 +14357,11 @@ export interface components {
       website_id?: string | null;
       /** Original Available */
       original_available: boolean;
+      /**
+       * Source Metadata
+       * @default []
+       */
+      source_metadata?: components["schemas"]["SourceMetadataEntry"][];
       /** Text */
       text: string;
     };
@@ -14373,6 +14383,11 @@ export interface components {
       website_id?: string | null;
       /** Original Available */
       original_available: boolean;
+      /**
+       * Source Metadata
+       * @default []
+       */
+      source_metadata?: components["schemas"]["SourceMetadataEntry"][];
     };
     /** InfoBlobUpdatePublic */
     InfoBlobUpdatePublic: {
@@ -19677,6 +19692,29 @@ export interface components {
      * @enum {string}
      */
     SortOrder: "asc" | "desc";
+    /**
+     * SourceMetadataEntry
+     * @description One document property from the source system, e.g. a SharePoint column.
+     *
+     *     ``name`` is the source's stable identifier for the property, ``label`` the
+     *     human readable name the source shows, ``value`` the normalised value as
+     *     text (a list for multi-value properties). ``kind`` lets presentation format
+     *     dates and booleans without re-parsing the value.
+     */
+    SourceMetadataEntry: {
+      /** Name */
+      name: string;
+      /** Label */
+      label: string;
+      /** Value */
+      value: string | string[];
+      /**
+       * Kind
+       * @default text
+       * @enum {string}
+       */
+      kind?: "text" | "choice" | "date" | "number" | "boolean" | "url";
+    };
     /** SpaceDashboard */
     SpaceDashboard: {
       /**
@@ -27502,6 +27540,11 @@ export interface operations {
                 website_id?: string | null;
                 /** Original Available */
                 original_available: boolean;
+                /**
+                 * Source Metadata
+                 * @default []
+                 */
+                source_metadata?: components["schemas"]["SourceMetadataEntry"][];
                 /** Score */
                 score: number;
               };
@@ -27594,6 +27637,29 @@ export interface operations {
                 description: string | null;
                 /** Security Level */
                 security_level: number;
+              };
+              /**
+               * SourceMetadataEntry
+               * @description One document property from the source system, e.g. a SharePoint column.
+               *
+               *     ``name`` is the source's stable identifier for the property, ``label`` the
+               *     human readable name the source shows, ``value`` the normalised value as
+               *     text (a list for multi-value properties). ``kind`` lets presentation format
+               *     dates and booleans without re-parsing the value.
+               */
+              SourceMetadataEntry: {
+                /** Name */
+                name: string;
+                /** Label */
+                label: string;
+                /** Value */
+                value: string | string[];
+                /**
+                 * Kind
+                 * @default text
+                 * @enum {string}
+                 */
+                kind?: "text" | "choice" | "date" | "number" | "boolean" | "url";
               };
               /** SupportedModelKwargs */
               SupportedModelKwargs: {
@@ -27918,6 +27984,11 @@ export interface operations {
                 website_id?: string | null;
                 /** Original Available */
                 original_available: boolean;
+                /**
+                 * Source Metadata
+                 * @default []
+                 */
+                source_metadata?: components["schemas"]["SourceMetadataEntry"][];
                 /** Score */
                 score: number;
               };
@@ -28010,6 +28081,29 @@ export interface operations {
                 description: string | null;
                 /** Security Level */
                 security_level: number;
+              };
+              /**
+               * SourceMetadataEntry
+               * @description One document property from the source system, e.g. a SharePoint column.
+               *
+               *     ``name`` is the source's stable identifier for the property, ``label`` the
+               *     human readable name the source shows, ``value`` the normalised value as
+               *     text (a list for multi-value properties). ``kind`` lets presentation format
+               *     dates and booleans without re-parsing the value.
+               */
+              SourceMetadataEntry: {
+                /** Name */
+                name: string;
+                /** Label */
+                label: string;
+                /** Value */
+                value: string | string[];
+                /**
+                 * Kind
+                 * @default text
+                 * @enum {string}
+                 */
+                kind?: "text" | "choice" | "date" | "number" | "boolean" | "url";
               };
               /** SupportedModelKwargs */
               SupportedModelKwargs: {
@@ -28783,6 +28877,11 @@ export interface operations {
                     website_id?: string | null;
                     /** Original Available */
                     original_available: boolean;
+                    /**
+                     * Source Metadata
+                     * @default []
+                     */
+                    source_metadata?: components["schemas"]["SourceMetadataEntry"][];
                     /** Score */
                     score: number;
                   };
@@ -28799,6 +28898,29 @@ export interface operations {
                     embedding_model_id: string;
                     /** Size */
                     size: number;
+                  };
+                  /**
+                   * SourceMetadataEntry
+                   * @description One document property from the source system, e.g. a SharePoint column.
+                   *
+                   *     ``name`` is the source's stable identifier for the property, ``label`` the
+                   *     human readable name the source shows, ``value`` the normalised value as
+                   *     text (a list for multi-value properties). ``kind`` lets presentation format
+                   *     dates and booleans without re-parsing the value.
+                   */
+                  SourceMetadataEntry: {
+                    /** Name */
+                    name: string;
+                    /** Label */
+                    label: string;
+                    /** Value */
+                    value: string | string[];
+                    /**
+                     * Kind
+                     * @default text
+                     * @enum {string}
+                     */
+                    kind?: "text" | "choice" | "date" | "number" | "boolean" | "url";
                   };
                 };
               }
@@ -29255,6 +29377,11 @@ export interface operations {
                     website_id?: string | null;
                     /** Original Available */
                     original_available: boolean;
+                    /**
+                     * Source Metadata
+                     * @default []
+                     */
+                    source_metadata?: components["schemas"]["SourceMetadataEntry"][];
                     /** Score */
                     score: number;
                   };
@@ -29347,6 +29474,29 @@ export interface operations {
                     description: string | null;
                     /** Security Level */
                     security_level: number;
+                  };
+                  /**
+                   * SourceMetadataEntry
+                   * @description One document property from the source system, e.g. a SharePoint column.
+                   *
+                   *     ``name`` is the source's stable identifier for the property, ``label`` the
+                   *     human readable name the source shows, ``value`` the normalised value as
+                   *     text (a list for multi-value properties). ``kind`` lets presentation format
+                   *     dates and booleans without re-parsing the value.
+                   */
+                  SourceMetadataEntry: {
+                    /** Name */
+                    name: string;
+                    /** Label */
+                    label: string;
+                    /** Value */
+                    value: string | string[];
+                    /**
+                     * Kind
+                     * @default text
+                     * @enum {string}
+                     */
+                    kind?: "text" | "choice" | "date" | "number" | "boolean" | "url";
                   };
                   /** SupportedModelKwargs */
                   SupportedModelKwargs: {
@@ -48064,6 +48214,11 @@ export interface operations {
                 website_id?: string | null;
                 /** Original Available */
                 original_available: boolean;
+                /**
+                 * Source Metadata
+                 * @default []
+                 */
+                source_metadata?: components["schemas"]["SourceMetadataEntry"][];
                 /** Score */
                 score: number;
               };
@@ -48080,6 +48235,29 @@ export interface operations {
                 embedding_model_id: string;
                 /** Size */
                 size: number;
+              };
+              /**
+               * SourceMetadataEntry
+               * @description One document property from the source system, e.g. a SharePoint column.
+               *
+               *     ``name`` is the source's stable identifier for the property, ``label`` the
+               *     human readable name the source shows, ``value`` the normalised value as
+               *     text (a list for multi-value properties). ``kind`` lets presentation format
+               *     dates and booleans without re-parsing the value.
+               */
+              SourceMetadataEntry: {
+                /** Name */
+                name: string;
+                /** Label */
+                label: string;
+                /** Value */
+                value: string | string[];
+                /**
+                 * Kind
+                 * @default text
+                 * @enum {string}
+                 */
+                kind?: "text" | "choice" | "date" | "number" | "boolean" | "url";
               };
             };
           };
@@ -48218,6 +48396,11 @@ export interface operations {
                 website_id?: string | null;
                 /** Original Available */
                 original_available: boolean;
+                /**
+                 * Source Metadata
+                 * @default []
+                 */
+                source_metadata?: components["schemas"]["SourceMetadataEntry"][];
                 /** Score */
                 score: number;
               };
@@ -48234,6 +48417,29 @@ export interface operations {
                 embedding_model_id: string;
                 /** Size */
                 size: number;
+              };
+              /**
+               * SourceMetadataEntry
+               * @description One document property from the source system, e.g. a SharePoint column.
+               *
+               *     ``name`` is the source's stable identifier for the property, ``label`` the
+               *     human readable name the source shows, ``value`` the normalised value as
+               *     text (a list for multi-value properties). ``kind`` lets presentation format
+               *     dates and booleans without re-parsing the value.
+               */
+              SourceMetadataEntry: {
+                /** Name */
+                name: string;
+                /** Label */
+                label: string;
+                /** Value */
+                value: string | string[];
+                /**
+                 * Kind
+                 * @default text
+                 * @enum {string}
+                 */
+                kind?: "text" | "choice" | "date" | "number" | "boolean" | "url";
               };
             };
           };
