@@ -112,11 +112,11 @@ class Datastore:
             count_tokens=count_tokens,
         )
 
-    def _chunk_text(
-        self, info_blob: InfoBlobInDB, reserved_tokens: int = 0
-    ) -> list[InfoBlobChunk]:
+    def _chunk_text(self, info_blob: InfoBlobInDB) -> list[InfoBlobChunk]:
         # Leave room for the source header so header + chunk stays within the
         # configured chunk size; the overlap must stay smaller than the chunk.
+        header = self._source_header(info_blob)
+        reserved_tokens = count_tokens(header) if header else 0
         chunk_size = max(
             settings.chunk_size - reserved_tokens, settings.chunk_size // 2
         )
@@ -164,10 +164,7 @@ class Datastore:
     async def add(self, info_blob: InfoBlobInDB, embedding_model: "EmbeddingModel"):
         logger.debug("Chunking text.")
         header = self._source_header(info_blob)
-        header_tokens = count_tokens(header) if header else 0
-        info_blob_chunks = await asyncio.to_thread(
-            self._chunk_text, info_blob, header_tokens
-        )
+        info_blob_chunks = await asyncio.to_thread(self._chunk_text, info_blob)
 
         if not info_blob_chunks:
             raise ValueError(
