@@ -61,7 +61,7 @@ async def test_add_surfaces_the_original_provider_error(monkeypatch):
         info_blob_id=uuid4(),
         tenant_id=uuid4(),
     )
-    monkeypatch.setattr(Datastore, "_chunk_text", lambda _self, _blob, *_args: [chunk])
+    monkeypatch.setattr(Datastore, "_chunk_text", lambda _self, _blob: [chunk])
     provider_error = OpenAIException("provider unavailable")
     completed = ChunkEmbeddingList()
     embeddings = MagicMock()
