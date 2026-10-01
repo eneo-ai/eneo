@@ -1,3 +1,4 @@
+import { EneoError } from "@eneo/eneo-js";
 import type {
   AIBuilderBudgetSettingsUpdate,
   Eneo,
@@ -54,4 +55,13 @@ export async function saveFlowAdminSettings(
     builderBudget,
     ragEvidence
   };
+}
+
+const RUN_CAPACITY_EXCEEDED_CODE = "max_concurrent_runs_exceeds_server_capacity";
+
+/** The server refused max concurrent flow runs because it is above server capacity. */
+export function isRunCapacityExceededError(error: unknown): boolean {
+  if (!(error instanceof EneoError)) return false;
+  const response = error.response as { code?: unknown } | null | undefined;
+  return response?.code === RUN_CAPACITY_EXCEEDED_CODE;
 }

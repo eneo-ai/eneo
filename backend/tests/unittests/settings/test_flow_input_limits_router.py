@@ -213,6 +213,8 @@ async def test_get_flow_runtime_policy_delegates_to_service() -> None:
         default_step_timeout_seconds=900,
         max_step_timeout_seconds=1800,
         hard_ceiling_seconds=3540,
+        max_concurrent_runs=4,
+        max_concurrent_runs_capacity=4,
     )
     container.settings_service.return_value = service
     container.user.return_value = SimpleNamespace(
@@ -234,6 +236,8 @@ async def test_patch_flow_runtime_policy_delegates_to_service() -> None:
         default_step_timeout_seconds=1200,
         max_step_timeout_seconds=2400,
         hard_ceiling_seconds=3540,
+        max_concurrent_runs=4,
+        max_concurrent_runs_capacity=4,
     )
     container.settings_service.return_value = service
     container.user.return_value = SimpleNamespace(

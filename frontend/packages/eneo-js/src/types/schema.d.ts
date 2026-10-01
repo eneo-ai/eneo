@@ -4561,11 +4561,11 @@ export interface paths {
     };
     /**
      * Get flow run capacity
-     * @description Return how many more concurrent Flow runs the caller's tenant may start.
+     * @description Return how many more concurrent Flow runs may be started.
      *
-     *     Use this before submitting a batch, so a client discovers the tenant ceiling
+     *     Use this before submitting a batch, so a client discovers the limit
      *     up front instead of as a rejected `create_run` partway through. `active_runs`
-     *     counts the tenant's `queued` and `running` runs, including work started by
+     *     counts `queued` and `running` runs, including work started by
      *     other clients and stale queued work that has not been recovered. A run paused
      *     at `awaiting_review` holds no slot and is not counted.
      *
@@ -8032,7 +8032,7 @@ export interface paths {
     };
     /**
      * Get flow runtime policy
-     * @description Return tenant-level per-step LLM runtime timeout policy for Flow executions. This controls backend worker timeouts for individual steps; it is separate from browser upload timeouts, document-rendering limits, and human-review expiry windows.
+     * @description Return the runtime policy for Flow executions: per-step LLM timeouts and the limit on concurrent runs. The timeouts control backend worker timeouts for individual steps; they are separate from browser upload timeouts, document-rendering limits, and human-review expiry windows. `max_concurrent_runs` is the effective limit on queued and running runs and `max_concurrent_runs_capacity` the server capacity it cannot exceed.
      */
     get: operations["get_flow_runtime_policy"];
     put?: never;
@@ -8042,7 +8042,7 @@ export interface paths {
     head?: never;
     /**
      * Update flow runtime policy
-     * @description Update tenant-level per-step LLM timeout policy for flow executions. Omit a field to leave it unchanged. Send null to remove the tenant override and fall back to the deployment default. The returned policy is the resolved effective timeout policy used by future Flow step executions.
+     * @description Update the runtime policy for flow executions: per-step LLM timeouts and the limit on concurrent runs. Omit a field to leave it unchanged. Send null to remove the tenant override and fall back to the deployment default. A `max_concurrent_runs` above the server capacity is refused with `max_concurrent_runs_exceeds_server_capacity`, and a value equal to the capacity is stored as no override. The returned policy is the resolved effective policy used by future Flow runs and step executions.
      */
     patch: operations["update_flow_runtime_policy"];
     trace?: never;
@@ -20217,9 +20217,9 @@ export interface components {
      *     Clients that submit batches read this before the first run instead of
      *     discovering the ceiling as a rejected `create_run`.
      * @example {
-     *       "active_runs": 1,
-     *       "available_slots": 3,
-     *       "max_concurrent_runs": 4,
+     *       "active_runs": 3,
+     *       "available_slots": 7,
+     *       "max_concurrent_runs": 10,
      *       "tenant_id": "00000000-0000-0000-0000-000000000010"
      *     }
      */
@@ -20236,7 +20236,7 @@ export interface components {
       available_slots: number;
       /**
        * Max Concurrent Runs
-       * @description Configured ceiling this tenant is held to. `create_run` rejects a run once `active_runs` reaches it.
+       * @description Effective limit on queued and running runs: the administrator's max concurrent flow runs when set, otherwise the server capacity. `create_run` rejects a run once `active_runs` reaches it.
        */
       max_concurrent_runs: number;
       /**
@@ -24746,6 +24746,8 @@ export interface components {
      * @example {
      *       "default_step_timeout_seconds": 900,
      *       "hard_ceiling_seconds": 3600,
+     *       "max_concurrent_runs": 6,
+     *       "max_concurrent_runs_capacity": 8,
      *       "max_step_timeout_seconds": 1800
      *     }
      */
@@ -24757,13 +24759,29 @@ export interface components {
        * @description Deployment hard ceiling after reserving worker task shutdown buffer.
        */
       hard_ceiling_seconds: number;
+      /**
+       * Max Concurrent Runs
+       * @description Effective limit on queued and running flow runs, checked when a new run is accepted: the administrator's value (at most the server capacity) when one is set, otherwise the server capacity. Runs already accepted continue.
+       */
+      max_concurrent_runs: number;
+      /**
+       * Max Concurrent Runs Capacity
+       * @description Server capacity: the upper bound and default for `max_concurrent_runs`. It is the execution worker's slots (`TASK_EXECUTION_MAX_JOBS`) unless the operator set `FLOW_MAX_CONCURRENT_RUNS_PER_TENANT`; a value above the slots only makes admitted runs wait in the queue.
+       */
+      max_concurrent_runs_capacity: number;
+      /**
+       * Max Concurrent Runs Override
+       * @description The administrator's saved value for `max_concurrent_runs`, kept even when the server capacity limits it below this number; null when the setting follows the server capacity.
+       */
+      max_concurrent_runs_override?: number | null;
       /** Max Step Timeout Seconds */
       max_step_timeout_seconds: number;
     };
     /**
      * FlowRuntimePolicyUpdate
      * @example {
-     *       "default_step_timeout_seconds": 900
+     *       "default_step_timeout_seconds": 900,
+     *       "max_concurrent_runs": 6
      *     }
      */
     FlowRuntimePolicyUpdate: {
@@ -24772,6 +24790,11 @@ export interface components {
        * @description Set the tenant default per-step LLM timeout, or send null to use the deployment default.
        */
       default_step_timeout_seconds?: number | null;
+      /**
+       * Max Concurrent Runs
+       * @description Set the limit on queued and running flow runs that admits a new run, up to `max_concurrent_runs_capacity`, or send null to use the server capacity. A value equal to the capacity is stored as no override.
+       */
+      max_concurrent_runs?: number | null;
       /**
        * Max Step Timeout Seconds
        * @description Set the tenant maximum per-step LLM timeout, or send null to use the deployment ceiling.
@@ -56818,10 +56841,10 @@ export interface operations {
           "application/json": components["schemas"]["GeneralError"];
         };
       };
-      /** @description The tenant already has the maximum number of active Flow runs. Wait for capacity, then submit the logical run again. */
+      /** @description The maximum number of active Flow runs is reached; `context.max_concurrent_runs` is the effective limit (the administrator's flow runtime policy, bounded by the server capacity). Wait for capacity, then submit the logical run again. */
       429: {
         headers: {
-          /** @description Suggested delay before submitting a new run. */
+          /** @description Fixed polling hint in seconds, not a prediction: a run can take hours, so read `available_slots` from the run capacity endpoint to learn when a slot is free. */
           "Retry-After"?: number;
           [name: string]: unknown;
         };
@@ -56830,11 +56853,11 @@ export interface operations {
            * @example {
            *       "code": "flow_run_concurrency_limit_reached",
            *       "context": {
-           *         "max_concurrent_runs": 4,
+           *         "max_concurrent_runs": 10,
            *         "retry_after_seconds": 60
            *       },
            *       "eneo_error_code": 9007,
-           *       "message": "Concurrent flow run limit reached for this tenant."
+           *       "message": "Concurrent flow run limit reached."
            *     }
            */
           "application/json": components["schemas"]["GeneralError"];
@@ -57774,7 +57797,7 @@ export interface operations {
           "application/json": components["schemas"]["GeneralError"];
         };
       };
-      /** @description Tenant concurrent-run capacity is exhausted. */
+      /** @description Concurrent flow run limit reached. */
       429: {
         headers: {
           [name: string]: unknown;
@@ -57784,7 +57807,7 @@ export interface operations {
            * @example {
            *       "code": "flow_run_concurrency_limit_reached",
            *       "eneo_error_code": 9007,
-           *       "message": "Tenant concurrent-run capacity is exhausted."
+           *       "message": "Concurrent flow run limit reached."
            *     }
            */
           "application/json": components["schemas"]["GeneralError"];
@@ -59106,7 +59129,7 @@ export interface operations {
           "application/json": components["schemas"]["GeneralError"];
         };
       };
-      /** @description Tenant concurrent-run capacity is exhausted. */
+      /** @description Concurrent flow run limit reached. */
       429: {
         headers: {
           [name: string]: unknown;
@@ -59116,7 +59139,7 @@ export interface operations {
            * @example {
            *       "code": "flow_run_concurrency_limit_reached",
            *       "eneo_error_code": 9007,
-           *       "message": "Tenant concurrent-run capacity is exhausted."
+           *       "message": "Concurrent flow run limit reached."
            *     }
            */
           "application/json": components["schemas"]["GeneralError"];

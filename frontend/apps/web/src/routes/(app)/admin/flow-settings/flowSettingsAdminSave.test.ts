@@ -116,3 +116,23 @@ describe("saveFlowAdminSettings", () => {
     });
   });
 });
+
+describe("isRunCapacityExceededError", () => {
+  it("recognises only the server capacity refusal", async () => {
+    const { EneoError } = await import("@eneo/eneo-js");
+    const { isRunCapacityExceededError } = await import("./flowSettingsAdminSave");
+
+    expect(
+      isRunCapacityExceededError(
+        new EneoError("x", "SERVER", 400, 9007, {
+          code: "max_concurrent_runs_exceeds_server_capacity"
+        })
+      )
+    ).toBe(true);
+    expect(
+      isRunCapacityExceededError(new EneoError("x", "SERVER", 400, 9007, { code: "other" }))
+    ).toBe(false);
+    expect(isRunCapacityExceededError(new Error("x"))).toBe(false);
+    expect(isRunCapacityExceededError(null)).toBe(false);
+  });
+});

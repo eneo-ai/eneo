@@ -469,9 +469,9 @@ class FlowRunCapacityPublic(BaseModel):
         json_schema_extra={
             "example": {
                 "tenant_id": "00000000-0000-0000-0000-000000000010",
-                "active_runs": 1,
-                "max_concurrent_runs": 4,
-                "available_slots": 3,
+                "active_runs": 3,
+                "max_concurrent_runs": 10,
+                "available_slots": 7,
             }
         },
     )
@@ -487,8 +487,9 @@ class FlowRunCapacityPublic(BaseModel):
     )
     max_concurrent_runs: int = Field(
         description=(
-            "Configured ceiling this tenant is held to. `create_run` rejects a "
-            "run once `active_runs` reaches it."
+            "Effective limit on queued and running runs: the administrator's "
+            "max concurrent flow runs when set, otherwise the server capacity. "
+            "`create_run` rejects a run once `active_runs` reaches it."
         )
     )
     available_slots: int = Field(

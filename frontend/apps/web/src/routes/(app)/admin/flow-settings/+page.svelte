@@ -21,7 +21,11 @@
   import { FLOW_RETENTION_MAX_DAYS } from "$lib/features/flows/flowRunRetentionPolicy";
   import { m } from "$lib/paraglide/messages";
   import FlowRunRetentionPolicyPanel from "./FlowRunRetentionPolicyPanel.svelte";
-  import { saveFlowAdminSettings, type FlowAdminSettingsUpdates } from "./flowSettingsAdminSave";
+  import {
+    isRunCapacityExceededError,
+    saveFlowAdminSettings,
+    type FlowAdminSettingsUpdates
+  } from "./flowSettingsAdminSave";
 
   let { data } = $props();
   const eneo = getEneo();
@@ -98,6 +102,20 @@
     min: 1,
     max: initial.flowRuntimePolicy.hard_ceiling_seconds
   });
+  // Server capacity bounds the value; entering it restores the default (the
+  // server stores no override), so the field always shows an effective number.
+  const runCapacity = initial.flowRuntimePolicy.max_concurrent_runs_capacity;
+  // The saved value, which stays stored when capacity limits it: the field shows
+  // the effective number, so inherited and clamped need telling apart here.
+  let runLimitOverride = $state(initial.flowRuntimePolicy.max_concurrent_runs_override ?? null);
+  // Capacity 0 admits no run: the range message "between 0 and 0" would say
+  // nothing, so the row states it instead and the field takes no new value.
+  const maxConcurrentRuns = new NumberField({
+    initial: initial.flowRuntimePolicy.max_concurrent_runs,
+    min: runCapacity > 0 ? 1 : 0,
+    max: runCapacity > 0 ? runCapacity : null,
+    required: true
+  });
 
   // --- AI Builder ---
   const builderMaxAttachments = new NumberField({
@@ -169,6 +187,7 @@
     audioMaxDuration,
     defaultStepTimeout,
     maxStepTimeout,
+    maxConcurrentRuns,
     builderMaxAttachments,
     builderMaxMessageChars,
     builderReviewEvidenceCap,
@@ -190,7 +209,9 @@
       : null
   );
 
-  const blocked = $derived(form.invalid || timeoutOrderError !== null);
+  const blocked = $derived(
+    form.invalid || timeoutOrderError !== null || (runCapacity === 0 && maxConcurrentRuns.dirty)
+  );
 
   const uploadStatus = $derived.by(() => {
     const days = policy.flow_runtime_upload_abandonment_days;
@@ -312,6 +333,7 @@
       runtimePolicy.default_step_timeout_seconds = defaultStepTimeout.value;
     }
     if (maxStepTimeout.dirty) runtimePolicy.max_step_timeout_seconds = maxStepTimeout.value;
+    if (maxConcurrentRuns.dirty) runtimePolicy.max_concurrent_runs = maxConcurrentRuns.value;
 
     const mappedExecution: FlowAdminSettingsUpdates["mappedExecution"] = {};
     if (mappedCalls.dirty) {
@@ -376,8 +398,10 @@
       audioMaxDuration.commit(updated.inputLimits.audio_max_duration_seconds);
     }
     if (updated.runtimePolicy) {
+      runLimitOverride = updated.runtimePolicy.max_concurrent_runs_override ?? null;
       defaultStepTimeout.commit(updated.runtimePolicy.default_step_timeout_seconds);
       maxStepTimeout.commit(updated.runtimePolicy.max_step_timeout_seconds);
+      maxConcurrentRuns.commit(updated.runtimePolicy.max_concurrent_runs);
     }
     if (updated.mappedExecution) {
       mappedCalls.commit(updated.mappedExecution.max_provider_calls_per_mapped_step ?? null);
@@ -410,6 +434,24 @@
     saving = true;
     try {
       await persist(patches);
+    } catch (error) {
+      if (isRunCapacityExceededError(error)) toast.error(m.flow_run_limit_exceeds_capacity_error());
+      else toastError(error);
+    } finally {
+      saving = false;
+    }
+  }
+
+  // Sends null whatever the field shows: a clamped saved value looks equal to
+  // the capacity, so the field is never dirty for it.
+  async function useServerCapacity() {
+    if (saving) return;
+    saving = true;
+    try {
+      const updated = await eneo.settings.updateFlowRuntimePolicy({ max_concurrent_runs: null });
+      maxConcurrentRuns.commit(updated.max_concurrent_runs);
+      runLimitOverride = updated.max_concurrent_runs_override ?? null;
+      toast.success(m.saved_successfully());
     } catch (error) {
       toastError(error);
     } finally {
@@ -577,6 +619,34 @@
             hint={audioDurationHint}
             field={audioMaxDuration}
           />
+        </Settings.Group>
+
+        <Settings.Group
+          title={m.flow_run_limit_group()}
+          description={m.flow_run_limit_group_description()}
+          density="compact"
+        >
+          <Settings.NumberRow
+            title={m.flow_run_limit_title()}
+            description={m.flow_run_limit_description()}
+            hint={runCapacity === 0
+              ? undefined
+              : runLimitOverride !== null && runLimitOverride > runCapacity
+                ? m.flow_run_limit_clamped_hint({
+                    limit: String(runCapacity),
+                    saved: String(runLimitOverride)
+                  })
+                : m.flow_run_limit_capacity_hint({ capacity: String(runCapacity) })}
+            externalError={runCapacity === 0 ? m.flow_run_limit_no_capacity() : null}
+            field={maxConcurrentRuns}
+          />
+          {#if runLimitOverride !== null}
+            <div class="px-4 lg:px-0.5">
+              <Button variant="outline" size="sm" disabled={saving} onclick={useServerCapacity}>
+                {m.flow_run_limit_use_capacity()}
+              </Button>
+            </div>
+          {/if}
         </Settings.Group>
 
         <Settings.Group

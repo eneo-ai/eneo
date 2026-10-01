@@ -704,6 +704,8 @@ def test_executor_accepts_grouped_config(user):
             default_step_timeout_seconds=70,
             max_step_timeout_seconds=100,
             hard_ceiling_seconds=100,
+            max_concurrent_runs=4,
+            max_concurrent_runs_capacity=4,
         ),
         mapped_execution_policy=FlowMappedExecutionPolicy(
             max_provider_calls_per_mapped_step=4

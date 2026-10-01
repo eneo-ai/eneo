@@ -19,10 +19,13 @@ FLOW_RUNTIME_POLICY_STORAGE_VERSION_KEY: Final[str] = "version"
 FLOW_RUNTIME_POLICY_STORAGE_VERSION: Final[int] = 1
 FLOW_RUNTIME_DEFAULT_STEP_TIMEOUT_KEY: Final[str] = "default_step_timeout_seconds"
 FLOW_RUNTIME_MAX_STEP_TIMEOUT_KEY: Final[str] = "max_step_timeout_seconds"
+FLOW_RUNTIME_MAX_CONCURRENT_RUNS_KEY: Final[str] = "max_concurrent_runs"
+_RUN_CAPACITY_ENV_FIELD: Final[str] = "flow_max_concurrent_runs_per_tenant"
 FLOW_RUNTIME_POLICY_BUSINESS_KEYS: Final[frozenset[str]] = frozenset(
     {
         FLOW_RUNTIME_DEFAULT_STEP_TIMEOUT_KEY,
         FLOW_RUNTIME_MAX_STEP_TIMEOUT_KEY,
+        FLOW_RUNTIME_MAX_CONCURRENT_RUNS_KEY,
     }
 )
 FLOW_RUNTIME_POLICY_KEYS: Final[frozenset[str]] = frozenset(
@@ -38,6 +41,48 @@ class FlowRuntimePolicy:
     default_step_timeout_seconds: int
     max_step_timeout_seconds: int
     hard_ceiling_seconds: int
+    max_concurrent_runs: int
+    max_concurrent_runs_capacity: int
+    # The admin's stored value, even when capacity clamps it; None when the
+    # setting inherits the capacity.
+    max_concurrent_runs_override: int | None = None
+
+
+def flow_runtime_run_capacity(*, defaults: Any | None = None) -> int:
+    """Server capacity for concurrent flow runs: the bound and default of the
+    admin's "max concurrent flow runs".
+
+    An operator who set FLOW_MAX_CONCURRENT_RUNS_PER_TENANT keeps that value;
+    otherwise the capacity is the execution worker's slots, so the two numbers
+    cannot drift apart by default. Zero is kept: a deployment that sets the
+    variable to 0 admits no run, and no admin value can raise it.
+    """
+    settings = defaults or get_settings()
+    if _RUN_CAPACITY_ENV_FIELD in getattr(settings, "model_fields_set", ()):
+        return max(0, int(getattr(settings, _RUN_CAPACITY_ENV_FIELD)))
+    return max(0, int(settings.task_execution_max_jobs))
+
+
+def warn_when_run_capacity_exceeds_executor_slots(
+    *, executor_slots: int, defaults: Any | None = None
+) -> bool:
+    """Log when admitted runs can outnumber the worker's executor slots.
+
+    The run limit counts queued runs, so a capacity above the slots admits runs
+    that then wait for a slot while their observation deadlines keep running.
+    """
+    capacity = flow_runtime_run_capacity(defaults=defaults)
+    if capacity <= executor_slots:
+        return False
+    logger.warning(
+        "FLOW_MAX_CONCURRENT_RUNS_PER_TENANT exceeds the execution worker slots; "
+        "admitted runs beyond the slots wait in the queue",
+        extra={
+            "max_concurrent_runs_capacity": capacity,
+            "task_execution_max_jobs": executor_slots,
+        },
+    )
+    return True
 
 
 def flow_runtime_step_timeout_hard_ceiling_seconds(
@@ -54,10 +99,13 @@ def flow_runtime_step_timeout_hard_ceiling_seconds(
 def default_flow_runtime_policy(*, defaults: Any | None = None) -> FlowRuntimePolicy:
     settings = defaults or get_settings()
     hard_ceiling = flow_runtime_step_timeout_hard_ceiling_seconds(defaults=settings)
+    run_capacity = flow_runtime_run_capacity(defaults=settings)
     return FlowRuntimePolicy(
         default_step_timeout_seconds=hard_ceiling,
         max_step_timeout_seconds=hard_ceiling,
         hard_ceiling_seconds=hard_ceiling,
+        max_concurrent_runs=run_capacity,
+        max_concurrent_runs_capacity=run_capacity,
     )
 
 
@@ -77,7 +125,7 @@ def _extract_runtime_policy(
     return dict(policy_dict)
 
 
-def _parse_positive_timeout_seconds(value: Any, field_name: str) -> int:
+def _parse_positive_int(value: Any, field_name: str) -> int:
     if not isinstance(value, int) or isinstance(value, bool):
         raise BadRequestException(
             f"{field_name} must be an integer.",
@@ -114,14 +162,23 @@ def validate_flow_runtime_policy_object(
     hard_ceiling = flow_runtime_step_timeout_hard_ceiling_seconds(defaults=defaults)
     parsed: dict[str, Any] = {}
     if FLOW_RUNTIME_DEFAULT_STEP_TIMEOUT_KEY in policy_dict:
-        parsed[FLOW_RUNTIME_DEFAULT_STEP_TIMEOUT_KEY] = _parse_positive_timeout_seconds(
+        parsed[FLOW_RUNTIME_DEFAULT_STEP_TIMEOUT_KEY] = _parse_positive_int(
             policy_dict[FLOW_RUNTIME_DEFAULT_STEP_TIMEOUT_KEY],
             FLOW_RUNTIME_DEFAULT_STEP_TIMEOUT_KEY,
         )
     if FLOW_RUNTIME_MAX_STEP_TIMEOUT_KEY in policy_dict:
-        parsed[FLOW_RUNTIME_MAX_STEP_TIMEOUT_KEY] = _parse_positive_timeout_seconds(
+        parsed[FLOW_RUNTIME_MAX_STEP_TIMEOUT_KEY] = _parse_positive_int(
             policy_dict[FLOW_RUNTIME_MAX_STEP_TIMEOUT_KEY],
             FLOW_RUNTIME_MAX_STEP_TIMEOUT_KEY,
+        )
+
+    # Server capacity is deployment state, so it is not checked here: a stored
+    # value above a later-lowered capacity must not make the settings row fail
+    # validation. The write path refuses it and resolution clamps it.
+    if FLOW_RUNTIME_MAX_CONCURRENT_RUNS_KEY in policy_dict:
+        parsed[FLOW_RUNTIME_MAX_CONCURRENT_RUNS_KEY] = _parse_positive_int(
+            policy_dict[FLOW_RUNTIME_MAX_CONCURRENT_RUNS_KEY],
+            FLOW_RUNTIME_MAX_CONCURRENT_RUNS_KEY,
         )
 
     max_timeout = parsed.get(FLOW_RUNTIME_MAX_STEP_TIMEOUT_KEY)
@@ -159,11 +216,28 @@ def resolve_flow_runtime_policy(
     if not overrides:
         return base
 
+    run_limit = base.max_concurrent_runs
+    run_override: int | None = None
+    if FLOW_RUNTIME_MAX_CONCURRENT_RUNS_KEY in overrides:
+        try:
+            run_override = _parse_positive_int(
+                overrides[FLOW_RUNTIME_MAX_CONCURRENT_RUNS_KEY],
+                FLOW_RUNTIME_MAX_CONCURRENT_RUNS_KEY,
+            )
+            # A stored value above a lowered capacity clamps silently: this runs
+            # on every admission, poll and GET.
+            run_limit = min(run_override, base.max_concurrent_runs_capacity)
+        except BadRequestException:
+            logger.warning(
+                "Ignoring invalid stored max concurrent flow runs",
+                extra={"value": overrides.get(FLOW_RUNTIME_MAX_CONCURRENT_RUNS_KEY)},
+            )
+
     default_timeout = base.default_step_timeout_seconds
     max_timeout = base.max_step_timeout_seconds
     if FLOW_RUNTIME_MAX_STEP_TIMEOUT_KEY in overrides:
         try:
-            parsed_max = _parse_positive_timeout_seconds(
+            parsed_max = _parse_positive_int(
                 overrides[FLOW_RUNTIME_MAX_STEP_TIMEOUT_KEY],
                 FLOW_RUNTIME_MAX_STEP_TIMEOUT_KEY,
             )
@@ -185,7 +259,7 @@ def resolve_flow_runtime_policy(
 
     if FLOW_RUNTIME_DEFAULT_STEP_TIMEOUT_KEY in overrides:
         try:
-            parsed_default = _parse_positive_timeout_seconds(
+            parsed_default = _parse_positive_int(
                 overrides[FLOW_RUNTIME_DEFAULT_STEP_TIMEOUT_KEY],
                 FLOW_RUNTIME_DEFAULT_STEP_TIMEOUT_KEY,
             )
@@ -222,6 +296,9 @@ def resolve_flow_runtime_policy(
         default_step_timeout_seconds=default_timeout,
         max_step_timeout_seconds=max_timeout,
         hard_ceiling_seconds=base.hard_ceiling_seconds,
+        max_concurrent_runs=run_limit,
+        max_concurrent_runs_capacity=base.max_concurrent_runs_capacity,
+        max_concurrent_runs_override=run_override,
     )
 
 
@@ -230,6 +307,7 @@ def apply_flow_runtime_policy_patch(
     *,
     default_step_timeout_seconds: int | None = None,
     max_step_timeout_seconds: int | None = None,
+    max_concurrent_runs: int | None = None,
     remove_keys: set[str] | None = None,
     defaults: Any | None = None,
 ) -> dict[str, Any]:
@@ -239,19 +317,36 @@ def apply_flow_runtime_policy_patch(
     next_policy = _extract_runtime_policy(result)
 
     if default_step_timeout_seconds is not None:
-        next_policy[FLOW_RUNTIME_DEFAULT_STEP_TIMEOUT_KEY] = (
-            _parse_positive_timeout_seconds(
-                default_step_timeout_seconds,
-                FLOW_RUNTIME_DEFAULT_STEP_TIMEOUT_KEY,
-            )
+        next_policy[FLOW_RUNTIME_DEFAULT_STEP_TIMEOUT_KEY] = _parse_positive_int(
+            default_step_timeout_seconds,
+            FLOW_RUNTIME_DEFAULT_STEP_TIMEOUT_KEY,
         )
     if max_step_timeout_seconds is not None:
-        next_policy[FLOW_RUNTIME_MAX_STEP_TIMEOUT_KEY] = (
-            _parse_positive_timeout_seconds(
-                max_step_timeout_seconds,
-                FLOW_RUNTIME_MAX_STEP_TIMEOUT_KEY,
-            )
+        next_policy[FLOW_RUNTIME_MAX_STEP_TIMEOUT_KEY] = _parse_positive_int(
+            max_step_timeout_seconds,
+            FLOW_RUNTIME_MAX_STEP_TIMEOUT_KEY,
         )
+
+    if max_concurrent_runs is not None:
+        run_capacity = flow_runtime_run_capacity(defaults=defaults)
+        requested = _parse_positive_int(
+            max_concurrent_runs, FLOW_RUNTIME_MAX_CONCURRENT_RUNS_KEY
+        )
+        if requested > run_capacity:
+            raise BadRequestException(
+                "max_concurrent_runs exceeds the server capacity.",
+                code="max_concurrent_runs_exceeds_server_capacity",
+                context={
+                    "max_concurrent_runs": requested,
+                    "max_concurrent_runs_capacity": run_capacity,
+                },
+            )
+        # Equal to the capacity is the inherited value: storing it would pin the
+        # setting to today's capacity after the operator changes it.
+        if requested == run_capacity:
+            next_policy.pop(FLOW_RUNTIME_MAX_CONCURRENT_RUNS_KEY, None)
+        else:
+            next_policy[FLOW_RUNTIME_MAX_CONCURRENT_RUNS_KEY] = requested
 
     for key in remove_keys or ():
         if key not in FLOW_RUNTIME_POLICY_KEYS:
@@ -284,7 +379,7 @@ def resolve_step_timeout_seconds(
 ) -> int:
     if step_timeout_seconds is None:
         return policy.default_step_timeout_seconds
-    parsed = _parse_positive_timeout_seconds(step_timeout_seconds, "timeout_seconds")
+    parsed = _parse_positive_int(step_timeout_seconds, "timeout_seconds")
     if parsed > policy.max_step_timeout_seconds:
         raise BadRequestException(
             "Step timeout exceeds the tenant runtime policy maximum.",

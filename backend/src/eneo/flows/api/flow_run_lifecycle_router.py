@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from typing import Annotated, Final
+from typing import Annotated
 from uuid import UUID
 
 from fastapi import (
@@ -43,6 +43,11 @@ from eneo.flows.api.flow_models import (
     FlowRunRedispatchResponse,
     FlowRunSummaryPublic,
 )
+from eneo.flows.api.flow_run_concurrency_response import (
+    FLOW_RUN_CONCURRENCY_MESSAGE,
+    FLOW_RUN_CONCURRENCY_RETRY_AFTER_SECONDS,
+    flow_run_concurrency_limit_response,
+)
 from eneo.flows.api.flow_run_contract_models import FlowRunCapacityPublic
 from eneo.flows.api.flow_run_status_capability_models import (
     FlowRunStatusCapabilitiesPublic,
@@ -83,12 +88,11 @@ from eneo.main.exceptions import (
     ErrorCodes,
     InternalServerException,
 )
-from eneo.main.models import GeneralError, OffsetPaginatedResponse
+from eneo.main.models import OffsetPaginatedResponse
 from eneo.server.dependencies.container import (
     get_container,
     get_container_for_explicit_transaction,
 )
-from eneo.server.exception_handlers import extract_request_id
 from eneo.users.user import UserInDB
 
 router = APIRouter()
@@ -110,13 +114,12 @@ _FLOW_RUN_IDEMPOTENCY_HEADER_DESCRIPTION = (
     "handle."
 )
 
-_FLOW_RUN_CONCURRENCY_RETRY_AFTER_SECONDS: Final[int] = 60
 _FLOW_RUN_CAPACITY_DESCRIPTION = """
-Return how many more concurrent Flow runs the caller's tenant may start.
+Return how many more concurrent Flow runs may be started.
 
-Use this before submitting a batch, so a client discovers the tenant ceiling
+Use this before submitting a batch, so a client discovers the limit
 up front instead of as a rejected `create_run` partway through. `active_runs`
-counts the tenant's `queued` and `running` runs, including work started by
+counts `queued` and `running` runs, including work started by
 other clients and stale queued work that has not been recovered. A run paused
 at `awaiting_review` holds no slot and is not counted.
 
@@ -401,23 +404,29 @@ async def get_flow_run_capacity(
         429: {
             **error_response(
                 description=(
-                    "The tenant already has the maximum number of active Flow runs. "
-                    "Wait for capacity, then submit the logical run again."
+                    "The maximum number of active Flow runs is reached; "
+                    "`context.max_concurrent_runs` is the effective limit "
+                    "(the administrator's flow runtime policy, bounded by the "
+                    "server capacity). Wait for capacity, then submit the logical run again."
                 ),
-                message="Concurrent flow run limit reached for this tenant.",
+                message=FLOW_RUN_CONCURRENCY_MESSAGE,
                 eneo_error_code=ErrorCodes.BAD_REQUEST,
                 code=FlowApiErrorCode.RUN_CONCURRENCY_LIMIT_REACHED,
                 context={
-                    "max_concurrent_runs": 4,
-                    "retry_after_seconds": _FLOW_RUN_CONCURRENCY_RETRY_AFTER_SECONDS,
+                    "max_concurrent_runs": 10,
+                    "retry_after_seconds": FLOW_RUN_CONCURRENCY_RETRY_AFTER_SECONDS,
                 },
             ),
             "headers": {
                 "Retry-After": {
-                    "description": "Suggested delay before submitting a new run.",
+                    "description": (
+                        "Fixed polling hint in seconds, not a prediction: a run can "
+                        "take hours, so read `available_slots` from the run capacity "
+                        "endpoint to learn when a slot is free."
+                    ),
                     "schema": {
                         "type": "integer",
-                        "example": _FLOW_RUN_CONCURRENCY_RETRY_AFTER_SECONDS,
+                        "example": FLOW_RUN_CONCURRENCY_RETRY_AFTER_SECONDS,
                     },
                 }
             },
@@ -517,20 +526,7 @@ async def create_flow_run(
                     )
                 )
     except FlowRunConcurrencyLimitReachedError as exc:
-        return JSONResponse(
-            status_code=status.HTTP_429_TOO_MANY_REQUESTS,
-            headers={"Retry-After": str(_FLOW_RUN_CONCURRENCY_RETRY_AFTER_SECONDS)},
-            content=GeneralError(
-                message="Concurrent flow run limit reached for this tenant.",
-                eneo_error_code=ErrorCodes.BAD_REQUEST,
-                code=FlowApiErrorCode.RUN_CONCURRENCY_LIMIT_REACHED.value,
-                context={
-                    "max_concurrent_runs": exc.max_concurrent_runs,
-                    "retry_after_seconds": _FLOW_RUN_CONCURRENCY_RETRY_AFTER_SECONDS,
-                },
-                request_id=extract_request_id(request),
-            ).model_dump(mode="json", exclude_none=True),
-        )
+        return flow_run_concurrency_limit_response(request, exc)
 
     if dispatch_run is not None:
         background_tasks.add_task(

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+from dataclasses import replace
 from datetime import datetime, timezone
 from types import SimpleNamespace
 from typing import cast
@@ -76,6 +77,7 @@ from eneo.flows.flow_run_step_inputs import (
     normalize_step_inputs_payload,
 )
 from eneo.flows.flow_run_step_result_file import FlowRunStepResultFile
+from eneo.flows.flow_runtime_policy import default_flow_runtime_policy
 from eneo.flows.infrastructure.flow_provider_call_repo import (
     FlowProviderCallEvidenceMeasurement,
     FlowProviderCallRepository,
@@ -204,8 +206,25 @@ def _file_repo() -> AsyncMock:
     return repo
 
 
-def _settings_service() -> AsyncMock:
+def _settings_service(
+    max_concurrent_runs: int | None = None,
+    max_concurrent_runs_capacity: int | None = None,
+) -> AsyncMock:
     service = AsyncMock()
+    default_policy = default_flow_runtime_policy()
+    service.get_flow_runtime_policy_resolved.return_value = replace(
+        default_policy,
+        max_concurrent_runs=(
+            default_policy.max_concurrent_runs
+            if max_concurrent_runs is None
+            else max_concurrent_runs
+        ),
+        max_concurrent_runs_capacity=(
+            default_policy.max_concurrent_runs_capacity
+            if max_concurrent_runs_capacity is None
+            else max_concurrent_runs_capacity
+        ),
+    )
     service.get_flow_input_limits_resolved.return_value = FlowInputLimits(
         file_max_size_bytes=10_000,
         audio_max_size_bytes=10_000,
@@ -343,12 +362,13 @@ def _flow_run_service(
         file_repo=resolved_file_repo,
         flow_run_terminalizer=resolved_terminalizer,
         settings_service=(
-            settings_service if settings_service is not None else _settings_service()
+            settings_service
+            if settings_service is not None
+            else _settings_service(max_concurrent_runs)
         ),
         access_policy=resolved_access_policy,
         webhook_delivery_repo=webhook_delivery_repo
         or AsyncMock(spec=FlowRunWebhookDeliveryRepository),
-        max_concurrent_runs=max_concurrent_runs,
     )
 
 
@@ -752,6 +772,102 @@ async def test_runtime_capacity_reports_the_ceiling_create_run_enforces(user):
     assert capacity.available_slots == 1
     assert capacity.tenant_id == user.tenant_id
     flow_run_repo.count_active_runs.assert_awaited_once_with(tenant_id=user.tenant_id)
+
+
+@pytest.mark.asyncio
+async def test_an_admin_run_limit_below_the_capacity_refuses_the_next_run(
+    user,
+):
+    flow_repo = _flow_repo()
+    flow_run_repo = flow_run_repo_mock()
+    flow_version_repo = AsyncMock()
+    service = _flow_run_service(
+        user=user,
+        flow_repo=flow_repo,
+        flow_run_repo=flow_run_repo,
+        flow_run_review_checkpoint_repo=AsyncMock(),
+        flow_version_repo=flow_version_repo,
+        runtime_upload_repo=_runtime_upload_repo(),
+        settings_service=_settings_service(
+            max_concurrent_runs=2, max_concurrent_runs_capacity=8
+        ),
+    )
+    flow = _flow(user=user, published_version=1)
+    _seed_flow_repo(flow_repo, flow)
+    flow_version_repo.get.return_value = _version(user=user, flow=flow, version=1)
+    flow_run_repo.count_active_runs.return_value = 2
+
+    with pytest.raises(FlowRunConcurrencyLimitReachedError) as exc_info:
+        await service.create_run(flow_id=flow.id, input_payload_json={"x": 1})
+
+    assert exc_info.value.max_concurrent_runs == 2
+    flow_run_repo.create.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_the_run_limit_is_read_under_the_row_lock_and_once(user):
+    """A limit change racing run creation is read after the row lock, the
+    same value both gates the run and is reported, and a later change applies from
+    the next admission."""
+    flow_repo = _flow_repo()
+    flow_run_repo = flow_run_repo_mock()
+    flow_version_repo = AsyncMock()
+    settings_service = _settings_service(max_concurrent_runs=3)
+    order: list[str] = []
+    flow_run_repo.acquire_tenant_run_creation_lock.side_effect = (
+        lambda **_: order.append("lock")
+    )
+
+    async def _resolved():
+        order.append("limit")
+        return replace(
+            default_flow_runtime_policy(),
+            max_concurrent_runs=1,
+            max_concurrent_runs_capacity=8,
+        )
+
+    settings_service.get_flow_runtime_policy_resolved.side_effect = _resolved
+    service = _flow_run_service(
+        user=user,
+        flow_repo=flow_repo,
+        flow_run_repo=flow_run_repo,
+        flow_run_review_checkpoint_repo=AsyncMock(),
+        flow_version_repo=flow_version_repo,
+        runtime_upload_repo=_runtime_upload_repo(),
+        settings_service=settings_service,
+    )
+    flow = _flow(user=user, published_version=1)
+    _seed_flow_repo(flow_repo, flow)
+    flow_version_repo.get.return_value = _version(user=user, flow=flow, version=1)
+    flow_run_repo.count_active_runs.return_value = 1
+
+    with pytest.raises(FlowRunConcurrencyLimitReachedError) as exc_info:
+        await service.create_run(flow_id=flow.id, input_payload_json={"x": 1})
+
+    assert exc_info.value.max_concurrent_runs == 1
+    assert order == ["lock", "limit"]
+
+
+@pytest.mark.asyncio
+async def test_runtime_capacity_reports_the_admin_limit_not_the_capacity(user):
+    flow_run_repo = flow_run_repo_mock()
+    service = _flow_run_service(
+        user=user,
+        flow_repo=_flow_repo(),
+        flow_run_repo=flow_run_repo,
+        flow_run_review_checkpoint_repo=AsyncMock(),
+        flow_version_repo=AsyncMock(),
+        runtime_upload_repo=_runtime_upload_repo(),
+        settings_service=_settings_service(
+            max_concurrent_runs=2, max_concurrent_runs_capacity=8
+        ),
+    )
+    flow_run_repo.count_active_runs.return_value = 1
+
+    capacity = await service.runtime_capacity()
+
+    assert (capacity.active_runs, capacity.max_concurrent_runs) == (1, 2)
+    assert capacity.available_slots == 1
 
 
 @pytest.mark.asyncio

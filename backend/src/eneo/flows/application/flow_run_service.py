@@ -301,8 +301,7 @@ class FlowRunService:
         flow_run_terminalizer: FlowRunTerminalizer,
         access_policy: FlowRunAccessPolicy,
         webhook_delivery_repo: FlowRunWebhookDeliveryRepository,
-        settings_service: SettingService | None = None,
-        max_concurrent_runs: int | None = None,
+        settings_service: SettingService,
     ):
         self.user = user
         self.flow_repo = flow_repo
@@ -315,26 +314,23 @@ class FlowRunService:
         self.settings_service = settings_service
         self.access_policy = access_policy
         self.webhook_delivery_repo = webhook_delivery_repo
-        self.max_concurrent_runs = (
-            max_concurrent_runs
-            if max_concurrent_runs is not None
-            else get_settings().flow_max_concurrent_runs_per_tenant
-        )
 
     async def runtime_capacity(self) -> FlowRuntimeCapacity:
-        """Report how many more concurrent runs this tenant may start.
+        """Report how many more concurrent runs may be started.
 
         A client planning a batch needs the same numbers `_ensure_can_create`
-        enforces, so both read the active count and the configured maximum from
+        enforces, so both read the active count and the effective limit (the
+        administrator's max concurrent flow runs under the server capacity) from
         here rather than from settings and the repository separately.
         """
+        policy = await self.settings_service.get_flow_runtime_policy_resolved()
         active_runs = await self.flow_run_repo.count_active_runs(
             tenant_id=self.user.tenant_id
         )
         return FlowRuntimeCapacity(
             tenant_id=self.user.tenant_id,
             active_runs=active_runs,
-            max_concurrent_runs=self.max_concurrent_runs,
+            max_concurrent_runs=policy.max_concurrent_runs,
         )
 
     def _principal(self) -> FlowPrincipal:
@@ -762,13 +758,16 @@ class FlowRunService:
                     "published_flow_version": locked_published_version,
                 },
             )
+        # Read under the row lock with the count: a limit change that
+        # lands after this read applies from the next admission.
+        run_limit = (
+            await self.settings_service.get_flow_runtime_policy_resolved()
+        ).max_concurrent_runs
         active_runs = await self.flow_run_repo.count_active_runs(
             tenant_id=self.user.tenant_id
         )
-        if active_runs >= self.max_concurrent_runs:
-            raise FlowRunConcurrencyLimitReachedError(
-                max_concurrent_runs=self.max_concurrent_runs
-            )
+        if active_runs >= run_limit:
+            raise FlowRunConcurrencyLimitReachedError(max_concurrent_runs=run_limit)
         return None
 
     async def _create_persisted_run(

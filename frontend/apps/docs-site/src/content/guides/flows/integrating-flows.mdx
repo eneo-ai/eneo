@@ -1949,8 +1949,8 @@ This table checks workloads against the default limits. It does not establish pr
 
 ### Concurrency and rate
 
-- A tenant may have a limited number of active runs at once; the deployment default is 4. `GET /api/v1/flows/runs/capacity/` reports `active_runs`, `max_concurrent_runs`, and `available_slots` for the caller's tenant. It is a snapshot, not a reservation.
-- Exceeding it returns `429` with `Retry-After: 60` and code `flow_run_concurrency_limit_reached`.
+- Only a limited number of runs may be queued or running when a new run is accepted; runs already accepted continue, and a review resume does not consult the limit. The server capacity is the upper bound and the default. It is the execution worker's slots (`TASK_EXECUTION_MAX_JOBS`, 4 by default), unless the operator set `FLOW_MAX_CONCURRENT_RUNS_PER_TENANT`, which then overrides the executor-slot default (a higher value only queues runs); an administrator may lower it with `PATCH /api/v1/settings/flow-runtime-policy` (`max_concurrent_runs`). `GET /api/v1/flows/runs/capacity/` reports `active_runs`, `max_concurrent_runs`, and `available_slots` for the caller. It is a snapshot, not a reservation.
+- Exceeding it returns `429` with `Retry-After: 60` and code `flow_run_concurrency_limit_reached`. The 60 seconds is a fixed hint, not a forecast; read `available_slots` to pace a batch.
 - API keys are separately rate-limited per hour by scope. No endpoint reports remaining quota, so treat a `429` without `flow_run_concurrency_limit_reached` as a request-rate rejection and back off.
 
 ### Retention

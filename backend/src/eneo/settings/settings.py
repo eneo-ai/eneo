@@ -3,7 +3,7 @@ from datetime import datetime
 from typing import Literal
 from uuid import UUID
 
-from pydantic import BaseModel, ConfigDict, Field, field_validator
+from pydantic import BaseModel, ConfigDict, Field, StrictInt, field_validator
 from pydantic.config import JsonDict
 from pydantic.json_schema import SkipJsonSchema
 
@@ -166,11 +166,14 @@ FLOW_RUNTIME_POLICY_EXAMPLE: JsonDict = {
     "default_step_timeout_seconds": 900,
     "max_step_timeout_seconds": 1800,
     "hard_ceiling_seconds": 3600,
+    "max_concurrent_runs": 6,
+    "max_concurrent_runs_capacity": 8,
 }
 
 FLOW_RUNTIME_POLICY_UPDATE_EXAMPLE: JsonDict = {
     "default_step_timeout_seconds": 900,
     "max_step_timeout_seconds": None,
+    "max_concurrent_runs": 6,
 }
 
 FLOW_MAPPED_EXECUTION_POLICY_EXAMPLE: JsonDict = {
@@ -448,6 +451,33 @@ class FlowRuntimePolicyPublic(BaseModel):
         ge=1,
         description="Deployment hard ceiling after reserving worker task shutdown buffer.",
     )
+    max_concurrent_runs: int = Field(
+        ge=0,
+        description=(
+            "Effective limit on queued and running flow runs, checked when a new run "
+            "is accepted: the administrator's value (at most the server capacity) "
+            "when one is set, otherwise the server capacity. Runs already accepted "
+            "continue."
+        ),
+    )
+    max_concurrent_runs_override: int | None = Field(
+        default=None,
+        ge=1,
+        description=(
+            "The administrator's saved value for `max_concurrent_runs`, kept even "
+            "when the server capacity limits it below this number; null when the "
+            "setting follows the server capacity."
+        ),
+    )
+    max_concurrent_runs_capacity: int = Field(
+        ge=0,
+        description=(
+            "Server capacity: the upper bound and default for `max_concurrent_runs`. "
+            "It is the execution worker's slots (`TASK_EXECUTION_MAX_JOBS`) unless "
+            "the operator set `FLOW_MAX_CONCURRENT_RUNS_PER_TENANT`; a value above "
+            "the slots only makes admitted runs wait in the queue."
+        ),
+    )
 
 
 class FlowRuntimePolicyUpdate(BaseModel):
@@ -465,6 +495,15 @@ class FlowRuntimePolicyUpdate(BaseModel):
         default=None,
         ge=1,
         description="Set the tenant maximum per-step LLM timeout, or send null to use the deployment ceiling.",
+    )
+    max_concurrent_runs: StrictInt | None = Field(
+        default=None,
+        ge=1,
+        description=(
+            "Set the limit on queued and running flow runs that admits a new run, up to "
+            "`max_concurrent_runs_capacity`, or send null to use the server "
+            "capacity. A value equal to the capacity is stored as no override."
+        ),
     )
 
 

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from dataclasses import replace
 from datetime import datetime, timezone
 from types import SimpleNamespace
 from unittest.mock import AsyncMock
@@ -24,6 +25,7 @@ from eneo.flows.domain.mapped_execution_policy import FlowMappedExecutionPolicy
 from eneo.flows.flow_input_limits import FlowInputLimits
 from eneo.flows.flow_run_input_envelope import FLOW_RUN_RESERVED_INPUT_PAYLOAD_KEYS
 from eneo.flows.flow_run_step_inputs import FlowRunStepInputFiles
+from eneo.flows.flow_runtime_policy import default_flow_runtime_policy
 from eneo.flows.infrastructure.flow_provider_call_repo import (
     FlowProviderCallRepository,
 )
@@ -62,8 +64,25 @@ def _file_repo() -> AsyncMock:
     return repo
 
 
-def _settings_service() -> AsyncMock:
+def _settings_service(
+    max_concurrent_runs: int | None = None,
+    max_concurrent_runs_capacity: int | None = None,
+) -> AsyncMock:
     service = AsyncMock()
+    default_policy = default_flow_runtime_policy()
+    service.get_flow_runtime_policy_resolved.return_value = replace(
+        default_policy,
+        max_concurrent_runs=(
+            default_policy.max_concurrent_runs
+            if max_concurrent_runs is None
+            else max_concurrent_runs
+        ),
+        max_concurrent_runs_capacity=(
+            default_policy.max_concurrent_runs_capacity
+            if max_concurrent_runs_capacity is None
+            else max_concurrent_runs_capacity
+        ),
+    )
     service.get_flow_input_limits_resolved.return_value = FlowInputLimits(
         file_max_size_bytes=10_000,
         audio_max_size_bytes=10_000,
@@ -97,14 +116,13 @@ def _flow_run_service(
         runtime_upload_repo=runtime_upload_repo,
         file_repo=resolved_file_repo,
         flow_run_terminalizer=AsyncMock(),
-        settings_service=_settings_service(),
+        settings_service=_settings_service(max_concurrent_runs),
         webhook_delivery_repo=AsyncMock(spec=FlowRunWebhookDeliveryRepository),
         access_policy=FlowRunAccessPolicy(
             user=user,
             flow_repo=flow_repo,
             flow_run_repo=flow_run_repo,
         ),
-        max_concurrent_runs=max_concurrent_runs,
     )
 
 

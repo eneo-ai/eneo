@@ -18,6 +18,9 @@ from eneo.flows.api.flow_api_common import (
 )
 from eneo.flows.api.flow_assembler import FlowAssembler
 from eneo.flows.api.flow_models import FLOW_RUN_RETRY_PUBLIC_EXAMPLE, FlowRunRetryPublic
+from eneo.flows.api.flow_run_concurrency_response import (
+    flow_run_concurrency_limit_response,
+)
 from eneo.flows.api.flow_runtime_paths import FLOW_RUN_RETRY_PATH
 from eneo.flows.application.flow_dispatch import (
     dispatch_flow_run_recoverably_after_commit,
@@ -28,7 +31,6 @@ from eneo.flows.flow_access_policy import FlowApiAction, flow_action_access_reas
 from eneo.flows.flow_api_error_code import FlowApiErrorCode
 from eneo.main.container.container import Container
 from eneo.main.exceptions import ErrorCodes
-from eneo.main.models import GeneralError
 from eneo.server.dependencies.container import get_container_for_explicit_transaction
 
 router = APIRouter()
@@ -89,8 +91,8 @@ shared input files remain available while the child references them.
             context={"status": "completed"},
         ),
         429: error_response(
-            description="Tenant concurrent-run capacity is exhausted.",
-            message="Tenant concurrent-run capacity is exhausted.",
+            description="Concurrent flow run limit reached.",
+            message="Concurrent flow run limit reached.",
             eneo_error_code=ErrorCodes.BAD_REQUEST,
             code=FlowApiErrorCode.RUN_CONCURRENCY_LIMIT_REACHED,
         ),
@@ -148,16 +150,8 @@ async def retry_flow_run_from_failed_step(
                 first_executed_step_order=result.first_executed_step_order,
                 reused_step_orders=list(result.reused_step_orders),
             )
-    except FlowRunConcurrencyLimitReachedError:
-        return JSONResponse(
-            status_code=429,
-            headers={"Retry-After": "60"},
-            content=GeneralError(
-                message="Concurrent flow run limit reached for this tenant.",
-                eneo_error_code=ErrorCodes.BAD_REQUEST,
-                code=FlowApiErrorCode.RUN_CONCURRENCY_LIMIT_REACHED.value,
-            ).model_dump(mode="json"),
-        )
+    except FlowRunConcurrencyLimitReachedError as exc:
+        return flow_run_concurrency_limit_response(request, exc)
     if result.run_result.created:
         background_tasks.add_task(
             dispatch_flow_run_recoverably_after_commit,

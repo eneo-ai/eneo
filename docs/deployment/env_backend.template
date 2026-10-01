@@ -432,8 +432,8 @@ WORKER_MAX_JOBS=15
 # Set an aggregate value when the dedicated crawler worker has multiple replicas.
 # CRAWL_JOB_CONCURRENCY_LIMIT=15
 
-# Max concurrent Flow runs per tenant
-FLOW_MAX_CONCURRENT_RUNS_PER_TENANT=4
+# Server capacity for concurrent Flow runs; admins lower it in Flow settings. Unset means TASK_EXECUTION_MAX_JOBS, which the API and the worker both read, so set it in the env they share. A higher value only queues runs (default: 4).
+# FLOW_MAX_CONCURRENT_RUNS_PER_TENANT=4
 
 # Flow PDF extraction: page count, extracted UTF-8 bytes, elapsed seconds.
 FLOW_PDF_MAX_PAGES=2000

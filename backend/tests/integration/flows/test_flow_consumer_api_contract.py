@@ -7,6 +7,7 @@ from uuid import UUID, uuid4
 import pytest
 import sqlalchemy as sa
 
+from eneo.audit.application.audit_service import AuditService
 from eneo.audit.domain.action_types import ActionType
 from eneo.audit.domain.audit_log import AuditLog
 from eneo.audit.infrastructure.audit_log_repo_impl import AuditLogRepositoryImpl
@@ -1546,7 +1547,7 @@ async def test_flow_run_create_concurrency_limit_preserves_creation_side_effects
     error = GeneralError.model_validate(response.json())
     assert error.code == "flow_run_concurrency_limit_reached"
     assert response.json() == {
-        "message": "Concurrent flow run limit reached for this tenant.",
+        "message": "Concurrent flow run limit reached.",
         "eneo_error_code": 9007,
         "code": "flow_run_concurrency_limit_reached",
         "context": {"max_concurrent_runs": 4, "retry_after_seconds": 60},
@@ -1570,6 +1571,155 @@ async def test_flow_run_create_concurrency_limit_preserves_creation_side_effects
     assert run_count_before == run_count_after == 4
     assert audit_count_before == audit_count_after
     assert len(dispatch_requests) == 4
+
+
+_RUNTIME_POLICY_PATH = "/api/v1/settings/flow-runtime-policy"
+
+
+async def _patch_runtime_policy(client, token: str, payload: dict):
+    return await client.patch(
+        _RUNTIME_POLICY_PATH,
+        json=payload,
+        headers={"Authorization": f"Bearer {token}"},
+    )
+
+
+async def _runtime_capacity(client, token: str) -> dict:
+    response = await client.get(
+        "/api/v1/flows/runs/capacity/",
+        headers={"Authorization": f"Bearer {token}"},
+    )
+    assert response.status_code == 200, response.text
+    return response.json()
+
+
+async def _create_run(client, token: str, flow: dict, index: int):
+    return await client.post(
+        f"/api/v1/flows/{flow['id']}/runs/",
+        json={
+            "expected_flow_version": flow["published_version"],
+            "input_payload_json": {"index": index},
+        },
+        headers={"Authorization": f"Bearer {token}"},
+    )
+
+
+@pytest.mark.asyncio
+@pytest.mark.integration
+async def test_a_run_limit_override_is_enforced_reported_and_audited(
+    client,
+    admin_token,
+    monkeypatch,
+):
+    monkeypatch.setattr(
+        flow_run_lifecycle_router,
+        "dispatch_flow_run_recoverably_after_commit",
+        _noop_dispatch_flow_run_recoverably_after_commit,
+    )
+    audit_calls: list[dict] = []
+
+    async def _record_audit(self, **kwargs):
+        audit_calls.append(kwargs)
+
+    monkeypatch.setattr(AuditService, "log_async", _record_audit)
+    space_id = await _create_space(client, token=admin_token)
+    flow = await _create_published_flow(client, token=admin_token, space_id=space_id)
+    ceiling = (await _runtime_capacity(client, admin_token))["max_concurrent_runs"]
+    assert ceiling >= 3
+
+    patched = await _patch_runtime_policy(
+        client, admin_token, {"max_concurrent_runs": 2}
+    )
+    assert patched.status_code == 200, patched.text
+    assert patched.json()["max_concurrent_runs"] == 2
+    assert patched.json()["max_concurrent_runs_capacity"] == ceiling
+    assert (await _runtime_capacity(client, admin_token))["max_concurrent_runs"] == 2
+
+    for index in range(2):
+        assert (await _create_run(client, admin_token, flow, index)).status_code == 201
+    refused = await _create_run(client, admin_token, flow, 2)
+
+    assert refused.status_code == 429, refused.text
+    assert refused.headers["Retry-After"] == "60"
+    assert refused.json()["code"] == "flow_run_concurrency_limit_reached"
+    assert refused.json()["context"] == {
+        "max_concurrent_runs": 2,
+        "retry_after_seconds": 60,
+    }
+    capacity = await _runtime_capacity(client, admin_token)
+    assert (capacity["active_runs"], capacity["available_slots"]) == (2, 0)
+
+    assert {"max_concurrent_runs": {"old": ceiling, "new": 2}} in [
+        call["metadata"]["changes"]
+        for call in audit_calls
+        if call["action"] == ActionType.TENANT_SETTINGS_UPDATED
+        and call["metadata"]["setting"] == "flow_runtime_policy"
+    ]
+
+    # Equal to the ceiling is the inherited value, not a stored override.
+    reset = await _patch_runtime_policy(
+        client, admin_token, {"max_concurrent_runs": ceiling}
+    )
+    assert reset.status_code == 200, reset.text
+    assert (await _runtime_capacity(client, admin_token))[
+        "max_concurrent_runs"
+    ] == ceiling
+    assert (await _create_run(client, admin_token, flow, 3)).status_code == 201
+
+
+@pytest.mark.asyncio
+@pytest.mark.integration
+async def test_the_run_limit_patch_refuses_what_is_not_a_limit_below_the_ceiling(
+    client,
+    admin_token,
+):
+    ceiling = (await _runtime_capacity(client, admin_token))["max_concurrent_runs"]
+
+    above = await _patch_runtime_policy(
+        client, admin_token, {"max_concurrent_runs": ceiling + 1}
+    )
+    assert above.status_code == 400, above.text
+    assert above.json()["code"] == "max_concurrent_runs_exceeds_server_capacity"
+
+    for invalid in (0, -1, True, "2", 2.0, 2.5, [], {}):
+        refused = await _patch_runtime_policy(
+            client, admin_token, {"max_concurrent_runs": invalid}
+        )
+        assert refused.status_code == 422, (invalid, refused.text)
+
+    assert (await _runtime_capacity(client, admin_token))[
+        "max_concurrent_runs"
+    ] == ceiling
+
+
+@pytest.mark.asyncio
+@pytest.mark.integration
+async def test_concurrent_run_creation_never_exceeds_the_run_limit(
+    client,
+    admin_token,
+    monkeypatch,
+):
+    import asyncio
+
+    monkeypatch.setattr(
+        flow_run_lifecycle_router,
+        "dispatch_flow_run_recoverably_after_commit",
+        _noop_dispatch_flow_run_recoverably_after_commit,
+    )
+    space_id = await _create_space(client, token=admin_token)
+    flow = await _create_published_flow(client, token=admin_token, space_id=space_id)
+    patched = await _patch_runtime_policy(
+        client, admin_token, {"max_concurrent_runs": 1}
+    )
+    assert patched.status_code == 200, patched.text
+
+    responses = await asyncio.gather(
+        *(_create_run(client, admin_token, flow, index) for index in range(3))
+    )
+
+    assert sorted(response.status_code for response in responses) == [201, 429, 429]
+    capacity = await _runtime_capacity(client, admin_token)
+    assert (capacity["active_runs"], capacity["max_concurrent_runs"]) == (1, 1)
 
 
 @pytest.mark.asyncio

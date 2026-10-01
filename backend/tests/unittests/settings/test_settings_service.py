@@ -1282,6 +1282,9 @@ async def test_get_flow_runtime_policy_reads_tenant_override(monkeypatch):
         "get_settings",
         lambda: SimpleNamespace(
             task_execution_timeout_seconds=3600,
+            task_execution_max_jobs=4,
+            flow_max_concurrent_runs_per_tenant=8,
+            model_fields_set={"flow_max_concurrent_runs_per_tenant"},
         ),
     )
 
@@ -1329,6 +1332,9 @@ async def test_update_flow_runtime_policy_persists_and_audits(monkeypatch):
         "get_settings",
         lambda: SimpleNamespace(
             task_execution_timeout_seconds=3600,
+            task_execution_max_jobs=4,
+            flow_max_concurrent_runs_per_tenant=8,
+            model_fields_set={"flow_max_concurrent_runs_per_tenant"},
         ),
     )
 
@@ -1359,6 +1365,157 @@ async def test_update_flow_runtime_policy_persists_and_audits(monkeypatch):
         "max_step_timeout_seconds": 2400,
     }
     assert calls[0]["metadata"]["setting"] == "flow_runtime_policy"
+
+
+def _runtime_policy_service(monkeypatch, *, capacity=8, flow_settings=None):
+    tenant_repo = MockTenantRepo()
+    audit_service = MockAuditService()
+    calls = []
+
+    async def _capture(*args, **kwargs):
+        calls.append(kwargs)
+
+    audit_service.log_async = _capture
+    monkeypatch.setattr(
+        flow_runtime_policy,
+        "get_settings",
+        lambda: SimpleNamespace(
+            task_execution_timeout_seconds=3600,
+            task_execution_max_jobs=4,
+            flow_max_concurrent_runs_per_tenant=capacity,
+            model_fields_set={"flow_max_concurrent_runs_per_tenant"},
+        ),
+    )
+    service = SettingService(
+        repo=MockRepo(),
+        user=TEST_USER,
+        ai_models_service=MockRepo(),
+        feature_flag_service=MockFeatureFlagService(),
+        tenant_repo=tenant_repo,
+        audit_service=audit_service,
+        data_retention_service=MockDataRetentionService(),
+        skill_repo=MagicMock(),
+    )
+    return service, tenant_repo, calls
+
+
+async def test_update_flow_runtime_policy_stores_a_run_limit_and_audits_it(
+    monkeypatch,
+):
+    service, tenant_repo, calls = _runtime_policy_service(monkeypatch)
+
+    updated = await service.update_flow_runtime_policy(
+        FlowRuntimePolicyUpdate(max_concurrent_runs=2)
+    )
+
+    assert (updated.max_concurrent_runs, updated.max_concurrent_runs_capacity) == (2, 8)
+    tenant = await tenant_repo.get(TEST_USER.tenant_id)
+    assert tenant.flow_settings["runtime_policy"] == {
+        "version": 1,
+        "max_concurrent_runs": 2,
+    }
+    assert calls[0]["metadata"] == {
+        "setting": "flow_runtime_policy",
+        "changes": {"max_concurrent_runs": {"old": 8, "new": 2}},
+    }
+    resolved = await service.get_flow_runtime_policy_resolved()
+    assert resolved.max_concurrent_runs == 2
+
+
+async def test_update_flow_runtime_policy_run_limit_equal_to_the_capacity_inherits(
+    monkeypatch,
+):
+    service, tenant_repo, _ = _runtime_policy_service(monkeypatch)
+    await service.update_flow_runtime_policy(
+        FlowRuntimePolicyUpdate(max_concurrent_runs=2)
+    )
+
+    updated = await service.update_flow_runtime_policy(
+        FlowRuntimePolicyUpdate(max_concurrent_runs=8)
+    )
+
+    assert updated.max_concurrent_runs == 8
+    tenant = await tenant_repo.get(TEST_USER.tenant_id)
+    assert "runtime_policy" not in tenant.flow_settings
+
+
+async def test_update_flow_runtime_policy_null_run_limit_removes_the_override(
+    monkeypatch,
+):
+    service, tenant_repo, _ = _runtime_policy_service(monkeypatch)
+    await service.update_flow_runtime_policy(
+        FlowRuntimePolicyUpdate(max_concurrent_runs=2)
+    )
+
+    updated = await service.update_flow_runtime_policy(
+        FlowRuntimePolicyUpdate(max_concurrent_runs=None)
+    )
+
+    assert updated.max_concurrent_runs == 8
+    tenant = await tenant_repo.get(TEST_USER.tenant_id)
+    assert "runtime_policy" not in tenant.flow_settings
+
+
+async def test_update_flow_runtime_policy_refuses_a_run_limit_above_the_capacity(
+    monkeypatch,
+):
+    service, tenant_repo, calls = _runtime_policy_service(monkeypatch)
+
+    with pytest.raises(BadRequestException) as exc_info:
+        await service.update_flow_runtime_policy(
+            FlowRuntimePolicyUpdate(max_concurrent_runs=9)
+        )
+
+    assert exc_info.value.code == "max_concurrent_runs_exceeds_server_capacity"
+    tenant = await tenant_repo.get(TEST_USER.tenant_id)
+    assert "runtime_policy" not in tenant.flow_settings
+    assert calls == []
+
+
+async def test_get_flow_runtime_policy_clamps_a_stored_run_limit_above_a_lowered_capacity(
+    monkeypatch,
+):
+    service, tenant_repo, _ = _runtime_policy_service(monkeypatch, capacity=3)
+    tenant = await tenant_repo.get(TEST_USER.tenant_id)
+    tenant_repo.tenant = tenant.model_copy(
+        update={
+            "flow_settings": {
+                "runtime_policy": {"version": 1, "max_concurrent_runs": 6}
+            }
+        }
+    )
+
+    policy = await service.get_flow_runtime_policy()
+
+    assert (policy.max_concurrent_runs, policy.max_concurrent_runs_capacity) == (3, 3)
+
+
+async def test_get_flow_runtime_policy_exposes_a_saved_value_the_capacity_clamps(
+    monkeypatch,
+):
+    service, tenant_repo, _ = _runtime_policy_service(monkeypatch, capacity=3)
+    tenant = await tenant_repo.get(TEST_USER.tenant_id)
+    tenant_repo.tenant = tenant.model_copy(
+        update={
+            "flow_settings": {
+                "runtime_policy": {"version": 1, "max_concurrent_runs": 6}
+            }
+        }
+    )
+
+    clamped = await service.get_flow_runtime_policy()
+    assert (clamped.max_concurrent_runs, clamped.max_concurrent_runs_override) == (3, 6)
+
+    reset = await service.update_flow_runtime_policy(
+        FlowRuntimePolicyUpdate(max_concurrent_runs=None)
+    )
+    assert (reset.max_concurrent_runs, reset.max_concurrent_runs_override) == (3, None)
+
+
+@pytest.mark.parametrize("value", [0, -1, True, False, "3", 3.0, 2.5, [], {}])
+def test_flow_runtime_policy_update_accepts_only_a_positive_integer_run_limit(value):
+    with pytest.raises(ValidationError):
+        FlowRuntimePolicyUpdate.model_validate({"max_concurrent_runs": value})
 
 
 async def test_get_flow_retention_policy_reads_tenant_override():

@@ -573,10 +573,12 @@ async def update_flow_document_render_limits(
     operation_id="get_flow_runtime_policy",
     summary="Get flow runtime policy",
     description=(
-        "Return tenant-level per-step LLM runtime timeout policy for Flow executions. "
-        "This controls backend worker timeouts for individual steps; it is separate "
-        "from browser upload timeouts, document-rendering limits, and human-review "
-        "expiry windows."
+        "Return the runtime policy for Flow executions: per-step LLM "
+        "timeouts and the limit on concurrent runs. The timeouts control backend "
+        "worker timeouts for individual steps; they are separate from browser upload "
+        "timeouts, document-rendering limits, and human-review expiry windows. "
+        "`max_concurrent_runs` is the effective limit on queued and running runs "
+        "and `max_concurrent_runs_capacity` the server capacity it cannot exceed."
     ),
     responses={403: _flow_settings_admin_forbidden_response()},
 )
@@ -598,10 +600,14 @@ async def get_flow_runtime_policy(
     operation_id="update_flow_runtime_policy",
     summary="Update flow runtime policy",
     description=(
-        "Update tenant-level per-step LLM timeout policy for flow executions. "
+        "Update the runtime policy for flow executions: per-step LLM "
+        "timeouts and the limit on concurrent runs. "
         "Omit a field to leave it unchanged. Send null to remove the tenant "
-        "override and fall back to the deployment default. The returned policy is the "
-        "resolved effective timeout policy used by future Flow step executions."
+        "override and fall back to the deployment default. A `max_concurrent_runs` "
+        "above the server capacity is refused with "
+        "`max_concurrent_runs_exceeds_server_capacity`, and a value equal to the "
+        "capacity is stored as no override. The returned policy is the "
+        "resolved effective policy used by future Flow runs and step executions."
     ),
     responses={
         400: _flow_settings_invalid_payload_response(

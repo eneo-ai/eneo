@@ -234,3 +234,28 @@ async def test_paused_execution_cannot_publish_transcript_after_recovery():
         session.commit.assert_not_awaited()
     finally:
         await manager.stop()
+
+
+def test_the_worker_heartbeats_check_the_run_capacity_against_the_executor_slots_once(
+    monkeypatch,
+):
+    from types import SimpleNamespace
+
+    checked: list[int] = []
+    monkeypatch.setattr(heartbeat, "_worker_heartbeats", None)
+    monkeypatch.setattr(
+        heartbeat,
+        "get_settings",
+        lambda: SimpleNamespace(task_execution_max_jobs=3),
+    )
+    monkeypatch.setattr(
+        heartbeat,
+        "warn_when_run_capacity_exceeds_executor_slots",
+        lambda *, executor_slots: checked.append(executor_slots),
+    )
+
+    first = heartbeat.execution_heartbeats()
+    second = heartbeat.execution_heartbeats()
+
+    assert first is second
+    assert checked == [3]

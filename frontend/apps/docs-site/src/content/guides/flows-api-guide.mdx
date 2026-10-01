@@ -267,7 +267,7 @@ These are admin surfaces, not end-user runtime endpoints:
 | --------------------------- | ------------------------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------ |
 | Flow input limits           | `GET/PATCH /api/v1/settings/flow-input-limits`                                 | Control maximum file/audio sizes and file-count limits                                                                   |
 | Flow document render limits | `GET/PATCH /api/v1/settings/flow-document-render-limits`                       | Control generated PDF/DOCX rendering limits                                                                              |
-| Flow runtime policy         | `GET/PATCH /api/v1/settings/flow-runtime-policy`                               | Control runtime step execution timeouts                                                                                  |
+| Flow runtime policy         | `GET/PATCH /api/v1/settings/flow-runtime-policy`                               | Control step timeouts and the run limit                                                                                  |
 | Mapped execution policy     | `GET/PATCH /api/v1/settings/flow-mapped-execution-policy`                      | Control provider-call fan-out and aggregate estimated-input-token ceilings for each mapped step attempt                  |
 | Flow evidence policy        | `GET/PATCH /api/v1/settings/flow-evidence-policy`                              | Control sensitive-flow export defaults and stricter raw evidence export behavior, especially for classification-3 spaces |
 | Knowledge evidence policy   | `GET/PATCH /api/v1/settings/flow-rag-evidence-policy`                          | Control how much retrieval evidence a run records and exposes                                                            |
@@ -286,6 +286,10 @@ Mapped execution has two independent positive-integer ceilings:
 - `max_estimated_input_tokens_per_mapped_step` limits the aggregate estimated packaged input across the same attempt. A null value means no aggregate tenant token ceiling, while each provider call still obeys its model input limit.
 
 PATCH requests distinguish omission from null: omit a field to preserve it, or send null to remove its tenant override. Runtime admission occurs before the first provider call and records the requested, tenant, and effective ceilings together with actual provider-call and token receipts in attempt evidence.
+
+### Max concurrent flow runs
+
+`max_concurrent_runs` in `PATCH /api/v1/settings/flow-runtime-policy` limits how many runs may be queued or running when a new run is accepted; the admin page shows it as "Max concurrent flow runs" under Flow settings. The server's capacity is the upper bound and the default: the execution worker's slots (`TASK_EXECUTION_MAX_JOBS`), unless the operator set `FLOW_MAX_CONCURRENT_RUNS_PER_TENANT`, which then keeps its meaning. A deployment that sets only `TASK_EXECUTION_MAX_JOBS` now gets that value as its capacity (it was 4); with neither set the capacity stays 4. A value above the capacity is refused with `max_concurrent_runs_exceeds_server_capacity`, a value equal to it restores the default, and `max_concurrent_runs_capacity` in the response reports the bound, and `max_concurrent_runs_override` the saved value even when the capacity limits it (send `max_concurrent_runs: null` to follow the capacity again). The setting gates the admission of new runs only: runs that were accepted continue, a review resume re-queues without consulting it, and a capacity of 0 stops new runs but not existing work. At the limit a new run is refused with `429`, `Retry-After: 60` and `flow_run_concurrency_limit_reached`.
 
 ### Flow retention policy shape
 
@@ -725,7 +729,7 @@ and `429`, `5xx`, and transport failures remain bounded-retryable; other `4xx`
 responses are terminal. If the fifth claim expires with an unknown remote
 outcome, Eneo dead-letters the delivery and fails the run without a sixth POST.
 
-When tenant capacity is full, create returns HTTP `429`, `Retry-After: 60`, and
+When the run limit is reached, create returns HTTP `429`, `Retry-After: 60`, and
 code `flow_run_concurrency_limit_reached`. Branch on the HTTP status plus that
 string code, wait at least the advertised delay while polling existing runs,
 then submit the logical run again. Numeric `eneo_error_code: 9007` is a legacy
@@ -734,8 +738,11 @@ category and is not the client control-flow contract.
 `GET /api/v1/flows/runs/capacity/` (`get_flow_run_capacity`) reports the same
 ceiling before you hit it. `FlowRunCapacityPublic` returns `tenant_id`,
 `active_runs`, `max_concurrent_runs`, and `available_slots` for the calling
-principal's tenant. The ceiling is a deployment setting, not one of the tenant
-settings below, and its default is 4. The response is a snapshot rather than a
+principal. `max_concurrent_runs` is the effective limit: an administrator
+may lower it below the server capacity with
+`PATCH /api/v1/settings/flow-runtime-policy` (see Max concurrent flow runs below).
+Queued runs count too. `Retry-After: 60` is a fixed hint, not a forecast; a run can
+hold its slot for hours, so pace on `available_slots`. The response is a snapshot rather than a
 reservation, so `create_flow_run` stays the authority; use it to pace a batch
 instead of discovering the limit as a rejection partway through.
 

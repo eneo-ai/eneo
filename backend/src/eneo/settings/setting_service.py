@@ -62,6 +62,7 @@ from eneo.flows.flow_retention_policy import (
     resolve_flow_retention_policy,
 )
 from eneo.flows.flow_runtime_policy import (
+    FlowRuntimePolicy,
     apply_flow_runtime_policy_patch,
     resolve_flow_runtime_policy,
 )
@@ -714,14 +715,20 @@ class SettingService:
         )
         return updated
 
+    async def get_flow_runtime_policy_resolved(self) -> FlowRuntimePolicy:
+        tenant = await self._get_tenant_for_flow_settings()
+        return resolve_flow_runtime_policy(getattr(tenant, "flow_settings", None))
+
     @validate_permissions(Permission.ADMIN)
     async def get_flow_runtime_policy(self) -> FlowRuntimePolicyPublic:
-        tenant = await self._get_tenant_for_flow_settings()
-        policy = resolve_flow_runtime_policy(getattr(tenant, "flow_settings", None))
+        policy = await self.get_flow_runtime_policy_resolved()
         return FlowRuntimePolicyPublic(
             default_step_timeout_seconds=policy.default_step_timeout_seconds,
             max_step_timeout_seconds=policy.max_step_timeout_seconds,
             hard_ceiling_seconds=policy.hard_ceiling_seconds,
+            max_concurrent_runs=policy.max_concurrent_runs,
+            max_concurrent_runs_override=policy.max_concurrent_runs_override,
+            max_concurrent_runs_capacity=policy.max_concurrent_runs_capacity,
         )
 
     @validate_permissions(Permission.ADMIN)

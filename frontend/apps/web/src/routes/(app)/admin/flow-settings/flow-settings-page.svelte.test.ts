@@ -14,13 +14,16 @@ const listOrganizationFlowRunRetentionReviewQueue = vi.hoisted(() => vi.fn());
 const listFlowRunRetentionSpaceTargets = vi.hoisted(() => vi.fn());
 const listFlowRunRetentionFlowTargets = vi.hoisted(() => vi.fn());
 const updateFlowInputLimits = vi.hoisted(() => vi.fn());
+const updateFlowRuntimePolicy = vi.hoisted(() => vi.fn());
 const toastSuccess = vi.hoisted(() => vi.fn());
+const toastErrorFn = vi.hoisted(() => vi.fn());
 const toastErrorMock = vi.hoisted(() => vi.fn());
 
 vi.mock("$lib/core/Eneo", () => ({
   getEneo: () => ({
     settings: {
       updateFlowInputLimits,
+      updateFlowRuntimePolicy,
       updateMappedExecutionPolicy,
       updateAIBuilderBudgetSettings,
       getFlowRetentionPolicy,
@@ -37,7 +40,7 @@ vi.mock("$lib/core/Eneo", () => ({
 }));
 
 vi.mock("$lib/components/toast", () => ({
-  toast: { success: toastSuccess, error: vi.fn() }
+  toast: { success: toastSuccess, error: toastErrorFn }
 }));
 
 vi.mock("$lib/core/errors", () => ({
@@ -125,6 +128,13 @@ function pageProps(
   return { data: pageData(mappedOverrides, builderOverrides) as never };
 }
 
+function pagePropsWithRunPolicy(overrides: Record<string, unknown>): PageProps {
+  const data = pageData();
+  return {
+    data: { ...data, flowRuntimePolicy: { ...data.flowRuntimePolicy, ...overrides } } as never
+  };
+}
+
 const BUILDER_BUDGET = {
   max_attachments: 100,
   max_message_chars: 50_000,
@@ -184,7 +194,9 @@ function pageData(
     flowRuntimePolicy: {
       default_step_timeout_seconds: 600,
       max_step_timeout_seconds: 3540,
-      hard_ceiling_seconds: 3540
+      hard_ceiling_seconds: 3540,
+      max_concurrent_runs: 4,
+      max_concurrent_runs_capacity: 8
     },
     mappedExecutionPolicy: {
       version: 1,
@@ -632,6 +644,119 @@ describe("flow settings page — mapped restore lifecycle", () => {
     await expect
       .element(page.getByRole("button", { name: "Ignorera ändringar: Största ljudfil" }))
       .toBeVisible();
+  });
+
+  test("max concurrent flow runs states the server capacity and refuses more", async () => {
+    render(FlowSettingsPage, pageProps());
+    await page.getByRole("tab", { name: "Uppladdningar och körtider" }).click();
+
+    const field = page.getByRole("textbox", { name: "Max samtidiga flödeskörningar" });
+    await expect.element(field).toHaveValue("4");
+    await expect.element(page.getByText(/Upp till 8 \(serverns kapacitet\)/)).toBeVisible();
+
+    await field.fill("9");
+    await expect.element(field).toHaveAttribute("aria-invalid", "true");
+    await expect.element(page.getByText(/Ange ett värde mellan 1 och 8/)).toBeVisible();
+    await field.fill("0");
+    await expect.element(field).toHaveAttribute("aria-invalid", "true");
+    await field.fill("");
+    await expect.element(field).toHaveAttribute("aria-invalid", "true");
+    await field.fill("2");
+    expect(field.query()?.getAttribute("aria-invalid")).toBeNull();
+  });
+
+  test("max concurrent flow runs saves, and the server capacity restores the default", async () => {
+    const policy = pageData().flowRuntimePolicy;
+    updateFlowRuntimePolicy.mockResolvedValueOnce({ ...policy, max_concurrent_runs: 2 });
+    render(FlowSettingsPage, pageProps());
+    await page.getByRole("tab", { name: "Uppladdningar och körtider" }).click();
+
+    const field = page.getByRole("textbox", { name: "Max samtidiga flödeskörningar" });
+    await field.fill("2");
+    await page.getByRole("button", { name: "Spara ändringar" }).click();
+    expect(updateFlowRuntimePolicy).toHaveBeenLastCalledWith({ max_concurrent_runs: 2 });
+    await expect.element(field).toHaveValue("2");
+
+    // The server stores the capacity as no override and returns it as the effective value.
+    updateFlowRuntimePolicy.mockResolvedValueOnce({ ...policy, max_concurrent_runs: 8 });
+    await field.fill("8");
+    await page.getByRole("button", { name: "Spara ändringar" }).click();
+    expect(updateFlowRuntimePolicy).toHaveBeenLastCalledWith({ max_concurrent_runs: 8 });
+    await expect.element(field).toHaveValue("8");
+    expect(page.getByText("1 osparad ändring").query()).toBeNull();
+  });
+
+  test("a saved value the capacity clamps is shown, and one click returns to the capacity", async () => {
+    const policy = pageData().flowRuntimePolicy;
+    updateFlowRuntimePolicy.mockResolvedValueOnce({
+      ...policy,
+      max_concurrent_runs: 3,
+      max_concurrent_runs_capacity: 3,
+      max_concurrent_runs_override: null
+    });
+    render(
+      FlowSettingsPage,
+      pagePropsWithRunPolicy({
+        max_concurrent_runs: 3,
+        max_concurrent_runs_capacity: 3,
+        max_concurrent_runs_override: 6
+      })
+    );
+    await page.getByRole("tab", { name: "Uppladdningar och körtider" }).click();
+
+    const field = page.getByRole("textbox", { name: "Max samtidiga flödeskörningar" });
+    await expect.element(field).toHaveValue("3");
+    await expect
+      .element(page.getByText("Begränsad till 3 av serverns kapacitet; sparat värde 6."))
+      .toBeVisible();
+
+    // Entering the shown number is not a change, so the explicit action is what resets it.
+    await page.getByRole("button", { name: "Använd serverns kapacitet" }).click();
+
+    expect(updateFlowRuntimePolicy).toHaveBeenLastCalledWith({ max_concurrent_runs: null });
+    await expect.element(page.getByText(/sparat värde 6/)).not.toBeInTheDocument();
+    expect(page.getByRole("button", { name: "Använd serverns kapacitet" }).query()).toBeNull();
+  });
+
+  test("the reset action is absent while the setting follows the capacity", async () => {
+    render(FlowSettingsPage, pageProps());
+    await page.getByRole("tab", { name: "Uppladdningar och körtider" }).click();
+
+    expect(page.getByRole("button", { name: "Använd serverns kapacitet" }).query()).toBeNull();
+  });
+
+  test("a server capacity of 0 says no run can start instead of a 0-to-0 range", async () => {
+    render(
+      FlowSettingsPage,
+      pagePropsWithRunPolicy({ max_concurrent_runs: 0, max_concurrent_runs_capacity: 0 })
+    );
+    await page.getByRole("tab", { name: "Uppladdningar och körtider" }).click();
+
+    await expect
+      .element(page.getByText("Inga nya flödeskörningar kan starta: serverns kapacitet är 0."))
+      .toBeVisible();
+    await page.getByRole("textbox", { name: "Max samtidiga flödeskörningar" }).fill("3");
+    expect(page.getByText(/Ange ett värde mellan 0 och 0/).query()).toBeNull();
+    await expect.element(page.getByRole("button", { name: "Spara ändringar" })).toBeDisabled();
+  });
+
+  test("a refusal for exceeding the server capacity is shown in the page language", async () => {
+    const { EneoError } = await import("@eneo/eneo-js");
+    updateFlowRuntimePolicy.mockRejectedValueOnce(
+      new EneoError("exceeds", "SERVER", 400, 9007, {
+        code: "max_concurrent_runs_exceeds_server_capacity"
+      })
+    );
+    render(FlowSettingsPage, pageProps());
+    await page.getByRole("tab", { name: "Uppladdningar och körtider" }).click();
+
+    await page.getByRole("textbox", { name: "Max samtidiga flödeskörningar" }).fill("2");
+    await page.getByRole("button", { name: "Spara ändringar" }).click();
+
+    expect(toastErrorFn).toHaveBeenCalledExactlyOnceWith(
+      "Max samtidiga flödeskörningar får inte överstiga serverns kapacitet. Ladda om sidan för att se aktuell kapacitet."
+    );
+    expect(toastErrorMock).not.toHaveBeenCalled();
   });
 
   test("reveals low-frequency runtime limits and keeps invalid edits visible", async () => {

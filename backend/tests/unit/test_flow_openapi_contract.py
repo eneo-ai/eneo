@@ -3357,10 +3357,10 @@ def test_openapi_create_flow_run_documents_concurrency_limit(
 
     assert resolved.get("title") == "GeneralError"
     assert example == {
-        "message": "Concurrent flow run limit reached for this tenant.",
+        "message": "Concurrent flow run limit reached.",
         "eneo_error_code": 9007,
         "code": "flow_run_concurrency_limit_reached",
-        "context": {"max_concurrent_runs": 4, "retry_after_seconds": 60},
+        "context": {"max_concurrent_runs": 10, "retry_after_seconds": 60},
     }
     assert retry_after.get("schema", {}).get("type") == "integer"
     assert retry_after.get("schema", {}).get("example") == 60

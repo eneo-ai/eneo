@@ -16,6 +16,7 @@ from eneo.flows.domain.flow_run_recovery_policy import (
     FLOW_EXECUTION_HEARTBEAT_MAX_FAILURES,
     FLOW_EXECUTION_HEARTBEAT_TRANSACTION_TIMEOUT_SECONDS,
 )
+from eneo.flows.flow_runtime_policy import warn_when_run_capacity_exceeds_executor_slots
 from eneo.flows.infrastructure.flow_run_repo import (
     FlowRunExecutionOwner,
     FlowRunRepository,
@@ -161,7 +162,9 @@ _worker_heartbeats: FlowExecutionHeartbeats | None = None
 def execution_heartbeats() -> FlowExecutionHeartbeats:
     global _worker_heartbeats
     if _worker_heartbeats is None:
-        _worker_heartbeats = FlowExecutionHeartbeats(
-            max_active=get_settings().task_execution_max_jobs
-        )
+        slots = get_settings().task_execution_max_jobs
+        # First built when the execution worker starts: the one place that holds
+        # the executor slots, so the configured run capacity is checked once.
+        warn_when_run_capacity_exceeds_executor_slots(executor_slots=slots)
+        _worker_heartbeats = FlowExecutionHeartbeats(max_active=slots)
     return _worker_heartbeats
