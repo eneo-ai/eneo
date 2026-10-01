@@ -18,7 +18,6 @@ from eneo.flows.ai_builder.ai_builder_field_identity import fold_result_field_na
 from eneo.flows.ai_builder.ai_builder_flow_schema_values import (
     BuilderFormFieldType,
     FlowInputFieldProvenance,
-    builder_output_type_values,
 )
 from eneo.flows.ai_builder.ai_builder_new_step_models import (
     DocumentDeliveryMode,
@@ -51,6 +50,7 @@ from eneo.flows.flow_authoring_spec import (
     InputType,
     OutputType,
 )
+from eneo.flows.flow_capability_manifest import CapabilityProjection, projection_values
 from eneo.flows.flow_review_policy import FlowStepReviewMode
 
 if TYPE_CHECKING:
@@ -481,8 +481,11 @@ class SemanticStepIntent(BaseModel):
         if not isinstance(value, str):
             return value
         normalized = value.strip()
-        if normalized not in builder_output_type_values():
-            allowed = ", ".join(builder_output_type_values())
+        allowed_values = projection_values(
+            CapabilityProjection.PROPOSABLE_NEW, "output_type"
+        )
+        if normalized not in allowed_values:
+            allowed = ", ".join(allowed_values)
             raise ValueError(f"output_type must be one of: {allowed}")
         return normalized
 
@@ -974,7 +977,12 @@ def build_semantic_step_schema(
                 {
                     "output_type": {
                         "type": ["string", "null"],
-                        "enum": [*builder_output_type_values(), None],
+                        "enum": [
+                            *projection_values(
+                                CapabilityProjection.PROPOSABLE_NEW, "output_type"
+                            ),
+                            None,
+                        ],
                     },
                 }
                 if include_output_type

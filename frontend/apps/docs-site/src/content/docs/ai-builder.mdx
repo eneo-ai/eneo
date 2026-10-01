@@ -222,7 +222,7 @@ AI Builder can propose the same core capabilities used by manually authored Flow
 
 | Capability         | What it means                                                                                       |
 | ------------------ | --------------------------------------------------------------------------------------------------- |
-| Runtime input      | The main text, document, audio, image, file, or structured input for a run                          |
+| Runtime input      | The main text, document, audio, file, or structured input for a run                                 |
 | Form fields        | Reusable values supplied at run time, such as language, audience, role, date range, or report level |
 | JSON output fields | Structured output that later steps or integrations can reuse reliably                               |
 | Final artifacts    | User-facing PDF or DOCX output rendered from a prepared body step                                   |
@@ -255,8 +255,15 @@ See <a href="/docs/flows#advanced-step-input-templates-underlag-till-steget">Adv
 
 AI Builder does not advertise or configure MCP servers and tools for Flows. Use
 supported Flow inputs for required data: runtime form or file input, prior step
-output, knowledge, or HTTP GET. Use terminal HTTP POST output for external
-delivery through the durable webhook outbox.
+output, or knowledge.
+
+The Builder proposes only what it can write safely: text, JSON, audio, document,
+file, and any-type input from the run, the previous step, or all previous steps,
+with text, JSON, PDF, or DOCX output. HTTP GET input and HTTP POST output are
+added by hand in the step editor; the Builder does not propose them, and the
+platform keeps them as they are. When you ask to name the speakers in a
+transcription, the Builder adds the speaker-mapping step itself (the model does
+not propose it directly). Image input is not supported.
 
 Standalone assistants and conversations keep their separately owned MCP
 behavior.

@@ -16,6 +16,14 @@ from eneo.flows.application.flow_authoring_snapshot import (
     unsupported_saved_steps,
 )
 from eneo.flows.domain.flow import FlowStep
+from eneo.flows.enums import (
+    FlowAuthoringInputSource,
+    FlowAuthoringInputType,
+    FlowAuthoringOutputMode,
+    FlowOutputType,
+)
+from eneo.flows.flow_capability_manifest import CapabilityProjection, projection_cells
+from eneo.flows.flow_validators import validate_steps
 
 _CREDENTIAL = "sk-live-credential-looking-value"
 
@@ -34,6 +42,13 @@ def _step(order: int, **overrides: object) -> FlowStep:
     fields.update(overrides)
     return FlowStep.model_validate(fields)
 
+
+# The one legal speaker-mapping cell: the Builder inserts it after a transcription.
+_SPEAKER_MAPPING: dict[str, object] = {
+    "input_source": "previous_step",
+    "output_type": "json",
+    "output_mode": "speaker_mapping",
+}
 
 _UNSUPPORTED: dict[str, dict[str, object]] = {
     "http_get_input": {
@@ -81,7 +96,7 @@ def test_the_listing_reports_every_offending_step_in_order_and_never_raises() ->
     steps = [
         _step(1),
         _step(2, **_UNSUPPORTED["image_input"]),
-        _step(3, output_mode="speaker_mapping"),
+        _step(3, **_SPEAKER_MAPPING),
         _step(
             4,
             user_description=None,
@@ -104,7 +119,7 @@ def test_the_listing_reports_every_offending_step_in_order_and_never_raises() ->
 
 
 def test_a_speaker_mapping_step_and_authorable_steps_still_project() -> None:
-    steps = [_step(1), _step(2, output_mode="speaker_mapping")]
+    steps = [_step(1), _step(2, **_SPEAKER_MAPPING)]
 
     assert unsupported_saved_steps(steps) == ()
     spec = current_flow_authoring_spec(
@@ -134,3 +149,77 @@ def test_the_description_signature_reads_the_same_owner() -> None:
         FlowSemanticSignature.from_flow_steps(
             [_step(1), _step(2, **_UNSUPPORTED["http_get_input"]), _step(3)]
         )
+
+
+def test_a_saved_step_is_listed_exactly_when_an_axis_value_is_outside_the_authoring_vocabulary() -> (
+    None
+):
+    # A per-axis portability check against the authoring vocabulary. Every
+    # inspectable cell is run through it: HTTP cells are inspectable but not
+    # portable. Whether a combination may run is the platform validators' call.
+    authorable = (
+        {item.value for item in FlowAuthoringInputSource},
+        {item.value for item in FlowAuthoringInputType},
+        {item.value for item in FlowOutputType},
+        {item.value for item in FlowAuthoringOutputMode},
+    )
+    for cell in projection_cells(CapabilityProjection.INSPECTABLE):
+        step = _step(
+            1,
+            input_source=cell[0].value,
+            input_type=cell[1].value,
+            output_type=cell[2].value,
+            output_mode=cell[3].value,
+        )
+        inside = all(
+            member.value in allowed for member, allowed in zip(cell, authorable)
+        )
+        assert bool(unsupported_saved_steps([step])) is (not inside), cell
+
+
+def test_a_json_step_followed_by_a_bound_all_previous_steps_json_step_projects() -> (
+    None
+):
+    # The manifest has no cell for all_previous_steps + json (concatenated text
+    # is not JSON) but the platform validators accept it when typed source_refs
+    # and an input_contract supply the input. The listing is a per-axis
+    # portability check, so such a step is portable although no cell covers it.
+    producer_contract: dict[str, object] = {
+        "type": "object",
+        "properties": {"title": {"type": "string"}},
+        "required": ["title"],
+        "additionalProperties": False,
+    }
+    bindings = {
+        "source_refs": [
+            {"step_ref": "step_1", "output": "structured", "field_path": "title"}
+        ]
+    }
+    consumer_contract: dict[str, object] = {
+        "type": "object",
+        "properties": {"title": {"type": "string"}},
+        "required": ["title"],
+        "additionalProperties": False,
+    }
+    steps = [
+        _step(1, output_type="json", output_contract=producer_contract),
+        _step(
+            2,
+            input_source="all_previous_steps",
+            input_type="json",
+            input_bindings=bindings,
+            input_contract=consumer_contract,
+        ),
+    ]
+
+    validate_steps(steps)
+    assert unsupported_saved_steps(steps) == ()
+    spec = current_flow_authoring_spec(
+        current_steps=steps,
+        flow_name="f",
+        flow_description="",
+        assistant_snapshots=None,
+    )
+    assert [step.input_type.value for step in spec.steps] == ["text", "json"]
+    assert spec.steps[1].input_bindings == bindings
+    assert spec.steps[1].input_contract == consumer_contract

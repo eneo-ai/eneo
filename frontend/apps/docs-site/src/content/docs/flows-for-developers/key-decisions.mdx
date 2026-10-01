@@ -151,6 +151,36 @@ every other one through one function. The plan lifecycle maps each field an
 approved diff can name to the one assistant field or step column it writes,
 and a test fails when a step spec field has no stated write.
 
+## 15. One capability owner, three projections
+
+`eneo.flows.flow_capability_manifest` owns which (source, input type, output
+type, output mode) cells a single step can occupy. Three projections read it and
+nothing else lists capabilities. `inspectable` is the set of tuple shapes the
+manifest rules admit as persisted step shapes, HTTP and image shapes included;
+a persisted image shape is one the runtime still rejects as unsupported input
+(graph validation `unsupported_input_type`). `editable_existing` is the subset
+an authoring spec can carry per axis.
+`proposable_new` is what the AI Builder may propose from scratch. A cell the
+Builder cannot author is `not_exposed` with a permanent reason. The AI Builder
+tool schemas take their vocabularies from `projection_values`, and the document
+delivery modes they offer come from the same cells. The one typed literal for
+those modes cannot be derived under strict typing, so a test pins it equal to
+the derived values. One conformance flow per proposable triple must pass the
+authoring command and publish.
+
+Three boundaries stay separate. The saved-step snapshot listing is a separate
+per-axis portability check: it asks only whether the authoring vocabulary can
+carry each field of a saved step, and the Builder lists a step outside it
+instead of failing with a bare error. So an HTTP cell is inspectable but not
+portable, and a bound JSON step outside the cell table can still be portable.
+The listing never judges whether the step may run. Per-step authoring
+feasibility is what the manifest cells state for one step on its own. Whether a
+whole flow is accepted is decided
+by the platform validators that see bindings and neighbouring steps, for example
+the audio-to-document chain refusal and a JSON input read from all previous
+steps when typed bindings supply it. A cell being a projection member does not
+promise that every flow using it publishes.
+
 ## Related
 
 - [The data schema](/docs/flows-for-developers/data-schema)

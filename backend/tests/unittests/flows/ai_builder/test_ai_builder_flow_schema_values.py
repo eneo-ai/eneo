@@ -4,52 +4,51 @@ from typing import get_args
 
 from eneo.flows.ai_builder.ai_builder_flow_schema_values import (
     FlowInputFieldProvenance,
-    builder_input_source_values,
-    builder_input_type_values,
-    builder_output_mode_values,
-    builder_output_type_values,
     document_delivery_mode_values,
 )
+from eneo.flows.ai_builder.ai_builder_new_step_models import DocumentDeliveryMode
 from eneo.flows.enums import (
-    FLOW_BUILDER_PROPOSABLE_OUTPUT_MODES,
-    FlowAuthoringInputSource,
     FlowAuthoringInputType,
-    FlowAuthoringOutputMode,
     FlowInputType,
     FlowOutputMode,
     FlowOutputType,
 )
 from eneo.flows.flow_authoring_spec import InputType
 from eneo.flows.flow_capability_manifest import (
-    CAPABILITY_REGISTRY,
     RUNTIME_INPUT_MODE_BY_TYPE,
+    CapabilityProjection,
+    projection_values,
     resolve_document_generation_mode,
 )
 
 
-def test_builder_schema_values_follow_builder_exposed_flow_capabilities() -> None:
-    exposed_input_types = {
-        capability_id.removeprefix("input_")
-        for capability_id, capability in CAPABILITY_REGISTRY.items()
-        if capability.exposure == "builder" and capability_id.startswith("input_")
-    }
+def test_wire_vocabulary_per_projection_is_declared_outright() -> None:
+    editable = CapabilityProjection.EDITABLE_EXISTING
+    proposable = CapabilityProjection.PROPOSABLE_NEW
 
-    assert builder_input_source_values() == [
-        item.value for item in FlowAuthoringInputSource
-    ]
-    assert builder_input_type_values() == [
-        item.value
-        for item in FlowAuthoringInputType
-        if item.value in exposed_input_types
-    ]
-    assert set(builder_input_type_values()) == exposed_input_types
-    assert builder_output_type_values() == [item.value for item in FlowOutputType]
-    assert builder_output_mode_values() == [
-        item.value
-        for item in FlowAuthoringOutputMode
-        if item in FLOW_BUILDER_PROPOSABLE_OUTPUT_MODES
-    ]
-    assert "speaker_mapping" not in builder_output_mode_values()
+    assert projection_values(editable, "input_source") == (
+        "flow_input",
+        "previous_step",
+        "all_previous_steps",
+    )
+    assert projection_values(editable, "input_type") == (
+        "text",
+        "json",
+        "audio",
+        "document",
+        "file",
+        "any",
+    )
+    assert projection_values(editable, "output_type") == ("text", "json", "pdf", "docx")
+    assert projection_values(proposable, "output_mode") == (
+        "pass_through",
+        "compose_text",
+        "transcribe_only",
+        "template_fill",
+        "render_verbatim",
+    )
+    assert "speaker_mapping" in projection_values(editable, "output_mode")
+    assert "speaker_mapping" not in projection_values(proposable, "output_mode")
 
 
 def test_flow_input_field_provenance_vocabulary_is_complete_and_ordered() -> None:
@@ -63,17 +62,16 @@ def test_flow_input_field_provenance_vocabulary_is_complete_and_ordered() -> Non
 
 def test_builder_runtime_input_modes_are_covered_by_schema_input_types() -> None:
     assert {input_type.value for input_type in RUNTIME_INPUT_MODE_BY_TYPE} <= set(
-        builder_input_type_values()
+        projection_values(CapabilityProjection.PROPOSABLE_NEW, "input_type")
     )
 
 
 def test_builder_exposed_flow_input_types_bridge_to_authoring_input_type() -> None:
-    exposed_flow_input_types = [
-        FlowInputType(value) for value in builder_input_type_values()
-    ]
+    values = projection_values(CapabilityProjection.PROPOSABLE_NEW, "input_type")
+    exposed_flow_input_types = [FlowInputType(value) for value in values]
 
     assert [InputType(input_type.value) for input_type in exposed_flow_input_types] == [
-        FlowAuthoringInputType(value) for value in builder_input_type_values()
+        FlowAuthoringInputType(value) for value in values
     ]
 
 
@@ -89,3 +87,9 @@ def test_document_delivery_modes_are_derived_from_flow_capability_rules() -> Non
                 expected.add(mode)
 
     assert set(document_delivery_mode_values()) == expected
+
+
+def test_the_document_delivery_literal_equals_the_derived_modes() -> None:
+    # The typed wire literal cannot be derived under strict typing, so it is
+    # pinned to the manifest-derived values the tool schemas offer.
+    assert list(get_args(DocumentDeliveryMode)) == document_delivery_mode_values()

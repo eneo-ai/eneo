@@ -1727,7 +1727,7 @@ def test_current_flow_authoring_spec_preserves_signature_vocabulary() -> None:
                 step_order=1,
                 user_description="Read input",
                 input_source="all_previous_steps",
-                input_type="json",
+                input_type="any",
                 output_mode="pass_through",
                 output_type="text",
             ),
@@ -1754,7 +1754,7 @@ def test_current_flow_authoring_spec_preserves_signature_vocabulary() -> None:
         "existing_step_2",
     ]
     assert result.steps[0].input_source == InputSource.ALL_PREVIOUS_STEPS
-    assert result.steps[0].input_type == InputType.JSON
+    assert result.steps[0].input_type == InputType.ANY
     assert result.steps[-1].output_mode == OutputMode.TEMPLATE_FILL
     assert result.steps[-1].output_type == OutputType.DOCX
 

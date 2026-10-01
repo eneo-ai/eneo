@@ -18,6 +18,7 @@ from eneo.flows.ai_builder.ai_builder_assembly.lower import lower_assembly_plan
 from eneo.flows.ai_builder.ai_builder_assembly.plan import (
     FlowAssemblyPlan,
     PlannedStep,
+    PlannedStepRole,
     UnderlagChannel,
 )
 from eneo.flows.ai_builder.ai_builder_new_step_models import (
@@ -125,6 +126,27 @@ def test_planned_step_rejects_unsupported_capability_tuple() -> None:
             output_type=OutputType.PDF,
             output_mode=OutputMode.PASS_THROUGH,
         )
+
+
+def _speaker_mapping_step(role: PlannedStepRole) -> PlannedStep:
+    return PlannedStep(
+        role=role,
+        name="Name the speakers",
+        instructions="Match the speakers to the participants.",
+        input_source=InputSource.PREVIOUS_STEP,
+        input_type=InputType.TEXT,
+        output_type=OutputType.JSON,
+        output_mode=OutputMode.SPEAKER_MAPPING,
+        underlag_channel="implicit_previous",
+    )
+
+
+def test_backend_inserted_speaker_naming_needs_only_engine_legality() -> None:
+    # Exposure governs what the planner proposes; the backend inserts this
+    # step itself, so a speaker_mapping cell is accepted for its role only.
+    _speaker_mapping_step("speaker_naming")
+    with pytest.raises(ValueError, match="unsupported capability tuple"):
+        _speaker_mapping_step("transform")
 
 
 def test_lowering_preserves_explicit_compose_output_mode() -> None:

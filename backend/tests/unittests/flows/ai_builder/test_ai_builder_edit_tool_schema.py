@@ -13,9 +13,6 @@ from eneo.flows.ai_builder.ai_builder_edit_tool_schema import (
     build_edit_flow_tool_schema,
 )
 from eneo.flows.ai_builder.ai_builder_flow_schema_values import (
-    builder_input_source_values,
-    builder_input_type_values,
-    builder_output_type_values,
     document_delivery_mode_values,
 )
 from eneo.flows.ai_builder.ai_builder_plan_edit_context import (
@@ -33,6 +30,7 @@ from eneo.flows.ai_builder.ai_builder_resource_catalog import (
 from eneo.flows.ai_builder.ai_builder_tool_names import PROPOSE_FLOW_TOOL_NAME
 from eneo.flows.ai_builder.ai_builder_tools import build_native_strict_tool_schema
 from eneo.flows.domain.flow import FlowStep
+from eneo.flows.flow_capability_manifest import CapabilityProjection, projection_values
 from eneo.tokens.token_utils import count_message_tokens, count_tool_tokens
 from tests.unittests.flows.ai_builder.test_ai_builder_edit_proposal import (
     _saved_step_large_flow_fixture,
@@ -287,7 +285,10 @@ class TestBuildEditFlowToolSchema:
 
         output_type = _add_step_payload_schema(schema)["properties"]["output_type"]
 
-        assert output_type["enum"] == [*builder_output_type_values(), None]
+        assert output_type["enum"] == [
+            *projection_values(CapabilityProjection.PROPOSABLE_NEW, "output_type"),
+            None,
+        ]
 
     def test_existing_step_ref_enum_contains_valid_refs(self):
         steps = [_make_step(1), _make_step(2), _make_step(3)]
@@ -452,15 +453,54 @@ class TestBuildEditFlowToolSchema:
         )
         props = _modify_step_schema(schema)["properties"]
 
-        assert props["input_source"]["enum"] == [*builder_input_source_values(), None]
-        assert props["input_type"]["enum"] == [*builder_input_type_values(), None]
+        editable = CapabilityProjection.EDITABLE_EXISTING
+        assert props["input_source"]["enum"] == [
+            *projection_values(editable, "input_source"),
+            None,
+        ]
+        assert props["input_type"]["enum"] == [
+            *projection_values(editable, "input_type"),
+            None,
+        ]
         assert "output_mode" not in props
-        assert props["output_type"]["enum"] == [*builder_output_type_values(), None]
+        assert props["output_type"]["enum"] == [
+            *projection_values(editable, "output_type"),
+            None,
+        ]
         assert props["document_delivery_mode"]["enum"] == [
             *document_delivery_mode_values(),
             None,
         ]
         assert props["review_mode"]["enum"] == ["view", "edit", "none", None]
+
+
+class TestVocabularySources:
+    """Each part of the schema reads the projection that owns its vocabulary."""
+
+    def test_new_steps_follow_proposable_new_and_modifications_follow_editable_existing(
+        self, monkeypatch: pytest.MonkeyPatch
+    ):
+        from eneo.flows import flow_capability_manifest as manifest
+
+        real = manifest.projection_cells
+
+        def without_pdf_proposals(projection):
+            cells = real(projection)
+            if projection is CapabilityProjection.PROPOSABLE_NEW:
+                return frozenset(cell for cell in cells if cell[2].value != "pdf")
+            return cells
+
+        monkeypatch.setattr(manifest, "projection_cells", without_pdf_proposals)
+        schema = build_edit_flow_tool_schema(
+            [_make_step(1)],
+            resource_catalog=_empty_catalog(),
+            tool_name=PROPOSE_FLOW_TOOL_NAME,
+        )
+
+        added = _add_step_payload_schema(schema)["properties"]["output_type"]["enum"]
+        modified = _modify_step_schema(schema)["properties"]["output_type"]["enum"]
+        assert "pdf" not in added
+        assert "pdf" in modified
 
 
 class TestReviewScopedEditSchema:

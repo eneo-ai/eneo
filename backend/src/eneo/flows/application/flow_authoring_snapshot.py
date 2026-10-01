@@ -20,21 +20,28 @@ from eneo.flows.flow_authoring_spec import (
     OutputType,
     StepSpec,
 )
+from eneo.flows.flow_capability_manifest import (
+    CapabilityAxis,
+    CapabilityProjection,
+    projection_values,
+)
 from eneo.flows.http_transport import redact_persisted_config
 from eneo.flows.step_lineage import existing_step_ref_for_order
 
 AssistantSnapshotProjector = Callable[[AssistantAuthoringSnapshot], AssistantSpec]
 
-# The authoring vocabulary: a saved step outside one of these enums runs on the
-# platform but cannot be carried by an authoring spec.
-_AUTHORING_VALUES: dict[str, frozenset[str]] = {
-    field: frozenset(member.value for member in vocabulary)
-    for field, vocabulary in (
-        ("input_source", InputSource),
-        ("input_type", InputType),
-        ("output_mode", OutputMode),
-        ("output_type", OutputType),
-    )
+# The authoring vocabulary, per axis: a saved step with a value outside it runs
+# on the platform but cannot be carried by an authoring spec. Whether a
+# combination of carried values may run is the platform validators' decision.
+_AUTHORING_AXES: tuple[CapabilityAxis, ...] = (
+    "input_source",
+    "input_type",
+    "output_mode",
+    "output_type",
+)
+_EDITABLE_VALUES: dict[CapabilityAxis, frozenset[str]] = {
+    axis: frozenset(projection_values(CapabilityProjection.EDITABLE_EXISTING, axis))
+    for axis in _AUTHORING_AXES
 }
 
 
@@ -82,7 +89,7 @@ def unsupported_saved_steps(
 
     listed: list[UnsupportedSavedStep] = []
     for step in steps:
-        saved = {
+        saved: dict[CapabilityAxis, str] = {
             "input_source": _saved_value(step.input_source),
             "input_type": _saved_value(step.input_type),
             "output_mode": _saved_value(step.output_mode),
@@ -91,7 +98,7 @@ def unsupported_saved_steps(
         fields = tuple(
             (field, value)
             for field, value in saved.items()
-            if value not in _AUTHORING_VALUES[field]
+            if value not in _EDITABLE_VALUES[field]
         )
         if fields:
             ref = existing_step_ref_for_order(step.step_order)

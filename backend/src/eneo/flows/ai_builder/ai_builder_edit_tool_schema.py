@@ -6,9 +6,6 @@ from typing import TYPE_CHECKING, Any
 
 from eneo.flows.ai_builder.ai_builder_flow_schema_values import (
     builder_form_field_type_values,
-    builder_input_source_values,
-    builder_input_type_values,
-    builder_output_type_values,
     document_delivery_mode_values,
 )
 from eneo.flows.ai_builder.ai_builder_proposal_intent import (
@@ -25,6 +22,7 @@ from eneo.flows.ai_builder.ai_builder_step_tool_schema_fragments import (
 )
 from eneo.flows.domain.flow import FlowStep
 from eneo.flows.flow_authoring_name import MAX_FLOW_NAME_LENGTH
+from eneo.flows.flow_capability_manifest import CapabilityProjection, projection_values
 from eneo.flows.step_lineage import existing_step_ref_for_order
 
 if TYPE_CHECKING:
@@ -261,15 +259,30 @@ def _build_modify_step_schema(
             "assistant_spec": _build_assistant_spec_schema(kb_refs),
             "input_source": {
                 "type": ["string", "null"],
-                "enum": [*builder_input_source_values(), None],
+                "enum": [
+                    *projection_values(
+                        CapabilityProjection.EDITABLE_EXISTING, "input_source"
+                    ),
+                    None,
+                ],
             },
             "input_type": {
                 "type": ["string", "null"],
-                "enum": [*builder_input_type_values(), None],
+                "enum": [
+                    *projection_values(
+                        CapabilityProjection.EDITABLE_EXISTING, "input_type"
+                    ),
+                    None,
+                ],
             },
             "output_type": {
                 "type": ["string", "null"],
-                "enum": [*builder_output_type_values(), None],
+                "enum": [
+                    *projection_values(
+                        CapabilityProjection.EDITABLE_EXISTING, "output_type"
+                    ),
+                    None,
+                ],
             },
             "document_delivery_mode": {
                 "type": ["string", "null"],

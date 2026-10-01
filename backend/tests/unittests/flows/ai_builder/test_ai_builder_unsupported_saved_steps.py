@@ -167,7 +167,7 @@ def test_the_proposal_boundary_refuses_an_unsupported_saved_flow(
 
 
 def test_the_proposal_boundary_keeps_speaker_mapping_and_authorable_flows() -> None:
-    flow = _flow(_step(1), _step(2, output_mode="speaker_mapping"))
+    flow = _flow(_step(1), _step(2, output_type="json", output_mode="speaker_mapping"))
 
     assert isinstance(_build(flow, None), ProposalPrepared)
     assert isinstance(_build(flow, _scoped_to(flow.steps[1])), ProposalPrepared)

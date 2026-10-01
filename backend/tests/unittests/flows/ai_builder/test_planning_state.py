@@ -47,10 +47,10 @@ from eneo.flows.ai_builder.planning_state import (
     enforce_planning_state_payload_cap,
 )
 from eneo.flows.enums import (
-    FLOW_BUILDER_PROPOSABLE_OUTPUT_MODES,
     FlowAuthoringInputType,
     FlowAuthoringOutputMode,
 )
+from eneo.flows.flow_capability_manifest import CapabilityProjection, projection_values
 
 _VALID_ARCH_HASH = "a" * ARCHITECTURE_HASH_HEX_LENGTH
 
@@ -959,7 +959,7 @@ class TestStepTripleValidation:
 
     @pytest.mark.parametrize(
         "output_mode",
-        sorted(item.value for item in FLOW_BUILDER_PROPOSABLE_OUTPUT_MODES),
+        sorted(projection_values(CapabilityProjection.PROPOSABLE_NEW, "output_mode")),
     )
     def test_canonical_output_modes_load_and_serialize_as_wire_values(
         self,

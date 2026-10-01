@@ -9,6 +9,7 @@ the public API (`resolve_capability_for_tuple`, `coverage_report`).
 from __future__ import annotations
 
 import ast
+import hashlib
 from dataclasses import FrozenInstanceError
 from pathlib import Path
 
@@ -36,6 +37,7 @@ from eneo.flows.flow_capability_manifest import (
     CoverageReport,
     FlowCapability,
     InvariantSpec,
+    TupleSpec,
     _classify_cell,
     coverage_report,
     is_chain_compatible,
@@ -59,8 +61,8 @@ def _flow_capability_manifest_source() -> Path:
     )
 
 
-def test_fcm_version_is_nine() -> None:
-    assert FCM_VERSION == 9
+def test_fcm_version_is_ten() -> None:
+    assert FCM_VERSION == 10
 
 
 def test_ai_builder_form_field_types_match_flow_authoring_values() -> None:
@@ -740,10 +742,9 @@ def test_registry_has_output_mode_capability(
         f"CAPABILITY_REGISTRY missing entry for {output_mode} — "
         f"expected id {capability_id!r}"
     )
-    assert capability.exposure == "builder", (
-        f"{capability_id} must be exposure='builder' — output modes are "
-        "user-facing via the flow publish API"
-    )
+    assert capability.exposure == (
+        "not_exposed" if output_mode is FlowOutputMode.HTTP_POST else "builder"
+    ), f"{capability_id} exposure must match what the Builder can propose"
     invariant_ids = frozenset(inv.id for inv in capability.invariants)
     assert invariant_ids == expected_invariant_ids, (
         f"{capability_id} invariant drift: expected {expected_invariant_ids}, "
@@ -960,6 +961,15 @@ def test_every_enum_tuple_is_classified() -> None:
 # ---------------------------------------------------------------------
 
 
+def _cells_digest(cells: tuple[TupleSpec, ...]) -> str:
+    """The derived cells as one digest: they are generated from the legality
+    rules, so the fingerprint pins their content without a 160-row literal."""
+    rows = sorted(
+        (is_.value, it.value, ot.value, om.value) for is_, it, ot, om in cells
+    )
+    return hashlib.sha256(repr(rows).encode()).hexdigest()
+
+
 def _capability_fingerprint(
     capability: FlowCapability,
 ) -> tuple[object, ...]:
@@ -973,12 +983,7 @@ def _capability_fingerprint(
         capability.exposure,
         capability.channel,
         capability.runtime_input_mode,
-        tuple(
-            sorted(
-                (is_.value, it.value, ot.value, om.value)
-                for is_, it, ot, om in capability.applies_to_tuples
-            )
-        ),
+        _cells_digest(capability.applies_to_tuples),
         tuple(sorted((inv.id, inv.description) for inv in capability.invariants)),
         tuple(sorted(req.key for req in capability.required_config)),
     )
@@ -1008,7 +1013,7 @@ def _compute_fcm_surface_fingerprint() -> tuple[object, ...]:
     )
 
 
-_FCM_SURFACE_FINGERPRINT_V9: tuple[object, ...] = (
+_FCM_SURFACE_FINGERPRINT_V10: tuple[object, ...] = (
     (
         "applies_to_tuples",
         "channel",
@@ -1046,25 +1051,25 @@ _FCM_SURFACE_FINGERPRINT_V9: tuple[object, ...] = (
             "builder",
             None,
             None,
-            (),
+            "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
             (
                 (
                     "forbids_template_fill_or_transcribe_only",
                     "Citation capability is disabled when `output_mode` is `compose_text`, "
-                    "`template_fill`, `transcribe_only`, or `render_verbatim` (non-LLM pathways). Any "
-                    "other output_mode preserves capability when the rest holds.",
+                    "`template_fill`, `transcribe_only`, or `render_verbatim` (non-LLM pathways). "
+                    "Any other output_mode preserves capability when the rest holds.",
                 ),
                 (
                     "requires_citation_capable_output_config",
                     "Citation capability requires `resolve_citation_mode(output_config) == "
-                    "'inline_inref_sidecar'`; any other resolved mode (including `off`, missing keys, "
-                    "non-dict payloads) collapses capability to `False`.",
+                    "'inline_inref_sidecar'`; any other resolved mode (including `off`, missing "
+                    "keys, non-dict payloads) collapses capability to `False`.",
                 ),
                 (
                     "requires_text_output_type",
                     "Citation capability holds only when `output_type=TEXT`; "
-                    "`is_citation_capable_step` returns `False` for JSON/PDF/DOCX outputs regardless "
-                    "of citation_mode.",
+                    "`is_citation_capable_step` returns `False` for JSON/PDF/DOCX outputs "
+                    "regardless of citation_mode.",
                 ),
             ),
             (),
@@ -1073,7 +1078,7 @@ _FCM_SURFACE_FINGERPRINT_V9: tuple[object, ...] = (
             "builder",
             "text_only",
             None,
-            (),
+            "fbc541a7a61149f5918bed7567c49ca9e7c681fa1a2d159d0e6abac695fd831a",
             (
                 (
                     "input_contract_forbidden",
@@ -1087,7 +1092,7 @@ _FCM_SURFACE_FINGERPRINT_V9: tuple[object, ...] = (
             "builder",
             "text_only",
             "audio",
-            (),
+            "eabad5abd2a7eab23334cbed679f7cc35bd1b17356b2c8c73c89ec2119fc98a0",
             (
                 (
                     "input_contract_forbidden",
@@ -1108,12 +1113,12 @@ _FCM_SURFACE_FINGERPRINT_V9: tuple[object, ...] = (
             "builder",
             "text_only",
             "documents",
-            (),
+            "e074eb025e3554304fe22e0eaa07e6a89a8275a2b50b63bcc96a0fe3583690b0",
             (
                 (
                     "input_contract_forbidden",
-                    "Steps using the `document` input capability must not set `input_contract`; the "
-                    "runtime rejects contract on non-contract-allowed capabilities.",
+                    "Steps using the `document` input capability must not set `input_contract`; "
+                    "the runtime rejects contract on non-contract-allowed capabilities.",
                 ),
                 (
                     "requires_non_empty_extraction",
@@ -1128,7 +1133,7 @@ _FCM_SURFACE_FINGERPRINT_V9: tuple[object, ...] = (
             "builder",
             "text_only",
             "documents",
-            (),
+            "1f18d5b97b145cd308233e4fa8ff23465bf9d86a87af6ab226494f41e702804e",
             (
                 (
                     "input_contract_forbidden",
@@ -1137,8 +1142,9 @@ _FCM_SURFACE_FINGERPRINT_V9: tuple[object, ...] = (
                 ),
                 (
                     "requires_non_empty_extraction",
-                    "Steps using the `file` input capability must produce non-empty extracted text at "
-                    "runtime; empty extraction is rejected by `validate_runtime_input_policy`.",
+                    "Steps using the `file` input capability must produce non-empty extracted "
+                    "text at runtime; empty extraction is rejected by "
+                    "`validate_runtime_input_policy`.",
                 ),
             ),
             (),
@@ -1147,7 +1153,7 @@ _FCM_SURFACE_FINGERPRINT_V9: tuple[object, ...] = (
             "not_exposed",
             "files_only",
             None,
-            (),
+            "27e253b5e1d9014bce2e2d3f9ba6ba68bbee3e3d02a5a5e1b64b9c730896732c",
             (
                 (
                     "input_contract_forbidden",
@@ -1156,41 +1162,56 @@ _FCM_SURFACE_FINGERPRINT_V9: tuple[object, ...] = (
                 ),
                 (
                     "requires_at_least_one_file",
-                    "Steps using the `image` input capability must present at least one compatible "
-                    "file at runtime.",
+                    "Steps using the `image` input capability must present at least one "
+                    "compatible file at runtime.",
                 ),
             ),
             (),
         ),
-        ("builder", "text_only", "text", (), (), ()),
-        ("builder", "text_only", "text", (), (), ()),
+        (
+            "builder",
+            "text_only",
+            "text",
+            "d064433b7adb8594f25d83d2a2fdc34ba4d79d0055080473c8cd1f7fa006c3de",
+            (),
+            (),
+        ),
+        (
+            "builder",
+            "text_only",
+            "text",
+            "0fde8ba640d7c2fd646a5fe1ced4fbe34ccd8ca289e64b6a25957f3270cfc401",
+            (),
+            (),
+        ),
         (
             "builder",
             None,
             None,
-            (),
+            "a4db4c731dc1e9d579f35baa9c9e5f4dffd503532d0c597962366aa6cdcaabe3",
             (
                 (
                     "requires_text_input_text_output",
-                    "Steps using `compose_text` must have `input_type=TEXT` and `output_type=TEXT`; "
-                    "any other IO pair is rejected by `supports_step_io_tuple`.",
+                    "Steps using `compose_text` must have `input_type=TEXT` and "
+                    "`output_type=TEXT`; any other IO pair is rejected by "
+                    "`supports_step_io_tuple`.",
                 ),
             ),
             (),
         ),
         (
-            "builder",
+            "not_exposed",
             None,
             None,
-            (),
+            "6408e4012ad9b77b426495098f172562f6a6559f55b70d77d47ff79c4744c8b5",
             (
                 (
                     "requires_http_output_config",
-                    "Steps using `http_post` output mode must declare an `output_config` object that "
-                    "passes `validate_http_output_config`; the authored HTTP transport config is the "
-                    "only accepted shape. The capability does not pin per-field rules — see the "
-                    "transport validators for URL scheme, body-mode, auth, and timeout "
-                    "constraints.",
+                    "Steps using `http_post` output mode must declare an `output_config` object "
+                    "that passes `validate_http_output_config`; the authored HTTP transport "
+                    "config is the only accepted shape. The capability does not pin per-field "
+                    "rules — see the transport validators for URL scheme, body-mode, auth, and "
+                    "timeout constraints.",
                 ),
             ),
             (),
@@ -1199,7 +1220,7 @@ _FCM_SURFACE_FINGERPRINT_V9: tuple[object, ...] = (
             "builder",
             None,
             None,
-            (),
+            "5df5c896357f09e1701de4fc3bb897f25d3e5e17b4e5b974d2b15e4dfc1217cc",
             (
                 (
                     "forbids_text_document_render_path",
@@ -1214,17 +1235,18 @@ _FCM_SURFACE_FINGERPRINT_V9: tuple[object, ...] = (
             "builder",
             None,
             None,
-            (),
+            "68c213e2a048fb21261cad9fe7f303ee424feb33e4ca96348fa5546bfcbf46a1",
             (
                 (
                     "forbids_output_contract",
-                    "Steps using `render_verbatim` render resolved text directly and must not declare "
-                    "an `output_contract`.",
+                    "Steps using `render_verbatim` render resolved text directly and must not "
+                    "declare an `output_contract`.",
                 ),
                 (
                     "requires_text_input_document_output",
-                    "Steps using `render_verbatim` must have `input_type=TEXT` and `output_type=PDF` "
-                    "or `DOCX`; any other IO pair is rejected by `supports_step_io_tuple`.",
+                    "Steps using `render_verbatim` must have `input_type=TEXT` and "
+                    "`output_type=PDF` or `DOCX`; any other IO pair is rejected by "
+                    "`supports_step_io_tuple`.",
                 ),
             ),
             (),
@@ -1233,12 +1255,12 @@ _FCM_SURFACE_FINGERPRINT_V9: tuple[object, ...] = (
             "not_exposed",
             None,
             None,
-            (),
+            "15524118420c1feccc8971aeb361d3b673998df2eb6f0da4785e080285e2eb27",
             (
                 (
                     "fixed_output_contract",
-                    "Steps using `speaker_mapping` must not declare an `output_contract`; the runtime "
-                    "pins `SPEAKER_MAPPING_OUTPUT_CONTRACT`.",
+                    "Steps using `speaker_mapping` must not declare an `output_contract`; the "
+                    "runtime pins `SPEAKER_MAPPING_OUTPUT_CONTRACT`.",
                 ),
                 (
                     "requires_edit_review_policy",
@@ -1258,7 +1280,7 @@ _FCM_SURFACE_FINGERPRINT_V9: tuple[object, ...] = (
             "builder",
             None,
             None,
-            (),
+            "cb5675b8560d84ada2404bcb871b2b033c2d4698417958d628c6804b05449d24",
             (
                 (
                     "forbids_output_contract",
@@ -1273,9 +1295,9 @@ _FCM_SURFACE_FINGERPRINT_V9: tuple[object, ...] = (
                 ),
                 (
                     "requires_template_fill_output_config",
-                    "Publishable flows with a `template_fill` step require a complete `output_config` "
-                    "template block; `validate_template_fill_output_config` enforces this when "
-                    "`require_complete_template_fill_config=True`.",
+                    "Publishable flows with a `template_fill` step require a complete "
+                    "`output_config` template block; `validate_template_fill_output_config` "
+                    "enforces this when `require_complete_template_fill_config=True`.",
                 ),
             ),
             (),
@@ -1284,18 +1306,19 @@ _FCM_SURFACE_FINGERPRINT_V9: tuple[object, ...] = (
             "builder",
             None,
             None,
-            (),
+            "392f49bf62e734741204f94b5df1d9ad7b849ba7711bb6f84b2bde324af38e71",
             (
                 (
                     "requires_audio_input_text_output",
                     "Steps using `transcribe_only` must have `input_type=AUDIO` and "
-                    "`output_type=TEXT`; any other IO pair is rejected by `supports_step_io_tuple`.",
+                    "`output_type=TEXT`; any other IO pair is rejected by "
+                    "`supports_step_io_tuple`.",
                 ),
                 (
                     "requires_audio_runtime_input_format",
                     "Steps using `transcribe_only` with runtime_input enabled must declare "
-                    "`input_format='audio'`; `_validate_runtime_input_publish_rules` rejects other "
-                    "formats.",
+                    "`input_format='audio'`; `_validate_runtime_input_publish_rules` rejects "
+                    "other formats.",
                 ),
             ),
             (),
@@ -1304,25 +1327,25 @@ _FCM_SURFACE_FINGERPRINT_V9: tuple[object, ...] = (
             "builder",
             None,
             None,
-            (),
+            "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
             (
                 (
                     "bounded_concurrent_source_calls",
-                    "Source calls are mapped with a named runtime concurrency bound and fail-fast at "
-                    "step-attempt granularity.",
+                    "Source calls are mapped with a named runtime concurrency bound and fail-fast "
+                    "at step-attempt granularity.",
                 ),
                 (
                     "requires_documents_array_contract",
-                    "Per-source reader execution requires a JSON output contract shaped as exactly "
-                    "one top-level `documents[]` array; corpus-level synthesis belongs to a "
-                    "downstream writer step.",
+                    "Per-source reader execution requires a JSON output contract shaped as "
+                    "exactly one top-level `documents[]` array; corpus-level synthesis belongs to "
+                    "a downstream writer step.",
                 ),
                 (
                     "runtime_sets_source_identity",
-                    "Every documents[] item schema declares `source_label` and `source_file_id` as "
-                    "required strings; `parse_runtime_steps` rejects invalid per-source contracts "
-                    "before provider work. The runtime, not the model, writes their values from "
-                    "uploaded file metadata.",
+                    "Every documents[] item schema declares `source_label` and `source_file_id` "
+                    "as required strings; `parse_runtime_steps` rejects invalid per-source "
+                    "contracts before provider work. The runtime, not the model, writes their "
+                    "values from uploaded file metadata.",
                 ),
             ),
             ("input_config.runtime_input.execution_mode",),
@@ -1368,11 +1391,11 @@ def test_fcm_surface_fingerprint_is_stable() -> None:
     reads cleanly.
     """
     actual = _compute_fcm_surface_fingerprint()
-    assert actual == _FCM_SURFACE_FINGERPRINT_V9, (
+    assert actual == _FCM_SURFACE_FINGERPRINT_V10, (
         "FCM surface fingerprint drifted. Bump `FCM_VERSION` to "
         f"{FCM_VERSION + 1} and update the expected fingerprint constant "
         "in this test.\n\n"
-        f"Expected: {_FCM_SURFACE_FINGERPRINT_V9}\n\n"
+        f"Expected: {_FCM_SURFACE_FINGERPRINT_V10}\n\n"
         f"Actual:   {actual}"
     )
 
@@ -1460,16 +1483,22 @@ class TestResolveCapabilityForTuple:
             is None
         )
 
-    def test_http_output_mode_legal_tuple_returns_caps(self) -> None:
-        caps = resolve_capability_for_tuple(
-            input_source=FlowInputSource.FLOW_INPUT,
-            input_type=FlowInputType.TEXT,
-            output_type=FlowOutputType.TEXT,
-            output_mode=FlowOutputMode.HTTP_POST,
-        )
-        assert caps is not None
-        ids = [cap.id for cap in caps]
-        assert ids == ["input_text", "output_mode_http_post"]
+    def test_http_cells_are_legal_but_not_proposable(self) -> None:
+        # The engine runs HTTP delivery and input; the Builder cannot author
+        # either, so neither resolves to a capability pair.
+        for source, mode in (
+            (FlowInputSource.FLOW_INPUT, FlowOutputMode.HTTP_POST),
+            (FlowInputSource.HTTP_GET, FlowOutputMode.PASS_THROUGH),
+        ):
+            assert (
+                resolve_capability_for_tuple(
+                    input_source=source,
+                    input_type=FlowInputType.TEXT,
+                    output_type=FlowOutputType.TEXT,
+                    output_mode=mode,
+                )
+                is None
+            )
 
     def test_compose_text_legal_tuple_returns_caps(self) -> None:
         caps = resolve_capability_for_tuple(

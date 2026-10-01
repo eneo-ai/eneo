@@ -85,7 +85,7 @@ class TestFlowSemanticSignature:
                 _flow_step(
                     step_order=1,
                     input_source="all_previous_steps",
-                    input_type="json",
+                    input_type="any",
                     output_mode="pass_through",
                     output_type="text",
                 ),
@@ -100,7 +100,7 @@ class TestFlowSemanticSignature:
         )
 
         assert sig.entry_input_source == "all_previous_steps"
-        assert sig.entry_input_type == "json"
+        assert sig.entry_input_type == "any"
         assert sig.terminal_output_mode == "template_fill"
         assert sig.terminal_output_type == "docx"
 

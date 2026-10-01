@@ -66,7 +66,7 @@ def assert_create_spec_prepares_through_authoring_command(
 
 async def assert_create_spec_materializes_through_authoring_command_async(
     spec: FlowDraftSpecCore,
-) -> None:
+) -> Flow:
     harness = _RealFlowServiceHarness()
     command = _create_command(spec=spec, space_id=harness.space_id)
     service = FlowAuthoringCommandService()
@@ -98,6 +98,7 @@ async def assert_create_spec_materializes_through_authoring_command_async(
         compiled_steps=prepared.changeset.compiled_steps,
         assistant_ids_by_plan_ref=harness.assistant_service.ids_by_name,
     )
+    return materialized
 
 
 async def assert_edit_spec_materializes_through_authoring_command_async(

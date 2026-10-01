@@ -3,26 +3,31 @@
 Declares the `FlowCapability` shape, seeds one entry per key in
 `INPUT_TYPE_POLICIES`, absorbs chain-compatibility / citation /
 transcription-wizard rules, and exposes the public API
-(`resolve_capability_for_tuple`, `coverage_report`).
+(`resolve_capability_for_tuple`, `coverage_report`, `projection_cells`,
+`projection_values`).
+
+The manifest is the one owner of capability membership. Three projections
+read it: the tuple shapes its rules admit as persisted step shapes
+(inspectable; this includes image shapes the runtime still rejects as
+unsupported input), the cells an authoring spec can carry (editable_existing)
+and what the AI Builder may propose (proposable_new). No projection promises
+that a flow using a cell is accepted: whole-flow acceptance belongs to the
+platform validators. Every vocabulary on the AI Builder wire derives from
+`projection_values`, or from `projection_cells` for document delivery modes;
+the one typed literal of those modes is pinned equal by a test.
 
 Engine-truth only: no Pattern Registry, no AI Builder, no planner prose.
 Planner-facing copy and strategy live on the Pattern Registry and
 Question Catalog.
-
-Versioning discipline: `FCM_VERSION` is the monotonic integer stamped on
-persisted plans, planning-state snapshots, and digests. Any
-capability-surface change — new registry key, added/changed
-`applies_to_tuples`, added/changed `FlowCapability` / nested-type field,
-or altered `invariants` content — bumps the version and keeps any retired
-capability resolvable with a deprecation reason for one bump cycle. The
-bump-discipline CI test covers this full surface, not just keys and
-`applies_to_tuples`.
 """
 
 from __future__ import annotations
 
 from collections.abc import Mapping
 from dataclasses import dataclass
+from enum import Enum, StrEnum
+from functools import cache
+from itertools import product
 from types import MappingProxyType
 from typing import Literal
 
@@ -31,15 +36,19 @@ from eneo.flows.citation_sidecar import (
     resolve_citation_mode,
 )
 from eneo.flows.enums import (
+    FlowAuthoringInputSource,
+    FlowAuthoringInputType,
+    FlowAuthoringOutputMode,
     FlowInputSource,
     FlowInputType,
     FlowOutputMode,
     FlowOutputType,
     flow_output_mode_uses_completion_model,
 )
+from eneo.flows.output_modes import speaker_mapping_violation
 from eneo.flows.type_policies import INPUT_TYPE_POLICIES, InputTypePolicy
 
-FCM_VERSION: int = 9
+FCM_VERSION: int = 10
 
 CapabilityId = str
 TupleSpec = tuple[FlowInputSource, FlowInputType, FlowOutputType, FlowOutputMode]
@@ -208,6 +217,19 @@ def _absorbed_invariants(
     return tuple(invariants)
 
 
+_INPUT_CAPABILITY_DESCRIPTIONS: Mapping[str, str] = MappingProxyType(
+    {
+        "text": "Plain text typed into a run form or produced by an earlier step.",
+        "json": "A JSON value from a run form or an earlier step's structured output.",
+        "document": "Uploaded documents whose text is extracted before the step runs.",
+        "file": "Uploaded files whose text is extracted before the step runs.",
+        "audio": "An uploaded audio recording, transcribed by the flow's transcription model.",
+        "image": "An uploaded image; no runtime backend reads raw image bytes.",
+        "any": "Whatever the source delivers, passed on without a type check.",
+    }
+)
+
+
 def _seed_input_type_capability(key: str, policy: InputTypePolicy) -> FlowCapability:
     if policy.supported:
         exposure: Exposure = "builder"
@@ -218,13 +240,10 @@ def _seed_input_type_capability(key: str, policy: InputTypePolicy) -> FlowCapabi
     return FlowCapability(
         id=f"input_{key}",
         label=f"{key.title()} input",
-        description=(
-            f"Seeded from `INPUT_TYPE_POLICIES['{key}']` — channel "
-            f"'{policy.channel}', contract_allowed={policy.contract_allowed}, "
-            f"requires_extraction={policy.requires_extraction}, "
-            f"requires_files={policy.requires_files}."
+        description=_INPUT_CAPABILITY_DESCRIPTIONS[key],
+        applies_to_tuples=tuple(
+            cell for cell in _LEGAL_CELLS if cell[1] is FlowInputType(key)
         ),
-        applies_to_tuples=(),
         required_config=(),
         invariants=_absorbed_invariants(key, policy),
         exposure=exposure,
@@ -440,13 +459,29 @@ _OUTPUT_MODE_CAPABILITY_SEED: Mapping[
 )
 
 
-# Output modes the planner cannot author yet; the engine still runs them.
+# Output modes and input sources the AI Builder never proposes; the engine
+# still runs them and the platform preserves saved steps that use them.
 _NOT_EXPOSED_OUTPUT_MODES: Mapping[FlowOutputMode, str] = MappingProxyType(
     {
+        FlowOutputMode.HTTP_POST: (
+            "HTTP delivery is configured by hand in the editor: its config holds "
+            "credentials that an authoring spec never carries, and the Builder "
+            "neither proposes nor edits it."
+        ),
         FlowOutputMode.SPEAKER_MAPPING: (
             "The planner never authors it: the Builder backend inserts it after "
             "transcription when the user asks to name the speakers, and people "
             "add it by hand in the editor."
+        ),
+    }
+)
+
+_NOT_EXPOSED_INPUT_SOURCES: Mapping[FlowInputSource, str] = MappingProxyType(
+    {
+        FlowInputSource.HTTP_GET: (
+            "HTTP input is configured by hand in the editor: its config holds "
+            "credentials that an authoring spec never carries, and the Builder "
+            "neither proposes nor edits it."
         ),
     }
 )
@@ -459,7 +494,7 @@ def _seed_output_mode_capability(mode: FlowOutputMode) -> FlowCapability:
         id=f"output_mode_{mode.value}",
         label=label,
         description=description,
-        applies_to_tuples=(),
+        applies_to_tuples=tuple(cell for cell in _LEGAL_CELLS if cell[3] is mode),
         required_config=(),
         invariants=invariants,
         exposure="not_exposed" if not_exposed_reason is not None else "builder",
@@ -557,22 +592,6 @@ def _seed_per_source_reader_execution_capability() -> FlowCapability:
         exposure="builder",
         not_exposed_reason=None,
     )
-
-
-CAPABILITY_REGISTRY: Mapping[CapabilityId, FlowCapability] = MappingProxyType(
-    {
-        **{
-            f"input_{key}": _seed_input_type_capability(key, policy)
-            for key, policy in INPUT_TYPE_POLICIES.items()
-        },
-        **{
-            f"output_mode_{mode.value}": _seed_output_mode_capability(mode)
-            for mode in FlowOutputMode
-        },
-        "citation_sidecar": _seed_citation_sidecar_capability(),
-        "per_source_reader_execution": _seed_per_source_reader_execution_capability(),
-    }
-)
 
 
 # Chain-composition truth: which `(previous_step_output_type, next_step_input_type)`
@@ -865,6 +884,67 @@ def _source_type_illegality(
     return None
 
 
+def _cell_illegality(cell: TupleSpec) -> tuple[str, str | None] | None:
+    """Why a cell is illegal for a step on its own, as ``(bucket, reason)``.
+
+    The one walk both ``_LEGAL_CELLS`` and ``_classify_cell`` read. The IO rule,
+    the single-cell source/type rules and the speaker-mapping source rule each
+    keep their one platform owner; none is restated here.
+    """
+    source, input_type, output_type, output_mode = cell
+    if not supports_step_io_tuple(
+        input_type=input_type, output_type=output_type, output_mode=output_mode
+    ):
+        return "illegal_io_triple", None
+    source_type_issue = _source_type_illegality(source, input_type)
+    if source_type_issue is not None:
+        return "illegal_source_type_pair", source_type_issue
+    if (
+        speaker_mapping_violation(
+            step_order=1,
+            input_source=source,
+            input_type=input_type,
+            output_type=output_type,
+            output_mode=output_mode,
+        )
+        is not None
+    ):
+        return "illegal_source_type_pair", (
+            f"output_mode {output_mode.value!r} does not accept input_source "
+            f"{source.value!r} (output_modes.speaker_mapping_violation)."
+        )
+    return None
+
+
+# Every tuple shape the listed manifest rules admit as a persisted step shape,
+# independent of what any surface exposes. This is a shape list, not an
+# acceptance rule: input bindings can make a platform-legal flow out of a cell
+# listed illegal here (a JSON input read from all previous steps), and a listed
+# cell can still be refused (image input fails graph validation as
+# unsupported_input_type), so the whole-flow validators decide acceptance. The
+# capability entries and the projections both read this one walk.
+_LEGAL_CELLS: tuple[TupleSpec, ...] = tuple(
+    cell
+    for cell in product(FlowInputSource, FlowInputType, FlowOutputType, FlowOutputMode)
+    if _cell_illegality(cell) is None
+)
+
+CAPABILITY_REGISTRY: Mapping[CapabilityId, FlowCapability] = MappingProxyType(
+    {
+        **{
+            f"input_{key}": _seed_input_type_capability(key, policy)
+            for key, policy in INPUT_TYPE_POLICIES.items()
+        },
+        **{
+            f"output_mode_{mode.value}": _seed_output_mode_capability(mode)
+            for mode in FlowOutputMode
+        },
+        "citation_sidecar": _seed_citation_sidecar_capability(),
+        "per_source_reader_execution": _seed_per_source_reader_execution_capability(),
+    }
+)
+
+
 def _classify_cell(
     input_source: FlowInputSource,
     input_type: FlowInputType,
@@ -878,13 +958,12 @@ def _classify_cell(
     ``"not_exposed"``, ``"exposed"`` — every legal path terminates in one
     of those four.
     """
-    if not supports_step_io_tuple(
-        input_type=input_type, output_type=output_type, output_mode=output_mode
-    ):
-        return "illegal_io_triple", None
-    source_type_issue = _source_type_illegality(input_source, input_type)
-    if source_type_issue is not None:
-        return "illegal_source_type_pair", source_type_issue
+    illegality = _cell_illegality((input_source, input_type, output_type, output_mode))
+    if illegality is not None:
+        return illegality
+    source_reason = _NOT_EXPOSED_INPUT_SOURCES.get(input_source)
+    if source_reason is not None:
+        return "not_exposed", source_reason
     input_cap = CAPABILITY_REGISTRY[f"input_{input_type.value}"]
     if input_cap.exposure == "not_exposed":
         return "not_exposed", input_cap.not_exposed_reason
@@ -941,6 +1020,83 @@ def resolve_capability_for_tuple(
     input_cap = CAPABILITY_REGISTRY[f"input_{input_type.value}"]
     mode_cap = CAPABILITY_REGISTRY[f"output_mode_{output_mode.value}"]
     return (input_cap, mode_cap)
+
+
+class CapabilityProjection(StrEnum):
+    """Which readers of the manifest a cell set serves.
+
+    ``INSPECTABLE``: the tuple shapes the manifest rules admit as persisted
+    step shapes, HTTP and image included. Image shapes are persisted shapes the
+    runtime still rejects as unsupported input; whole-flow acceptance belongs to
+    the platform validators. ``EDITABLE_EXISTING``: the inspectable cells an
+    authoring spec can carry. ``PROPOSABLE_NEW``: the cells the AI Builder may
+    propose from scratch.
+    """
+
+    INSPECTABLE = "inspectable"
+    EDITABLE_EXISTING = "editable_existing"
+    PROPOSABLE_NEW = "proposable_new"
+
+
+CapabilityAxis = Literal["input_source", "input_type", "output_type", "output_mode"]
+
+# Axis order of `TupleSpec`; the member order is the declaration order every
+# projection vocabulary follows.
+_AXES: tuple[CapabilityAxis, ...] = (
+    "input_source",
+    "input_type",
+    "output_type",
+    "output_mode",
+)
+_AXIS_MEMBERS: Mapping[CapabilityAxis, tuple[Enum, ...]] = MappingProxyType(
+    {
+        "input_source": tuple(FlowInputSource),
+        "input_type": tuple(FlowInputType),
+        "output_type": tuple(FlowOutputType),
+        "output_mode": tuple(FlowOutputMode),
+    }
+)
+
+# What an authoring spec can carry per axis. Output types are authored whole.
+_AUTHORING_VALUES: Mapping[CapabilityAxis, frozenset[str]] = MappingProxyType(
+    {
+        "input_source": frozenset(item.value for item in FlowAuthoringInputSource),
+        "input_type": frozenset(item.value for item in FlowAuthoringInputType),
+        "output_type": frozenset(item.value for item in FlowOutputType),
+        "output_mode": frozenset(item.value for item in FlowAuthoringOutputMode),
+    }
+)
+
+
+@cache
+def projection_cells(projection: CapabilityProjection) -> frozenset[TupleSpec]:
+    """The cells one projection admits; derived, never listed by hand."""
+
+    if projection is CapabilityProjection.PROPOSABLE_NEW:
+        return frozenset(
+            cell for cell in _LEGAL_CELLS if _classify_cell(*cell)[0] == "exposed"
+        )
+    if projection is CapabilityProjection.INSPECTABLE:
+        return frozenset(_LEGAL_CELLS)
+    return frozenset(
+        cell
+        for cell in _LEGAL_CELLS
+        if all(
+            member.value in _AUTHORING_VALUES[axis]
+            for axis, member in zip(_AXES, cell, strict=True)
+        )
+    )
+
+
+def projection_values(
+    projection: CapabilityProjection, axis: CapabilityAxis
+) -> tuple[str, ...]:
+    """The values of one axis that some cell of the projection uses, in enum
+    declaration order."""
+
+    index = _AXES.index(axis)
+    used = {cell[index] for cell in projection_cells(projection)}
+    return tuple(member.value for member in _AXIS_MEMBERS[axis] if member in used)
 
 
 def coverage_report() -> CoverageReport:

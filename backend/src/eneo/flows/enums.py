@@ -170,16 +170,6 @@ class FlowAuthoringOutputMode(str, Enum):
     SPEAKER_MAPPING = FlowOutputMode.SPEAKER_MAPPING.value
 
 
-# The subset the AI Builder may propose. A speaker-mapping step is authored by
-# hand; a spec carries it through edits and packages, but the model never
-# emits it.
-FLOW_BUILDER_PROPOSABLE_OUTPUT_MODES: frozenset[FlowAuthoringOutputMode] = frozenset(
-    mode
-    for mode in FlowAuthoringOutputMode
-    if mode is not FlowAuthoringOutputMode.SPEAKER_MAPPING
-)
-
-
 FLOW_INPUT_SOURCE_VALUES = tuple(item.value for item in FlowInputSource)
 FLOW_INPUT_TYPE_VALUES = tuple(item.value for item in FlowInputType)
 FLOW_OUTPUT_MODE_VALUES = tuple(item.value for item in FlowOutputMode)

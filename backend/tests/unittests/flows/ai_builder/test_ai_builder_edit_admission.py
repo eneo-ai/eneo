@@ -488,3 +488,38 @@ def test_a_schema_following_form_field_passes_admission() -> None:
     assert [(f.variable_name, f.options) for f in proposal.form_fields] == [
         ("case_id", [])
     ]
+
+
+@pytest.mark.parametrize(
+    ("field", "value"),
+    [
+        ("input_type", "image"),
+        ("input_source", "http_get"),
+        ("output_type", "xml"),
+    ],
+)
+def test_a_modify_outside_the_editable_vocabulary_is_refused(
+    field: str, value: str
+) -> None:
+    with pytest.raises(ProposalToolArgumentsError, match=field):
+        validate_propose_flow_tool_arguments(
+            arguments=_strict_arguments(
+                _strict_modify("existing_step_1", **{field: value})
+            ),
+            tool_schema=_edit_schema(1),
+        )
+
+
+def test_a_modify_inside_the_editable_vocabulary_is_admitted() -> None:
+    validate_propose_flow_tool_arguments(
+        arguments=_strict_arguments(
+            _strict_modify(
+                "existing_step_1",
+                input_type="document",
+                input_source="flow_input",
+                output_type="docx",
+                document_delivery_mode="template_fill",
+            )
+        ),
+        tool_schema=_edit_schema(1),
+    )
