@@ -4,6 +4,7 @@ import { readFile, writeFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import { DuckDBInstance } from "@duckdb/node-api";
 import { ToolError } from "../../errors";
+import { spillDirectory } from "../tabular/engine/duckdb";
 import { convertXlsxToCsvSheets } from "../tabular/engine/xlsx-to-csv";
 import { assertZipWithinBounds } from "../tabular/zip-guard";
 import type {
@@ -72,6 +73,7 @@ async function readTypedCsv(csvPath: string): Promise<{ columns: string[]; rows:
   // Server-built SQL over a file this child was given; no model SQL runs here.
   const instance = await DuckDBInstance.create(":memory:", {
     memory_limit: "256MB",
+    temp_directory: spillDirectory(),
     threads: "1",
     allow_community_extensions: "false",
     autoinstall_known_extensions: "false",

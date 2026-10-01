@@ -5,6 +5,8 @@
  * Only a single SELECT is accepted; row caps and interruption bound execution.
  * The worker adds process isolation and a deadline covering the complete job.
  */
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import {
   DuckDBInstance,
   StatementType,
@@ -18,11 +20,20 @@ import type { TabularColumn } from "./types";
  * Process-global instance for the ingest lane. Never executes LLM-supplied
  * SQL, so it doesn't need the per-call lockdown that `runQuery` uses.
  */
+/**
+ * Where DuckDB spills when a query outgrows its memory limit. Set explicitly because the
+ * default is relative to the working directory, which a confined child cannot write to.
+ */
+export function spillDirectory(): string {
+  return join(tmpdir(), "duckdb-spill");
+}
+
 let _ingestInstance: Promise<DuckDBInstance> | null = null;
 function getIngestInstance(): Promise<DuckDBInstance> {
   if (!_ingestInstance)
     _ingestInstance = DuckDBInstance.create(":memory:", {
       memory_limit: "256MB",
+      temp_directory: spillDirectory(),
       max_temp_directory_size: "256MB",
       threads: "1",
       allow_community_extensions: "false",
@@ -332,6 +343,7 @@ export async function runQuery(input: RunQueryInput): Promise<RunQueryResult> {
   const sql = input.sql.replace(/\s*;\s*$/, "");
   const instance = await DuckDBInstance.create(":memory:", {
     memory_limit: `${memoryMb}MB`,
+    temp_directory: spillDirectory(),
     max_temp_directory_size: `${tempMb}MB`,
     threads: String(threads),
     allow_community_extensions: "false",

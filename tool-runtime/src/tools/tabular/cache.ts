@@ -78,6 +78,16 @@ export class SheetCache {
     }
   }
 
+  /**
+   * Evicts on a timer. A lookup only removes the expired entry it was asked for and a build is
+   * the only other trigger, so without this an idle runtime keeps expired sheets on disk.
+   */
+  sweepEvery(intervalMs: number): ReturnType<typeof setInterval> {
+    const timer = setInterval(() => void this.evict(), intervalMs);
+    timer.unref();
+    return timer;
+  }
+
   /** Drops expired entries, then the least recently used ones until the size budget holds. */
   async evict(): Promise<void> {
     let entries: { directory: string; used: number; bytes: number }[] = [];

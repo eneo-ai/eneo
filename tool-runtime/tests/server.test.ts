@@ -90,6 +90,14 @@ describe("authentication", () => {
       }),
     ).toThrow();
   });
+  test("the parsed-sheet lifetime is configurable but never shorter than a call", () => {
+    const ttl = (seconds?: string) =>
+      loadConfig({ TOOL_RUNTIME_TOKEN: TOKEN, TABULAR_CACHE_TTL_SECONDS: seconds }).tabular.config
+        .cache_ttl_ms;
+    expect(ttl()).toBe(30 * 60 * 1000);
+    expect(ttl("60")).toBe(60_000);
+    expect(() => ttl("0")).toThrow();
+  });
 });
 
 describe("MCP endpoint", () => {

@@ -38,8 +38,16 @@ const environmentSchema = z.object({
     ),
   TABULAR_MAX_UPLOAD_MB: z.coerce.number().int().optional(),
   TABULAR_CACHE_MB: z.coerce.number().int().optional(),
+  // How long parsed sheets stay on disk. The floor keeps an entry alive for the call that
+  // built it: the query child reads its sheets after the parse.
+  TABULAR_CACHE_TTL_SECONDS: z.coerce.number().int().min(60).max(86_400).optional(),
   // Native DuckDB children are memory-heavy (up to memory_mb each): run few at a time.
   TABULAR_CONCURRENCY: z.coerce.number().int().min(1).max(16).default(2),
+  // Refuse to start, and to run any job, unless sandbox children are confined with Landlock.
+  TOOL_RUNTIME_REQUIRE_CONFINEMENT: z
+    .enum(["true", "false"])
+    .default("false")
+    .transform((value) => value === "true"),
   // Shown in the footer of generated documents.
   DOCUMENT_ORGANISATION_NAME: z.string().max(120).optional(),
 });
@@ -48,6 +56,7 @@ export type RuntimeConfig = {
   token: string;
   port: number;
   maxConcurrency: number;
+  requireConfinement: boolean;
   compute: ComputeConfig;
   tabular: { config: TabularConfig; allowedFileOrigins: string[]; concurrency: number };
   documents: DocumentConfig;
@@ -59,6 +68,7 @@ export function loadConfig(environment: Record<string, string | undefined>): Run
     token: parsed.TOOL_RUNTIME_TOKEN,
     port: parsed.PORT,
     maxConcurrency: parsed.MAX_CONCURRENCY,
+    requireConfinement: parsed.TOOL_RUNTIME_REQUIRE_CONFINEMENT,
     compute: computeConfigSchema.parse({
       ...(parsed.COMPUTE_TIMEOUT_MS !== undefined ? { timeout_ms: parsed.COMPUTE_TIMEOUT_MS } : {}),
       ...(parsed.COMPUTE_MEMORY_MB !== undefined ? { memory_mb: parsed.COMPUTE_MEMORY_MB } : {}),
@@ -77,6 +87,9 @@ export function loadConfig(environment: Record<string, string | undefined>): Run
           : {}),
         ...(parsed.TABULAR_CACHE_MB !== undefined
           ? { cache_max_bytes: parsed.TABULAR_CACHE_MB * 1024 * 1024 }
+          : {}),
+        ...(parsed.TABULAR_CACHE_TTL_SECONDS !== undefined
+          ? { cache_ttl_ms: parsed.TABULAR_CACHE_TTL_SECONDS * 1000 }
           : {}),
       }),
     },

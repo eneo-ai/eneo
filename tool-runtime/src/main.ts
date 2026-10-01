@@ -1,4 +1,5 @@
 import { loadConfig } from "./config";
+import type { SandboxJob } from "./child";
 import { concurrencyLimit, runIsolated } from "./sandbox";
 import { createHandler, type Endpoint } from "./server";
 import type { ComputeOutcome } from "./tools/compute/ports";
@@ -13,6 +14,23 @@ import type { ChartRendering } from "./tools/charts/ports";
 import { chartTools } from "./tools/charts/tool";
 
 const config = loadConfig(process.env);
+const isolate = (job: SandboxJob, timeoutMs: number) =>
+  runIsolated(job, timeoutMs, { requireConfinement: config.requireConfinement });
+// What a sandbox child of this runtime is confined to, measured by running one.
+const confinement = await isolate({ job: { kind: "confinement" } }, 10_000).catch(() => ({
+  files: false,
+  tcp: false,
+}));
+if (config.requireConfinement && !confinement.files) {
+  console.error(
+    JSON.stringify({
+      event: "confinement_unavailable",
+      message:
+        "TOOL_RUNTIME_REQUIRE_CONFINEMENT is set, but sandbox children cannot be confined here. Landlock needs Linux 5.13 or later, enabled in the kernel and allowed by the container's seccomp profile.",
+    }),
+  );
+  process.exit(1);
+}
 // The whole-job deadline covers child start-up (Bun plus the WASM engine) on top of the
 // script's own QuickJS deadline, which reports TIMEOUT as an ordinary outcome.
 const computeJobTimeoutMs = config.compute.timeout_ms + 5_000;
@@ -23,13 +41,20 @@ const endpoints: Endpoint[] = [
     tools: computeTools(
       config.compute,
       async (job) =>
-        (await runIsolated({ job, config: config.compute }, computeJobTimeoutMs)) as ComputeOutcome,
+        (await isolate({ job, config: config.compute }, computeJobTimeoutMs)) as ComputeOutcome,
     ),
   },
 ];
 const tabular = config.tabular.config;
 const slot = concurrencyLimit(config.tabular.concurrency);
 // Budgets keep one call (downloads, a parse, a query) inside Eneo's 60 s tool-call timeout.
+const sheetCache = new SheetCache(
+  defaultCacheRoot(),
+  tabular.cache_ttl_ms,
+  tabular.cache_max_bytes,
+);
+// Parsed sheets are plaintext on disk: they leave within one sweep of expiring.
+sheetCache.sweepEvery(Math.max(30_000, Math.min(tabular.cache_ttl_ms, 5 * 60_000)));
 const ingestTimeoutMs = 25_000;
 const queryJobTimeoutMs = Math.min(tabular.query_timeout_ms + 10_000, 30_000);
 endpoints.push({
@@ -39,18 +64,18 @@ endpoints.push({
   tools: tabularTools({
     config: tabular,
     allowedFileOrigins: config.tabular.allowedFileOrigins,
-    cache: new SheetCache(defaultCacheRoot(), tabular.cache_ttl_ms, tabular.cache_max_bytes),
+    cache: sheetCache,
     executor: {
       ingest: (job) =>
         slot(
           async () =>
-            (await runIsolated({ job }, ingestTimeoutMs)) as {
+            (await isolate({ job }, ingestTimeoutMs)) as {
               sheets: SheetMetadata[];
             },
         ),
       query: (job) =>
         slot(
-          async () => (await runIsolated({ job }, queryJobTimeoutMs)) as unknown as QueryJobResult,
+          async () => (await isolate({ job }, queryJobTimeoutMs)) as unknown as QueryJobResult,
         ),
     },
   }),
@@ -65,7 +90,7 @@ const fileAccess = {
   timeoutMs: tabular.download_timeout_ms,
 };
 const render = fileRenderer((job) =>
-  slot(async () => (await runIsolated({ job }, renderTimeoutMs)) as RenderResult),
+  slot(async () => (await isolate({ job }, renderTimeoutMs)) as RenderResult),
 );
 // One endpoint creates every kind of file, so one Eneo provider serves the capability.
 endpoints.push(
@@ -82,7 +107,7 @@ endpoints.push(
     toolTimeoutMs: renderTimeoutMs + 5_000,
     tools: chartTools(
       chartConfigSchema.parse({}),
-      (job) => slot(async () => (await runIsolated({ job }, renderTimeoutMs)) as ChartRendering),
+      (job) => slot(async () => (await isolate({ job }, renderTimeoutMs)) as ChartRendering),
       {
         allowedFileOrigins: config.tabular.allowedFileOrigins,
         maxBytes: tabular.max_upload_bytes,
@@ -106,5 +131,6 @@ console.log(
     event: "listening",
     port: config.port,
     endpoints: endpoints.map((e) => e.slug),
+    confinement,
   }),
 );

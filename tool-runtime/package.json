@@ -9,6 +9,7 @@
     "start": "bun src/main.ts",
     "dev": "bun --watch src/main.ts",
     "typecheck": "tsc --noEmit",
+    "build:landrun": "docker run --rm -v \"$PWD/bin:/out\" -e CGO_ENABLED=0 -e GOBIN=/out golang:1.27-bookworm go install github.com/zouuup/landrun/cmd/landrun@v0.1.17",
     "test": "bun test tests --timeout 30000"
   },
   "dependencies": {

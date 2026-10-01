@@ -38,6 +38,13 @@ services:
       # well; a mismatch then fails the call instead of fetching.
       TOOL_RUNTIME_FILE_ORIGINS: ${TOOL_RUNTIME_FILE_ORIGINS:-}
       TABULAR_CONCURRENCY: ${TOOL_RUNTIME_TABULAR_CONCURRENCY:-2}
+      # How long parsed sheets (plaintext) stay in /tmp for follow-up
+      # questions. Lower it, down to 60, where files are sensitive.
+      TABULAR_CACHE_TTL_SECONDS: ${TOOL_RUNTIME_TABULAR_CACHE_TTL_SECONDS:-1800}
+      # Each job runs confined with Landlock where the host kernel offers it
+      # (Linux 5.13 or later). Set true to refuse to start, and to run any
+      # job, on a host that cannot confine them.
+      TOOL_RUNTIME_REQUIRE_CONFINEMENT: ${TOOL_RUNTIME_REQUIRE_CONFINEMENT:-false}
       # Name shown in the footer of generated documents.
       DOCUMENT_ORGANISATION_NAME: ${TOOL_RUNTIME_DOCUMENT_ORGANISATION_NAME:-}
     # Only the backend can reach the runtime, and the runtime can reach nothing:

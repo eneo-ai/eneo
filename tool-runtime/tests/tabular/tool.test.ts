@@ -339,6 +339,20 @@ describe("cache", () => {
     await cache.evict();
     expect(await readdir(dir)).toEqual([]);
   });
+
+  test("an idle runtime still removes expired entries from disk", async () => {
+    const dir = join(root, "sweep");
+    const cache = new SheetCache(dir, 20, config.cache_max_bytes);
+    await cache.getOrBuild("k", async () => [] as SheetMetadata[]);
+    expect(await readdir(dir)).toHaveLength(1);
+    const timer = cache.sweepEvery(10);
+    try {
+      await Bun.sleep(100);
+      expect(await readdir(dir)).toEqual([]);
+    } finally {
+      clearInterval(timer);
+    }
+  });
 });
 
 describe("sandbox", () => {

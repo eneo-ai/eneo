@@ -64,6 +64,19 @@ be reachable from inside the devcontainer. In development the runtime shares the
 devcontainer's network. Only the deployment overlay puts it on an internal
 network without egress.
 
+Sandbox children are confined with [landrun](https://github.com/zouuup/landrun)
+(Linux Landlock) when it is installed. The image builds it in; for local runs
+and the confinement tests, build it once from the host, where Docker is
+available:
+
+```bash
+cd tool-runtime
+bun run build:landrun   # writes bin/landrun (ignored by git)
+```
+
+Without it children run unconfined and the confinement tests are skipped. The
+start-up log line reports what is enforced (`"confinement":{"files":true,"tcp":true}`).
+
 ## Configuration
 
 | Variable              | Default | Notes                                  |
@@ -77,6 +90,8 @@ network without egress.
 | `TABULAR_CONCURRENCY` | 2       | DuckDB children running at once        |
 | `TABULAR_MAX_UPLOAD_MB` | 20    | Largest attachment downloaded          |
 | `TABULAR_CACHE_MB`    | 256     | Parsed-sheet cache budget on `/tmp`    |
+| `TABULAR_CACHE_TTL_SECONDS` | 1800 | How long parsed sheets stay on `/tmp` (60 to 86400) |
+| `TOOL_RUNTIME_REQUIRE_CONFINEMENT` | false | Refuse to start or run jobs unless children are confined |
 | `DOCUMENT_ORGANISATION_NAME` | none | Name in generated document footers |
 
 Releases are versioned by `VERSION` and published by

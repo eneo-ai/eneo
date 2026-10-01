@@ -77,6 +77,10 @@ jobs:
       - name: Typecheck
         run: bun run typecheck
 
+      # The confinement tests need the launcher; without it they are skipped.
+      - name: Build landrun
+        run: bun run build:landrun
+
       - name: Test
         run: bun run test
 
@@ -133,11 +137,14 @@ jobs:
           token="$(openssl rand -hex 32)"
           docker run -d --name tool-runtime --read-only --tmpfs /tmp:rw,noexec,nosuid,nodev \
             --cap-drop ALL --security-opt no-new-privileges:true \
-            -e TOOL_RUNTIME_TOKEN="$token" -p 3010:3010 eneo-tool-runtime:candidate
+            -e TOOL_RUNTIME_TOKEN="$token" -e TOOL_RUNTIME_REQUIRE_CONFINEMENT=true \
+            -p 3010:3010 eneo-tool-runtime:candidate
           for _ in $(seq 1 30); do
             curl -fsS http://127.0.0.1:3010/health/ready >/dev/null && break
             sleep 1
           done
+          # The runtime only starts in this mode when its sandbox children are confined.
+          docker logs tool-runtime 2>&1 | grep -F '"confinement":{"files":true'
           body='{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"run_javascript","arguments":{"code":"return input.reduce((a, b) => a + b, 0);","input":[1,2,39]}}}'
           curl -fsS http://127.0.0.1:3010/mcp/compute \
             -H "authorization: Bearer $token" \

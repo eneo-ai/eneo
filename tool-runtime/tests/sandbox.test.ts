@@ -1,6 +1,11 @@
 import { describe, expect, test } from "bun:test";
+import { mkdtemp, rm, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { REQUIRE_CONFINEMENT } from "../src/child";
 import { computeConfigSchema } from "../src/tools/compute/config";
-import { concurrencyLimit, runIsolated } from "../src/sandbox";
+import { tabularConfigSchema } from "../src/tools/tabular/config";
+import { concurrencyLimit, confinement, runIsolated } from "../src/sandbox";
 
 const config = computeConfigSchema.parse({});
 
@@ -71,6 +76,118 @@ describe("sandbox child", () => {
       ),
     ).rejects.toMatchObject({ code: "TIMEOUT" });
     expect(performance.now() - started).toBeLessThan(5_000);
+  });
+});
+
+// Confinement needs landrun (`bun run build:landrun`) and a kernel with Landlock. Where either
+// is missing the runtime runs children unconfined, and these tests have nothing to check.
+const enforced = (await runIsolated({ job: { kind: "confinement" } }, 10_000)) as {
+  files: boolean;
+  tcp: boolean;
+};
+
+describe("confinement", () => {
+  /** Runs a script the way a job's child runs, with exactly that job's file access. */
+  async function asChildOf(
+    job: Parameters<typeof confinement>[0],
+    directory: string,
+    script: string,
+  ): Promise<Record<string, string>> {
+    const child = Bun.spawn(
+      [...confinement(job, directory), process.execPath, "-e", script],
+      {
+        cwd: new URL("..", import.meta.url).pathname,
+        env: { PATH: process.env.PATH ?? "", TMPDIR: directory },
+        stdout: "pipe",
+        stderr: "ignore",
+      },
+    );
+    return JSON.parse(await new Response(child.stdout).text());
+  }
+
+  test.skipIf(!enforced.files)(
+    "a child reaches its own job's files and nothing of another job's",
+    async () => {
+      const root = await mkdtemp(join(tmpdir(), "eneo-confinement-test-"));
+      try {
+        const own = join(root, "own");
+        const mine = join(root, "cache-mine");
+        const theirs = join(root, "cache-theirs");
+        for (const directory of [own, mine, theirs])
+          await Bun.write(join(directory, "0.csv"), "id\n1\n");
+        const script = `
+          const fs = require("node:fs");
+          const attempt = (run) => { try { run(); return "ok"; } catch (e) { return e.code ?? "failed"; } };
+          let tcp = "ok";
+          try { Bun.listen({ hostname: "127.0.0.1", port: 0, socket: { data() {} } }).stop(true); } catch { tcp = "denied"; }
+          console.log(JSON.stringify({
+            readDeclared: attempt(() => fs.readFileSync(${JSON.stringify(join(mine, "0.csv"))})),
+            writeDeclared: attempt(() => fs.writeFileSync(${JSON.stringify(join(mine, "0.csv"))}, "x")),
+            writeOwn: attempt(() => fs.writeFileSync(${JSON.stringify(join(own, "scratch"))}, "x")),
+            readOther: attempt(() => fs.readFileSync(${JSON.stringify(join(theirs, "0.csv"))})),
+            listOther: attempt(() => fs.readdirSync(${JSON.stringify(theirs)})),
+            listTmp: attempt(() => fs.readdirSync(${JSON.stringify(tmpdir())})),
+            parentEnvironment: attempt(() => fs.readFileSync("/proc/" + process.ppid + "/environ")),
+            spawn: attempt(() => { if (!Bun.spawnSync(["/bin/true"]).success) throw { code: "EACCES" }; }),
+            tcp,
+          }));`;
+        const job = {
+          job: {
+            kind: "tabular_query" as const,
+            csvPath: join(mine, "0.csv"),
+            tables: [],
+            statements: ["SELECT 1"],
+            explain: false,
+            config: tabularConfigSchema.parse({}),
+          },
+        };
+        expect(await asChildOf(job, own, script)).toEqual({
+          readDeclared: "ok",
+          writeDeclared: "EACCES",
+          writeOwn: "ok",
+          readOther: "EACCES",
+          listOther: "EACCES",
+          listTmp: "EACCES",
+          parentEnvironment: "EACCES",
+          spawn: "EACCES",
+          tcp: enforced.tcp ? "denied" : "ok",
+        });
+      } finally {
+        await rm(root, { recursive: true, force: true });
+      }
+    },
+  );
+
+  test("a child that must be confined refuses its job when it is not", async () => {
+    const directory = await mkdtemp(join(tmpdir(), "eneo-confinement-test-"));
+    try {
+      await writeFile(join(directory, "marker"), "");
+      // No launcher: the child starts unconfined and has to notice that for itself.
+      const child = Bun.spawn(
+        [process.execPath, new URL("../src/child.ts", import.meta.url).pathname, REQUIRE_CONFINEMENT],
+        {
+          env: { PATH: process.env.PATH ?? "", TMPDIR: directory },
+          stdin: new Blob([JSON.stringify({ job: { kind: "env" } })]),
+          stdout: "pipe",
+          stderr: "ignore",
+        },
+      );
+      expect(JSON.parse(await new Response(child.stdout).text())).toMatchObject({
+        ok: false,
+        error: { code: "CONFINEMENT_UNAVAILABLE" },
+      });
+    } finally {
+      await rm(directory, { recursive: true, force: true });
+    }
+  });
+
+  test.skipIf(!enforced.files)("a confined job still passes when confinement is required", async () => {
+    const outcome = await runIsolated(
+      { job: { kind: "compute", code: "return 1 + 1;", input: null }, config },
+      10_000,
+      { requireConfinement: true },
+    );
+    expect(outcome).toMatchObject({ ok: true, result: 2 });
   });
 });
 

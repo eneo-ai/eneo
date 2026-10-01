@@ -7,6 +7,15 @@ COPY package.json bun.lock ./
 RUN --mount=type=cache,target=/root/.bun/install/cache \
     bun install --frozen-lockfile --production
 
+# landrun confines every sandbox child with Landlock before it starts (see src/sandbox.ts).
+# Built from source at a pinned version, which the Go checksum database verifies; keep it in
+# step with the build:landrun script in package.json.
+FROM --platform=$BUILDPLATFORM golang:1.27-bookworm AS landrun
+ARG TARGETARCH
+RUN CGO_ENABLED=0 GOARCH=$TARGETARCH \
+    go install github.com/zouuup/landrun/cmd/landrun@v0.1.17 \
+    && find /go/bin -name landrun -type f -exec cp {} /landrun \;
+
 FROM oven/bun:1.3.14-slim
 ARG VERSION=0.0.0-dev
 ARG GIT_SHA=unknown
@@ -29,6 +38,7 @@ RUN apt-get update \
 WORKDIR /app
 ENV NODE_ENV=production \
     APP_VERSION=${VERSION}
+COPY --from=landrun /landrun /usr/local/bin/landrun
 COPY --from=deps /app/node_modules ./node_modules
 COPY package.json tsconfig.json ./
 COPY src ./src
