@@ -19,12 +19,16 @@
   import { buildSharePointSelectionKey } from "./selectionKey";
   import {
     hasSelectedSharePointDescendant,
+    sharePointTreeHasMatchingDescendant,
+    sharePointTreeNodeVisible,
     type SharePointTreeItem,
     type SharePointTreeNode
   } from "./treeState";
 
   interface Props {
     node: SharePointTreeNode;
+    /** Normalised search query; empty when not searching. */
+    query?: string;
     selectedItemKeySet: Set<string>;
     selectedPaths: string[];
     ancestorSelected?: boolean;
@@ -35,6 +39,7 @@
 
   let {
     node,
+    query = "",
     selectedItemKeySet,
     selectedPaths,
     ancestorSelected = false,
@@ -78,13 +83,13 @@
     currentNode.type === "folder" &&
     hasSelectedSharePointDescendant(selectedPaths, currentNode.path)}
   {@const checkboxId = `sharepoint-item-${currentNode.id}`}
+  {@const expanded =
+    currentNode.expanded || sharePointTreeHasMatchingDescendant(currentNode, query)}
 
   <li
     role="treeitem"
     aria-selected={selected}
-    aria-expanded={currentNode.type === "folder" && currentNode.has_children
-      ? currentNode.expanded
-      : undefined}
+    aria-expanded={currentNode.type === "folder" && currentNode.has_children ? expanded : undefined}
   >
     <div
       class="border-border flex min-h-11 w-full min-w-0 items-center gap-2 border-b px-3 text-left transition-colors
@@ -104,16 +109,16 @@
         <Button
           variant="ghost"
           class="h-10 min-w-0 flex-1 justify-start px-2"
-          aria-label={currentNode.expanded
+          aria-label={expanded
             ? m.sharepoint_collapse_folder_named({ name: currentNode.name })
             : m.sharepoint_expand_folder_named({ name: currentNode.name })}
           onclick={() => onToggleExpanded(currentNode)}
         >
           <ChevronRight
-            class="size-4 shrink-0 transition-transform {currentNode.expanded ? 'rotate-90' : ''}"
+            class="size-4 shrink-0 transition-transform {expanded ? 'rotate-90' : ''}"
             aria-hidden="true"
           />
-          {#if currentNode.expanded}
+          {#if expanded}
             <FolderOpen class="text-muted-foreground size-4 shrink-0" aria-hidden="true" />
           {:else}
             <Folder class="text-muted-foreground size-4 shrink-0" aria-hidden="true" />
@@ -183,7 +188,7 @@
       {/if}
     </div>
 
-    {#if currentNode.type === "folder" && currentNode.expanded}
+    {#if currentNode.type === "folder" && expanded}
       <ul role="group" class="border-border ml-4 border-l sm:ml-5">
         {#if currentNode.loading}
           <li role="none">
@@ -214,7 +219,7 @@
             </div>
           </li>
         {:else}
-          {#each currentNode.children ?? [] as child (buildSharePointSelectionKey(child))}
+          {#each (currentNode.children ?? []).filter( (child) => sharePointTreeNodeVisible(child, query) ) as child (buildSharePointSelectionKey(child))}
             {@render renderNode(child, selected)}
           {/each}
         {/if}

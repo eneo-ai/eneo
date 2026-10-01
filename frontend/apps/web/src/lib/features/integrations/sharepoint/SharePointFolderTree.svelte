@@ -1,15 +1,19 @@
 <script lang="ts">
   import { getEneo } from "$lib/core/Eneo";
-  import { Cloud, Earth, Info, LoaderCircle, RefreshCw } from "@lucide/svelte";
+  import { Cloud, Earth, Info, LoaderCircle, RefreshCw, Search } from "@lucide/svelte";
   import { Button } from "$lib/components/ui/button/index.js";
   import { Checkbox } from "$lib/components/ui/checkbox/index.js";
+  import * as InputGroup from "$lib/components/ui/input-group/index.js";
   import type { components } from "@eneo/eneo-js";
   import SharePointFolderTreeNode from "./SharePointFolderTreeNode.svelte";
   import { m } from "$lib/paraglide/messages";
   import { buildSharePointSelectionKey } from "./selectionKey";
   import { fetchSharePointFixtureTree, type SharePointFixtureScenario } from "./fixtureMode";
   import {
+    countSharePointTreeMatches,
     createSharePointTreeNode,
+    normalizeSharePointTreeQuery,
+    sharePointTreeNodeVisible,
     type SharePointTreeItem,
     type SharePointTreeNode
   } from "./treeState";
@@ -36,7 +40,8 @@
       web_url: item.web_url ?? undefined,
       has_children: item.has_children,
       size: item.size ?? undefined,
-      modified: item.modified ?? undefined
+      modified: item.modified ?? undefined,
+      source_metadata: item.source_metadata ?? []
     };
   }
 
@@ -76,6 +81,12 @@
   let rootItems = $state<SharePointTreeNode[]>([]);
   let rootLoading = $state(false);
   let rootLoadError = $state(false);
+  let search = $state("");
+  const query = $derived(normalizeSharePointTreeQuery(search));
+  const visibleRootItems = $derived(
+    rootItems.filter((item) => sharePointTreeNodeVisible(item, query))
+  );
+  const matchCount = $derived(countSharePointTreeMatches(rootItems, query));
   let treeGeneration = 0;
   let selectedItemKeySet = $derived.by(() => new Set(selectedItemKeys));
   let siteRootSelected = $derived(selectedItemKeySet.has(siteRootSelectionKey));
@@ -200,6 +211,34 @@
     {m.sharepoint_tree_selection_description()}
   </p>
 
+  <div class="flex flex-col gap-1">
+    <InputGroup.Root class="bg-background">
+      <InputGroup.Addon>
+        <Search class="size-4 shrink-0 opacity-60" aria-hidden="true" />
+      </InputGroup.Addon>
+      <InputGroup.Input
+        type="search"
+        bind:value={search}
+        placeholder={m.sharepoint_search_content({ name: siteName })}
+        aria-label={m.sharepoint_search_content({ name: siteName })}
+        aria-describedby="sharepoint-search-scope"
+        autocomplete="off"
+      />
+    </InputGroup.Root>
+    <!-- Names and document properties of what has been opened so far; folders
+         that were never expanded are not fetched just to search them. -->
+    <p id="sharepoint-search-scope" class="text-muted-foreground px-1 text-xs" aria-live="polite">
+      {#if query}
+        {matchCount === 1
+          ? m.sharepoint_search_matches_one({ count: matchCount })
+          : m.sharepoint_search_matches_other({ count: matchCount })}
+        · {m.sharepoint_search_scope_hint()}
+      {:else}
+        {m.sharepoint_search_scope_hint()}
+      {/if}
+    </p>
+  </div>
+
   <div
     class="border-border bg-card min-h-56 flex-1 overflow-x-hidden overflow-y-auto rounded-lg border"
     aria-busy={rootLoading}
@@ -249,19 +288,26 @@
         </label>
       </div>
 
-      <ul role="tree" aria-label={siteName} class="flex flex-col">
-        {#each rootItems as item (buildSharePointSelectionKey(item))}
-          <SharePointFolderTreeNode
-            node={item}
-            {selectedItemKeySet}
-            {selectedPaths}
-            ancestorSelected={siteRootSelected}
-            {onToggleSelect}
-            onToggleExpanded={toggleNodeExpanded}
-            onRetryLoad={retryNodeLoad}
-          />
-        {/each}
-      </ul>
+      {#if query && visibleRootItems.length === 0}
+        <div class="text-muted-foreground px-4 py-10 text-center text-sm" role="status">
+          {m.sharepoint_search_no_matches()}
+        </div>
+      {:else}
+        <ul role="tree" aria-label={siteName} class="flex flex-col">
+          {#each visibleRootItems as item (buildSharePointSelectionKey(item))}
+            <SharePointFolderTreeNode
+              node={item}
+              {query}
+              {selectedItemKeySet}
+              {selectedPaths}
+              ancestorSelected={siteRootSelected}
+              {onToggleSelect}
+              onToggleExpanded={toggleNodeExpanded}
+              onRetryLoad={retryNodeLoad}
+            />
+          {/each}
+        </ul>
+      {/if}
     {/if}
   </div>
 </div>

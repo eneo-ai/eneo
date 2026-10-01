@@ -4436,5 +4436,10 @@
   "resource_file": "file",
   "select_all": "Select all",
   "sync_failed": "Sync failed",
-  "source_metadata_label": "Document properties"
+  "source_metadata_label": "Document properties",
+  "sharepoint_search_content": "Search files, folders and properties in {name}",
+  "sharepoint_search_scope_hint": "Searches names and properties in folders that have been opened.",
+  "sharepoint_search_no_matches": "Nothing loaded matches the search. Open more folders or change the search.",
+  "sharepoint_search_matches_one": "{count} match",
+  "sharepoint_search_matches_other": "{count} matches"
 }

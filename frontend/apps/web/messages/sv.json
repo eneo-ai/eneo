@@ -4436,5 +4436,10 @@
   "resource_file": "fil",
   "select_all": "Välj alla",
   "sync_failed": "Synkronisering misslyckades",
-  "source_metadata_label": "Dokumentegenskaper"
+  "source_metadata_label": "Dokumentegenskaper",
+  "sharepoint_search_content": "Sök filer, mappar och egenskaper i {name}",
+  "sharepoint_search_scope_hint": "Sökningen gäller namn och egenskaper i mappar som har öppnats.",
+  "sharepoint_search_no_matches": "Inget som lästs in matchar sökningen. Öppna fler mappar eller ändra sökningen.",
+  "sharepoint_search_matches_one": "{count} träff",
+  "sharepoint_search_matches_other": "{count} träffar"
 }
