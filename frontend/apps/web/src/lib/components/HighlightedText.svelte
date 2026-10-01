@@ -12,7 +12,8 @@
 {#if query}
   {#each splitSharePointMatches(text, query) as segment, index (index)}
     {#if segment.match}
-      <mark class="bg-accent-dimmer rounded-sm text-inherit">{segment.text}</mark>
+      <!-- Highlighter yellow from the theme, so it stays readable in both modes. -->
+      <mark class="bg-highlight text-highlight-foreground rounded-sm px-0.5">{segment.text}</mark>
     {:else}
       {segment.text}
     {/if}
