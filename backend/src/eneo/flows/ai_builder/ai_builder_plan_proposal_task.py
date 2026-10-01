@@ -133,7 +133,10 @@ def build_plan_proposal_system_prompt(
             + (
                 f"Set review_mode to '{structured_review_mode.value}' on the one "
                 "step whose JSON result the person checks and corrects before "
-                "later steps use it, and null on every other step; "
+                "later steps use it, and null on every other step (a last step "
+                "that produces the delivered document or text does not stay a "
+                "JSON result, so compute the figures the person reviews in an "
+                "earlier step with output_fields and set review_mode there); "
                 if structured_review_mode is not None
                 else "Do not set review_mode, and "
             )

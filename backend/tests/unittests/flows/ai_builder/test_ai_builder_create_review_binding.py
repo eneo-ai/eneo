@@ -335,6 +335,119 @@ def test_an_ambiguous_report_names_only_authored_steps() -> None:
     assert "('Read documents', 'Analyse risks')" in raised.value.detail
 
 
+_DOCX_LETTER = CreateCompileContext(
+    runtime_input_type=InputType.DOCUMENT,
+    final_output_type=OutputType.DOCX,
+    final_output_mode=OutputMode.RENDER_VERBATIM,
+    ui_language="en",
+    checkpoint_intents=_structured_review(),
+)
+
+
+def _lost_declaration_detail(
+    steps: tuple[dict[str, Any], ...], context: CreateCompileContext
+) -> str:
+    with pytest.raises(AIBuilderArchitectureError) as raised:
+        compile_create_intent_to_spec(_intent(*steps), context=context)
+    return raised.value.detail
+
+
+_GENERIC = (
+    "sets review_mode but its result does not stay a structured JSON result "
+    "after the flow is assembled; compute and review the figures in an earlier "
+    "step that returns structured fields."
+)
+
+
+def _report_context(disposition: ReportDisposition) -> CreateCompileContext:
+    return CreateCompileContext(
+        runtime_input_type=InputType.DOCUMENT,
+        final_output_type=OutputType.PDF,
+        final_output_mode=OutputMode.RENDER_VERBATIM,
+        report_disposition=disposition,
+        ui_language="en",
+        checkpoint_intents=_structured_review(),
+    )
+
+
+_DECLARED = {"declare": True, "review_mode": "edit"}
+_REPORT_DISPOSITIONS = ("synthesized_overview", "both", "per_source_sections")
+
+
+@pytest.mark.parametrize(
+    ("steps", "context", "declared"),
+    [
+        (
+            (
+                _step("Extract case data", fields=("income", "rent")),
+                _step(
+                    "Calculate and write",
+                    fields=("calculation", "decision"),
+                    **_DECLARED,
+                ),
+            ),
+            _DOCX_LETTER,
+            "step 2 'Calculate and write'",
+        ),
+        (
+            (
+                _step("Compare", fields=("comparison",)),
+                _step("Write decision", fields=("decision",), **_DECLARED),
+            ),
+            _TEXT_LETTER,
+            "step 2 'Write decision'",
+        ),
+        (
+            (
+                _step("Compare", fields=("comparison",)),
+                _step("Write the letter text", **_DECLARED),
+                _step("Render PDF"),
+            ),
+            _PDF_LETTER,
+            "step 2 'Write the letter text'",
+        ),
+        (
+            (
+                _step("Analyse", fields=("a",)),
+                _step("Analyse", fields=("b",)),
+                _step("Analyse", fields=("c",), **_DECLARED),
+            ),
+            _DOCX_LETTER,
+            "step 3 'Analyse'",
+        ),
+        (
+            (_step("Write the letter text"), _step("Create the PDF", **_DECLARED)),
+            _PDF_LETTER,
+            "step 2 'Create the PDF'",
+        ),
+        *(
+            (
+                (
+                    _step("Read documents", fields=("summary",)),
+                    _step(name, **_DECLARED),
+                ),
+                _report_context(disposition),
+                f"step 2 '{name}'",
+            )
+            for disposition in _REPORT_DISPOSITIONS
+            for name in ("Render PDF", "Write report", "Write overview")
+        ),
+    ],
+)
+def test_a_lost_declaration_names_only_the_declared_step_and_a_generic_cause(
+    steps: tuple[dict[str, Any], ...],
+    context: CreateCompileContext,
+    declared: str,
+) -> None:
+    """No cause and no other step is inferred from names: assembly merges,
+    renames and adds steps, so a name match proves nothing."""
+
+    detail = _lost_declaration_detail(steps, context)
+
+    assert detail.endswith(f"{declared} {_GENERIC}")
+    assert detail.count("'") == 2
+
+
 def test_a_lost_declaration_fails_naming_the_step_and_never_rebinds() -> None:
     """The declared terminal folds to text; the other JSON step stays unreviewed."""
 

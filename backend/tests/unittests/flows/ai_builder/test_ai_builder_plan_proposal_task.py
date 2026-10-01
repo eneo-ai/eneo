@@ -285,10 +285,12 @@ def test_create_offers_the_reviewed_result_declaration_exactly_when_requested(
     baseline = build_propose_flow_tool_schema(resource_catalog=_empty_catalog())
     if offered_mode is None:
         assert "Set review_mode to" not in str(prompt)
+        assert "earlier step with output_fields" not in str(prompt)
         if not is_edit_mode:
             assert "review_mode" not in json.dumps(schema)
         return
     assert f"Set review_mode to '{offered_mode}' on the one step" in str(prompt)
+    assert str(prompt).count("earlier step with output_fields") == 1
     assert "Do not set review_mode" not in str(prompt)
     step_properties = schema["function"]["parameters"]["properties"]["steps"]["items"][
         "properties"

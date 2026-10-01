@@ -78,6 +78,22 @@ from eneo.main.logging import get_logger
 logger = get_logger(__name__)
 
 
+def _lost_declaration_problem(intent: CreateFlowIntent, declared_step: int) -> str:
+    """Why the declared step lost its review, and where the review can go.
+
+    Only the rejected step is named, as authored. Compiled steps map back to
+    proposal steps by name alone and assembly merges, renames and adds steps,
+    so neither a cause nor another step is inferred from the compiled Flow."""
+
+    return (
+        f"step {declared_step} "
+        f"'{display_value(intent.steps[declared_step - 1].name)}' sets "
+        "review_mode but its result does not stay a structured JSON result "
+        "after the flow is assembled; compute and review the figures in an "
+        "earlier step that returns structured fields"
+    )
+
+
 def compile_create_intent_to_spec(
     intent: CreateFlowIntent,
     *,
@@ -285,12 +301,7 @@ def compile_create_intent_to_spec(
                     # Only a structured-result binding failure is the declared
                     # step's: it did not stay a structured JSON result.
                     missing_kinds.remove("structured_result")
-                    problems.append(
-                        f"step {declared_step} "
-                        f"'{display_value(intent.steps[declared_step - 1].name)}' "
-                        "sets review_mode but does not stay a structured JSON "
-                        "result, so set it on a step whose result stays JSON"
-                    )
+                    problems.append(_lost_declaration_problem(intent, declared_step))
                 if missing_kinds or not problems:
                     problems.append(
                         "add the missing "
