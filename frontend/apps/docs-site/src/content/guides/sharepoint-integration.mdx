@@ -322,13 +322,13 @@ SHAREPOINT_FIXTURE_MODE_ENABLED=true
 
 Then append one of these query parameters to the Eneo page URL before opening the SharePoint import dialog:
 
-| Query parameter                      | Purpose                                                                                                  |
-| ------------------------------------ | -------------------------------------------------------------------------------------------------------- |
-| `?sharepoint_fixture=representative` | 12 sites with duplicate and long names, Unicode, OneDrive, varied files, empty folders, and deep nesting |
-| `?sharepoint_fixture=large_tenant`   | 152 deterministic results for search, grouping, and rendering validation                                 |
-| `?sharepoint_fixture=empty`          | Empty-result behavior                                                                                    |
+| Query parameter                      | Purpose                                                                                                                                              |
+| ------------------------------------ | ---------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `?sharepoint_fixture=representative` | 13 sites with duplicate and long names, Unicode, OneDrive, varied files, empty folders, deep nesting, and a records library with 24 metadata columns |
+| `?sharepoint_fixture=large_tenant`   | 153 deterministic results for search, grouping, and rendering validation                                                                             |
+| `?sharepoint_fixture=empty`          | Empty-result behavior                                                                                                                                |
 
-Files in the `representative` scenario carry fixture document properties (_Dokumenttyp_, _Verksamhet_, _Giltig till_, _Extern publicering_, _Ansvarig enhet_) so the folder tree, the search and the column filters behave exactly as they would against a tenant. The OneDrive fixture has none, matching personal drives without a backing list.
+Files in the `representative` scenario carry fixture document properties (_Dokumenttyp_, _Verksamhet_, _Giltig till_, _Extern publicering_, _Ansvarig enhet_) so the folder tree, the search and the column filters behave exactly as they would against a tenant. The site _Dokumentcenter – metadatatungt bibliotek_ carries 24 columns of mixed kinds on every file, to check how the filter menu and the property lists hold up against a wide library. The OneDrive fixture has none, matching personal drives without a backing list.
 
 Fixture mode is deliberately separate from the real integration:
 

@@ -748,7 +748,7 @@
   "sharepoint_fixture_compact_status": "Local data · nothing is fetched or saved",
   "sharepoint_fixture_scenario_label": "Test scenario",
   "sharepoint_fixture_scenario_representative": "Representative data",
-  "sharepoint_fixture_scenario_large_tenant": "Large tenant (152 results)",
+  "sharepoint_fixture_scenario_large_tenant": "Large tenant (153 results)",
   "sharepoint_fixture_scenario_empty": "Empty result",
   "sharepoint_fixture_scenario_invalid": "Invalid scenario (fixture mode remains active)",
   "sharepoint_fixture_simulate_import": "Simulate import",

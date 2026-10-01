@@ -746,7 +746,7 @@
   "sharepoint_fixture_compact_status": "Lokala data · inget hämtas eller sparas",
   "sharepoint_fixture_scenario_label": "Testscenario",
   "sharepoint_fixture_scenario_representative": "Representativ testdata",
-  "sharepoint_fixture_scenario_large_tenant": "Stor tenant (152 träffar)",
+  "sharepoint_fixture_scenario_large_tenant": "Stor tenant (153 träffar)",
   "sharepoint_fixture_scenario_empty": "Tomt resultat",
   "sharepoint_fixture_scenario_invalid": "Ogiltigt scenario (testläget är fortfarande aktivt)",
   "sharepoint_fixture_simulate_import": "Simulera import",
