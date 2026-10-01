@@ -24,6 +24,7 @@ class EneoPackageKind(StrEnum):
 
 
 FLOW_PACKAGE_PAYLOAD_SCHEMA = "eneo.flow_package.v1"
+FLOW_PACKAGE_TEMPLATES_PAYLOAD_SCHEMA = "eneo.flow_package.v2"
 ASSISTANT_PACKAGE_PAYLOAD_SCHEMA = "eneo.assistant_package.v1"
 APP_PACKAGE_PAYLOAD_SCHEMA = "eneo.app_package.v1"
 
@@ -127,6 +128,11 @@ class ResourcePackageManifestMetadata(ResourcePackageManifestMetadataFields):
     @model_validator(mode="after")
     def validate_payload_schema_for_kind(self) -> ResourcePackageManifestMetadata:
         expected = PACKAGE_PAYLOAD_SCHEMA_BY_KIND[self.kind]
+        if (
+            self.kind is EneoPackageKind.FLOW
+            and self.payload_schema == FLOW_PACKAGE_TEMPLATES_PAYLOAD_SCHEMA
+        ):
+            return self
         if self.payload_schema != expected:
             raise ValueError(
                 f"{self.kind.value} packages must use payload schema {expected}."

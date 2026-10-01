@@ -21,6 +21,7 @@ from eneo.flows.api.flow_models import (
     FlowAssistantUpdateRequest,
     FlowStepUpdateRequest,
 )
+from eneo.flows.api.flow_request_body import read_body_within, replay_body
 from eneo.flows.api.flow_security_classification_models import (
     FlowSecurityClassificationAssistantCandidate,
     FlowSecurityClassificationPreviewPublic,
@@ -28,8 +29,6 @@ from eneo.flows.api.flow_security_classification_models import (
 )
 from eneo.flows.api.flow_security_classification_router import (
     preview_flow_security_classification,
-    read_body_within,
-    replay_body,
 )
 from eneo.flows.api.flow_security_classification_router import (
     router as preview_router,

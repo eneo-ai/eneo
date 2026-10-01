@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, Field
 
 from eneo.flow_packages.domain.flow_package_checksum import (
     compose_content_checksum,
@@ -18,6 +18,7 @@ from eneo.flow_packages.domain.flow_package_errors import (
 )
 from eneo.flow_packages.domain.flow_package_manifest import (
     FLOW_PACKAGE_PAYLOAD_SCHEMA,
+    FLOW_PACKAGE_TEMPLATES_PAYLOAD_SCHEMA,
     EneoPackageKind,
     FlowPackageManifest,
     FlowPackageManifestMetadata,
@@ -29,10 +30,16 @@ from eneo.flow_packages.domain.flow_package_requirements import (
     FlowPackageModelRequirement,
     FlowPackageRequirementEntry,
     FlowPackageRequirementSet,
+    FlowPackageTemplateAssetRequirement,
+)
+from eneo.flow_packages.domain.flow_package_templates import (
+    FlowPackageTemplateDescriptor,
+    validate_package_template_payloads,
 )
 from eneo.flows.flow_authoring_spec import AssistantSpec, FlowDraftSpecCore, OutputMode
 from eneo.flows.flow_resource_bindings import ResourceSlotRef
 from eneo.flows.flow_validators_template import has_template_fill_resource_reference
+from eneo.resource_packages.checksum import coerce_json_object
 
 MANIFEST_PATH = "manifest.json"
 FLOW_DRAFT_PATH = "flow.draft.json"
@@ -69,6 +76,7 @@ class FlowPackageEnvelope(BaseModel):
     requirements_hash: str
     provenance_hash: str
     content_checksum: str
+    template_payloads: dict[str, bytes] = Field(default_factory=dict, exclude=True)
 
     @property
     def spec(self) -> FlowDraftSpecCore:
@@ -106,6 +114,12 @@ class FlowPackageEnvelope(BaseModel):
             for step in self.spec.steps
             for ref in _assistant_slot_refs(step.assistant_spec)
         )
+        template_refs = frozenset(
+            ref
+            for step in self.spec.steps
+            if isinstance(ref := (step.output_config or {}).get("template_ref"), str)
+        )
+        referenced_slot_refs = referenced_slot_refs | template_refs
         unknown_slot_refs = referenced_slot_refs.difference(declared_slot_refs)
         if unknown_slot_refs:
             first_unknown = min(unknown_slot_refs)
@@ -121,6 +135,13 @@ class FlowPackageEnvelope(BaseModel):
                 },
             )
         for step in self.spec.steps:
+            template_ref = (step.output_config or {}).get("template_ref")
+            if isinstance(template_ref, str) and not isinstance(
+                declared_requirements[template_ref], FlowPackageTemplateAssetRequirement
+            ):
+                raise _invalid_requirement_use(
+                    slot_ref=template_ref, reason="template_ref_kind_mismatch"
+                )
             model_ref = step.assistant_spec.model_ref
             if model_ref is not None:
                 requirement = declared_requirements[model_ref]
@@ -169,6 +190,7 @@ class FlowPackageEnvelope(BaseModel):
         draft: FlowPackageFlowDraft,
         requirements: FlowPackageRequirementSet,
         provenance: FlowPackageProvenance,
+        template_payloads: dict[str, bytes] | None = None,
     ) -> "FlowPackageEnvelope":
         require_flow_package_manifest(manifest)
         hashes = _calculate_hashes(
@@ -188,6 +210,7 @@ class FlowPackageEnvelope(BaseModel):
             requirements=requirements,
             provenance=provenance,
             hashes=hashes,
+            template_payloads=template_payloads,
         )
 
     @classmethod
@@ -198,6 +221,7 @@ class FlowPackageEnvelope(BaseModel):
         draft: FlowPackageFlowDraft,
         requirements: FlowPackageRequirementSet,
         provenance: FlowPackageProvenance,
+        template_payloads: dict[str, bytes] | None = None,
     ) -> "FlowPackageEnvelope":
         require_flow_package_manifest(manifest_metadata)
         hashes = _calculate_hashes(
@@ -212,6 +236,7 @@ class FlowPackageEnvelope(BaseModel):
             requirements=requirements,
             provenance=provenance,
             hashes=hashes,
+            template_payloads=template_payloads,
         )
 
     @classmethod
@@ -223,6 +248,7 @@ class FlowPackageEnvelope(BaseModel):
         requirements: FlowPackageRequirementSet,
         provenance: FlowPackageProvenance,
         hashes: _FlowPackageDocumentHashes,
+        template_payloads: dict[str, bytes] | None = None,
     ) -> "FlowPackageEnvelope":
         envelope = cls(
             manifest=manifest,
@@ -234,9 +260,10 @@ class FlowPackageEnvelope(BaseModel):
             requirements_hash=hashes.requirements_hash,
             provenance_hash=hashes.provenance_hash,
             content_checksum=hashes.content_checksum,
+            template_payloads=template_payloads or {},
         )
         _validate_portable_step_identity(envelope.spec)
-        _reject_unsupported_template_use(envelope.spec)
+        _validate_template_contract(envelope)
         # Validate without replacing the spec covered by the package checksum.
         normalize_flow_package_spec(envelope.spec)
         envelope.validated_resource_contract()
@@ -270,10 +297,10 @@ def _calculate_hashes(
 
 
 def require_flow_package_manifest(manifest: FlowPackageManifestMetadata) -> None:
-    if (
-        manifest.kind is EneoPackageKind.FLOW
-        and manifest.payload_schema == FLOW_PACKAGE_PAYLOAD_SCHEMA
-    ):
+    if manifest.kind is EneoPackageKind.FLOW and manifest.payload_schema in {
+        FLOW_PACKAGE_PAYLOAD_SCHEMA,
+        FLOW_PACKAGE_TEMPLATES_PAYLOAD_SCHEMA,
+    }:
         return
     raise FlowPackageValidationError(
         code=FlowPackageErrorCode.PACKAGE_KIND_UNSUPPORTED,
@@ -313,20 +340,69 @@ def _invalid_requirement_use(
     )
 
 
-def _reject_unsupported_template_use(spec: FlowDraftSpecCore) -> None:
-    for step in spec.steps:
+def _validate_template_contract(envelope: FlowPackageEnvelope) -> None:
+    descriptors: dict[str, FlowPackageTemplateDescriptor] = {
+        requirement.slot_ref.ref: requirement.template
+        for requirement in envelope.requirements.requirements
+        if isinstance(requirement, FlowPackageTemplateAssetRequirement)
+        and requirement.template is not None
+    }
+    for step in envelope.spec.steps:
         if (
             step.output_mode is OutputMode.TEMPLATE_FILL
             or has_template_fill_resource_reference(step.output_config)
         ):
-            raise FlowPackageValidationError(
-                code=FlowPackageErrorCode.IMPORT_TEMPLATE_ASSETS_UNSUPPORTED,
-                message=(
-                    "Flow package import does not support template asset "
-                    "installation yet."
-                ),
-                context={"plan_step_ref": step.plan_step_ref},
+            if (
+                envelope.manifest.payload_schema
+                != FLOW_PACKAGE_TEMPLATES_PAYLOAD_SCHEMA
+            ):
+                raise FlowPackageValidationError(
+                    code=FlowPackageErrorCode.IMPORT_TEMPLATE_ASSETS_UNSUPPORTED,
+                    message="Template-fill steps require the Word template package format.",
+                    context={"plan_step_ref": step.plan_step_ref},
+                )
+        config = step.output_config or {}
+        ref = config.get("template_ref")
+        if step.output_mode is not OutputMode.TEMPLATE_FILL:
+            if any(
+                key in config for key in ("template_ref", "placeholders", "bindings")
+            ) or has_template_fill_resource_reference(config):
+                raise _invalid_requirement_use(
+                    slot_ref=str(ref or ""), reason="inactive_template_config"
+                )
+            continue
+        descriptor = descriptors.get(ref) if isinstance(ref, str) else None
+        if descriptor is None or has_template_fill_resource_reference(config):
+            raise _invalid_requirement_use(
+                slot_ref=str(ref or ""), reason="missing_portable_template"
             )
+        names = {field.name for field in descriptor.fields}
+        bindings = config.get("bindings")
+        if (
+            not isinstance(bindings, dict)
+            or set(coerce_json_object(config.get("bindings"))) != names
+            or config.get("placeholders") != [field.name for field in descriptor.fields]
+        ):
+            raise _invalid_requirement_use(
+                slot_ref=str(ref), reason="template_binding_contract_mismatch"
+            )
+    if (
+        descriptors
+        and envelope.manifest.payload_schema != FLOW_PACKAGE_TEMPLATES_PAYLOAD_SCHEMA
+    ):
+        raise _invalid_requirement_use(
+            slot_ref=min(descriptors), reason="template_payload_requires_v2"
+        )
+    used_refs = {
+        str((step.output_config or {}).get("template_ref"))
+        for step in envelope.spec.steps
+        if step.output_mode is OutputMode.TEMPLATE_FILL
+    }
+    if set(descriptors) != used_refs:
+        raise _invalid_requirement_use(
+            slot_ref="", reason="template_requirements_do_not_match_usage"
+        )
+    validate_package_template_payloads(descriptors, envelope.template_payloads)
 
 
 def _validate_portable_step_identity(spec: FlowDraftSpecCore) -> None:

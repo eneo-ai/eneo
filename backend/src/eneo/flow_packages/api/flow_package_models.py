@@ -5,6 +5,9 @@ from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
+from eneo.flow_packages.application.flow_package_template_uploads import (
+    FlowPackageTemplateUpload,
+)
 from eneo.flow_packages.domain.flow_package_envelope import FlowPackageEnvelope
 from eneo.flow_packages.domain.flow_package_import_plan import (
     FlowPackageImportTargetState,
@@ -21,6 +24,7 @@ from eneo.flow_packages.domain.flow_package_provenance import FlowPackageOmissio
 from eneo.flow_packages.domain.flow_package_requirements import (
     FlowPackageRequirementKind,
 )
+from eneo.flows.flow_authoring_spec import MAX_FLOW_AUTHORING_STEPS
 from eneo.flows.flow_resource_bindings import (
     LocalResourceBinding,
     LocalResourceKind,
@@ -64,6 +68,11 @@ class FlowPackageExportRequest(FlowPackageManifestMetadataFields):
         description=(
             "Publisher-supplied package description shown before import planning."
         ),
+    )
+    include_templates: bool = Field(
+        default=True,
+        strict=True,
+        description="Include referenced DOCX templates. When false, the importer must upload templates with matching Word fields.",
     )
 
     def to_manifest_metadata(self) -> FlowPackageManifestMetadata:
@@ -283,6 +292,15 @@ class FlowPackageImportRequest(BaseModel):
             "Knowledge slots may target `collection`, `website`, or "
             "`integration_knowledge` resources."
         ),
+    )
+    template_uploads: list[FlowPackageTemplateUpload] = Field(
+        default_factory=lambda: list[FlowPackageTemplateUpload](),
+        max_length=MAX_FLOW_AUTHORING_STEPS,
+    )
+    expected_template_upload_checksums: dict[str, str] = Field(
+        default_factory=dict,
+        max_length=MAX_FLOW_AUTHORING_STEPS,
+        description="Checksums of uploaded replacement templates from the reviewed import plan.",
     )
 
     @field_validator("expected_target_state", mode="before")

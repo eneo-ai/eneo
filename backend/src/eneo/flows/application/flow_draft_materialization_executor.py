@@ -20,6 +20,7 @@ from eneo.flows.application.flow_draft_materialization import (
 from eneo.flows.application.flow_service import FlowService
 from eneo.flows.application.flow_template_attachment_materialization import (
     materialize_template_attachment,
+    materialize_template_imports,
 )
 from eneo.flows.domain.flow import FlowStep
 from eneo.flows.flow_authoring_name import normalize_flow_name
@@ -46,7 +47,10 @@ from eneo.main.exceptions import BadRequestException
 from eneo.prompts.api.prompt_models import PromptCreate
 
 if TYPE_CHECKING:
-    from eneo.flows.application.flow_authoring_command import TemplateAttachmentIntent
+    from eneo.flows.application.flow_authoring_command import (
+        TemplateAttachmentIntent,
+        TemplateImportIntent,
+    )
     from eneo.flows.flow_template_asset_service import FlowTemplateAssetService
 
 _MODEL_LOCAL_KINDS = frozenset({LocalResourceKind.COMPLETION_MODEL})
@@ -67,13 +71,16 @@ class FlowDraftMaterializer:
         binding_source: FlowResourceBindingSource,
         template_attachment_intent: "TemplateAttachmentIntent | None" = None,
         template_asset_service: "FlowTemplateAssetService | None" = None,
+        template_imports: tuple[TemplateImportIntent, ...] = (),
         progress_callback: Callable[[FlowDraftMaterializationProgress], None]
         | None = None,
     ) -> FlowDraftMaterializationResult:
         is_create = flow_id is None
         progress = _MaterializationProgressAccumulator(callback=progress_callback)
 
-        if template_attachment_intent is not None and template_asset_service is None:
+        if (
+            template_attachment_intent is not None or template_imports
+        ) and template_asset_service is None:
             raise RuntimeError(
                 "Template attachment materialization requires a template asset service."
             )
@@ -111,6 +118,21 @@ class FlowDraftMaterializer:
 
         if flow_id is None:
             raise BadRequestException("Flow id missing while executing changeset.")
+
+        if template_imports:
+            assert template_asset_service is not None
+            changeset, template_bindings = await materialize_template_imports(
+                intents=template_imports,
+                changeset=changeset,
+                flow_id=flow_id,
+                template_asset_service=template_asset_service,
+            )
+            resource_bindings = (*resource_bindings, *template_bindings)
+            resource_bindings_by_slot_ref = (
+                index_and_validate_changeset_resource_bindings(
+                    changeset=changeset, resource_bindings=resource_bindings
+                )
+            )
 
         if template_attachment_intent is not None:
             assert template_asset_service is not None

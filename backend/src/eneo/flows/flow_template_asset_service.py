@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from collections.abc import AsyncGenerator
 from dataclasses import replace
+from io import BytesIO
 from typing import Any
 from uuid import UUID
 
@@ -73,6 +74,20 @@ class FlowTemplateAssetService:
             flow_id=persisted_flow_id,
             tenant_id=self.user.tenant_id,
         )
+
+    async def create_asset_from_bytes(
+        self, *, flow_id: UUID, filename: str, content: bytes
+    ) -> FlowTemplateAsset:
+        upload = UploadFile(filename=filename, file=BytesIO(content))
+        headers = upload.headers.mutablecopy()
+        headers["content-type"] = (
+            "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+        )
+        upload.headers = headers
+        try:
+            return await self.upload_asset(flow_id=flow_id, upload_file=upload)
+        finally:
+            await upload.close()
 
     async def upload_asset(
         self,

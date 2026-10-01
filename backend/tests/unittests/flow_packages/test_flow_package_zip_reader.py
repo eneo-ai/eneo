@@ -513,15 +513,12 @@ def test_too_many_entries_is_rejected() -> None:
     assert_zip_unsafe(
         _zip_raw(
             {
-                reader.MANIFEST_PATH: b"{}",
-                reader.FLOW_DRAFT_PATH: b"{}",
-                reader.REQUIREMENTS_PATH: b"{}",
-                reader.PROVENANCE_PATH: b"{}",
-                "extra.json": b"{}",
+                f"extra-{index}.json": b"{}"
+                for index in range(reader.MAX_ZIP_ENTRIES + 1)
             }
         ),
         FlowPackageZipUnsafeReason.TOO_MANY_ENTRIES,
-        count=5,
+        count=reader.MAX_ZIP_ENTRIES + 1,
         max_entries=reader.MAX_ZIP_ENTRIES,
     )
 

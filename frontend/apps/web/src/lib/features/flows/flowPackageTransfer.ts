@@ -17,7 +17,8 @@ export type FlowPackageImportBlockingReasonCode =
   | "required_mapping_missing"
   | "selected_resource_unavailable"
   | "dependency_unsupported"
-  | "template_asset_unsupported";
+  | "template_asset_unsupported"
+  | "template_upload_missing";
 
 export type FlowPackageImportBlockingReason = {
   code: FlowPackageImportBlockingReasonCode;
@@ -40,6 +41,9 @@ export type FlowPackageImportReadiness = {
 export type FlowPackageCandidate = FlowPackageLocalCandidate | FlowPackageModelCandidate;
 
 export const FLOW_PACKAGE_IMPORT_ERROR_CODES = [
+  "flow_package_template_file_invalid",
+  "flow_package_template_fields_mismatch",
+  "flow_package_template_upload_required",
   "duplicate_slot_binding",
   "flow_package_base64_invalid",
   "flow_package_zip_unsafe",
@@ -64,6 +68,8 @@ export const FLOW_PACKAGE_IMPORT_ERROR_CODES = [
 ] as const;
 
 export const FLOW_PACKAGE_EXPORT_ERROR_CODES = [
+  "flow_package_export_template_bindings_incomplete",
+  "flow_package_export_template_file_invalid",
   "flow_package_export_missing_assistant_snapshot",
   "flow_package_export_unsupported_step_io",
   "flow_package_export_step_config_not_portable",
@@ -83,6 +89,9 @@ type FlowPackageErrorCode = FlowPackageImportErrorCode | FlowPackageExportErrorC
 // One message per code, named literally so a missing code is a type error and
 // the catalogue's unused-key check sees every message in use.
 const FLOW_PACKAGE_ERROR_MESSAGES = {
+  flow_package_template_file_invalid: m.flow_package_error_flow_package_template_file_invalid,
+  flow_package_template_fields_mismatch: m.flow_package_error_flow_package_template_fields_mismatch,
+  flow_package_template_upload_required: m.flow_package_error_flow_package_template_upload_required,
   duplicate_slot_binding: m.flow_package_error_duplicate_slot_binding,
   flow_package_base64_invalid: m.flow_package_error_flow_package_base64_invalid,
   flow_package_zip_unsafe: m.flow_package_error_flow_package_zip_unsafe,
@@ -111,6 +120,10 @@ const FLOW_PACKAGE_ERROR_MESSAGES = {
   flow_package_import_name_collision: m.flow_package_error_flow_package_import_name_collision,
   flow_package_file_too_large: m.flow_package_error_flow_package_file_too_large,
   transcription_model_required: m.flow_package_error_transcription_model_required,
+  flow_package_export_template_bindings_incomplete:
+    m.flow_package_error_flow_package_export_template_bindings_incomplete,
+  flow_package_export_template_file_invalid:
+    m.flow_package_error_flow_package_export_template_file_invalid,
   flow_package_export_missing_assistant_snapshot:
     m.flow_package_error_flow_package_export_missing_assistant_snapshot,
   flow_package_export_unsupported_step_io:
@@ -214,6 +227,22 @@ export function getFlowPackageImportReadiness(
     const selectedCandidate = selectedCandidateKey
       ? candidatesBySlot.get(slotKey)?.get(selectedCandidateKey)
       : undefined;
+
+    if (resolution.kind === "template_asset" && resolution.template) {
+      totalRequiredCount += 1;
+      if (resolution.install_blocks) {
+        unresolvedRequiredCount += 1;
+        blockingReasons.push({
+          code: "template_upload_missing",
+          slotKey,
+          slotLabel: slotRef.label,
+          kind: resolution.kind
+        });
+      } else {
+        selectedRequiredCount += 1;
+      }
+      continue;
+    }
 
     if (resolution.status === "unsupported") {
       if (resolution.kind === "template_asset") {
@@ -392,7 +421,21 @@ export function mapFlowPackageImportError(error: unknown): string | null {
   ) {
     return m.flow_package_error_form_field_type_unsupported();
   }
-  return FLOW_PACKAGE_ERROR_MESSAGES[code]();
+  const message = FLOW_PACKAGE_ERROR_MESSAGES[code]();
+  if (code !== "flow_package_template_fields_mismatch") return message;
+  const context = getFlowPackageResponseContext(error);
+  const details = [
+    typeof context?.missing_fields === "string" && context.missing_fields
+      ? m.flow_package_template_missing_fields({ fields: context.missing_fields })
+      : "",
+    typeof context?.added_fields === "string" && context.added_fields
+      ? m.flow_package_template_added_fields({ fields: context.added_fields })
+      : "",
+    typeof context?.changed_fields === "string" && context.changed_fields
+      ? m.flow_package_template_changed_fields({ fields: context.changed_fields })
+      : ""
+  ].filter(Boolean);
+  return [message, ...details].join(" ");
 }
 
 export function mapFlowPackageExportError(error: unknown): string | null {

@@ -18,6 +18,7 @@ from fastapi import (
     status,
 )
 from fastapi.responses import JSONResponse
+from pydantic import TypeAdapter, ValidationError
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -55,6 +56,11 @@ from eneo.flow_packages.application.flow_package_install_service import (
     ResolvedFlowPackageInstallCommand,
     resolve_flow_package_install_command,
 )
+from eneo.flow_packages.application.flow_package_template_uploads import (
+    MAX_TEMPLATE_UPLOADS_JSON_BYTES,
+    FlowPackageTemplateUpload,
+    resolve_flow_package_template_files,
+)
 from eneo.flow_packages.domain.flow_package_envelope import FlowPackageEnvelope
 from eneo.flow_packages.domain.flow_package_errors import (
     FlowPackageErrorCode,
@@ -81,7 +87,9 @@ from eneo.flow_packages.infrastructure.flow_package_zip_writer import (
 from eneo.flows.api import flow_access_context
 from eneo.flows.api.flow_api_common import error_response
 from eneo.flows.api.flow_definition_access import require_flow_edit_access
+from eneo.flows.api.flow_request_body import capped_body_route_class
 from eneo.flows.domain.flow import Flow
+from eneo.flows.enums import FlowOutputMode
 from eneo.flows.flow_access_policy import (
     FlowApiAction,
     flow_action_access_reason,
@@ -116,8 +124,20 @@ FLOW_IMPORT_NAME_COLLISION_MESSAGE = (
 logger = get_logger(__name__)
 
 
+# The import routes carry the package (and, for the plan or import, replacement
+# Word templates) in their body; it is read under this cap before it is parsed.
+MAX_IMPORT_REQUEST_BYTES = MAX_PACKAGE_BASE64_CHARS + MAX_TEMPLATE_UPLOADS_JSON_BYTES
+
 tenant_router = APIRouter()
-space_router = APIRouter()
+space_router = APIRouter(
+    route_class=capped_body_route_class(
+        MAX_IMPORT_REQUEST_BYTES,
+        message=(
+            f"The import request is larger than the {MAX_IMPORT_REQUEST_BYTES} "
+            "bytes a Flow package import accepts."
+        ),
+    )
+)
 flow_router = APIRouter()
 
 
@@ -186,6 +206,10 @@ async def validate_flow_package(
 ) -> FlowPackageValidationPublic:
     require_flow_action(container.user(), FlowApiAction.EDIT)
     envelope = await _read_flow_package(package_file)
+    try:
+        resolve_flow_package_template_files(envelope)
+    except FlowPackageValidationError as exc:
+        raise _bad_flow_package_request(exc) from exc
     return FlowPackageValidationPublic.from_envelope(envelope)
 
 
@@ -240,6 +264,12 @@ async def create_flow_package_import_plan(
     package_file: PackageUpload,
     request: Request,
     container: Annotated[Container, Depends(get_container(with_user=True))],
+    template_uploads: Annotated[
+        UploadFile | None,
+        File(
+            description="JSON file containing replacement DOCX uploads for templates omitted from the package."
+        ),
+    ] = None,
 ) -> FlowPackageImportPlan:
     access_context = await flow_access_context.resolve_space_access_context(
         request,
@@ -260,12 +290,36 @@ async def create_flow_package_import_plan(
         access_context.space
     )
     try:
+        upload_bytes = b"[]"
+        if template_uploads is not None:
+            try:
+                upload_bytes = await template_uploads.read(
+                    MAX_TEMPLATE_UPLOADS_JSON_BYTES + 1
+                )
+            finally:
+                await template_uploads.close()
+        if len(upload_bytes) > MAX_TEMPLATE_UPLOADS_JSON_BYTES:
+            raise FlowPackageValidationError(
+                code=FlowPackageErrorCode.TEMPLATE_FILE_INVALID,
+                message="The Word template uploads exceed the size limit.",
+            )
+        try:
+            uploads = TypeAdapter(list[FlowPackageTemplateUpload]).validate_json(
+                upload_bytes
+            )
+        except ValidationError as exc:
+            raise FlowPackageValidationError(
+                code=FlowPackageErrorCode.TEMPLATE_FILE_INVALID,
+                message="The Word template uploads are not valid.",
+            ) from exc
+        template_files = resolve_flow_package_template_files(envelope, uploads)
         return build_flow_package_import_plan(
             envelope,
             candidates=candidates,
             default_transcription_model_id=(
                 _target_space_default_transcription_model_id(access_context.space)
             ),
+            template_files=template_files,
         )
     except FlowPackageValidationError as exc:
         raise _bad_flow_package_request(exc) from exc
@@ -332,7 +386,11 @@ async def import_flow_package_as_draft(
     request: Request,
     container: Annotated[
         Container,
-        Depends(get_container_for_explicit_transaction(with_user=True)),
+        Depends(
+            get_container_for_explicit_transaction(
+                with_user=True, with_upload_admission=True
+            )
+        ),
     ],
 ) -> FlowPackageImportPublic | JSONResponse:
     """Commit each durable import receipt before returning its response."""
@@ -356,6 +414,14 @@ async def import_flow_package_as_draft(
         )
 
     envelope = _read_flow_package_base64(import_request.package_base64)
+    # Every cheap bound and each distinct Word file's one inspection run before
+    # the space lock is taken, so a refused package never holds it.
+    try:
+        template_files = resolve_flow_package_template_files(
+            envelope, import_request.template_uploads
+        )
+    except FlowPackageValidationError as exc:
+        raise _bad_flow_package_request(exc) from exc
     import_repo = FlowPackageImportRepository(session)
     user = container.user()
     await import_repo.acquire_space_import_lock(
@@ -386,6 +452,7 @@ async def import_flow_package_as_draft(
             envelope,
             candidates=candidates,
             default_transcription_model_id=default_transcription_model_id,
+            template_files=template_files,
         )
     except FlowPackageValidationError as exc:
         raise _bad_flow_package_request(exc) from exc
@@ -400,6 +467,8 @@ async def import_flow_package_as_draft(
             expected_target_state=import_request.expected_target_state,
             selection=selection,
             candidates=candidates,
+            template_files=template_files,
+            expected_template_upload_checksums=import_request.expected_template_upload_checksums,
         )
         failure_selection = command.selection
         existing = await import_repo.get_successful_retry(
@@ -422,6 +491,9 @@ async def import_flow_package_as_draft(
                 command=command,
                 flow_service=container.flow_service(),
                 space_id=id,
+                template_asset_service=container.flow_template_asset_service()
+                if command.template_files
+                else None,
             )
     except IntegrityError as exc:
         if not _is_flow_name_collision(exc):
@@ -433,6 +505,7 @@ async def import_flow_package_as_draft(
         )
     except (
         BadRequestException,
+        FileTooLargeException,
         FlowPackageValidationError,
         FlowResourceBindingResolutionError,
     ) as exc:
@@ -499,7 +572,8 @@ def _replayed_install_result(
         package_version=envelope.manifest.package_version,
         content_checksum=envelope.content_checksum,
         steps_created=len(command.install_spec.steps),
-        resource_bindings_count=len(command.selection.selected_bindings),
+        resource_bindings_count=len(command.selection.selected_bindings)
+        + len(command.template_files),
     )
 
 
@@ -568,7 +642,11 @@ async def export_flow_package(
     request: Request,
     container: Annotated[
         Container,
-        Depends(get_container_for_explicit_transaction(with_user=True)),
+        Depends(
+            get_container_for_explicit_transaction(
+                with_user=True, with_upload_admission=True
+            )
+        ),
     ],
 ) -> Response:
     session = cast(AsyncSession, container.session())
@@ -584,12 +662,19 @@ async def export_flow_package(
     export_service = FlowPackageExportService(
         flow_service=container.flow_service(),
         package_writer=write_flow_package,
+        template_asset_service=container.flow_template_asset_service()
+        if any(
+            step.output_mode is FlowOutputMode.TEMPLATE_FILL
+            for step in access_context.flow.steps
+        )
+        else None,
     )
     try:
         result = await export_service.export_to_bytes(
             flow_id=id,
             flow=access_context.flow,
             manifest_metadata=export_request.to_manifest_metadata(),
+            include_templates=export_request.include_templates,
         )
     except FlowPackageExportError as exc:
         _raise_export_error(exc)
@@ -780,6 +865,7 @@ def _is_flow_name_collision(exc: IntegrityError) -> bool:
 def _flow_package_import_failure_payload(
     exc: (
         BadRequestException
+        | FileTooLargeException
         | FlowPackageValidationError
         | FlowResourceBindingResolutionError
     ),
@@ -874,7 +960,9 @@ async def _read_package_upload_bytes(package_file: UploadFile) -> bytes:
 def _raise_export_error(exc: FlowPackageExportError) -> NoReturn:
     match exc.code:
         case (
-            FlowPackageExportErrorCode.MISSING_ASSISTANT_SNAPSHOT
+            FlowPackageExportErrorCode.TEMPLATE_BINDINGS_INCOMPLETE
+            | FlowPackageExportErrorCode.TEMPLATE_FILE_INVALID
+            | FlowPackageExportErrorCode.MISSING_ASSISTANT_SNAPSHOT
             | FlowPackageExportErrorCode.UNSUPPORTED_STEP_IO
             | FlowPackageExportErrorCode.STEP_CONFIG_NOT_PORTABLE
             | FlowPackageExportErrorCode.UNMAPPED_RESOURCE_REF

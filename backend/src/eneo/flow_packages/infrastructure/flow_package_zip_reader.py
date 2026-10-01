@@ -25,8 +25,10 @@ from eneo.flow_packages.domain.flow_package_manifest import FlowPackageManifest
 from eneo.flow_packages.domain.flow_package_provenance import FlowPackageProvenance
 from eneo.flow_packages.domain.flow_package_requirements import (
     FlowPackageRequirementSet,
+    FlowPackageTemplateAssetRequirement,
 )
 from eneo.flows.flow_authoring_spec import (
+    MAX_FLOW_AUTHORING_STEPS,
     AssistantSpecLocalRefNotPortableError,
     has_flow_mcp_unsupported_error,
 )
@@ -34,7 +36,7 @@ from eneo.flows.flow_metadata import UnsupportedFlowFormFieldTypeError
 from eneo.resource_packages.archive import (
     ResourcePackageArchiveError,
     ResourcePackageArchiveLimits,
-    read_bounded_json_archive,
+    read_bounded_archive,
 )
 from eneo.resource_packages.archive import (
     decompression_ratio_too_high as _resource_package_ratio_too_high,
@@ -43,11 +45,10 @@ from eneo.resource_packages.archive import (
     validate_archive_entry_path as _validate_resource_package_entry_path,
 )
 
-MAX_ZIP_ENTRIES = 4
-# Four compressed JSON entries plus zip metadata headroom for the current package schema.
+MAX_ZIP_ENTRIES = 4 + MAX_FLOW_AUTHORING_STEPS
 MAX_PACKAGE_UPLOAD_BYTES = MAX_FLOW_PACKAGE_BYTES
-MAX_PER_ENTRY_COMPRESSED_BYTES = 1 * 1024 * 1024
-MAX_PER_ENTRY_UNCOMPRESSED_BYTES = 2 * 1024 * 1024
+MAX_PER_ENTRY_COMPRESSED_BYTES = MAX_FLOW_PACKAGE_BYTES
+MAX_PER_ENTRY_UNCOMPRESSED_BYTES = MAX_FLOW_PACKAGE_BYTES
 MAX_TOTAL_UNCOMPRESSED_BYTES = 8 * 1024 * 1024
 MAX_JSON_BYTES = 2 * 1024 * 1024
 MAX_DECOMPRESSION_RATIO = 50
@@ -63,7 +64,6 @@ def read_flow_package(package_bytes: bytes) -> FlowPackageEnvelope:
         invalid_code=FlowPackageErrorCode.MANIFEST_INVALID,
     )
     require_flow_package_manifest(manifest)
-    _validate_flow_profile_entries(payloads)
     draft = _parse_subdocument(
         FlowPackageFlowDraft,
         payloads[FLOW_DRAFT_PATH],
@@ -74,22 +74,33 @@ def read_flow_package(package_bytes: bytes) -> FlowPackageEnvelope:
         payloads[REQUIREMENTS_PATH],
         invalid_code=FlowPackageErrorCode.REQUIREMENTS_INVALID,
     )
+    template_paths = frozenset(
+        requirement.template.asset_path
+        for requirement in requirements.requirements
+        if isinstance(requirement, FlowPackageTemplateAssetRequirement)
+        and requirement.template is not None
+        and requirement.template.asset_path is not None
+    )
+    _validate_flow_profile_entries(payloads, template_paths=template_paths)
     provenance = _parse_subdocument(
         FlowPackageProvenance,
         payloads[PROVENANCE_PATH],
         invalid_code=FlowPackageErrorCode.PROVENANCE_INVALID,
     )
-    return FlowPackageEnvelope.verify_from_subdocuments(
+    envelope = FlowPackageEnvelope.verify_from_subdocuments(
         manifest=manifest,
         draft=draft,
         requirements=requirements,
         provenance=provenance,
+        template_payloads={path: payloads[path] for path in template_paths},
     )
+
+    return envelope
 
 
 def _read_bounded_json_payloads(package_bytes: bytes) -> dict[str, bytes]:
     try:
-        payloads = read_bounded_json_archive(
+        payloads = read_bounded_archive(
             package_bytes,
             limits=ResourcePackageArchiveLimits(
                 max_entries=MAX_ZIP_ENTRIES,
@@ -99,6 +110,7 @@ def _read_bounded_json_payloads(package_bytes: bytes) -> dict[str, bytes]:
                 max_json_bytes=MAX_JSON_BYTES,
                 max_decompression_ratio=MAX_DECOMPRESSION_RATIO,
             ),
+            json_paths=REQUIRED_PACKAGE_FILES,
         )
     except ResourcePackageArchiveError as exc:
         raise _zip_unsafe(
@@ -137,14 +149,17 @@ def _validate_entry_path(  # pyright: ignore[reportUnusedFunction]
         ) from exc
 
 
-def _validate_flow_profile_entries(payloads: Mapping[str, bytes]) -> None:
-    unexpected_files = payloads.keys() - REQUIRED_PACKAGE_FILES
+def _validate_flow_profile_entries(
+    payloads: Mapping[str, bytes], *, template_paths: frozenset[str] = frozenset()
+) -> None:
+    required = REQUIRED_PACKAGE_FILES | template_paths
+    unexpected_files = payloads.keys() - required
     if unexpected_files:
         raise _zip_unsafe(
             FlowPackageZipUnsafeReason.UNKNOWN_ENTRY,
             path=sorted(unexpected_files)[0],
         )
-    missing_files = REQUIRED_PACKAGE_FILES - payloads.keys()
+    missing_files = required - payloads.keys()
     if missing_files:
         raise _zip_unsafe(
             FlowPackageZipUnsafeReason.MISSING_REQUIRED_ENTRY,

@@ -1,7 +1,11 @@
 from __future__ import annotations
 
+import zipfile
 from datetime import datetime, timezone
 from enum import StrEnum
+from io import BytesIO
+from types import SimpleNamespace
+from unittest.mock import AsyncMock
 from uuid import UUID, uuid4
 
 import pytest
@@ -44,6 +48,9 @@ from eneo.flows.flow_resource_bindings import (
     ResourceSlotKind,
     ResourceSlotRef,
 )
+from eneo.flows.flow_template_asset_service import FlowTemplateAssetService
+from eneo.main.exceptions import BadRequestException, NotFoundException
+from tests.docx_template_fixtures import control_template_bytes
 
 
 @pytest.mark.anyio
@@ -1687,3 +1694,153 @@ def test_export_omits_literal_disabled_input_blocks(input_type: str) -> None:
         read_flow_package(write_flow_package(envelope)).spec.steps[0].input_config
         is None
     )
+
+
+def _template_export_service(*, bindings: object, content: bytes | None):
+    assistant_id, asset_id = uuid4(), uuid4()
+    flow = _flow(
+        steps=[
+            _step(
+                1,
+                assistant_id=assistant_id,
+                output_mode="template_fill",
+                output_type="docx",
+                output_config={
+                    "template_asset_id": str(asset_id),
+                    "bindings": bindings,
+                },
+            )
+        ]
+    )
+    assets = AsyncMock(spec=FlowTemplateAssetService)
+    assets.get_asset_with_file.return_value = (
+        SimpleNamespace(name="Report.docx"),
+        SimpleNamespace(blob=content),
+    )
+    service = FlowPackageExportService(
+        flow_service=_FakeFlowPackageExportFlowService(
+            assistant_snapshots={assistant_id: _snapshot(model_ref=None)},
+            resource_bindings=tuple(),
+        ),
+        template_asset_service=assets,
+        package_writer=write_flow_package,
+    )
+    return service, flow, assets
+
+
+@pytest.mark.anyio
+@pytest.mark.parametrize("bindings", [{}, {"Body": "", "Old": ""}, {"Body": 42}, None])
+async def test_export_template_mapping_errors_are_actionable(bindings: object) -> None:
+    service, flow, _ = _template_export_service(
+        bindings=bindings, content=control_template_bytes(rich=["Body"])
+    )
+    with pytest.raises(FlowPackageExportError) as error:
+        await service.export_to_bytes(
+            flow_id=uuid4(), flow=flow, manifest_metadata=_manifest_metadata()
+        )
+    assert error.value.code.value == "flow_package_export_template_bindings_incomplete"
+    assert error.value.context == {"step_order": 1, "config_field": "output_config"}
+
+
+@pytest.mark.anyio
+@pytest.mark.parametrize("include_templates", [True, False])
+async def test_export_service_includes_or_omits_original_template(
+    include_templates: bool,
+) -> None:
+    content = control_template_bytes(rich=["Body"])
+    service, flow, assets = _template_export_service(
+        bindings={"Body": "{{ flow_input.text }}"}, content=content
+    )
+    result = await service.export_to_bytes(
+        flow_id=uuid4(),
+        flow=flow,
+        manifest_metadata=_manifest_metadata(),
+        include_templates=include_templates,
+    )
+    imported = read_flow_package(result.package_bytes)
+    assert imported.manifest.payload_schema == "eneo.flow_package.v2"
+    assert list(imported.template_payloads.values()) == (
+        [content] if include_templates else []
+    )
+    assert imported.spec.steps[0].output_config["bindings"] == {
+        "Body": "{{ flow_input.text }}"
+    }
+    assets.get_asset_with_file.assert_awaited_once()
+
+
+@pytest.mark.anyio
+@pytest.mark.parametrize("content", [None, b"not a DOCX"])
+async def test_export_template_file_errors_are_actionable(
+    content: bytes | None,
+) -> None:
+    service, flow, _ = _template_export_service(bindings={"Body": ""}, content=content)
+    with pytest.raises(FlowPackageExportError) as error:
+        await service.export_to_bytes(
+            flow_id=uuid4(), flow=flow, manifest_metadata=_manifest_metadata()
+        )
+    assert error.value.code.value == "flow_package_export_template_file_invalid"
+    assert error.value.context["step_order"] == 1
+
+
+@pytest.mark.anyio
+@pytest.mark.parametrize("same_asset", [True, False])
+async def test_export_deduplicates_template_bytes_while_preserving_asset_slots(
+    same_asset: bool,
+) -> None:
+    content = control_template_bytes(rich=["Body"])
+    service, flow, assets = _template_export_service(
+        bindings={"Body": "{{flow_input.text}}"}, content=content
+    )
+    first = flow.steps[0]
+    asset_id = first.output_config["template_asset_id"] if same_asset else str(uuid4())
+    flow.steps.append(
+        _step(
+            2,
+            assistant_id=first.assistant_id,
+            input_source="previous_step",
+            output_mode="template_fill",
+            output_type="docx",
+            output_config={
+                "template_asset_id": asset_id,
+                "bindings": {"Body": "{{step_1.output.text}}"},
+            },
+        )
+    )
+    assets.get_asset_with_file.side_effect = [
+        (SimpleNamespace(name="Report.docx"), SimpleNamespace(blob=content)),
+        (SimpleNamespace(name="Copy.docx"), SimpleNamespace(blob=content)),
+    ]
+    result = await service.export_to_bytes(
+        flow_id=uuid4(), flow=flow, manifest_metadata=_manifest_metadata()
+    )
+    expected_names = ["Report.docx"] if same_asset else ["Report.docx", "Copy.docx"]
+    assert sorted(
+        requirement.template.filename
+        for requirement in result.envelope.requirements.requirements
+    ) == sorted(expected_names)
+    assert assets.get_asset_with_file.await_count == len(expected_names)
+    with zipfile.ZipFile(BytesIO(result.package_bytes)) as package:
+        assert (
+            len([name for name in package.namelist() if name.startswith("templates/")])
+            == 1
+        )
+
+
+@pytest.mark.anyio
+@pytest.mark.parametrize(
+    "failure",
+    [NotFoundException("Deleted template"), BadRequestException("Missing content")],
+)
+async def test_export_unavailable_asset_uses_template_recovery_error(
+    failure: Exception,
+) -> None:
+    service, flow, assets = _template_export_service(
+        bindings={"Body": ""}, content=None
+    )
+    assets.get_asset_with_file.side_effect = failure
+    with pytest.raises(FlowPackageExportError) as error:
+        await service.export_to_bytes(
+            flow_id=uuid4(), flow=flow, manifest_metadata=_manifest_metadata()
+        )
+    assert error.value.code is FlowPackageExportErrorCode.TEMPLATE_FILE_INVALID
+    assert error.value.context["step_order"] == 1

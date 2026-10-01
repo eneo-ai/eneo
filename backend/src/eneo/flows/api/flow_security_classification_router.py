@@ -1,11 +1,9 @@
 from __future__ import annotations
 
-from collections.abc import Callable, Coroutine, MutableMapping
-from typing import Annotated, Any
+from typing import Annotated
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, Path, Request, Response, status
-from fastapi.routing import APIRoute
+from fastapi import APIRouter, Depends, Path, Request, status
 
 from eneo.authentication.endpoint_access import (
     Authentication,
@@ -18,6 +16,7 @@ from eneo.flows.api.flow_assistant_router import (
     flow_assistant_update_command,
     require_flow_assistant_access,
 )
+from eneo.flows.api.flow_request_body import body_too_large, capped_body_route_class
 from eneo.flows.api.flow_security_classification_models import (
     FLOW_SECURITY_CLASSIFICATION_PREVIEW_EXAMPLE,
     FlowSecurityClassificationPreviewPublic,
@@ -35,68 +34,22 @@ from eneo.main.container.container import Container
 from eneo.main.exceptions import ErrorCodes, FileTooLargeException
 from eneo.server.dependencies.container import get_container
 
+_BODY_TOO_LARGE_MESSAGE = (
+    "The request is larger than the {max_bytes} bytes a security "
+    "classification preview accepts. Send fewer or shorter steps."
+)
+
 
 def _body_too_large(max_bytes: int) -> FileTooLargeException:
-    return FileTooLargeException(
-        f"The request is larger than the {max_bytes} bytes a security "
-        "classification preview accepts. Send fewer or shorter steps.",
-        code=FlowApiErrorCode.REQUEST_BODY_TOO_LARGE.value,
-        context={"max_bytes": max_bytes},
-        max_size=max_bytes,
+    return body_too_large(
+        max_bytes, _BODY_TOO_LARGE_MESSAGE.format(max_bytes=max_bytes)
     )
 
 
-async def read_body_within(request: Request, max_bytes: int) -> bytes:
-    """The request body, refused as soon as it is known to exceed ``max_bytes``.
-
-    Nothing is parsed here: a declared length over the cap is refused before a
-    byte is read, and a streamed body is refused at the chunk that crosses it.
-    """
-    declared = request.headers.get("content-length")
-    if declared is not None and declared.isdigit() and int(declared) > max_bytes:
-        raise _body_too_large(max_bytes)
-    size = 0
-    chunks: list[bytes] = []
-    async for chunk in request.stream():
-        size += len(chunk)
-        if size > max_bytes:
-            raise _body_too_large(max_bytes)
-        chunks.append(chunk)
-    return b"".join(chunks)
-
-
-def replay_body(request: Request, body: bytes) -> Request:
-    """A request that delivers ``body`` once, then whatever the client sends next.
-
-    Later calls go to the original receive, so a client that disconnects after
-    the body was read is still seen as disconnected.
-    """
-    delivered = False
-
-    # An ASGI message (starlette.types.Message is this alias). The flow egress
-    # boundary test keeps third-party imports of flow code to its allowlist, so
-    # the alias is spelled out instead of importing starlette for one annotation.
-    async def receive() -> MutableMapping[str, Any]:
-        nonlocal delivered
-        if not delivered:
-            delivered = True
-            return {"type": "http.request", "body": body, "more_body": False}
-        return await request.receive()
-
-    return Request(request.scope, receive)
-
-
-class _CappedBodyRoute(APIRoute):
-    """Reads the body under the authoring request cap before FastAPI parses it."""
-
-    def get_route_handler(self) -> Callable[[Request], Coroutine[Any, Any, Response]]:
-        original_route_handler = super().get_route_handler()
-
-        async def capped_body_route_handler(request: Request) -> Response:
-            body = await read_body_within(request, MAX_FLOW_AUTHORING_REQUEST_BYTES)
-            return await original_route_handler(replay_body(request, body))
-
-        return capped_body_route_handler
+_CappedBodyRoute = capped_body_route_class(
+    MAX_FLOW_AUTHORING_REQUEST_BYTES,
+    message=_BODY_TOO_LARGE_MESSAGE.format(max_bytes=MAX_FLOW_AUTHORING_REQUEST_BYTES),
+)
 
 
 router = APIRouter(route_class=_CappedBodyRoute)

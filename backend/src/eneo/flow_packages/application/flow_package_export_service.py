@@ -4,9 +4,12 @@ import json
 from collections.abc import Callable, Iterable, Iterator, Mapping, Sequence
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
-from typing import Protocol, cast
+from typing import TYPE_CHECKING, Protocol, cast
 from uuid import UUID
 
+from eneo.flow_packages.application.flow_package_template_uploads import (
+    inspect_package_template,
+)
 from eneo.flow_packages.domain.flow_package_draft import (
     FlowPackageFlowDraft,
     FlowPackageStepInputConfig,
@@ -19,6 +22,7 @@ from eneo.flow_packages.domain.flow_package_errors import (
 )
 from eneo.flow_packages.domain.flow_package_limits import MAX_FLOW_PACKAGE_BYTES
 from eneo.flow_packages.domain.flow_package_manifest import (
+    FLOW_PACKAGE_TEMPLATES_PAYLOAD_SCHEMA,
     FlowPackageManifestMetadata,
     flow_package_filename,
 )
@@ -32,6 +36,10 @@ from eneo.flow_packages.domain.flow_package_requirements import (
     FlowPackageModelRequirement,
     FlowPackageRequirementEntry,
     FlowPackageRequirementSet,
+    FlowPackageTemplateAssetRequirement,
+)
+from eneo.flow_packages.domain.flow_package_templates import (
+    FlowPackageTemplateDescriptor,
 )
 from eneo.flows.assistant_authoring_snapshot import (
     AssistantAuthoringResourceRef,
@@ -73,7 +81,10 @@ from eneo.flows.flow_resource_bindings import (
     is_uuid_shaped_resource_ref,
     local_resource_kinds_for_slot_kind,
 )
-from eneo.flows.flow_validators_template import has_template_fill_resource_reference
+from eneo.flows.flow_validators_template import (
+    has_template_fill_resource_reference,
+    validate_template_placeholder_bindings,
+)
 from eneo.flows.flow_variable_definitions import (
     RESERVED_RUNTIME_VARIABLES,
     runtime_variables_for_step,
@@ -83,7 +94,10 @@ from eneo.flows.template_reference_analyzer import (
     TemplateReferenceKind,
     analyze_template,
 )
-from eneo.main.exceptions import BadRequestException
+from eneo.main.exceptions import BadRequestException, NotFoundException
+
+if TYPE_CHECKING:
+    from eneo.flows.flow_template_asset_service import FlowTemplateAssetService
 
 _MAX_JSON_SCAN_DEPTH = 32
 # Package bytes are materialized before response; this cap bounds the response payload.
@@ -119,6 +133,12 @@ class FlowPackageExportResult:
     filename: str
 
 
+@dataclass(frozen=True, slots=True)
+class FlowPackageExportTemplate:
+    descriptor: FlowPackageTemplateDescriptor
+    content: bytes
+
+
 class FlowPackageExportService:
     """Portable export invariants: no source-local provenance ids, capped bytes."""
 
@@ -128,10 +148,12 @@ class FlowPackageExportService:
         flow_service: FlowPackageExportFlowService,
         package_writer: FlowPackageWriter,
         clock: FlowPackageClock | None = None,
+        template_asset_service: FlowTemplateAssetService | None = None,
     ) -> None:
         self._flow_service = flow_service
         self._package_writer = package_writer
         self._clock = clock or _utc_now
+        self._template_asset_service = template_asset_service
 
     async def export_to_bytes(
         self,
@@ -139,6 +161,7 @@ class FlowPackageExportService:
         flow_id: UUID,
         flow: Flow,
         manifest_metadata: FlowPackageManifestMetadata,
+        include_templates: bool = True,
     ) -> FlowPackageExportResult:
         omitted_mcp_assistant_count = (
             await self._flow_service.count_flow_step_assistants_with_mcp_configuration(
@@ -151,11 +174,71 @@ class FlowPackageExportService:
         resource_bindings = await self._flow_service.list_resource_bindings(
             flow_id=flow_id
         )
+        template_assets: dict[UUID, FlowPackageExportTemplate] = {}
+        for step in flow.steps:
+            if step.output_mode is not FlowOutputMode.TEMPLATE_FILL:
+                continue
+            if self._template_asset_service is None:
+                raise FlowPackageExportError(
+                    code=FlowPackageExportErrorCode.TEMPLATE_ASSET_PAYLOAD_UNSUPPORTED,
+                    message="Template export requires a template asset service.",
+                    context={"step_order": step.step_order},
+                )
+            try:
+                asset_id = UUID(
+                    str((step.output_config or {}).get("template_asset_id", ""))
+                )
+            except ValueError as exc:
+                raise _step_config_not_portable(
+                    step_order=step.step_order, config_field="output_config"
+                ) from exc
+            if asset_id in template_assets:
+                continue
+            try:
+                asset, file = await self._template_asset_service.get_asset_with_file(
+                    flow_id=flow_id, asset_id=asset_id
+                )
+                if file.blob is None:
+                    raise BadRequestException(
+                        "The original Word template is unavailable."
+                    )
+                descriptor = inspect_package_template(
+                    file.blob, filename=asset.name, included=include_templates
+                )
+            except (BadRequestException, NotFoundException, ValueError) as exc:
+                raise FlowPackageExportError(
+                    code=FlowPackageExportErrorCode.TEMPLATE_FILE_INVALID,
+                    message="The Word template is unavailable or invalid; upload it again before exporting.",
+                    context={
+                        "step_order": step.step_order,
+                        "config_field": "output_config",
+                    },
+                ) from exc
+            template_assets[asset_id] = FlowPackageExportTemplate(
+                descriptor=descriptor,
+                content=file.blob if include_templates else b"",
+            )
+            if (
+                sum(
+                    len(content)
+                    for content in {
+                        template.descriptor.checksum: template.content
+                        for template in template_assets.values()
+                    }.values()
+                )
+                > MAX_PACKAGE_EXPORT_BYTES
+            ):
+                raise FlowPackageExportError(
+                    code=FlowPackageExportErrorCode.PACKAGE_BYTES_TOO_LARGE,
+                    message="The Word templates exceed the package size limit.",
+                    context={"max_package_export_bytes": MAX_PACKAGE_EXPORT_BYTES},
+                )
         envelope = build_flow_package_export_envelope(
             flow=flow,
             assistant_snapshots=assistant_snapshots,
             resource_bindings=resource_bindings,
             manifest_metadata=manifest_metadata,
+            template_assets=template_assets,
             provenance=FlowPackageProvenance.for_portable_export(
                 exported_at=self._clock(),
                 omissions=(
@@ -200,6 +283,7 @@ class _StepUsage:
 class _RequirementDraft:
     slot_ref_kind: ResourceSlotKind
     binding: LocalResourceBinding
+    template: FlowPackageTemplateDescriptor | None = None
     used_by_steps: dict[str, _StepUsage] = field(
         default_factory=lambda: dict[str, _StepUsage]()
     )
@@ -215,6 +299,7 @@ def build_flow_package_export_envelope(
     resource_bindings: tuple[LocalResourceBinding, ...],
     manifest_metadata: FlowPackageManifestMetadata,
     provenance: FlowPackageProvenance,
+    template_assets: Mapping[UUID, FlowPackageExportTemplate] | None = None,
 ) -> FlowPackageEnvelope:
     try:
         index_local_resource_bindings(resource_bindings)
@@ -248,6 +333,7 @@ def build_flow_package_export_envelope(
             slot_allocator=slot_allocator,
             requirement_drafts=requirement_drafts,
             usage=usage,
+            template_assets=template_assets or {},
         )
         _validate_step_template_references(
             step_spec=step_spec,
@@ -267,13 +353,24 @@ def build_flow_package_export_envelope(
         ),
     )
     return FlowPackageEnvelope.build_for_export(
-        manifest_metadata=manifest_metadata,
+        manifest_metadata=(
+            manifest_metadata.model_copy(
+                update={"payload_schema": FLOW_PACKAGE_TEMPLATES_PAYLOAD_SCHEMA}
+            )
+            if template_assets
+            else manifest_metadata
+        ),
         draft=draft,
         requirements=FlowPackageRequirementSet(
             schema_version=1,
             requirements=_requirements_from_drafts(requirement_drafts.values()),
         ),
         provenance=provenance,
+        template_payloads={
+            template.descriptor.asset_path: template.content
+            for template in (template_assets or {}).values()
+            if template.descriptor.asset_path is not None
+        },
     )
 
 
@@ -311,10 +408,13 @@ def _step_spec(
     slot_allocator: ResourceSlotAllocator,
     requirement_drafts: dict[str, _RequirementDraft],
     usage: _StepUsage,
+    template_assets: Mapping[UUID, FlowPackageExportTemplate],
 ) -> StepSpec:
     step = clean_inactive_step_config(step)
     has_template_resource = has_template_fill_resource_reference(step.output_config)
-    if step.output_mode == FlowOutputMode.TEMPLATE_FILL or has_template_resource:
+    if (step.output_mode == FlowOutputMode.TEMPLATE_FILL and not template_assets) or (
+        has_template_resource and step.output_mode is not FlowOutputMode.TEMPLATE_FILL
+    ):
         raise FlowPackageExportError(
             code=FlowPackageExportErrorCode.TEMPLATE_ASSET_PAYLOAD_UNSUPPORTED,
             message="Flow package export does not support template asset payloads yet.",
@@ -322,7 +422,13 @@ def _step_spec(
         )
 
     input_config = _portable_input_config(step)
-    output_config = _portable_output_config(step)
+    output_config = (
+        _portable_template_config(
+            step, template_assets, slot_allocator, requirement_drafts, usage
+        )
+        if step.output_mode is FlowOutputMode.TEMPLATE_FILL
+        else _portable_output_config(step)
+    )
 
     try:
         input_source = InputSource(step.input_source.value)
@@ -358,6 +464,66 @@ def _step_spec(
         output_config=output_config,
         review_policy=step.review_policy,
     )
+
+
+def _portable_template_config(
+    step: FlowStep,
+    template_assets: Mapping[UUID, FlowPackageExportTemplate],
+    slot_allocator: ResourceSlotAllocator,
+    requirement_drafts: dict[str, _RequirementDraft],
+    usage: _StepUsage,
+) -> FlowPersistedJsonObject:
+    config = step.output_config or {}
+    _reject_known_nonportable_config(
+        config, step_order=step.step_order, config_field="output_config"
+    )
+    if set(config) - {
+        "template_asset_id",
+        "template_name",
+        "template_checksum",
+        "placeholders",
+        "bindings",
+    }:
+        raise _step_config_not_portable(
+            step_order=step.step_order, config_field="output_config"
+        )
+    try:
+        asset_id = UUID(str(config.get("template_asset_id", "")))
+        template = template_assets[asset_id]
+    except (ValueError, KeyError) as exc:
+        raise _step_config_not_portable(
+            step_order=step.step_order, config_field="output_config"
+        ) from exc
+    names = [field.name for field in template.descriptor.fields]
+    bindings = config.get("bindings")
+    try:
+        validate_template_placeholder_bindings(
+            step_order=step.step_order, placeholder_names=names, bindings=bindings
+        )
+        if not isinstance(bindings, dict) or set(
+            cast(dict[str, object], bindings)
+        ) != set(names):
+            raise BadRequestException("Word template mappings include obsolete fields.")
+    except BadRequestException as exc:
+        raise FlowPackageExportError(
+            code=FlowPackageExportErrorCode.TEMPLATE_BINDINGS_INCOMPLETE,
+            message="Review the Word step: map every template field and remove obsolete mappings before exporting.",
+            context={"step_order": step.step_order, "config_field": "output_config"},
+        ) from exc
+    slot_ref, binding = slot_allocator.allocate(
+        slot_kind=ResourceSlotKind.TEMPLATE_ASSET,
+        local_kind=LocalResourceKind.TEMPLATE_ASSET,
+        local_ref=str(asset_id),
+        display_name=template.descriptor.filename,
+    )
+    assert binding is not None
+    _record_requirement(requirement_drafts, binding, usage)
+    requirement_drafts[slot_ref.ref].template = template.descriptor
+    return {
+        "template_ref": slot_ref.ref,
+        "placeholders": names,
+        "bindings": config.get("bindings"),
+    }
 
 
 def _portable_input_config(step: FlowStep) -> FlowPersistedJsonObject | None:
@@ -632,10 +798,10 @@ def _requirement_from_draft(draft: _RequirementDraft) -> FlowPackageRequirementE
                 used_by_steps=used_by_steps,
             )
         case ResourceSlotKind.TEMPLATE_ASSET:
-            raise FlowPackageExportError(
-                code=FlowPackageExportErrorCode.TEMPLATE_ASSET_PAYLOAD_UNSUPPORTED,
-                message="Flow package export does not support template asset payloads yet.",
-                context={"resource_ref": draft.binding.slot_ref.ref},
+            return FlowPackageTemplateAssetRequirement(
+                slot_ref=draft.binding.slot_ref,
+                used_by_steps=used_by_steps,
+                template=draft.template,
             )
 
 

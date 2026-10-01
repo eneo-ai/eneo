@@ -1,4 +1,4 @@
-import { cleanup, render, screen, waitFor } from "@testing-library/svelte";
+import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/svelte";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { Eneo, FlowPackageImportPlan, FlowPackageImportResult } from "@eneo/eneo-js";
 import { m } from "$lib/paraglide/messages";
@@ -100,6 +100,30 @@ describe("FlowPackageImportDialog", () => {
     })) as HTMLButtonElement;
     await waitFor(() => expect(submit.disabled).toBe(false));
     submit.click();
+    await waitFor(() => expect(goto).toHaveBeenCalledWith("/spaces/space-1/flows/flow-new"));
+  });
+  it("keeps the import dialog open while the draft is being created", async () => {
+    let finish!: (result: FlowPackageImportResult) => void;
+    const pending = new Promise<FlowPackageImportResult>((resolve) => {
+      finish = resolve;
+    });
+    const client = eneo(() => pending);
+    render(FlowPackageImportDialog, {
+      eneo: client,
+      spaceId: "space-1",
+      spaceRouteId: "space-1",
+      open: true,
+      showTrigger: false,
+      initialFile: new File(["zip"], "report.eneopkg")
+    });
+    const submit = await screen.findByRole("button", { name: m.flow_package_import_as_draft() });
+    await waitFor(() => expect((submit as HTMLButtonElement).disabled).toBe(false));
+    submit.click();
+    await waitFor(() => expect(client.flows.packages.importDraft).toHaveBeenCalledOnce());
+    expect(screen.queryByRole("button", { name: m.close() })).toBeNull();
+    await fireEvent.keyDown(document, { key: "Escape" });
+    expect(screen.getByRole("dialog", { name: m.flow_package_import() })).toBeTruthy();
+    finish(installed);
     await waitFor(() => expect(goto).toHaveBeenCalledWith("/spaces/space-1/flows/flow-new"));
   });
 });

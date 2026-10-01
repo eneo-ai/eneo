@@ -92,6 +92,35 @@ For authoring, Flows track both:
 
 In the API and backend this maps to `created_by_user_id` and `owner_user_id`. The distinction matters because authorship history and current authoring authority are not always the same thing.
 
+## Export and import a flow
+
+Choose **Export** in the flow editor to download an `.eneopkg` package. It carries
+step instructions, form fields, settings, and resource requirements. Run history,
+credentials, and knowledge-source contents are excluded. At import, choose the
+local models and knowledge sources that the new draft should use.
+
+If the flow fills a Word template, **Include Word templates** is selected by
+default. The package includes the original DOCX files and field mappings. Review
+the files before sharing: text already present in a template travels with it.
+Imported templates become separate assets owned by the new flow; source-local
+file and template identifiers are replaced.
+
+Clear the checkbox to share only the definition and mappings. During import,
+upload a replacement DOCX for each missing template. Eneo checks that its content
+control tags and field types match the package before allowing import. You may
+change layout and other document text while preserving those fields.
+
+An import is refused before any work starts when its request is larger than the
+package limit allows (the package plus its replacement files), or when its Word
+templates together unpack to more than 100 MiB. Each step that fills a template
+counts with its own copy, so a file reused by many steps counts once per step.
+
+Packages with template requirements use `eneo.flow_package.v2` and require an
+Eneo version that supports this format, whether or not the DOCX files are
+included. Existing `eneo.flow_package.v1` packages remain readable. Imports create
+unpublished drafts. Review the mappings, publish the draft when ready, and test the generated Word
+document before colleagues start using the flow.
+
 ## How a flow executes
 
 Flows execute **sequentially**. Each step receives input, produces output, and passes input data onward according to its `input_source`.
