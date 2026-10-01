@@ -99,6 +99,7 @@ from eneo.flows.output_modes import (
     transcribe_only_violation,
 )
 from eneo.flows.output_processing import (
+    PRIMITIVE_FIELD_TYPES,
     schema_expects_structured,
     validate_against_contract,
     validate_schema_syntax,
@@ -1239,10 +1240,6 @@ def template_binding_structured_source(
     return reference.step_order, reference.structured_path
 
 
-# A tuple, not a set: a declared type list is unhashable.
-_FIELD_TYPES = ("string", "number", "integer", "boolean")
-
-
 def _mapping(node: object) -> Mapping[str, object]:
     return cast(Mapping[str, object], node) if isinstance(node, Mapping) else {}
 
@@ -1272,7 +1269,7 @@ def template_bound_path_ok(schema: Mapping[str, object], path: tuple[str, ...]) 
             return False
         node = _mapping(obj.get("properties")).get(key)
     field = _mapping(node)
-    return "$ref" not in field and field.get("type") in _FIELD_TYPES
+    return "$ref" not in field and field.get("type") in PRIMITIVE_FIELD_TYPES
 
 
 # The keywords a schema may carry anywhere and still be edited. Any other (not,
@@ -1412,7 +1409,9 @@ def template_bound_path_made_ok(
             return None
         if key not in required:
             required.append(key)
-    edited = _narrowed_to(nodes[-1], _FIELD_TYPES) and _accepts_witness(contract)
+    edited = _narrowed_to(nodes[-1], PRIMITIVE_FIELD_TYPES) and _accepts_witness(
+        contract
+    )
     return contract if edited else None
 
 

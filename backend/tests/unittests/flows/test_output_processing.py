@@ -2,16 +2,32 @@
 
 from __future__ import annotations
 
+import copy
+import dataclasses
+import json
 import tracemalloc
+from typing import Any
 
 import pytest
 from referencing import Registry
 
+from eneo.completion_models.infrastructure.tenant_model_capabilities import (
+    _COMMON_SCHEMA_KEYWORDS,
+)
+from eneo.flows.domain import strict_schema_limits
+from eneo.flows.domain.strict_schema_limits import (
+    COMMON_STRICT_SCHEMA_LIMITS,
+    STRICT_SCHEMA_LIMITS_BY_PROVIDER,
+    StrictSchemaLimits,
+    strict_schema_limits_for,
+)
 from eneo.flows.flow_run_error import FlowRunContractViolation
 from eneo.flows.output_processing import (
+    _STRICT_RESPONSE_KEYWORDS,
     _contract_named_pointer,
     compile_validators,
     conform_keys_to_schema,
+    first_strict_response_violation,
     parse_json_output,
     validate_against_contract,
     validate_schema_syntax,
@@ -1129,3 +1145,605 @@ def test_compile_validators_keeps_explicit_empty_contracts():
     assert ("output", 1) in compiled
     compiled[("input", 1)].validate({"anything": True})
     compiled[("output", 1)].validate(["anything"])
+
+
+# --- first_strict_response_violation ---
+
+
+def _closed(**properties: Any) -> dict[str, Any]:
+    return {
+        "type": "object",
+        "properties": properties,
+        "required": list(properties),
+        "additionalProperties": False,
+    }
+
+
+def _strings(count: int, prefix: str = "p") -> dict[str, Any]:
+    return _closed(**{f"{prefix}{index}": {"type": "string"} for index in range(count)})
+
+
+def _nested_objects(levels: int) -> dict[str, Any]:
+    contract = _closed(leaf={"type": "string"})
+    for _ in range(levels - 1):
+        contract = _closed(child=contract)
+    return contract
+
+
+STRICT_ELIGIBLE: dict[str, dict[str, Any]] = {
+    "primitives": _closed(
+        a={"type": "string"},
+        b={"type": "number"},
+        c={"type": "integer"},
+        d={"type": "boolean"},
+    ),
+    "enum_and_const": _closed(
+        kind={"type": "string", "enum": ["x", "y"]},
+        level={"type": "integer", "enum": [1, 2]},
+        flag={"type": "boolean", "const": True},
+        tag={"type": "string", "const": "fixed"},
+    ),
+    "enum_and_const_of_the_declared_type": _closed(
+        a={"type": "number", "enum": [1, 2.5]},
+        b={"type": ["integer", "null"], "const": 3},
+        c={"type": "boolean", "enum": [True, False]},
+    ),
+    "finite_floats_are_scalars": _closed(
+        a={"type": "number", "enum": [1.5, 1e300]},
+        b={"type": "number", "const": -2.5},
+    ),
+    "nullable_union_both_orders": _closed(
+        a={"type": ["string", "null"]}, b={"type": ["null", "integer"]}
+    ),
+    "nested_objects": _closed(outer=_closed(inner=_closed(leaf={"type": "string"}))),
+    "array_of_closed_objects": _closed(
+        rows={"type": "array", "items": _closed(n={"type": "number"})}
+    ),
+    "array_of_primitives": _closed(tags={"type": "array", "items": {"type": "string"}}),
+    "annotations": _closed(a={"type": "string", "title": "A", "description": "The a"}),
+    "property_names_are_data": _closed(
+        type={"type": "string"},
+        required={"type": "string"},
+        minItems={"type": "string"},
+        **{"$ref": {"type": "string"}, "~a/b": {"type": "string"}},
+    ),
+}
+
+
+@pytest.mark.parametrize("contract", STRICT_ELIGIBLE.values(), ids=STRICT_ELIGIBLE)
+def test_strict_response_eligible_shapes_have_no_violation(contract):
+    before = copy.deepcopy(contract)
+    assert first_strict_response_violation(contract) is None
+    assert contract == before
+
+
+def _with(contract: dict[str, Any], **changes: Any) -> dict[str, Any]:
+    return {**contract, **changes}
+
+
+def _without(contract: dict[str, Any], key: str) -> dict[str, Any]:
+    return {k: v for k, v in contract.items() if k != key}
+
+
+_ONE = _closed(a={"type": "string"})
+_TWO = _closed(a={"type": "string"}, b={"type": "string"})
+
+
+def _prop(schema: dict[str, Any]) -> dict[str, Any]:
+    return _closed(a=schema)
+
+
+STRICT_INELIGIBLE = {
+    "array_root": (
+        {"type": "array", "items": _ONE},
+        "",
+        "root_not_object",
+    ),
+    "string_root": ({"type": "string"}, "", "root_not_object"),
+    "boolean_root": (True, "", "boolean_schema"),
+    "non_dict_root": (["x"], "", "schema_not_object"),
+    "none_root": (None, "", "schema_not_object"),
+    "boolean_property": (_prop(True), "/properties/a", "boolean_schema"),
+    "non_dict_property": (_prop("string"), "/properties/a", "schema_not_object"),
+    "additional_absent": (
+        _without(_ONE, "additionalProperties"),
+        "",
+        "object_open",
+    ),
+    "additional_true": (_with(_ONE, additionalProperties=True), "", "object_open"),
+    "additional_schema": (
+        _with(_ONE, additionalProperties={"type": "string"}),
+        "",
+        "object_open",
+    ),
+    "nested_object_open": (
+        _prop(
+            {
+                "type": "object",
+                "properties": {"b": {"type": "string"}},
+                "required": ["b"],
+            }
+        ),
+        "/properties/a",
+        "object_open",
+    ),
+    "required_missing": (_without(_ONE, "required"), "", "required_mismatch"),
+    "required_subset": (_with(_TWO, required=["a"]), "", "required_mismatch"),
+    "required_superset": (
+        _with(_ONE, required=["a", "ghost"]),
+        "",
+        "required_mismatch",
+    ),
+    "required_duplicate": (_with(_TWO, required=["a", "a"]), "", "required_mismatch"),
+    "required_duplicate_beside_all_names": (
+        _with(_TWO, required=["a", "b", "a"]),
+        "",
+        "required_mismatch",
+    ),
+    "required_not_a_list": (_with(_ONE, required="a"), "", "required_mismatch"),
+    "empty_object": (_closed(), "", "structure_mismatch"),
+    "properties_absent": (
+        {"type": "object", "required": [], "additionalProperties": False},
+        "",
+        "structure_mismatch",
+    ),
+    "properties_not_a_dict": (_with(_ONE, properties=["a"]), "", "structure_mismatch"),
+    "schema_keyword": (
+        _with(_ONE, **{"$schema": "x"}),
+        "/$schema",
+        "keyword_outside_grammar",
+    ),
+    "id_keyword": (_with(_ONE, **{"$id": "x"}), "/$id", "keyword_outside_grammar"),
+    "ref_keyword": (
+        _prop({"$ref": "#/$defs/a"}),
+        "/properties/a/$ref",
+        "keyword_outside_grammar",
+    ),
+    "defs_keyword": (
+        _with(_ONE, **{"$defs": {}}),
+        "/$defs",
+        "keyword_outside_grammar",
+    ),
+    "composition": (
+        _prop({"anyOf": [{"type": "string"}]}),
+        "/properties/a/anyOf",
+        "keyword_outside_grammar",
+    ),
+    "pattern": (
+        _prop({"type": "string", "pattern": "^a"}),
+        "/properties/a/pattern",
+        "keyword_outside_grammar",
+    ),
+    "format": (
+        _prop({"type": "string", "format": "date"}),
+        "/properties/a/format",
+        "keyword_outside_grammar",
+    ),
+    "default": (
+        _prop({"type": "string", "default": "x"}),
+        "/properties/a/default",
+        "keyword_outside_grammar",
+    ),
+    "unknown_keyword": (
+        _prop({"type": "string", "x-note": 1}),
+        "/properties/a/x-note",
+        "keyword_outside_grammar",
+    ),
+    "type_missing": (_prop({}), "/properties/a", "type_outside_grammar"),
+    "type_unknown": (_prop({"type": "null"}), "/properties/a", "type_outside_grammar"),
+    "three_type_list": (
+        _prop({"type": ["string", "integer", "null"]}),
+        "/properties/a",
+        "type_outside_grammar",
+    ),
+    "two_primitives_without_null": (
+        _prop({"type": ["string", "integer"]}),
+        "/properties/a",
+        "type_outside_grammar",
+    ),
+    "container_plus_null": (
+        _prop({"type": ["array", "null"], "items": {"type": "string"}}),
+        "/properties/a",
+        "type_outside_grammar",
+    ),
+    "object_plus_null": (
+        _prop({"type": ["object", "null"]}),
+        "/properties/a",
+        "type_outside_grammar",
+    ),
+    "properties_on_non_object": (
+        _prop({"type": "string", "properties": {}}),
+        "/properties/a",
+        "structure_mismatch",
+    ),
+    "items_on_non_array": (
+        _prop({"type": "string", "items": {"type": "string"}}),
+        "/properties/a",
+        "structure_mismatch",
+    ),
+    "array_without_items": (
+        _prop({"type": "array"}),
+        "/properties/a",
+        "structure_mismatch",
+    ),
+    "enum_on_object": (
+        _with(_ONE, enum=["a"]),
+        "",
+        "structure_mismatch",
+    ),
+    "empty_enum": (
+        _prop({"type": "string", "enum": []}),
+        "/properties/a",
+        "enum_invalid",
+    ),
+    "enum_with_null": (
+        _prop({"type": ["string", "null"], "enum": ["a", None]}),
+        "/properties/a",
+        "enum_invalid",
+    ),
+    "enum_with_object": (
+        _prop({"type": "string", "enum": [{"a": 1}]}),
+        "/properties/a",
+        "enum_invalid",
+    ),
+    "enum_not_a_list": (
+        _prop({"type": "string", "enum": "ab"}),
+        "/properties/a",
+        "enum_invalid",
+    ),
+    "enum_integers_on_a_string": (
+        _prop({"type": "string", "enum": [1, 2]}),
+        "/properties/a",
+        "enum_type_mismatch",
+    ),
+    "enum_string_on_an_integer": (
+        _prop({"type": "integer", "enum": ["a"]}),
+        "/properties/a",
+        "enum_type_mismatch",
+    ),
+    "enum_float_on_an_integer": (
+        _prop({"type": "integer", "enum": [1.5]}),
+        "/properties/a",
+        "enum_type_mismatch",
+    ),
+    "enum_bool_on_a_string": (
+        _prop({"type": "string", "enum": [True]}),
+        "/properties/a",
+        "enum_type_mismatch",
+    ),
+    "enum_bool_on_a_number": (
+        _prop({"type": "number", "enum": [True]}),
+        "/properties/a",
+        "enum_type_mismatch",
+    ),
+    "enum_bool_on_an_integer": (
+        _prop({"type": "integer", "enum": [1, False]}),
+        "/properties/a",
+        "enum_type_mismatch",
+    ),
+    "enum_number_on_a_boolean": (
+        _prop({"type": "boolean", "enum": [1]}),
+        "/properties/a",
+        "enum_type_mismatch",
+    ),
+    "enum_mismatch_on_a_nullable_union": (
+        _prop({"type": ["integer", "null"], "enum": ["a"]}),
+        "/properties/a",
+        "enum_type_mismatch",
+    ),
+    "enum_duplicate": (
+        _prop({"type": "string", "enum": ["x", "x"]}),
+        "/properties/a",
+        "enum_invalid",
+    ),
+    "const_integer_on_a_string": (
+        _prop({"type": "string", "const": 5}),
+        "/properties/a",
+        "const_type_mismatch",
+    ),
+    "const_bool_on_an_integer": (
+        _prop({"type": "integer", "const": True}),
+        "/properties/a",
+        "const_type_mismatch",
+    ),
+    "open_dict_without_properties": (
+        {"type": "object", "additionalProperties": True},
+        "",
+        "object_open",
+    ),
+    "enum_infinity": (
+        _prop({"type": "number", "enum": [1.0, float("inf")]}),
+        "/properties/a",
+        "enum_invalid",
+    ),
+    "enum_negative_infinity": (
+        _prop({"type": "number", "enum": [float("-inf")]}),
+        "/properties/a",
+        "enum_invalid",
+    ),
+    "enum_not_a_number": (
+        _prop({"type": "number", "enum": [float("nan")]}),
+        "/properties/a",
+        "enum_invalid",
+    ),
+    "const_not_a_number": (
+        _prop({"type": "number", "const": float("nan")}),
+        "/properties/a",
+        "const_invalid",
+    ),
+    "const_infinity_parsed_from_json": (
+        _prop(json.loads('{"type": "number", "const": 1e999}')),
+        "/properties/a",
+        "const_invalid",
+    ),
+    "enum_and_const_that_conflict": (
+        _prop({"type": "string", "enum": ["a"], "const": "b"}),
+        "/properties/a",
+        "enum_with_const",
+    ),
+    "enum_and_const_that_agree": (
+        _prop({"type": "string", "enum": ["a", "b"], "const": "a"}),
+        "/properties/a",
+        "enum_with_const",
+    ),
+    "const_null": (
+        _prop({"type": ["string", "null"], "const": None}),
+        "/properties/a",
+        "const_invalid",
+    ),
+    "const_object": (
+        _prop({"type": "string", "const": {"a": 1}}),
+        "/properties/a",
+        "const_invalid",
+    ),
+    "title_not_a_string": (
+        _prop({"type": "string", "title": 3}),
+        "/properties/a",
+        "annotation_invalid",
+    ),
+}
+for _bound in (
+    "minLength",
+    "maxLength",
+    "minimum",
+    "maximum",
+    "exclusiveMinimum",
+    "exclusiveMaximum",
+    "minItems",
+    "maxItems",
+):
+    STRICT_INELIGIBLE[f"bound_{_bound}"] = (
+        _prop({"type": "string", _bound: 1}),
+        f"/properties/a/{_bound}",
+        "keyword_outside_grammar",
+    )
+
+
+@pytest.mark.parametrize(
+    ("contract", "pointer", "rule"), STRICT_INELIGIBLE.values(), ids=STRICT_INELIGIBLE
+)
+def test_strict_response_violation_is_the_exact_pointer_and_rule(
+    contract, pointer, rule
+):
+    before = copy.deepcopy(contract)
+    assert first_strict_response_violation(contract) == (pointer, rule)
+    assert contract == before
+
+
+def test_strict_response_violation_is_the_first_in_document_order():
+    contract = _closed(
+        first={"type": "string", "minLength": 1},
+        second={"type": "string", "pattern": "a"},
+    )
+    assert first_strict_response_violation(contract) == (
+        "/properties/first/minLength",
+        "keyword_outside_grammar",
+    )
+
+
+def test_strict_response_violation_escapes_property_names_in_the_pointer():
+    contract = _closed(**{"~a/b": {"type": "string", "minLength": 1}})
+    assert first_strict_response_violation(contract) == (
+        "/properties/~0a~1b/minLength",
+        "keyword_outside_grammar",
+    )
+
+
+def test_strict_response_violation_reads_property_names_as_data():
+    contract = _closed(**{"type": {"type": "string", "pattern": "x"}})
+    assert first_strict_response_violation(contract) == (
+        "/properties/type/pattern",
+        "keyword_outside_grammar",
+    )
+
+
+def test_strict_response_violation_fails_closed_on_a_contract_too_deep_to_walk():
+    contract: dict[str, Any] = {"type": "string"}
+    for _ in range(2000):
+        contract = _closed(c=contract)
+    unbounded = dataclasses.replace(
+        COMMON_STRICT_SCHEMA_LIMITS, max_nesting_levels=10_000
+    )
+    violation = first_strict_response_violation(contract, unbounded)
+    assert violation is not None and violation[1] == "contract_unreadable"
+    assert first_strict_response_violation(contract) is not None
+
+
+def test_strict_response_allowlist_stays_inside_the_grammar_safety_precondition():
+    assert _STRICT_RESPONSE_KEYWORDS <= _COMMON_SCHEMA_KEYWORDS
+
+
+# --- strict response: provider limits ---
+
+
+def test_strict_limits_are_documented_openai_values_and_the_common_default():
+    assert STRICT_SCHEMA_LIMITS_BY_PROVIDER["openai"] == StrictSchemaLimits(
+        max_nesting_levels=10,
+        max_properties=5000,
+        max_enum_values=1000,
+        enum_size_checked_above_values=250,
+        max_enum_string_chars=15_000,
+        max_total_string_chars=120_000,
+    )
+    assert COMMON_STRICT_SCHEMA_LIMITS == STRICT_SCHEMA_LIMITS_BY_PROVIDER["openai"]
+    assert (
+        strict_schema_limits_for("openai") is STRICT_SCHEMA_LIMITS_BY_PROVIDER["openai"]
+    )
+    assert strict_schema_limits_for("not-declared") is COMMON_STRICT_SCHEMA_LIMITS
+
+
+def test_strict_common_limits_are_the_fieldwise_minimum_over_declared_providers():
+    stricter = dataclasses.replace(
+        STRICT_SCHEMA_LIMITS_BY_PROVIDER["openai"],
+        max_nesting_levels=4,
+        max_properties=9000,
+    )
+    common = strict_schema_limits._common_limits(
+        {**STRICT_SCHEMA_LIMITS_BY_PROVIDER, "other": stricter}
+    )
+    assert common.max_nesting_levels == 4
+    assert common.max_properties == 5000
+
+
+def test_strict_a_declared_provider_limit_replaces_the_common_one():
+    assert first_strict_response_violation(_nested_objects(3)) is None
+    narrow = dataclasses.replace(COMMON_STRICT_SCHEMA_LIMITS, max_nesting_levels=2)
+    assert first_strict_response_violation(_nested_objects(3), narrow) is not None
+
+
+def test_strict_nesting_levels_10_are_eligible_and_11_are_not():
+    assert first_strict_response_violation(_nested_objects(10)) is None
+    violation = first_strict_response_violation(_nested_objects(11))
+    assert violation is not None and violation[1] == "nesting_depth_exceeded"
+    assert violation[0].count("/properties/child") == 10
+
+
+def test_strict_an_array_counts_as_a_nesting_level():
+    def chain(pairs: int, tail: dict[str, Any]) -> dict[str, Any]:
+        contract = _closed(leaf=tail)
+        for _ in range(pairs):
+            contract = _closed(rows={"type": "array", "items": contract})
+        return contract
+
+    # Each pair is an array and an object: 4 pairs, a root object and an array of
+    # strings are 10 levels; 5 pairs and a root object are 11.
+    ten = chain(4, {"type": "array", "items": {"type": "string"}})
+    assert first_strict_response_violation(ten) is None
+    violation = first_strict_response_violation(chain(5, {"type": "string"}))
+    assert violation is not None and violation[1] == "nesting_depth_exceeded"
+
+
+def test_strict_properties_5000_are_eligible_and_5001_are_not():
+    assert first_strict_response_violation(_strings(5000)) is None
+    assert first_strict_response_violation(_strings(5001)) == (
+        "",
+        "property_count_exceeded",
+    )
+
+
+def test_strict_property_count_is_a_total_over_every_object():
+    contract = _closed(a=_strings(2500, "x"), b=_strings(2500, "y"))
+    assert first_strict_response_violation(contract) == (
+        "/properties/b",
+        "property_count_exceeded",
+    )
+
+
+def _enum_property(values: list[Any]) -> dict[str, Any]:
+    return _closed(e={"type": "string", "enum": values})
+
+
+def test_strict_enum_values_1000_are_eligible_and_1001_are_not():
+    assert (
+        first_strict_response_violation(_enum_property([f"v{i}" for i in range(1000)]))
+        is None
+    )
+    assert first_strict_response_violation(
+        _enum_property([f"v{i}" for i in range(1001)])
+    ) == ("/properties/e", "enum_value_count_exceeded")
+
+
+def test_strict_enum_value_count_is_a_total_over_every_enum():
+    contract = _closed(
+        **{
+            name: {"type": "string", "enum": [f"{name}{i}" for i in range(400)]}
+            for name in ("a", "b", "c")
+        }
+    )
+    assert first_strict_response_violation(contract) == (
+        "/properties/c",
+        "enum_value_count_exceeded",
+    )
+
+
+def test_strict_a_large_enum_is_bound_by_its_own_string_size():
+    within = [f"{i:03d}" + "x" * 56 for i in range(251)]  # 251 values, 59 chars
+    over = [f"{i:03d}" + "x" * 57 for i in range(251)]  # 251 values, 60 chars
+    assert first_strict_response_violation(_enum_property(within)) is None
+    assert first_strict_response_violation(_enum_property(over)) == (
+        "/properties/e",
+        "enum_string_size_exceeded",
+    )
+
+
+def test_strict_an_enum_up_to_the_size_check_threshold_is_not_bound_by_string_size():
+    values = [f"{i:03d}" + "x" * 60 for i in range(250)]  # 250 values, 63 chars
+    assert first_strict_response_violation(_enum_property(values)) is None
+
+
+def test_strict_total_string_size_120000_is_eligible_and_120001_is_not():
+    def const_of(length: int) -> dict[str, Any]:
+        return _closed(a={"type": "string", "const": "c" * length})
+
+    assert first_strict_response_violation(const_of(119_999)) is None
+    assert first_strict_response_violation(const_of(120_000)) == (
+        "/properties/a",
+        "string_size_exceeded",
+    )
+
+
+def test_strict_total_string_size_counts_property_names_and_enum_values():
+    names = _closed(
+        **{"n" * 60_000: {"type": "string"}, "m" * 60_001: {"type": "string"}}
+    )
+    assert first_strict_response_violation(names) == ("", "string_size_exceeded")
+    enums = _closed(
+        a={"type": "string", "enum": ["e" * 60_000]},
+        b={"type": "string", "enum": ["e" * 60_000]},
+    )
+    assert first_strict_response_violation(enums) == (
+        "/properties/b",
+        "string_size_exceeded",
+    )
+
+
+def test_strict_an_enum_over_its_allowance_is_refused_before_it_is_hashed():
+    class Spy(str):
+        hashed = 0
+
+        def __hash__(self) -> int:
+            Spy.hashed += 1
+            return str.__hash__(self)
+
+    limits = dataclasses.replace(COMMON_STRICT_SCHEMA_LIMITS, max_enum_values=3)
+    over = _enum_property([Spy(f"v{i}") for i in range(4)])
+    assert first_strict_response_violation(over, limits) == (
+        "/properties/e",
+        "enum_value_count_exceeded",
+    )
+    assert Spy.hashed == 0
+    within = _enum_property([Spy(f"v{i}") for i in range(3)])
+    assert first_strict_response_violation(within, limits) is None
+    assert Spy.hashed > 0
+
+
+def test_strict_the_enum_allowance_is_what_earlier_enums_left():
+    limits = dataclasses.replace(COMMON_STRICT_SCHEMA_LIMITS, max_enum_values=3)
+    contract = _closed(
+        a={"type": "string", "enum": ["a1", "a2"]},
+        b={"type": "string", "enum": ["b1", "b2"]},
+    )
+    assert first_strict_response_violation(contract, limits) == (
+        "/properties/b",
+        "enum_value_count_exceeded",
+    )

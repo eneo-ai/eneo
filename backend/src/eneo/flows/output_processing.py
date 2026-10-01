@@ -3,12 +3,13 @@
 from __future__ import annotations
 
 import json
+import math
 import re
 import unicodedata
 from collections.abc import Callable, Generator, Iterable, Iterator
 from contextlib import contextmanager
 from dataclasses import dataclass
-from typing import Any, NoReturn, Protocol, cast
+from typing import Any, Literal, NoReturn, Protocol, cast
 from urllib.parse import unquote
 
 import jsonschema
@@ -19,6 +20,10 @@ from referencing import Registry, Resource
 from referencing.exceptions import NoSuchResource, Unresolvable
 from referencing.jsonschema import DRAFT202012, Schema
 
+from eneo.flows.domain.strict_schema_limits import (
+    COMMON_STRICT_SCHEMA_LIMITS,
+    StrictSchemaLimits,
+)
 from eneo.flows.flow_api_error_code import FlowApiErrorCode
 from eneo.flows.flow_run_error import (
     CONTRACT_VIOLATION_POINTER_MAX_LENGTH,
@@ -650,6 +655,228 @@ def _schema_nodes(
             for index, child in enumerate(cast(list[Any], value)):
                 if id(child) in children:
                     yield from _schema_nodes(child, f"{child_path}/{index}")
+
+
+# A tuple, not a set: a declared type list is unhashable.
+PRIMITIVE_FIELD_TYPES = ("string", "number", "integer", "boolean")
+
+# What a schema may carry to be sent as `strict: true`: nothing but these, each in the
+# shape _strict_node_violation names. A keyword outside this set is never read as one.
+_STRICT_RESPONSE_KEYWORDS = frozenset(
+    {
+        "type",
+        "properties",
+        "required",
+        "additionalProperties",
+        "items",
+        "enum",
+        "const",
+        "title",
+        "description",
+    }
+)
+
+StrictResponseRule = Literal[
+    "schema_not_object",
+    "boolean_schema",
+    "keyword_outside_grammar",
+    "type_outside_grammar",
+    "root_not_object",
+    "structure_mismatch",
+    "object_open",
+    "required_mismatch",
+    "enum_invalid",
+    "enum_with_const",
+    "enum_type_mismatch",
+    "const_invalid",
+    "const_type_mismatch",
+    "annotation_invalid",
+    "contract_unreadable",
+    "nesting_depth_exceeded",
+    "property_count_exceeded",
+    "enum_value_count_exceeded",
+    "enum_string_size_exceeded",
+    "string_size_exceeded",
+]
+
+
+def _is_scalar(value: object) -> bool:
+    """A string, bool, int or finite float: JSON has no NaN or infinity."""
+    if isinstance(value, float):
+        return math.isfinite(value)
+    return isinstance(value, (str, int, bool))
+
+
+def _fits_primitive(value: object, primitive: object) -> bool:
+    """Whether a value is one the primitive type admits (a bool is no number)."""
+    if primitive == "string":
+        return isinstance(value, str)
+    if primitive == "boolean":
+        return isinstance(value, bool)
+    if isinstance(value, bool):
+        return False
+    if primitive == "integer":
+        return isinstance(value, int)
+    return primitive == "number" and isinstance(value, (int, float))
+
+
+def _scalar_size(value: str | int | float | bool) -> int:
+    return len(value) if isinstance(value, str) else len(json.dumps(value))
+
+
+def _strict_node_violation(
+    node: object, *, is_root: bool, enum_values_left: int
+) -> tuple[str, StrictResponseRule] | None:
+    """The first rule one schema node breaks, as (keyword suffix, rule); None if none.
+
+    The suffix is "" for the node itself or "/<keyword>" for the keyword at fault.
+    """
+    if isinstance(node, bool):
+        return "", "boolean_schema"
+    if not isinstance(node, dict):
+        return "", "schema_not_object"
+    schema = cast(dict[str, Any], node)
+    for key in schema:
+        if key not in _STRICT_RESPONSE_KEYWORDS:
+            return f"/{_json_pointer_token(str(key))}", "keyword_outside_grammar"
+    declared = schema.get("type")
+    if isinstance(declared, list):
+        members = cast(list[object], declared)
+        primitives = [m for m in members if m in PRIMITIVE_FIELD_TYPES]
+        is_nullable_primitive = (
+            len(members) == 2 and len(primitives) == 1 and "null" in members
+        )
+        kind = "leaf" if is_nullable_primitive else None
+        primitive = primitives[0] if is_nullable_primitive else None
+    elif declared in PRIMITIVE_FIELD_TYPES:
+        kind = "leaf"
+        primitive = declared
+    else:
+        kind = declared if declared in ("object", "array") else None
+        primitive = None
+    if kind is None:
+        return "", "type_outside_grammar"
+    if is_root and kind != "object":
+        return "", "root_not_object"
+    structural = {
+        "object": {"properties", "required", "additionalProperties"},
+        "array": {"items"},
+        "leaf": set[str](),
+    }
+    for keyword in ("properties", "required", "additionalProperties", "items"):
+        if keyword in schema and keyword not in structural[kind]:
+            return "", "structure_mismatch"
+    if kind != "leaf" and ("enum" in schema or "const" in schema):
+        return "", "structure_mismatch"
+    if kind == "object":
+        if schema.get("additionalProperties") is not False:
+            return "", "object_open"
+        properties = cast(object, schema.get("properties"))
+        if not isinstance(properties, dict) or not properties:
+            return "", "structure_mismatch"
+        names = cast(dict[str, object], properties)
+        required = schema.get("required")
+        if (
+            not isinstance(required, list)
+            or not all(isinstance(name, str) for name in cast(list[object], required))
+            or len(cast(list[object], required)) != len(names)
+            or set(cast(list[str], required)) != set(names)
+        ):
+            return "", "required_mismatch"
+    if kind == "array" and "items" not in schema:
+        return "", "structure_mismatch"
+    if "enum" in schema and "const" in schema:
+        # Either alone is read; both together are rejected rather than reconciled.
+        return "", "enum_with_const"
+    if "enum" in schema:
+        values = schema["enum"]
+        if not isinstance(values, list) or not values:
+            return "", "enum_invalid"
+        # Before the values are read or hashed: an over-limit enum builds nothing.
+        if len(cast(list[object], values)) > enum_values_left:
+            return "", "enum_value_count_exceeded"
+        if not all(_is_scalar(v) for v in cast(list[object], values)):
+            return "", "enum_invalid"
+        if len(set(cast(list[Any], values))) != len(cast(list[object], values)):
+            return "", "enum_invalid"
+        if not all(_fits_primitive(v, primitive) for v in cast(list[Any], values)):
+            return "", "enum_type_mismatch"
+    if "const" in schema:
+        if not _is_scalar(schema["const"]):
+            return "", "const_invalid"
+        if not _fits_primitive(schema["const"], primitive):
+            return "", "const_type_mismatch"
+    if any(
+        key in schema and not isinstance(schema[key], str)
+        for key in ("title", "description")
+    ):
+        return "", "annotation_invalid"
+    return None
+
+
+def first_strict_response_violation(
+    contract: object,
+    limits: StrictSchemaLimits = COMMON_STRICT_SCHEMA_LIMITS,
+) -> tuple[str, StrictResponseRule] | None:
+    """The first reason a contract may not be sent as `strict: true`, or None if it may.
+
+    An allowlist recognizer: only the shapes _strict_node_violation names are eligible,
+    and a closed object with every property required is the one object shape. Beside
+    the shape, the schema must fit the provider `limits` (nesting levels, total
+    properties, enum values and string sizes; see strict_schema_limits). It reads the
+    contract alone, never mutates it, and never raises: a contract it cannot walk is a
+    violation. Violations come in document order; a node's shape rules come before its
+    limit checks, except that an enum's value count is checked before its values are
+    read. Nothing calls it yet.
+    """
+    properties_seen = enum_values_seen = string_chars_seen = 0
+    ancestors: list[tuple[str, int]] = []
+    pointer = ""
+    try:
+        for pointer, node in _schema_nodes(cast(Any, contract)):
+            while ancestors and not pointer.startswith(ancestors[-1][0] + "/"):
+                ancestors.pop()
+            if ancestors and pointer == f"{ancestors[-1][0]}/additionalProperties":
+                # The literal false its object already passed, not a schema.
+                continue
+            violation = _strict_node_violation(
+                node,
+                is_root=not pointer,
+                enum_values_left=limits.max_enum_values - enum_values_seen,
+            )
+            if violation is not None:
+                suffix, rule = violation
+                return pointer + suffix, rule
+            schema = cast(dict[str, Any], node)
+            parent_levels = ancestors[-1][1] if ancestors else 0
+            is_container = schema.get("type") in ("object", "array")
+            levels = parent_levels + int(is_container)
+            ancestors.append((pointer, levels))
+            if levels > limits.max_nesting_levels:
+                return pointer, "nesting_depth_exceeded"
+            if schema.get("type") == "object":
+                names = cast(dict[str, Any], schema["properties"])
+                properties_seen += len(names)
+                string_chars_seen += sum(len(name) for name in names)
+                if properties_seen > limits.max_properties:
+                    return pointer, "property_count_exceeded"
+            if "enum" in schema:
+                values = cast(list[str | int | float | bool], schema["enum"])
+                enum_values_seen += len(values)
+                if (
+                    len(values) > limits.enum_size_checked_above_values
+                    and sum(len(v) for v in values if isinstance(v, str))
+                    > limits.max_enum_string_chars
+                ):
+                    return pointer, "enum_string_size_exceeded"
+                string_chars_seen += sum(_scalar_size(v) for v in values)
+            if "const" in schema:
+                string_chars_seen += _scalar_size(schema["const"])
+            if string_chars_seen > limits.max_total_string_chars:
+                return pointer, "string_size_exceeded"
+    except _CONTRACT_FAILURES:
+        return pointer, "contract_unreadable"
+    return None
 
 
 def schema_expects_structured(schema: dict[str, Any]) -> bool:

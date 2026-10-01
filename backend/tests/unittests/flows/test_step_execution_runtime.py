@@ -6,6 +6,7 @@ import json
 import logging
 from datetime import datetime, timezone
 from types import SimpleNamespace
+from typing import Any
 from unittest.mock import AsyncMock, MagicMock, patch
 from uuid import uuid4
 
@@ -36,6 +37,8 @@ from eneo.completion_models.infrastructure.context_builder import (
 from eneo.completion_models.infrastructure.stream_collector import (
     ProviderJsonWhitespaceAbort,
 )
+from eneo.flows.ai_builder.ai_builder_new_step_compiler import _compile_object_schema
+from eneo.flows.ai_builder.ai_builder_new_step_models import StructuredFieldDraft
 from eneo.flows.citation_sidecar import (
     CITATION_MODE_INLINE_INREF_SIDECAR,
     CITATION_MODE_OFF,
@@ -1095,6 +1098,188 @@ def test_prepared_json_call_includes_nested_output_schema(
     assert call.effective_prompt.startswith("Extract the facts")
     assert "Return ONLY valid JSON" in call.effective_prompt
     assert call.capability_fallback_prompt == prepared.effective_prompt
+
+
+_CLOSED_CONTRACT: dict[str, Any] = {
+    "type": "object",
+    "required": ["title", "kind"],
+    "additionalProperties": False,
+    "properties": {
+        "title": {"type": "string"},
+        "kind": {"type": "string", "enum": ["a", "b"]},
+    },
+}
+
+_BUILDER_COMPILED_CONTRACT = _compile_object_schema(
+    [
+        StructuredFieldDraft(name="title", field_type="string", description="d"),
+        StructuredFieldDraft(
+            name="note", field_type="string", description="d", nullable=True
+        ),
+        StructuredFieldDraft(
+            name="rows",
+            field_type="array",
+            description="d",
+            required=False,
+            item_fields=[
+                StructuredFieldDraft(name="n", field_type="number", description="d")
+            ],
+        ),
+    ]
+)
+
+_ARRAY_BOUNDS = {"minItems": 1, "maxItems": 1}
+_MAPPED_DERIVED_CONTRACT: dict[str, Any] = {
+    "type": "object",
+    "required": ["sections"],
+    "additionalProperties": False,
+    "properties": {
+        "sections": {
+            "type": "array",
+            **_ARRAY_BOUNDS,
+            "items": _CLOSED_CONTRACT,
+        }
+    },
+}
+_PER_SOURCE_DERIVED_CONTRACT: dict[str, Any] = {
+    "type": "object",
+    "required": ["documents"],
+    "additionalProperties": False,
+    "properties": {
+        "documents": {
+            "type": "array",
+            "description": "One document",
+            **_ARRAY_BOUNDS,
+            "items": _CLOSED_CONTRACT,
+        }
+    },
+}
+_OPEN_GROUP_CONTRACT: dict[str, Any] = {
+    "type": "object",
+    "required": ["extra"],
+    "additionalProperties": False,
+    "properties": {
+        "extra": {"type": "object", "title": "Extra", "additionalProperties": True}
+    },
+}
+_ARRAY_ROOT_CONTRACT: dict[str, Any] = {"type": "array", "items": _CLOSED_CONTRACT}
+_REF_CONTRACT: dict[str, Any] = {
+    "type": "object",
+    "properties": {"a": {"$ref": "#/$defs/a"}, "b": {"anyOf": [{"type": "string"}]}},
+    "$defs": {"a": {"type": "string"}},
+}
+
+_SCHEMA = "json_schema"
+_OBJECT = {"type": "json_object"}
+
+# What the request carries today for each contract family, and for none of them is it
+# `strict: true`: the schema goes out as authored with strict False, or the plain JSON
+# mode, or nothing.
+_EXPECTED_RESPONSE_FORMAT = {
+    ("openai", "closed"): _SCHEMA,
+    ("openai", "builder"): _SCHEMA,
+    ("openai", "mapped"): _SCHEMA,
+    ("openai", "per_source"): _SCHEMA,
+    ("openai", "open_group"): _SCHEMA,
+    ("openai", "array_root"): None,
+    ("openai", "ref"): _OBJECT,
+    ("hosted_vllm", "closed"): _SCHEMA,
+    ("hosted_vllm", "builder"): _SCHEMA,
+    ("hosted_vllm", "mapped"): _SCHEMA,
+    ("hosted_vllm", "per_source"): _SCHEMA,
+    ("hosted_vllm", "open_group"): _SCHEMA,
+    ("hosted_vllm", "array_root"): _SCHEMA,
+    ("hosted_vllm", "ref"): _OBJECT,
+    ("vllm", "closed"): _SCHEMA,
+    ("vllm", "builder"): _SCHEMA,
+    ("vllm", "mapped"): _SCHEMA,
+    ("vllm", "per_source"): _SCHEMA,
+    ("vllm", "open_group"): _SCHEMA,
+    ("vllm", "array_root"): _SCHEMA,
+    ("vllm", "ref"): _OBJECT,
+    ("openai-unknown-model", "closed"): _OBJECT,
+    ("openai-unknown-model", "builder"): _OBJECT,
+    ("openai-unknown-model", "mapped"): _OBJECT,
+    ("openai-unknown-model", "per_source"): _OBJECT,
+    ("openai-unknown-model", "open_group"): _OBJECT,
+    ("openai-unknown-model", "array_root"): None,
+    ("openai-unknown-model", "ref"): _OBJECT,
+}
+_CONTRACT_FAMILIES = {
+    "closed": _CLOSED_CONTRACT,
+    "builder": _BUILDER_COMPILED_CONTRACT,
+    "mapped": _MAPPED_DERIVED_CONTRACT,
+    "per_source": _PER_SOURCE_DERIVED_CONTRACT,
+    "open_group": _OPEN_GROUP_CONTRACT,
+    "array_root": _ARRAY_ROOT_CONTRACT,
+    "ref": _REF_CONTRACT,
+}
+
+
+@pytest.mark.parametrize(("route", "family"), list(_EXPECTED_RESPONSE_FORMAT))
+def test_prepared_json_call_response_format_per_route_and_contract_family(
+    route, family, monkeypatch
+):
+    provider = "openai" if route == "openai-unknown-model" else route
+    model = "not-in-litellm" if route == "openai-unknown-model" else "gpt-4.1"
+    monkeypatch.setattr(
+        "eneo.completion_models.infrastructure.tenant_model_capabilities.supports_response_schema",
+        lambda **kwargs: route != "openai-unknown-model",
+    )
+    monkeypatch.setattr(
+        "eneo.flows.runtime.step_execution_runtime.detect_native_json_output_support",
+        lambda assistant: True,
+    )
+    contract = _CONTRACT_FAMILIES[family]
+    original = json.dumps(contract, sort_keys=True)
+    assistant = MagicMock()
+    assistant.completion_model = SimpleNamespace(
+        id=None,
+        name=model,
+        provider_type=provider,
+        litellm_model_name=f"{provider}/{model}",
+        supported_model_kwargs=SupportedModelKwargs(),
+    )
+    assistant.completion_model_kwargs = ModelKwargs()
+    prepared = PreparedStepExecution(
+        assistant=assistant,
+        step_input=StepInputValue(
+            text="Source", source_text="Source", input_source="flow_input"
+        ),
+        effective_prompt=_prompt_for_output_format(
+            output_type="json", output_contract=contract, prompt="Extract"
+        ),
+        input_payload_for_result={"text": "Source"},
+        contract_validation=None,
+        diagnostics=[],
+        llm_files=[],
+    )
+
+    call = build_prepared_completion_call(
+        step=_step(output_type="json", output_contract=contract),
+        state=_state(),
+        prepared=prepared,
+    )
+
+    expected = _EXPECTED_RESPONSE_FORMAT[(route, family)]
+    response_format = call.preferred_model_kwargs.response_format
+    if expected == _SCHEMA:
+        assert response_format == {
+            "type": "json_schema",
+            "json_schema": {
+                "name": "flow_step_output",
+                "strict": False,
+                "schema": contract,
+            },
+        }
+    else:
+        assert response_format == expected
+    assert call.capability_fallback_prompt == (
+        None if expected is None else prepared.effective_prompt
+    )
+    if expected in (None, _OBJECT):
+        assert call.effective_prompt == prepared.effective_prompt
+    assert json.dumps(contract, sort_keys=True) == original
 
 
 def test_detect_native_json_output_support_falls_back_to_provider_prefixed_name(
