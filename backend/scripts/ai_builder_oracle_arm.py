@@ -1139,7 +1139,7 @@ def _observation_input(
 ) -> JsonObject:
     manifest = harness._fixture_manifest()
     runtime_fixture_sha256s = [manifest[name] for name in case.runtime_files]
-    runtime_sha256s, status = harness._runtime_lineage_sha256s(
+    runtime = harness.runtime_lineage(
         runtime_evidence, expected_count=len(runtime_fixture_sha256s)
     )
     template = None
@@ -1154,22 +1154,18 @@ def _observation_input(
                 else None
             ),
         }
-    mismatches = (
-        ["runtime_evidence"] if runtime_fixture_sha256s and status != "complete" else []
-    )
     fingerprint = {
         "runtime_fixture_sha256s": runtime_fixture_sha256s,
-        "runtime_source_sha256s": runtime_sha256s,
+        "runtime_source_sha256s": list(runtime.sha256s),
         "template": None if template is None else template["content_sha256"],
     }
-    complete = all(harness._is_sha256(v) for v in runtime_sha256s)
     return {
         **fingerprint,
         "template_binding": template,
-        "runtime_evidence_status": status,
-        "verified": not mismatches and complete,
-        "mismatches": mismatches,
-        "sha256": harness._canonical_sha256(fingerprint) if complete else None,
+        "runtime_evidence_status": runtime.status.value,
+        "verified": runtime.holds,
+        "mismatches": [] if runtime.holds else ["runtime_evidence"],
+        "sha256": harness._canonical_sha256(fingerprint) if runtime.holds else None,
     }
 
 
@@ -1244,24 +1240,20 @@ def oracle_evidence_report(
     persisted_complete = oracle.get("refusal") is not None or (
         isinstance(materialization, Mapping) and persisted.get("passed") is True
     )
-    runtime_evidence = bundle.get("runtime_evidence")
     fixtures = harness._fixture_contract_or_none(
         cast(Mapping[str, Any], contract.get("attachment_fixture") or {}).get(
             "runtime_files"
         )
     )
     expected_runtime = [entry["content_sha256"] for entry in fixtures or []]
-    recomputed, status = harness._runtime_lineage_sha256s(
-        runtime_evidence if isinstance(runtime_evidence, Mapping) else None,
-        expected_count=len(expected_runtime),
+    recomputed = harness.recorded_runtime_lineage(
+        bundle, expected_count=len(expected_runtime)
     )
     identity = cast(Mapping[str, Any], bundle.get("observation_input_identity") or {})
     input_complete = (
-        identity.get("runtime_fixture_sha256s") == expected_runtime
-        and identity.get("runtime_source_sha256s") == recomputed
-        and identity.get("runtime_evidence_status") == status
-        and identity.get("mismatches")
-        == (["runtime_evidence"] if expected_runtime and status != "complete" else [])
+        recomputed.accepts(identity)
+        and identity.get("runtime_fixture_sha256s") == expected_runtime
+        and identity.get("mismatches") == []
     )
     checks: list[JsonObject] = [
         {"name": "observation_case_contract_consistent", "passed": contract_complete},

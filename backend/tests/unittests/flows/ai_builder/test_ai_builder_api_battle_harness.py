@@ -28,6 +28,16 @@ from eneo.flows.ai_builder.ai_builder_flow_schema_values import (
 from eneo.flows.ai_builder.ai_builder_slot_classification_contract import (
     SLOT_CLASSIFICATION_SCHEMA_VERSION,
 )
+from tests.unittests.flows.ai_builder.test_ai_builder_runtime_lineage import (
+    CONSUMED_SHA256,
+    INPUT_STEP,
+    completed_evidence,
+    failed_result_evidence,
+    lineage,
+    no_result_evidence,
+    runtime_file_edge,
+    tracked,
+)
 
 _TEST_SESSION_ID = "00000000-0000-0000-0000-000000000001"
 
@@ -5821,45 +5831,8 @@ def test_observation_input_identity_distinguishes_fixture_bytes_from_runtime_con
             "path": f"scripts/fixtures/ai_builder_battle/{attachment_fixture}",
         }
     }
-    runtime_evidence = {
-        "run_contract": {
-            "steps_requiring_input": [{"step_id": "reader-step"}],
-        },
-        "uploaded_files": [{"id": "runtime-file-1", "size": 358}],
-        "step_results": [
-            {
-                "step_id": "reader-step",
-                "status": "completed",
-                "current_attempt_no": 1,
-                "runtime_input_file_ids": ["runtime-file-1"],
-            }
-        ],
-        "step_attempts": [
-            {
-                "id": "attempt-1",
-                "step_id": "reader-step",
-                "attempt_no": 1,
-                "status": "completed",
-                "superseded_by_attempt_id": None,
-                "resolved_input_lineage": {
-                    "status": "tracked",
-                    "schema_version": 1,
-                    "edges": [
-                        {
-                            "source": {
-                                "kind": "runtime_file",
-                                "input_file_ordinal": 0,
-                                "file_id": "runtime-file-1",
-                                "checksum": runtime_source_sha256,
-                                "byte_size": 358,
-                            },
-                            "selection": {"encoding": "bound_file"},
-                        }
-                    ],
-                },
-            }
-        ],
-    }
+    runtime_evidence = completed_evidence()
+    assert runtime_source_sha256 == CONSUMED_SHA256
 
     identity = harness._observation_input_identity(
         case=case,
@@ -5925,15 +5898,13 @@ def test_observation_input_identity_distinguishes_fixture_bytes_from_runtime_con
     assert missing_evidence["mismatches"] == ["attachment_evidence"]
 
     uploaded_source["source_sha256"] = extracted_evidence_sha256
-    stale_attempt = runtime_evidence["step_attempts"][0]
-    stale_attempt["superseded_by_attempt_id"] = "attempt-2"
+    # The current attempt is the one the result names; its lineage decides.
     runtime_evidence["step_attempts"].append(
         {
-            "id": "attempt-2",
-            "step_id": "reader-step",
+            "id": str(uuid4()),
+            "step_id": INPUT_STEP,
             "attempt_no": 2,
             "status": "completed",
-            "superseded_by_attempt_id": None,
             "resolved_input_lineage": {"status": "not_tracked"},
         }
     )
@@ -5950,66 +5921,367 @@ def test_observation_input_identity_distinguishes_fixture_bytes_from_runtime_con
     assert untracked["mismatches"] == ["runtime_evidence"]
 
 
-def test_runtime_lineage_accepts_per_source_edges_with_local_ordinals() -> None:
-    harness = _battle_harness()
-    runtime_evidence = {
-        "run_contract": {
-            "steps_requiring_input": [{"step_id": "reader-step"}],
-        },
-        "uploaded_files": [
-            {"id": "runtime-file-a", "size": 11},
-            {"id": "runtime-file-b", "size": 22},
-        ],
-        "step_results": [
+def _runtime_input_observation(
+    harness: ModuleType,
+    runtime_evidence: object,
+    *,
+    runtime_files: tuple[str, ...] = ("05_lokalkalkyl.csv",),
+) -> tuple[dict[str, Any], Any]:
+    case = harness.BattleCase(
+        case_id="runtime-input-identity",
+        prompt="Build it.",
+        execution=_file_execution(harness, runtime_files) if runtime_files else None,
+    )
+    bundle = _complete_live_case_bundle(
+        harness,
+        case,
+        quality_checks=[
             {
-                "step_id": "reader-step",
-                "status": "completed",
-                "current_attempt_no": 1,
-                "runtime_input_file_ids": ["runtime-file-a", "runtime-file-b"],
+                "name": "output_delivered",
+                "passed": False,
+                "actual": None,
+                "expected": True,
             }
         ],
-        "step_attempts": [
-            {
-                "step_id": "reader-step",
-                "attempt_no": 1,
-                "status": "completed",
-                "superseded_by_attempt_id": None,
-                "resolved_input_lineage": {
-                    "status": "tracked",
-                    "edges": [
-                        {
-                            "binding_ref": "runtime_files[0]",
-                            "source": {
-                                "kind": "runtime_file",
-                                "input_file_ordinal": 0,
-                                "file_id": "runtime-file-a",
-                                "checksum": "a" * 64,
-                                "byte_size": 11,
-                            },
-                        },
-                        {
-                            "binding_ref": "runtime_files[0]",
-                            "source": {
-                                "kind": "runtime_file",
-                                "input_file_ordinal": 0,
-                                "file_id": "runtime-file-b",
-                                "checksum": "b" * 64,
-                                "byte_size": 22,
-                            },
-                        },
-                    ],
-                },
-            }
-        ],
+    )
+    bundle["runtime_evidence"] = runtime_evidence
+    bundle["observation_input_identity"] = harness._observation_input_identity(
+        case=case,
+        session_id=_TEST_SESSION_ID,
+        attached_file_ids=(),
+        classifier_diagnostics=bundle["classifier_diagnostics"],
+        runtime_evidence=runtime_evidence,
+        provisioned_fixtures={},
+    )
+    return bundle, case
+
+
+def _identity_check_passes(harness: ModuleType, bundle: dict[str, Any]) -> bool:
+    return "observation_input_identity_consistent" not in {
+        check["name"]
+        for check in harness._observation_evidence_report(bundle)["failed_checks"]
     }
 
-    sha256s, status = harness._runtime_lineage_sha256s(
-        runtime_evidence,
-        expected_count=2,
+
+def _release_input_check_passes(
+    harness: ModuleType, case: Any, identity: Mapping[str, object]
+) -> bool:
+    return next(
+        check
+        for check in harness._required_case_identity_checks(
+            case=case,
+            release_identity=_release_identity_fixture(
+                harness, case_id=case.case_id, prompt=case.prompt
+            ),
+            provenance=_live_provenance_fixture(harness, prompt=case.prompt),
+            observation_input_identity=identity,
+        )
+        if check["name"] == "suite_observation_input_identity"
+    )["passed"]
+
+
+@mark.parametrize(
+    "runtime_evidence",
+    [None, failed_result_evidence(), no_result_evidence()],
+    ids=["run_never_executed", "input_step_failed", "no_input_step_result"],
+)
+def test_a_run_that_never_completed_its_input_step_is_a_scored_fail(
+    runtime_evidence: dict[str, Any] | None, tmp_path: Path
+) -> None:
+    harness = _battle_harness()
+    bundle, case = _runtime_input_observation(harness, runtime_evidence)
+
+    identity = bundle["observation_input_identity"]
+    assert identity["runtime_evidence_status"] == "not_reached"
+    assert identity["runtime_source_sha256s"] == [None]
+    assert identity["verified"] is True
+    assert _identity_check_passes(harness, bundle)
+    assert _release_input_check_passes(harness, case, identity)
+    path = tmp_path / "run.json"
+    path.write_text(json.dumps(bundle), encoding="utf-8")
+    result = harness._suite_result(harness.seal_observation(bundle), path)
+    assert result["observation_status"] == "completed"
+    assert result["expectation_verdict"] == "fail"
+    assert result["verdict_states"]["case"] == "fail"
+
+
+def _without_input_lineage() -> dict[str, Any]:
+    evidence = completed_evidence()
+    del evidence["step_attempts"][0]["resolved_input_lineage"]
+    return evidence
+
+
+def _with_omitted_input_result() -> dict[str, Any]:
+    evidence = no_result_evidence()
+    evidence["debug_export"]["run"]["summary"]["omissions"] = [
+        {"reason": "row_limit", "section": "step_results", "rows_omitted": 2}
+    ]
+    return evidence
+
+
+def _with(evidence: dict[str, Any], path: tuple[Any, ...], value: object) -> object:
+    node: Any = evidence
+    for key in path[:-1]:
+        node = node[key]
+    node[path[-1]] = value
+    return evidence
+
+
+@mark.parametrize(
+    ("runtime_evidence", "status"),
+    [
+        (
+            completed_evidence(lineage_record={"status": "not_tracked"}),
+            "current_lineage_not_tracked",
+        ),
+        (completed_evidence(lineage_record=tracked()), "current_lineage_incomplete"),
+        (
+            completed_evidence(lineage_record=tracked(runtime_file_edge(checksum="x"))),
+            "current_lineage_invalid",
+        ),
+        (
+            completed_evidence(lineage_record={"status": "not_reached"}),
+            "step_attempts_invalid",
+        ),
+        (_without_input_lineage(), "step_attempts_invalid"),
+        (
+            _with(completed_evidence(), ("step_attempts", 0, "attempt_no"), True),
+            "step_attempts_invalid",
+        ),
+        (
+            _with(
+                completed_evidence(),
+                (
+                    "step_attempts",
+                    0,
+                    "resolved_input_lineage",
+                    "edges",
+                    0,
+                    "source",
+                    "byte_size",
+                ),
+                358.0,
+            ),
+            "step_attempts_invalid",
+        ),
+        (
+            _with(
+                failed_result_evidence(),
+                ("run_contract", "steps_requiring_input", 0, "step_id"),
+                "   ",
+            ),
+            "input_step_invalid",
+        ),
+        (
+            _with(no_result_evidence(), ("step_results",), [None]),
+            "step_results_invalid",
+        ),
+        (_with_omitted_input_result(), "current_step_unread"),
+        (
+            _with(
+                failed_result_evidence(), ("step_attempts", 0, "status"), "completed"
+            ),
+            "current_step_contradictory",
+        ),
+        ("corrupted evidence", "runtime_evidence_malformed"),
+    ],
+    ids=[
+        "lineage_not_tracked",
+        "lineage_without_runtime_edge",
+        "unreadable_checksum",
+        "producer_status_not_reached",
+        "no_lineage",
+        "bool_attempt_no",
+        "float_byte_size",
+        "blank_contract_step_id",
+        "malformed_result_row",
+        "omitted_input_result",
+        "failed_result_completed_attempt",
+        "scalar_runtime_evidence",
+    ],
+)
+def test_runtime_evidence_that_proves_neither_outcome_is_invalid(
+    runtime_evidence: object, status: str, tmp_path: Path
+) -> None:
+    harness = _battle_harness()
+    bundle, case = _runtime_input_observation(harness, runtime_evidence)
+
+    identity = bundle["observation_input_identity"]
+    assert identity["runtime_evidence_status"] == status
+    assert identity["runtime_source_sha256s"] == [None]
+    assert identity["verified"] is False
+    assert identity["mismatches"] == ["runtime_evidence"]
+    assert identity["sha256"] is None
+    assert not _identity_check_passes(harness, bundle)
+    assert not _release_input_check_passes(harness, case, identity)
+    path = tmp_path / "run.json"
+    path.write_text(json.dumps(bundle), encoding="utf-8")
+    result = harness._suite_result(harness.seal_observation(bundle), path)
+    assert result["observation_status"] == "invalid_evidence"
+
+
+def test_a_completed_run_keeps_its_verified_runtime_lineage() -> None:
+    harness = _battle_harness()
+    bundle, _case = _runtime_input_observation(harness, completed_evidence())
+
+    identity = bundle["observation_input_identity"]
+    assert identity["runtime_evidence_status"] == "complete"
+    assert identity["runtime_source_sha256s"] == [CONSUMED_SHA256]
+    assert identity["verified"] is True
+    assert _identity_check_passes(harness, bundle)
+
+
+def test_a_case_without_runtime_files_needs_no_runtime_lineage() -> None:
+    harness = _battle_harness()
+    bundle, case = _runtime_input_observation(harness, None, runtime_files=())
+
+    identity = bundle["observation_input_identity"]
+    assert identity["runtime_evidence_status"] == "not_required"
+    assert identity["runtime_source_sha256s"] == []
+    assert identity["verified"] is True
+    assert _identity_check_passes(harness, bundle)
+    del bundle["runtime_evidence"]
+    assert _identity_check_passes(harness, bundle)
+    assert _release_input_check_passes(harness, case, identity)
+
+
+def test_a_stored_not_reached_claim_is_refused_when_the_run_completed_its_input() -> (
+    None
+):
+    harness = _battle_harness()
+    bundle, _case = _runtime_input_observation(harness, None)
+    bundle["runtime_evidence"] = completed_evidence()
+
+    assert not _identity_check_passes(harness, bundle)
+
+
+def test_a_stored_failure_that_matches_the_recomputed_one_is_still_refused() -> None:
+    """Validity is positive acceptance, not consistency: an identity whose
+    every field agrees with invalid evidence (digest included) is refused."""
+    harness = _battle_harness()
+    bundle, _case = _runtime_input_observation(harness, "corrupted evidence")
+    identity = bundle["observation_input_identity"]
+    assert identity["runtime_evidence_status"] == "runtime_evidence_malformed"
+    identity["sha256"] = harness._canonical_sha256(
+        {
+            "attachment_evidence_sha256s": identity["attachment_evidence_sha256s"],
+            "runtime_fixture_sha256s": identity["runtime_fixture_sha256s"],
+            "runtime_source_sha256s": identity["runtime_source_sha256s"],
+        }
     )
 
-    assert status == "complete"
-    assert sha256s == ["a" * 64, "b" * 64]
+    assert not _identity_check_passes(harness, bundle)
+
+
+def test_a_stored_observation_without_its_runtime_evidence_is_refused() -> None:
+    harness = _battle_harness()
+    bundle, _case = _runtime_input_observation(harness, None)
+    del bundle["runtime_evidence"]
+
+    assert not _identity_check_passes(harness, bundle)
+
+
+@mark.parametrize(
+    ("status", "sha256s", "mismatches", "passed"),
+    [
+        ("not_reached", [None], ["attachment_evidence"], True),
+        # The v4 claim for a terminal run is no longer an accepted status, and
+        # any other claim is refused even when the mismatches agree with it.
+        ("missing", [None], ["attachment_evidence"], False),
+        ("current_step_unread", [None], ["attachment_evidence"], False),
+        (
+            "current_step_unread",
+            [None],
+            ["attachment_evidence", "runtime_evidence"],
+            False,
+        ),
+        ("complete", [CONSUMED_SHA256], ["attachment_evidence"], False),
+        ("not_reached", [CONSUMED_SHA256], ["attachment_evidence"], False),
+        ("not_reached", [None, None], ["attachment_evidence"], False),
+    ],
+    ids=[
+        "not_reached",
+        "retired_missing",
+        "invalid_status",
+        "invalid_status_with_mismatch",
+        "forged_complete",
+        "not_reached_with_digest",
+        "extra_digest",
+    ],
+)
+def test_a_terminal_error_accepts_only_runtime_lineage_not_reached(
+    status: str, sha256s: list[str | None], mismatches: list[str], passed: bool
+) -> None:
+    harness = _battle_harness()
+    fixture = "generic_case_template.docx"
+    attachment_file_id = "00000000-0000-0000-0000-000000000002"
+    case = harness.BattleCase(
+        case_id="terminal-runtime",
+        prompt="Build and run the Flow.",
+        required=True,
+        apply_plan=True,
+        attachments=(fixture,),
+        execution=_file_execution(harness, (fixture,)),
+    )
+    manifest = harness._fixture_manifest()
+    identity = harness._observation_input_identity(
+        case=case,
+        session_id=_TEST_SESSION_ID,
+        attached_file_ids=(attachment_file_id,),
+        classifier_diagnostics={"session_id": _TEST_SESSION_ID, "classifier_runs": []},
+        runtime_evidence=None,
+        provisioned_fixtures={
+            fixture: {
+                "file_id": attachment_file_id,
+                "content_sha256": manifest[fixture],
+                "path": f"scripts/fixtures/ai_builder_battle/{fixture}",
+            }
+        },
+    )
+    assert identity["attachment_evidence_status"] == "not_observed"
+    assert identity["runtime_evidence_status"] == "not_reached"
+    assert identity["mismatches"] == ["attachment_evidence"]
+    identity.update(
+        runtime_evidence_status=status,
+        runtime_source_sha256s=sha256s,
+        mismatches=mismatches,
+    )
+    provenance = _live_provenance_fixture(harness, prompt=case.prompt)
+    terminal_model = harness._resolved_model_identity(
+        session_models={
+            "models": [{"id": "model-a", "name": "gpt-a", "provider": "openai"}]
+        },
+        requested_model_id="model-a",
+        planner_observed_model_ids=[],
+        classifier_observed_model_ids=[],
+        planner_interaction_count=1,
+        planner_observations=[],
+        missing_planner_interaction_indices=[],
+        terminal_error_interaction_indices=[1],
+    )
+    provenance["model"] = {
+        **terminal_model,
+        "sha256": harness._canonical_sha256(terminal_model),
+    }
+
+    checks = harness._required_case_identity_checks(
+        case=case,
+        release_identity=_release_identity_fixture(
+            harness, case_id=case.case_id, prompt=case.prompt
+        ),
+        provenance=provenance,
+        journey_outcome="builder_error",
+        observation_input_identity=identity,
+    )
+
+    assert (
+        next(
+            check
+            for check in checks
+            if check["name"] == "suite_observation_input_identity"
+        )["passed"]
+        is passed
+    )
 
 
 def test_complex_first_pass_provenance_rejects_each_missing_or_amplified_fact(
@@ -9798,7 +10070,7 @@ def test_evaluator_identity_carries_measurement_semantics_versions() -> None:
     harness = _battle_harness()
     assert harness.QUESTION_RELEVANCE_SEMANTICS_VERSION == 3
     assert harness.OUTCOME_CLASSIFICATION_SEMANTICS_VERSION == 6
-    assert harness.OBSERVATION_INPUT_IDENTITY_SEMANTICS_VERSION == 4
+    assert harness.OBSERVATION_INPUT_IDENTITY_SEMANTICS_VERSION == 5
     assert harness.SUPPORTED_CASES_FILE_VERSION == 9
     identity = harness._suite_evaluator_identity(
         release_identity={},
@@ -9807,7 +10079,7 @@ def test_evaluator_identity_carries_measurement_semantics_versions() -> None:
     )
     assert identity["question_relevance_semantics_version"] == 3
     assert identity["outcome_classification_semantics_version"] == 6
-    assert identity["observation_input_identity_semantics_version"] == 4
+    assert identity["observation_input_identity_semantics_version"] == 5
 
 
 def test_planner_evidence_skips_planner_less_interactions() -> None:
@@ -13440,13 +13712,15 @@ def test_a_failed_checkpoint_edit_and_a_failed_cancel_are_recorded_not_raised(
     assert report["output_success"] is False
 
 
-@mark.parametrize("measured", [True, False])
+@mark.parametrize("status", ["complete", "current_step_invalid", "not_reached"])
 def test_a_run_is_cancelled_at_its_deadline_and_its_record_kept(
-    tmp_path: Path, monkeypatch: MonkeyPatch, measured: bool
+    tmp_path: Path, monkeypatch: MonkeyPatch, status: str
 ) -> None:
     # A timed-out run that consumed its files is a scoreable product outcome;
-    # one that never did has no runtime lineage and stays the re-measurable
-    # stack fault a timeout always was, with its record on the lifecycle.
+    # one that never did (not reached included) has no runtime lineage and
+    # stays the re-measurable stack fault a timeout always was, with its
+    # record on the lifecycle.
+    measured = status == "complete"
     harness = _battle_harness()
     api = _RuntimeApi(
         contract={"steps_requiring_input": [{"step_id": "reader"}]},
@@ -13456,8 +13730,10 @@ def test_a_run_is_cancelled_at_its_deadline_and_its_record_kept(
     monkeypatch.setattr(harness, "_upload_runtime_file", lambda **_: {"id": "up-1"})
     monkeypatch.setattr(
         harness,
-        "_runtime_lineage_sha256s",
-        lambda *_a, **_k: ([], "complete" if measured else "current_step_invalid"),
+        "runtime_lineage",
+        lambda *_a, **_k: lineage.RuntimeLineage(
+            lineage.RuntimeLineageStatus(status), (None,)
+        ),
     )
     execution = _file_execution(harness, ("05_lokalkalkyl.csv",))
 

@@ -226,7 +226,7 @@ def _write_receipt(
     evaluator_identity = {
         "question_relevance_semantics_version": 3,
         "outcome_classification_semantics_version": 6,
-        "observation_input_identity_semantics_version": 4,
+        "observation_input_identity_semantics_version": 5,
         "requested_model_id": requested,
         "harness_sha256": harness,
         **(

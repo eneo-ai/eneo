@@ -1183,14 +1183,15 @@ def test_receipts_of_these_graders_name_scorer_semantics_2_or_later(
         "ai_builder_edit_expectation.py",
         "ai_builder_oracle_arm.py",
         "ai_builder_receipt.py",
+        "ai_builder_runtime_lineage.py",
     ],
 )
 def test_the_scorer_digest_moves_with_each_module_whose_bytes_decide_a_verdict(
     harness: ModuleType, monkeypatch: MonkeyPatch, tmp_path: Path, module: str
 ) -> None:
-    """The literal rule, the oracle arm's plan grader and the receipt reader
-    decide verdicts beside the harness: a change to any of them is another
-    scorer."""
+    """The literal rule, the oracle arm's plan grader, the receipt reader and
+    the runtime lineage policy decide verdicts beside the harness: a change to
+    any of them is another scorer."""
 
     for name in harness._SCORER_MODULES:  # pyright: ignore[reportPrivateUsage]
         (tmp_path / name).write_bytes((_SCRIPTS / name).read_bytes())

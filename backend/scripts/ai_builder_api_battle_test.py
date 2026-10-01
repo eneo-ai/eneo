@@ -146,7 +146,11 @@ _ERROR_TERMINATED_OUTCOME_CLASSES = frozenset({"builder_error"})
 # not be compared to the original upload digest.
 # v4: an edit observation whose session ran no classifier takes attachment
 # identity from the session's attachment record (`attachment_evidence_source`).
-OBSERVATION_INPUT_IDENTITY_SEMANTICS_VERSION = 4
+# v5: runtime lineage is parsed once into a strict typed model and judged on it
+# (`ai_builder_runtime_lineage`): a run that never completed its input step is
+# `not_reached`, a valid observation; any evidence that proves neither outcome
+# is invalid with a typed reason.
+OBSERVATION_INPUT_IDENTITY_SEMANTICS_VERSION = 5
 # v1: a verdict is stated per dimension (`verdict_states`), and a required fact,
 # an association or a reviewed edit on a run that delivered nothing is
 # `not_evaluated` instead of failed.
@@ -167,6 +171,7 @@ _SCORER_MODULES = (
     "ai_builder_output_gold.json",
     "ai_builder_output_gold.py",
     "ai_builder_receipt.py",
+    "ai_builder_runtime_lineage.py",
 )
 # The semantic graders a dimension needs before it can pass (`_graded_state`).
 # Plan: each step carries the content written for it. Gold: the case's frozen
@@ -238,6 +243,11 @@ from ai_builder_edit_expectation import (  # noqa: E402
 )
 from ai_builder_intake_answers import intake_message  # noqa: E402
 from ai_builder_release_gate import replacement_limit  # noqa: E402
+from ai_builder_runtime_lineage import (  # noqa: E402
+    RuntimeLineageStatus,
+    recorded_runtime_lineage,
+    runtime_lineage,
+)
 from pydantic import ValidationError  # noqa: E402
 
 from eneo.files.docx_template_validation import (  # noqa: E402
@@ -4924,12 +4934,6 @@ def _required_case_identity_checks(
         else None
     )
     runtime_fixture_sha256s = observation_input.get("runtime_fixture_sha256s")
-    raw_runtime_source_sha256s = observation_input.get("runtime_source_sha256s")
-    runtime_source_sha256s = (
-        cast(list[object], raw_runtime_source_sha256s)
-        if isinstance(raw_runtime_source_sha256s, list)
-        else None
-    )
     expected_runtime_fixture_sha256s: list[str] = []
     if error_terminated and case.runtime_files:
         manifest = _fixture_manifest()
@@ -4955,7 +4959,6 @@ def _required_case_identity_checks(
             declared_attachment_fixtures=declared_attachment_fixtures,
             expected_runtime_fixture_sha256s=expected_runtime_fixture_sha256s,
             runtime_fixture_sha256s=runtime_fixture_sha256s,
-            runtime_source_sha256s=runtime_source_sha256s,
         )
     )
     checks.append(
@@ -4986,7 +4989,6 @@ def _terminal_input_evidence_matches(
     declared_attachment_fixtures: list[JsonObject],
     expected_runtime_fixture_sha256s: list[str],
     runtime_fixture_sha256s: object,
-    runtime_source_sha256s: list[object] | None,
 ) -> bool:
     """Accept only phase-appropriate missing evidence after a terminal error."""
 
@@ -5018,21 +5020,13 @@ def _terminal_input_evidence_matches(
     if not attachment_valid:
         return False
 
-    if expected_runtime_fixture_sha256s:
-        runtime_valid = (
-            runtime_fixture_sha256s == expected_runtime_fixture_sha256s
-            and runtime_source_sha256s is not None
-            and len(runtime_source_sha256s) == len(expected_runtime_fixture_sha256s)
-            and all(value is None for value in runtime_source_sha256s)
-            and observation_input.get("runtime_evidence_status") == "missing"
-        )
-        expected_mismatches.append("runtime_evidence")
-    else:
-        runtime_valid = (
-            runtime_fixture_sha256s == []
-            and runtime_source_sha256s == []
-            and observation_input.get("runtime_evidence_status") == "not_required"
-        )
+    # A terminal error executed nothing: its runtime half is exactly what no
+    # runtime evidence proves (not reached, or not required), never a mismatch.
+    runtime_valid = runtime_fixture_sha256s == expected_runtime_fixture_sha256s and (
+        runtime_lineage(
+            None, expected_count=len(expected_runtime_fixture_sha256s)
+        ).accepts(observation_input)
+    )
     return (
         runtime_valid
         and bool(expected_mismatches)
@@ -5997,11 +5991,12 @@ def _apply_execute_and_cleanup_flow(
                     record=runtime_record,
                     review_target_names=_review_target_names(case.expected),
                 )
-                if runtime_record.get(
-                    "outcome"
-                ) == "timed_out" and _runtime_lineage_sha256s(
+                if runtime_record.get("outcome") == "timed_out" and runtime_lineage(
                     runtime_evidence, expected_count=len(runtime_file_paths)
-                )[1] not in {"complete", "not_required"}:
+                ).status not in {
+                    RuntimeLineageStatus.COMPLETE,
+                    RuntimeLineageStatus.NOT_REQUIRED,
+                }:
                     # Without runtime lineage the evidence could never be
                     # scored, so this stays the re-measurable stack fault a
                     # timeout always was.
@@ -7973,9 +7968,8 @@ def _observation_input_identity(
     )
     manifest = _fixture_manifest()
     runtime_fixture_sha256s = [manifest[name] for name in case.runtime_files]
-    runtime_sha256s, runtime_evidence_status = _runtime_lineage_sha256s(
-        runtime_evidence,
-        expected_count=len(runtime_fixture_sha256s),
+    runtime = runtime_lineage(
+        runtime_evidence, expected_count=len(runtime_fixture_sha256s)
     )
 
     mismatches: list[str] = []
@@ -7985,19 +7979,19 @@ def _observation_input_identity(
         mismatches.append("attachment_evidence")
     if case.attachments and attachment_fixture_bindings is None:
         mismatches.append("attachment_fixture_binding")
-    if runtime_fixture_sha256s and runtime_evidence_status != "complete":
+    if not runtime.holds:
         mismatches.append("runtime_evidence")
 
     fingerprint_payload = {
         "attachment_evidence_sha256s": observed_attachment_evidence_sha256s,
         "runtime_fixture_sha256s": runtime_fixture_sha256s,
-        "runtime_source_sha256s": runtime_sha256s,
+        "runtime_source_sha256s": list(runtime.sha256s),
     }
     fingerprint_complete = (
         attachment_evidence_status in {"not_required", "complete"}
         and attachment_fixture_bindings is not None
         and all(value is not None for value in observed_attachment_evidence_sha256s)
-        and all(_is_sha256(value) for value in runtime_sha256s)
+        and runtime.holds
     )
     return {
         **fingerprint_payload,
@@ -8017,139 +8011,13 @@ def _observation_input_identity(
             and attachment_evidence_source == SESSION_ATTACHMENT_EVIDENCE_SOURCE
             else {}
         ),
-        "runtime_evidence_status": runtime_evidence_status,
+        "runtime_evidence_status": runtime.status.value,
         "verified": not mismatches and fingerprint_complete,
         "mismatches": mismatches,
         "sha256": (
             _canonical_sha256(fingerprint_payload) if fingerprint_complete else None
         ),
     }
-
-
-def _runtime_lineage_sha256s(
-    runtime_evidence: Mapping[str, object] | None,
-    *,
-    expected_count: int,
-) -> tuple[list[str | None], str]:
-    if expected_count == 0:
-        return [], "not_required"
-    if runtime_evidence is None:
-        return [None] * expected_count, "missing"
-    contract = runtime_evidence.get("run_contract")
-    contract = contract if isinstance(contract, Mapping) else {}
-    input_steps = _mapping_list(contract.get("steps_requiring_input"))
-    if len(input_steps) != 1:
-        return [None] * expected_count, "input_step_ambiguous"
-    input_step_id = _optional_string(input_steps[0], "step_id")
-    if input_step_id is None:
-        return [None] * expected_count, "input_step_missing"
-
-    uploaded_files = _mapping_list(runtime_evidence.get("uploaded_files"))
-    uploaded_file_ids = [
-        _optional_string(uploaded_file, "id") for uploaded_file in uploaded_files
-    ]
-    uploaded_runtime_content_sizes = [
-        uploaded_file.get("size") for uploaded_file in uploaded_files
-    ]
-    if (
-        len(uploaded_file_ids) != expected_count
-        or any(file_id is None for file_id in uploaded_file_ids)
-        or len(set(uploaded_file_ids)) != expected_count
-        or any(
-            not isinstance(size, int) or isinstance(size, bool) or size < 0
-            for size in uploaded_runtime_content_sizes
-        )
-    ):
-        return [None] * expected_count, "uploaded_files_invalid"
-
-    current_step_results = [
-        result
-        for result in _mapping_list(runtime_evidence.get("step_results"))
-        if result.get("step_id") == input_step_id
-    ]
-    if len(current_step_results) != 1:
-        return [None] * expected_count, "current_step_ambiguous"
-    current_step = current_step_results[0]
-    current_attempt_no = current_step.get("current_attempt_no")
-    if (
-        not isinstance(current_attempt_no, int)
-        or isinstance(current_attempt_no, bool)
-        or current_attempt_no < 1
-        or current_step.get("status") != "completed"
-        or _string_list(current_step.get("runtime_input_file_ids")) != uploaded_file_ids
-    ):
-        return [None] * expected_count, "current_step_invalid"
-
-    current_attempts = [
-        attempt
-        for attempt in _mapping_list(runtime_evidence.get("step_attempts"))
-        if attempt.get("step_id") == input_step_id
-        and attempt.get("attempt_no") == current_attempt_no
-    ]
-    if len(current_attempts) != 1:
-        return [None] * expected_count, "current_attempt_ambiguous"
-    current_attempt = current_attempts[0]
-    if (
-        current_attempt.get("status") != "completed"
-        or current_attempt.get("superseded_by_attempt_id") is not None
-    ):
-        return [None] * expected_count, "current_attempt_invalid"
-    lineage = current_attempt.get("resolved_input_lineage")
-    if not isinstance(lineage, Mapping):
-        return [None] * expected_count, "current_lineage_missing"
-    lineage_status = lineage.get("status")
-    if lineage_status != "tracked":
-        return [None] * expected_count, str(lineage_status or "invalid")
-    edges = lineage.get("edges")
-    if not isinstance(edges, list):
-        return [None] * expected_count, "current_lineage_invalid"
-
-    uploaded_ids = [file_id for file_id in uploaded_file_ids if file_id is not None]
-    uploaded_sizes_by_id = dict(zip(uploaded_ids, uploaded_runtime_content_sizes))
-    uploaded_positions_by_id = {
-        file_id: position for position, file_id in enumerate(uploaded_ids)
-    }
-    checksum_by_file_id: dict[str, str] = {}
-    runtime_edge_positions: list[tuple[int, int, object]] = []
-    for edge in edges:
-        if not isinstance(edge, Mapping):
-            return [None] * expected_count, "current_lineage_invalid"
-        source = edge.get("source")
-        if not isinstance(source, Mapping) or source.get("kind") != "runtime_file":
-            continue
-        ordinal = source.get("input_file_ordinal")
-        file_id = source.get("file_id")
-        checksum = source.get("checksum")
-        byte_size = source.get("byte_size")
-        if (
-            not isinstance(ordinal, int)
-            or isinstance(ordinal, bool)
-            or ordinal not in range(expected_count)
-            or not isinstance(file_id, str)
-            or file_id not in uploaded_sizes_by_id
-            or not _is_sha256(checksum)
-            or byte_size != uploaded_sizes_by_id[file_id]
-            or file_id in checksum_by_file_id
-        ):
-            return [None] * expected_count, "current_lineage_invalid"
-        checksum_by_file_id[file_id] = checksum
-        runtime_edge_positions.append(
-            (uploaded_positions_by_id[file_id], ordinal, edge.get("binding_ref"))
-        )
-
-    if set(checksum_by_file_id) != set(uploaded_ids):
-        return [None] * expected_count, "incomplete"
-    global_ordinals = all(
-        expected_ordinal == observed_ordinal
-        for expected_ordinal, observed_ordinal, _ in runtime_edge_positions
-    )
-    per_source_local_ordinals = all(
-        observed_ordinal == 0 and binding_ref == "runtime_files[0]"
-        for _, observed_ordinal, binding_ref in runtime_edge_positions
-    )
-    if not global_ordinals and not per_source_local_ordinals:
-        return [None] * expected_count, "current_lineage_invalid"
-    return [checksum_by_file_id[file_id] for file_id in uploaded_ids], "complete"
 
 
 def _write_bundle(output_dir: Path, bundle: JsonObject, *, suffix: str) -> Path:
@@ -8948,7 +8816,6 @@ def _observation_evidence_report(bundle: Mapping[str, object]) -> JsonObject:
     attachment_sha256s = observation_input.get("attachment_evidence_sha256s")
     attachment_file_ids = observation_input.get("attachment_file_ids")
     attachment_fixture_bindings = observation_input.get("attachment_fixture_bindings")
-    runtime_sha256s = observation_input.get("runtime_source_sha256s")
     runtime_fixture_sha256s = observation_input.get("runtime_fixture_sha256s")
     attached_file_ids = tuple(_string_list(case.get("file_ids")))
     # The receipt carries the fixture contract it ran against, so this recompute
@@ -9000,10 +8867,8 @@ def _observation_evidence_report(bundle: Mapping[str, object]) -> JsonObject:
         bool(attached_file_ids)
         and recomputed_attachment_source == SESSION_ATTACHMENT_EVIDENCE_SOURCE
     )
-    runtime_evidence = bundle.get("runtime_evidence")
-    recomputed_runtime_sha256s, recomputed_runtime_status = _runtime_lineage_sha256s(
-        runtime_evidence if isinstance(runtime_evidence, Mapping) else None,
-        expected_count=expected_runtime_digest_count,
+    recomputed_runtime = recorded_runtime_lineage(
+        bundle, expected_count=expected_runtime_digest_count
     )
     expected_runtime_fixture_sha256s = [
         entry["content_sha256"] for entry in expected_runtime_fixtures or []
@@ -9011,7 +8876,7 @@ def _observation_evidence_report(bundle: Mapping[str, object]) -> JsonObject:
     fingerprint_payload = {
         "attachment_evidence_sha256s": recomputed_attachment_sha256s,
         "runtime_fixture_sha256s": expected_runtime_fixture_sha256s,
-        "runtime_source_sha256s": recomputed_runtime_sha256s,
+        "runtime_source_sha256s": list(recomputed_runtime.sha256s),
     }
     expected_mismatches: list[str] = []
     attachment_evidence_complete = all(
@@ -9029,25 +8894,20 @@ def _observation_evidence_report(bundle: Mapping[str, object]) -> JsonObject:
     )
     if declared_attachments and not attachment_bindings_match:
         expected_mismatches.append("attachment_fixture_binding")
-    if expected_runtime_fixture_sha256s and recomputed_runtime_status != "complete":
-        expected_mismatches.append("runtime_evidence")
     fingerprint_complete = (
         recomputed_attachment_status in {"not_required", "complete"}
         and attachment_bindings_match
         and all(_is_sha256(value) for value in recomputed_attachment_sha256s)
-        and all(_is_sha256(value) for value in recomputed_runtime_sha256s)
     )
     input_complete = (
         isinstance(attachment_sha256s, list)
         and observation_input.get("classifier_session_id") == bundle.get("session_id")
         and attachment_file_ids == list(attached_file_ids)
         and attachment_bindings_match
-        and isinstance(runtime_sha256s, list)
         and declared_attachments is not None
         and observation_input.get("attachment_fixtures") == declared_attachments
         and runtime_fixture_sha256s == expected_runtime_fixture_sha256s
         and all(_is_sha256(value) for value in attachment_sha256s)
-        and all(_is_sha256(value) for value in runtime_sha256s)
         and attachment_sha256s == recomputed_attachment_sha256s
         and observation_input.get("attachment_evidence_status")
         == recomputed_attachment_status
@@ -9060,9 +8920,9 @@ def _observation_evidence_report(bundle: Mapping[str, object]) -> JsonObject:
             in cast(Mapping[str, object], observation_input)
         )
         == session_attachment_evidence
-        and runtime_sha256s == recomputed_runtime_sha256s
-        and observation_input.get("runtime_evidence_status")
-        == recomputed_runtime_status
+        # Positive acceptance: the runtime half is the recomputed one, which
+        # holds (so it adds no mismatch and leaves the fingerprint complete).
+        and recomputed_runtime.accepts(observation_input)
         and observation_input.get("mismatches") == expected_mismatches
         and observation_input.get("verified")
         == (not expected_mismatches and fingerprint_complete)

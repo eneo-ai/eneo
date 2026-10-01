@@ -37,6 +37,11 @@ from eneo.flows.flow_authoring_spec import (
     StepSpec,
 )
 from tests.docx_template_fixtures import control_template_bytes
+from tests.unittests.flows.ai_builder.test_ai_builder_runtime_lineage import (
+    completed_evidence,
+    failed_result_evidence,
+    no_result_evidence,
+)
 
 _SCRIPTS = Path(__file__).resolve().parents[4] / "scripts"
 
@@ -1082,6 +1087,250 @@ def _swapped_instructions(spec: FlowDraftSpecCore) -> dict[str, Any]:
     return executed
 
 
+def _oracle_lineage_report(
+    harness: ModuleType,
+    arm: ModuleType,
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    runtime_evidence: object,
+    *,
+    runtime_files: tuple[str, ...] = ("05_lokalkalkyl.csv",),
+) -> dict[str, Any]:
+    """The oracle report for a run whose case declares these runtime files."""
+
+    bundle, _, _ = _run(
+        harness,
+        arm,
+        monkeypatch,
+        tmp_path,
+        spec=_spec(final_instructions=f"Avsluta med {REQUIRED_FACT}."),
+    )
+    fixtures = harness._fixture_contract(runtime_files)
+    bundle["case_contract"]["attachment_fixture"]["runtime_files"] = fixtures
+    bundle["case"]["runtime_files"] = fixtures
+    bundle["case_contract_sha256"] = harness._canonical_sha256(bundle["case_contract"])
+    lineage = harness.runtime_lineage(runtime_evidence, expected_count=len(fixtures))
+    bundle["runtime_evidence"] = runtime_evidence
+    bundle["observation_input_identity"] = {
+        "runtime_fixture_sha256s": [entry["content_sha256"] for entry in fixtures],
+        "runtime_source_sha256s": list(lineage.sha256s),
+        "runtime_evidence_status": lineage.status.value,
+        "mismatches": [] if lineage.holds else ["runtime_evidence"],
+    }
+    return arm.oracle_evidence_report(harness, bundle)
+
+
+def _malformed(
+    build: Callable[[], dict[str, Any]], key: str, value: object
+) -> Callable[[], dict[str, Any]]:
+    def malformed() -> dict[str, Any]:
+        evidence = build()
+        evidence[key] = value
+        return evidence
+
+    return malformed
+
+
+@pytest.mark.parametrize(
+    ("build", "accepted"),
+    [
+        (completed_evidence, True),
+        (no_result_evidence, True),
+        (failed_result_evidence, True),
+        (lambda: None, True),
+        (_malformed(no_result_evidence, "step_results", [None]), False),
+        (_malformed(no_result_evidence, "debug_export", None), False),
+        (
+            _malformed(
+                failed_result_evidence,
+                "run_contract",
+                {"steps_requiring_input": [{"step_id": "   "}]},
+            ),
+            False,
+        ),
+        (
+            _malformed(
+                failed_result_evidence, "run_contract", {"steps_requiring_input": None}
+            ),
+            False,
+        ),
+        (lambda: "corrupted evidence", False),
+    ],
+    ids=[
+        "completed",
+        "no_result",
+        "failed_step",
+        "never_executed",
+        "malformed_row",
+        "no_result_unread",
+        "blank_contract_step_id",
+        "contract_steps_null",
+        "scalar_runtime_evidence",
+    ],
+)
+def test_the_oracle_report_requires_positive_lineage_acceptance(
+    harness: ModuleType,
+    arm: ModuleType,
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    build: Callable[[], object],
+    accepted: bool,
+) -> None:
+    report = _oracle_lineage_report(harness, arm, monkeypatch, tmp_path, build())
+
+    assert report["valid"] is accepted, report["failed_checks"]
+    if not accepted:
+        assert [c["name"] for c in report["failed_checks"]] == [
+            "observation_input_identity_consistent"
+        ]
+
+
+@pytest.mark.parametrize(
+    ("claim", "accepted"),
+    [
+        ({}, True),
+        # The run did not complete its input step; a complete claim is forged.
+        (
+            {
+                "runtime_evidence_status": "complete",
+                "runtime_source_sha256s": ["b" * 64],
+            },
+            False,
+        ),
+        ({"mismatches": ["runtime_evidence"]}, False),
+        ({"runtime_source_sha256s": [None, None]}, False),
+    ],
+    ids=["as_written", "forged_complete", "extra_mismatch", "extra_digest"],
+)
+def test_the_oracle_report_accepts_only_the_recomputed_claim(
+    harness: ModuleType,
+    arm: ModuleType,
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    claim: dict[str, object],
+    accepted: bool,
+) -> None:
+    bundle, _, _ = _run(
+        harness,
+        arm,
+        monkeypatch,
+        tmp_path,
+        spec=_spec(final_instructions=f"Avsluta med {REQUIRED_FACT}."),
+    )
+    fixtures = harness._fixture_contract(("05_lokalkalkyl.csv",))
+    bundle["case_contract"]["attachment_fixture"]["runtime_files"] = fixtures
+    bundle["case"]["runtime_files"] = fixtures
+    bundle["case_contract_sha256"] = harness._canonical_sha256(bundle["case_contract"])
+    bundle["runtime_evidence"] = failed_result_evidence()
+    bundle["observation_input_identity"] = {
+        "runtime_fixture_sha256s": [fixtures[0]["content_sha256"]],
+        "runtime_source_sha256s": [None],
+        "runtime_evidence_status": "not_reached",
+        "mismatches": [],
+        **claim,
+    }
+
+    assert arm.oracle_evidence_report(harness, bundle)["valid"] is accepted
+
+
+@pytest.mark.parametrize(
+    ("runtime_evidence", "verified"),
+    [
+        (completed_evidence(), True),
+        (failed_result_evidence(), True),
+        (None, True),
+        ("corrupted evidence", False),
+    ],
+    ids=["completed", "failed_step", "never_executed", "malformed"],
+)
+def test_the_oracle_writer_verifies_only_lineage_that_holds(
+    harness: ModuleType, arm: ModuleType, runtime_evidence: object, verified: bool
+) -> None:
+    identity = arm._observation_input(
+        harness,
+        case=SimpleNamespace(runtime_files=("05_lokalkalkyl.csv",)),
+        gold=SimpleNamespace(template_attachment=None),
+        provisioned={},
+        runtime_evidence=runtime_evidence,
+    )
+
+    assert identity["verified"] is verified
+    assert identity["mismatches"] == ([] if verified else ["runtime_evidence"])
+    assert (identity["sha256"] is not None) is verified
+
+
+def test_the_oracle_report_refuses_a_stored_failure_without_a_mismatch(
+    harness: ModuleType,
+    arm: ModuleType,
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    """A stored claim equal to the recomputed failure is not acceptance."""
+    bundle, _, _ = _run(
+        harness,
+        arm,
+        monkeypatch,
+        tmp_path,
+        spec=_spec(final_instructions=f"Avsluta med {REQUIRED_FACT}."),
+    )
+    fixtures = harness._fixture_contract(("05_lokalkalkyl.csv",))
+    bundle["case_contract"]["attachment_fixture"]["runtime_files"] = fixtures
+    bundle["case"]["runtime_files"] = fixtures
+    bundle["case_contract_sha256"] = harness._canonical_sha256(bundle["case_contract"])
+    bundle["runtime_evidence"] = "corrupted evidence"
+    bundle["observation_input_identity"] = {
+        "runtime_fixture_sha256s": [fixtures[0]["content_sha256"]],
+        "runtime_source_sha256s": [None],
+        "runtime_evidence_status": "runtime_evidence_malformed",
+        "mismatches": [],
+    }
+
+    assert arm.oracle_evidence_report(harness, bundle)["valid"] is False
+
+
+def test_the_oracle_report_refuses_a_bundle_without_its_runtime_evidence(
+    harness: ModuleType,
+    arm: ModuleType,
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    bundle, _, _ = _run(
+        harness,
+        arm,
+        monkeypatch,
+        tmp_path,
+        spec=_spec(final_instructions=f"Avsluta med {REQUIRED_FACT}."),
+    )
+    fixtures = harness._fixture_contract(("05_lokalkalkyl.csv",))
+    bundle["case_contract"]["attachment_fixture"]["runtime_files"] = fixtures
+    bundle["case"]["runtime_files"] = fixtures
+    bundle["case_contract_sha256"] = harness._canonical_sha256(bundle["case_contract"])
+    bundle["observation_input_identity"] = {
+        "runtime_fixture_sha256s": [fixtures[0]["content_sha256"]],
+        "runtime_source_sha256s": [None],
+        "runtime_evidence_status": "not_reached",
+        "mismatches": [],
+    }
+    bundle["runtime_evidence"] = None
+    assert arm.oracle_evidence_report(harness, bundle)["valid"] is True
+    del bundle["runtime_evidence"]
+
+    assert arm.oracle_evidence_report(harness, bundle)["valid"] is False
+
+
+def test_the_oracle_report_accepts_a_case_without_runtime_files(
+    harness: ModuleType,
+    arm: ModuleType,
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    report = _oracle_lineage_report(
+        harness, arm, monkeypatch, tmp_path, completed_evidence(), runtime_files=()
+    )
+
+    assert report["valid"] is True, report["failed_checks"]
+
+
 def test_steps_that_ran_with_each_others_instructions_fail_the_plan(
     harness: ModuleType,
     arm: ModuleType,
@@ -1385,7 +1634,7 @@ def _summary(arm: str, model: str | None) -> dict[str, Any]:
         "evaluator_identity": {
             "question_relevance_semantics_version": 3,
             "outcome_classification_semantics_version": 6,
-            "observation_input_identity_semantics_version": 4,
+            "observation_input_identity_semantics_version": 5,
             "requested_model_id": model,
             "harness_sha256": "h" * 64,
             "run_context": {
