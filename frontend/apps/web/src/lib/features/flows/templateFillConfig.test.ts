@@ -362,7 +362,8 @@ describe("templateFillConfig", () => {
             location: "body",
             label: "Bakgrund",
             kind: "rich",
-            hint: "Bakgrund..."
+            hint: "Bakgrund...",
+            section_heading: "Bakgrund"
           },
           { name: "författare", location: "body", label: "författare", kind: "rich" }
         ]
@@ -388,11 +389,13 @@ describe("templateFillConfig", () => {
           placeholderName: "bakgrund",
           status: "matched",
           autoSuggested: true,
-          sourceLabel: "Bakgrund -> text"
+          sourceLabel: "Bakgrund -> text",
+          sectionHeading: "Bakgrund"
         }),
         expect.objectContaining({
           placeholderName: "författare",
-          status: "missing"
+          status: "missing",
+          sectionHeading: null
         }),
         expect.objectContaining({
           placeholderName: "removed",

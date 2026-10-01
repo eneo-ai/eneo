@@ -122,6 +122,14 @@
       else templateTrigger?.focus();
     }
   }
+
+  function focusTemplateField(index: number) {
+    const target = document.getElementById(
+      `${instanceId}-${isPublished ? "field" : "source"}-${index}`
+    );
+    target?.focus({ preventScroll: true });
+    target?.scrollIntoView({ block: "center" });
+  }
 </script>
 
 <div class="flex flex-col gap-6">
@@ -255,9 +263,19 @@
             <IconDownload data-icon="inline-start" />
             {m.flow_template_fill_example_action()}
           </Button>
+          <Button
+            variant="link"
+            size="sm"
+            href={asset("/examples/eneo-word-template-fields.docx")}
+            download="eneo-word-template-fields.docx"
+          >
+            <IconDownload data-icon="inline-start" />
+            {m.flow_template_fill_fields_example_action()}
+          </Button>
         </div>
         <Collapsible.Content class="flex max-w-prose flex-col gap-4 pt-4 text-sm leading-relaxed">
           <p>{m.flow_template_fill_example_help()}</p>
+          <p>{m.flow_template_fill_fields_example_help()}</p>
           <div class="flex flex-col gap-2">
             <p class="font-medium">{m.flow_template_fill_word_help_windows_title()}</p>
             <ol class="flex list-decimal flex-col gap-2 pl-5">
@@ -266,6 +284,7 @@
               <li>{m.flow_template_fill_word_help_step_three()}</li>
               <li>{m.flow_template_fill_word_help_step_four()}</li>
             </ol>
+            <p>{m.flow_template_fill_word_control_appearance_help()}</p>
           </div>
           <div class="flex flex-col gap-2">
             <p class="font-medium">{m.flow_template_fill_word_help_mac_title()}</p>
@@ -371,11 +390,68 @@
             class="overflow-auto whitespace-pre-wrap">{templateInspection.extracted_text_preview}</pre>
         {/if}
       {:else}
+        {#if templateInspection && !busy && templatePlaceholders.length > 1}
+          <Collapsible.Root class="flex flex-col gap-3">
+            <Collapsible.Trigger>
+              {#snippet child({ props })}
+                <Button {...props} variant="outline" size="sm" class="self-start">
+                  {m.flow_template_fill_locations_action()}
+                </Button>
+              {/snippet}
+            </Collapsible.Trigger>
+            <Collapsible.Content class="flex flex-col gap-3">
+              <p class="text-muted-foreground max-w-prose text-sm leading-relaxed">
+                {m.flow_template_fill_locations_help()}
+              </p>
+              <ol class="flex max-w-prose list-decimal flex-col gap-1 pl-5 text-sm">
+                {#each templateBindingRows as row, index (row.key)}
+                  {#if row.status !== "orphaned"}
+                    <li>
+                      <Button
+                        variant="ghost"
+                        class="h-auto w-full items-start justify-between gap-3 py-3 text-left whitespace-normal"
+                        aria-label={m.flow_template_fill_go_to_field({ name: row.label })}
+                        aria-describedby={row.status === "missing"
+                          ? `${instanceId}-location-status-${index}`
+                          : undefined}
+                        onclick={() => focusTemplateField(index)}
+                      >
+                        <span class="flex min-w-0 flex-col gap-1 break-words">
+                          <span class="font-medium">{row.label}</span>
+                          <span class="text-muted-foreground font-normal">
+                            {row.sectionHeading
+                              ? m.flow_template_fill_under_heading({ heading: row.sectionHeading })
+                              : m.flow_template_fill_in_body()}
+                          </span>
+                        </span>
+                        {#if row.status === "missing"}
+                          <Badge
+                            id={`${instanceId}-location-status-${index}`}
+                            variant="outline"
+                            class="shrink-0"
+                          >
+                            {getTemplateRowStatusText(row.status)}
+                          </Badge>
+                        {/if}
+                      </Button>
+                    </li>
+                  {/if}
+                {/each}
+              </ol>
+            </Collapsible.Content>
+          </Collapsible.Root>
+          <Separator />
+        {/if}
         <Field.FieldGroup>
           {#each templateBindingRows as row, index (row.key)}
             {#if index > 0}<Separator />{/if}
-            <Field.FieldSet class="min-w-0">
+            <Field.FieldSet id={`${instanceId}-field-${index}`} tabindex={-1} class="min-w-0">
               <Field.FieldLegend>{row.label}</Field.FieldLegend>
+              {#if row.sectionHeading}
+                <Field.FieldDescription class="text-foreground">
+                  {m.flow_template_fill_under_heading({ heading: row.sectionHeading })}
+                </Field.FieldDescription>
+              {/if}
               <div class="flex flex-wrap items-center gap-2">
                 {#if row.label !== row.placeholderName}
                   <Field.FieldDescription

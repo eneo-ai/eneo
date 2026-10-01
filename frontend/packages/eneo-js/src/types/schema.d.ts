@@ -25895,6 +25895,11 @@ export interface components {
       location: string;
       /** Name */
       name: string;
+      /**
+       * Section Heading
+       * @description Text of the nearest preceding document heading, when present.
+       */
+      section_heading?: string | null;
     };
     /** FlowTemplateReadinessPublic */
     FlowTemplateReadinessPublic: {

@@ -11,6 +11,7 @@ const EXAMPLE = /^(Download example template|Ladda ner exempelmall)$/;
 const TEMPLATE = "Template step";
 const TEXT_STEP = "Source text";
 const FILE = new URL("../static/examples/eneo-word-template.docx", import.meta.url);
+const FIELDS_FILE = new URL("../static/examples/eneo-word-template-fields.docx", import.meta.url);
 
 async function api(page: Page, request: APIRequestContext, path: string, data?: object) {
   const response = await backendFetch(page, request, path, {
@@ -87,6 +88,82 @@ async function savedTemplate(page: Page, request: APIRequestContext, flowId: str
   const flow = await api(page, request, `/api/v1/flows/${flowId}/`);
   return flow.steps[2].output_config;
 }
+
+test("multi-field example shows real locations and keyboard navigation preserves mappings", async ({
+  page,
+  request
+}) => {
+  const flow = await createFlow(page, request, true);
+  await openTemplate(page, flow.id);
+  const downloadPromise = page.waitForEvent("download");
+  await page
+    .getByRole("link", { name: /^(Example with several fields|Exempel med flera fält)$/ })
+    .click();
+  const example = await downloadPromise;
+  expect(example.suggestedFilename()).toBe("eneo-word-template-fields.docx");
+  const filePath = test.info().outputPath("eneo-word-template-fields.docx");
+  await example.saveAs(filePath);
+  expect(await readFile(filePath)).toEqual(await readFile(FIELDS_FILE));
+  await page.locator('input[type="file"][accept=".docx"]').setInputFiles(filePath);
+  const overview = page.getByRole("button", {
+    name: /^(Show places in the template|Visa platser i mallen)$/
+  });
+  await expect(overview).toBeVisible();
+  await overview.focus();
+  await overview.press("Enter");
+  const locations = page
+    .getByRole("list")
+    .filter({ has: page.getByRole("button", { name: /^(Go to field|Gå till fältet) Namn$/ }) });
+  const names = await locations.getByRole("button").allTextContents();
+  expect(names).toHaveLength(4);
+  for (const [index, label] of ["Namn", "Bakgrund", "Bedömning", "Nästa steg"].entries()) {
+    expect(names[index]).toContain(label);
+  }
+  await expect(locations).toContainText(/In the document body|I dokumentets huvudtext/);
+  await expect(locations).toContainText(/Under the heading “Bedömning”|Under rubriken ”Bedömning”/);
+  const target = page.getByRole("button", { name: /^(Go to field|Gå till fältet) Bedömning$/ });
+  await target.focus();
+  await target.press("Enter");
+  const source = page.getByRole("button", { name: /^(Text for|Text till) Bedömning$/ });
+  await expect(source).toBeFocused();
+  await source.press("Enter");
+  await page.getByRole("option", { name: /Source text/ }).click();
+  await expect
+    .poll(async () => (await savedTemplate(page, request, flow.id))?.bindings?.bedomning)
+    .toBe("{{step_1.output.text}}");
+  const nameSource = page.getByRole("button", { name: /^(Text for|Text till) Namn$/ });
+  await nameSource.click();
+  await page.getByRole("option", { name: /^(Field|Fält): brukarens_namn$/ }).click();
+  const nextSource = page.getByRole("button", { name: /^(Text for|Text till) Nästa steg$/ });
+  await nextSource.click();
+  await page.getByRole("option", { name: EMPTY }).click();
+  for (const [width, height] of [
+    [1024, 768],
+    [1440, 1000],
+    [2560, 1080]
+  ]) {
+    await page.setViewportSize({ width, height });
+    await overview.scrollIntoViewIfNeeded();
+    expect(
+      await locations.evaluate((element) => element.scrollWidth <= element.clientWidth + 1)
+    ).toBe(true);
+    await page.screenshot({
+      path: test.info().outputPath(`word-locations-${width}.png`),
+      fullPage: true
+    });
+  }
+  await page.getByRole("button", { name: /^(Refresh|Uppdatera)$/ }).click();
+  await expect(source).toContainText(TEXT_STEP);
+  await expect(nameSource).toContainText("brukarens_namn");
+  await expect(nextSource).toContainText(/Leave empty|Lämna tomt/);
+  await expect
+    .poll(async () => (await savedTemplate(page, request, flow.id)).bindings)
+    .toMatchObject({
+      namn: "{{flow_input.brukarens_namn}}",
+      bedomning: "{{step_1.output.text}}",
+      nasta_steg: ""
+    });
+});
 
 test("invalid Word files show actionable errors and a replacement upload recovers", async ({
   page,

@@ -7179,5 +7179,13 @@
   "flow_template_fill_asset_read_only": "Mallen kan inte ändras",
   "flow_template_fill_asset_unavailable": "Mallen är inte tillgänglig",
   "flow_template_fill_template_text_label": "Den här texten ersätts med den valda källan när flödet körs.",
-  "flow_template_fill_form_source_help": "Du har valt ett formulärfält. Bara fältets värde fylls i här. Välj text från ett steg om du vill fylla hela avsnittet med stegets resultat."
+  "flow_template_fill_form_source_help": "Du har valt ett formulärfält. Bara fältets värde fylls i här. Välj text från ett steg om du vill fylla hela avsnittet med stegets resultat.",
+  "flow_template_fill_fields_example_action": "Exempel med flera fält",
+  "flow_template_fill_fields_example_help": "Vill du fylla olika platser? Exemplet med flera fält har Namn, Bakgrund, Bedömning och Nästa steg. Rubrikerna finns kvar när varje fält fylls med den text du väljer.",
+  "flow_template_fill_word_control_appearance_help": "Klicka i ett fält i Word för att se kontrollens titel och gränser. Behåll fasta rubriker utanför kontrollen om de ska finnas kvar i resultatet.",
+  "flow_template_fill_locations_action": "Visa platser i mallen",
+  "flow_template_fill_locations_help": "Fälten visas i dokumentets ordning. Välj ett fält för att gå till dess koppling. Rubriken hjälper dig hitta platsen i Word; slutlig sidbrytning och formatering ser du i Word-resultatet.",
+  "flow_template_fill_go_to_field": "Gå till fältet {name}",
+  "flow_template_fill_under_heading": "Under rubriken ”{heading}”",
+  "flow_template_fill_in_body": "I dokumentets huvudtext"
 }

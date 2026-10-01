@@ -72,6 +72,7 @@ class ContentControl:
     heading_level: int
     multiline: bool
     element: Any
+    section_heading: str | None = None
 
 
 def inspect_content_controls(document: Any) -> tuple[ContentControl, ...]:
@@ -159,6 +160,9 @@ def inspect_content_controls(document: Any) -> tuple[ContentControl, ...]:
             multiline = text_properties is not None and text_properties.get(
                 qn("w:multiLine")
             ) in ("1", "true", "on")
+            heading_level, section_heading = _preceding_heading(
+                sdt if parent is body else parent, style_names=style_names
+            )
             controls.append(
                 ContentControl(
                     name=tag_value,
@@ -166,12 +170,10 @@ def inspect_content_controls(document: Any) -> tuple[ContentControl, ...]:
                     kind=kind,
                     hint=_control_text(sdt),
                     location="body",
-                    heading_level=_preceding_heading_level(
-                        sdt if parent is body else parent,
-                        style_names=style_names,
-                    ),
+                    heading_level=heading_level,
                     multiline=multiline,
                     element=sdt,
+                    section_heading=section_heading,
                 )
             )
     return tuple(controls)
@@ -384,21 +386,22 @@ def _control_text(sdt: Any) -> str:
     if content is None:
         return ""
 
-    def inline_text(element: Any) -> str:
-        pieces: list[str] = []
-        for node in element.iter():
-            if node.tag == qn("w:t"):
-                pieces.append(node.text or "")
-            elif node.tag == qn("w:tab"):
-                pieces.append("\t")
-            elif node.tag in (qn("w:br"), qn("w:cr")):
-                pieces.append("\n")
-        return "".join(pieces).strip()
-
     paragraphs = list(content.iter(qn("w:p")))
     if paragraphs:
-        return "\n\n".join(inline_text(paragraph) for paragraph in paragraphs)
-    return inline_text(content)
+        return "\n\n".join(_inline_text(paragraph) for paragraph in paragraphs)
+    return _inline_text(content)
+
+
+def _inline_text(element: Any) -> str:
+    pieces: list[str] = []
+    for node in element.iter():
+        if node.tag == qn("w:t"):
+            pieces.append(node.text or "")
+        elif node.tag == qn("w:tab"):
+            pieces.append("\t")
+        elif node.tag in (qn("w:br"), qn("w:cr")):
+            pieces.append("\n")
+    return "".join(pieces).strip()
 
 
 def _style_names_by_id(document: Any) -> dict[str, str]:
@@ -407,7 +410,9 @@ def _style_names_by_id(document: Any) -> dict[str, str]:
     }
 
 
-def _preceding_heading_level(anchor: Any, *, style_names: dict[str, str]) -> int:
+def _preceding_heading(
+    anchor: Any, *, style_names: dict[str, str]
+) -> tuple[int, str | None]:
     for sibling in anchor.itersiblings(preceding=True):
         if sibling.tag != qn("w:p"):
             continue
@@ -419,5 +424,6 @@ def _preceding_heading_level(anchor: Any, *, style_names: dict[str, str]) -> int
             style_names.get(style.get(qn("w:val"), ""), "")
         )
         if match:
-            return int(match.group(1))
-    return 0
+            text = _inline_text(sibling)
+            return int(match.group(1)), text or None
+    return 0, None

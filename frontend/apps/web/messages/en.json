@@ -7179,5 +7179,13 @@
   "flow_template_fill_asset_read_only": "Template is read-only",
   "flow_template_fill_asset_unavailable": "Template unavailable",
   "flow_template_fill_template_text_label": "This text is replaced with the selected source when the flow runs.",
-  "flow_template_fill_form_source_help": "You selected a form field. Only that field’s value is inserted here. Choose text from a step to fill the whole section with that step’s result."
+  "flow_template_fill_form_source_help": "You selected a form field. Only that field’s value is inserted here. Choose text from a step to fill the whole section with that step’s result.",
+  "flow_template_fill_fields_example_action": "Example with several fields",
+  "flow_template_fill_fields_example_help": "Need to fill separate places? The multi-field example has Namn, Bakgrund, Bedömning and Nästa steg. Its headings stay in place when each field is filled with your chosen text.",
+  "flow_template_fill_word_control_appearance_help": "Click inside a field in Word to see the control’s title and boundaries. Keep fixed headings outside the control if they should stay in the result.",
+  "flow_template_fill_locations_action": "Show places in the template",
+  "flow_template_fill_locations_help": "Fields appear in document order. Select a field to go to its mapping. The heading helps you find the place in Word; check final pagination and formatting in the Word result.",
+  "flow_template_fill_go_to_field": "Go to field {name}",
+  "flow_template_fill_under_heading": "Under the heading “{heading}”",
+  "flow_template_fill_in_body": "In the document body"
 }

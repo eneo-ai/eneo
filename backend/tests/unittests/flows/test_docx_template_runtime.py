@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import io
 import zipfile
+from pathlib import Path
 
 import pytest
 from docx import Document
@@ -60,6 +61,74 @@ def _bytes(document) -> bytes:
 
 
 # --- discovery ------------------------------------------------------------------
+
+
+def test_downloadable_field_example_fills_distinct_places_and_keeps_fixed_headings() -> (
+    None
+):
+    template = (
+        Path(__file__).resolve().parents[4]
+        / "frontend/apps/web/static/examples/eneo-word-template-fields.docx"
+    ).read_bytes()
+    fields = inspect_docx_template_bytes(template, filename="example.docx")
+    assert [
+        (field["name"], field["kind"], field["section_heading"]) for field in fields
+    ] == [
+        ("namn", "text", None),
+        ("bakgrund", "rich", "Bakgrund"),
+        ("bedomning", "rich", "Bedömning"),
+        ("nasta_steg", "rich", "Nästa steg"),
+    ]
+
+    result, _ = render_docx_template(
+        template_bytes=template,
+        template_name="example.docx",
+        context={
+            "namn": "Testperson",
+            "bakgrund": "Bakgrund från underlaget.",
+            "bedomning": "# Detaljer\n\nBedömning från underlaget.",
+            "nasta_steg": "",
+        },
+        step_order=1,
+    )
+    assert docx_paragraph_texts(result) == [
+        "Utredningsunderlag",
+        "Namn: Testperson",
+        "Bakgrund",
+        "Bakgrund från underlaget.",
+        "Bedömning",
+        "Detaljer",
+        "Bedömning från underlaget.",
+        "Nästa steg",
+    ]
+
+
+def test_inspection_identifies_nearest_heading_for_inline_and_section_fields() -> None:
+    document = Document()
+    append_text_control(
+        document.add_paragraph("Namn: "), tag="namn", label="Namn", hint="Namn här"
+    )
+    document.add_heading("Bakgrund", level=1)
+    document.add_paragraph("Fast text före fältet.")
+    append_rich_control(document, tag="bakgrund", label="Bakgrund", hint="Text här")
+    heading = document.add_heading("Uppfölj", level=2)
+    heading.add_run("ning").bold = True
+    append_text_control(
+        document.add_paragraph("Ansvarig: "),
+        tag="ansvarig",
+        label="Ansvarig",
+        hint="Ansvarig här",
+    )
+    append_rich_control(document, tag="plan", label="Plan", hint="Plan här")
+
+    fields = inspect_docx_template_bytes(_bytes(document), filename="sections.docx")
+
+    assert [(field["name"], field["section_heading"]) for field in fields] == [
+        ("namn", None),
+        ("bakgrund", "Bakgrund"),
+        ("ansvarig", "Uppföljning"),
+        ("plan", "Uppföljning"),
+    ]
 
 
 def test_control_preview_preserves_paragraphs_inline_runs_breaks_and_tabs() -> None:
@@ -121,6 +190,7 @@ def test_inspect_lists_controls_with_kind_label_and_hint_in_document_order() -> 
             "kind": "text",
             "hint": "Rapportens titel",
             "location": "body",
+            "section_heading": None,
         },
         {
             "name": "datum",
@@ -128,6 +198,7 @@ def test_inspect_lists_controls_with_kind_label_and_hint_in_document_order() -> 
             "kind": "text",
             "hint": "ÅÅÅÅ-MM-DD",
             "location": "body",
+            "section_heading": None,
         },
         {
             "name": "sammanfattning",
@@ -135,6 +206,7 @@ def test_inspect_lists_controls_with_kind_label_and_hint_in_document_order() -> 
             "kind": "rich",
             "hint": "Två till fyra stycken.",
             "location": "body",
+            "section_heading": "Sammanfattning",
         },
         {
             "name": "analys",
@@ -142,6 +214,7 @@ def test_inspect_lists_controls_with_kind_label_and_hint_in_document_order() -> 
             "kind": "rich",
             "hint": "Underrubriker och tabeller.",
             "location": "body",
+            "section_heading": "Analys",
         },
     ]
 
