@@ -1,11 +1,14 @@
 import asyncio
 import json
 from typing import Any, Awaitable, Callable, Optional, Sequence, cast
-from urllib.parse import ParseResult, parse_qs, urlparse
+from urllib.parse import ParseResult, parse_qs, quote, urlparse
 from uuid import UUID
 
 import aiohttp
 
+from eneo.integration.infrastructure.content_service.sharepoint_metadata import (
+    LIST_ITEM_FIELDS_EXPAND,
+)
 from eneo.integration.infrastructure.content_service.types import SharePointItem
 from eneo.integration.infrastructure.content_service.utils import (
     process_sharepoint_response,
@@ -29,6 +32,20 @@ def _relative_graph_link(url: str) -> str:
     parsed: ParseResult = urlparse(url)
     query = f"?{parsed.query}" if parsed.query else ""
     return f"{parsed.path.lstrip('/')}{query}"
+
+
+def _strip_query_param(url: str, name: str) -> str:
+    """Remove one query parameter from a relative or absolute URL."""
+    if "?" not in url:
+        return url
+    path, _, query = url.partition("?")
+    encoded = name.replace("$", "%24")
+    kept = [
+        part
+        for part in query.split("&")
+        if part and part.split("=", 1)[0] not in (name, encoded)
+    ]
+    return f"{path}?{'&'.join(kept)}" if kept else path
 
 
 def _token_from_delta_link(delta_link: str) -> Optional[str]:
@@ -57,8 +74,15 @@ class SharePointContentClient(BaseClient):
         token_id: Optional[UUID] = None,
         token_refresh_callback: Optional[TokenRefreshCallback] = None,
         max_download_bytes: Optional[int] = None,
+        include_list_item_fields: bool = False,
     ):
         super().__init__(base_url=base_url)
+        # Content sync asks for each item's list item columns (source metadata)
+        # in the same listing and delta calls. Browsing for the import picker
+        # does not: the expansion makes every page heavier for nothing there.
+        # Cleared for the rest of this client's life if Graph rejects the
+        # expansion, so one odd drive degrades to plain listings, not failure.
+        self._list_item_expand_enabled = include_list_item_fields
         self.headers: dict[str, str] = {
             "Authorization": f"Bearer {api_token}",
             "Accept": "application/json",
@@ -116,6 +140,161 @@ class SharePointContentClient(BaseClient):
             next_link = response.get("@odata.nextLink")
 
         return all_items
+
+    @property
+    def list_item_fields_enabled(self) -> bool:
+        return self._list_item_expand_enabled
+
+    def _with_item_expand(self, endpoint: str) -> str:
+        if not self._list_item_expand_enabled:
+            return endpoint
+        separator = "&" if "?" in endpoint else "?"
+        return f"{endpoint}{separator}$expand={LIST_ITEM_FIELDS_EXPAND}"
+
+    def _disable_item_expand_after(self, error: aiohttp.ClientResponseError) -> bool:
+        """True when the failed request should be retried without the expansion.
+
+        Graph answers 400 for an ``$expand`` it cannot honour (for example on
+        drives without a backing list). Everything else is not about the
+        expansion and propagates as before.
+        """
+        if not self._list_item_expand_enabled or error.status != 400:
+            return False
+        self._list_item_expand_enabled = False
+        logger.warning(
+            "Graph rejected $expand=%s (%s); continuing without source metadata "
+            "for the rest of this sync",
+            LIST_ITEM_FIELDS_EXPAND,
+            error.message,
+        )
+        return True
+
+    async def _get_items(self, endpoint: str) -> list[SharePointItem]:
+        """Paged listing with list item columns when enabled."""
+        try:
+            return await self._get_all_paged_items(self._with_item_expand(endpoint))
+        except aiohttp.ClientResponseError as e:
+            if self._disable_item_expand_after(e):
+                return await self._get_all_paged_items(endpoint)
+            raise
+
+    async def _get_item(self, endpoint: str) -> dict[str, Any]:
+        """Single item with list item columns when enabled."""
+        try:
+            return await self.client.get(
+                self._with_item_expand(endpoint), headers=self.headers
+            )
+        except aiohttp.ClientResponseError as e:
+            if self._disable_item_expand_after(e):
+                return await self.client.get(endpoint, headers=self.headers)
+            raise
+
+    # Rows Graph is asked for before a search gives up on finding more matches
+    # when a local check (free text on a column query) discards most of them.
+    MAX_SCANNED_ROWS = 2000
+
+    async def _get_paged_items_capped(
+        self,
+        endpoint: str,
+        *,
+        max_items: int,
+        headers: Optional[dict[str, str]] = None,
+        accept: Optional[Callable[[dict[str, Any]], bool]] = None,
+    ) -> tuple[list[dict[str, Any]], bool]:
+        """Pages until ``max_items`` accepted rows are in hand.
+
+        ``accept`` drops rows as they arrive, so the cap counts matches rather
+        than raw rows. The second value is True when more matches may exist:
+        another page remained, or the scan budget ran out first.
+        """
+        rows: list[dict[str, Any]] = []
+        scanned = 0
+        next_link: Optional[str] = endpoint
+        while next_link:
+            if next_link.startswith("http"):
+                next_link = _relative_graph_link(next_link)
+            response = await self.client.get(
+                next_link, headers={**self.headers, **(headers or {})}
+            )
+            page = cast(list[dict[str, Any]], response.get("value", []))
+            scanned += len(page)
+            for row in page:
+                if accept is None or accept(row):
+                    rows.append(row)
+            next_link = cast(Optional[str], response.get("@odata.nextLink"))
+            if len(rows) >= max_items:
+                return rows[:max_items], bool(next_link) or len(rows) > max_items
+            if next_link and scanned >= self.MAX_SCANNED_ROWS:
+                return rows, True
+        return rows, False
+
+    async def get_list_items_filtered(
+        self,
+        drive_id: str,
+        odata_filter: Optional[str],
+        *,
+        max_items: int,
+        accept: Optional[Callable[[dict[str, Any]], bool]] = None,
+    ) -> tuple[list[dict[str, Any]], bool]:
+        """List items of a library with their columns and drive item.
+
+        ``odata_filter`` compares ``fields/<Column>``; Graph evaluates it for
+        indexed columns and, with the Prefer header, tries non-indexed ones too.
+        ``accept`` keeps paging past rows a local check rejects.
+        """
+        endpoint = f"v1.0/drives/{drive_id}/list/items?$expand=fields,driveItem"
+        if odata_filter:
+            # A column value may hold &, # or %, which would otherwise end or
+            # corrupt the query string.
+            endpoint += "&$filter=" + quote(odata_filter, safe="/")
+        prefer = {"Prefer": "HonorNonIndexedQueriesWarningMayFailRandomly"}
+        try:
+            return await self._get_paged_items_capped(
+                endpoint, max_items=max_items, headers=prefer, accept=accept
+            )
+        except aiohttp.ClientResponseError as e:
+            if e.status == 401 and self.token_refresh_callback and self.token_id:
+                await self.refresh_token()
+                return await self._get_paged_items_capped(
+                    endpoint, max_items=max_items, headers=prefer, accept=accept
+                )
+            raise
+
+    async def search_drive_items(
+        self, drive_id: str, text: str, *, max_items: int
+    ) -> tuple[list[dict[str, Any]], bool]:
+        """Drive items whose name or content matches ``text``, with list item columns when enabled."""
+        # Percent-encoded inside the path segment, so quotes, &, # and spaces
+        # in what a person typed reach Graph as the search text.
+        quoted = quote(text.replace("'", "''"), safe="")
+        endpoint = self._with_item_expand(
+            f"v1.0/drives/{drive_id}/root/search(q='{quoted}')"
+        )
+        try:
+            return await self._get_paged_items_capped(endpoint, max_items=max_items)
+        except aiohttp.ClientResponseError as e:
+            if self._disable_item_expand_after(e):
+                return await self._get_paged_items_capped(
+                    _strip_query_param(endpoint, "$expand"), max_items=max_items
+                )
+            if e.status == 401 and self.token_refresh_callback and self.token_id:
+                await self.refresh_token()
+                return await self._get_paged_items_capped(endpoint, max_items=max_items)
+            raise
+
+    async def get_list_columns(self, drive_id: str) -> list[dict[str, Any]]:
+        """Column definitions of the list behind a document library."""
+        endpoint = f"v1.0/drives/{drive_id}/list/columns"
+        try:
+            return cast(list[dict[str, Any]], await self._get_all_paged_items(endpoint))
+        except aiohttp.ClientResponseError as e:
+            if e.status == 401 and self.token_refresh_callback and self.token_id:
+                logger.info("Token expired while getting list columns, refreshing...")
+                await self.refresh_token()
+                return cast(
+                    list[dict[str, Any]], await self._get_all_paged_items(endpoint)
+                )
+            raise
 
     @staticmethod
     def _parse_content_length(content_length: Optional[str]) -> Optional[int]:
@@ -365,12 +544,12 @@ class SharePointContentClient(BaseClient):
         """Get all items in root of a drive (works for both OneDrive and SharePoint)."""
         endpoint = f"v1.0/drives/{drive_id}/root/children"
         try:
-            return await self._get_all_paged_items(endpoint)
+            return await self._get_items(endpoint)
         except aiohttp.ClientResponseError as e:
             if e.status == 401 and self.token_refresh_callback and self.token_id:
                 logger.info("Token expired while getting drive root, refreshing...")
                 await self.refresh_token()
-                return await self._get_all_paged_items(endpoint)
+                return await self._get_items(endpoint)
             else:
                 raise
 
@@ -380,12 +559,12 @@ class SharePointContentClient(BaseClient):
         """Get all items in a folder by drive_id (no site_id needed)."""
         endpoint = f"v1.0/drives/{drive_id}/items/{folder_id}/children"
         try:
-            return await self._get_all_paged_items(endpoint)
+            return await self._get_items(endpoint)
         except aiohttp.ClientResponseError as e:
             if e.status == 401 and self.token_refresh_callback and self.token_id:
                 logger.info("Token expired while getting folder items, refreshing...")
                 await self.refresh_token()
-                return await self._get_all_paged_items(endpoint)
+                return await self._get_items(endpoint)
             else:
                 raise
 
@@ -464,7 +643,7 @@ class SharePointContentClient(BaseClient):
                 return []
 
             endpoint = f"v1.0/sites/{site_id}/drives/{drive_id}/root/children"
-            return await self._get_all_paged_items(endpoint)
+            return await self._get_items(endpoint)
         except aiohttp.ClientResponseError as e:
             if e.status == 401 and self.token_refresh_callback and self.token_id:
                 logger.info("SharePoint token expired, refreshing...")
@@ -474,7 +653,7 @@ class SharePointContentClient(BaseClient):
                     logger.warning("No drive found for site %s after refresh", site_id)
                     return []
                 endpoint = f"v1.0/sites/{site_id}/drives/{drive_id}/root/children"
-                return await self._get_all_paged_items(endpoint)
+                return await self._get_items(endpoint)
             else:
                 logger.error(f"SharePoint API error: {e}")
                 raise
@@ -492,7 +671,7 @@ class SharePointContentClient(BaseClient):
         """
         try:
             endpoint = f"v1.0/drives/{drive_id}/items/{item_id}"
-            return await self.client.get(endpoint, headers=self.headers)
+            return await self._get_item(endpoint)
         except aiohttp.ClientResponseError as e:
             if e.status == 401 and self.token_refresh_callback and self.token_id:
                 logger.info(
@@ -501,7 +680,7 @@ class SharePointContentClient(BaseClient):
                 await self.refresh_token()
 
                 endpoint = f"v1.0/drives/{drive_id}/items/{item_id}"
-                return await self.client.get(endpoint, headers=self.headers)
+                return await self._get_item(endpoint)
             else:
                 logger.error(f"SharePoint API error when getting file metadata: {e}")
                 raise
@@ -526,7 +705,7 @@ class SharePointContentClient(BaseClient):
             endpoint = (
                 f"v1.0/sites/{site_id}/drives/{drive_id}/items/{folder_id}/children"
             )
-            return await self._get_all_paged_items(endpoint)
+            return await self._get_items(endpoint)
         except aiohttp.ClientResponseError as e:
             if e.status == 401 and self.token_refresh_callback and self.token_id:
                 logger.info(
@@ -536,7 +715,7 @@ class SharePointContentClient(BaseClient):
                 endpoint = (
                     f"v1.0/sites/{site_id}/drives/{drive_id}/items/{folder_id}/children"
                 )
-                return await self._get_all_paged_items(endpoint)
+                return await self._get_items(endpoint)
             else:
                 logger.error(f"SharePoint API error while getting folder items: {e}")
                 raise
@@ -606,6 +785,20 @@ class SharePointContentClient(BaseClient):
                 logger.error(f"SharePoint API error when getting file content: {e}")
                 raise
 
+    async def _get_delta_page(self, link: str) -> dict[str, Any]:
+        """One delta page; drops the list item expansion if Graph rejects it.
+
+        Only the first page carries our own query string; later pages come
+        from ``@odata.nextLink``, which Graph builds from the accepted options.
+        """
+        try:
+            return await self.client.get(link, headers=self.headers)
+        except aiohttp.ClientResponseError as e:
+            if self._disable_item_expand_after(e):
+                stripped = _strip_query_param(link, "$expand")
+                return await self.client.get(stripped, headers=self.headers)
+            raise
+
     async def initialize_delta_token(
         self, drive_id: str, *, _retried: bool = False
     ) -> Optional[str]:
@@ -620,7 +813,7 @@ class SharePointContentClient(BaseClient):
             The delta token to use for future incremental syncs, or None if failed
         """
         try:
-            endpoint = f"v1.0/drives/{drive_id}/root/delta"
+            endpoint = self._with_item_expand(f"v1.0/drives/{drive_id}/root/delta")
 
             # Iterate through all pages to get to the final deltaLink
             delta_link = None
@@ -631,7 +824,7 @@ class SharePointContentClient(BaseClient):
                 if next_link.startswith("http"):
                     next_link = _relative_graph_link(next_link)
 
-                response = await self.client.get(next_link, headers=self.headers)
+                response = await self._get_delta_page(next_link)
 
                 # Check for @odata.nextLink (more pages to fetch)
                 next_link = cast(str | None, response.get("@odata.nextLink"))
@@ -686,7 +879,9 @@ class SharePointContentClient(BaseClient):
             Tuple of (list of changed items, new delta token for next sync)
         """
         try:
-            endpoint = f"v1.0/drives/{drive_id}/root/delta?token={delta_token}"
+            endpoint = self._with_item_expand(
+                f"v1.0/drives/{drive_id}/root/delta?token={delta_token}"
+            )
 
             all_changes: list[SharePointItem] = []
             next_link = endpoint
@@ -697,7 +892,7 @@ class SharePointContentClient(BaseClient):
                 if next_link.startswith("http"):
                     next_link = _relative_graph_link(next_link)
 
-                response = await self.client.get(next_link, headers=self.headers)
+                response = await self._get_delta_page(next_link)
 
                 # Collect changed items
                 items = response.get("value", [])

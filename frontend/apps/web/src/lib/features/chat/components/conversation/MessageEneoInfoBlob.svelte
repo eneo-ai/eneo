@@ -12,6 +12,8 @@
     mergeAdjacentCitations
   } from "../../mcpReferenceDocs";
   import { m } from "$lib/paraglide/messages";
+  import SourceMetadataList from "$lib/features/knowledge/components/SourceMetadataList.svelte";
+  import { hasSourceMetadata } from "$lib/features/knowledge/sourceMetadata";
 
   let { token }: EneoInrefCustomComponentProps = $props();
 
@@ -119,7 +121,12 @@
           <!-- eslint-enable svelte/no-navigation-without-resolve -->
         {/snippet}
       </Tooltip.Trigger>
-      <Tooltip.Content class="break-all">{reference.metadata.url}</Tooltip.Content>
+      <Tooltip.Content class="flex-col items-start break-all">
+        <span>{reference.metadata.url}</span>
+        {#if hasSourceMetadata(reference)}
+          <SourceMetadataList entries={reference.source_metadata} variant="inline" />
+        {/if}
+      </Tooltip.Content>
     </Tooltip.Root>
   {:else}
     {@const title = reference.metadata.title}
@@ -136,7 +143,12 @@
               </button>
             {/snippet}
           </Tooltip.Trigger>
-          <Tooltip.Content>{title}</Tooltip.Content>
+          <Tooltip.Content class="flex-col items-start">
+            <span>{title}</span>
+            {#if hasSourceMetadata(reference)}
+              <SourceMetadataList entries={reference.source_metadata} variant="inline" />
+            {/if}
+          </Tooltip.Content>
         </Tooltip.Root>
       {:else}
         <button type="button" onclick={showBlob} class={["reference", token.level]}>

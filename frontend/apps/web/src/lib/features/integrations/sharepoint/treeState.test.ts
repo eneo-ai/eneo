@@ -1,8 +1,11 @@
 import { describe, expect, it } from "vitest";
+import { buildSharePointSelectionKey } from "./selectionKey";
 import {
   createSharePointTreeNode,
   hasSelectedSharePointDescendant,
-  isSharePointDescendantPath
+  isSharePointDescendantPath,
+  isSharePointItemCovered,
+  normalizeSharePointTreeQuery
 } from "./treeState";
 
 describe("SharePoint tree state", () => {
@@ -36,5 +39,30 @@ describe("SharePoint tree state", () => {
   it("treats every non-root path as a descendant of the selected site", () => {
     expect(isSharePointDescendantPath("/Policies/Security.pdf", "/")).toBe(true);
     expect(isSharePointDescendantPath("/", "/")).toBe(false);
+  });
+});
+
+describe("selection coverage", () => {
+  it("treats items under a selected folder or the site root as covered", () => {
+    const item = createSharePointTreeNode({
+      id: "Larm natt.docx",
+      name: "Larm natt.docx",
+      type: "file",
+      path: "/Larmrutiner/Larm natt.docx",
+      has_children: false
+    });
+
+    expect(isSharePointItemCovered(item, new Set(), [])).toBe(false);
+    expect(isSharePointItemCovered(item, new Set(), ["/Larmrutiner"])).toBe(true);
+    expect(isSharePointItemCovered(item, new Set(), ["/"])).toBe(true);
+    expect(isSharePointItemCovered(item, new Set(), ["/Larm"])).toBe(false);
+    expect(isSharePointItemCovered(item, new Set([buildSharePointSelectionKey(item)]), [])).toBe(
+      true
+    );
+  });
+
+  it("normalises a query by trimming and case-folding", () => {
+    expect(normalizeSharePointTreeQuery("  LARM ")).toBe("larm");
+    expect(normalizeSharePointTreeQuery("   ")).toBe("");
   });
 });

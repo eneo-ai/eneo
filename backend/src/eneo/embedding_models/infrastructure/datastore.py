@@ -18,6 +18,7 @@ from eneo.info_blobs.info_blob import (
     InfoBlobInDB,
 )
 from eneo.info_blobs.info_blob_chunk_repo import InfoBlobChunkRepo
+from eneo.info_blobs.source_metadata import build_source_header
 from eneo.integration.domain.entities.integration_knowledge import (
     IntegrationKnowledge,
 )
@@ -41,6 +42,10 @@ class ChunkSettings(BaseSettings):
 
 
 settings = ChunkSettings()
+
+# Share of a chunk's token budget the source metadata header may take when it
+# is prepended for embedding. The rest stays for the chunk's own text.
+SOURCE_HEADER_BUDGET_SHARE = 0.25
 
 
 def autocut(y_values: list[float], cutoff: int = 2) -> int:
@@ -89,10 +94,35 @@ class Datastore:
         self.chunk_repo = info_blob_chunk_repo
         self.create_embeddings_service = create_embeddings_service
 
+    @staticmethod
+    def _source_header(info_blob: InfoBlobInDB) -> str:
+        """Title and source properties prepended to every chunk for embedding.
+
+        Stored chunk text stays the document's own words: the header is only
+        part of what the embedding model sees, so a query about a document's
+        kind or subject area can find it, while excerpts shown to people and
+        the model remain clean. Empty for documents without source metadata.
+        """
+        if not info_blob.source_metadata:
+            return ""
+        return build_source_header(
+            title=info_blob.title,
+            entries=info_blob.source_metadata,
+            token_budget=max(1, int(settings.chunk_size * SOURCE_HEADER_BUDGET_SHARE)),
+            count_tokens=count_tokens,
+        )
+
     def _chunk_text(self, info_blob: InfoBlobInDB) -> list[InfoBlobChunk]:
+        # Leave room for the source header so header + chunk stays within the
+        # configured chunk size; the overlap must stay smaller than the chunk.
+        header = self._source_header(info_blob)
+        reserved_tokens = count_tokens(header) if header else 0
+        chunk_size = max(
+            settings.chunk_size - reserved_tokens, settings.chunk_size // 2
+        )
         splitter = RecursiveCharacterTextSplitter(
-            chunk_size=settings.chunk_size,
-            chunk_overlap=settings.chunk_overlap,
+            chunk_size=chunk_size,
+            chunk_overlap=min(settings.chunk_overlap, chunk_size // 2),
             length_function=count_tokens,
         )
 
@@ -133,6 +163,7 @@ class Datastore:
 
     async def add(self, info_blob: InfoBlobInDB, embedding_model: "EmbeddingModel"):
         logger.debug("Chunking text.")
+        header = self._source_header(info_blob)
         info_blob_chunks = await asyncio.to_thread(self._chunk_text, info_blob)
 
         if not info_blob_chunks:
@@ -141,13 +172,30 @@ class Datastore:
             )
 
         logger.debug(f"Embedding {len(info_blob_chunks)} info-blob chunks.")
+        embedding_inputs = (
+            [
+                chunk.model_copy(update={"text": header + chunk.text})
+                for chunk in info_blob_chunks
+            ]
+            if header
+            else info_blob_chunks
+        )
         try:
             chunk_embedding_list = await self.create_embeddings_service.get_embeddings(
-                model=embedding_model, chunks=info_blob_chunks
+                model=embedding_model, chunks=embedding_inputs
             )
         except PartialEmbeddingBatchError as error:
             error.completed.close()
             raise error.cause from None
+
+        if header:
+            # Pair each embedding back with the chunk whose text we store: the
+            # header belongs to the vector, not to the excerpt.
+            by_chunk_no = {chunk.chunk_no: chunk for chunk in info_blob_chunks}
+            stored = ChunkEmbeddingList()
+            for embedded, embedding in chunk_embedding_list:
+                stored.add([by_chunk_no[embedded.chunk_no]], [embedding])
+            chunk_embedding_list = stored
 
         logger.debug(f"Adding {len(info_blob_chunks)} info-blob chunks to datastore.")
         await self._add(chunk_embedding_list)

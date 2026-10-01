@@ -8,6 +8,7 @@ from pydantic import BaseModel, Field, computed_field
 from eneo.ai_models.embedding_models.embedding_model import (
     EmbeddingModelPublicLegacy,
 )
+from eneo.info_blobs.info_blob import SourceMetadataEntry
 from eneo.integration.domain.value_objects import (
     IntegrationType,
     SkippedDetail,
@@ -132,6 +133,19 @@ class SharePointTreeItem(BaseModel):
     size: Optional[int] = None
     modified: Optional[datetime] = None
     web_url: Optional[str] = None
+    # Library columns of a file, as they will be stored on import. Empty for
+    # folders and for libraries whose columns cannot be read.
+    source_metadata: list[SourceMetadataEntry] = []
+
+
+class SharePointFilterColumn(BaseModel):
+    """A library column a person can filter on without typing a value."""
+
+    name: str
+    label: str
+    kind: Literal["choice", "boolean"]
+    # The allowed values of a choice column; empty for yes/no columns.
+    choices: list[str] = []
 
 
 class SharePointTreeResponse(BaseModel):
@@ -140,6 +154,19 @@ class SharePointTreeResponse(BaseModel):
     parent_id: Optional[str] = None
     drive_id: str
     site_id: Optional[str] = None  # None for OneDrive
+    # Filterable columns of the library behind the drive. Empty when the drive
+    # has no backing list or its columns cannot be read.
+    columns: list[SharePointFilterColumn] = []
+
+
+class SharePointSearchResponse(BaseModel):
+    """Files anywhere in a library that match a text and column filters."""
+
+    items: list[SharePointTreeItem]
+    # True when more files matched than ``items`` holds; narrow the search.
+    truncated: bool = False
+    drive_id: str
+    site_id: Optional[str] = None
 
 
 class IntegrationKnowledgeMetaData(BaseModel):

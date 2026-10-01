@@ -399,6 +399,7 @@ class TestProcessInfoBlobSizeAccounting:
         existing_blob.size = 100
         existing_blob.title = "Doc"  # metadata unchanged too
         existing_blob.url = "https://example.com"
+        existing_blob.source_metadata = None
         existing_blob.content_hash = hashlib.sha256(
             sanitize_text_for_db(text).encode("utf-8")
         ).digest()
