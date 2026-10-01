@@ -30,12 +30,9 @@ _DEFAULT_RUNTIME_INPUT_DESCRIPTIONS: dict[InputType, str] = {
 def resolve_runtime_input_config(
     *,
     step_spec: StepSpec,
-    existing_input_config: FlowPersistedJsonObject | None = None,
 ) -> FlowPersistedJsonObject | None:
     """Return the effective input_config for a compiled AI Builder step."""
     base_config = clone_json_object(step_spec.input_config)
-    if base_config is None:
-        base_config = clone_json_object(existing_input_config)
 
     if not _requires_runtime_upload(step_spec):
         return _remove_runtime_input_config(base_config)

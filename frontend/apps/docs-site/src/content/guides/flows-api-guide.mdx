@@ -175,6 +175,17 @@ installation. A form field type outside the six Flow form types (`text`, `number
 `text`) is refused with `flow_package_flow_draft_invalid`, whose `context.reason`
 is `form_field_type_unsupported`, instead of silently remapping the type as earlier versions did (for example `radio` to `select`, `datetime` to `date`, and an unknown type to `text`).
 
+## Update a draft Flow
+
+`PATCH /api/v1/flows/{id}/` replaces what it sends and keeps what it omits:
+
+- Without `steps`, every step row keeps its id and its columns. The save still drops configuration of a mode a step does not run, such as HTTP settings on a step that neither fetches nor delivers over HTTP, as every save does.
+- With `steps`, the list is the flow's steps. A saved step whose `id` is not in the list is deleted, the steps that are keep their ids, and an optional column a step item omits (`output_contract`, `review_policy`, `timeout_seconds`, ...) is stored as null. The required fields (`assistant_id`, `step_order`, `input_source`, `input_type`, `output_mode`, `output_type`) are not defaulted: a step item without one fails request validation.
+- An omitted `description` keeps the saved value; `null` clears it. An omitted `metadata_json` keeps the saved metadata, which the save still normalizes (a form field of a type an older writer saved, such as `email`, is read and stored as `text`); `null` clears it.
+- With a stale `expected_revision` the update is refused with `stale_revision` and nothing is written.
+
+An AI Builder apply writes differently: only the step columns its approved plan names (see [AI Builder](/docs/ai-builder)).
+
 ## Step limit
 
 A flow has at most 256 steps. The flow endpoints that write or evaluate a draft (create, update, publish and the security classification preview) refuse more with `flow_step_limit_exceeded`. Its `context` carries `step_count` and `max_steps`, and its message tells the author to remove steps or split the work into several flows. The preview also caps the request body at 16 MiB (64 KiB for each of the 256 steps) and refuses a larger one with HTTP 413 and `flow_request_body_too_large`, before it parses the body; its `context.max_bytes` states the cap. The preview refuses a saved flow over the limit the same way when it is asked to explain the saved steps, and it answers a request with too many submitted steps with the same 400, not with a request-validation error. The AI Builder reports the same code in its plan validation.

@@ -15,7 +15,7 @@ from contextlib import contextmanager
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from types import SimpleNamespace
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, cast
 from unittest.mock import patch
 from uuid import UUID, uuid4
 
@@ -42,6 +42,7 @@ from eneo.flows.ai_builder.ai_builder_plan_lifecycle import (
     _removed_existing_step_refs_for_apply,
     _updated_assistant_fields_for_apply,
     _updated_existing_step_refs_for_apply,
+    _updated_step_fields_for_apply,
 )
 from eneo.flows.ai_builder.ai_builder_proposal_tool_contracts import ProposalReady
 from eneo.flows.ai_builder.ai_builder_resource_catalog import (
@@ -74,7 +75,10 @@ from eneo.users.user import UserUpdate
 from tests.unittests.flows.ai_builder.proposal_turn_builders import _make_turn
 
 if TYPE_CHECKING:
-    from eneo.flows.application.flow_draft_materialization import AssistantField
+    from eneo.flows.application.flow_draft_materialization import (
+        AssistantField,
+        StepColumn,
+    )
 
 pytestmark = [pytest.mark.integration, pytest.mark.asyncio]
 
@@ -280,6 +284,17 @@ def _updated(changed: dict[int, set[str]]) -> frozenset[str]:
     return frozenset(existing_step_ref_for_order(order) for order in changed)
 
 
+def _step_fields(changed: dict[int, set[str]]) -> dict[str, frozenset[StepColumn]]:
+    """The columns a plan's approval names on each step it modifies."""
+
+    return {
+        existing_step_ref_for_order(order): cast(
+            "frozenset[StepColumn]", frozenset(columns)
+        )
+        for order, columns in changed.items()
+    }
+
+
 async def _apply_spec(
     db_container,
     saved: Saved,
@@ -288,6 +303,7 @@ async def _apply_spec(
     removed: frozenset[str],
     updated: frozenset[str],
     assistant_fields: dict[str, frozenset[AssistantField]] | None = None,
+    step_fields: dict[str, frozenset[StepColumn]] | None = None,
     bindings: tuple[LocalResourceBinding, ...] = (),
 ) -> None:
     async with db_container() as container:
@@ -306,6 +322,7 @@ async def _apply_spec(
                 removed_existing_step_refs=removed,
                 updated_existing_step_refs=updated,
                 updated_assistant_fields=assistant_fields or {},
+                updated_step_fields=step_fields or {},
                 resource_bindings=bindings,
                 origin=origin,
             ),
@@ -318,11 +335,12 @@ async def _apply(
     db_container,
     saved: Saved,
     edit: Edit,
-    updated: frozenset[str] = frozenset(),
+    changed: dict[int, set[str]] | None = None,
     assistant_fields: dict[str, frozenset[AssistantField]] | None = None,
 ) -> None:
     """The edit laid over the saved flow's own authoring spec, applied with the
-    step refs a plan's approval lists as modified."""
+    steps a plan's approval lists as modified and the columns it names on
+    each."""
 
     async with db_container() as container:
         service = container.flow_service()
@@ -346,8 +364,9 @@ async def _apply(
         saved,
         spec,
         removed=removed,
-        updated=updated,
+        updated=_updated(changed or {}),
         assistant_fields=assistant_fields,
+        step_fields=_step_fields(changed or {}),
     )
 
 
@@ -411,6 +430,7 @@ async def _edit(
         assistant_fields=_updated_assistant_fields_for_apply(
             session=session, plan=plan
         ),  # type: ignore[arg-type]
+        step_fields=_updated_step_fields_for_apply(session=session, plan=plan),  # type: ignore[arg-type]
         bindings=outcome.compiled.resource_bindings,
     )
     assert content.edit is not None
@@ -436,7 +456,7 @@ async def test_an_edit_keeps_the_state_the_spec_has_no_field_for(
         row["step_order"]: row for row in await _rows(db_container, saved.flow_id)
     }
 
-    await _apply(db_container, saved, edit, _updated(changed))
+    await _apply(db_container, saved, edit, changed)
     after = await _rows(db_container, saved.flow_id)
 
     expected = {
@@ -457,7 +477,7 @@ async def test_an_edit_patches_the_step_rows_it_keeps(
     before = await _rows(db_container, saved.flow_id)
     by_position = {row["step_order"]: row for row in before}
 
-    await _apply(db_container, saved, edit, _updated(changed))
+    await _apply(db_container, saved, edit, changed)
     after = await _rows(db_container, saved.flow_id)
 
     assert [row["step_order"] for row in after] == list(range(1, len(sequence) + 1))
@@ -488,7 +508,7 @@ async def test_a_rename_leaves_every_unnamed_step_row_exactly_as_saved(
 
     before = await _rows(db_container, saved.flow_id)
 
-    await _apply(db_container, saved, _rename, _updated({2: set()}))
+    await _apply(db_container, saved, _rename, {2: {"user_description"}})
     after = await _rows(db_container, saved.flow_id)
 
     assert [after[0], after[2]] == [before[0], before[2]]
@@ -535,7 +555,7 @@ async def test_a_step_the_edit_leaves_keeps_the_shape_an_older_writer_saved(
         steps[0] = steps[0].model_copy(update={"name": "Läs"})
         return spec.model_copy(update={"steps": steps}), frozenset()
 
-    await _apply(db_container, saved, rename_first, _updated({1: set()}))
+    await _apply(db_container, saved, rename_first, {1: {"user_description"}})
     after = await _rows(db_container, saved.flow_id)
 
     assert after[1] == before[1] and after[2] == before[2]
@@ -614,7 +634,7 @@ async def test_a_modified_retained_step_is_patched_alone_through_the_apply(
         db_container,
         saved,
         change_two_columns,
-        updated=frozenset({"existing_step_2"}),
+        {2: {"user_description", "output_config"}},
         assistant_fields={"existing_step_2": frozenset({"instructions"})},
     )
     after = await _rows(db_container, saved.flow_id)
@@ -642,7 +662,7 @@ async def test_a_secret_shaped_value_in_a_retained_steps_plain_config_is_kept_as
     await _set_raw(db_container, rows[1]["id"], output_config=sentinel)
     before = await _rows(db_container, saved.flow_id)
 
-    await _apply(db_container, saved, _rename, _updated({2: set()}))
+    await _apply(db_container, saved, _rename, {2: {"user_description"}})
     after = await _rows(db_container, saved.flow_id)
 
     assert after[1]["output_config"] == sentinel == before[1]["output_config"]
@@ -701,7 +721,7 @@ async def test_a_rename_leaves_the_steps_it_does_not_name_as_the_frontend_saved_
     """Through the real edit compile: the policy would derive a runtime input
     description for step 1 and turn the `{}` and `{"runtime_input": false}`
     configs into NULL, and the spec shows the question with the spaces the
-    validators add. None of it reaches a step the edit does not name."""
+    validators add. None of it reaches a column the edit does not name."""
 
     before = await _rows(db_container, frontend_saved.flow_id)
 
@@ -714,13 +734,9 @@ async def test_a_rename_leaves_the_steps_it_does_not_name_as_the_frontend_saved_
 
     assert after[0] == before[0]
     assert after[2] == before[2]
-    # Known residue: the step the edit names still gets the policy's derivation
-    # for its runtime input, so its `{}` config is written as NULL.
-    assert _differing(before[1], after[1]) == {
-        "user_description",
-        "input_config",
-        "updated_at",
-    }
+    # The step the edit names is written in the column it names only: its
+    # `{}` config is not rewritten to what the policy derives.
+    assert _differing(before[1], after[1]) == {"user_description", "updated_at"}
     assert after[1]["user_description"] == "Granska"
 
 
@@ -792,12 +808,10 @@ async def test_a_step_the_edit_names_and_a_moved_producer_change_only_what_the_e
     assert after[3]["input_bindings"] == {
         "question": "Sammanfatta {{step_3.output.text}}"
     }
-    # Known residue: the runtime-input derivation of a step the edit names.
     assert _differing(before[2], after[3]) == {
         "step_order",
         "user_description",
         "input_bindings",
-        "input_config",
         "updated_at",
     }
 

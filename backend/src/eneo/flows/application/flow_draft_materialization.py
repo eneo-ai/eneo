@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import enum
-from collections.abc import Mapping
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from typing import Literal, cast, get_args
 from uuid import UUID
@@ -22,6 +22,7 @@ from eneo.flows.flow_authoring_spec import (
     metadata_json_from_authoring_form_fields,
 )
 from eneo.flows.flow_authoring_transcription import (
+    AudioInputStep,
     apply_audio_transcription_defaults,
 )
 from eneo.flows.flow_authoring_variable_rewriting import (
@@ -41,6 +42,7 @@ from eneo.flows.flow_metadata import (
 from eneo.flows.flow_review_policy import FlowStepReviewPolicy
 from eneo.flows.http_transport import redact_persisted_config
 from eneo.flows.step_lineage import (
+    ConfigChannel,
     ConfigColumn,
     config_channel,
     existing_step_order_from_ref,
@@ -72,6 +74,26 @@ _INVALID_EXISTING_STEP_REF_REASONS: tuple[InvalidExistingStepRefReason, ...] = g
 # assistant update at all.
 AssistantField = Literal["instructions", "model_ref", "knowledge_refs"]
 ALL_ASSISTANT_FIELDS: frozenset[AssistantField] = frozenset(get_args(AssistantField))
+
+
+# The columns of a step's row an edit writes. A step the edit names is written
+# in the columns it names, from the spec, and is its saved row in every other
+# one; a column the spec has no field for (a timeout, a classification
+# override) is never written by an edit.
+StepColumn = Literal[
+    "user_description",
+    "input_source",
+    "input_type",
+    "input_bindings",
+    "input_contract",
+    "input_config",
+    "output_mode",
+    "output_type",
+    "output_contract",
+    "output_config",
+    "review_policy",
+]
+ALL_STEP_COLUMNS: frozenset[StepColumn] = frozenset(get_args(StepColumn))
 
 
 # The columns of a step a read of another step by alias can be saved in.
@@ -196,8 +218,13 @@ def compile_flow_draft_changeset(
     removed_existing_step_refs: frozenset[str] = frozenset(),
     updated_existing_step_refs: frozenset[str] | None = None,
     updated_assistant_fields: Mapping[str, frozenset[AssistantField]] | None = None,
+    updated_step_fields: Mapping[str, frozenset[StepColumn]] | None = None,
     default_transcription_model_id: UUID | None = None,
 ) -> FlowDraftChangeSet:
+    """`updated_step_fields`: per updated step, the columns the edit writes;
+    None writes every column of an updated step from the spec (a caller that
+    names none, as a create does)."""
+
     existing_by_ref: dict[str, FlowStep] = {}
     if current_flow:
         for step in current_flow.steps:
@@ -211,7 +238,7 @@ def compile_flow_draft_changeset(
         existing_by_ref=existing_by_ref,
         removed_existing_step_refs=removed_existing_step_refs,
         updated_existing_step_refs=updated_existing_step_refs,
-        updated_assistant_fields=updated_assistant_fields,
+        named_refs={*(updated_assistant_fields or {}), *(updated_step_fields or {})},
     )
     ref_to_order = build_ref_to_order(spec.steps)
     # Where each kept step's alias changes: a step that reads it by alias is
@@ -240,11 +267,17 @@ def compile_flow_draft_changeset(
                 or existing_ref in updated_existing_step_refs
             )
             named_fields: frozenset[AssistantField] = frozenset()
+            named_columns: frozenset[StepColumn] = frozenset()
             if updates_step:
                 named_fields = (
                     ALL_ASSISTANT_FIELDS
                     if updated_assistant_fields is None
                     else updated_assistant_fields.get(existing_ref or "", frozenset())
+                )
+                named_columns = (
+                    _columns_a_full_write_names(rewritten_spec, existing_step)
+                    if updated_step_fields is None
+                    else updated_step_fields.get(existing_ref or "", frozenset())
                 )
             # A step whose instructions the edit does not write still reads its
             # producers by alias: when any step moved, the prompt it holds is
@@ -274,6 +307,7 @@ def compile_flow_draft_changeset(
                         if updates_step
                         else FlowDraftStepChangeKind.UNCHANGED
                     ),
+                    named_columns=named_columns,
                 )
             )
             continue
@@ -302,6 +336,7 @@ def compile_flow_draft_changeset(
         compiled_steps=compiled_steps,
         metadata_json=build_flow_draft_metadata_json(
             spec=spec,
+            steps=compiled_steps,
             current_flow=current_flow,
             default_transcription_model_id=default_transcription_model_id,
         ),
@@ -483,14 +518,14 @@ def _validate_updated_existing_step_refs(
     existing_by_ref: dict[str, FlowStep],
     removed_existing_step_refs: frozenset[str],
     updated_existing_step_refs: frozenset[str] | None,
-    updated_assistant_fields: Mapping[str, frozenset[AssistantField]] | None,
+    named_refs: set[str],
 ) -> None:
     if updated_existing_step_refs is None:
         return
     invalid_refs = sorted(
         (updated_existing_step_refs - set(existing_by_ref))
         | (updated_existing_step_refs & removed_existing_step_refs)
-        | (set(updated_assistant_fields or {}) - updated_existing_step_refs)
+        | (named_refs - updated_existing_step_refs)
     )
     if not invalid_refs:
         return
@@ -578,28 +613,16 @@ def _keeps_saved_output_config(step_spec: StepSpec, existing_step: FlowStep) -> 
     )
 
 
-def preserve_modified_step_output_config(
-    *,
-    step_spec: StepSpec,
-    existing_step: FlowStep,
-    alias_renumbering: Mapping[int, int],
-) -> StepSpec:
-    """A step the spec gives no output config keeps its saved one, with the
-    alias of each step that moved renumbered: the saved config reads steps at
-    their saved positions, and the spec's aliases are already rewritten."""
+def _columns_a_full_write_names(
+    step_spec: StepSpec, existing_step: FlowStep
+) -> frozenset[StepColumn]:
+    """The columns a caller that names none writes on a step it updates: every
+    one, except an output config the spec leaves None while the step keeps its
+    output mode and type, which stays as saved."""
 
-    if not _keeps_saved_output_config(step_spec, existing_step):
-        return step_spec
-    return step_spec.model_copy(
-        update={
-            "output_config": _carried_config(
-                redact_persisted_config(existing_step.output_config),
-                "output_config",
-                existing_step,
-                alias_renumbering,
-            )
-        }
-    )
+    if _keeps_saved_output_config(step_spec, existing_step):
+        return ALL_STEP_COLUMNS - {"output_config"}
+    return ALL_STEP_COLUMNS
 
 
 def _carried_config(
@@ -613,20 +636,35 @@ def _carried_config(
 
     return renumber_config_aliases(
         config,
-        config_channel(
-            column=column,
-            config=config,
-            input_source=FlowInputSource(existing_step.input_source),
-            output_mode=FlowOutputMode(existing_step.output_mode),
-            step_order=existing_step.step_order,
-        ),
+        _saved_channel(column, config, existing_step),
         alias_renumbering,
+    )
+
+
+def _saved_channel(
+    column: ConfigColumn,
+    config: FlowPersistedJsonObject | None,
+    existing_step: FlowStep,
+    *,
+    input_source: FlowInputSource | None = None,
+    output_mode: FlowOutputMode | None = None,
+) -> ConfigChannel | None:
+    """The channel `config`, a saved column of `existing_step`, is read
+    through: under the step's saved modes, or under the modes given."""
+
+    return config_channel(
+        column=column,
+        config=config,
+        input_source=input_source or FlowInputSource(existing_step.input_source),
+        output_mode=output_mode or FlowOutputMode(existing_step.output_mode),
+        step_order=existing_step.step_order,
     )
 
 
 def build_flow_draft_metadata_json(
     *,
     spec: FlowDraftSpecCore,
+    steps: Sequence[AudioInputStep],
     current_flow: Flow | None,
     default_transcription_model_id: UUID | None = None,
 ) -> FlowPersistedJsonObject | None:
@@ -644,7 +682,7 @@ def build_flow_draft_metadata_json(
     metadata = (
         apply_audio_transcription_defaults(
             metadata=metadata if metadata else None,
-            spec=spec,
+            steps=steps,
             default_transcription_model_id=default_transcription_model_id,
         )
         or {}
@@ -800,15 +838,14 @@ def _saved_where_unchanged(
     *,
     alias_renumbering: Mapping[int, int],
     runtime_aliases: Mapping[str, int],
-) -> dict[str, object]:
-    """What a step the edit names keeps of its saved row where the edit did not
-    change it: the description and the input bindings, the two columns the
-    spec shows in a form its validators change (a padded question is stripped,
-    a step saved without a description is named "Step N", a template is
-    written `{{ step_N.x }}`). Each is judged by reading the saved value
-    through the same validators and rewriting as the spec's; when the two are
-    equal the row keeps what was saved, with the aliases of moved steps
-    renumbered, and is not rewritten to what the spec shows."""
+) -> frozenset[StepColumn]:
+    """Which of the description and the input bindings the spec states as the
+    saved row has them: the two columns the spec shows in a form its
+    validators change (a padded question is stripped, a step saved without a
+    description is named "Step N", a template is written `{{ step_N.x }}`).
+    Each is judged by reading the saved value through the same validators and
+    rewriting as the spec's; when the two are equal the row keeps what was
+    saved, and is not rewritten to what the spec shows."""
 
     saved_bindings = renumber_input_binding_aliases(
         existing_step.input_bindings, alias_renumbering
@@ -823,14 +860,48 @@ def _saved_where_unchanged(
         )
     except ValueError:
         # A step in a mode authoring cannot express (an HTTP step) has no
-        # view to compare with: nothing of it is carried.
-        return {}
-    kept: dict[str, object] = {}
+        # view to compare with: what the edit names is written as the spec has it.
+        return frozenset()
+    kept: set[StepColumn] = set()
     if _same_authored_value(step_spec.name, saved_view.name):
-        kept["user_description"] = existing_step.user_description
+        kept.add("user_description")
     if _same_authored_value(step_spec.input_bindings, saved_view.input_bindings):
-        kept["input_bindings"] = saved_bindings
-    return kept
+        kept.add("input_bindings")
+    return frozenset(kept)
+
+
+def _authored_column(step_spec: StepSpec, column: StepColumn) -> object:
+    if column == "user_description":
+        return step_spec.name
+    return getattr(step_spec, column)
+
+
+def _saved_column(
+    existing_step: FlowStep,
+    column: StepColumn,
+    *,
+    alias_renumbering: Mapping[int, int],
+    written: bool,
+) -> object:
+    """`column` as the saved row holds it, with only the aliases of moved
+    steps renumbered where the step's saved modes read them. A row the edit
+    writes hands its configurations' stored credentials back as sentinels,
+    which the flow update resolves to the stored ciphertext; a row it does not
+    write is handed back as saved, and the flow update keeps it as it is."""
+
+    if column == "input_bindings":
+        return renumber_input_binding_aliases(
+            existing_step.input_bindings, alias_renumbering
+        )
+    if column == "input_config" or column == "output_config":
+        config = getattr(existing_step, column)
+        return _carried_config(
+            redact_persisted_config(config) if written else config,
+            column,
+            existing_step,
+            alias_renumbering,
+        )
+    return getattr(existing_step, column)
 
 
 def _compile_existing_step(
@@ -841,91 +912,80 @@ def _compile_existing_step(
     alias_renumbering: Mapping[int, int],
     runtime_aliases: Mapping[str, int],
     change_kind: FlowDraftStepChangeKind,
+    named_columns: frozenset[StepColumn],
 ) -> FlowDraftCompiledStep:
-    if change_kind is FlowDraftStepChangeKind.UNCHANGED:
-        return _compile_untouched_step(
-            step_spec=step_spec,
-            existing_step=existing_step,
-            step_order=step_order,
+    """A saved step as the edit leaves it, the one carry of saved columns: the
+    columns the edit names are written from the spec, and every other column
+    is the saved row's (a step no admitted change names is its saved row,
+    whatever the spec and the origin's policy derived for it)."""
+
+    authored = named_columns
+    if authored & {"user_description", "input_bindings"}:
+        authored = authored - _saved_where_unchanged(
+            step_spec,
+            existing_step,
             alias_renumbering=alias_renumbering,
+            runtime_aliases=runtime_aliases,
         )
-    effective_spec = preserve_modified_step_output_config(
-        step_spec=step_spec,
-        existing_step=existing_step,
-        alias_renumbering=alias_renumbering,
+    columns = {
+        column: (
+            _authored_column(step_spec, column)
+            if column in authored
+            else _saved_column(
+                existing_step,
+                column,
+                alias_renumbering=alias_renumbering,
+                written=change_kind is not FlowDraftStepChangeKind.UNCHANGED,
+            )
+        )
+        for column in ALL_STEP_COLUMNS
+    }
+    final_source = FlowInputSource(columns["input_source"])
+    final_mode = FlowOutputMode(columns["output_mode"])
+    carried = frozenset(
+        column
+        for column in ALL_STEP_READ_COLUMNS - authored
+        if column == "input_bindings"
+        or _read_through_the_saved_channel(
+            column, existing_step, input_source=final_source, output_mode=final_mode
+        )
     )
-    kept = _saved_where_unchanged(
-        effective_spec,
-        existing_step,
-        alias_renumbering=alias_renumbering,
-        runtime_aliases=runtime_aliases,
-    )
-    carried: set[StepReadColumn] = set()
-    if "input_bindings" in kept:
-        carried.add("input_bindings")
-    if _keeps_saved_output_config(step_spec, existing_step):
-        carried.add("output_config")
     return FlowDraftCompiledStep.model_validate(
         {
-            "plan_step_ref": effective_spec.plan_step_ref,
+            **columns,
+            "plan_step_ref": step_spec.plan_step_ref,
             "change_kind": change_kind,
             "step_order": step_order,
-            "user_description": effective_spec.name,
             "assistant_id": existing_step.assistant_id,
             "saved_step": existing_step,
-            "carried_columns": frozenset(carried),
-            "input_source": FlowInputSource(effective_spec.input_source.value),
-            "input_type": FlowInputType(effective_spec.input_type.value),
-            "output_mode": FlowOutputMode(effective_spec.output_mode.value),
-            "output_type": OutputType(effective_spec.output_type.value),
-            "input_bindings": effective_spec.input_bindings,
-            "input_contract": effective_spec.input_contract,
-            "output_contract": effective_spec.output_contract,
-            "input_config": effective_spec.input_config,
-            "output_config": effective_spec.output_config,
-            "review_policy": effective_spec.review_policy,
-            **kept,
+            "carried_columns": carried,
         }
     )
 
 
-def _compile_untouched_step(
-    *,
-    step_spec: StepSpec,
+def _read_through_the_saved_channel(
+    column: ConfigColumn,
     existing_step: FlowStep,
-    step_order: int,
-    alias_renumbering: Mapping[int, int],
-) -> FlowDraftCompiledStep:
-    """A step no admitted change names is its saved row, whatever the spec and
-    the origin's policy derived for it. Only a runtime alias of a step that
-    changed position is written anew, and only that token, where the step's
-    modes read it."""
+    *,
+    input_source: FlowInputSource,
+    output_mode: FlowOutputMode,
+) -> bool:
+    """Whether the step, run in the modes given, reads its saved `column` at
+    the sites it read when saved. Only then are the column's reads the saved
+    ones; under a mode the step leaves, it is configuration of a mode the step
+    does not run."""
 
-    return FlowDraftCompiledStep(
-        plan_step_ref=step_spec.plan_step_ref,
-        change_kind=FlowDraftStepChangeKind.UNCHANGED,
-        step_order=step_order,
-        user_description=existing_step.user_description,
-        assistant_id=existing_step.assistant_id,
-        saved_step=existing_step,
-        carried_columns=ALL_STEP_READ_COLUMNS,
-        input_source=FlowInputSource(existing_step.input_source),
-        input_type=FlowInputType(existing_step.input_type),
-        output_mode=FlowOutputMode(existing_step.output_mode),
-        output_type=OutputType(existing_step.output_type.value),
-        input_bindings=renumber_input_binding_aliases(
-            existing_step.input_bindings, alias_renumbering
-        ),
-        input_contract=existing_step.input_contract,
-        output_contract=existing_step.output_contract,
-        input_config=_carried_config(
-            existing_step.input_config, "input_config", existing_step, alias_renumbering
-        ),
-        output_config=_carried_config(
-            existing_step.output_config,
-            "output_config",
+    config = getattr(existing_step, column)
+    saved, final = (
+        _saved_channel(column, config, existing_step),
+        _saved_channel(
+            column,
+            config,
             existing_step,
-            alias_renumbering,
+            input_source=input_source,
+            output_mode=output_mode,
         ),
-        review_policy=existing_step.review_policy,
+    )
+    return (None if saved is None else saved.sites) == (
+        None if final is None else final.sites
     )

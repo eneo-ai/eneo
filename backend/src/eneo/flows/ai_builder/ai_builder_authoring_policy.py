@@ -12,12 +12,7 @@ from eneo.flows.domain.flow import (
     FlowPersistedJsonObject,
 )
 from eneo.flows.flow_authoring_runtime_input import resolve_runtime_input_config
-from eneo.flows.flow_authoring_spec import (
-    FlowDraftSpecCore,
-    StepSpec,
-)
-from eneo.flows.http_transport import redact_persisted_config
-from eneo.flows.step_lineage import existing_step_ref_for_order
+from eneo.flows.flow_authoring_spec import FlowDraftSpecCore
 
 
 class AIBuilderAuthoringPolicy:
@@ -35,26 +30,18 @@ class AIBuilderAuthoringPolicy:
             current_flow=current_flow,
             description_override_manual=self._origin.description_override_manual,
         )
-        existing_by_ref = (
-            {
-                existing_step_ref_for_order(step.step_order): step
-                for step in current_flow.steps
-            }
-            if current_flow is not None
-            else {}
-        )
-        steps: list[StepSpec] = []
-        for step in spec.steps:
-            existing_step = existing_by_ref.get(step.existing_step_ref or "")
-            input_config = resolve_runtime_input_config(
-                step_spec=step,
-                existing_input_config=(
-                    redact_persisted_config(existing_step.input_config)
-                    if existing_step is not None
-                    else None
-                ),
+        steps = [
+            # A saved step's null input config is a clear: an upload
+            # configuration is derived for new steps only. Where the edit
+            # writes the column, the clear is written; where it does not, the
+            # saved column is carried whatever the spec holds.
+            step
+            if step.input_config is None and step.existing_step_ref is not None
+            else step.model_copy(
+                update={"input_config": resolve_runtime_input_config(step_spec=step)}
             )
-            steps.append(step.model_copy(update={"input_config": input_config}))
+            for step in spec.steps
+        ]
         return spec.model_copy(
             update={
                 "flow_description": resolved_description,

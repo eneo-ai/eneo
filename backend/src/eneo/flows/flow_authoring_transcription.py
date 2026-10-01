@@ -1,27 +1,39 @@
 from __future__ import annotations
 
 from collections.abc import Sequence
+from typing import Protocol
 from uuid import UUID
 
 from eneo.flows.domain.flow import FlowPersistedJsonObject, clone_json_object
-from eneo.flows.domain.flow_step_validation import FlowStepValidationView
 from eneo.flows.domain.runtime_input import parse_runtime_input_config
-from eneo.flows.flow_authoring_spec import (
-    FlowDraftSpecCore,
-    InputSource,
-    InputType,
-    StepSpec,
-)
+from eneo.flows.flow_authoring_spec import InputSource, InputType
 from eneo.flows.transcription_config import DEFAULT_TRANSCRIPTION_LANGUAGE
+
+
+class AudioInputStep(Protocol):
+    """The three values of a step that say it takes audio: read from the steps a
+    flow ends with (a compiled step, a validation view) or from a spec's."""
+
+    @property
+    def input_source(self) -> str: ...
+
+    @property
+    def input_type(self) -> str: ...
+
+    @property
+    def input_config(self) -> FlowPersistedJsonObject | None: ...
 
 
 def apply_audio_transcription_defaults(
     *,
     metadata: FlowPersistedJsonObject | None,
-    spec: FlowDraftSpecCore,
+    steps: Sequence[AudioInputStep],
     default_transcription_model_id: UUID | None,
 ) -> FlowPersistedJsonObject | None:
-    if not requires_audio_transcription(spec.steps):
+    """`steps` are the steps the flow ends with, not the caller's description of
+    them: a sparse edit never states the columns it does not name."""
+
+    if not requires_audio_transcription(steps):
         return _cleanup_transcription_metadata(metadata)
 
     updated_metadata = dict(metadata or {})
@@ -46,9 +58,7 @@ def apply_audio_transcription_defaults(
     return updated_metadata
 
 
-def requires_audio_transcription(
-    steps: Sequence[StepSpec | FlowStepValidationView],
-) -> bool:
+def requires_audio_transcription(steps: Sequence[AudioInputStep]) -> bool:
     for step in steps:
         if (
             step.input_source == InputSource.FLOW_INPUT

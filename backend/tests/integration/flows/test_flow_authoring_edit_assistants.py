@@ -59,6 +59,7 @@ from eneo.flows.ai_builder.ai_builder_plan_lifecycle import (
     _removed_existing_step_refs_for_apply,
     _updated_assistant_fields_for_apply,
     _updated_existing_step_refs_for_apply,
+    _updated_step_fields_for_apply,
 )
 from eneo.flows.ai_builder.ai_builder_proposal_tool_contracts import ProposalReady
 from eneo.flows.ai_builder.ai_builder_resource_catalog import (
@@ -88,7 +89,10 @@ from tests.integration.flows.test_flow_authoring_edit_step_rows import _space
 from tests.unittests.flows.ai_builder.proposal_turn_builders import _make_turn
 
 if TYPE_CHECKING:
-    from eneo.flows.application.flow_draft_materialization import AssistantField
+    from eneo.flows.application.flow_draft_materialization import (
+        AssistantField,
+        StepColumn,
+    )
 
 pytestmark = [pytest.mark.integration, pytest.mark.asyncio]
 
@@ -375,6 +379,7 @@ async def _apply_spec(
     bindings: tuple[LocalResourceBinding, ...] = (),
     updated: frozenset[str] = frozenset({"existing_step_2"}),
     removed: frozenset[str] = frozenset(),
+    step_fields: dict[str, frozenset[StepColumn]] | None = None,
 ) -> dict[UUID, int]:
     """The edit command applied; how many assistant updates it made, by assistant."""
 
@@ -402,6 +407,7 @@ async def _apply_spec(
                     removed_existing_step_refs=removed,
                     updated_existing_step_refs=updated,
                     updated_assistant_fields=fields,
+                    updated_step_fields=step_fields or {},
                     origin=origin,
                     resource_bindings=bindings,
                 ),
@@ -478,6 +484,7 @@ async def _apply_proposal(
         bindings=outcome.compiled.resource_bindings,
         updated=_updated_existing_step_refs_for_apply(session=session, plan=plan),  # type: ignore[arg-type]
         removed=_removed_existing_step_refs_for_apply(session=session, plan=plan),  # type: ignore[arg-type]
+        step_fields=_updated_step_fields_for_apply(session=session, plan=plan),  # type: ignore[arg-type]
     )
 
 

@@ -17,6 +17,7 @@ from eneo.flows.application.flow_draft_materialization import (
     FlowDraftChangeSet,
     FlowDraftMaterializationProgress,
     FlowDraftStepChangeKind,
+    StepColumn,
     compile_flow_draft_changeset,
 )
 from eneo.flows.application.flow_draft_materialization_executor import (
@@ -89,6 +90,10 @@ class EditFlowAuthoringCommand(BaseModel):
     # Per updated step, the assistant fields the edit changes; a step absent
     # here (a rename, say) makes no assistant update.
     updated_assistant_fields: dict[str, frozenset[AssistantField]]
+    # Per updated step, the columns of its row the edit writes from the spec;
+    # every other column, and every column of a step absent here, is written
+    # as saved.
+    updated_step_fields: dict[str, frozenset[StepColumn]]
     origin: FlowAuthoringOrigin
     resource_bindings: tuple[LocalResourceBinding, ...] = ()
     default_transcription_model_id: UUID | None = None
@@ -168,6 +173,7 @@ class FlowAuthoringCommandService:
             removed_existing_step_refs=_removed_existing_step_refs(command),
             updated_existing_step_refs=_updated_existing_step_refs(command),
             updated_assistant_fields=_updated_assistant_fields(command),
+            updated_step_fields=_updated_step_fields(command),
             default_transcription_model_id=command.default_transcription_model_id,
         )
         # Before anything is written: the materializer creates assistants ahead
@@ -359,6 +365,14 @@ def _updated_assistant_fields(
     if command.kind == "create":
         return None
     return command.updated_assistant_fields
+
+
+def _updated_step_fields(
+    command: FlowAuthoringCommand,
+) -> dict[str, frozenset[StepColumn]] | None:
+    if command.kind == "create":
+        return None
+    return command.updated_step_fields
 
 
 def _target_flow_id(command: FlowAuthoringCommand) -> UUID | None:

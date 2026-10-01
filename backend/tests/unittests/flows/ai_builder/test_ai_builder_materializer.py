@@ -20,6 +20,7 @@ from eneo.flows.application.flow_draft_materialization import (
     FlowDraftChangeSet,
     FlowDraftMaterializationProgress,
     FlowDraftMaterializationStage,
+    StepColumn,
     compile_flow_draft_changeset,
 )
 from eneo.flows.application.flow_draft_materialization import (
@@ -67,6 +68,8 @@ def _edit_proposal(**kwargs: Any) -> OrderedEditProposal:
 def _compile_builder_changeset(
     spec: FlowDraftSpecCore,
     current_flow: Flow | None,
+    *,
+    updated_step_fields: dict[str, frozenset[StepColumn]] | None = None,
 ) -> FlowDraftChangeSet:
     policy = AIBuilderAuthoringPolicy(
         AIBuilderFlowAuthoringOrigin(
@@ -79,6 +82,7 @@ def _compile_builder_changeset(
     return compile_flow_draft_changeset(
         policy.effective_spec(spec=spec, current_flow=current_flow),
         current_flow,
+        updated_step_fields=updated_step_fields,
     )
 
 
@@ -676,7 +680,8 @@ class TestCompileEditFlow:
         assert changeset.compiled_steps[1].step_order == 2
 
     def test_preserve_unspecified_fields_from_existing_step(self) -> None:
-        """Fields not in the spec (input_config, output_config) are preserved."""
+        """Columns the edit does not name (input_config, output_config) are
+        preserved, whatever the spec holds for them."""
         existing_config = {"custom_hint": "preserve-me"}
         existing_output_config = {"webhook_url": "https://example.com"}
         existing_step = _make_flow_step(
@@ -695,7 +700,11 @@ class TestCompileEditFlow:
                 ),
             ],
         )
-        changeset = _compile_builder_changeset(spec, current_flow=flow)
+        changeset = _compile_builder_changeset(
+            spec,
+            current_flow=flow,
+            updated_step_fields={"existing_step_1": frozenset({"user_description"})},
+        )
         step = changeset.compiled_steps[0]
         assert step.input_config == existing_config
         assert step.output_config == existing_output_config
@@ -729,6 +738,8 @@ class TestCompileEditFlow:
                     name="Analysera transkribering",
                     input_source=InputSource.PREVIOUS_STEP,
                     input_type=InputType.TEXT,
+                    # The edit's spec starts from the saved step's config.
+                    input_config=existing_step.input_config,
                 ),
             ],
         )

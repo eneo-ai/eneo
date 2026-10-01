@@ -21,6 +21,7 @@ from eneo.flows.application.flow_authoring_command import (
     FlowAuthoringCommandService,
 )
 from eneo.flows.application.flow_draft_materialization import (
+    ALL_STEP_COLUMNS,
     FlowDraftCompiledStep,
     FlowDraftStepChangeKind,
 )
@@ -132,6 +133,12 @@ async def assert_edit_spec_materializes_through_authoring_command_async(
             if step.existing_step_ref is not None
         ),
         updated_assistant_fields={},
+        # The edit restates every step, column for column.
+        updated_step_fields={
+            step.existing_step_ref: ALL_STEP_COLUMNS
+            for step in edit_spec.steps
+            if step.existing_step_ref is not None
+        },
         origin=_authoring_origin(edit_spec),
     )
 

@@ -500,6 +500,80 @@ def test_the_assistant_fields_are_the_assistant_fields_a_diff_names() -> None:
     assert set(_ASSISTANT_SPEC_FIELDS) == ALL_ASSISTANT_FIELDS
 
 
+def test_every_field_a_step_diff_names_writes_one_assistant_field_or_one_step_column() -> (
+    None
+):
+    """The drift closer of the write contract. Each field the diff can name is
+    written to exactly one layer, every writable column is reachable, and a
+    step spec field is a written field or identity: a new spec field with no
+    stated write fails here before it can be approved and silently dropped."""
+
+    from eneo.flows.ai_builder import ai_builder_plan_lifecycle as lifecycle
+    from eneo.flows.application.flow_draft_materialization import ALL_STEP_COLUMNS
+
+    writes = lifecycle._WRITE_OF_STEP_CHANGE
+    assert set(writes) == set(get_args(StepChangeField))
+    for field, write in writes.items():
+        assert (write in ALL_ASSISTANT_FIELDS) != (write in ALL_STEP_COLUMNS), field
+    assert set(writes.values()) == ALL_ASSISTANT_FIELDS | ALL_STEP_COLUMNS
+    identity = {"plan_step_ref", "existing_step_ref", "assistant_spec"}
+    assert set(StepSpec.model_fields) - identity == (
+        set(get_args(StepChangeField)) - ALL_ASSISTANT_FIELDS
+    )
+    assert set(AssistantSpec.model_fields) == ALL_ASSISTANT_FIELDS
+
+
+def test_the_step_columns_of_an_apply_are_the_ones_the_approved_diff_names() -> None:
+    """A rename writes the description column only; a step whose diff names
+    only assistant fields writes no column and is left out."""
+
+    from eneo.flows.ai_builder import ai_builder_plan_lifecycle as lifecycle
+
+    user = _make_user()
+    session = _make_session(
+        tenant_id=user.tenant_id,
+        actor_user_id=user.id,
+        flow_id=uuid4(),
+        target_kind=TargetKind.EDIT,
+    )
+
+    def modified(ref: str, *fields: str) -> StepChange:
+        return StepChange(
+            kind="modified",
+            step_name=ref,
+            step_ref=ref,
+            field_changes=[StepFieldChange(field=field) for field in fields],  # type: ignore[arg-type]
+        )
+
+    approval = FlowBuilderEditApproval(
+        base_flow_revision=1,
+        diff=FlowEditDiff(
+            step_changes=[
+                modified("existing_step_1", "name"),
+                modified("existing_step_2", "instructions"),
+                modified(
+                    "existing_step_3",
+                    "input_type",
+                    "input_config",
+                    "review_policy",
+                    "knowledge_refs",
+                ),
+            ]
+        ),
+    )
+    plan = _make_plan(
+        session_id=session.id,
+        tenant_id=session.tenant_id,
+        spec=_make_spec(),
+        edit=approval,
+    )
+
+    assert lifecycle._updated_step_fields_for_apply(session=session, plan=plan) == {
+        "existing_step_1": frozenset({"user_description"}),
+        "existing_step_3": frozenset({"input_type", "input_config", "review_policy"}),
+    }
+
+
 async def _real_approval_without_field_changes() -> tuple[BuilderSession, BuilderPlan]:
     """A real compiled approval whose diff has lost `field_changes`, as a plan
     persisted before diffs carried them loads."""

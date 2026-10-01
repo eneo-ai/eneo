@@ -213,10 +213,18 @@ class FlowService:
         metadata_json: FlowPersistedJsonObject | None | NotProvided = NOT_PROVIDED,
         expected_revision: int | None = None,
         unchanged_step_ids: frozenset[UUID] = frozenset(),
+        keep_saved_form_fields: bool = False,
     ) -> Flow:
         """`unchanged_step_ids`: saved steps the caller hands back as they are
         saved. They are written as given: dropping the configuration of modes
-        they do not use would be a change nobody made."""
+        they do not use would be a change nobody made.
+
+        `keep_saved_form_fields`: a form field of `metadata_json` whose type
+        reads as the saved field's of its name is stored with the type it was
+        saved with (a legacy type such as `email` stays `email`), whatever
+        else the edit changes on it; one that reads the same throughout is
+        stored exactly as saved. Validation reads every field normalized
+        either way."""
 
         existing = await self.get_flow(flow_id)
         if existing.published_version is not None:
@@ -290,7 +298,11 @@ class FlowService:
                     existing.description if description is NOT_PROVIDED else description
                 ),
                 "steps": persisted_steps,
-                "metadata_json": next_metadata,
+                "metadata_json": (
+                    _with_saved_form_fields(next_metadata, existing.metadata_json)
+                    if keep_saved_form_fields
+                    else next_metadata
+                ),
             },
         )
         persisted = await self.flow_repo.update(
@@ -1270,3 +1282,61 @@ class FlowService:
             if name not in names:
                 names.append(name)
         return names
+
+
+def _with_saved_form_fields(
+    written: FlowPersistedJsonObject | None,
+    saved: FlowPersistedJsonObject | None,
+) -> FlowPersistedJsonObject | None:
+    """`written` with the saved field of each name as it is stored where the
+    written field reads the same, and where only the label, requiredness,
+    options or place differ, with the type the saved field is stored with: a
+    type is replaced only when the edit changes what the platform reads."""
+
+    written_schema = _form_schema(written)
+    saved_schema = _form_schema(saved)
+    saved_reads = _form_schema(normalize_persisted_flow_metadata(saved))
+    if written is None or written_schema is None or saved_schema is None:
+        return written
+    if saved_reads is None:
+        return written
+    # The persisted read keeps every object field of the saved form, in order,
+    # and normalizes each; a field that is not an object is dropped by both.
+    stored = [
+        cast(FlowPersistedJsonObject, field)
+        for field in cast(list[object], saved_schema["fields"])
+        if isinstance(field, dict)
+    ]
+    saved_by_name = {
+        read["name"]: (read, field)
+        for read, field in zip(
+            cast(list[FlowPersistedJsonObject], saved_reads["fields"]),
+            stored,
+            strict=True,
+        )
+    }
+    fields: list[FlowPersistedJsonObject] = []
+    for field in cast(list[FlowPersistedJsonObject], written_schema["fields"]):
+        read, stored_field = saved_by_name.get(field.get("name"), (None, None))
+        if read is None or stored_field is None:
+            fields.append(field)
+        elif not json_values_differ(read, field):
+            fields.append(stored_field)
+        elif read.get("type") == field.get("type"):
+            # A label, a requiredness or a place was edited, not the type.
+            fields.append({**field, "type": stored_field.get("type")})
+        else:
+            fields.append(field)
+    return {**written, "form_schema": {**written_schema, "fields": fields}}
+
+
+def _form_schema(
+    metadata: FlowPersistedJsonObject | None,
+) -> FlowPersistedJsonObject | None:
+    if metadata is None:
+        return None
+    schema: object = metadata.get("form_schema")
+    if not isinstance(schema, dict):
+        return None
+    form_schema = cast(FlowPersistedJsonObject, schema)
+    return form_schema if isinstance(form_schema.get("fields"), list) else None

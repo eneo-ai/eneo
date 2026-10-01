@@ -232,6 +232,7 @@ async def test_prepare_counts_a_removed_step_without_claiming_its_shared_assista
             removed_existing_step_refs=frozenset({"existing_step_2"}),
             updated_existing_step_refs=frozenset(),
             updated_assistant_fields={},
+            updated_step_fields={},
             origin=FlowPackageAuthoringOrigin(
                 package_id="se.demo.flow",
                 package_version="1.0.0",

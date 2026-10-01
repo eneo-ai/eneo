@@ -122,6 +122,35 @@ sinks only, and dynamic imports are outside it. Two transcription endpoints are
 named exceptions: the external service an operator configures, and the provider
 `api_base` a tenant administrator sets for live transcription.
 
+## 14. Write semantics are per operation
+
+What a write leaves out means something different for each way a draft is
+written. The authoring command and the flow update each own their row.
+
+| Operation | An omitted value | A null value | A step left out |
+| --- | --- | --- | --- |
+| Full replace (create: package install, AI Builder create) | Takes its default: input type `text`, output mode `pass_through`, output type `text`; bindings, contracts, configs and review policy are null. An AI Builder create derives the upload configuration of a step that takes audio, documents or files. | Same as omitted | Not applicable |
+| Sparse edit (the authoring command, an AI Builder apply) | A step column the approved diff does not name keeps its saved value, including shapes only the step editor writes (speaker mapping, and an HTTP configuration's settings and credentials, stored in its canonical shape) and columns no spec has (timeout, classification override, id). | A named column is written null (bindings, contracts, configs, review policy); no upload configuration is generated in place of the clear. | Must be listed for removal, or the edit is refused |
+| Manual update (`PATCH /api/v1/flows/{id}/`) | Without `steps`, every step row and id is kept; an omitted `description` is kept. An optional column a sent step item omits is stored as null; a required field (`assistant_id`, `step_order`, `input_source`, `input_type`, `output_mode`, `output_type`) it omits fails request validation. An omitted `metadata_json` is normalized as saved (legacy form field types are read as `text`). | `description` and `metadata_json` are cleared | A saved step missing from a sent `steps` list is deleted |
+
+An unnamed column of an edited step changes in two ways only. A step alias
+the step reads follows its producer when the edit moves that producer, and a
+configuration of a mode the step does not run is dropped from a step the edit
+lists (also when it lists the step only for assistant fields); a flow update without `steps` drops such configuration from every
+step. A stored credential is never encrypted again: a carried configuration
+hands it to the flow update as a reference to the stored ciphertext. A form
+field an edit carries keeps the type an older writer saved (`email`,
+`string` and `textarea` stay as saved and are read as `text`) for as long as
+the edit does not change the type the platform reads: editing its label,
+requiredness or place keeps it, changing it to another type writes the new one.
+Whether an AI Builder apply needs a transcription setup is read from the steps
+the flow ends with, not from the submitted spec.
+
+`compile_flow_draft_changeset` writes the columns an edit names and carries
+every other one through one function. The plan lifecycle maps each field an
+approved diff can name to the one assistant field or step column it writes,
+and a test fails when a step spec field has no stated write.
+
 ## Related
 
 - [The data schema](/docs/flows-for-developers/data-schema)

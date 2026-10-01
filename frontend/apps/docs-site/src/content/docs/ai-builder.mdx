@@ -54,6 +54,8 @@ In edit sessions, changes to a step's input source, input type, or selected form
 
 Existing Flow steps are preserved unless the approved edit proposal explicitly includes a modified version of the step or lists the step for removal.
 
+An applied edit writes only what the approved plan lists as changed. A modified step keeps every column the plan does not name as it was saved, including configuration the Builder cannot author, and a column the plan names with no value is cleared rather than filled with a default. Two changes reach a column the plan does not name: a reference to a step that moves follows that step, and configuration of a mode the step no longer runs is dropped. The run form keeps its saved field types.
+
 The Builder cannot edit a saved Flow that has a step which fetches data over HTTP, takes an image as input, or sends its result over HTTP. The Builder asks its usual questions first; when it would propose the edit, it instead answers with the names of those steps and a pointer to the step editor, where they are changed by hand, and no plan is proposed. A request to edit another step of the same Flow is refused the same way and the answer says that no edits can be proposed while those steps exist.
 
 When a modified step's patch names a review mode (`view` or `edit`), it changes the mode only: a review deadline saved on the step stays, and the approval lists the step as unchanged when the mode is the one already saved. Setting the mode to `none` removes the review step, deadline included. AI Builder cannot set or reset a review deadline; to return to the default, remove the review and add it again.

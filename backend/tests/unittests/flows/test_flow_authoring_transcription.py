@@ -4,15 +4,16 @@ from __future__ import annotations
 
 from uuid import uuid4
 
+from eneo.flows.domain.flow import FlowStep
 from eneo.flows.flow_authoring_spec import (
     AssistantSpec,
-    FlowDraftSpecCore,
     InputSource,
     InputType,
     StepSpec,
 )
 from eneo.flows.flow_authoring_transcription import (
     apply_audio_transcription_defaults,
+    requires_audio_transcription,
 )
 from eneo.flows.transcription_config import (
     DEFAULT_TRANSCRIPTION_LANGUAGE,
@@ -34,12 +35,8 @@ def _step(
     )
 
 
-def _spec(*steps: StepSpec) -> FlowDraftSpecCore:
-    return FlowDraftSpecCore(
-        flow_name="Test Flow",
-        flow_description="Test",
-        steps=list(steps),
-    )
+def _steps(*steps: StepSpec) -> list[StepSpec]:
+    return list(steps)
 
 
 class TestTranscriptionSetup:
@@ -48,7 +45,7 @@ class TestTranscriptionSetup:
     def test_audio_flow_input_sets_transcription_enabled(self) -> None:
         result = apply_audio_transcription_defaults(
             metadata=None,
-            spec=_spec(_step(input_type=InputType.AUDIO)),
+            steps=_steps(_step(input_type=InputType.AUDIO)),
             default_transcription_model_id=uuid4(),
         )
 
@@ -64,7 +61,7 @@ class TestTranscriptionSetup:
     def test_non_audio_leaves_metadata_unchanged(self) -> None:
         result = apply_audio_transcription_defaults(
             metadata={"existing": "data"},
-            spec=_spec(_step(input_type=InputType.DOCUMENT)),
+            steps=_steps(_step(input_type=InputType.DOCUMENT)),
             default_transcription_model_id=uuid4(),
         )
 
@@ -87,7 +84,7 @@ class TestTranscriptionCleanup:
 
         result = apply_audio_transcription_defaults(
             metadata=existing_metadata,
-            spec=_spec(_step(input_type=InputType.DOCUMENT)),
+            steps=_steps(_step(input_type=InputType.DOCUMENT)),
             default_transcription_model_id=uuid4(),
         )
 
@@ -110,7 +107,7 @@ class TestTranscriptionCleanup:
 
         result = apply_audio_transcription_defaults(
             metadata=existing_metadata,
-            spec=_spec(_step(input_type=InputType.DOCUMENT)),
+            steps=_steps(_step(input_type=InputType.DOCUMENT)),
             default_transcription_model_id=None,
         )
 
@@ -131,7 +128,7 @@ class TestTranscriptionCleanup:
 
         result = apply_audio_transcription_defaults(
             metadata=existing_metadata,
-            spec=_spec(
+            steps=_steps(
                 _step(input_type=InputType.TEXT, input_source=InputSource.PREVIOUS_STEP)
             ),
             default_transcription_model_id=None,
@@ -145,8 +142,35 @@ class TestTranscriptionCleanup:
     def test_no_metadata_no_audio_returns_none(self) -> None:
         result = apply_audio_transcription_defaults(
             metadata=None,
-            spec=_spec(_step(input_type=InputType.DOCUMENT)),
+            steps=_steps(_step(input_type=InputType.DOCUMENT)),
             default_transcription_model_id=None,
         )
 
         assert result is None
+
+
+class TestStepsTheFlowEndsWith:
+    """The requirement is read from each step's own columns, whatever type of
+    step value holds them."""
+
+    def test_a_step_view_that_takes_audio_requires_transcription(self) -> None:
+        saved = FlowStep(
+            id=uuid4(),
+            flow_id=uuid4(),
+            tenant_id=uuid4(),
+            assistant_id=uuid4(),
+            step_order=1,
+            user_description="Lyssna",
+            input_source="flow_input",
+            input_type="audio",
+            output_mode="transcribe_only",
+            output_type="text",
+        )
+
+        assert requires_audio_transcription([saved]) is True
+        assert (
+            requires_audio_transcription(
+                [saved.model_copy(update={"input_type": "text"})]
+            )
+            is False
+        )

@@ -174,28 +174,6 @@ class TestInputFormatSyncsWithInputType:
         assert ri["required"] is True
         assert ri["description"] == "Ladda upp dokument som detta steg ska analysera."
 
-    def test_existing_config_from_parameter_used_when_spec_has_none(self) -> None:
-        """When step_spec.input_config is None, existing_input_config is used as base."""
-        existing = {
-            "runtime_input": {
-                "enabled": True,
-                "input_format": "audio",
-                "description": "Ladda upp ljudfiler som detta steg ska transkribera eller analysera.",
-                "max_files": 3,
-            }
-        }
-
-        result = resolve_runtime_input_config(
-            step_spec=_step(input_type=InputType.DOCUMENT, input_config=None),
-            existing_input_config=existing,
-        )
-
-        assert result is not None
-        ri = result["runtime_input"]
-        assert ri["input_format"] == "document"
-        assert ri["description"] == "Ladda upp dokument som detta steg ska analysera."
-        assert ri["max_files"] == 3
-
     def test_non_runtime_upload_step_removes_stale_runtime_input(self) -> None:
         existing = {
             "other": "keep",
@@ -209,9 +187,8 @@ class TestInputFormatSyncsWithInputType:
             step_spec=_step(
                 input_source=InputSource.PREVIOUS_STEP,
                 input_type=InputType.DOCUMENT,
-                input_config=None,
+                input_config=existing,
             ),
-            existing_input_config=existing,
         )
 
         assert result == {"other": "keep"}

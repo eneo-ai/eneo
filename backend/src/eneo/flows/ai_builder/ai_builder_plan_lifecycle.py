@@ -26,7 +26,10 @@ from eneo.flows.ai_builder.ai_builder_domain_models import (
     SessionStatus,
     TargetKind,
 )
-from eneo.flows.ai_builder.ai_builder_edit_preview_models import StepChange
+from eneo.flows.ai_builder.ai_builder_edit_preview_models import (
+    StepChange,
+    StepChangeField,
+)
 from eneo.flows.ai_builder.ai_builder_error_contract import (
     AIBuilderBadRequestException,
     AIBuilderErrorCode,
@@ -52,8 +55,10 @@ from eneo.flows.application.flow_authoring_command import (
 )
 from eneo.flows.application.flow_draft_materialization import (
     ALL_ASSISTANT_FIELDS,
+    ALL_STEP_COLUMNS,
     AssistantField,
     FlowDraftMaterializationProgress,
+    StepColumn,
 )
 from eneo.flows.flow_authoring_spec import (
     FlowDraftSpecCore,
@@ -199,6 +204,58 @@ def _updated_existing_step_refs_for_apply(
     return modified_refs
 
 
+# What each field a modified step's approved diff names writes: one field of
+# the step's assistant, or one column of its row. The approved diff is the one
+# statement of what an edit writes; a field it names that is missing here is
+# refused before anything is written, never applied as a write of nothing.
+_WRITE_OF_STEP_CHANGE: dict[StepChangeField, AssistantField | StepColumn] = {
+    "name": "user_description",
+    "instructions": "instructions",
+    "model_ref": "model_ref",
+    "knowledge_refs": "knowledge_refs",
+    "input_source": "input_source",
+    "input_type": "input_type",
+    "input_bindings": "input_bindings",
+    "input_contract": "input_contract",
+    "input_config": "input_config",
+    "output_mode": "output_mode",
+    "output_type": "output_type",
+    "output_contract": "output_contract",
+    "output_config": "output_config",
+    "review_policy": "review_policy",
+}
+
+
+def _named_writes_for_apply(
+    *,
+    session: BuilderSession,
+    plan: BuilderPlan,
+) -> dict[str, frozenset[AssistantField | StepColumn]]:
+    """Per modified step of the approved diff, the assistant fields and step
+    columns its field changes write."""
+
+    if session.target_kind != TargetKind.EDIT:
+        return {}
+    named: dict[str, frozenset[AssistantField | StepColumn]] = {}
+    for change in _modified_step_changes_for_apply(session=session, plan=plan):
+        unwritable = sorted(
+            changed.field
+            for changed in change.field_changes
+            if changed.field not in _WRITE_OF_STEP_CHANGE
+        )
+        if unwritable:
+            raise AIBuilderBadRequestException(
+                "Approved edit plan changes a step field the apply cannot write.",
+                code=AIBuilderErrorCode.BAD_REQUEST,
+                context={"plan_id": str(plan.id), "fields": unwritable},
+            )
+        if change.step_ref is not None:
+            named[change.step_ref] = frozenset(
+                _WRITE_OF_STEP_CHANGE[changed.field] for changed in change.field_changes
+            )
+    return named
+
+
 def _updated_assistant_fields_for_apply(
     *,
     session: BuilderSession,
@@ -208,16 +265,26 @@ def _updated_assistant_fields_for_apply(
     approval's own diff is the statement of what changes: a step whose diff
     names none of them (a rename) is left out and its assistant is not written."""
 
-    if session.target_kind != TargetKind.EDIT:
-        return {}
-    fields: dict[str, frozenset[AssistantField]] = {}
-    for change in _modified_step_changes_for_apply(session=session, plan=plan):
-        named = ALL_ASSISTANT_FIELDS & {
-            changed.field for changed in change.field_changes
-        }
-        if named and change.step_ref is not None:
-            fields[change.step_ref] = named
-    return fields
+    return {
+        ref: fields
+        for ref, writes in _named_writes_for_apply(session=session, plan=plan).items()
+        if (fields := ALL_ASSISTANT_FIELDS & writes)
+    }
+
+
+def _updated_step_fields_for_apply(
+    *,
+    session: BuilderSession,
+    plan: BuilderPlan,
+) -> dict[str, frozenset[StepColumn]]:
+    """The step columns each modified step's approved changes name; a step
+    whose diff names none of them (a new instruction) writes no column."""
+
+    return {
+        ref: columns
+        for ref, writes in _named_writes_for_apply(session=session, plan=plan).items()
+        if (columns := ALL_STEP_COLUMNS & writes)
+    }
 
 
 def _edit_approval_for_apply(
@@ -748,6 +815,10 @@ class AIBuilderPlanLifecycle:
                 plan=plan,
             ),
             updated_assistant_fields=_updated_assistant_fields_for_apply(
+                session=session,
+                plan=plan,
+            ),
+            updated_step_fields=_updated_step_fields_for_apply(
                 session=session,
                 plan=plan,
             ),

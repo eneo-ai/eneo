@@ -4167,7 +4167,7 @@ def test_a_request_to_name_the_speakers_compiles_the_speaker_naming_review() -> 
         flow_step_validation_views_from_draft_spec(compiled.steps),
         metadata_json=apply_audio_transcription_defaults(
             metadata=metadata_json_from_authoring_form_fields(compiled.form_fields),
-            spec=compiled,
+            steps=compiled.steps,
             default_transcription_model_id=uuid4(),
         ),
         require_complete_template_fill_config=True,
@@ -4310,7 +4310,7 @@ def test_a_transcript_only_flow_that_names_the_speakers_compiles_the_naming_revi
         flow_step_validation_views_from_draft_spec(compiled.steps),
         metadata_json=apply_audio_transcription_defaults(
             metadata=metadata_json_from_authoring_form_fields(compiled.form_fields),
-            spec=compiled,
+            steps=compiled.steps,
             default_transcription_model_id=uuid4(),
         ),
         require_complete_template_fill_config=True,
@@ -4363,7 +4363,7 @@ def test_the_naming_step_maps_speakers_onto_a_participants_field_it_can_read(
         flow_step_validation_views_from_draft_spec(compiled.steps),
         metadata_json=apply_audio_transcription_defaults(
             metadata=metadata_json_from_authoring_form_fields(compiled.form_fields),
-            spec=compiled,
+            steps=compiled.steps,
             default_transcription_model_id=uuid4(),
         ),
         require_complete_template_fill_config=True,

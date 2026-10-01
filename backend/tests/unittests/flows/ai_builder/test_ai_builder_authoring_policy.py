@@ -110,6 +110,7 @@ async def test_prepare_removes_stale_ai_builder_description_metadata() -> None:
             removed_existing_step_refs=frozenset(),
             updated_existing_step_refs=frozenset({"existing_step_1"}),
             updated_assistant_fields={},
+            updated_step_fields={},
             origin=origin,
         ),
         flow_service=SimpleNamespace(get_flow=_async_return(current_flow)),
@@ -148,6 +149,7 @@ async def test_prepare_rewrites_builder_managed_stale_terminal_output_descriptio
             removed_existing_step_refs=frozenset(),
             updated_existing_step_refs=frozenset({"existing_step_1"}),
             updated_assistant_fields={},
+            updated_step_fields={},
             origin=origin,
         ),
         flow_service=SimpleNamespace(get_flow=_async_return(current_flow)),
@@ -184,6 +186,7 @@ async def test_manual_description_override_keeps_current_description() -> None:
             removed_existing_step_refs=frozenset(),
             updated_existing_step_refs=frozenset({"existing_step_1"}),
             updated_assistant_fields={},
+            updated_step_fields={},
             origin=origin,
         ),
         flow_service=SimpleNamespace(get_flow=_async_return(current_flow)),
@@ -222,6 +225,7 @@ async def test_unsupported_current_flow_signature_leaves_description_unchanged()
             removed_existing_step_refs=frozenset(),
             updated_existing_step_refs=frozenset({"existing_step_1"}),
             updated_assistant_fields={},
+            updated_step_fields={},
             origin=origin,
         ),
         flow_service=SimpleNamespace(get_flow=_async_return(current_flow)),
@@ -272,6 +276,7 @@ async def test_unsupported_middle_step_signature_leaves_description_unchanged() 
                 {"existing_step_1", "existing_step_2", "existing_step_3"}
             ),
             updated_assistant_fields={},
+            updated_step_fields={},
             origin=origin,
         ),
         flow_service=SimpleNamespace(get_flow=_async_return(current_flow)),
@@ -424,8 +429,10 @@ async def test_builder_prepare_preserves_upload_edit_transitions(
         }
     )
     current_flow = _flow(description="", draft_revision=1, steps=[stored])
+    # The edit's spec starts from the saved step, so it holds the saved
+    # configuration; the retype names the type and the configuration.
     step = _spec_step(existing_step_ref="existing_step_1").model_copy(
-        update={"input_type": input_type}
+        update={"input_type": input_type, "input_config": stored.input_config}
     )
     spec = _spec(steps=[step])
     origin = _origin(spec_hash=spec.spec_hash())
@@ -439,6 +446,9 @@ async def test_builder_prepare_preserves_upload_edit_transitions(
             removed_existing_step_refs=frozenset(),
             updated_existing_step_refs=frozenset({"existing_step_1"}),
             updated_assistant_fields={},
+            updated_step_fields={
+                "existing_step_1": frozenset({"input_type", "input_config"})
+            },
         ),
         flow_service=SimpleNamespace(get_flow=_async_return(current_flow)),
         origin_policy=AIBuilderAuthoringPolicy(origin),
@@ -459,6 +469,57 @@ async def test_builder_prepare_preserves_upload_edit_transitions(
     assert prepared.changeset.compiled_steps[0].input_config == expected
     assert stored.input_config is not None
     assert stored.input_config["runtime_input"]["input_format"] == "audio"
+
+
+@pytest.mark.anyio
+@pytest.mark.parametrize(
+    "input_type", [InputType.AUDIO, InputType.DOCUMENT, InputType.FILE]
+)
+async def test_builder_prepare_keeps_a_named_null_input_config_of_an_upload_step(
+    input_type: InputType,
+) -> None:
+    """The policy derives an upload configuration for a step that takes files;
+    for a saved step whose edit names the column with null, the null is the
+    author's clear and no configuration is generated in its place."""
+
+    stored = _flow_step(output_type="text").model_copy(
+        update={
+            "input_type": input_type.value,
+            "input_config": {
+                "runtime_input": {
+                    "enabled": True,
+                    "required": True,
+                    "input_format": input_type.value,
+                    "description": "Custom upload",
+                }
+            },
+        }
+    )
+    current_flow = _flow(description="", draft_revision=1, steps=[stored])
+    step = _spec_step(existing_step_ref="existing_step_1").model_copy(
+        update={"input_type": input_type, "input_config": None}
+    )
+    spec = _spec(steps=[step])
+    origin = _origin(spec_hash=spec.spec_hash())
+
+    prepared = await FlowAuthoringCommandService().prepare(
+        command=EditFlowAuthoringCommand(
+            space_id=current_flow.space_id,
+            flow_id=current_flow.id,
+            expected_revision=1,
+            spec=spec,
+            origin=origin,
+            removed_existing_step_refs=frozenset(),
+            updated_existing_step_refs=frozenset({"existing_step_1"}),
+            updated_assistant_fields={},
+            updated_step_fields={"existing_step_1": frozenset({"input_config"})},
+        ),
+        flow_service=SimpleNamespace(get_flow=_async_return(current_flow)),
+        origin_policy=AIBuilderAuthoringPolicy(origin),
+    )
+
+    assert prepared.spec.steps[0].input_config is None
+    assert prepared.changeset.compiled_steps[0].input_config is None
 
 
 def test_modified_step_preserves_stored_http_secrets_as_sentinels() -> None:
@@ -493,7 +554,13 @@ def test_modified_step_preserves_stored_http_secrets_as_sentinels() -> None:
     current_flow = _flow(description="", draft_revision=1, steps=[existing])
     policy = AIBuilderAuthoringPolicy(_origin(spec_hash=spec.spec_hash()))
     effective_spec = policy.effective_spec(spec=spec, current_flow=current_flow)
-    changeset = compile_flow_draft_changeset(effective_spec, current_flow)
+    # The edit names the step's description; its config is the saved one.
+    changeset = compile_flow_draft_changeset(
+        effective_spec,
+        current_flow,
+        updated_existing_step_refs=frozenset({"existing_step_1"}),
+        updated_step_fields={"existing_step_1": frozenset({"user_description"})},
+    )
 
     compiled_config = changeset.compiled_steps[0].input_config
     assert compiled_config is not None

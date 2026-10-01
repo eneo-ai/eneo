@@ -225,6 +225,9 @@ class FlowDraftMaterializer:
                     and compiled.saved_step is not None
                     and compiled.saved_step.id is not None
                 ),
+                # The changeset reads the saved form normalized; a field it
+                # carries is stored as saved, not rewritten to that reading.
+                keep_saved_form_fields=True,
             )
         progress.flow_updated = True
         progress.emit(FlowDraftMaterializationStage.FLOW_UPDATED)

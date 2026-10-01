@@ -1844,3 +1844,215 @@ def test_a_saved_unsupported_field_type_is_reported_at_its_raw_array_index() -> 
 
     assert "fields[2].type" in str(from_builder.value)
     assert "fields[2].type" in str(from_compile.value)
+
+
+# Sparse edit: a step the edit names is written in the columns it names and is
+# its saved row in every other one.
+
+_SAVED_COLUMNS: dict[str, Any] = {
+    "user_description": "Sparad",
+    "input_bindings": {"question": "Sparad fråga."},
+    "input_contract": {"type": "object", "properties": {"a": {"type": "string"}}},
+    "output_contract": {"type": "object", "properties": {"b": {"type": "string"}}},
+    "input_config": {"retrieval": {"top_k": 3}},
+    "output_config": {"citation_mode": "off"},
+    "review_policy": FlowStepReviewPolicy(mode=FlowStepReviewMode.VIEW),
+}
+_SPEC_COLUMNS: dict[str, Any] = {
+    "user_description": "Ny",
+    "input_bindings": {"question": "Ny fråga."},
+    "input_contract": {"type": "object", "properties": {"c": {"type": "string"}}},
+    "output_contract": {"type": "object", "properties": {"d": {"type": "string"}}},
+    "input_config": {"retrieval": {"top_k": 9}},
+    "output_config": {"citation_mode": "off", "anteckning": "ny"},
+    "review_policy": FlowStepReviewPolicy(mode=FlowStepReviewMode.EDIT),
+}
+
+
+def _saved_with_every_column() -> Flow:
+    columns = {k: v for k, v in _SAVED_COLUMNS.items() if k != "review_policy"}
+    return _flow(
+        _flow_step(step_order=1).model_copy(
+            update={**columns, "review_policy": _SAVED_COLUMNS["review_policy"]}
+        )
+    )
+
+
+def _spec_with(columns: dict[str, Any]) -> FlowDraftSpecCore:
+    step = _step_spec(existing_step_ref="existing_step_1", name=columns.pop("name"))
+    return FlowDraftSpecCore(
+        flow_name="Existing flow", steps=[step.model_copy(update=columns)]
+    )
+
+
+@pytest.mark.parametrize("fill", ["none", "other"])
+@pytest.mark.parametrize("column", list(_SAVED_COLUMNS))
+def test_a_sparse_edit_compiles_only_the_column_it_names(
+    column: str, fill: str
+) -> None:
+    flow = _saved_with_every_column()
+    unnamed = _SPEC_COLUMNS if fill == "other" else dict.fromkeys(_SPEC_COLUMNS)
+    values = {c: _SPEC_COLUMNS[c] if c == column else unnamed[c] for c in _SPEC_COLUMNS}
+    values["name"] = values.pop("user_description") or "Ett annat namn"
+
+    (step,) = compile_flow_draft_changeset(
+        _spec_with(values),
+        flow,
+        updated_existing_step_refs=frozenset({"existing_step_1"}),
+        updated_step_fields={"existing_step_1": frozenset({column})},
+    ).compiled_steps
+
+    written = {c: getattr(step, c) for c in _SAVED_COLUMNS}
+    assert written == {**_SAVED_COLUMNS, column: _SPEC_COLUMNS[column]}
+
+
+@pytest.mark.parametrize(
+    "column",
+    [c for c in _SAVED_COLUMNS if c != "user_description"],
+)
+def test_a_named_null_is_written_null_even_where_the_mode_and_type_are_kept(
+    column: str,
+) -> None:
+    """The output config keeps its saved mode and type here: an unnamed null
+    there was the one case kept before names existed; a named one clears."""
+
+    values = {c: None if c == column else v for c, v in _SAVED_COLUMNS.items()}
+    values["name"] = values.pop("user_description")
+
+    (step,) = compile_flow_draft_changeset(
+        _spec_with(values),
+        _saved_with_every_column(),
+        updated_existing_step_refs=frozenset({"existing_step_1"}),
+        updated_step_fields={"existing_step_1": frozenset({column})},
+    ).compiled_steps
+
+    assert getattr(step, column) is None
+    assert {c: getattr(step, c) for c in _SAVED_COLUMNS if c != column} == {
+        c: v for c, v in _SAVED_COLUMNS.items() if c != column
+    }
+
+
+def test_a_carried_config_of_a_mode_the_named_step_leaves_is_not_a_carried_read() -> (
+    None
+):
+    """The edit moves the step off HTTP delivery and names no config: the saved
+    webhook config is carried as configuration of a mode the step no longer
+    runs (the flow update drops it), not judged as a read that lost its
+    producer."""
+
+    saved = _flow(
+        _flow_step(step_order=1),
+        _flow_step(
+            step_order=2,
+            output_mode="http_post",
+            output_config={
+                "url": "https://example.test/{{step_1.output.text}}",
+                "auth": {"mode": "none"},
+            },
+        ),
+    )
+    spec = FlowDraftSpecCore(
+        flow_name="Existing flow",
+        steps=[
+            _step_spec(existing_step_ref="existing_step_1", plan_step_ref="p1"),
+            _step_spec(
+                existing_step_ref="existing_step_2",
+                plan_step_ref="p2",
+                input_source=InputSource.PREVIOUS_STEP,
+            ),
+        ],
+    )
+
+    changeset = compile_flow_draft_changeset(
+        spec,
+        saved,
+        updated_existing_step_refs=frozenset({"existing_step_2"}),
+        updated_step_fields={"existing_step_2": frozenset({"output_mode"})},
+    )
+
+    step = changeset.compiled_steps[1]
+    assert step.output_mode == "pass_through"
+    assert "output_config" not in step.carried_columns
+    assert step.output_config is not None
+    assert step.output_config["url"] == "https://example.test/{{step_1.output.text}}"
+
+
+# The metadata follows the steps the edit leaves, not the spec's default text
+# columns: a sparse caller never reconstructs a column it does not name.
+
+_SAVED_TRANSCRIPTION = {
+    "wizard": {
+        "transcription_enabled": True,
+        "transcription_model": {"id": "11111111-1111-1111-1111-111111111111"},
+        "transcription_language": "sv",
+    }
+}
+
+
+def _saved_audio_flow() -> Flow:
+    return _flow(
+        _flow_step(step_order=1).model_copy(
+            update={"input_type": "audio", "output_mode": "transcribe_only"}
+        ),
+        metadata_json=_SAVED_TRANSCRIPTION,
+    )
+
+
+def test_a_sparse_rename_of_a_saved_audio_step_keeps_the_transcription_setup() -> None:
+    spec = FlowDraftSpecCore(
+        flow_name="Existing flow",
+        steps=[_step_spec(existing_step_ref="existing_step_1", name="Nytt namn")],
+    )
+
+    changeset = compile_flow_draft_changeset(
+        spec,
+        _saved_audio_flow(),
+        updated_existing_step_refs=frozenset({"existing_step_1"}),
+        updated_step_fields={"existing_step_1": frozenset({"user_description"})},
+    )
+
+    (step,) = changeset.compiled_steps
+    assert (step.input_type, step.output_mode) == ("audio", "transcribe_only")
+    assert changeset.metadata_json == _SAVED_TRANSCRIPTION
+
+
+def test_an_edit_that_names_the_input_type_off_audio_removes_the_transcription() -> (
+    None
+):
+    spec = FlowDraftSpecCore(
+        flow_name="Existing flow",
+        steps=[_step_spec(existing_step_ref="existing_step_1")],
+    )
+
+    changeset = compile_flow_draft_changeset(
+        spec,
+        _saved_audio_flow(),
+        updated_existing_step_refs=frozenset({"existing_step_1"}),
+        updated_step_fields={
+            "existing_step_1": frozenset({"input_type", "output_mode"})
+        },
+    )
+
+    (step,) = changeset.compiled_steps
+    assert step.input_type == "text"
+    assert changeset.metadata_json is None
+
+
+def test_an_edit_that_leaves_a_text_step_text_adds_no_transcription_the_spec_states() -> (
+    None
+):
+    spec = FlowDraftSpecCore(
+        flow_name="Existing flow",
+        steps=[
+            _step_spec(existing_step_ref="existing_step_1", input_type=InputType.AUDIO)
+        ],
+    )
+
+    changeset = compile_flow_draft_changeset(
+        spec,
+        _flow(_flow_step(step_order=1)),
+        updated_existing_step_refs=frozenset({"existing_step_1"}),
+        updated_step_fields={"existing_step_1": frozenset({"user_description"})},
+    )
+
+    assert changeset.metadata_json is None
