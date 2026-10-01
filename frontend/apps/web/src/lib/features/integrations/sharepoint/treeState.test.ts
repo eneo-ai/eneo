@@ -8,6 +8,7 @@ import {
   sharePointTreeHasMatchingDescendant,
   sharePointTreeItemMatches,
   sharePointTreeNodeVisible,
+  splitSharePointMatches,
   type SharePointTreeItem
 } from "./treeState";
 
@@ -115,5 +116,21 @@ describe("SharePoint tree search", () => {
 
     expect(countSharePointTreeMatches([folder, file("Larmlista.xlsx")], "larm")).toBe(3);
     expect(countSharePointTreeMatches([folder], "")).toBe(0);
+  });
+});
+
+describe("splitSharePointMatches", () => {
+  it("marks every case-insensitive occurrence in order", () => {
+    expect(splitSharePointMatches("Larm – larmlista", "larm")).toEqual([
+      { text: "Larm", match: true },
+      { text: " – ", match: false },
+      { text: "larm", match: true },
+      { text: "lista", match: false }
+    ]);
+  });
+
+  it("returns the text untouched without a query or a hit", () => {
+    expect(splitSharePointMatches("Policy", "")).toEqual([{ text: "Policy", match: false }]);
+    expect(splitSharePointMatches("Policy", "larm")).toEqual([{ text: "Policy", match: false }]);
   });
 });
