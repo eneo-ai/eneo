@@ -1,7 +1,7 @@
 # Functions
 
-Web search, image generation, tabular analysis, document creation and
-spreadsheet creation are **functions** (Swedish: *Funktioner*) that an
+Web search, image generation, ask a file and create files are **functions**
+(Swedish: *Funktioner*) that an
 assistant switches on, not servers it connects to. An administrator decides
 which source serves each function for the organisation; spaces, assistants and
 roles decide where and by whom the function may be used. This guide covers the
@@ -24,14 +24,13 @@ import { Callout } from 'nextra/components'
 |----------|--------------|---------------------|
 | **Web search** | Lets the assistant search the web and cite live pages | An external MCP search server (for example Tavily or Exa behind an MCP endpoint) |
 | **Image generation** | Lets the assistant create images from a description, and edit or vary images | Either a catalog **image model** called by Eneo itself, or an external MCP image server |
-| **Tabular analysis** (*Analysera tabelldata*) | Lets the assistant inspect, query, join and check attached CSV and Excel files, and export full results | The **bundled tool runtime**, or an external MCP server |
-| **Document creation** (*Skapa dokument*) | Lets the assistant create Word (DOCX) and PDF documents the user downloads from the chat | The **bundled tool runtime**, or an external MCP server |
-| **Spreadsheet creation** (*Skapa kalkylblad*) | Lets the assistant create Excel (XLSX) workbooks, from inline tables or from files such as a query export | The **bundled tool runtime**, or an external MCP server |
+| **Ask a file** (*Fråga fil*) | Lets the assistant answer questions about attached files: today it inspects, queries, joins and checks CSV and Excel files and exports full results; more formats will follow | The provider **built into Eneo** (the bundled tool runtime), or an external MCP server |
+| **Create files** (*Skapa filer*) | Lets the assistant create Word (DOCX) and PDF documents, optionally from a Word template, and Excel (XLSX) workbooks the user downloads from the chat | The provider **built into Eneo**, or an external MCP server |
 
 The key ideas:
 
 - **Saved intent is a purpose, not a server.** A space or assistant stores
-  a purpose such as `web_search` or `tabular_analysis`. Which server serves that purpose is
+  a purpose such as `web_search` or `file_analysis`. Which server serves that purpose is
   resolved at ask time, so switching, disabling or deleting a provider never
   breaks a saved configuration. A replacement restores availability.
 - **One default per function, any number of group sources.** The tenant has at
@@ -115,24 +114,25 @@ produces a generated image in the chat.
 
 ### Using the bundled tool runtime
 
-Tabular analysis, document creation and spreadsheet creation can be served by
-the **bundled tool runtime**: an optional, isolated container shipped with
+Ask a file and create files can be served by the provider **built into Eneo**,
+the bundled tool runtime: an optional, isolated container shipped with
 Eneo. It is not part of the backend process and holds no Eneo credentials; see
 `docs/deployment/TOOL_RUNTIME.md` in the repository for how an operator enables
 it. Once it runs:
 
-1. On the **Functions** tab, choose **Use bundled provider** (*Använd
-   medföljande leverantör*) on the function's card. The button appears only
-   when the deployment has the runtime configured and the function has no
-   bundled source yet.
-2. Eneo tests the connection and discovers the tools. If the function has no
-   active default, the bundled source becomes it; otherwise it is saved
-   inactive, ready to be activated as a replacement.
+1. On the **Functions** tab, a function without a source shows **Built into
+   Eneo** (*Inbyggd i Eneo*) with a **Turn on** (*Slå på*) button. When the
+   function already has sources, **Add source** offers *Built into Eneo* next
+   to *External MCP server*. If the deployment has no runtime, the card says
+   **Not enabled in this deployment** and links the operator guide.
+2. Eneo tests the connection and discovers the tools. **Turn on** makes the
+   source the default; added from the menu while another default is active,
+   it is saved inactive, ready to be activated as a replacement.
 
 The runtime also offers two ordinary tool servers, added from the **MCP
-servers** tab with **Add bundled compute** (exact JavaScript calculations) and
-**Add bundled charts** (bar, line, pie and scatter charts as images). They
-are enabled per space like any other MCP server.
+servers** tab through **Add MCP Server** under *Built into Eneo*: **Compute**
+(exact JavaScript calculations) and **Charts** (bar, line, pie and scatter
+charts as images). They are enabled per space like any other MCP server.
 
 A bundled source is an ordinary source in every other respect: audiences,
 permissions, classification and tool approval apply unchanged, and an external
@@ -173,10 +173,9 @@ external server.
 
 Each function has a role permission of the same name, edited under **Admin →
 Roles**: **Web search** (`web_search`), **Image generation**
-(`image_generation`), **Tabular analysis** (`tabular_analysis`), **Create
-documents** (`document_creation`) and **Create spreadsheets**
-(`spreadsheet_creation`). The predefined User, AI Configurator and Owner
-roles have all five; custom roles only have the ones an administrator adds. Without the
+(`image_generation`), **Ask a file** (`file_analysis`) and **Create files**
+(`file_creation`). The predefined User, AI Configurator and Owner roles have
+all four; custom roles only have the ones an administrator adds. Without the
 permission the tools are never attached for that user, even where an assistant
 offers the function. Configuring a function on a space or assistant is not
 gated by these permissions.
@@ -198,9 +197,9 @@ in new chats. Turning a function **off** always works; turning one **on**
 requires an eligible source and the space rules above. Temporary unavailability
 never blocks unrelated edits.
 
-Service API keys can use web search but no other function: generated images,
-documents and spreadsheets are stored as files owned by a user, a service key
-has no user, and tabular analysis is not granted to service keys.
+Service API keys can use web search but no other function: generated images
+and files are stored as files owned by a user, a service key has no user, and
+ask a file is not granted to service keys.
 
 ---
 
@@ -364,11 +363,12 @@ reference URL.
 
 ---
 
-## How tabular analysis works
+## How ask a file works
 
 The model receives the attachment's signed reference URL (the same one
 described under [Reference images](#reference-images-variations-and-follow-up-edits))
-and passes it to the tabular tools. With the bundled runtime:
+and passes it to the file analysis tools. With the provider built into Eneo
+(CSV and Excel today):
 
 - `inspect_table` returns sheet names, column types and value profiles and a
   few sample rows; `query_table` runs one read-only SQL `SELECT` over the full
@@ -385,12 +385,12 @@ and passes it to the tabular tools. With the bundled runtime:
 - `query_table` with `export` also returns the complete result (up to 200 000
   rows) as a CSV file, shown to the user as a download.
 
-The tabular source forwards the user's identity, which the bundled runtime
-uses only to keep each user's parsed files apart.
+The source forwards the user's identity, which the bundled runtime uses only
+to keep each user's parsed files apart.
 
 ---
 
-## How document and spreadsheet creation works
+## How create files works
 
 - `create_document` renders Markdown (headings, lists, tables, quotes, code,
   links, page breaks) to Word or PDF. `create_spreadsheet` builds XLSX with
@@ -402,6 +402,28 @@ uses only to keep each user's parsed files apart.
 - The file travels back inside the tool result as a standard MCP embedded
   resource. The bundled runtime keeps no copy and serves no download links.
 
+### Word templates
+
+A Word document can be created from a template: the organisation's letterhead,
+a *tjänsteskrivelse* layout, a report shell. Nothing is configured for it in
+the assistant; the template is an ordinary attachment:
+
+- **Ad hoc:** the user attaches the `.docx` in the chat and asks for the
+  document "using the attached template".
+- **Per assistant:** an administrator attaches the `.docx` to the assistant
+  (**Bilagor**) and tells the assistant in its instructions to use it for
+  documents, for example "Create reports with the template *Rapportmall.docx*".
+  Attachments are handed to the assistant as files it opens when needed, so a
+  template does not load into every answer.
+
+The model passes the template's signed reference to `create_document`, which
+renders the content into it. The template keeps its styles, headers, footers,
+numbering and page setup. A paragraph in the template that reads
+`{{content}}` marks where the content goes; without one, the template's body
+is replaced and only its page furniture remains. Templates apply to Word
+output only, must be plain `.docx` (macro-enabled files are refused), and the
+result goes through the same checks as any created document.
+
 ### Generated files
 
 Eneo admits a file from a tool result only when the producing source serves a
@@ -409,9 +431,8 @@ function that delivers that type:
 
 | Function | Accepted types |
 |----------|----------------|
-| Document creation | DOCX, PDF |
-| Spreadsheet creation | XLSX |
-| Tabular analysis | CSV (query exports) |
+| Create files | DOCX, PDF, XLSX |
+| Ask a file | CSV (query exports) |
 
 The same file from any other server stays an ordinary result, and file bytes
 never reach the model. Before saving, Eneo checks the bytes against the
@@ -487,7 +508,7 @@ server opt-outs stay in `disabled_mcp_server_ids`.
 | `MCP_TOOL_OUTPUT_MAX_CHARS` | 32768 | Text budget per tool result. |
 | `MCP_TOOL_FILE_MAX_BYTES` | 20971520 | Size cap per generated document, spreadsheet or CSV export. |
 | `MCP_TOOL_FILE_MAX_COUNT` | 4 | Generated files per tool result. |
-| `TOOL_RUNTIME_URL` | unset | Address of the bundled tool runtime. Set by the deployment overlay; enables the **Use bundled provider** and **Add bundled** actions. |
+| `TOOL_RUNTIME_URL` | unset | Address of the bundled tool runtime. Set by the deployment overlay; enables the **Built into Eneo** offers under Functions and MCP servers. |
 | `TOOL_RUNTIME_TOKEN` | unset | Shared bearer for the bundled runtime; never stored in the database. |
 
 ---
@@ -497,7 +518,7 @@ server opt-outs stay in `disabled_mcp_server_ids`.
 ### The function toggle is missing in the chat
 
 - Check the user's role has the function's permission (for example **Web
-  search** or **Tabular analysis**).
+  search** or **Ask a file**).
 - Check the assistant enables the function and the space makes it available.
 - If the space is classified, check an active source meets that
   classification.
@@ -526,13 +547,14 @@ variations and follow-up edits.
 Set `FILE_REFERENCE_BASE_URL` to a URL the external server can reach. The
 signed link is the file; asking the user to re-upload changes nothing.
 
-### "Use bundled provider" does not appear
+### "Built into Eneo" says it is not enabled in this deployment
 
 The deployment has no bundled tool runtime configured (`TOOL_RUNTIME_URL` and
-`TOOL_RUNTIME_TOKEN`), or the function already has a bundled source. The
-button offers each bundled source once per organisation.
+`TOOL_RUNTIME_TOKEN`); the card links the operator guide. Once a function has
+its built-in source, the offer disappears: each is added once per
+organisation.
 
-### Tabular analysis cannot read an attachment
+### Ask a file cannot read an attachment
 
 - The runtime fetches files from `FILE_REFERENCE_BASE_URL` (or `PUBLIC_ORIGIN`
   when unset); that address must be reachable from the runtime.
@@ -544,5 +566,5 @@ button offers each bundled source once per organisation.
 
 The file failed Eneo's checks (wrong type for the function, active content, or
 over `MCP_TOOL_FILE_MAX_BYTES`). The backend log names the reason. Only
-sources serving document or spreadsheet creation, or tabular analysis for CSV
-exports, can deliver files.
+sources serving create files, or ask a file for CSV exports, can deliver
+files.

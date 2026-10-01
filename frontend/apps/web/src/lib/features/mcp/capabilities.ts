@@ -1,23 +1,19 @@
 /**
  * Capability purposes: MCP servers that act as the tenant's provider for one
- * capability (web search, image generation, tabular analysis). The backend resolves an attached
+ * capability (web search, image generation, file analysis, file creation). The backend resolves an attached
  * capability marker to the active provider at ask time, so every surface here
  * treats them as on/off capabilities rather than as servers.
  *
  * Adding a capability means adding one entry here (plus its messages); every
  * admin, space, assistant and chat surface renders from this list.
  */
-import { FileSpreadsheet, FileText, Globe, Image, Sheet } from "@lucide/svelte";
+import { FilePlus, FileSearch, Globe, Image } from "@lucide/svelte";
 import { m } from "$lib/paraglide/messages";
 
 export const GENERAL_PURPOSE = "general";
 
 export type CapabilityPurpose =
-  | "web_search"
-  | "image_generation"
-  | "tabular_analysis"
-  | "document_creation"
-  | "spreadsheet_creation";
+  "web_search" | "image_generation" | "file_analysis" | "file_creation";
 
 export type CapabilityDescriptor = {
   purpose: CapabilityPurpose;
@@ -40,6 +36,8 @@ export type CapabilityDescriptor = {
   builtinProvider?: boolean;
   /** What the bundled tool runtime's provider of this capability does, shown before it is added. */
   bundledDescription?: () => string;
+  /** A short usage note for administrators, with a link to the docs instead of more settings. */
+  guide?: { hint: () => string; label: () => string; url: string };
 };
 
 export const CAPABILITIES: readonly CapabilityDescriptor[] = [
@@ -71,46 +69,37 @@ export const CAPABILITIES: readonly CapabilityDescriptor[] = [
     builtinProvider: true
   },
   {
-    purpose: "tabular_analysis",
-    icon: Sheet,
-    label: m.tabular_analysis,
-    providerNamePlaceholder: m.tabular_analysis_provider_name_placeholder,
-    providerManagedNote: m.tabular_analysis_provider_managed_note,
-    forwardIdentityHint: m.tabular_analysis_forward_identity_hint,
-    capabilityHint: m.tabular_analysis_capability_hint,
-    spaceHint: m.tabular_analysis_space_group_hint,
-    noActiveProviderHint: m.tabular_analysis_no_active_provider_hint,
-    notAvailableHereHint: m.tabular_analysis_not_available_here_hint,
-    classificationHint: m.tabular_analysis_classification_hint,
-    bundledDescription: m.tools_builtin_tabular_analysis_description
+    purpose: "file_analysis",
+    icon: FileSearch,
+    label: m.file_analysis,
+    providerNamePlaceholder: m.file_analysis_provider_name_placeholder,
+    providerManagedNote: m.file_analysis_provider_managed_note,
+    forwardIdentityHint: m.file_analysis_forward_identity_hint,
+    capabilityHint: m.file_analysis_capability_hint,
+    spaceHint: m.file_analysis_space_group_hint,
+    noActiveProviderHint: m.file_analysis_no_active_provider_hint,
+    notAvailableHereHint: m.file_analysis_not_available_here_hint,
+    classificationHint: m.file_analysis_classification_hint,
+    bundledDescription: m.tools_builtin_file_analysis_description
   },
   {
-    purpose: "document_creation",
-    icon: FileText,
-    label: m.document_creation,
-    providerNamePlaceholder: m.document_creation_provider_name_placeholder,
-    providerManagedNote: m.document_creation_provider_managed_note,
-    forwardIdentityHint: m.document_creation_forward_identity_hint,
-    capabilityHint: m.document_creation_capability_hint,
-    spaceHint: m.document_creation_space_group_hint,
-    noActiveProviderHint: m.document_creation_no_active_provider_hint,
-    notAvailableHereHint: m.document_creation_not_available_here_hint,
-    classificationHint: m.document_creation_classification_hint,
-    bundledDescription: m.tools_builtin_document_creation_description
-  },
-  {
-    purpose: "spreadsheet_creation",
-    icon: FileSpreadsheet,
-    label: m.spreadsheet_creation,
-    providerNamePlaceholder: m.spreadsheet_creation_provider_name_placeholder,
-    providerManagedNote: m.spreadsheet_creation_provider_managed_note,
-    forwardIdentityHint: m.spreadsheet_creation_forward_identity_hint,
-    capabilityHint: m.spreadsheet_creation_capability_hint,
-    spaceHint: m.spreadsheet_creation_space_group_hint,
-    noActiveProviderHint: m.spreadsheet_creation_no_active_provider_hint,
-    notAvailableHereHint: m.spreadsheet_creation_not_available_here_hint,
-    classificationHint: m.spreadsheet_creation_classification_hint,
-    bundledDescription: m.tools_builtin_spreadsheet_creation_description
+    purpose: "file_creation",
+    icon: FilePlus,
+    label: m.file_creation,
+    providerNamePlaceholder: m.file_creation_provider_name_placeholder,
+    providerManagedNote: m.file_creation_provider_managed_note,
+    forwardIdentityHint: m.file_creation_forward_identity_hint,
+    capabilityHint: m.file_creation_capability_hint,
+    spaceHint: m.file_creation_space_group_hint,
+    noActiveProviderHint: m.file_creation_no_active_provider_hint,
+    notAvailableHereHint: m.file_creation_not_available_here_hint,
+    classificationHint: m.file_creation_classification_hint,
+    bundledDescription: m.tools_builtin_file_creation_description,
+    guide: {
+      hint: m.tools_templates_hint,
+      label: m.tools_templates_guide,
+      url: "https://docs.eneo.ai/guides/capabilities#word-templates"
+    }
   }
 ];
 

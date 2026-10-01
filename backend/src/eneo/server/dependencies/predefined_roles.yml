@@ -9,9 +9,8 @@ roles:
       - shared_spaces
       - web_search
       - image_generation
-      - tabular_analysis
-      - document_creation
-      - spreadsheet_creation
+      - file_analysis
+      - file_creation
 
   - name: 'AI Configurator'
     permissions:
@@ -28,9 +27,8 @@ roles:
       - assistant_debug
       - web_search
       - image_generation
-      - tabular_analysis
-      - document_creation
-      - spreadsheet_creation
+      - file_analysis
+      - file_creation
 
   - name: 'Owner'
     permissions:
@@ -54,6 +52,5 @@ roles:
       - assistant_debug
       - web_search
       - image_generation
-      - tabular_analysis
-      - document_creation
-      - spreadsheet_creation
+      - file_analysis
+      - file_creation

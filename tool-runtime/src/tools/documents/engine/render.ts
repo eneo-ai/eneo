@@ -8,7 +8,7 @@ export type Rendered = { buffer: Buffer; pages?: number };
 export async function renderDocument(
   format: ExportFormat,
   document: DocumentSpec,
-  options: { organisationName?: string } = {},
+  options: { organisationName?: string; template?: Buffer } = {},
 ): Promise<Rendered> {
   if (format === "xlsx") {
     if (document.kind !== "sheets") throw new RenderError("A spreadsheet needs sheets.");
@@ -18,8 +18,17 @@ export async function renderDocument(
   if (document.kind !== "markdown") throw new RenderError("A document needs markdown content.");
   if (format === "docx") {
     const { renderDocx } = await import("./docx");
-    return { buffer: await renderDocx(document, options) };
+    const rendered = await renderDocx(document, options);
+    if (!options.template) return { buffer: rendered };
+    const { applyTemplate, TemplateError } = await import("./template");
+    try {
+      return { buffer: await applyTemplate(rendered, options.template) };
+    } catch (error) {
+      if (error instanceof TemplateError) throw new RenderError(error.message);
+      throw error;
+    }
   }
+  if (options.template) throw new RenderError("A template applies to Word (docx) output only.");
   const { renderPdf } = await import("./pdf");
   return renderPdf(document, options);
 }

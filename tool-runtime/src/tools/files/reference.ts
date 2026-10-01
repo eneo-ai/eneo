@@ -8,20 +8,30 @@ import type { CallContext } from "../types";
 const FILE_PATH = /^\/api\/v1\/files\/([0-9a-f-]{36})\/original\/download\/?$/;
 
 /** A file the model names by its signed Eneo URL and filename, both passed unchanged. */
-export const fileReference = z
-  .object({
-    url: z
-      .string()
-      .min(1)
-      .max(8192)
-      .describe("The file's signed Eneo URL, exactly as given in the attachment reference."),
-    filename: z
-      .string()
-      .max(200)
-      .regex(/^[^\x00-\x1f/\\]+\.(csv|xlsx)$/i, "Only .csv and .xlsx files are supported")
-      .describe("The file's name, ending in .csv or .xlsx."),
-  })
-  .strict();
+function referenceTo(extensions: readonly string[]) {
+  const list = extensions.map((extension) => `.${extension}`).join(" and ");
+  return z
+    .object({
+      url: z
+        .string()
+        .min(1)
+        .max(8192)
+        .describe("The file's signed Eneo URL, exactly as given in the attachment reference."),
+      filename: z
+        .string()
+        .max(200)
+        .regex(
+          new RegExp(`^[^\\x00-\\x1f/\\\\]+\\.(${extensions.join("|")})$`, "i"),
+          `Only ${list} files are supported`,
+        )
+        .describe(`The file's name, ending in ${list}.`),
+    })
+    .strict();
+}
+/** A table source: CSV or XLSX. */
+export const fileReference = referenceTo(["csv", "xlsx"]);
+/** A Word document used as a template. */
+export const documentReference = referenceTo(["docx"]);
 export type FileReference = z.infer<typeof fileReference>;
 
 export type ReferenceAccess = {

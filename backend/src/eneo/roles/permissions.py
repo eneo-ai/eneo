@@ -36,9 +36,8 @@ class Permission(str, Enum):
     # stays generic: Permission(purpose).
     WEB_SEARCH = "web_search"
     IMAGE_GENERATION = "image_generation"
-    TABULAR_ANALYSIS = "tabular_analysis"
-    DOCUMENT_CREATION = "document_creation"
-    SPREADSHEET_CREATION = "spreadsheet_creation"
+    FILE_ANALYSIS = "file_analysis"
+    FILE_CREATION = "file_creation"
 
 
 def validate_permissions(permission: Permission) -> Callable[[_F], _F]:

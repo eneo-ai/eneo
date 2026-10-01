@@ -10290,11 +10290,7 @@ export interface components {
     AskAssistant: {
       /** Disabled Capabilities */
       disabled_capabilities?: (
-        | "web_search"
-        | "image_generation"
-        | "tabular_analysis"
-        | "document_creation"
-        | "spreadsheet_creation"
+        "web_search" | "image_generation" | "file_analysis" | "file_creation"
       )[];
       /** Disabled Mcp Server Ids */
       disabled_mcp_server_ids?: string[];
@@ -10374,14 +10370,7 @@ export interface components {
       logging_enabled?: boolean | null;
       /** Enabled Capabilities */
       enabled_capabilities?:
-        | (
-            | "web_search"
-            | "image_generation"
-            | "tabular_analysis"
-            | "document_creation"
-            | "spreadsheet_creation"
-          )[]
-        | null;
+        ("web_search" | "image_generation" | "file_analysis" | "file_creation")[] | null;
       /**
        * Space Id
        * Format: uuid
@@ -10564,11 +10553,7 @@ export interface components {
       id: string;
       /** Enabled Capabilities */
       enabled_capabilities?: (
-        | "web_search"
-        | "image_generation"
-        | "tabular_analysis"
-        | "document_creation"
-        | "spreadsheet_creation"
+        "web_search" | "image_generation" | "file_analysis" | "file_creation"
       )[];
       /** Available Capabilities */
       available_capabilities?: components["schemas"]["CapabilityAvailability"][];
@@ -11319,12 +11304,7 @@ export interface components {
        * Purpose
        * @enum {string}
        */
-      purpose:
-        | "web_search"
-        | "image_generation"
-        | "tabular_analysis"
-        | "document_creation"
-        | "spreadsheet_creation";
+      purpose: "web_search" | "image_generation" | "file_analysis" | "file_creation";
       /** Available */
       available: boolean;
       /** Reason */
@@ -11999,11 +11979,7 @@ export interface components {
       disabled_mcp_server_ids?: string[];
       /** Disabled Capabilities */
       disabled_capabilities?: (
-        | "web_search"
-        | "image_generation"
-        | "tabular_analysis"
-        | "document_creation"
-        | "spreadsheet_creation"
+        "web_search" | "image_generation" | "file_analysis" | "file_creation"
       )[];
     };
     /** Counts */
@@ -12421,14 +12397,7 @@ export interface components {
       name: string;
       /** Enabled Capabilities */
       enabled_capabilities?:
-        | (
-            | "web_search"
-            | "image_generation"
-            | "tabular_analysis"
-            | "document_creation"
-            | "spreadsheet_creation"
-          )[]
-        | null;
+        ("web_search" | "image_generation" | "file_analysis" | "file_creation")[] | null;
       from_template?: components["schemas"]["TemplateCreate"] | null;
     };
     /** CreateSpaceGroupsRequest */
@@ -12749,11 +12718,7 @@ export interface components {
       id: string;
       /** Enabled Capabilities */
       enabled_capabilities?: (
-        | "web_search"
-        | "image_generation"
-        | "tabular_analysis"
-        | "document_creation"
-        | "spreadsheet_creation"
+        "web_search" | "image_generation" | "file_analysis" | "file_creation"
       )[];
       /** Available Capabilities */
       available_capabilities?: components["schemas"]["CapabilityAvailability"][];
@@ -12966,19 +12931,11 @@ export interface components {
       available_capabilities?: components["schemas"]["CapabilityAvailability"][];
       /** Enabled Capabilities */
       enabled_capabilities?: (
-        | "web_search"
-        | "image_generation"
-        | "tabular_analysis"
-        | "document_creation"
-        | "spreadsheet_creation"
+        "web_search" | "image_generation" | "file_analysis" | "file_creation"
       )[];
       /** Default Disabled Capabilities */
       default_disabled_capabilities?: (
-        | "web_search"
-        | "image_generation"
-        | "tabular_analysis"
-        | "document_creation"
-        | "spreadsheet_creation"
+        "web_search" | "image_generation" | "file_analysis" | "file_creation"
       )[];
       /** Models Enforced */
       models_enforced: boolean;
@@ -14860,13 +14817,7 @@ export interface components {
        * @default general
        * @enum {string}
        */
-      purpose?:
-        | "general"
-        | "web_search"
-        | "image_generation"
-        | "tabular_analysis"
-        | "document_creation"
-        | "spreadsheet_creation";
+      purpose?: "general" | "web_search" | "image_generation" | "file_analysis" | "file_creation";
       /** Description */
       description?: string | null;
       /** Http Auth Config Schema */
@@ -14950,13 +14901,7 @@ export interface components {
        * @default general
        * @enum {string}
        */
-      purpose?:
-        | "general"
-        | "web_search"
-        | "image_generation"
-        | "tabular_analysis"
-        | "document_creation"
-        | "spreadsheet_creation";
+      purpose?: "general" | "web_search" | "image_generation" | "file_analysis" | "file_creation";
       /** Image Model Id */
       image_model_id?: string | null;
       image_model?: components["schemas"]["MCPServerBackingModelPublic"] | null;
@@ -15079,13 +15024,7 @@ export interface components {
        * @default general
        * @enum {string}
        */
-      purpose?:
-        | "general"
-        | "web_search"
-        | "image_generation"
-        | "tabular_analysis"
-        | "document_creation"
-        | "spreadsheet_creation";
+      purpose?: "general" | "web_search" | "image_generation" | "file_analysis" | "file_creation";
       /** Image Model Id */
       image_model_id?: string | null;
       image_model?: components["schemas"]["MCPServerBackingModelPublic"] | null;
@@ -15291,15 +15230,7 @@ export interface components {
       http_auth_type?: ("none" | "bearer" | "api_key_header" | "internal") | null;
       /** Purpose */
       purpose?:
-        | (
-            | "general"
-            | "web_search"
-            | "image_generation"
-            | "tabular_analysis"
-            | "document_creation"
-            | "spreadsheet_creation"
-          )
-        | null;
+        ("general" | "web_search" | "image_generation" | "file_analysis" | "file_creation") | null;
       /** Description */
       description?: string | null;
       /** Http Auth Config Schema */
@@ -17257,14 +17188,7 @@ export interface components {
       logging_enabled?: boolean | null;
       /** Enabled Capabilities */
       enabled_capabilities?:
-        | (
-            | "web_search"
-            | "image_generation"
-            | "tabular_analysis"
-            | "document_creation"
-            | "spreadsheet_creation"
-          )[]
-        | null;
+        ("web_search" | "image_generation" | "file_analysis" | "file_creation")[] | null;
       /** Space Id */
       space_id?: string | null;
       prompt?: components["schemas"]["PromptCreate"] | null;
@@ -17437,14 +17361,7 @@ export interface components {
     PartialUpdateSpaceRequest: {
       /** Enabled Capabilities */
       enabled_capabilities?:
-        | (
-            | "web_search"
-            | "image_generation"
-            | "tabular_analysis"
-            | "document_creation"
-            | "spreadsheet_creation"
-          )[]
-        | null;
+        ("web_search" | "image_generation" | "file_analysis" | "file_creation")[] | null;
       /** Name */
       name?: string | null;
       /** Description */
@@ -17596,9 +17513,8 @@ export interface components {
       | "assistant_debug"
       | "web_search"
       | "image_generation"
-      | "tabular_analysis"
-      | "document_creation"
-      | "spreadsheet_creation";
+      | "file_analysis"
+      | "file_creation";
     /** PermissionPublic */
     PermissionPublic: {
       name: components["schemas"]["Permission"];
@@ -17643,12 +17559,7 @@ export interface components {
        * Purpose
        * @enum {string}
        */
-      purpose:
-        | "web_search"
-        | "image_generation"
-        | "tabular_analysis"
-        | "document_creation"
-        | "spreadsheet_creation";
+      purpose: "web_search" | "image_generation" | "file_analysis" | "file_creation";
       /**
        * Is Default Enabled
        * @default true
@@ -19901,11 +19812,7 @@ export interface components {
       data_retention_days?: number | null;
       /** Enabled Capabilities */
       enabled_capabilities?: (
-        | "web_search"
-        | "image_generation"
-        | "tabular_analysis"
-        | "document_creation"
-        | "spreadsheet_creation"
+        "web_search" | "image_generation" | "file_analysis" | "file_creation"
       )[];
       /** Available Capabilities */
       available_capabilities?: components["schemas"]["CapabilityAvailability"][];
@@ -21488,13 +21395,7 @@ export interface components {
     /** UpdateSpaceDryRunResponse */
     UpdateSpaceDryRunResponse: {
       /** Capabilities */
-      capabilities?: (
-        | "web_search"
-        | "image_generation"
-        | "tabular_analysis"
-        | "document_creation"
-        | "spreadsheet_creation"
-      )[];
+      capabilities?: ("web_search" | "image_generation" | "file_analysis" | "file_creation")[];
       /** Assistants */
       assistants: components["schemas"]["AssistantSparse"][];
       /** Group Chats */
@@ -43305,14 +43206,7 @@ export interface operations {
       query?: {
         tags?: string[] | null;
         purpose?:
-          | (
-              | "general"
-              | "web_search"
-              | "image_generation"
-              | "tabular_analysis"
-              | "document_creation"
-              | "spreadsheet_creation"
-            )
+          | ("general" | "web_search" | "image_generation" | "file_analysis" | "file_creation")
           | null;
       };
       header?: never;
@@ -43414,14 +43308,7 @@ export interface operations {
     parameters: {
       query?: {
         purpose?:
-          | (
-              | "general"
-              | "web_search"
-              | "image_generation"
-              | "tabular_analysis"
-              | "document_creation"
-              | "spreadsheet_creation"
-            )
+          | ("general" | "web_search" | "image_generation" | "file_analysis" | "file_creation")
           | null;
       };
       header?: never;

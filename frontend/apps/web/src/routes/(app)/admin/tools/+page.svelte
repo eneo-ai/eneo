@@ -498,6 +498,22 @@
                   {/if}
                 </div>
               {/each}
+              {#if capability.guide && sources.length > 0}
+                <!-- Usage guidance lives here and in the docs, not in assistant settings. -->
+                <p class="border-dimmer text-secondary border-t p-5 text-sm">
+                  {capability.guide.hint()}
+                  <!-- eslint-disable svelte/no-navigation-without-resolve -- external docs link -->
+                  <a
+                    href={capability.guide.url}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    class="text-default font-medium underline underline-offset-2"
+                  >
+                    {capability.guide.label()}
+                  </a>
+                  <!-- eslint-enable svelte/no-navigation-without-resolve -->
+                </p>
+              {/if}
             </section>
           {/each}
         </div>

@@ -5,14 +5,14 @@ documentation lives in `docs/deployment/TOOL_RUNTIME.md`.
 
 - `POST /mcp/compute` is a stateless Streamable HTTP MCP endpoint (JSON
   responses) exposing `run_javascript`.
-- `POST /mcp/tabular` exposes `inspect_table`, `query_table` and
+- `POST /mcp/file-analysis` exposes `inspect_table`, `query_table` and
   `assert_table` over signed Eneo attachment URLs. It fetches only from the
   origin Eneo sends in `X-Eneo-File-Origin`.
 - `POST /mcp/charts` (`create_chart`) returns PNG charts as MCP image blocks,
   from inline series or a CSV/XLSX source file.
-- `POST /mcp/documents` (`create_document`, DOCX or PDF from Markdown) and
-  `POST /mcp/spreadsheets` (`create_spreadsheet`, XLSX) return the file as an
-  embedded resource that Eneo saves in the conversation.
+- `POST /mcp/file-creation` (`create_document`, DOCX or PDF from Markdown,
+  optionally into a Word template; `create_spreadsheet`, XLSX) returns the
+  file as an embedded resource that Eneo saves in the conversation.
 - `GET /health/live` and `GET /health/ready` are the health endpoints.
 
 ## Layout
@@ -58,7 +58,7 @@ bun run dev
 
 The devcontainer sets `TOOL_RUNTIME_URL=http://localhost:3010` and a shared dev
 `TOOL_RUNTIME_TOKEN` for both processes, so **Admin > Tools > MCP servers**
-offers **Add bundled compute** right away. Tabular analysis fetches from whatever the backend's
+offers the servers built into Eneo right away. Tabular analysis fetches from whatever the backend's
 `FILE_REFERENCE_BASE_URL` (or `PUBLIC_ORIGIN`) points at, so that address must
 be reachable from inside the devcontainer. In development the runtime shares the
 devcontainer's network. Only the deployment overlay puts it on an internal

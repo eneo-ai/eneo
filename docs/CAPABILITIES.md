@@ -4,11 +4,10 @@
 **Audience:** Tenant administrators configuring providers, operators tuning limits, developers extending the capability set
 
 Capabilities are functions an assistant can use: **Webbsökning**
-(`web_search`), **Bildgenerering** (`image_generation`), **Analysera
-tabelldata** (`tabular_analysis`), **Skapa dokument** (`document_creation`) and
-**Skapa kalkylblad** (`spreadsheet_creation`). Image generation can run through
-a configured image model or an external MCP server; web search uses an external
-server; tabular analysis, document and spreadsheet creation run in the bundled
+(`web_search`), **Bildgenerering** (`image_generation`), **Fråga fil**
+(`file_analysis`) and **Skapa filer** (`file_creation`). Image generation can
+run through a configured image model or an external MCP server; web search
+uses an external server; file analysis and file creation run in the bundled
 tool runtime or an external MCP server.
 
 ## 1. Configuration and navigation
@@ -44,8 +43,8 @@ activation action identifies the default that will be replaced.
 ## 2. Saved intent and provider lifecycle
 
 Spaces and assistants store enabled_capabilities, a list of purposes
-(web_search, image_generation, tabular_analysis, document_creation,
-spreadsheet_creation). Governance policies store purposes with
+(web_search, image_generation, file_analysis, file_creation). Governance
+policies store purposes with
 is_default_enabled. These rows reference their owner, never a provider.
 They remain intact when a provider is switched, disabled or deleted—even
 when the last provider disappears. A replacement restores availability.
@@ -82,12 +81,11 @@ The backend must be able to reach its own loopback URL (`INTERNAL_MCP_BASE_URL`,
 
 ### Bundled tool runtime providers
 
-Tabular analysis, document creation and spreadsheet creation can be served by
-the bundled tool runtime (`tool-runtime/`, operator guide
-`docs/deployment/TOOL_RUNTIME.md`). **Använd medföljande leverantör** on a
-function card creates the source through
-`POST /api/v1/mcp-servers/bundled/{tool}/`, activating it when the function
-has no active default. The row has `http_auth_type = "bundled"`: its URL comes
+File analysis and file creation can be served by the bundled tool runtime
+(`tool-runtime/`, operator guide `docs/deployment/TOOL_RUNTIME.md`). A function
+card offers it as **Inbyggd i Eneo**: **Slå på** (or the Add source menu)
+creates the source through `POST /api/v1/mcp-servers/bundled/{tool}/`,
+activating it when the function has no active default. The row has `http_auth_type = "bundled"`: its URL comes
 from `TOOL_RUNTIME_URL` and its bearer from `TOOL_RUNTIME_TOKEN` at connect
 time, and the connection fields are read-only. Everything else (audiences,
 permissions, classification, tool approval, replacement) works as for external
@@ -98,14 +96,14 @@ general servers from the MCP servers tab.
 
 For each capability an assistant requests, the provider is attached only when all of these hold:
 
-- the user's role grants the capability permission (the purpose name, for example `web_search` or `tabular_analysis`; roles can be edited under **Admin → Roles**);
+- the user's role grants the capability permission (the purpose name, for example `web_search` or `file_analysis`; roles can be edited under **Admin → Roles**);
 - a provider serves the user: a group-targeted provider covering one of their groups, else the tenant default;
 - the provider has at least one enabled, approved tool;
 - for a built-in provider, its image model is enabled, not deprecated or deleted, and its model provider is active;
 - the provider's security classification (for a built-in provider, its image model's) meets the space's classification;
 - the completion model supports tool calling.
 
-Otherwise the capability is silently unavailable for that turn. Service API keys can use web search only: generated images, documents and spreadsheets are stored as files owned by a user, a service key has no user, and tabular analysis is not in the service-key permission set.
+Otherwise the capability is silently unavailable for that turn. Service API keys can use web search only: generated images and files are stored as files owned by a user, a service key has no user, and file analysis is not in the service-key permission set.
 
 Conversation requests carry purpose-based disabled_capabilities; ordinary server opt-outs remain in disabled_mcp_server_ids. The chat toolbar persists purpose keys, so an opt-out survives a provider switch.
 
@@ -142,9 +140,8 @@ A binary embedded resource (`resource` with `blob`) becomes a generated file onl
 
 | Purpose | Types |
 |---------|-------|
-| `document_creation` | DOCX, PDF |
-| `spreadsheet_creation` | XLSX |
-| `tabular_analysis` | CSV |
+| `file_creation` | DOCX, PDF, XLSX |
+| `file_analysis` | CSV |
 
 Every other blob is stripped by the proxy, so the resource stays an ordinary result and bytes never reach the model, which sees `[File N (name) ...]`. `files/generated_documents.py` then checks the bytes: OOXML packages are bounded (entries, expansion ratio) and must not contain macros, embedded objects, unsafe paths or non-hyperlink external relationships; PDFs must be complete and contain no JavaScript, launch actions, embedded files, rich media or XFA; CSV must be UTF-8 without NUL bytes. Accepted documents are prepared like uploads (exact original plus extracted text), linked to the question and the tool call, and shown as download chips. A refused document is logged and skipped. Limits: `MCP_TOOL_FILE_MAX_BYTES` (20 MiB) and `MCP_TOOL_FILE_MAX_COUNT` (4) per tool result.
 
@@ -167,8 +164,8 @@ Whether a capability should be served by a built-in loopback server at all, and 
 
 ## 6. Deployment and client changes
 
-Ship migrations **202609041000**, **202609241000** (`tabular_analysis`) and
-**202609301000** (`document_creation`, `spreadsheet_creation`), backend,
+Ship migrations **202609041000** and **202610011000** (`file_analysis`,
+`file_creation`), backend,
 frontend and the bundled JavaScript client together. The migration backfills active and inactive capability
 attachments, collapses duplicate purposes, preserves a policy default as on
 when any duplicate was on, and removes obsolete provider attachments and

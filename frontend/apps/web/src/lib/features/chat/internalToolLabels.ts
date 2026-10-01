@@ -149,17 +149,13 @@ const CAPABILITY_STEPS: Record<
     }
   },
   image_generation: INTERNAL_SERVERS.image_generation.tools.generate_image,
-  tabular_analysis: {
-    running: () => m.tool_tabular_analysis(),
-    done: () => m.tool_tabular_analysis_done()
+  file_analysis: {
+    running: () => m.tool_file_analysis(),
+    done: () => m.tool_file_analysis_done()
   },
-  document_creation: {
-    running: () => m.tool_document_creation(),
-    done: () => m.tool_document_creation_done()
-  },
-  spreadsheet_creation: {
-    running: () => m.tool_spreadsheet_creation(),
-    done: () => m.tool_spreadsheet_creation_done()
+  file_creation: {
+    running: () => m.tool_file_creation(),
+    done: () => m.tool_file_creation_done()
   }
 };
 

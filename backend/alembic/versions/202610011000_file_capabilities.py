@@ -1,15 +1,16 @@
-"""Add the document_creation and spreadsheet_creation capability purposes
+"""Add the file_analysis and file_creation capability purposes
 
-Spaces, assistants and governance policies may now save
-``document_creation`` and ``spreadsheet_creation`` as capabilities, governed by
-permissions of the same names. Both are granted to the predefined User, AI
-Configurator and Owner roles (as with tabular analysis); custom roles are left
-unchanged for tenant admins to opt in. The YAML template in
+Spaces, assistants and governance policies may now save ``file_analysis``
+(questions about attached files) and ``file_creation`` (Word, PDF and Excel
+output) as capabilities, governed by permissions of the same names. Both are
+granted to the predefined User, AI Configurator and Owner roles (matching web
+search and image generation). Custom roles are left unchanged: tenant admins
+opt their own roles in. The YAML template in
 ``server/dependencies/predefined_roles.yml`` covers new tenants.
 
-Revision ID: 202609301000
-Revises: 202609241000
-Create Date: 2026-09-29
+Revision ID: 202610011000
+Revises: 202609291000
+Create Date: 2026-10-01
 
 """
 
@@ -18,8 +19,8 @@ import sqlalchemy as sa
 from alembic import op
 
 # revision identifiers, used by Alembic.
-revision = "202609301000"
-down_revision = "202609241000"
+revision = "202610011000"
+down_revision = "202609291000"
 branch_labels = None
 depends_on = None
 
@@ -28,8 +29,8 @@ _CONSTRAINTS = (
     ("assistant_capabilities", "ck_assistant_capability_purpose"),
     ("governance_policy_capabilities", "ck_policy_capability_purpose"),
 )
-_PREVIOUS = ("web_search", "image_generation", "tabular_analysis")
-_ADDED = ("document_creation", "spreadsheet_creation")
+_PREVIOUS = ("web_search", "image_generation")
+_ADDED = ("file_analysis", "file_creation")
 _PREDEFINED_ROLES = ("User", "AI Configurator", "Owner")
 
 

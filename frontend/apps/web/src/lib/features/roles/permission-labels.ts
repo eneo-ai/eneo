@@ -103,20 +103,15 @@ export function getPermissionCopy(name: string, fallbackDescription: string): En
         label: m.permission_image_generation(),
         description: m.permission_image_generation_description()
       };
-    case "tabular_analysis":
+    case "file_analysis":
       return {
-        label: m.permission_tabular_analysis(),
-        description: m.permission_tabular_analysis_description()
+        label: m.permission_file_analysis(),
+        description: m.permission_file_analysis_description()
       };
-    case "document_creation":
+    case "file_creation":
       return {
-        label: m.permission_document_creation(),
-        description: m.permission_document_creation_description()
-      };
-    case "spreadsheet_creation":
-      return {
-        label: m.permission_spreadsheet_creation(),
-        description: m.permission_spreadsheet_creation_description()
+        label: m.permission_file_creation(),
+        description: m.permission_file_creation_description()
       };
     default:
       // Unknown permission — degrade gracefully: reformat the key so

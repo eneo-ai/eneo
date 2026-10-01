@@ -1,5 +1,5 @@
 // Runs inside sandbox children only; the document libraries never load in the parent.
-import { writeFile } from "node:fs/promises";
+import { readFile, writeFile } from "node:fs/promises";
 import { ToolError } from "../../errors";
 import { RenderError, renderDocument } from "./engine/render";
 import { resolveSources } from "./sources";
@@ -7,10 +7,14 @@ import type { RenderJob, RenderResult } from "./ports";
 
 export async function executeRender(job: RenderJob): Promise<RenderResult> {
   const document = await resolveSources(job.document);
+  const templatePath = document.kind === "markdown" ? document.template?.path : undefined;
+  if (document.kind === "markdown" && document.template && !templatePath)
+    throw new ToolError("RENDER_FAILED", "The template was not downloaded.");
   let rendered;
   try {
     rendered = await renderDocument(job.format, document, {
       organisationName: job.organisationName,
+      ...(templatePath ? { template: await readFile(templatePath) } : {}),
     });
   } catch (error) {
     if (error instanceof RenderError) throw new ToolError("RENDER_FAILED", error.message);

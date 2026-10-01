@@ -1,6 +1,5 @@
-# Optional bundled tool runtime: isolated MCP tools (compute, tabular
-# analysis, document and spreadsheet creation) that Eneo registers through
-# Admin -> Tools.
+# Optional bundled tool runtime: isolated MCP tools (compute, charts, file
+# analysis and file creation) that Eneo registers through Admin -> Tools.
 #
 # Compose this file with docker-compose.yml and enable the tool-runtime profile
 # after setting ENEO_TOOL_RUNTIME_IMAGE (an immutable digest) and
@@ -34,7 +33,7 @@ services:
     environment:
       TOOL_RUNTIME_TOKEN: ${TOOL_RUNTIME_TOKEN:?Set TOOL_RUNTIME_TOKEN in .env (openssl rand -hex 32)}
       MAX_CONCURRENCY: ${TOOL_RUNTIME_MAX_CONCURRENCY:-16}
-      # Tabular analysis fetches attachments from the origin Eneo sends with
+      # File analysis fetches attachments from the origin Eneo sends with
       # each call (its FILE_REFERENCE_BASE_URL). Optionally pin it here as
       # well; a mismatch then fails the call instead of fetching.
       TOOL_RUNTIME_FILE_ORIGINS: ${TOOL_RUNTIME_FILE_ORIGINS:-}

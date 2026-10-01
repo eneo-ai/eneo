@@ -7,9 +7,8 @@ from pydantic import BaseModel
 CapabilityPurpose = Literal[
     "web_search",
     "image_generation",
-    "tabular_analysis",
-    "document_creation",
-    "spreadsheet_creation",
+    "file_analysis",
+    "file_creation",
 ]
 
 

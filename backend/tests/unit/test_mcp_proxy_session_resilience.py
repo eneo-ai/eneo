@@ -1336,7 +1336,7 @@ class TestTruncateToolResult:
         }
 
         admitted = MCPProxySession([])._truncate_tool_result(  # pyright: ignore[reportPrivateUsage]
-            result, "document_creation"
+            result, "file_creation"
         )
 
         assert admitted["content"] == [
@@ -1363,9 +1363,9 @@ class TestTruncateToolResult:
         assert general["content"] == [
             {k: v for k, v in resource.items() if k != "blob"}
         ]
-        # A spreadsheet provider may not deliver a PDF.
+        # A file analysis provider delivers CSV exports, never a PDF.
         sheet = MCPProxySession([])._truncate_tool_result(  # pyright: ignore[reportPrivateUsage]
-            {"content": [resource], "is_error": False}, "spreadsheet_creation"
+            {"content": [resource], "is_error": False}, "file_analysis"
         )
         assert all(block.get("type") != "file" for block in sheet["content"])
         assert all("blob" not in block for block in sheet["content"])
@@ -1392,7 +1392,7 @@ class TestTruncateToolResult:
         }
 
         admitted = MCPProxySession([])._truncate_tool_result(  # pyright: ignore[reportPrivateUsage]
-            result, "document_creation"
+            result, "file_creation"
         )
 
         assert [block["type"] for block in admitted["content"]] == ["text"]

@@ -2,21 +2,20 @@
 
 The tool runtime is an optional container shipped with Eneo. It serves
 Eneo-maintained MCP tools from an isolated process, never from the backend.
-It has two endpoints:
+It has four endpoints:
 
 - `/mcp/compute`: `run_javascript`, restricted compute over JSON. It is added
   as an ordinary MCP server.
-- `/mcp/tabular`: `inspect_table`, `query_table` and `assert_table` over
-  attached CSV and XLSX files. It is added as the provider of the **Tabular
-  analysis** capability (`tabular_analysis`, "Analysera tabelldata" in Swedish).
-- `/mcp/documents`: `create_document`, which renders Word (DOCX) or PDF from
-  Markdown. It provides **Create documents** (`document_creation`).
-- `/mcp/spreadsheets`: `create_spreadsheet`, which builds XLSX workbooks with
-  named sheets and typed cells. It provides **Create spreadsheets**
-  (`spreadsheet_creation`).
+- `/mcp/file-analysis`: `inspect_table`, `query_table` and `assert_table` over
+  attached CSV and XLSX files (more formats will follow). It is added as the
+  provider of the **Ask a file** capability (`file_analysis`, "Fråga fil" in
+  Swedish).
+- `/mcp/file-creation`: `create_document`, which renders Word (DOCX) or PDF
+  from Markdown, optionally into a Word template from the conversation, and
+  `create_spreadsheet`, which builds XLSX workbooks with named sheets and typed
+  cells. It provides **Create files** (`file_creation`).
 - `/mcp/charts`: `create_chart`, which draws bar, line, pie and scatter charts
-  as PNG images. It is added as an ordinary MCP server (**Add bundled
-  charts**).
+  as PNG images. It is added as an ordinary MCP server.
 
 ## Chaining tools without copying data
 
@@ -63,7 +62,7 @@ returns bounded JSON output.
   join. It has no route out even if guest code escaped both the engine and
   the child.
 
-## What the tabular tools can and cannot do
+## What the file analysis tools can and cannot do
 
 The model passes the signed URL of an attachment, exactly as Eneo put it in the
 conversation. The runtime then works as follows:
@@ -89,10 +88,21 @@ conversation. The runtime then works as follows:
    by DuckDB's own parser. Queries are limited to 500 rows, 10 s, 256 MB and
    1 thread.
 
-The tabular server forwards the user's identity, which the cache needs.
+The file analysis server forwards the user's identity, which the cache needs.
 At most `TOOL_RUNTIME_TABULAR_CONCURRENCY` (default 2) DuckDB children run at
 once; other calls wait. Formulas are read as their cached values. Writing
 spreadsheets is not part of this endpoint.
+
+## Word templates
+
+`create_document` takes an optional `template`: the signed reference of a
+`.docx` the user attached in the chat or an administrator attached to the
+assistant. The runtime downloads it under the same policy as other
+attachments, refuses macro-enabled files, and renders the content into it:
+the template keeps its styles, headers, footers, numbering and page setup. A
+paragraph in the template reading `{{content}}` marks where the content goes;
+without one the template's body is replaced. Eneo checks the result like any
+other generated document.
 
 ## Created documents and spreadsheets
 
@@ -100,9 +110,9 @@ The renderers run in a sandbox child and return the file inside the tool result
 as a standard MCP embedded resource. The runtime keeps no copy and serves no
 download links. Eneo then does the following:
 
-1. It admits the file only because the server provides `document_creation`
-   (DOCX, PDF) or `spreadsheet_creation` (XLSX). The same resource from any
-   other server stays an ordinary result.
+1. It admits the file only because the server provides `file_creation`
+   (DOCX, PDF, XLSX). The same resource from any other server stays an
+   ordinary result.
 2. It checks the bytes: OOXML packages must be well-formed, bounded and free of
    macros, embedded objects and externally loaded content. PDFs must be
    complete and free of script, launch actions and embedded files.
@@ -130,7 +140,7 @@ footers.
    and points the backend at `http://tool-runtime:3010`. Nothing goes into
    `env_backend.env` for the runtime itself.
 
-3. For tabular analysis, the runtime must be able to reach Eneo's signed file
+3. For file analysis and Word templates, the runtime must be able to reach Eneo's signed file
    links. In `env_backend.env`:
 
    ```bash
@@ -148,15 +158,16 @@ footers.
      --profile tool-runtime up -d
    ```
 
-5. In **Admin > Tools > MCP servers**, choose **Add bundled compute**. Eneo
-   tests the connection and discovers the tool. Review it, then enable the
-   server in the spaces that should use it.
-6. In **Admin > Tools > Functions**, choose **Use bundled provider** on the
-   **Tabular analysis**, **Create documents** and **Create spreadsheets** cards. If no provider is active yet, it becomes the
-   default. Then enable the capabilities in spaces and assistants. Their
-   permissions (`tabular_analysis`, `document_creation`,
-   `spreadsheet_creation`) are granted to the predefined User, AI Configurator
-   and Owner roles. Custom roles need them added.
+5. In **Admin > Tools > MCP servers**, open **Add MCP Server** and pick
+   **Compute** or **Charts** under *Built into Eneo*. Eneo tests the connection
+   and discovers the tools. Review them, then enable the server in the spaces
+   that should use it.
+6. In **Admin > Tools > Functions**, the **Ask a file** and **Create files**
+   cards offer the provider built into Eneo: **Turn on** adds it and makes it
+   the default when no provider is active yet. Then enable the capabilities in
+   spaces and assistants. Their permissions (`file_analysis`, `file_creation`)
+   are granted to the predefined User, AI Configurator and Owner roles. Custom
+   roles need them added.
 
 ## Rotate the token
 

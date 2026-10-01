@@ -165,26 +165,23 @@ class BundledTool:
 BUNDLED_TOOL_NAMES: dict[str, str] = {
     "compute": "Compute",
     "charts": "Charts",
-    "tabular": "Tabular analysis",
-    "documents": "Documents",
-    "spreadsheets": "Spreadsheets",
+    "file-analysis": "Ask a file",
+    "file-creation": "Create files",
 }
 BUNDLED_TOOL_DESCRIPTIONS: dict[str, str] = {
     "charts": (
         "Draws bar, line, pie and scatter charts as images in an isolated "
         "sandbox, from inline values or a CSV/XLSX file in the conversation."
     ),
-    "tabular": (
-        "Inspects and queries attached CSV and Excel files with DuckDB in an "
-        "isolated sandbox. Files are fetched through short-lived signed links."
+    "file-analysis": (
+        "Answers questions about attached files in an isolated sandbox: CSV "
+        "and Excel files are inspected and queried with DuckDB. Files are "
+        "fetched through short-lived signed links."
     ),
-    "documents": (
-        "Renders Word (DOCX) and PDF documents from Markdown in an isolated "
-        "sandbox. The files are saved in the conversation."
-    ),
-    "spreadsheets": (
-        "Builds Excel (XLSX) workbooks with named sheets and typed cells in an "
-        "isolated sandbox. The files are saved in the conversation."
+    "file-creation": (
+        "Creates Word (DOCX), PDF and Excel (XLSX) files in an isolated "
+        "sandbox, optionally from a Word template in the conversation. The "
+        "files are saved in the conversation."
     ),
     "compute": (
         "Runs JavaScript over JSON in an isolated sandbox for exact "

@@ -10,8 +10,7 @@ Outside the backend there are two kinds of MCP provider:
 
 - an **Eneo-bundled isolated MCP provider**: the optional tool runtime
   (`tool-runtime/` in the repository), released with Eneo and run as its own
-  container. It serves compute, tabular analysis, document and spreadsheet
-  creation, and charts.
+  container. It serves compute, charts, file analysis and file creation.
 - an **independently operated MCP provider**: any MCP server an operator
   connects, run and maintained by someone else.
 
@@ -49,8 +48,8 @@ Three servers are registered:
 /internal-mcp/image_generation/mcp   one tool  (generate_image)
 ```
 
-Web search has no loopback server. Tabular analysis, document and spreadsheet
-creation, compute and charts run in the bundled tool runtime (see
+Web search has no loopback server. File analysis, file creation, compute and
+charts run in the bundled tool runtime (see
 [below](#bundled-isolated-providers)), never in the backend.
 
 ## Two attachment patterns
@@ -159,7 +158,7 @@ writes the SQL. Eneo ships it as a bundled isolated provider: the tool runtime
 receives the signed reference URL, downloads the bytes through the signed
 download endpoint on every call, and runs each query in a separate sandbox
 process with a locked-down DuckDB. An independently operated tabular server
-plugs into the same `tabular_analysis` function the same way: `read_file`
+plugs into the same `file_analysis` function the same way: `read_file`
 already tells the model to prefer "tabular or spreadsheet analysis tools" and
 to pass them the same URL. See [How attachment references interoperate with
 external
@@ -183,11 +182,10 @@ Compose overlay. Operators configure it in `docs/deployment/TOOL_RUNTIME.md`.
 
 | Endpoint | Tools | Registered as |
 |---|---|---|
-| `/mcp/compute` | `run_javascript` | general server (**Add bundled compute**) |
-| `/mcp/charts` | `create_chart` | general server (**Add bundled charts**) |
-| `/mcp/tabular` | `inspect_table`, `query_table`, `assert_table` | `tabular_analysis` source |
-| `/mcp/documents` | `create_document` | `document_creation` source |
-| `/mcp/spreadsheets` | `create_spreadsheet` | `spreadsheet_creation` source |
+| `/mcp/compute` | `run_javascript` | general server (**Compute**, built into Eneo) |
+| `/mcp/charts` | `create_chart` | general server (**Charts**, built into Eneo) |
+| `/mcp/file-analysis` | `inspect_table`, `query_table`, `assert_table` | `file_analysis` source |
+| `/mcp/file-creation` | `create_document`, `create_spreadsheet` | `file_creation` source |
 
 How it differs from a loopback server, and from an independently operated one:
 

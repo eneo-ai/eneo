@@ -36,9 +36,8 @@ GENERAL_PURPOSE = "general"
 CAPABILITY_PURPOSES: tuple[CapabilityPurpose, ...] = (
     "web_search",
     "image_generation",
-    "tabular_analysis",
-    "document_creation",
-    "spreadsheet_creation",
+    "file_analysis",
+    "file_creation",
 )
 
 # Purposes whose providers deliver files. A binary embedded resource of one
@@ -53,11 +52,10 @@ XLSX_MIME_TYPE = "application/vnd.openxmlformats-officedocument.spreadsheetml.sh
 PDF_MIME_TYPE = "application/pdf"
 CSV_MIME_TYPE = "text/csv"
 GENERATED_FILE_TYPES_BY_PURPOSE: dict[str, frozenset[str]] = {
-    "document_creation": frozenset({DOCX_MIME_TYPE, PDF_MIME_TYPE}),
-    "spreadsheet_creation": frozenset({XLSX_MIME_TYPE}),
+    "file_creation": frozenset({DOCX_MIME_TYPE, PDF_MIME_TYPE, XLSX_MIME_TYPE}),
     # A full query result, so large data moves between tools as a file
     # instead of through the model.
-    "tabular_analysis": frozenset({CSV_MIME_TYPE}),
+    "file_analysis": frozenset({CSV_MIME_TYPE}),
 }
 _GENERATED_FILE_EXTENSIONS: dict[str, str] = {
     DOCX_MIME_TYPE: "docx",
@@ -114,7 +112,7 @@ def is_builtin_provider(http_auth_type: str | None) -> bool:
 # credential is ever stored on the row. Only the bundled-server preset creates
 # such rows; the generic create and update API cannot. Each runtime endpoint
 # fixes the purpose its row serves and whether it needs the caller's identity
-# (tabular analysis scopes its parsed-file cache per tenant and user).
+# (file analysis scopes its parsed-file cache per tenant and user).
 BUNDLED_AUTH_TYPE = "bundled"
 
 
@@ -127,11 +125,8 @@ class BundledToolSpec:
 BUNDLED_TOOLS: dict[str, BundledToolSpec] = {
     "compute": BundledToolSpec(purpose=GENERAL_PURPOSE, forward_identity=False),
     "charts": BundledToolSpec(purpose=GENERAL_PURPOSE, forward_identity=False),
-    "tabular": BundledToolSpec(purpose="tabular_analysis", forward_identity=True),
-    "documents": BundledToolSpec(purpose="document_creation", forward_identity=False),
-    "spreadsheets": BundledToolSpec(
-        purpose="spreadsheet_creation", forward_identity=False
-    ),
+    "file-analysis": BundledToolSpec(purpose="file_analysis", forward_identity=True),
+    "file-creation": BundledToolSpec(purpose="file_creation", forward_identity=False),
 }
 
 

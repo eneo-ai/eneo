@@ -127,11 +127,11 @@ class TestCreateBundledTabular:
     ):
         service, _, _ = _make_service(monkeypatch)
 
-        result = await service.create_bundled_mcp_server("tabular")
+        result = await service.create_bundled_mcp_server("file-analysis")
 
         server = result.server
-        assert server.http_url == f"{RUNTIME_URL}/mcp/tabular"
-        assert server.purpose == "tabular_analysis"
+        assert server.http_url == f"{RUNTIME_URL}/mcp/file-analysis"
+        assert server.purpose == "file_analysis"
         assert server.is_enabled is False
         # The runtime scopes its parsed-file cache per tenant and user.
         assert server.forward_identity is True
@@ -145,7 +145,7 @@ class TestCreateBundledTabular:
         )
         monkeypatch.setattr(service, "activate_capability_server", activate)
 
-        await service.create_bundled_mcp_server("tabular", activate=True)
+        await service.create_bundled_mcp_server("file-analysis", activate=True)
 
         activate.assert_awaited_once()
 
@@ -176,8 +176,8 @@ class TestListBundled:
         assert tools["compute"].purpose == "general"
         assert tools["compute"].available is True
         assert tools["compute"].mcp_server_id == added.id
-        assert tools["tabular"].purpose == "tabular_analysis"
-        assert tools["tabular"].mcp_server_id is None
+        assert tools["file-analysis"].purpose == "file_analysis"
+        assert tools["file-analysis"].mcp_server_id is None
 
     async def test_unconfigured_runtime_is_unavailable(self, monkeypatch):
         settings = get_settings().model_copy(update={"tool_runtime_url": None})

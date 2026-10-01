@@ -2,7 +2,13 @@ import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { z } from "zod";
-import { fetchReference, fileReference, type ReferenceAccess } from "../files/reference";
+import { ToolError } from "../../errors";
+import {
+  documentReference,
+  fetchReference,
+  fileReference,
+  type ReferenceAccess,
+} from "../files/reference";
 import { RichResult, type ToolDefinition } from "../types";
 import type { DocumentConfig, ExportFormat } from "./config";
 import { MIME_BY_FORMAT, safeFilename } from "./filename";
@@ -25,10 +31,21 @@ export function fileRenderer(run: (job: RenderJob) => Promise<RenderResult>): Re
     try {
       const outputPath = join(directory, "output");
       for (const [index, bytes] of sources.entries())
-        await writeFile(join(directory, `source-${index}`), bytes, { mode: 0o600 });
+        await writeFile(join(directory, `source-${index}`), bytes, {
+          mode: 0o600,
+        });
       const document: DocumentRequest =
-        request.document.kind === "sheets"
-          ? {
+        request.document.kind === "markdown"
+          ? request.document.template
+            ? {
+                ...request.document,
+                template: {
+                  ...request.document.template,
+                  path: join(directory, `source-${request.document.template.index}`),
+                },
+              }
+            : request.document
+          : {
               ...request.document,
               sheets: request.document.sheets.map((sheet) =>
                 sheet.source
@@ -41,9 +58,13 @@ export function fileRenderer(run: (job: RenderJob) => Promise<RenderResult>): Re
                     }
                   : sheet,
               ),
-            }
-          : request.document;
-      const result = await run({ kind: "render_document", ...request, document, outputPath });
+            };
+      const result = await run({
+        kind: "render_document",
+        ...request,
+        document,
+        outputPath,
+      });
       return { buffer: await readFile(outputPath), pages: result.pages };
     } finally {
       await rm(directory, { recursive: true, force: true });
@@ -95,7 +116,11 @@ async function produce(
   );
 }
 
-export function documentTools(config: DocumentConfig, render: Renderer): ToolDefinition[] {
+export function documentTools(
+  config: DocumentConfig,
+  render: Renderer,
+  access: ReferenceAccess,
+): ToolDefinition[] {
   const input = z.object({
     title: z
       .string()
@@ -117,23 +142,39 @@ export function documentTools(config: DocumentConfig, render: Renderer): ToolDef
       .enum(["sv", "en"])
       .default("sv")
       .describe("Language of the document (footer and metadata)."),
+    template: documentReference
+      .optional()
+      .describe(
+        "Optional Word template: the signed url and filename of a .docx attached in the conversation or by the assistant. The content is rendered into it, keeping its styles, headers, footers and page setup. A paragraph in the template reading {{content}} marks where the content goes; without one the template's body is replaced. Only with format docx.",
+      ),
   });
   return [
     {
       name: "create_document",
       title: "Create document",
       description:
-        "Produce a real document (Word .docx or PDF) from Markdown. Use it when the user asks for a document, report, memo, letter, tjänsteskrivelse or 'as Word/PDF'; write the complete, well-structured content in Markdown with headings, lists and tables. The file is attached to your answer for the user to download: mention it by name and do not paste the whole content back. Every call creates a new file; for a revision call again with the full revised content and say which file replaces which.",
+        "Produce a real document (Word .docx or PDF) from Markdown. Use it when the user asks for a document, report, memo, letter, tjänsteskrivelse or 'as Word/PDF'; write the complete, well-structured content in Markdown with headings, lists and tables. When the user names a Word template or one is attached for that purpose, pass its signed url as template and output docx. The file is attached to your answer for the user to download: mention it by name and do not paste the whole content back. Every call creates a new file; for a revision call again with the full revised content and say which file replaces which.",
       inputSchema: input.shape,
       readOnly: false,
-      async execute(raw) {
+      async execute(raw, ctx) {
         const args = input.parse(raw);
+        if (args.template && args.format !== "docx")
+          throw new ToolError("TEMPLATE_FORMAT", "A template applies to Word (docx) output only.");
+        const sources: Buffer[] = [];
+        if (args.template) sources.push((await fetchReference(args.template, ctx, access)).bytes);
         return produce(
           render,
           config,
           args.format,
           safeFilename(args.filename ?? args.title, args.format),
-          { kind: "markdown", title: args.title, content: args.content, language: args.language },
+          {
+            kind: "markdown",
+            title: args.title,
+            content: args.content,
+            language: args.language,
+            ...(args.template ? { template: { index: 0 } } : {}),
+          },
+          sources,
         );
       },
     },
@@ -203,7 +244,11 @@ export function spreadsheetTools(
         const sheets: SheetRequest[] = [];
         for (const sheet of args.sheets) {
           if (!sheet.source) {
-            sheets.push({ name: sheet.name, columns: sheet.columns, rows: sheet.rows ?? [] });
+            sheets.push({
+              name: sheet.name,
+              columns: sheet.columns,
+              rows: sheet.rows ?? [],
+            });
             continue;
           }
           const file = await fetchReference(sheet.source, ctx, access);

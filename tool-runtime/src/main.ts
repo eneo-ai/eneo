@@ -33,7 +33,7 @@ const slot = concurrencyLimit(config.tabular.concurrency);
 const ingestTimeoutMs = 25_000;
 const queryJobTimeoutMs = Math.min(tabular.query_timeout_ms + 10_000, 30_000);
 endpoints.push({
-  slug: "tabular",
+  slug: "file-analysis",
   requiresIdentity: true,
   toolTimeoutMs: 55_000,
   tools: tabularTools({
@@ -43,7 +43,10 @@ endpoints.push({
     executor: {
       ingest: (job) =>
         slot(
-          async () => (await runIsolated({ job }, ingestTimeoutMs)) as { sheets: SheetMetadata[] },
+          async () =>
+            (await runIsolated({ job }, ingestTimeoutMs)) as {
+              sheets: SheetMetadata[];
+            },
         ),
       query: (job) =>
         slot(
@@ -55,23 +58,24 @@ endpoints.push({
 
 // Rendering shares the native-job slots: a large workbook or PDF is as heavy as a query.
 const renderTimeoutMs = 25_000;
+// Sheet sources and Word templates download under the same policy as attachments.
+const fileAccess = {
+  allowedFileOrigins: config.tabular.allowedFileOrigins,
+  maxBytes: tabular.max_upload_bytes,
+  timeoutMs: tabular.download_timeout_ms,
+};
 const render = fileRenderer((job) =>
   slot(async () => (await runIsolated({ job }, renderTimeoutMs)) as RenderResult),
 );
+// One endpoint creates every kind of file, so one Eneo provider serves the capability.
 endpoints.push(
   {
-    slug: "documents",
+    slug: "file-creation",
     toolTimeoutMs: renderTimeoutMs + 5_000,
-    tools: documentTools(config.documents, render),
-  },
-  {
-    slug: "spreadsheets",
-    toolTimeoutMs: renderTimeoutMs + 5_000,
-    tools: spreadsheetTools(config.documents, render, {
-      allowedFileOrigins: config.tabular.allowedFileOrigins,
-      maxBytes: tabular.max_upload_bytes,
-      timeoutMs: tabular.download_timeout_ms,
-    }),
+    tools: [
+      ...documentTools(config.documents, render, fileAccess),
+      ...spreadsheetTools(config.documents, render, fileAccess),
+    ],
   },
   {
     slug: "charts",

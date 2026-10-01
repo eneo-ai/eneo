@@ -7,15 +7,24 @@ export type SheetSpec = {
   columns: string[];
   rows: Cell[][];
 };
+/**
+ * A downloaded file a render job takes as input. `index` points into the render request's
+ * sources; the renderer fills in `path`, a file in its own directory.
+ */
+export type FileSource = { index: number; path?: string };
 export type DocumentSpec =
-  | { kind: "markdown"; title: string; content: string; language: "sv" | "en" }
+  | {
+      kind: "markdown";
+      title: string;
+      content: string;
+      language: "sv" | "en";
+      /** A downloaded Word document the content is rendered into (DOCX output only). */
+      template?: FileSource;
+    }
   | { kind: "sheets"; title: string; sheets: SheetSpec[] };
 
-/**
- * A sheet read from a downloaded CSV or XLSX file instead of inline rows. `index` points into
- * the render request's sources; the renderer fills in `path`, a file in its own directory.
- */
-export type SheetSource = { index: number; isXlsx: boolean; sheet?: string; path?: string };
+/** A sheet read from a downloaded CSV or XLSX file instead of inline rows. */
+export type SheetSource = FileSource & { isXlsx: boolean; sheet?: string };
 export type SheetRequest = {
   name: string;
   columns?: string[];

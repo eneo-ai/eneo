@@ -88,7 +88,10 @@ describe("markdown", () => {
       ReturnType<typeof parseMarkdown>[number],
       { type: "paragraph" }
     >;
-    expect(image.runs[0]).toMatchObject({ text: "Bild av torget", italic: true });
+    expect(image.runs[0]).toMatchObject({
+      text: "Bild av torget",
+      italic: true,
+    });
     const html = blocks[11] as Extract<
       ReturnType<typeof parseMarkdown>[number],
       { type: "paragraph" }
@@ -141,6 +144,44 @@ describe("filenames", () => {
     expect(contentDisposition('a";b.pdf')).not.toContain('";b');
   });
 });
+/** A Word-like template: header, footer, its own list and either a placeholder or sample text. */
+async function makeTemplate(bodyText: string): Promise<Buffer> {
+  const { Document, Footer, Header, LevelFormat, Packer, Paragraph, TextRun } =
+    await import("docx");
+  const doc = new Document({
+    numbering: {
+      config: [
+        {
+          reference: "tpl-list",
+          levels: [{ level: 0, format: LevelFormat.LOWER_LETTER, text: "%1)" }],
+        },
+      ],
+    },
+    sections: [
+      {
+        headers: {
+          default: new Header({
+            children: [new Paragraph("Sundsvalls kommun")],
+          }),
+        },
+        footers: {
+          default: new Footer({ children: [new Paragraph("Sidfot")] }),
+        },
+        children: [
+          new Paragraph({
+            children: [new TextRun("Punkt")],
+            numbering: { reference: "tpl-list", level: 0 },
+          }),
+          new Paragraph({
+            children: [new TextRun("{{con"), new TextRun("tent}}")],
+          }),
+          new Paragraph(bodyText),
+        ],
+      },
+    ],
+  });
+  return Buffer.from(await Packer.toBuffer(doc));
+}
 describe("engines", () => {
   const document = {
     kind: "markdown" as const,
@@ -149,7 +190,9 @@ describe("engines", () => {
     language: "sv" as const,
   };
   test("docx contains the text, escapes markup and carries a page break", async () => {
-    const { buffer } = await renderDocument("docx", document, { organisationName: "Kommunen" });
+    const { buffer } = await renderDocument("docx", document, {
+      organisationName: "Kommunen",
+    });
     expect(buffer.subarray(0, 2).toString("hex")).toBe("504b");
     const xml = await unzipText(buffer, "word/document.xml");
     expect(xml).toContain("Tjänsteskrivelse");
@@ -203,6 +246,69 @@ describe("engines", () => {
     expect(buffer.includes(Buffer.from("DejaVuSans"))).toBe(true);
     expect(pages).toBeGreaterThanOrEqual(2);
   });
+  test("a template keeps its header, footer and lists around the content", async () => {
+    const template = await makeTemplate("Efter innehållet");
+    const { buffer } = await renderDocument("docx", document, { template });
+    const xml = await unzipText(buffer, "word/document.xml");
+    expect(xml).toContain("Tjänsteskrivelse");
+    expect(xml).toContain("Efter innehållet");
+    expect(xml).not.toContain("content}}");
+    expect(xml.indexOf("Punkt")).toBeLessThan(xml.indexOf("Tjänsteskrivelse"));
+    expect(xml.indexOf("Tjänsteskrivelse")).toBeLessThan(xml.indexOf("Efter innehållet"));
+    expect(xml).toContain("<w:sectPr");
+    expect(await unzipText(buffer, "word/header1.xml")).toContain("Sundsvalls kommun");
+    const numbering = await unzipText(buffer, "word/numbering.xml");
+    // The template's list and both rendered lists (bullets, numbers) coexist.
+    expect(numbering.match(/<w:abstractNum(?=[\s>])/g)?.length).toBeGreaterThanOrEqual(3);
+    const ids = [...xml.matchAll(/w:numId w:val="(\d+)"/g)].map((m) => Number(m[1]));
+    expect(new Set(ids).size).toBeGreaterThan(1);
+    for (const id of ids) expect(numbering).toContain(`w:numId="${id}"`);
+    const rels = await unzipText(buffer, "word/_rels/document.xml.rels");
+    expect(rels).toContain("https://example.org/a");
+    expect(xml).toContain('r:id="rIdEneo1"');
+  });
+  test("a template without a placeholder has its body replaced", async () => {
+    const template = Buffer.from(
+      await (await makeTemplate("Exempeltext")).toString("base64"),
+      "base64",
+    );
+    const stripped = await (async () => {
+      const JSZip = (await import("jszip")).default;
+      const zip = await JSZip.loadAsync(template);
+      const xml = (await zip.file("word/document.xml")!.async("string")).replace(
+        /\{\{con|tent\}\}/g,
+        "",
+      );
+      zip.file("word/document.xml", xml);
+      return Buffer.from(await zip.generateAsync({ type: "nodebuffer" }));
+    })();
+    const { buffer } = await renderDocument("docx", document, {
+      template: stripped,
+    });
+    const xml = await unzipText(buffer, "word/document.xml");
+    expect(xml).toContain("Tjänsteskrivelse");
+    expect(xml).not.toContain("Exempeltext");
+    expect(await unzipText(buffer, "word/footer1.xml")).toContain("Sidfot");
+  });
+  test("refuses templates with macros, non-Word files and PDF output", async () => {
+    const JSZip = (await import("jszip")).default;
+    const zip = await JSZip.loadAsync(await makeTemplate("x"));
+    zip.file(
+      "[Content_Types].xml",
+      (await zip.file("[Content_Types].xml")!.async("string")).replace(
+        "wordprocessingml.document.main+xml",
+        "ms-word.document.macroEnabled.main+xml",
+      ),
+    );
+    const macro = Buffer.from(await zip.generateAsync({ type: "nodebuffer" }));
+    await expect(renderDocument("docx", document, { template: macro })).rejects.toThrow("macros");
+    await expect(
+      renderDocument("docx", document, { template: Buffer.from("not a zip") }),
+    ).rejects.toThrow("not a Word");
+    await expect(
+      renderDocument("pdf", document, { template: await makeTemplate("x") }),
+    ).rejects.toThrow("docx");
+  });
   test("refuses mismatched specs", async () => {
     await expect(renderDocument("xlsx", document)).rejects.toThrow("needs sheets");
   });
@@ -231,10 +337,9 @@ describe("tools", () => {
     `${ORIGIN}/api/v1/files/${SOURCE_ID}/original/download/?token=${token}`;
   const withOrigin: CallContext = { ...context, fileOrigin: ORIGIN };
   const tools = Object.fromEntries(
-    [...documentTools(config, render), ...spreadsheetTools(config, render, access)].map((t) => [
-      t.name,
-      t,
-    ]),
+    [...documentTools(config, render, access), ...spreadsheetTools(config, render, access)].map(
+      (t) => [t.name, t],
+    ),
   );
   const cellsOf = async (result: RichResult) => {
     const workbook = new ExcelJS.Workbook();
@@ -260,7 +365,10 @@ describe("tools", () => {
       {
         title: "Export",
         sheets: [
-          { name: "Data", source: { url: sourceUrl("csv"), filename: "result.csv" } },
+          {
+            name: "Data",
+            source: { url: sourceUrl("csv"), filename: "result.csv" },
+          },
           { name: "Notes", columns: ["note"], rows: [["inline"]] },
         ],
       },
@@ -290,7 +398,11 @@ describe("tools", () => {
           sheets: [
             {
               name: "Kopia",
-              source: { url: sourceUrl("xlsx"), filename: "in.xlsx", ...(sheet ? { sheet } : {}) },
+              source: {
+                url: sourceUrl("xlsx"),
+                filename: "in.xlsx",
+                ...(sheet ? { sheet } : {}),
+              },
             },
           ],
         },
@@ -314,7 +426,10 @@ describe("tools", () => {
     );
     expect(result).toBeInstanceOf(RichResult);
     const { structured, files } = result as RichResult;
-    expect(structured).toMatchObject({ filename: "Rapport Q32026.docx", format: "docx" });
+    expect(structured).toMatchObject({
+      filename: "Rapport Q32026.docx",
+      format: "docx",
+    });
     expect(structured).not.toHaveProperty("download_url");
     const [file] = files;
     expect(file!.mimeType).toBe(
@@ -332,7 +447,10 @@ describe("tools", () => {
 
   test("spreadsheets come back as typed workbooks", async () => {
     const result = (await tools.create_spreadsheet!.execute(
-      { title: "Tabell", sheets: [{ name: "Blad", columns: ["a", "b"], rows: [["=1", 2]] }] },
+      {
+        title: "Tabell",
+        sheets: [{ name: "Blad", columns: ["a", "b"], rows: [["=1", 2]] }],
+      },
       context,
     )) as RichResult;
     const workbook = new ExcelJS.Workbook();
@@ -342,6 +460,50 @@ describe("tools", () => {
     const sheet = workbook.worksheets[0]!;
     expect(sheet.getCell("A2").type).toBe(ExcelJS.ValueType.String);
     expect(sheet.getCell("B2").value).toBe(2);
+  });
+
+  test("a template is fetched by its signed url and applied in the child", async () => {
+    const template = await makeTemplate("Mall");
+    sources.set("tpl", {
+      bytes: template,
+      contentType: "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+    });
+    const result = (await tools.create_document!.execute(
+      {
+        title: "Med mall",
+        content: "# Rubrik\n\nText.",
+        template: { url: sourceUrl("tpl"), filename: "mall.docx" },
+      },
+      withOrigin,
+    )) as RichResult;
+    const xml = await unzipText(Buffer.from(result.files[0]!.blob, "base64"), "word/document.xml");
+    expect(xml).toContain("Rubrik");
+    expect(xml).toContain("Mall");
+    expect(requests.at(-1)!.document).toMatchObject({
+      kind: "markdown",
+      template: { index: 0 },
+    });
+    await expect(
+      tools.create_document!.execute(
+        {
+          title: "x",
+          content: "y",
+          format: "pdf",
+          template: { url: sourceUrl("tpl"), filename: "mall.docx" },
+        },
+        withOrigin,
+      ),
+    ).rejects.toMatchObject({ code: "TEMPLATE_FORMAT" });
+    await expect(
+      tools.create_document!.execute(
+        {
+          title: "x",
+          content: "y",
+          template: { url: sourceUrl("tpl"), filename: "mall.xlsx" },
+        },
+        withOrigin,
+      ),
+    ).rejects.toThrow("Only .docx");
   });
 
   test("the documents endpoint offers only document formats", async () => {
@@ -354,7 +516,12 @@ describe("tools", () => {
     await expect(
       render({
         format: "pdf",
-        document: { kind: "markdown", title: "Stor", content: "Text", language: "sv" },
+        document: {
+          kind: "markdown",
+          title: "Stor",
+          content: "Text",
+          language: "sv",
+        },
         maxBytes: 1000,
       }),
     ).rejects.toMatchObject({ code: "EXPORT_TOO_LARGE" });
@@ -362,11 +529,20 @@ describe("tools", () => {
 
   test("renders in a sandbox child through a parent-owned output file", async () => {
     const childRender = fileRenderer(
-      async (job) => (await runIsolated({ job }, 25_000)) as { bytes: number; pages?: number },
+      async (job) =>
+        (await runIsolated({ job }, 25_000)) as {
+          bytes: number;
+          pages?: number;
+        },
     );
     const { buffer, pages } = await childRender({
       format: "pdf",
-      document: { kind: "markdown", title: "Barn", content: "Hej", language: "sv" },
+      document: {
+        kind: "markdown",
+        title: "Barn",
+        content: "Hej",
+        language: "sv",
+      },
       maxBytes: config.max_export_bytes,
     });
     expect(buffer.subarray(0, 5).toString()).toBe("%PDF-");
