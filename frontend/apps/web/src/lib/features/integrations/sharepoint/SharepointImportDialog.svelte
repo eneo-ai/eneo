@@ -15,6 +15,7 @@
     Trash2,
     Users
   } from "@lucide/svelte";
+  import HighlightedText from "$lib/components/HighlightedText.svelte";
   import * as Alert from "$lib/components/ui/alert/index.js";
   import { Badge } from "$lib/components/ui/badge/index.js";
   import { Button } from "$lib/components/ui/button/index.js";
@@ -615,7 +616,12 @@
                         onSelect={() => handleSiteSelect(previewItem.value)}
                       >
                         <CategoryIcon class="text-muted-foreground size-4" aria-hidden="true" />
-                        <span class="min-w-0 flex-1 truncate">{previewItem.label}</span>
+                        <span class="min-w-0 flex-1 truncate">
+                          <HighlightedText
+                            text={previewItem.label}
+                            query={sourceFilter.trim().toLowerCase()}
+                          />
+                        </span>
                       </Command.Item>
                     {/each}
                   </Command.Group>

@@ -1,5 +1,6 @@
 <script lang="ts">
   import { m } from "$lib/paraglide/messages";
+  import HighlightedText from "$lib/components/HighlightedText.svelte";
   import { formatSourceMetadataValue, type SourceMetadataEntry } from "../sourceMetadata";
 
   /**
@@ -13,10 +14,13 @@
   let {
     entries,
     variant = "list",
+    highlight = "",
     class: className = ""
   }: {
     entries: SourceMetadataEntry[];
     variant?: "list" | "inline";
+    /** Normalised search query whose occurrences are marked in labels and values. */
+    highlight?: string;
     class?: string;
   } = $props();
 
@@ -31,8 +35,10 @@
     >
       {#each entries as entry (entry.name)}
         <div class="inline-flex gap-1">
-          <dt class="opacity-80">{entry.label}:</dt>
-          <dd class="font-medium">{formatSourceMetadataValue(entry, labels)}</dd>
+          <dt class="opacity-80"><HighlightedText text={entry.label} query={highlight} />:</dt>
+          <dd class="font-medium">
+            <HighlightedText text={formatSourceMetadataValue(entry, labels)} query={highlight} />
+          </dd>
         </div>
       {/each}
     </dl>
@@ -42,8 +48,12 @@
       class={["grid grid-cols-[max-content_1fr] gap-x-4 gap-y-1 text-sm", className]}
     >
       {#each entries as entry (entry.name)}
-        <dt class="text-muted-foreground">{entry.label}</dt>
-        <dd class="break-words">{formatSourceMetadataValue(entry, labels)}</dd>
+        <dt class="text-muted-foreground">
+          <HighlightedText text={entry.label} query={highlight} />
+        </dt>
+        <dd class="break-words">
+          <HighlightedText text={formatSourceMetadataValue(entry, labels)} query={highlight} />
+        </dd>
       {/each}
     </dl>
   {/if}

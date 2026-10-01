@@ -12,6 +12,7 @@
   } from "@lucide/svelte";
   import { Button } from "$lib/components/ui/button/index.js";
   import { Checkbox } from "$lib/components/ui/checkbox/index.js";
+  import HighlightedText from "$lib/components/HighlightedText.svelte";
   import { m } from "$lib/paraglide/messages";
   import { formatFileSize, formatModifiedDate } from "./format";
   import SourceMetadataList from "$lib/features/knowledge/components/SourceMetadataList.svelte";
@@ -124,7 +125,7 @@
             <Folder class="text-muted-foreground size-4 shrink-0" aria-hidden="true" />
           {/if}
           <span class="min-w-0 flex-1 truncate text-left" title={currentNode.name}>
-            {currentNode.name}
+            <HighlightedText text={currentNode.name} {query} />
           </span>
           {#if currentNode.modified}
             <span class="text-muted-foreground hidden shrink-0 text-xs tabular-nums lg:inline">
@@ -140,7 +141,7 @@
           <span class="size-4 shrink-0" aria-hidden="true"></span>
           <Folder class="text-muted-foreground size-4 shrink-0" aria-hidden="true" />
           <span class="min-w-0 flex-1 truncate text-left" title={currentNode.name}>
-            {currentNode.name}
+            <HighlightedText text={currentNode.name} {query} />
           </span>
           <span class="text-muted-foreground hidden shrink-0 text-xs md:inline">
             {m.sharepoint_empty_folder()}
@@ -163,13 +164,16 @@
             <File class="text-muted-foreground size-4 shrink-0" aria-hidden="true" />
           {/if}
           <span class="flex min-w-0 flex-1 flex-col text-left">
-            <span class="truncate" title={currentNode.name}>{currentNode.name}</span>
+            <span class="truncate" title={currentNode.name}>
+              <HighlightedText text={currentNode.name} {query} />
+            </span>
             {#if hasSourceMetadata(currentNode)}
               <!-- The library columns that follow the file on import: lets a
                    person see what becomes searchable before choosing. -->
               <SourceMetadataList
                 entries={currentNode.source_metadata}
                 variant="inline"
+                highlight={query}
                 class="text-muted-foreground text-xs"
               />
             {/if}
