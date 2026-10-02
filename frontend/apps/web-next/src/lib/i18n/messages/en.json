@@ -5943,5 +5943,7 @@
   "audit_retention_saved": "The retention period has been saved.",
   "admin_crawler_no_runs_title": "No runs yet",
   "admin_crawler_no_runs_description": "Runs show up here once a website has been crawled. Add a website under Knowledge to get started.",
-  "admin_crawler_go_to_websites": "Go to websites"
+  "admin_crawler_go_to_websites": "Go to websites",
+  "space_default_assistant_named": "{space} assistant",
+  "space_default_assistant": "Space assistant"
 }

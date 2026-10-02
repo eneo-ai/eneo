@@ -1,5 +1,6 @@
 "use client";
 
+import { IconTile, type IconTileHue } from "@/components/composites/icon-tile";
 import { useQuery } from "@tanstack/react-query";
 import { ChevronRight, FileText, ListChecks, PenLine, type LucideIcon } from "lucide-react";
 import Link from "next/link";
@@ -39,13 +40,13 @@ export function BrandMark({ className }: { className?: string }) {
 type Starter = {
   key: "summarize" | "draft" | "plan";
   icon: LucideIcon;
-  tone: string;
+  hue: IconTileHue;
 };
 
 const STARTERS: Starter[] = [
-  { key: "summarize", icon: FileText, tone: "bg-ax-blue-muted text-ax-blue" },
-  { key: "draft", icon: PenLine, tone: "bg-ax-purple-muted text-ax-purple" },
-  { key: "plan", icon: ListChecks, tone: "bg-ax-teal-muted text-ax-teal" }
+  { key: "summarize", icon: FileText, hue: "blue" },
+  { key: "draft", icon: PenLine, hue: "purple" },
+  { key: "plan", icon: ListChecks, hue: "teal" }
 ];
 
 const STARTER_TEXT = {
@@ -218,15 +219,7 @@ export function StartState({
                       onClick={() => onPickStarter(t(text.prompt))}
                       className="border-ax-border hover:bg-ax-hover focus-visible:outline-ring flex w-full items-start gap-3 rounded-[0.875rem] border p-3.5 text-start focus-visible:outline-2 focus-visible:outline-offset-2"
                     >
-                      <span
-                        aria-hidden="true"
-                        className={cn(
-                          "rounded-ax-inner flex size-8 shrink-0 items-center justify-center",
-                          starter.tone
-                        )}
-                      >
-                        <Icon className="size-4" />
-                      </span>
+                      <IconTile icon={<Icon />} hue={starter.hue} size="sm" />
                       <span className="flex flex-col gap-0.5">
                         <span className="font-semibold">{t(text.label)}</span>
                         <span className="text-ax-text-secondary text-[12.5px] leading-snug">

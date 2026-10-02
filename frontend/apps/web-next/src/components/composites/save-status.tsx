@@ -2,7 +2,8 @@
 
 import { Check, CircleAlert, Loader2, OctagonX } from "lucide-react";
 import { useTranslations } from "next-intl";
-import { createContext, useCallback, useContext, useMemo, useState } from "react";
+import { createContext, useCallback, useContext, useEffect, useMemo, useState } from "react";
+import { useAnnounce } from "@astryxdesign/core/hooks";
 import { useBeforeUnloadWarning } from "@/lib/hooks/use-before-unload-warning";
 
 export type SaveStatus = "dirty" | "saving" | "error";
@@ -94,6 +95,17 @@ export function SaveStatusIndicator() {
   }
   const justSaved = state === "saved" && landings > 0;
 
+  // Saved and failed are announced once each through the shared live region
+  // (ACCESSIBILITY.md → status messages); the visible text itself is not live,
+  // so "Sparar…" and the unsaved count never chatter.
+  const announce = useAnnounce();
+  useEffect(() => {
+    if (justSaved) announce(t("all_changes_saved"));
+  }, [justSaved, landings, announce, t]);
+  useEffect(() => {
+    if (errorKey) announce(t("save_failed"));
+  }, [errorKey, announce, t]);
+
   let content: React.ReactNode;
   if (errorKey) {
     content = (
@@ -133,9 +145,5 @@ export function SaveStatusIndicator() {
     );
   }
 
-  return (
-    <span aria-live="polite" role="status">
-      {content}
-    </span>
-  );
+  return <span>{content}</span>;
 }

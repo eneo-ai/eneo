@@ -100,6 +100,10 @@ async function expectNoAxeViolations(
     builder = builder.exclude(selector);
   }
 
+  // The document title arrives with the route's metadata, which a client
+  // navigation streams after the page is interactive; scanning before it
+  // lands reports a false "document-title" violation.
+  await expect(page).toHaveTitle(/\S/);
   const { violations } = await builder.analyze();
   const report = violations.map((violation) => ({
     rule: violation.id,

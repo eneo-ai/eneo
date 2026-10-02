@@ -5943,5 +5943,7 @@
   "audit_retention_saved": "Gallringsperioden är sparad.",
   "admin_crawler_no_runs_title": "Inga körningar ännu",
   "admin_crawler_no_runs_description": "Körningar visas här när en webbplats har crawlats. Lägg till en webbplats under Kunskap för att komma igång.",
-  "admin_crawler_go_to_websites": "Gå till webbplatser"
+  "admin_crawler_go_to_websites": "Gå till webbplatser",
+  "space_default_assistant_named": "Assistent för {space}",
+  "space_default_assistant": "Ytans assistent"
 }
