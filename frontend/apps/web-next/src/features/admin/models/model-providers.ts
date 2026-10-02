@@ -92,6 +92,44 @@ export function isProviderNameTaken(error: unknown): boolean {
   return error instanceof EneoApiError && error.code === 9017;
 }
 
+/**
+ * The backend refused the update before writing anything (400): the endpoint
+ * changed without a freshly typed key, or the key was its masked display
+ * value. Its message says which.
+ */
+export function isProviderUpdateRefused(error: unknown): error is EneoApiError {
+  return error instanceof EneoApiError && error.status === 400;
+}
+
+/**
+ * Canonical form for deciding whether an endpoint edit changes the
+ * destination: scheme and host are case-insensitive, a default port equals
+ * no port, and trailing slashes are ignored. A scheme, host, port, base path
+ * or query change is a new destination. The backend applies the same rule
+ * (`normalize_destination`) and is authoritative.
+ */
+export function comparableEndpoint(value: string): string {
+  const trimmed = value.trim();
+  if (!trimmed) return "";
+  try {
+    const url = new URL(trimmed.includes("://") ? trimmed : `https://${trimmed}`);
+    const path = url.pathname.replace(/\/+$/, "");
+    return `${url.protocol}//${url.host}${path}${url.search}`.toLowerCase();
+  } catch {
+    return trimmed.replace(/\/+$/, "").toLowerCase();
+  }
+}
+
+/**
+ * A value that is only the display form of a key ("...4f2a", "••••"), never a
+ * key: pasted back from the dialog, it must not be stored. Mirrors the
+ * backend's `_is_masked_api_key`.
+ */
+export function looksLikeMaskedApiKey(value: string): boolean {
+  const trimmed = value.trim();
+  return trimmed !== "" && (trimmed.startsWith("...") || /^[*•·]+$/.test(trimmed));
+}
+
 /** Delete a custom model provider (backend 400s if models are still attached). */
 export function deleteProvider(api: EneoClient, id: string) {
   return unwrap(

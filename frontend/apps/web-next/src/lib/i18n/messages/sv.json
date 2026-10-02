@@ -4649,8 +4649,6 @@
   "upload_failed_announcement": "Uppladdningen av {name} misslyckades: {message}",
   "job_completed_announcement": "{name} slutfördes.",
   "job_failed_announcement": "{name} misslyckades.",
-  "websites_bulk_recrawl_queued": "{count, plural, one {# webbplats köad för synkning} other {# webbplatser köade för synkning}}",
-  "websites_bulk_recrawl_failed": "{queued} köade, {failed} misslyckades",
   "add_n_models": "{count, plural, =0 {Lägg till modeller} one {Lägg till # modell} other {Lägg till # modeller}}",
   "models_added_count": "{count, plural, one {# modell tillagd} other {# modeller tillagda}}",
   "models_added_partial": "La till {added} av {total} modeller",
@@ -5873,5 +5871,8 @@
   "crawl_skipped": "Hoppad över",
   "files_failed": "{count} filer misslyckades",
   "sync_skipped": "Synkronisering hoppades över",
-  "synced_with_warnings": "Synkroniserad med varningar"
+  "synced_with_warnings": "Synkroniserad med varningar",
+  "login_too_many_attempts_later": "För många misslyckade inloggningsförsök. Försök igen senare.",
+  "provider_form_api_key_masked": "Det ser ut som nyckelns maskerade visning. Ange den faktiska API-nyckeln.",
+  "conversation_retention_space_admin_only": "Endast administratörer för utrymmet kan ändra gallringen."
 }

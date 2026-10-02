@@ -1,5 +1,6 @@
 "use client";
 
+import { useId } from "react";
 import { useTranslations } from "next-intl";
 import { SettingsGroup, SettingsRow } from "@/components/composites/settings-rows";
 import { useAutosaveField } from "@/components/composites/use-autosave";
@@ -7,11 +8,17 @@ import { Input } from "@/components/ui/input";
 import { useSpace } from "@/features/spaces/use-space";
 import { useUpdateAssistant, type Assistant } from "./use-assistant";
 
-/** Conversation retention; empty inherits the space policy. */
+/**
+ * Conversation retention; empty inherits the space policy. In a shared or
+ * organisation space only those who may edit the space change it (the
+ * backend refuses other editors); everyone else reads the value.
+ */
 export function SecuritySection({ assistant }: { assistant: Assistant }) {
   const t = useTranslations();
-  const { space } = useSpace();
+  const { space, can } = useSpace();
   const update = useUpdateAssistant(assistant.id);
+  const readOnlyHintId = useId();
+  const canEditRetention = space.personal || can("edit", "space");
 
   const days = useAutosaveField({
     key: "assistant-retention-days",
@@ -41,9 +48,16 @@ export function SecuritySection({ assistant }: { assistant: Assistant }) {
             placeholder={inherited}
             onChange={(event) => days.setValue(event.target.value)}
             onBlur={() => days.commit()}
+            disabled={!canEditRetention}
+            aria-describedby={canEditRetention ? undefined : readOnlyHintId}
           />
           <span className="text-muted-foreground text-sm">{t("days")}</span>
         </div>
+        {!canEditRetention && (
+          <p id={readOnlyHintId} className="text-muted-foreground text-sm">
+            {t("conversation_retention_space_admin_only")}
+          </p>
+        )}
       </SettingsRow>
     </SettingsGroup>
   );

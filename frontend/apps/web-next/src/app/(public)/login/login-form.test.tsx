@@ -55,6 +55,62 @@ describe("LoginForm", () => {
     await expectNoAxeViolations(container);
   });
 
+  it("counts the attempts left after a wrong password", async () => {
+    action.result = { error: "invalid_credentials", attemptsRemaining: 2, retryAfterSeconds: null };
+    const { container } = renderInApp(<LoginForm />);
+    submit("anna@kommun.se", "fel-lösenord");
+
+    const error = await screen.findByRole("alert");
+    expect(error.textContent).toBe(
+      "Ogiltiga inloggningsuppgifterFörsök kvar innan inloggningen spärras tillfälligt: 2."
+    );
+    expect(screen.getByLabelText("E-post").getAttribute("aria-invalid")).toBe("true");
+    await expectNoAxeViolations(container);
+    action.result = { error: "invalid_credentials" };
+  });
+
+  it("says how long to wait when the last allowed attempt failed", async () => {
+    action.result = { error: "invalid_credentials", attemptsRemaining: 0, retryAfterSeconds: 540 };
+    renderInApp(<LoginForm />);
+    submit("anna@kommun.se", "fel-lösenord");
+
+    const error = await screen.findByRole("alert");
+    expect(error.textContent).toBe(
+      "För många misslyckade inloggningsförsök. Försök igen om 9 min."
+    );
+    action.result = { error: "invalid_credentials" };
+  });
+
+  it("says how long to wait when the backend refuses the attempt, without blaming the password", async () => {
+    action.result = { error: "too_many_attempts", attemptsRemaining: 0, retryAfterSeconds: 30 };
+    renderInApp(<LoginForm />);
+    submit("anna@kommun.se", "rätt-lösenord");
+
+    const error = await screen.findByRole("alert");
+    // Never "0 min": the wait is rounded up to whole minutes.
+    expect(error.textContent).toBe(
+      "För många misslyckade inloggningsförsök. Försök igen om 1 min."
+    );
+    await waitFor(() => expect(document.activeElement).toBe(error));
+    expect(screen.getByLabelText("E-post").hasAttribute("aria-invalid")).toBe(false);
+    expect(screen.getByLabelText("Lösenord").hasAttribute("aria-invalid")).toBe(false);
+    action.result = { error: "invalid_credentials" };
+  });
+
+  it("asks to try later when the backend refuses the attempt without saying for how long", async () => {
+    action.result = {
+      error: "too_many_attempts",
+      attemptsRemaining: null,
+      retryAfterSeconds: null
+    };
+    renderInApp(<LoginForm />);
+    submit("anna@kommun.se", "rätt-lösenord");
+
+    const error = await screen.findByRole("alert");
+    expect(error.textContent).toBe("För många misslyckade inloggningsförsök. Försök igen senare.");
+    action.result = { error: "invalid_credentials" };
+  });
+
   it("does not mark the fields invalid when the service is unavailable", async () => {
     action.result = { error: "unavailable" };
     renderInApp(<LoginForm />);

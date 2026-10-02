@@ -4649,8 +4649,6 @@
   "upload_failed_announcement": "{name} upload failed: {message}",
   "job_completed_announcement": "{name} completed.",
   "job_failed_announcement": "{name} failed.",
-  "websites_bulk_recrawl_queued": "{count, plural, one {# website queued for sync} other {# websites queued for sync}}",
-  "websites_bulk_recrawl_failed": "{queued} queued, {failed} failed",
   "add_n_models": "{count, plural, =0 {Add models} one {Add # model} other {Add # models}}",
   "models_added_count": "{count, plural, one {# model added} other {# models added}}",
   "models_added_partial": "Added {added} of {total} models",
@@ -5873,5 +5871,8 @@
   "crawl_skipped": "Skipped",
   "files_failed": "{count} files failed",
   "sync_skipped": "Sync skipped",
-  "synced_with_warnings": "Synced with warnings"
+  "synced_with_warnings": "Synced with warnings",
+  "login_too_many_attempts_later": "Too many failed login attempts. Try again later.",
+  "provider_form_api_key_masked": "That looks like the key's masked display value. Enter the actual API key.",
+  "conversation_retention_space_admin_only": "Only space administrators can change retention."
 }

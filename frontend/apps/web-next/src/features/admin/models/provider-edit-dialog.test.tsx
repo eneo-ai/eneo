@@ -189,6 +189,134 @@ describe("ProviderEditDialog", () => {
     await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
   });
 
+  it("asks for the key again when the endpoint changes, and says why", async () => {
+    const dialog = renderDialog();
+
+    fireEvent.change(field(/^Endpoint-URL/), { target: { value: "https://proxy.kommun.se/v1" } });
+
+    // The field opens by itself; focus stays where the admin is typing.
+    expect(document.activeElement).not.toBe(field(/^API-nyckel/));
+    expect(within(dialog).queryByRole("button", { name: "Ändra API-nyckel" })).toBeNull();
+    expect(
+      within(dialog).queryByRole("button", { name: "Avbryt och behåll nuvarande nyckel" })
+    ).toBeNull();
+    const why = within(dialog).getByText(
+      "Du ändrade endpointen. Ange API-nyckeln igen; den lagrade nyckeln skickas inte till en annan destination."
+    );
+    expect(field(/^API-nyckel/).getAttribute("aria-describedby")).toContain(why.id);
+    await expectNoAxeViolations(document.body);
+
+    save(dialog);
+
+    expect(api.PUT).not.toHaveBeenCalled();
+    expect(document.activeElement).toBe(field(/^API-nyckel/));
+    expect(within(dialog).getByText("Ange API-nyckeln.")).toBeTruthy();
+
+    fireEvent.change(field(/^API-nyckel/), { target: { value: "sk-new-5678" } });
+    fireEvent.change(field(/^Bekräfta API-nyckel/), { target: { value: "sk-new-5678" } });
+    save(dialog);
+
+    await waitFor(() => expect(api.PUT).toHaveBeenCalledTimes(1));
+    expect(api.PUT.mock.calls[0]?.[1]).toMatchObject({
+      body: {
+        credentials: { api_key: "sk-new-5678" },
+        config: { endpoint: "https://proxy.kommun.se/v1" }
+      }
+    });
+  });
+
+  it("keeps the stored key when the endpoint edit keeps the destination", async () => {
+    const dialog = renderDialog(provider({ config: { endpoint: "https://api.example.com/v1" } }));
+
+    fireEvent.change(field(/^Endpoint-URL/), { target: { value: "HTTPS://api.example.com/v1/" } });
+
+    expect(within(dialog).getByRole("group", { name: "API-nyckel" })).toBeTruthy();
+    save(dialog);
+
+    await waitFor(() => expect(api.PUT).toHaveBeenCalledTimes(1));
+    expect(api.PUT.mock.calls[0]?.[1]).toMatchObject({
+      body: { config: { endpoint: "HTTPS://api.example.com/v1/" } }
+    });
+    expect(api.PUT.mock.calls[0]?.[1]).not.toHaveProperty("body.credentials");
+  });
+
+  it("does not ask for a key a provider without one never had", () => {
+    const dialog = renderDialog(provider({ masked_api_key: null }));
+
+    fireEvent.change(field(/^Endpoint-URL/), { target: { value: "https://proxy.kommun.se/v1" } });
+
+    expect(within(dialog).getByRole("group", { name: "API-nyckel" })).toBeTruthy();
+    expect(screen.queryByLabelText(/^Bekräfta API-nyckel/)).toBeNull();
+  });
+
+  it("rejects the masked display value as a key", async () => {
+    const dialog = renderDialog();
+    fireEvent.click(within(dialog).getByRole("button", { name: "Ändra API-nyckel" }));
+    fireEvent.change(field(/^API-nyckel/), { target: { value: "...4f2a" } });
+    fireEvent.change(field(/^Bekräfta API-nyckel/), { target: { value: "...4f2a" } });
+
+    save(dialog);
+
+    expect(api.PUT).not.toHaveBeenCalled();
+    expect(document.activeElement).toBe(field(/^API-nyckel/));
+    const error = within(dialog).getByText(
+      "Det ser ut som nyckelns maskerade visning. Ange den faktiska API-nyckeln."
+    );
+    expect(field(/^API-nyckel/).getAttribute("aria-describedby")).toContain(error.id);
+    await expectNoAxeViolations(document.body);
+
+    fireEvent.change(field(/^API-nyckel/), { target: { value: "sk-new-5678" } });
+    expect(field(/^API-nyckel/).getAttribute("aria-invalid")).toBeNull();
+  });
+
+  it("shows the backend's refusal at the key field", async () => {
+    const dialog = renderDialog();
+    api.PUT.mockImplementation(() =>
+      Promise.resolve({
+        error: {
+          message:
+            "Changing the provider endpoint requires entering a new API key; the stored key is not reused for a different destination.",
+          eneo_error_code: 9000
+        },
+        response: new Response("{}", { status: 400 })
+      })
+    );
+    fireEvent.change(field(/^Endpoint-URL/), { target: { value: "https://proxy.kommun.se/v1" } });
+    fireEvent.change(field(/^API-nyckel/), { target: { value: "sk-new-5678" } });
+    fireEvent.change(field(/^Bekräfta API-nyckel/), { target: { value: "sk-new-5678" } });
+
+    save(dialog);
+
+    const error = await within(dialog).findByText(/Changing the provider endpoint requires/);
+    expect(document.activeElement).toBe(field(/^API-nyckel/));
+    expect(field(/^API-nyckel/).getAttribute("aria-describedby")).toContain(error.id);
+    expect(toast.error).not.toHaveBeenCalled();
+    expect(screen.getByRole("dialog", { name: "Redigera leverantör" })).toBe(dialog);
+
+    // Another key: the refusal goes.
+    fireEvent.change(field(/^API-nyckel/), { target: { value: "sk-new-9999" } });
+    expect(field(/^API-nyckel/).getAttribute("aria-invalid")).toBeNull();
+  });
+
+  it("opens the key field for a refusal of a save that sent no key", async () => {
+    const dialog = renderDialog();
+    api.PUT.mockImplementation(() =>
+      Promise.resolve({
+        error: {
+          message: "The API key looks like the masked display value; enter the actual key."
+        },
+        response: new Response("{}", { status: 400 })
+      })
+    );
+    fireEvent.change(field(/^Leverantörsnamn/), { target: { value: "OpenAI prod" } });
+
+    save(dialog);
+
+    const error = await within(dialog).findByText(/masked display value/);
+    expect(field(/^API-nyckel/).getAttribute("aria-describedby")).toContain(error.id);
+    expect(document.activeElement).toBe(field(/^API-nyckel/));
+  });
+
   it("removes a cleared expiry date", async () => {
     const dialog = renderDialog();
 

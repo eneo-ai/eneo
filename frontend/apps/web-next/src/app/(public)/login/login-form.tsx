@@ -11,23 +11,40 @@ import { loginAction, type LoginFormState } from "./actions";
 const ERROR_MESSAGE_KEYS: Record<NonNullable<LoginFormState["error"]>, string> = {
   invalid_credentials: "invalid_credentials",
   missing_fields: "invalid_credentials",
+  too_many_attempts: "login_too_many_attempts_later",
   deactivated: "access_disabled",
   unavailable: "login_failed"
 };
+
+/** Whole minutes to wait, at least one, so "0 min" never asks for a retry now. */
+function retryAfterMinutes(seconds: number | null | undefined): number | null {
+  return seconds == null ? null : Math.max(1, Math.ceil(seconds / 60));
+}
 
 /**
  * Password login (ACCESSIBILITY.md → Forms): works with password managers
  * (`username` / `current-password`), keeps the typed e-mail address after a
  * failed attempt (React resets uncontrolled fields after a form action; the
  * action returns it as the field's default) and moves focus to the error.
+ * After a wrong password the message counts the attempts left; once the
+ * account is blocked it says how long to wait instead.
  */
 export function LoginForm({ next }: { next?: string }) {
   const t = useTranslations();
   const [state, formAction, pending] = useActionState(loginAction, {});
   const errorRef = useRef<HTMLDivElement>(null);
   const errorId = useId();
+  const retryMinutes = retryAfterMinutes(state.retryAfterSeconds);
+  // The backend refused the attempt (429), or this wrong password was the last one allowed.
+  const blocked =
+    state.error === "too_many_attempts" ||
+    (state.error === "invalid_credentials" &&
+      state.attemptsRemaining === 0 &&
+      retryMinutes !== null);
   const credentialsRejected =
     state.error === "invalid_credentials" || state.error === "missing_fields";
+  const attemptsRemaining =
+    state.error === "invalid_credentials" && !blocked ? (state.attemptsRemaining ?? null) : null;
 
   // Every failed attempt (a new state object) moves focus to its message.
   useEffect(() => {
@@ -45,7 +62,20 @@ export function LoginForm({ next }: { next?: string }) {
     >
       {state.error && (
         <Alert ref={errorRef} id={errorId} tabIndex={-1} variant="destructive">
-          <AlertDescription>{t(ERROR_MESSAGE_KEYS[state.error])}</AlertDescription>
+          <AlertDescription className="flex flex-col gap-1">
+            {blocked ? (
+              <p>
+                {retryMinutes !== null
+                  ? t("login_too_many_attempts", { minutes: retryMinutes })
+                  : t("login_too_many_attempts_later")}
+              </p>
+            ) : (
+              <p>{t(ERROR_MESSAGE_KEYS[state.error])}</p>
+            )}
+            {attemptsRemaining !== null && (
+              <p>{t("login_attempts_remaining", { count: attemptsRemaining })}</p>
+            )}
+          </AlertDescription>
         </Alert>
       )}
       {next && <input type="hidden" name="next" value={next} />}

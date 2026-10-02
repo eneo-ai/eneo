@@ -17,7 +17,10 @@ import { toastApiError } from "@/lib/api/toast";
 import { toast } from "@/lib/toast";
 import { KeyExpiryField } from "./key-expiry-field";
 import {
+  comparableEndpoint,
   isProviderNameTaken,
+  isProviderUpdateRefused,
+  looksLikeMaskedApiKey,
   type ModelProvider,
   type ModelProviderUpdate,
   type ProviderFieldDef,
@@ -45,22 +48,32 @@ function configToStrings(config: Record<string, unknown>): Record<string, string
 }
 
 type TakenName = { name: string; at: number };
+/** A key the backend refused (with the key as sent, "" when none was). */
+type KeyRefusal = { key: string; message: string; at: number };
 
 /**
  * The provider's settings. Mounted while the dialog is open, so each opening
  * starts from the saved provider. Problems show at their fields on submit,
  * and focus moves to the first of them (WCAG 3.3.1).
+ *
+ * A stored key is never sent to a destination it was not entered for, so
+ * changing the endpoint of a provider that holds a key means typing the key
+ * again; the field opens by itself and says why. The backend applies the
+ * same rule and is authoritative: its refusal shows at the key field.
  */
 function ProviderEditForm({
   id,
   provider,
   takenName,
+  keyRefusal,
   onSubmit
 }: {
   id: string;
   provider: ModelProvider;
   /** A name the save was refused for: another provider has it. */
   takenName: TakenName | null;
+  /** A key (or its absence) the save was refused for. */
+  keyRefusal: KeyRefusal | null;
   onSubmit: (body: ModelProviderUpdate) => void;
 }) {
   const t = useTranslations();
@@ -71,11 +84,22 @@ function ProviderEditForm({
   const [name, setName] = useState(provider.name);
   const [isActive, setIsActive] = useState(provider.is_active);
   const [changingKey, setChangingKey] = useState(false);
+  // A refusal the admin answered with "keep the current key" (by its time).
+  const [dismissedRefusal, setDismissedRefusal] = useState<number | null>(null);
   const [apiKey, setApiKey] = useState("");
   const [apiKeyConfirmation, setApiKeyConfirmation] = useState("");
   const [configValues, setConfigValues] = useState(() => configToStrings(provider.config));
   const [keyExpiresOn, setKeyExpiresOn] = useState(provider.key_expires_on ?? null);
   const [submitted, setSubmitted] = useState(false);
+  // The endpoint the stored key was entered for, in comparable form.
+  const [seededEndpoint] = useState(() =>
+    comparableEndpoint(configToStrings(provider.config).endpoint ?? "")
+  );
+  const endpointChanged = comparableEndpoint(configValues.endpoint ?? "") !== seededEndpoint;
+  const keyRequiredForEndpointChange = Boolean(provider.masked_api_key) && endpointChanged;
+  // A refused key opens the field when it was not on screen (a save that sent none).
+  const openedByRefusal = keyRefusal !== null && keyRefusal.at !== dismissedRefusal;
+  const showKeyInput = changingKey || keyRequiredForEndpointChange || openedByRefusal;
 
   const configFields = capabilities.data
     ? providerFields(capabilities.data, provider.provider_type).filter(
@@ -93,6 +117,16 @@ function ProviderEditForm({
   useEffect(() => {
     if (takenName) focus.focus("name");
   }, [takenName, focus]);
+  // ... or at the key.
+  useEffect(() => {
+    if (keyRefusal) focus.focus(NEW_KEY_FIELD.name);
+  }, [keyRefusal, focus]);
+  const keyValueError =
+    submitted && showKeyInput && looksLikeMaskedApiKey(apiKey)
+      ? t("provider_form_api_key_masked")
+      : keyRefusal && apiKey.trim() === keyRefusal.key
+        ? keyRefusal.message
+        : undefined;
 
   // The control pressed disappears, so focus moves to what replaced it.
   function startChangingKey() {
@@ -103,6 +137,7 @@ function ProviderEditForm({
   function keepCurrentKey() {
     flushSync(() => {
       setChangingKey(false);
+      setDismissedRefusal(keyRefusal?.at ?? null);
       setApiKey("");
       setApiKeyConfirmation("");
     });
@@ -113,7 +148,8 @@ function ProviderEditForm({
     event.preventDefault();
     const firstProblem = [
       name.trim() === "" ? "name" : null,
-      changingKey ? providerFieldProblem(NEW_KEY_FIELD, apiKey, apiKeyConfirmation) : null,
+      showKeyInput ? providerFieldProblem(NEW_KEY_FIELD, apiKey, apiKeyConfirmation) : null,
+      showKeyInput && looksLikeMaskedApiKey(apiKey) ? NEW_KEY_FIELD.name : null,
       ...configFields.map((field) =>
         providerFieldProblem(field, configValues[field.name] ?? "", "")
       )
@@ -129,7 +165,7 @@ function ProviderEditForm({
       is_active: isActive,
       // Always sent: null removes a date the admin cleared.
       key_expires_on: keyExpiresOn,
-      ...(changingKey ? { credentials: { api_key: apiKey.trim() } } : {}),
+      ...(showKeyInput ? { credentials: { api_key: apiKey.trim() } } : {}),
       ...(configFields.length > 0
         ? {
             config: Object.fromEntries(
@@ -160,7 +196,7 @@ function ProviderEditForm({
           labelPosition="start"
           labelSpacing="spread"
         />
-        {changingKey ? (
+        {showKeyInput ? (
           <div className="flex flex-col gap-2">
             <ProviderField
               field={NEW_KEY_FIELD}
@@ -169,16 +205,25 @@ function ProviderEditForm({
               confirmation={apiKeyConfirmation}
               onValueChange={setApiKey}
               onConfirmationChange={setApiKeyConfirmation}
+              description={
+                keyRequiredForEndpointChange
+                  ? t("provider_endpoint_change_requires_key")
+                  : undefined
+              }
+              valueError={keyValueError}
               showErrors={submitted}
               focus={focus}
             />
-            <Button
-              variant="ghost"
-              size="sm"
-              label={t("cancel_keep_current_key")}
-              onClick={keepCurrentKey}
-              className="self-start"
-            />
+            {/* The stored key cannot be kept for a new destination. */}
+            {!keyRequiredForEndpointChange && (
+              <Button
+                variant="ghost"
+                size="sm"
+                label={t("cancel_keep_current_key")}
+                onClick={keepCurrentKey}
+                className="self-start"
+              />
+            )}
           </div>
         ) : (
           <div role="group" aria-labelledby={keyLabelId} className="flex flex-col gap-1">
@@ -246,6 +291,7 @@ export function ProviderEditDialog({
   const noTrigger = useRef<HTMLElement>(null);
   useReturnFocus(open, noTrigger);
   const [takenName, setTakenName] = useState<TakenName | null>(null);
+  const [keyRefusal, setKeyRefusal] = useState<KeyRefusal | null>(null);
 
   const save = useMutation({
     mutationFn: (body: ModelProviderUpdate) => updateProvider(browserApi, provider.id, body),
@@ -254,19 +300,33 @@ export function ProviderEditDialog({
       void queryClient.invalidateQueries({ queryKey: MODELS_KEY });
       toast.success(t("provider_updated_success"));
       setTakenName(null);
+      setKeyRefusal(null);
       onOpenChange(false);
     },
-    // A taken name is shown at the name field; the toast's generic text
-    // would speak of a model.
+    // A taken name is shown at the name field and a refused key at the key
+    // field; the toast's generic text would speak of a model.
     onError: (error, body) => {
-      if (isProviderNameTaken(error)) setTakenName({ name: body.name ?? "", at: Date.now() });
-      else toastApiError(error, t);
+      if (isProviderNameTaken(error)) {
+        setTakenName({ name: body.name ?? "", at: Date.now() });
+      } else if (isProviderUpdateRefused(error)) {
+        const sent = body.credentials?.api_key;
+        setKeyRefusal({
+          key: typeof sent === "string" ? sent : "",
+          message: error.message,
+          at: Date.now()
+        });
+      } else {
+        toastApiError(error, t);
+      }
     }
   });
 
   function requestOpenChange(next: boolean) {
     if (!next && save.isPending) return;
-    if (!next) setTakenName(null);
+    if (!next) {
+      setTakenName(null);
+      setKeyRefusal(null);
+    }
     onOpenChange(next);
   }
 
@@ -295,6 +355,7 @@ export function ProviderEditDialog({
                 id={formId}
                 provider={provider}
                 takenName={takenName}
+                keyRefusal={keyRefusal}
                 onSubmit={(body) => {
                   if (!save.isPending) save.mutate(body);
                 }}

@@ -6,7 +6,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useLocale, useTranslations } from "next-intl";
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useId, useRef, useState } from "react";
 import {
   Bot,
   KeyRound,
@@ -410,10 +410,16 @@ function SecuritySection() {
   );
 }
 
+/**
+ * The space's retention policy. Only those who may edit the space change it
+ * (the backend refuses everyone else); the rest read the value.
+ */
 function RetentionSection() {
   const t = useTranslations();
-  const { space } = useSpace();
+  const { space, can } = useSpace();
   const update = useUpdateSpace();
+  const readOnlyHintId = useId();
+  const canEditRetention = can("edit", "space");
   const [daysVisited, setDaysVisited] = useState(false);
 
   const validDays = (value: string) =>
@@ -449,11 +455,21 @@ function RetentionSection() {
             setDaysVisited(true);
             void days.commit();
           }}
-          {...fieldProblemProps("retention-days", daysProblem)}
+          disabled={!canEditRetention}
+          {...fieldProblemProps(
+            "retention-days",
+            daysProblem,
+            canEditRetention ? undefined : readOnlyHintId
+          )}
         />
         <span className="text-muted-foreground text-sm">{t("days")}</span>
       </div>
       <FieldProblem id="retention-days" problem={daysProblem} />
+      {!canEditRetention && (
+        <p id={readOnlyHintId} className="text-muted-foreground text-sm">
+          {t("conversation_retention_space_admin_only")}
+        </p>
+      )}
     </SettingsRow>
   );
 }

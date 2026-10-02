@@ -100,6 +100,8 @@ export function ProviderField({
   confirmation = "",
   onValueChange,
   onConfirmationChange,
+  description,
+  valueError,
   showErrors,
   focus
 }: {
@@ -109,12 +111,17 @@ export function ProviderField({
   confirmation?: string;
   onValueChange: (value: string) => void;
   onConfirmationChange?: (value: string) => void;
+  /** Replaces the field's usual hint: why it is asked for right now. */
+  description?: string;
+  /** What is wrong with a secret's value itself (a server's refusal); shown at once. */
+  valueError?: string;
   /** The form was submitted: show every problem at its field. */
   showErrors: boolean;
   focus: ReturnType<typeof useFieldFocus>;
 }) {
   const t = useTranslations();
-  const hint = providerFieldHint(t, field.name, field.required, providerType) || undefined;
+  const hint =
+    description ?? (providerFieldHint(t, field.name, field.required, providerType) || undefined);
 
   if (field.secret) {
     return (
@@ -131,6 +138,7 @@ export function ProviderField({
         autoComplete="off"
         placeholder={providerFieldPlaceholder(t, field.name, providerType) || undefined}
         requiredMessage={requiredMessage(t, field, providerType)}
+        valueError={valueError}
         mismatchMessage={
           field.name === "api_key"
             ? t("provider_form_api_key_mismatch")

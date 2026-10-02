@@ -195,6 +195,26 @@ it("keeps invalid retention input, explains the allowed format and saves a corre
   expect(retention.getAttribute("aria-invalid")).toBeNull();
 });
 
+it("shows the retention policy read-only to someone who may not edit the space", async () => {
+  const { container } = showSettings(
+    undefined,
+    [],
+    [],
+    "space-1",
+    makeSpace({
+      permissions: ["read"],
+      overrides: { data_retention_days: 30, completion_models: [], embedding_models: [] }
+    })
+  );
+  const retention = screen.getByRole("textbox", { name: "Gallring av konversationshistorik" });
+
+  expect((retention as HTMLInputElement).value).toBe("30");
+  expect(retention.hasAttribute("disabled")).toBe(true);
+  const hint = screen.getByText("Endast administratörer för utrymmet kan ändra gallringen.");
+  expect(retention.getAttribute("aria-describedby")).toContain(hint.id);
+  await expectNoAxeViolations(container);
+});
+
 it.each([
   ["/api/v1/security-classifications/", "Kunde inte läsa in säkerhetsklassningar för ytan."],
   ["/api/v1/ai-models/", "Kunde inte läsa in modeller för ytan."],
