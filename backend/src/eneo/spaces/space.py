@@ -99,6 +99,7 @@ class Space:
         enabled_capabilities: list[CapabilityPurpose] | None = None,
         group_members: dict[UUID, SpaceGroupMember] | None = None,
         default_assistant_load_failed: bool = False,
+        unloaded_hidden_assistant_ids: frozenset[UUID] = frozenset(),
     ):
         super().__init__()
         self.id = id
@@ -121,6 +122,9 @@ class Space:
         # Assistants this request removed on purpose. A whole-space write
         # deletes only these, never one it merely did not load.
         self.removed_assistant_ids: set[UUID] = set()
+        # Hidden assistants of the space this load did not build. API-key
+        # access facts still count them, as a load of every hidden one did.
+        self.unloaded_hidden_assistant_ids = unloaded_hidden_assistant_ids
         self.group_chats = group_chats or []
         self.apps = apps or []
         self.services = services or []

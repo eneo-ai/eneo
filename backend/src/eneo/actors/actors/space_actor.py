@@ -79,7 +79,8 @@ class SpaceAccessFacts:
                 if space.default_assistant is not None
                 else None
             ),
-            assistant_ids=frozenset(assistant.id for assistant in space.assistants),
+            assistant_ids=frozenset(assistant.id for assistant in space.assistants)
+            | space.unloaded_hidden_assistant_ids,
             app_ids=frozenset(app.id for app in space.apps if app.id is not None),
         )
 

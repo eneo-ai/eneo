@@ -301,6 +301,7 @@ class SpaceFactory:
         security_classification: Optional["SecurityClassificationDBModel"] = None,
         integration_knowledge_in_db: Iterable["IntegrationKnowledgeDBModel"]
         | None = None,
+        unloaded_hidden_assistant_ids: frozenset[UUID] = frozenset(),
     ) -> Space:
         collections_in_db = list(collections_in_db or [])
         websites_in_db = list(websites_in_db or [])
@@ -614,6 +615,7 @@ class SpaceFactory:
             default_assistant=default_assistant,
             default_assistant_load_failed=default_assistant_load_failed,
             assistants=space_assistants,
+            unloaded_hidden_assistant_ids=unloaded_hidden_assistant_ids,
             group_chats=space_group_chats,
             apps=space_apps,
             services=space_services,

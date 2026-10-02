@@ -2,7 +2,8 @@ from collections.abc import Sequence
 from collections.abc import Set as AbstractSet
 from copy import deepcopy
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Any, Optional, Protocol
+from enum import Enum
+from typing import TYPE_CHECKING, Any, Literal, Optional, Protocol
 from uuid import UUID
 
 import sqlalchemy as sa
@@ -146,6 +147,15 @@ if TYPE_CHECKING:
     from eneo.websites.infrastructure.http_auth_encryption import (
         HttpAuthEncryptionService,
     )
+
+
+class HiddenAssistants(Enum):
+    """Every hidden assistant of the space, selected without listing ids."""
+
+    ALL = "all"
+
+
+HiddenAssistantSelection = AbstractSet[UUID] | Literal[HiddenAssistants.ALL]
 
 
 class SpaceRepositoryTenantMismatchError(ValueError):
@@ -1273,7 +1283,7 @@ class SpaceRepository:
         self,
         space_id: UUID,
         *,
-        include_hidden: bool = False,
+        hidden_assistant_ids: HiddenAssistantSelection = frozenset(),
     ) -> Sequence[Assistants]:
         stmt = (
             sa.select(Assistants)
@@ -1290,8 +1300,15 @@ class SpaceRepository:
             )
             .order_by(Assistants.created_at)
         )
-        if not include_hidden:
-            stmt = stmt.where(Assistants.hidden.is_(False))
+        if hidden_assistant_ids is not HiddenAssistants.ALL:
+            stmt = stmt.where(
+                sa.or_(
+                    Assistants.hidden.is_(False),
+                    Assistants.id.in_(hidden_assistant_ids),
+                )
+                if hidden_assistant_ids
+                else Assistants.hidden.is_(False)
+            )
         assistant_records = await self.session.execute(stmt)
         assistants = assistant_records.scalars().all()
 
@@ -1576,12 +1593,42 @@ class SpaceRepository:
 
         return apps_db
 
+    def _active_key_assistant_ids(self) -> frozenset[UUID]:
+        """The assistant the caller's assistant-scoped key is bound to.
+
+        A scoped load builds it like any named assistant, so the key's role
+        rests on the same validated row as with a load of every hidden one: a
+        row the factory skips grants no role."""
+        key = self.user.active_api_key if self.user is not None else None
+        if (
+            key is None
+            or key.scope_type != ApiKeyScopeType.ASSISTANT
+            or key.scope_id is None
+        ):
+            return frozenset()
+        return frozenset({key.scope_id})
+
+    async def _unloaded_hidden_assistant_ids(
+        self, space_id: UUID, loaded: AbstractSet[UUID]
+    ) -> frozenset[UUID]:
+        rows = await self.session.scalars(
+            sa.select(Assistants.id)
+            .where(Assistants.space_id == space_id)
+            .where(Assistants.hidden.is_(True))
+            .where(Assistants.is_default.is_(False))
+            .where(Assistants.id.not_in(loaded))
+        )
+        return frozenset(rows.all())
+
     async def _get_from_query(
         self,
         query: sa.Select[tuple[Spaces]],
         *,
-        include_hidden_assistants: bool = False,
+        hidden_assistant_ids: HiddenAssistantSelection = frozenset(),
     ) -> Space | None:
+        """Load the space with its visible assistants and, of the hidden ones,
+        only ``hidden_assistant_ids``: building every hidden assistant of a
+        space made each write to one of them cost the whole space."""
         entry_in_db = await self._get_record_with_options(query)
         if not entry_in_db:
             return
@@ -1665,9 +1712,21 @@ class SpaceRepository:
                 entry_in_db.id, mcp_servers
             )
 
+        if hidden_assistant_ids and hidden_assistant_ids is not HiddenAssistants.ALL:
+            hidden_assistant_ids = {
+                *hidden_assistant_ids,
+                *self._active_key_assistant_ids(),
+            }
         assistants = await self._get_assistants(
             space_id=entry_in_db.id,
-            include_hidden=include_hidden_assistants,
+            hidden_assistant_ids=hidden_assistant_ids,
+        )
+        unloaded_hidden_assistant_ids = (
+            await self._unloaded_hidden_assistant_ids(
+                entry_in_db.id, hidden_assistant_ids
+            )
+            if hidden_assistant_ids and hidden_assistant_ids is not HiddenAssistants.ALL
+            else frozenset[UUID]()
         )
         apps = await self._get_apps(space_id=entry_in_db.id)
         (
@@ -1698,6 +1757,7 @@ class SpaceRepository:
             services_in_db=services,
             integration_knowledge_in_db=integration_knowledge_union,
             security_classification=entry_in_db.security_classification,
+            unloaded_hidden_assistant_ids=unloaded_hidden_assistant_ids,
         )
         from eneo.mcp_servers.application.capability_resolver import (
             capability_availability,
@@ -1819,18 +1879,18 @@ class SpaceRepository:
         return query.where(Spaces.tenant_id == self.tenant_id)
 
     async def one_or_none(
-        self, id: UUID, *, include_hidden_assistants: bool = False
+        self, id: UUID, *, hidden_assistant_ids: AbstractSet[UUID] = frozenset()
     ) -> Optional[Space]:
         query = self._in_caller_tenant(sa.select(Spaces).where(Spaces.id == id))
 
         return await self._get_from_query(
-            query, include_hidden_assistants=include_hidden_assistants
+            query, hidden_assistant_ids=hidden_assistant_ids
         )
 
-    async def one(self, id: UUID, *, include_hidden_assistants: bool = False) -> Space:
-        space = await self.one_or_none(
-            id=id, include_hidden_assistants=include_hidden_assistants
-        )
+    async def one(
+        self, id: UUID, *, hidden_assistant_ids: AbstractSet[UUID] = frozenset()
+    ) -> Space:
+        space = await self.one_or_none(id=id, hidden_assistant_ids=hidden_assistant_ids)
 
         if space is None:
             raise NotFoundException()
@@ -1920,8 +1980,6 @@ class SpaceRepository:
         self,
         space: Space,
         mcp_tool_settings: list[tuple[UUID, bool]] | None = None,
-        *,
-        include_hidden_assistants: bool = False,
     ) -> Space:
         query = (
             sa.update(Spaces)
@@ -1969,10 +2027,7 @@ class SpaceRepository:
         )
         await self._set_group_chats(entry_in_db, space.group_chats)
 
-        return await self.one(
-            id=entry_in_db.id,
-            include_hidden_assistants=include_hidden_assistants,
-        )
+        return await self.one(id=entry_in_db.id)
 
     async def delete(self, id: UUID):
         query = sa.delete(Spaces).where(Spaces.id == id)
@@ -2062,12 +2117,31 @@ class SpaceRepository:
 
         return await self._get_from_query(query)
 
-    async def get_space_by_assistant(self, assistant_id: UUID) -> Space:
+    async def get_space_by_assistant(
+        self,
+        assistant_id: UUID,
+        *,
+        hidden_assistant_ids: AbstractSet[UUID] = frozenset(),
+    ) -> Space:
+        """The space of ``assistant_id`` with that assistant built, hidden or
+        not, plus the hidden ``hidden_assistant_ids``. The default assistant's
+        tools are every other assistant of its space, so loading by it builds
+        every hidden one."""
         query = self._in_caller_tenant(
             sa.select(Spaces).join(Assistants).where(Assistants.id == assistant_id)
         )
+        is_default = await self.session.scalar(
+            sa.select(Assistants.is_default).where(Assistants.id == assistant_id)
+        )
 
-        space = await self._get_from_query(query, include_hidden_assistants=True)
+        space = await self._get_from_query(
+            query,
+            hidden_assistant_ids=(
+                HiddenAssistants.ALL
+                if is_default
+                else {assistant_id, *hidden_assistant_ids}
+            ),
+        )
 
         if space is None:
             raise NotFoundException()

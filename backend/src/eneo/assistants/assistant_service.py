@@ -1892,7 +1892,8 @@ class AssistantService:
         # meanwhile and undoing concurrent edits to the rest.
         await self.repo.update(assistant)
         refreshed_space = await self.space_repo.one(
-            id=assistant.space_id, include_hidden_assistants=include_hidden
+            id=assistant.space_id,
+            hidden_assistant_ids={assistant_id} if include_hidden else frozenset(),
         )
         assistant = refreshed_space.get_assistant(assistant_id=assistant_id)
 
@@ -2998,7 +2999,12 @@ class AssistantService:
                 history_repo=self.help_assistant_assignment_history_repo,
             )
 
-        space = await self.space_repo.get_space_by_assistant(assistant_id=assistant_id)
+        space = await self.space_repo.get_space_by_assistant(
+            assistant_id=assistant_id,
+            hidden_assistant_ids=(
+                {tool_assistant_id} if tool_assistant_id is not None else frozenset()
+            ),
+        )
         active_assistant = space.get_assistant(assistant_id=assistant_id)
         actor = self.actor_manager.get_space_actor_from_space(space=space)
 

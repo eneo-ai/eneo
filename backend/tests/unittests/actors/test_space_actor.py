@@ -155,6 +155,7 @@ def test_space_access_facts_from_space_preserves_authorization_inputs() -> None:
     group_id = uuid4()
     default_assistant_id = uuid4()
     assistant_id = uuid4()
+    unloaded_hidden_id = uuid4()
     app_id = uuid4()
     space = MagicMock(
         id=space_id,
@@ -172,6 +173,7 @@ def test_space_access_facts_from_space_preserves_authorization_inputs() -> None:
             MagicMock(id=assistant_id),
         ],
         apps=[MagicMock(id=app_id), MagicMock(id=None)],
+        unloaded_hidden_assistant_ids=frozenset({unloaded_hidden_id}),
     )
 
     facts = SpaceAccessFacts.from_space(space)
@@ -182,7 +184,9 @@ def test_space_access_facts_from_space_preserves_authorization_inputs() -> None:
     assert facts.members[member_id].role == MockSpaceRole.ADMIN
     assert facts.group_members[group_id].role == MockSpaceRole.EDITOR
     assert facts.default_assistant_id == default_assistant_id
-    assert facts.assistant_ids == frozenset({default_assistant_id, assistant_id})
+    assert facts.assistant_ids == frozenset(
+        {default_assistant_id, assistant_id, unloaded_hidden_id}
+    )
     assert facts.app_ids == frozenset({app_id})
 
 

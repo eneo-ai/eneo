@@ -1478,7 +1478,7 @@ async def test_update_persists_only_the_updated_assistant(setup: Setup):
     setup.service.repo.update.assert_awaited_once_with(assistant)
     setup.service.space_repo.update.assert_not_awaited()
     setup.service.space_repo.one.assert_awaited_once_with(
-        id=assistant.space_id, include_hidden_assistants=True
+        id=assistant.space_id, hidden_assistant_ids={TEST_UUID}
     )
     assert returned is refreshed.get_assistant.return_value
 
