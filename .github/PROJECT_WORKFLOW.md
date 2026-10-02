@@ -258,9 +258,9 @@ Most new planning work should start manually from the GitHub issue chooser:
 
 Use `Epic` when the idea belongs on the roadmap and may contain several implementation tasks. This is the preferred starting point for product planning such as "comes in 2.1" or "comes in 2.2".
 
-Use `Development task` when the work is already scoped enough to build. A task should reference an epic in `Parent epic`, for example `#123`. This is the main planning metadata developers need to keep current.
+Use `Development task` when the work is already scoped enough to build. A task should reference an epic in `Parent epic`, for example `#123`; intake then adds the task as a sub-issue of that epic. The sub-issue relationship is the parent link that GitHub and Project #5 use.
 
-Open pull requests against development tasks, not epics. Put a closing reference such as `Fixes #123` in the PR body, where `#123` is the task issue. The task owns the parent epic relationship.
+Open pull requests against development tasks, not epics. Link the task with `Fixes #123` in the PR body or under **Development** in the PR sidebar; both close the task when the PR merges into `develop`. A bug issue can be linked the same way. The task owns the parent epic relationship.
 
 Use `Finding` when something has been observed but is not yet planned. A finding can later be converted into one or more tasks under an epic.
 
@@ -271,7 +271,7 @@ AI-assisted development should follow the same model:
 1. If AI discovers a follow-up during implementation, create or suggest a `Finding` unless the work is already clearly scoped.
 2. If AI is asked to plan new roadmap work, create or suggest an `Epic`.
 3. If AI is asked to split an approved epic, create `Development task` issues and link each one to the epic.
-4. AI-created tasks must include the parent epic reference in the issue body so automation and exports can resolve the relationship.
+4. AI-created tasks must include the parent epic reference in the `Parent epic` field so intake can create the sub-issue relationship.
 5. AI-created PRs must link the development task with a closing reference such as `Fixes #123`.
 
 Do not create disconnected tasks for roadmap work. If there is no suitable epic, create the epic first and then add tasks under it.
@@ -323,10 +323,9 @@ Preferred relationship:
 
 1. Create an epic issue with the Epic template.
 2. Create development task issues with the Development task template.
-3. Add each task as a GitHub sub-issue of the epic when available.
-4. Keep the task body's `Parent epic` field as `#123`.
+3. Fill in the task's `Parent epic` field as `#123`.
 
-The `Parent epic` body field is intentionally duplicated with the GitHub relationship because it is stable for exports and automation. If the `Parent epic` section exists but is empty, the intake script must keep `needs:epic` even if another issue is mentioned elsewhere in the task.
+The GitHub sub-issue relationship is the parent link. Intake creates it from the `Parent epic` field when the task has no parent yet, provided the field holds exactly one `#123` or issue URL in this repository and that issue is an epic. It never replaces an existing parent. Tasks without a parent keep `needs:epic`, even if another issue is mentioned elsewhere in the task.
 
 Pull requests should close the task issue, not the epic. This keeps the roadmap at outcome level and the code review at implementation level.
 
@@ -347,8 +346,10 @@ When a finding becomes planned work:
 - ensures the classification and planning labels exist;
 - adds opened or reopened issues and PRs to project #5;
 - labels structured issues by kind and their selected area, and marks incomplete classification for triage;
-- marks development tasks with `needs:epic` if their `Parent epic` field does not reference an epic issue.
-- marks non-draft PRs with `needs:task-link` if the PR body does not contain a closing task reference such as `Fixes #123`.
+- adds a development task as a sub-issue of the epic named in its `Parent epic` field, and marks it `needs:epic` while it has no parent epic;
+- marks ready PRs into `develop` with `needs:task-link` while GitHub reports no issue they close. PRs into release or feature branches are not checked, because the PR into `develop` carries the link.
+
+Intake re-reads the current issue or PR on every run. Linking in a sidebar triggers no workflow, so the label updates on the next edit or label change; removing the label refreshes it immediately.
 
 Planning links remain non-blocking; classification is enforced separately by
 **PR labels**. Issue classification runs before Project token validation, so a

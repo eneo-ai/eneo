@@ -10,6 +10,7 @@ const selfTest = process.argv.includes("--self-test");
 const marker = "<!-- eneo-project-intake:missing-epic -->";
 const repo = process.env.GITHUB_REPOSITORY || "eneo-ai/eneo";
 const eventPath = process.env.GITHUB_EVENT_PATH;
+const epicSectionHeadings = ["Parent epic", "Epic", "Parent issue"];
 
 if (selfTest) {
   runSelfTest();
@@ -61,8 +62,11 @@ async function handleIssue(item) {
     return;
   }
 
-  if (hasEpicReference(item.body || "")) {
-    removeLabel(item.number, "needs:epic");
+  // The native sub-issue relationship is the parent. The form field is only
+  // the input used to create it when it is missing.
+  const epic = taskEpicLink(item);
+  if (epic.linked || (epic.number && linkToEpic(item, epic.number))) {
+    if (labels.includes("needs:epic")) removeLabel(item.number, "needs:epic");
     return;
   }
 
@@ -70,22 +74,34 @@ async function handleIssue(item) {
   addMissingEpicComment(item.number);
 }
 
-async function handlePullRequest(item) {
-  if (item.draft) {
-    return;
+async function handlePullRequest(payload) {
+  // Re-read so links made in the Development sidebar and queued edits count.
+  const current = runGh([
+    "pr", "view", String(payload.number), "--repo", repo,
+    "--json", "isDraft,baseRefName,labels,closingIssuesReferences",
+  ], { capture: true });
+  const defaultBranch = event.repository?.default_branch || "develop";
+  const change = taskLinkLabelChange(JSON.parse(current.stdout), defaultBranch);
+
+  if (change === "add") {
+    addLabel(payload.number, "needs:task-link");
+    console.log(`PR #${payload.number} closes no issue. Added needs:task-link.`);
+  } else if (change === "remove") {
+    removeLabel(payload.number, "needs:task-link");
   }
+}
 
-  const text = `${item.title || ""}\n${item.body || ""}`;
+// Only ready PRs into the default branch close issues on merge. Release
+// backports and stacked PRs reach the task through that default-branch PR.
+function taskLinkLabelChange(pr, defaultBranch) {
+  const hasLabel = getLabelNames(pr).includes("needs:task-link");
+  const missing = !pr.isDraft
+    && pr.baseRefName === defaultBranch
+    && !(pr.closingIssuesReferences || []).length;
 
-  if (hasClosingIssueReference(text)) {
-    removeLabel(item.number, "needs:task-link");
-    return;
-  }
-
-  addLabel(item.number, "needs:task-link");
-  console.log(
-    `PR #${item.number} has no linked development task. Added needs:task-link.`,
-  );
+  if (missing && !hasLabel) return "add";
+  if (!missing && hasLabel) return "remove";
+  return null;
 }
 
 function inferIssueKind(item, labels) {
@@ -118,35 +134,44 @@ function inferIssueKind(item, labels) {
   return null;
 }
 
-function hasEpicReference(body) {
-  const parentEpicSection = getSectionWithPresence(body, [
-    "Parent epic",
-    "Epic",
-    "Parent issue",
-  ]);
-
-  if (parentEpicSection.found) {
-    return hasIssueReference(parentEpicSection.value);
+function taskEpicLink(item) {
+  if (item.parent_issue_url) {
+    return { linked: true };
   }
 
-  return hasIssueReference(body);
+  // Accept exactly one reference to this repository; anything else stays a
+  // missing link rather than guessing which issue was meant.
+  const value = getSectionWithPresence(item.body || "", epicSectionHeadings).value;
+  const url = `https://github.com/${repo}/issues/`;
+  const match = /^#(\d+)$/.exec(value)
+    || (value.toLowerCase().startsWith(url.toLowerCase()) && /^(\d+)$/.exec(value.slice(url.length)));
+  const number = match ? Number(match[1]) : null;
+
+  return { linked: false, number: number && number !== item.number ? number : null };
 }
 
-function hasIssueReference(value) {
-  return /(^|\s)#\d+\b/.test(value)
-    || /github\.com\/[^/\s]+\/[^/\s]+\/issues\/\d+/i.test(value);
-}
+function linkToEpic(item, epicNumber) {
+  const epic = runGh(["api", `repos/${repo}/issues/${epicNumber}`], {
+    capture: true,
+    allowFailure: true,
+  });
+  if (epic.status !== 0) {
+    return false;
+  }
 
-function hasClosingIssueReference(value) {
-  const keyword = String.raw`\b(?:close[sd]?|fix(?:e[sd])?|resolve[sd]?)`;
-  const issueReference = [
-    String.raw`#\d+`,
-    String.raw`[^/\s]+\/[^/\s]+#\d+`,
-    String.raw`https?:\/\/github\.com\/[^/\s]+\/[^/\s]+\/issues\/\d+`,
-  ].join("|");
-  const pattern = new RegExp(`${keyword}:?\\s+(?:${issueReference})\\b`, "i");
+  const target = JSON.parse(epic.stdout);
+  const isEpic = getLabelNames(target).includes("kind:epic")
+    || /^epic$/i.test(target.type?.name || "");
+  if (target.pull_request || !isEpic) {
+    console.log(`Issue #${item.number}: #${epicNumber} is not an epic. Kept needs:epic.`);
+    return false;
+  }
 
-  return pattern.test(value);
+  const result = runGh([
+    "api", "-X", "POST", `repos/${repo}/issues/${epicNumber}/sub_issues`,
+    "-F", `sub_issue_id=${item.id}`,
+  ], { allowFailure: true });
+  return result.status === 0;
 }
 
 function hasHeading(body, heading) {
@@ -162,9 +187,7 @@ function addLabel(number, label) {
 }
 
 function removeLabel(number, label) {
-  runGh(["issue", "edit", String(number), "--repo", repo, "--remove-label", label], {
-    allowFailure: true,
-  });
+  runGh(["issue", "edit", String(number), "--repo", repo, "--remove-label", label]);
 }
 
 function addMissingEpicComment(number) {
@@ -187,7 +210,7 @@ function addMissingEpicComment(number) {
     marker,
     "This development task needs a parent epic before it is ready for planning.",
     "",
-    "Add the epic as a GitHub sub-issue relationship when available, and keep the `Parent epic` field in the issue body as `#123` so roadmap exports can resolve it.",
+    "Write the epic as `#123` in the `Parent epic` field, and automation adds this task as a sub-issue of that epic. You can also add the sub-issue relationship directly from the epic.",
   ].join("\n");
 
   runGh([
@@ -233,46 +256,69 @@ function runGh(args, options = {}) {
 }
 
 function runSelfTest() {
-  assert.equal(
-    hasEpicReference([
-      "## Parent epic",
-      "",
-      "## Problem",
-      "This mentions #999 but has no parent epic.",
-    ].join("\n")),
-    false,
-    "empty Parent epic section must not fall back to unrelated issue references",
+  const section = (value) => `## Parent epic\n${value}\n\n## Problem\nMentions #999.`;
+  assert.deepEqual(taskEpicLink({ number: 5, body: section("#123") }), { linked: false, number: 123 });
+  assert.deepEqual(
+    taskEpicLink({ number: 5, body: section(`https://github.com/${repo}/issues/123`) }),
+    { linked: false, number: 123 },
+  );
+  assert.deepEqual(
+    taskEpicLink({ number: 5, body: section("") }),
+    { linked: false, number: null },
+    "an empty Parent epic field must not fall back to unrelated issue references",
+  );
+  assert.deepEqual(
+    taskEpicLink({ number: 5, body: section("#5") }),
+    { linked: false, number: null },
+    "a task cannot be its own epic",
+  );
+  assert.deepEqual(
+    taskEpicLink({ number: 5, body: section("https://github.com/other/repo/issues/123") }),
+    { linked: false, number: null },
+    "only epics in this repository can be linked automatically",
+  );
+  for (const value of ["#123 #456", "https://notgithub.com/eneo-ai/eneo/issues/123", "see #123"]) {
+    assert.deepEqual(
+      taskEpicLink({ number: 5, body: section(value.replace("eneo-ai/eneo", repo)) }),
+      { linked: false, number: null },
+      `ambiguous or foreign reference must not be linked: ${value}`,
+    );
+  }
+  assert.deepEqual(
+    taskEpicLink({ number: 5, body: "Legacy task. Parent #123." }),
+    { linked: false, number: null },
+    "a body without a Parent epic field is not a parent link",
+  );
+  assert.deepEqual(
+    taskEpicLink({ number: 5, body: section(""), parent_issue_url: "https://api.github.com/repos/x/y/issues/1" }),
+    { linked: true },
+    "a native parent counts even when the form field is empty",
   );
 
+  const pr = (overrides) => ({
+    isDraft: false, baseRefName: "develop", labels: [], closingIssuesReferences: [], ...overrides,
+  });
+  const linked = { closingIssuesReferences: [{ number: 1013 }] };
+  const labeled = { labels: [{ name: "needs:task-link" }] };
+  assert.equal(taskLinkLabelChange(pr({}), "develop"), "add");
+  assert.equal(taskLinkLabelChange(pr(labeled), "develop"), null);
   assert.equal(
-    hasEpicReference([
-      "## Parent epic",
-      "#123",
-      "",
-      "## Problem",
-      "Implement the scoped work.",
-    ].join("\n")),
-    true,
-    "Parent epic section with an issue reference should be valid",
+    taskLinkLabelChange(pr({ ...linked, ...labeled }), "develop"),
+    "remove",
+    "a sidebar or keyword link reported by GitHub must clear the label",
   );
-
+  assert.equal(taskLinkLabelChange(pr(linked), "develop"), null);
+  assert.equal(taskLinkLabelChange(pr({ baseRefName: "release/v2.2" }), "develop"), null);
   assert.equal(
-    hasEpicReference("Legacy task created before the form existed. Parent #123."),
-    true,
-    "legacy unstructured task bodies should keep the issue-reference fallback",
+    taskLinkLabelChange(pr({ baseRefName: "release/v2.2", ...labeled }), "develop"),
+    "remove",
+    "retargeting away from the default branch must clear the label",
   );
-
-  assert.equal(hasClosingIssueReference("fixes #123"), true);
-  assert.equal(hasClosingIssueReference("Closes: #123"), true);
+  assert.equal(taskLinkLabelChange(pr({ isDraft: true }), "develop"), null);
   assert.equal(
-    hasClosingIssueReference("Resolves https://github.com/eneo-ai/eneo/issues/123"),
-    true,
-  );
-  assert.equal(hasClosingIssueReference("Fixes: eneo-ai/eneo#123"), true);
-  assert.equal(
-    hasClosingIssueReference("This PR implements #123"),
-    false,
-    "generic issue mentions should not count as task-closing references",
+    taskLinkLabelChange(pr({ isDraft: true, ...labeled }), "develop"),
+    "remove",
+    "converting a ready PR to draft must clear the label",
   );
 
   console.log("project-intake self-test passed");

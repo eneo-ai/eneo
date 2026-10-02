@@ -24,8 +24,8 @@ export const LABELS = [
   { name: "kind:epic", color: "5319e7", description: "Roadmap-level planning item that can own development tasks", roles: ["kind"] },
   { name: "kind:task", color: "1d76db", description: "Buildable development work item that should belong to an epic", roles: ["kind"] },
   { name: "kind:finding", color: "d4c5f9", description: "Observed issue, risk, or improvement candidate before planning", roles: ["kind"] },
-  { name: "needs:epic", color: "fbca04", description: "Development task needs a linked parent epic before it is ready", roles: ["triage"] },
-  { name: "needs:task-link", color: "fbca04", description: "Pull request needs a linked development task issue", roles: ["triage"] },
+  { name: "needs:epic", color: "fbca04", description: "Development task is not yet a sub-issue of an epic", roles: ["triage"] },
+  { name: "needs:task-link", color: "fbca04", description: "Ready PR into develop closes no issue: link it under Development or write Fixes #123", roles: ["triage"] },
   { name: "needs:triage", color: "fef2c0", description: "Needs product or engineering triage before planning", roles: ["triage"] },
 ];
 

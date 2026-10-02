@@ -41,7 +41,7 @@ Use this chain when planned work moves from roadmap discussion to code review.
 | Level | GitHub item | Link to keep current |
 | --- | --- | --- |
 | Roadmap card | Epic issue or Project draft item with `Kind: Epic` | Set `Roadmap version`, `Sponsor / municipality`, and `Owner / lead`. |
-| Buildable work | Development task issue with `Kind: Task` | Add `Parent epic: #123` and, when available, add it as a GitHub sub-issue of the epic. |
+| Buildable work | Development task issue with `Kind: Task` | Add `Parent epic: #123`. Intake adds the task as a sub-issue of the epic. |
 | Code review | Pull request | Add `Fixes #456` in the PR body, where `#456` is the development task. |
 
 Do not point PRs at epics. The task connects implementation work to the roadmap card.
@@ -121,13 +121,13 @@ Use the `Development task` issue template and fill in `Parent epic` with the epi
 #123
 ```
 
-When GitHub sub-issues are available, add the task as a sub-issue of the epic too. Keep the `Parent epic` field in the issue body because automation and exports can read it.
+Intake then adds the task as a sub-issue of that epic, so you do not need to link it twice. You can also add the sub-issue directly from the epic.
 
 Tasks without a parent epic get the `needs:epic` label. That label means the task needs planning context before the team treats it as roadmap work.
 
 ## Open Pull Requests
 
-Pull requests should link to development tasks, not epics. Add a closing reference in the PR body:
+Pull requests should link to development tasks, not epics. Add a closing reference in the PR body, or select the task under **Development** in the PR sidebar:
 
 ```text
 Fixes #123
@@ -135,7 +135,7 @@ Fixes #123
 
 Use the task issue number. The task owns the `Parent epic` link, and the epic stays at roadmap level.
 
-Non-draft PRs without a closing task reference get the `needs:task-link` label. The label is non-blocking, but it keeps unlinked implementation work visible in Project #5.
+Ready PRs into `develop` that close no issue get the `needs:task-link` label. A linked bug issue also counts. PRs into release or feature branches are not checked, because the PR into `develop` carries the link. The label is non-blocking, but it keeps unlinked implementation work visible in Project #5.
 
 PRs also need an explicit change type and at least one area label. The
 **PR labels** check rejects missing or conflicting classification; a planning
@@ -264,8 +264,8 @@ Project intake and manual roadmap exports run the script after they validate `AD
 | An epic appears under `Unscheduled`. | Set `Roadmap version` on the epic. |
 | A field exists but you cannot see it in the current view. | Open `View` -> `Fields` and tick the field. The export can read hidden fields. |
 | The export workflow says `Missing ADD_TO_PROJECT_PAT`. | Add a repository secret named `ADD_TO_PROJECT_PAT`. |
-| A task gets `needs:epic`. | Add a `Parent epic` issue reference such as `#123`. |
-| A PR gets `needs:task-link`. | Add a closing task reference such as `Fixes #123` to the PR body. |
+| A task gets `needs:epic`. | Write the epic as `#123` in `Parent epic`. If it was already there, check that the epic has the `kind:epic` label. |
+| A PR gets `needs:task-link`. | Write `Fixes #123` in the PR body, or link the task under **Development**. After a sidebar link, remove the label to refresh it. |
 | A card is missing from the SVG. | Check that `Kind` is `Epic` or the issue has the `kind:epic` label. |
 
 `Add item` creates a new project item. The `+` in a table header adds or shows fields in that view.
