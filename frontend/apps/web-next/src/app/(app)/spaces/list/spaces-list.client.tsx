@@ -8,6 +8,7 @@ import { LayoutGrid, SearchX, Trash2 } from "lucide-react";
 import { useTranslations } from "next-intl";
 import { useRef, useState } from "react";
 import { EmptyState } from "@/components/composites/empty-state";
+import { AREA_HUES } from "@/components/composites/icon-tile";
 import { EntityAvatar } from "@/components/composites/entity-avatar";
 import { iconUrl } from "@/components/composites/icon-field";
 import { PageHeader } from "@/components/composites/page-header";
@@ -116,6 +117,7 @@ export function SpacesList({ title }: { title: string }) {
       {sharedSpaces.length === 0 ? (
         <EmptyState
           icon={<LayoutGrid />}
+          hue={AREA_HUES.spaces}
           title={t("space_list_empty_title")}
           description={
             canCreate ? t("space_list_empty_description") : t("space_list_empty_no_create")

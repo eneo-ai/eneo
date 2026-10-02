@@ -1,8 +1,9 @@
 // @vitest-environment jsdom
-import { fireEvent, screen, waitFor, within } from "@testing-library/react";
+import { act, fireEvent, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { expectNoAxeViolations } from "@/test/axe";
+import { router } from "@/test/navigation";
 import { renderInApp, testAppContext } from "@/test/render";
+import { clearJustCreated, isJustCreated } from "@/features/spaces/just-created";
 
 const api = vi.hoisted(() => ({ POST: vi.fn() }));
 vi.mock("@/lib/api/browser", () => ({ browserApi: api }));
@@ -14,7 +15,19 @@ vi.mock("@/features/spaces/use-space", async () => {
 
 import { CreateChatAppMenu } from "./create-menu";
 
-afterEach(() => vi.clearAllMocks());
+const created = (id: string) =>
+  Promise.resolve({ data: { id }, response: new Response("{}", { status: 200 }) });
+const collision = () =>
+  Promise.resolve({
+    error: { message: "Name collision", eneo_error_code: 9017 },
+    response: new Response("{}", { status: 400 })
+  });
+
+afterEach(() => {
+  vi.clearAllMocks();
+  clearJustCreated("assistant", "a-new");
+  clearJustCreated("group-chat", "g-new");
+});
 
 describe("CreateChatAppMenu", () => {
   it("names the split button's menu after what it offers", () => {
@@ -32,29 +45,56 @@ describe("CreateChatAppMenu", () => {
     ).toEqual(["Skapa ny assistent", "Börja med en mall...", "Skapa ny gruppchatt"]);
   });
 
-  it("shows a missing name at the field on create, which takes focus", async () => {
-    api.POST.mockReturnValue(new Promise(() => {}));
+  it("creates the assistant as 'Ny assistent' at once and opens its editor", async () => {
+    let finish!: (value: Awaited<ReturnType<typeof created>>) => void;
+    api.POST.mockReturnValue(new Promise((resolve) => (finish = resolve)));
     renderInApp(<CreateChatAppMenu />, { appContext: testAppContext() });
-    fireEvent.click(screen.getByRole("button", { name: "Skapa assistent" }));
-    const dialog = await screen.findByRole("dialog", { name: "Skapa ny assistent" });
-    const create = within(dialog).getByRole("button", {
-      name: "Skapa assistent"
-    }) as HTMLButtonElement;
-    // Never disabled: a disabled button says nothing about what is missing.
+
+    const create = screen.getByRole("button", { name: "Skapa assistent" }) as HTMLButtonElement;
+    fireEvent.click(create);
+    // No name dialog in between: the editor's first field is the name.
+    expect(screen.queryByRole("dialog")).toBeNull();
+    // Busy, the button stays enabled so it keeps focus; a second press is ignored.
+    await waitFor(() => expect(create.getAttribute("aria-busy")).toBe("true"));
     expect(create.disabled).toBe(false);
-
     fireEvent.click(create);
-    const name = within(dialog).getByLabelText("Namn");
-    expect(name.getAttribute("aria-invalid")).toBe("true");
-    expect(document.getElementById(name.getAttribute("aria-describedby")!)?.textContent).toBe(
-      "Detta fält är obligatoriskt"
+    expect(api.POST).toHaveBeenCalledTimes(1);
+
+    await act(async () => finish(await created("a-new")));
+    await waitFor(() =>
+      expect(router.push).toHaveBeenCalledWith("/spaces/space-1/assistants/a-new/edit")
     );
-    expect(document.activeElement).toBe(name);
-    expect(api.POST).not.toHaveBeenCalled();
-    await expectNoAxeViolations(dialog);
+    expect(api.POST).toHaveBeenCalledTimes(1);
+    expect(api.POST.mock.calls[0]?.[1]).toMatchObject({ body: { name: "Ny assistent" } });
+    // The editor focuses the name and announces the creation.
+    expect(isJustCreated("assistant", "a-new")).toBe(true);
+  });
 
-    fireEvent.change(name, { target: { value: "Upphandling" } });
-    fireEvent.click(create);
-    await waitFor(() => expect(api.POST).toHaveBeenCalledTimes(1));
+  it("numbers the name when 'Ny assistent' is taken", async () => {
+    api.POST.mockReturnValueOnce(collision()).mockReturnValueOnce(created("a-new"));
+    renderInApp(<CreateChatAppMenu />, { appContext: testAppContext() });
+
+    fireEvent.click(screen.getByRole("button", { name: "Skapa assistent" }));
+    await waitFor(() => expect(router.push).toHaveBeenCalledTimes(1));
+    expect(
+      api.POST.mock.calls.map((call) => (call[1] as { body: { name: string } }).body.name)
+    ).toEqual(["Ny assistent", "Ny assistent 2"]);
+  });
+
+  it("creates a group chat as 'Ny gruppchatt' from the menu", async () => {
+    api.POST.mockReturnValue(created("g-new"));
+    renderInApp(<CreateChatAppMenu />, { appContext: testAppContext() });
+
+    fireEvent.keyDown(screen.getByRole("button", { name: "Fler sätt att skapa" }), {
+      key: "Enter"
+    });
+    fireEvent.click(screen.getByRole("menuitem", { name: "Skapa ny gruppchatt" }));
+
+    await waitFor(() =>
+      expect(router.push).toHaveBeenCalledWith("/spaces/space-1/group-chats/g-new/edit")
+    );
+    expect(api.POST.mock.calls[0]?.[0]).toBe("/api/v1/spaces/{id}/applications/group-chats/");
+    expect(api.POST.mock.calls[0]?.[1]).toMatchObject({ body: { name: "Ny gruppchatt" } });
+    expect(isJustCreated("group-chat", "g-new")).toBe(true);
   });
 });

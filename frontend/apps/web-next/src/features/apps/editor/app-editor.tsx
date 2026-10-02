@@ -3,7 +3,6 @@
 import { useSuspenseQuery } from "@tanstack/react-query";
 import {
   BookOpenCheck,
-  ChevronLeft,
   KeyRound,
   MessageSquare,
   Paperclip,
@@ -15,8 +14,7 @@ import {
 } from "lucide-react";
 import Link from "next/link";
 import { useTranslations } from "next-intl";
-import { PageHeader } from "@/components/composites/page-header";
-import { SaveStatusIndicator, SaveStatusProvider } from "@/components/composites/save-status";
+import { SaveStatusProvider } from "@/components/composites/save-status";
 import {
   SectionedSettings,
   type SettingsSection
@@ -24,6 +22,8 @@ import {
 import { Button } from "@/components/ui/button";
 import { browserApi } from "@/lib/api/browser";
 import { ResourceApiKeysSection } from "@/features/api-keys/resource-api-keys-section";
+import { EditorHeader, useCreatedAnnouncement } from "@/features/spaces/editor-header";
+import { useJustCreated } from "@/features/spaces/just-created";
 import { useSpace } from "@/features/spaces/use-space";
 import { SkillBindingsSection } from "@/features/skills/skill-bindings-section";
 import { appQueryOptions } from "../apps";
@@ -36,18 +36,26 @@ import { PublishingSection } from "./publishing-section";
 import { SecuritySection } from "./security-section";
 import { useUpdateApp } from "./use-app";
 
-/** App settings, saved per section (web-next pattern). */
+/**
+ * App settings, saved per section (web-next pattern). The editor owns the
+ * surface (see AssistantEditor); "Klar" leads to the app's run page. Opened
+ * right after "Skapa app", it focuses the (default) name and announces the
+ * creation.
+ */
 export function AppEditor({ appId }: { appId: string }) {
   const t = useTranslations();
   const { routeId, can } = useSpace();
   const { data: app } = useSuspenseQuery(appQueryOptions(browserApi, appId));
   const update = useUpdateApp(appId);
+  const created = useJustCreated("app", appId);
+  useCreatedAnnouncement(created, t("app_created_announcement"));
+
   const sections: SettingsSection[] = [
     {
       id: "general",
       label: t("general"),
       icon: SlidersHorizontal,
-      node: <GeneralSection app={app} />
+      node: <GeneralSection app={app} focusName={created} />
     },
     { id: "input", label: t("input"), icon: TextCursorInput, node: <InputSection app={app} /> },
     {
@@ -107,24 +115,18 @@ export function AppEditor({ appId }: { appId: string }) {
   return (
     <SaveStatusProvider>
       <SectionedSettings
-        navigationLabel={t("settings")}
+        navigationLabel={t("editor_sections_label")}
         sections={sections}
         header={
-          <div className="flex flex-col gap-1 py-3">
-            <Link
-              href={`/spaces/${routeId}/apps/${app.id}`}
-              className="text-muted-foreground hover:text-foreground flex w-fit items-center gap-1 text-sm"
-            >
-              <ChevronLeft className="size-4" />
-              {app.name}
-            </Link>
-            <PageHeader title={t("edit")}>
-              <SaveStatusIndicator />
-              <Button asChild variant="outline">
+          <EditorHeader
+            section="apps"
+            name={app.name}
+            actions={
+              <Button asChild variant="outline" size="sm">
                 <Link href={`/spaces/${routeId}/apps/${app.id}`}>{t("done")}</Link>
               </Button>
-            </PageHeader>
-          </div>
+            }
+          />
         }
       />
     </SaveStatusProvider>

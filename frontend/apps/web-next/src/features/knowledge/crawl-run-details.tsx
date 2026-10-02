@@ -12,6 +12,7 @@ import { useTranslations } from "next-intl";
 import { useId, useState } from "react";
 import { useClientTimeText } from "@/components/composites/client-time";
 import { LoadingState } from "@/components/composites/loading-state";
+import { ListError } from "@/components/composites/query-state";
 import { browserApi } from "@/lib/api/browser";
 import { flattenPages } from "@/lib/api/pagination";
 import {
@@ -22,7 +23,7 @@ import {
   resourceLink,
   type CrawlFailureKind
 } from "./crawl-run-state";
-import { CrawlLoadError, CrawlRunCounts, CrawlRunStatusLabel } from "./crawl-run-ui";
+import { CrawlRunCounts, CrawlRunStatusLabel } from "./crawl-run-ui";
 import { crawlFailuresQueryOptions, type CrawlFailurePage, type CrawlRun } from "./knowledge";
 
 /** Query options for a run's failures of one kind (all kinds with `null`). */
@@ -198,9 +199,10 @@ export function CrawlRunDetailsContent({
       )}
 
       {failures.isError ? (
-        <CrawlLoadError
-          message={t("crawl_failures_load_failed")}
-          loading={loading}
+        <ListError
+          error={failures.error}
+          title={t("crawl_failures_load_failed")}
+          isRetrying={loading}
           onRetry={() => void (pages ? failures.fetchNextPage() : failures.refetch())}
         />
       ) : null}

@@ -8,6 +8,7 @@ import { useTranslations } from "next-intl";
 import { useState } from "react";
 import { ClientTime } from "@/components/composites/client-time";
 import { EmptyState } from "@/components/composites/empty-state";
+import { AREA_HUES } from "@/components/composites/icon-tile";
 import { StatusLabel } from "@/components/composites/status-label";
 import { CollectionActions, CreateCollectionButton } from "@/features/knowledge/collections";
 import { IntegrationActions, WrapperActions } from "@/features/knowledge/integrations/actions";
@@ -195,6 +196,7 @@ export function OverviewKnowledge() {
       {rows.length === 0 ? (
         <EmptyState
           icon={<BookOpen />}
+          hue={AREA_HUES.knowledge}
           title={t("space_knowledge_empty_title")}
           description={t("space_knowledge_empty_description")}
           headingLevel={3}

@@ -1,5 +1,6 @@
 "use client";
 
+import { LoadingState } from "@/components/composites/loading-state";
 import { useQuery } from "@tanstack/react-query";
 import { ChevronDown, ChevronRight, Database, FileText, Globe, Plus, X } from "lucide-react";
 import { useLocale, useTranslations } from "next-intl";
@@ -144,7 +145,7 @@ function SelectedKnowledgeBlobList({
   const [page, setPage] = useState(0);
 
   if (loading) {
-    return <div className="text-muted-foreground px-3 py-3 text-sm">{t("loading")}</div>;
+    return <LoadingState variant="text" rows={2} />;
   }
   if (error) {
     return (

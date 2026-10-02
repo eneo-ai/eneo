@@ -146,14 +146,23 @@ ships must be release-ready: correct, accessible, tested and without dead ends.
 ## Long settings editors
 
 Use `src/components/composites/sectioned-settings.tsx` for editors with several
-settings sections inside a space. Put the title, back link and save state in its
-sticky header, and provide one ordered section list for both the horizontal
-anchor navigation and the single-column content. Keep conditional sections in
-that list so a link never points to hidden or unavailable settings. Use
+settings sections inside a space. Its header is `EditorHeader`
+(`src/features/spaces/editor-header.tsx`): the breadcrumb back to the space
+and the tab, the name as the h1, the save state and the actions. The editor
+owns the surface: `spaceRoute` classifies the assistant, app and group-chat
+editors as `editor`, and the space frame renders no space header or tabs
+above them. Provide one ordered section list for both the section links (an
+Astryx TabList in its navigation pattern: it scrolls with edge fades, keeps
+the current link in view and moves with the arrow keys, so no label is ever
+truncated) and the single-column content. Keep conditional sections in that
+list so a link never points to hidden or unavailable settings. Use
 `SettingsGroup` for each card's heading and rows. Do not add another sidebar
 inside the space navigation. Keep anchors and focused controls clear of the
 sticky header, and check keyboard navigation and narrow widths when changing
-the shared layout.
+the shared layout. An editor opened right after "Skapa …" gets the resource
+through `useJustCreated` (`src/features/spaces/just-created.ts`): it focuses
+the default name and announces the creation; `createWithUniqueName` numbers
+the default name on a backend name collision (9017).
 
 ## How it is wired
 
@@ -195,8 +204,10 @@ the shared layout.
   yet (`astryx-provider.tsx`). For other client-only values use `useHydrated()`
   (`src/lib/hooks/use-hydrated.ts`) instead of effect + setState, below the
   page's providers.
-- **Fonts**: Figtree for UI (`font-sans`), JetBrains Mono (`font-mono`), Source
-  Serif 4 for assistant answers (`font-voice`). Type scale 14px / 1.2.
+- **Fonts**: Figtree for UI and assistant answers (`font-sans`; answers use
+  `ANSWER_TEXT_CLASS` in `ai-elements/message.tsx`), JetBrains Mono (`font-mono`).
+  Source Serif 4 stays loaded as `font-voice` so the answer voice can be flipped
+  back with one class. Type scale 14px / 1.2.
 - **App shell** (`src/components/shell/`): Astryx `SideNav` (collapsed state in
   the `eneo_sidenav_collapsed` cookie, read by the layout), an admin mode under
   `/admin`, Astryx `MobileNav` below 768px and the ⌘K `CommandPalette`. A page
@@ -297,9 +308,18 @@ focus-visible:outline-offset-2 focus-visible:outline-ring`);
   (only `current` marks a crumb as this page; a crumb without `href` is a plain
   label), `actions?` (legacy `children` still work), `headingLevel?`,
   `headingRef?`, `tour?`.
-- `EmptyState` — `title`, `description?`, `icon?`, `actions?` (or `children`),
-  `headingLevel?` (1–4, default 2), `isCompact?`, `framed?` (dashed frame,
-  default on).
+- `QueryStateBoundary` / `ListError` (`query-state.tsx`) — the one loading and
+  error state for a list or section: skeleton rows while pending, an error banner
+  with the catalog message, "Försök igen" (refetch) and status/code/trace behind
+  details. Never a hand-rolled "Laddar…" or a skeleton that cannot end.
+- `EmptyState` — `title`, `description?`, `icon?`, `hue?` (the area's hue for
+  the icon tile, `AREA_HUES` from `icon-tile.tsx`; neutral for zero results),
+  `actions?` (or `children`), `headingLevel?` (1–4, default 2), `isCompact?`,
+  `framed?` (dashed frame, default on).
+- `IconTile` — the coloured icon tile of the start page's starter cards and
+  the empty states: `icon`, `hue?` (`neutral` | categorical, `AREA_HUES` maps
+  each area to one), `size?: sm|md|lg`. Decorative; the text beside it
+  carries the meaning.
 - `LoadingState` — skeleton status region: `label?`, `rows?`,
   `variant?: "rows" | "text"`. Never show an EmptyState that says "Loading".
 - `EntityAvatar` — coloured tile for spaces/assistants: `name`, `id?`, `tone?`,

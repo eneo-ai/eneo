@@ -1,13 +1,12 @@
 "use client";
 
 import { useMutation, useQueryClient, useSuspenseQuery } from "@tanstack/react-query";
-import { Bot, ChevronLeft, Send, SlidersHorizontal, Wrench } from "lucide-react";
+import { Bot, Play, Send, SlidersHorizontal, Wrench } from "lucide-react";
 import Link from "next/link";
 import { useTranslations } from "next-intl";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { IconField } from "@/components/composites/icon-field";
-import { PageHeader } from "@/components/composites/page-header";
-import { SaveStatusIndicator, SaveStatusProvider } from "@/components/composites/save-status";
+import { SaveStatusProvider } from "@/components/composites/save-status";
 import {
   SectionedSettings,
   type SettingsSection
@@ -24,6 +23,8 @@ import { unwrap } from "@/lib/api/errors";
 import { toastApiError } from "@/lib/api/toast";
 import { chatPartnerHref } from "@/features/assistants/assistants";
 import { PublishDialog } from "@/features/assistants/publish-dialog";
+import { EditorHeader, useCreatedAnnouncement } from "@/features/spaces/editor-header";
+import { useJustCreated } from "@/features/spaces/just-created";
 import { useSpace } from "@/features/spaces/use-space";
 import { GroupChatAssistantList } from "./assistant-list";
 import {
@@ -33,9 +34,20 @@ import {
   type GroupChatAssistant
 } from "./use-group-chat";
 
-function GeneralSection({ groupChat }: { groupChat: GroupChat }) {
+function GeneralSection({
+  groupChat,
+  focusName = false
+}: {
+  groupChat: GroupChat;
+  /**
+   * The editor opened right after the group chat was created with a default
+   * name: focus the name field with that name selected, so typing replaces it.
+   */
+  focusName?: boolean;
+}) {
   const t = useTranslations();
   const update = useUpdateGroupChat(groupChat.id);
+  const nameRef = useRef<HTMLInputElement>(null);
 
   const name = useAutosaveField({
     key: "group-chat-name",
@@ -45,6 +57,12 @@ function GeneralSection({ groupChat }: { groupChat: GroupChat }) {
     validate: (value) => value.length > 0
   });
 
+  useEffect(() => {
+    if (!focusName) return;
+    nameRef.current?.focus();
+    nameRef.current?.select();
+  }, [focusName]);
+
   return (
     <SettingsGroup title={t("general")}>
       <SettingsRow
@@ -53,6 +71,7 @@ function GeneralSection({ groupChat }: { groupChat: GroupChat }) {
         htmlFor="group-chat-name"
       >
         <Input
+          ref={nameRef}
           id="group-chat-name"
           value={name.value}
           onChange={(event) => name.setValue(event.target.value)}
@@ -241,17 +260,25 @@ function PublishingSection({ groupChat }: { groupChat: GroupChat }) {
   );
 }
 
+/**
+ * Group chat settings, saved per section. The editor owns the surface (see
+ * AssistantEditor); "Testa" opens a chat with the group. Opened right after
+ * "Skapa ny gruppchatt", it focuses the (default) name and announces the
+ * creation.
+ */
 export function GroupChatEditor({ groupChatId }: { groupChatId: string }) {
   const t = useTranslations();
   const { routeId } = useSpace();
   const { data: groupChat } = useSuspenseQuery(groupChatQueryOptions(browserApi, groupChatId));
+  const created = useJustCreated("group-chat", groupChatId);
+  useCreatedAnnouncement(created, t("group_chat_created_announcement"));
   const permissions = groupChat.permissions ?? [];
   const sections: SettingsSection[] = [
     {
       id: "general",
       label: t("general"),
       icon: SlidersHorizontal,
-      node: <GeneralSection groupChat={groupChat} />
+      node: <GeneralSection groupChat={groupChat} focusName={created} />
     },
     {
       id: "assistants",
@@ -280,26 +307,21 @@ export function GroupChatEditor({ groupChatId }: { groupChatId: string }) {
   return (
     <SaveStatusProvider>
       <SectionedSettings
-        navigationLabel={t("settings")}
+        navigationLabel={t("editor_sections_label")}
         sections={sections}
         header={
-          <div className="flex flex-col gap-1 py-3">
-            <Link
-              href={`/spaces/${routeId}/assistants`}
-              className="text-muted-foreground hover:text-foreground flex w-fit items-center gap-1 text-sm"
-            >
-              <ChevronLeft className="size-4" />
-              {t("assistants")}
-            </Link>
-            <PageHeader title={groupChat.name}>
-              <SaveStatusIndicator />
-              <Button asChild variant="outline">
+          <EditorHeader
+            section="assistants"
+            name={groupChat.name}
+            actions={
+              <Button asChild size="sm">
                 <Link href={chatPartnerHref(routeId, { type: "group-chat", id: groupChat.id })}>
-                  {t("done")}
+                  <Play className="size-4" />
+                  {t("test")}
                 </Link>
               </Button>
-            </PageHeader>
-          </div>
+            }
+          />
         }
       />
     </SaveStatusProvider>

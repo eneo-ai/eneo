@@ -1,6 +1,7 @@
 "use client";
 
 import { useTranslations } from "next-intl";
+import { useEffect, useRef } from "react";
 import { IconField } from "@/components/composites/icon-field";
 import { SettingsGroup, SettingsRow } from "@/components/composites/settings-rows";
 import { useAutosaveField } from "@/components/composites/use-autosave";
@@ -9,9 +10,21 @@ import { Textarea } from "@/components/ui/textarea";
 import type { App } from "../apps";
 import { useUpdateApp } from "./use-app";
 
-export function GeneralSection({ app }: { app: App }) {
+export function GeneralSection({
+  app,
+  focusName = false
+}: {
+  app: App;
+  /**
+   * The editor opened right after the app was created with a default name:
+   * focus the name field with that name selected, so typing replaces it.
+   * Carries on the user's own action, like the name dialog it replaced.
+   */
+  focusName?: boolean;
+}) {
   const t = useTranslations();
   const update = useUpdateApp(app.id);
+  const nameRef = useRef<HTMLInputElement>(null);
 
   const name = useAutosaveField({
     key: "app-name",
@@ -26,10 +39,17 @@ export function GeneralSection({ app }: { app: App }) {
     save: (value) => update.mutateAsync({ description: value })
   });
 
+  useEffect(() => {
+    if (!focusName) return;
+    nameRef.current?.focus();
+    nameRef.current?.select();
+  }, [focusName]);
+
   return (
     <SettingsGroup title={t("general")}>
       <SettingsRow title={t("name")} description={t("app_name_description")} htmlFor="app-name">
         <Input
+          ref={nameRef}
           id="app-name"
           value={name.value}
           onChange={(event) => name.setValue(event.target.value)}

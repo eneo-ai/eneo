@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { act, cleanup, fireEvent, screen, waitFor } from "@testing-library/react";
+import { act, cleanup, fireEvent, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { expectNoAxeViolations } from "@/test/axe";
 import { renderInApp } from "@/test/render";
@@ -61,11 +61,24 @@ describe("LoginForm", () => {
     submit("anna@kommun.se", "fel-lösenord");
 
     const error = await screen.findByRole("alert");
-    expect(error.textContent).toBe(
-      "Ogiltiga inloggningsuppgifterFörsök kvar innan inloggningen spärras tillfälligt: 2."
-    );
+    // Two sentences on their own lines: the count never wraps alone.
+    const lines = within(error).getAllByRole("paragraph");
+    expect(lines.map((line) => line.textContent)).toEqual([
+      "Ogiltiga inloggningsuppgifter",
+      "2 försök kvar innan kontot spärras tillfälligt."
+    ]);
     expect(screen.getByLabelText("E-post").getAttribute("aria-invalid")).toBe("true");
     await expectNoAxeViolations(container);
+    action.result = { error: "invalid_credentials" };
+  });
+
+  it("counts a single attempt left in the singular", async () => {
+    action.result = { error: "invalid_credentials", attemptsRemaining: 1, retryAfterSeconds: null };
+    renderInApp(<LoginForm />);
+    submit("anna@kommun.se", "fel-lösenord");
+
+    const error = await screen.findByRole("alert");
+    expect(within(error).getByText("1 försök kvar innan kontot spärras tillfälligt.")).toBeTruthy();
     action.result = { error: "invalid_credentials" };
   });
 

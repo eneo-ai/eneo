@@ -4,7 +4,6 @@ import { useSuspenseQuery } from "@tanstack/react-query";
 import {
   BookOpen,
   BookOpenCheck,
-  ChevronLeft,
   Globe,
   KeyRound,
   MessageSquare,
@@ -18,7 +17,7 @@ import {
 } from "lucide-react";
 import Link from "next/link";
 import { useTranslations } from "next-intl";
-import { SaveStatusIndicator, SaveStatusProvider } from "@/components/composites/save-status";
+import { SaveStatusProvider } from "@/components/composites/save-status";
 import {
   SectionedSettings,
   type SettingsSection
@@ -26,6 +25,8 @@ import {
 import { Button } from "@/components/ui/button";
 import { browserApi } from "@/lib/api/browser";
 import { ResourceApiKeysSection } from "@/features/api-keys/resource-api-keys-section";
+import { EditorHeader, useCreatedAnnouncement } from "@/features/spaces/editor-header";
+import { useJustCreated } from "@/features/spaces/just-created";
 import { useSpace } from "@/features/spaces/use-space";
 import { SkillBindingsSection } from "@/features/skills/skill-bindings-section";
 import { chatPartnerHref } from "../assistants";
@@ -42,16 +43,19 @@ import { assistantQueryOptions, type Assistant, useUpdateAssistant } from "./use
 
 /**
  * Assistant settings. Saved per section (web-next pattern; the Svelte app's
- * global draft/diff editor is intentionally not ported). A single full-width
- * column under a sticky header; a horizontal anchor strip (not a second sidebar)
- * navigates the sections, and the header carries the aggregate save state and a
- * shortcut into chat.
+ * global draft/diff editor is intentionally not ported). The editor owns the
+ * surface: a single full-width column under a sticky header with the
+ * breadcrumb back to the space's assistants, the name, the aggregate save
+ * state and a shortcut into chat, then the section links. Opened right after
+ * "Skapa assistent", it focuses the (default) name and announces the creation.
  */
 export function AssistantEditor({ assistantId }: { assistantId: string }) {
   const t = useTranslations();
   const { space, routeId, can } = useSpace();
   const { data: assistant } = useSuspenseQuery(assistantQueryOptions(browserApi, assistantId));
   const update = useUpdateAssistant(assistantId);
+  const created = useJustCreated("assistant", assistantId);
+  useCreatedAnnouncement(created, t("assistant_created_announcement"));
 
   const chatHref = chatPartnerHref(routeId, { ...assistant, type: "assistant" as const });
 
@@ -65,7 +69,7 @@ export function AssistantEditor({ assistantId }: { assistantId: string }) {
       id: "general",
       label: t("general"),
       icon: SlidersHorizontal,
-      node: <GeneralSection assistant={assistant} />
+      node: <GeneralSection assistant={assistant} focusName={created} />
     },
     {
       id: "instructions",
@@ -157,36 +161,21 @@ export function AssistantEditor({ assistantId }: { assistantId: string }) {
   return (
     <SaveStatusProvider>
       <SectionedSettings
-        navigationLabel={t("settings")}
+        navigationLabel={t("editor_sections_label")}
         sections={sections}
         header={
-          <div className="flex items-center justify-between gap-3 py-3">
-            <div className="flex min-w-0 items-center gap-2">
-              <Link
-                href={`/spaces/${routeId}/assistants`}
-                aria-label={t("assistants")}
-                className="text-muted-foreground hover:text-foreground"
-              >
-                <ChevronLeft className="size-5" />
-              </Link>
-              <span className="text-muted-foreground hidden text-sm sm:inline">
-                {t("assistants")}
-              </span>
-              <span className="text-muted-foreground hidden sm:inline">/</span>
-              <h1 className="truncate text-base font-semibold">{assistant.name}</h1>
-            </div>
-            <div className="flex shrink-0 items-center gap-3">
-              <span className="hidden md:inline">
-                <SaveStatusIndicator />
-              </span>
+          <EditorHeader
+            section="assistants"
+            name={assistant.name}
+            actions={
               <Button asChild size="sm">
                 <Link href={chatHref}>
                   <Play className="size-4" />
                   {t("test")}
                 </Link>
               </Button>
-            </div>
-          </div>
+            }
+          />
         }
       />
     </SaveStatusProvider>

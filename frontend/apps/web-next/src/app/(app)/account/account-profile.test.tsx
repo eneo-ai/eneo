@@ -1,17 +1,31 @@
 // @vitest-environment jsdom
-import { screen } from "@testing-library/react";
+import { fireEvent, screen, waitFor } from "@testing-library/react";
 import { expect, it, vi } from "vitest";
 import { expectNoAxeViolations } from "@/test/axe";
+import { router } from "@/test/navigation";
 import { renderInApp, testAppContext } from "@/test/render";
 import { AccountProfile } from "./account-profile.client";
 
 vi.mock("next/navigation", () => import("@/test/navigation"));
+const setLocale = vi.hoisted(() => vi.fn(() => Promise.resolve()));
+vi.mock("@/lib/i18n/actions", () => ({ setLocale }));
 
-it("names the language picker by its row title (a combobox takes no name from its value)", async () => {
+it("shows the current language as the selected value, named by the row title", async () => {
   const { container } = renderInApp(<AccountProfile />);
 
-  expect(screen.getByRole("combobox", { name: "Språk" })).toBeTruthy();
+  const picker = screen.getByRole("combobox", { name: "Språk" });
+  expect(picker.textContent).toContain("Svenska");
   await expectNoAxeViolations(container);
+});
+
+it("saves the chosen language and refreshes the page", async () => {
+  renderInApp(<AccountProfile />);
+
+  fireEvent.click(screen.getByRole("combobox", { name: "Språk" }));
+  fireEvent.click(await screen.findByRole("option", { name: "English" }));
+
+  await waitFor(() => expect(setLocale).toHaveBeenCalledWith("en"));
+  await waitFor(() => expect(router.refresh).toHaveBeenCalled());
 });
 
 it("shows the frontend's and the backend's version", () => {

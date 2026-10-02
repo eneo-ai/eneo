@@ -1,8 +1,10 @@
 // @vitest-environment jsdom
-import { fireEvent, screen, waitFor, within } from "@testing-library/react";
+import { act, fireEvent, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { expectNoAxeViolations } from "@/test/axe";
+import { router } from "@/test/navigation";
 import { renderInApp, testAppContext } from "@/test/render";
+import { clearJustCreated, isJustCreated } from "@/features/spaces/just-created";
 
 const api = vi.hoisted(() => ({
   POST: vi.fn(),
@@ -34,7 +36,18 @@ vi.mock("@/features/spaces/use-space", async () => {
 
 import { CreateAppButton } from "./create-app";
 
-afterEach(() => vi.clearAllMocks());
+const created = (id: string) =>
+  Promise.resolve({ data: { id }, response: new Response("{}", { status: 200 }) });
+const collision = () =>
+  Promise.resolve({
+    error: { message: "Name collision", eneo_error_code: 9017 },
+    response: new Response("{}", { status: 400 })
+  });
+
+afterEach(() => {
+  vi.clearAllMocks();
+  clearJustCreated("app", "p-new");
+});
 
 describe("CreateAppButton", () => {
   it("names the split button's menu after what it offers", () => {
@@ -52,28 +65,39 @@ describe("CreateAppButton", () => {
     ).toEqual(["Börja med en mall..."]);
   });
 
-  it("shows a missing name at the field on create, which takes focus", async () => {
-    api.POST.mockReturnValue(new Promise(() => {}));
+  it("creates the app as 'Ny app' at once and opens its editor", async () => {
+    let finish!: (value: Awaited<ReturnType<typeof created>>) => void;
+    api.POST.mockReturnValue(new Promise((resolve) => (finish = resolve)));
     renderInApp(<CreateAppButton />, { appContext: testAppContext() });
-    fireEvent.click(screen.getByRole("button", { name: "Skapa app" }));
-    const dialog = await screen.findByRole("dialog", { name: "Skapa en tom app" });
-    const create = within(dialog).getByRole("button", { name: "Skapa app" }) as HTMLButtonElement;
-    // Never disabled: a disabled button says nothing about what is missing.
+
+    const create = screen.getByRole("button", { name: "Skapa app" }) as HTMLButtonElement;
+    fireEvent.click(create);
+    // No name dialog in between: the editor's first field is the name.
+    expect(screen.queryByRole("dialog")).toBeNull();
+    // Busy, the button stays enabled so it keeps focus; a second press is ignored.
+    await waitFor(() => expect(create.getAttribute("aria-busy")).toBe("true"));
     expect(create.disabled).toBe(false);
-
     fireEvent.click(create);
-    const name = within(dialog).getByLabelText("Namn");
-    expect(name.getAttribute("aria-invalid")).toBe("true");
-    expect(document.getElementById(name.getAttribute("aria-describedby")!)?.textContent).toBe(
-      "Detta fält är obligatoriskt"
+    expect(api.POST).toHaveBeenCalledTimes(1);
+
+    await act(async () => finish(await created("p-new")));
+    await waitFor(() =>
+      expect(router.push).toHaveBeenCalledWith("/spaces/space-1/apps/p-new/edit")
     );
-    expect(document.activeElement).toBe(name);
-    expect(api.POST).not.toHaveBeenCalled();
-    await expectNoAxeViolations(dialog);
+    expect(api.POST).toHaveBeenCalledTimes(1);
+    expect(api.POST.mock.calls[0]?.[1]).toMatchObject({ body: { name: "Ny app" } });
+    expect(isJustCreated("app", "p-new")).toBe(true);
+  });
 
-    fireEvent.change(name, { target: { value: "Upphandling" } });
-    fireEvent.click(create);
-    await waitFor(() => expect(api.POST).toHaveBeenCalledTimes(1));
+  it("numbers the name when 'Ny app' is taken", async () => {
+    api.POST.mockReturnValueOnce(collision()).mockReturnValueOnce(created("p-new"));
+    renderInApp(<CreateAppButton />, { appContext: testAppContext() });
+
+    fireEvent.click(screen.getByRole("button", { name: "Skapa app" }));
+    await waitFor(() => expect(router.push).toHaveBeenCalledTimes(1));
+    expect(
+      api.POST.mock.calls.map((call) => (call[1] as { body: { name: string } }).body.name)
+    ).toEqual(["Ny app", "Ny app 2"]);
   });
 
   it("says a template is needed, then its name, when creating from a template", async () => {

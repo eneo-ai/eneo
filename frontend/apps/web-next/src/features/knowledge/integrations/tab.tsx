@@ -5,6 +5,7 @@ import { Plug } from "lucide-react";
 import { useTranslations } from "next-intl";
 import { useId, useState } from "react";
 import { EmptyState } from "@/components/composites/empty-state";
+import { AREA_HUES } from "@/components/composites/icon-tile";
 import { useAppContext } from "@/components/providers/app-context";
 import { useSpace } from "@/features/spaces/use-space";
 import { embeddingModelsInUse } from "../knowledge";
@@ -85,6 +86,7 @@ export function IntegrationsTab({
         // Nothing to list yet: the empty state carries the one action.
         <EmptyState
           icon={<Plug />}
+          hue={AREA_HUES.knowledge}
           title={t("fix_integrations_empty_title")}
           headingLevel={3}
           actions={action}

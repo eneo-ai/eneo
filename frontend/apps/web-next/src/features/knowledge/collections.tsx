@@ -20,6 +20,7 @@ import { useTranslations } from "next-intl";
 import { useId, useRef, useState } from "react";
 import { flushSync } from "react-dom";
 import { EmptyState } from "@/components/composites/empty-state";
+import { AREA_HUES } from "@/components/composites/icon-tile";
 import { FieldProblem, fieldProblemProps } from "@/components/composites/field-problem";
 import { StatusLabel } from "@/components/composites/status-label";
 import { Button } from "@/components/ui/button";
@@ -415,6 +416,7 @@ export function CollectionsTab({
     return (
       <EmptyState
         icon={<FolderClosed />}
+        hue={AREA_HUES.knowledge}
         title={t("space_collections_empty_title")}
         description={t("space_collections_empty_description")}
         headingLevel={3}

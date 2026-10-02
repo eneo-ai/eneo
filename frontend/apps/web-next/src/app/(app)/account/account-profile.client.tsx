@@ -1,5 +1,6 @@
 "use client";
 
+import { Selector } from "@astryxdesign/core/Selector";
 import { useRouter } from "next/navigation";
 import { useLocale, useTranslations } from "next-intl";
 import { useState, useTransition } from "react";
@@ -8,13 +9,6 @@ import { useAppContext } from "@/components/providers/app-context";
 import { Badge } from "@/components/ui/badge";
 import { Label } from "@/components/ui/label";
 import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue
-} from "@/components/ui/select";
 import { browserApi } from "@/lib/api/browser";
 import { unwrap } from "@/lib/api/errors";
 import { toastApiError } from "@/lib/api/toast";
@@ -27,7 +21,9 @@ import {
   setPreferredAssistantCopyFormat
 } from "@/features/chat/copy-assistant-answer";
 
+// Each language in its own name, so every reader finds theirs (not translated).
 const LOCALE_LABELS: Record<string, string> = { sv: "Svenska", en: "English" };
+const LOCALE_OPTIONS = locales.map((value) => ({ value, label: LOCALE_LABELS[value] ?? value }));
 const COPY_FORMAT_OPTIONS: AssistantCopyFormat[] = ["markdown", "richtext"];
 
 function isAssistantCopyFormat(value: string): value is AssistantCopyFormat {
@@ -89,11 +85,17 @@ export function AccountProfile() {
           ))}
         </div>
       </SettingsRow>
-      {/* A combobox takes no name from its value: the row title labels it. */}
-      <SettingsRow title={t("language")} htmlFor="account-language">
-        <Select
+      {/* The row title is the visible label; the selector's own (hidden) label
+          gives the combobox the same name. The current locale (the
+          NEXT_LOCALE cookie, read by src/lib/i18n/request.ts) is the value. */}
+      <SettingsRow title={t("language")}>
+        <Selector
+          label={t("language")}
+          isLabelHidden
+          options={LOCALE_OPTIONS}
           value={locale}
-          onValueChange={(next) =>
+          width={192}
+          onChange={(next) =>
             startTransition(async () => {
               try {
                 await setLocale(next);
@@ -103,18 +105,7 @@ export function AccountProfile() {
               }
             })
           }
-        >
-          <SelectTrigger id="account-language" className="w-48">
-            <SelectValue />
-          </SelectTrigger>
-          <SelectContent>
-            {locales.map((value) => (
-              <SelectItem key={value} value={value}>
-                {LOCALE_LABELS[value] ?? value}
-              </SelectItem>
-            ))}
-          </SelectContent>
-        </Select>
+        />
       </SettingsRow>
       <SettingsRow
         tour="account-copy-format"

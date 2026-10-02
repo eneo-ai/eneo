@@ -5,6 +5,7 @@ import { AppWindow, SearchX } from "lucide-react";
 import { useTranslations } from "next-intl";
 import { useId, useRef, useState } from "react";
 import { EmptyState } from "@/components/composites/empty-state";
+import { AREA_HUES } from "@/components/composites/icon-tile";
 import { PageHeader } from "@/components/composites/page-header";
 import { RESOURCE_GRID_CLASS } from "@/components/composites/resource-tile";
 import { RemovalFocusScope } from "@/features/spaces/removal";
@@ -67,6 +68,7 @@ export function AppsPage() {
         {items.length === 0 ? (
           <EmptyState
             icon={<AppWindow />}
+            hue={AREA_HUES.apps}
             title={t("space_apps_empty_title")}
             description={t("space_apps_empty_description")}
             headingLevel={3}

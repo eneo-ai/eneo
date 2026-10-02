@@ -24,6 +24,8 @@ import { flushSync } from "react-dom";
 import { Streamdown } from "streamdown";
 import { ConfirmDialogControlled } from "@/components/composites/confirm-dialog";
 import { EmptyState } from "@/components/composites/empty-state";
+import { LoadingState } from "@/components/composites/loading-state";
+import { ListError } from "@/components/composites/query-state";
 import { FieldProblem, fieldProblemProps } from "@/components/composites/field-problem";
 import { Button } from "@/components/ui/button";
 import {
@@ -71,7 +73,7 @@ export function BlobPreviewDialog({
   onOpenChange: (open: boolean) => void;
 }) {
   const t = useTranslations();
-  const { data, isPending, isError } = useQuery({
+  const { data, isPending, isError, error, isFetching, refetch } = useQuery({
     queryKey: ["info-blobs", blob.id],
     queryFn: () =>
       unwrap(browserApi.GET("/api/v1/info-blobs/{id}/", { params: { path: { id: blob.id } } })),
@@ -91,9 +93,14 @@ export function BlobPreviewDialog({
         </DialogHeader>
         <div className="min-h-0 flex-1 overflow-y-auto rounded-md border p-4 text-sm">
           {isPending ? (
-            <p className="text-muted-foreground">{t("loading")}</p>
+            <LoadingState variant="text" rows={4} />
           ) : isError ? (
-            <p className="text-destructive">{t("attachment_error_loading_content")}</p>
+            <ListError
+              error={error}
+              title={t("attachment_error_loading_content")}
+              isRetrying={isFetching}
+              onRetry={() => void refetch()}
+            />
           ) : (
             <Streamdown>{data.text ?? ""}</Streamdown>
           )}

@@ -81,3 +81,8 @@ export function useTour(): TourContextValue {
   if (!context) throw new Error("useTour must be used inside the app layout");
   return context;
 }
+
+/** For UI that is also rendered without the app layout (tests, previews): null there. */
+export function useOptionalTour(): TourContextValue | null {
+  return useContext(TourContext);
+}

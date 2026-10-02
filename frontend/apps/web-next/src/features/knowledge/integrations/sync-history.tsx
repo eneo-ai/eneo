@@ -1,6 +1,5 @@
 "use client";
 
-import { Spinner } from "@astryxdesign/core/Spinner";
 import { keepPreviousData, useQuery } from "@tanstack/react-query";
 import { Check, History, Loader2, X } from "lucide-react";
 import { useTranslations } from "next-intl";
@@ -16,6 +15,8 @@ import {
 import { browserApi } from "@/lib/api/browser";
 import { formatDuration } from "@/lib/format";
 import { ClientTime } from "@/components/composites/client-time";
+import { LoadingState } from "@/components/composites/loading-state";
+import { ListError } from "@/components/composites/query-state";
 import type { IntegrationKnowledge } from "../knowledge";
 import { syncLogsQueryOptions, type SyncLog } from "./queries";
 
@@ -122,7 +123,7 @@ function SyncHistoryContent({ item }: { item: IntegrationKnowledge }) {
   const t = useTranslations();
   const [page, setPage] = useState(1);
 
-  const { data, isPending, isError, error } = useQuery({
+  const { data, isPending, isError, error, isFetching, refetch } = useQuery({
     ...syncLogsQueryOptions(browserApi, item.id, page),
     placeholderData: keepPreviousData
   });
@@ -140,14 +141,9 @@ function SyncHistoryContent({ item }: { item: IntegrationKnowledge }) {
       </DialogHeader>
       <div className="flex max-h-[60vh] flex-col gap-3 overflow-y-auto pr-1">
         {isPending ? (
-          <div className="flex items-center justify-center gap-2 py-8">
-            <Spinner size="lg" />
-          </div>
+          <LoadingState rows={4} />
         ) : isError ? (
-          <div className="bg-destructive/10 text-destructive flex items-center gap-2 rounded-md p-4 text-sm">
-            <X className="size-4 shrink-0" />
-            <span>{error instanceof Error ? error.message : t("error")}</span>
-          </div>
+          <ListError error={error} isRetrying={isFetching} onRetry={() => void refetch()} />
         ) : logs.length === 0 ? (
           <div className="text-muted-foreground flex flex-col items-center gap-2 py-8">
             <History className="size-6 opacity-50" />

@@ -75,6 +75,16 @@ describe("SpaceFrame", () => {
     expect(screen.queryByRole("navigation")).toBeNull();
   });
 
+  it("renders an editor full-bleed, without the space header and tabs", () => {
+    show(sharedSpace(), ["assistants", "a1", "edit"]);
+    expect(screen.getByText("Sidans innehåll")).toBeTruthy();
+    // The editor's own sticky header carries the breadcrumb back, so the space
+    // header and tabs would only push its section tabs off the screen.
+    expect(screen.queryByRole("banner")).toBeNull();
+    expect(screen.queryByRole("navigation")).toBeNull();
+    expect(screen.queryByRole("link", { name: "Ny chatt" })).toBeNull();
+  });
+
   it("gives a tab page the space name as its h1, breadcrumbs, members and tabs", async () => {
     const { container } = show(sharedSpace(), ["overview"]);
 

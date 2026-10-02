@@ -13,7 +13,6 @@ import { env } from "@/lib/env";
 import { JobsProvider } from "@/features/jobs/use-jobs";
 import { WhatsNewProvider } from "@/features/whats-new/whats-new-provider";
 import { TourProvider } from "@/features/whats-new/tour-provider";
-import { WhatsNewAnnouncement } from "@/features/whats-new/announcement";
 import packageJson from "../../../package.json";
 
 /** Every app page can be added to the home screen (public/manifest.json). */
@@ -74,7 +73,6 @@ export default async function AppLayout({
       >
         <TourProvider>
           <JobsProvider>
-            <WhatsNewAnnouncement />
             {/* Viewport-locked shell: pages scroll inside the page panel
                 (main#main-content), so full-height surfaces (chat) can pin
                 their input to the bottom. */}

@@ -1,6 +1,7 @@
 "use client";
 
 import { useTranslations } from "next-intl";
+import { useEffect, useRef } from "react";
 import { IconField } from "@/components/composites/icon-field";
 import { SettingsGroup, SettingsRow } from "@/components/composites/settings-rows";
 import { useAutosaveField } from "@/components/composites/use-autosave";
@@ -8,9 +9,21 @@ import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { useUpdateAssistant, type Assistant } from "./use-assistant";
 
-export function GeneralSection({ assistant }: { assistant: Assistant }) {
+export function GeneralSection({
+  assistant,
+  focusName = false
+}: {
+  assistant: Assistant;
+  /**
+   * The editor opened right after the assistant was created with a default
+   * name: focus the name field with that name selected, so typing replaces it.
+   * Carries on the user's own action, like the name dialog it replaced.
+   */
+  focusName?: boolean;
+}) {
   const t = useTranslations();
   const update = useUpdateAssistant(assistant.id);
+  const nameRef = useRef<HTMLInputElement>(null);
 
   const name = useAutosaveField({
     key: "assistant-name",
@@ -25,6 +38,12 @@ export function GeneralSection({ assistant }: { assistant: Assistant }) {
     save: (value) => update.mutateAsync({ description: value })
   });
 
+  useEffect(() => {
+    if (!focusName) return;
+    nameRef.current?.focus();
+    nameRef.current?.select();
+  }, [focusName]);
+
   return (
     <SettingsGroup title={t("general")}>
       <SettingsRow
@@ -33,6 +52,7 @@ export function GeneralSection({ assistant }: { assistant: Assistant }) {
         htmlFor="assistant-name"
       >
         <Input
+          ref={nameRef}
           id="assistant-name"
           value={name.value}
           onChange={(event) => name.setValue(event.target.value)}

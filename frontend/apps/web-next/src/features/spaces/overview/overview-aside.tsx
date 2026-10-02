@@ -10,7 +10,7 @@ import { MetadataList, MetadataListItem } from "@astryxdesign/core/MetadataList"
 import { ChevronDown, ChevronUp } from "lucide-react";
 import { useTranslations } from "next-intl";
 import { Fragment, useId } from "react";
-import { ClientTime } from "@/components/composites/client-time";
+import { useClientTimeText } from "@/components/composites/client-time";
 import { cn } from "@/lib/utils";
 import {
   memberDisplayName,
@@ -18,7 +18,6 @@ import {
   SPACE_ROLE_LABEL_KEYS,
   sortMembersByRole
 } from "../members/member-avatar";
-import { modelDisplayName } from "../space-models";
 import { useSpace } from "../use-space";
 import { defaultModelFirst } from "./overview-data";
 import { OverviewLink, OverviewSection } from "./overview-section";
@@ -33,6 +32,17 @@ type ModelListItem = {
   nickname?: string | null;
   is_org_default?: boolean;
 };
+
+/**
+ * A model's display name (its nickname). A model without one has only its
+ * identifier, `name` ("claude-haiku-4-5"), shown in monospace so it reads as
+ * one, not as a word that lost its capitals.
+ */
+function ModelName({ model }: { model: ModelListItem }) {
+  const nickname = model.nickname?.trim();
+  if (nickname) return <span className="min-w-0 wrap-anywhere">{nickname}</span>;
+  return <span className="min-w-0 font-mono text-[0.8125rem] wrap-anywhere">{model.name}</span>;
+}
 
 /**
  * A space's models, one per line. From five models on, the first three show
@@ -60,7 +70,7 @@ function ModelList({
       <ul id={listId} className="flex flex-col gap-1 self-stretch">
         {shown.map((model) => (
           <li key={model.id} className="flex flex-wrap items-center gap-x-2 gap-y-0.5">
-            <span className="min-w-0 wrap-anywhere">{modelDisplayName(model)}</span>
+            <ModelName model={model} />
             {model.is_org_default ? (
               <Badge variant="blue" label={t("admin_models_default_badge")} />
             ) : null}
@@ -91,14 +101,19 @@ function ModelList({
   );
 }
 
-/** "Om ytan": the space facts that exist (classification, models, creation date). */
+/**
+ * "Om ytan": the space facts that exist (classification, models, creation
+ * date). A row shows only with a value: the date renders in the viewer's time
+ * zone after hydration, so until then, and without a valid date, there is no
+ * "Skapad" label over nothing.
+ */
 function AboutPanel() {
   const t = useTranslations();
   const { space } = useSpace();
   const chatModels = defaultModelFirst(space.completion_models);
   const embeddingModels = space.embedding_models;
   const classification = space.security_classification?.name;
-  const createdAt = space.created_at;
+  const createdAt = useClientTimeText(space.created_at, "date_long");
 
   if (!classification && !chatModels.length && !embeddingModels.length && !createdAt) return null;
 
@@ -132,11 +147,7 @@ function AboutPanel() {
             />
           </MetadataListItem>
         ) : null}
-        {createdAt ? (
-          <MetadataListItem label={t("created")}>
-            <ClientTime value={createdAt} format="date_long" />
-          </MetadataListItem>
-        ) : null}
+        {createdAt ? <MetadataListItem label={t("created")}>{createdAt}</MetadataListItem> : null}
       </MetadataList>
     </OverviewSection>
   );

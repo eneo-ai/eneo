@@ -1,8 +1,6 @@
 "use client";
 
-import { Banner } from "@astryxdesign/core/Banner";
 import { Button } from "@astryxdesign/core/Button";
-import { RefreshCw } from "lucide-react";
 import { useLocale, useTranslations } from "next-intl";
 import { cn } from "@/lib/utils";
 import {
@@ -189,37 +187,5 @@ export function CrawlRunCounts({
         ))}
       </tbody>
     </table>
-  );
-}
-
-/** A failed load with a way to try again. */
-export function CrawlLoadError({
-  message,
-  loading,
-  onRetry
-}: {
-  message: string;
-  loading?: boolean;
-  onRetry: () => void;
-}) {
-  const t = useTranslations();
-  return (
-    <Banner
-      status="error"
-      title={message}
-      collapsible={false}
-      endContent={
-        <Button
-          size="sm"
-          label={t("retry")}
-          icon={<RefreshCw aria-hidden="true" />}
-          isLoading={loading}
-          isInterruptible
-          onClick={() => {
-            if (!loading) onRetry();
-          }}
-        />
-      }
-    />
   );
 }

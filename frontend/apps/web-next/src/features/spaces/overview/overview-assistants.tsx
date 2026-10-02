@@ -4,6 +4,7 @@ import { useCollator } from "@astryxdesign/core/i18n";
 import { Bot, Plus } from "lucide-react";
 import { useTranslations } from "next-intl";
 import { EmptyState } from "@/components/composites/empty-state";
+import { AREA_HUES } from "@/components/composites/icon-tile";
 import { useAppContext } from "@/components/providers/app-context";
 import { CreateChatAppMenu } from "@/features/assistants/create-menu";
 import { ChatAppTile } from "@/features/assistants/tile";
@@ -70,6 +71,7 @@ export function OverviewAssistants() {
       {items.length === 0 ? (
         <EmptyState
           icon={<Bot />}
+          hue={AREA_HUES.assistants}
           title={t("space_assistants_empty_title")}
           description={t("space_assistants_empty_description")}
           headingLevel={3}

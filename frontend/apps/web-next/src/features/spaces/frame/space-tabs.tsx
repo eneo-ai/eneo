@@ -10,7 +10,10 @@ function ignoreSelection() {}
 /**
  * The space's sections as an Astryx TabList in its navigation pattern: a named
  * <nav> of links, the current one marked with aria-current. Counts sit after
- * the label; the accessible name spells them out ("Assistenter (3)").
+ * the label; the accessible name spells them out ("Assistenter (3)"). On a
+ * phone the strip is narrower than its tabs: Astryx scrolls it with edge
+ * fades, keeps the current tab in view and moves through it with the arrow
+ * keys; `globals.css` (section 12) adds scroll snapping to the tabs.
  */
 export function SpaceTabs({
   sections,
@@ -30,6 +33,7 @@ export function SpaceTabs({
       value={activeSection ?? ""}
       onChange={ignoreSelection}
       size="lg"
+      overflow="scroll"
       aria-label={t("space_sections_label")}
       className={className}
     >

@@ -25,6 +25,7 @@ import { useTranslations } from "next-intl";
 import { useId, useMemo, useState, type Dispatch, type SetStateAction } from "react";
 import { ConfirmDialogControlled } from "@/components/composites/confirm-dialog";
 import { EmptyState } from "@/components/composites/empty-state";
+import { AREA_HUES } from "@/components/composites/icon-tile";
 import type { StatusTone } from "@/components/composites/status-label";
 import { browserApi } from "@/lib/api/browser";
 import { unwrap } from "@/lib/api/errors";
@@ -543,6 +544,7 @@ export function WebsitesTab({ canCreate, labelledBy }: { canCreate: boolean; lab
       <>
         <EmptyState
           icon={<Globe />}
+          hue={AREA_HUES.knowledge}
           title={t("space_websites_empty_title")}
           description={t("space_websites_empty_description")}
           headingLevel={3}

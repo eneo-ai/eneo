@@ -97,3 +97,8 @@ export function useWhatsNew(): WhatsNewContextValue {
   if (!value) throw new Error("useWhatsNew must be used inside the app layout");
   return value;
 }
+
+/** For UI that is also rendered without the app layout (tests, previews): null there. */
+export function useOptionalWhatsNew(): WhatsNewContextValue | null {
+  return useContext(WhatsNewContext);
+}

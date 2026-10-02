@@ -100,14 +100,24 @@ describe("spaceRoute", () => {
       section: "knowledge",
       isSectionRoot: false
     });
-    expect(spaceRoute(["assistants", "a1", "edit"])).toMatchObject({
-      section: "assistants",
+    expect(spaceRoute(["apps", "p1"])).toEqual({
+      kind: "page",
+      section: "apps",
       isSectionRoot: false
     });
-    expect(spaceRoute(["group-chats", "g1", "edit"])).toMatchObject({
+    expect(spaceRoute(["group-chats", "g1"])).toMatchObject({
       section: "assistants",
       isSectionRoot: false
     });
     expect(spaceRoute([])).toEqual({ kind: "page", section: null, isSectionRoot: false });
+  });
+
+  it("lets the assistant, app and group-chat editors own the surface", () => {
+    expect(spaceRoute(["assistants", "a1", "edit"])).toEqual({ kind: "editor" });
+    expect(spaceRoute(["apps", "p1", "edit"])).toEqual({ kind: "editor" });
+    expect(spaceRoute(["group-chats", "g1", "edit"])).toEqual({ kind: "editor" });
+    // Only the editor itself: an app's run page and results keep the frame.
+    expect(spaceRoute(["apps", "p1", "results", "r1"])).toMatchObject({ kind: "page" });
+    expect(spaceRoute(["skills", "s1", "edit"])).toMatchObject({ kind: "page", section: "skills" });
   });
 });

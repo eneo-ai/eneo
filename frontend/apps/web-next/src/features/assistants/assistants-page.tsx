@@ -5,6 +5,7 @@ import { Bot, SearchX } from "lucide-react";
 import { useTranslations } from "next-intl";
 import { useId, useRef, useState } from "react";
 import { EmptyState } from "@/components/composites/empty-state";
+import { AREA_HUES } from "@/components/composites/icon-tile";
 import { PageHeader } from "@/components/composites/page-header";
 import { RESOURCE_GRID_CLASS } from "@/components/composites/resource-tile";
 import { RemovalFocusScope } from "@/features/spaces/removal";
@@ -78,6 +79,7 @@ export function AssistantsPage() {
         {items.length === 0 ? (
           <EmptyState
             icon={<Bot />}
+            hue={AREA_HUES.assistants}
             title={t("space_assistants_empty_title")}
             description={t("space_assistants_empty_description")}
             headingLevel={3}

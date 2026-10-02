@@ -72,6 +72,8 @@ export function spaceSections(space: Space, can: Can, routeId: SpaceRouteId): Sp
 
 export type SpaceRoute =
   | { kind: "chat" }
+  /** An assistant, app or group-chat editor: it owns the surface with its own header. */
+  | { kind: "editor" }
   | {
       kind: "page";
       /** The tab the route belongs to, or null for routes outside the tabs. */
@@ -80,14 +82,24 @@ export type SpaceRoute =
       isSectionRoot: boolean;
     };
 
+/** `/spaces/x/assistants/<id>/edit`, `/apps/<id>/edit`, `/group-chats/<id>/edit`. */
+function isEditorRoute(first: string | undefined, rest: readonly string[]): boolean {
+  return (
+    (first === "assistants" || first === "apps" || first === "group-chats") &&
+    rest.length === 2 &&
+    rest[1] === "edit"
+  );
+}
+
 /**
  * Classifies the route below `/spaces/[spaceId]` from its layout segments
- * (`useSelectedLayoutSegments()`). The chat renders full-bleed with its own
- * header; every other route gets the space header and tabs.
+ * (`useSelectedLayoutSegments()`). The chat and the editors render full-bleed
+ * with headers of their own; every other route gets the space header and tabs.
  */
 export function spaceRoute(segments: readonly string[]): SpaceRoute {
   const [first, ...rest] = segments;
   if (first === "chat") return { kind: "chat" };
+  if (isEditorRoute(first, rest)) return { kind: "editor" };
   // Group chats are edited from the assistants tab.
   if (first === "group-chats") return { kind: "page", section: "assistants", isSectionRoot: false };
   if (!isSectionId(first)) return { kind: "page", section: null, isSectionRoot: false };
