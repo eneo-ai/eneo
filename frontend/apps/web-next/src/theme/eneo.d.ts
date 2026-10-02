@@ -7,7 +7,7 @@
  */
 
 /// <reference path="./eneo.variants.d.ts" />
-import type { DefinedTheme } from "@astryxdesign/core/theme";
-import type { IconRegistry } from "@astryxdesign/core/Icon";
+import type { DefinedTheme } from '@astryxdesign/core/theme';
+import type { IconRegistry } from '@astryxdesign/core/Icon';
 export declare const neutralIconRegistry: IconRegistry;
 export declare const eneoTheme: DefinedTheme;
