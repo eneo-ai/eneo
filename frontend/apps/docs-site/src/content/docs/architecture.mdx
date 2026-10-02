@@ -46,7 +46,10 @@ and Redis. Everything is deployed with Docker Compose behind Traefik.
 - User interface, routing, and forms
 - Server-side rendering and the login flow (cookies are set server-side)
 - Streaming chat responses over Server-Sent Events
-- Live job and crawl status over the `/api/v1/ws` WebSocket
+- Live job and crawl status: the SvelteKit app listens on the `/api/v1/ws`
+  WebSocket; the React app (`web-next`) subscribes to the per-user
+  `/api/v1/jobs/events/` Server-Sent Events stream, which the backend feeds
+  from Redis pub/sub after each job status change commits
 
 **Directory structure:**
 
