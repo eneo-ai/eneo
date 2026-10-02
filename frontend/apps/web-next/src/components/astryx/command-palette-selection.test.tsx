@@ -5,7 +5,7 @@ import { fireEvent, screen, waitFor } from "@testing-library/react";
 import { expect, it } from "vitest";
 import { renderInApp } from "@/test/render";
 
-// Guards frontend/patches/@astryxdesign%2Fcore@0.6.3.patch. Unpatched, Astryx
+// Guards frontend/patches/@astryxdesign%2Fcore@0.6.4.patch. Unpatched, Astryx
 // marks only a picked value as selected, so every highlighted option is
 // exposed as "not selected". After an Astryx upgrade bun silently skips a
 // stale patch; this test then fails: recreate the patch with

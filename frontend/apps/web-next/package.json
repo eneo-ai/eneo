@@ -22,8 +22,8 @@
   },
   "dependencies": {
     "@ai-sdk/react": "3.0.294",
-    "@astryxdesign/core": "0.6.3",
-    "@astryxdesign/theme-neutral": "0.6.3",
+    "@astryxdesign/core": "0.6.4",
+    "@astryxdesign/theme-neutral": "0.6.4",
     "@eneo/whats-new": "workspace:*",
     "@radix-ui/react-use-controllable-state": "^1.2.3",
     "@streamdown/cjk": "^1.0.3",
@@ -57,7 +57,7 @@
     "zod": "^4.4.3"
   },
   "devDependencies": {
-    "@astryxdesign/cli": "0.6.3",
+    "@astryxdesign/cli": "0.6.4",
     "@axe-core/playwright": "4.13.0",
     "@eneo/eslint-plugin": "workspace:*",
     "@playwright/test": "1.58.2",

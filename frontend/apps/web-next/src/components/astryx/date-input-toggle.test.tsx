@@ -15,7 +15,7 @@ it("keeps the calendar toggle where globals.css finds it", () => {
       label="Från"
       value={undefined}
       onChange={() => {}}
-      nativePicker="never"
+      presentation="adaptive-bottom-sheet"
       format="date"
     />
   );

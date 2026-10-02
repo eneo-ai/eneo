@@ -25,7 +25,7 @@ const describedBy = () =>
     .split(" ")
     .map((id) => document.getElementById(id)?.textContent);
 
-// Astryx 0.6.3 sets aria-describedby from its own description and status
+// Astryx 0.6.4 sets aria-describedby from its own description and status
 // only, over any the caller passes; the wrapper adds the caller's after them.
 // When Astryx keeps the caller's ids, drop the wrapper, its lint rule and this
 // test.

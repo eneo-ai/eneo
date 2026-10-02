@@ -89,7 +89,7 @@ function FilterBar({
         if (!value) return;
         setFilters((current) => ({ ...current, [boundary]: isoFromDateInput(value, boundary) }));
       }}
-      nativePicker="never"
+      presentation="adaptive-bottom-sheet"
       weekStartsOn="mon"
       format="date"
       width="11rem"

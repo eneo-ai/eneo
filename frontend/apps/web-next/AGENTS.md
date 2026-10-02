@@ -106,7 +106,7 @@ ships must be release-ready: correct, accessible, tested and without dead ends.
 - **Fix an Astryx gap in one place**, never at each call site: a wrapper in
   `src/components/astryx/` (lint sends imports there), or the bun patch for
   what a wrapper can't reach (How it is wired → Packages). Known gaps in
-  Astryx 0.6.3:
+  Astryx 0.6.4:
   - `Switch` announces a hard-coded English "Loading" in its busy state: use
     `Switch` from `@/components/astryx/switch`, which leaves
     `isLoading`/`changeAction` out.
@@ -114,8 +114,11 @@ ships must be release-ready: correct, accessible, tested and without dead ends.
     from its own description and status only): use `TextInput` from
     `@/components/astryx/text-input`, which adds the caller's ids after
     Astryx's own (as the password policy checklist needs).
-  - CommandPalette marks only a picked value as selected, and DateInput passes
-    `nativePicker` on to the DOM: both patched.
+  - CommandPalette marks only a picked value as selected: patched (the
+    highlighted option is exposed as selected, as the APG combobox pattern
+    says). DateInput's `nativePicker` is deprecated since 0.6.4: use
+    `presentation` (`"adaptive-bottom-sheet"` keeps the CSP-blocked browser
+    picker away, see `key-expiry-field.tsx`).
   - BottomSheet skips `data-autofocus` when opening the dialog already focused
     its panel: focus the target yourself once the sheet is open (as
     `activity-sources.tsx` does).
@@ -156,9 +159,8 @@ the shared layout.
 - **Packages** (beta, pinned exactly; upgrade together, then run
   `bunx astryx upgrade` and `bun run theme:build`): `@astryxdesign/core`,
   `@astryxdesign/theme-neutral`, `@stylexjs/stylex` (runtime only), dev
-  `@astryxdesign/cli`. `frontend/patches/@astryxdesign%2Fcore@0.6.3.patch`
-  makes CommandPalette mark the highlighted option as selected and keeps
-  DateInput's `nativePicker` off the DOM. After an upgrade bun silently skips
+  `@astryxdesign/cli`. `frontend/patches/@astryxdesign%2Fcore@0.6.4.patch`
+  makes CommandPalette mark the highlighted option as selected. After an upgrade bun silently skips
   the stale patch and the guard tests in `src/components/astryx/` fail:
   recreate it with `bun patch @astryxdesign/core` (keep the diff free of bun's
   `.bun-tag-*` file), or drop a part Astryx has fixed.
@@ -425,7 +427,7 @@ production build shows these violations. Never loosen the policy.
 
 <!-- ASTRYX:START -->
 
-Astryx 0.6.3 quick reference for this app (edited for web-next; see above).
+Astryx 0.6.4 quick reference for this app (edited for web-next; see above).
 
 - Discover: `bunx astryx search "<q>"`, `bunx astryx component <Name> --dense`,
   `bunx astryx build "<idea>"`, `bunx astryx docs layout`.

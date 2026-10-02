@@ -7,7 +7,7 @@ import { useLayoutEffect, useRef } from "react";
 export type { TextInputProps };
 
 /**
- * Astryx TextInput whose `aria-describedby` works. Astryx 0.6.3 sets the
+ * Astryx TextInput whose `aria-describedby` works. Astryx 0.6.4 sets the
  * input's aria-describedby to its own description and status and drops the
  * caller's, so the caller's ids (a password policy checklist next to the
  * field, say) are added after Astryx's own after each render: Astryx rewrites

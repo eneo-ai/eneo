@@ -13,7 +13,7 @@ function isIsoDate(value: string | null): value is IsoDate {
 /**
  * The optional date a provider's API key expires, as YYYY-MM-DD or null.
  *
- * `nativePicker="never"`: the browser-picker surface probes the engine with an
+ * `presentation="adaptive-bottom-sheet"`: the browser-picker surface probes the engine with an
  * injected <style>, which the production CSP blocks (AGENTS.md → CSP); Astryx's
  * own calendar and touch picker inject nothing.
  */
@@ -33,7 +33,7 @@ export function KeyExpiryField({
       })}
       isOptional
       hasClear
-      nativePicker="never"
+      presentation="adaptive-bottom-sheet"
       weekStartsOn="mon"
       value={isIsoDate(value) ? value : undefined}
       onChange={(next) => onChange(next ?? null)}
