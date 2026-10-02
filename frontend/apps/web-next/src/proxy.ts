@@ -23,7 +23,10 @@ const PUBLIC_PREFIXES = [
   "/healthz",
   "/deactivated",
   "/activate",
+  // The invitation notice (links to /login; Zitadel registration is not ported).
   "/invite",
+  // Gates the session itself so its login redirect carries its own headers.
+  "/module-login",
   "/integrations/callback"
 ];
 

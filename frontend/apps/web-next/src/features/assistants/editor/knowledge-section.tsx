@@ -20,7 +20,7 @@ function toIds(selections: KnowledgeSelections): string {
  * Current-space + organization knowledge pickers. Knowledge and MCP servers are
  * mutually exclusive: when MCP servers are active and no knowledge exists the
  * pickers are disabled (legacy data with both stays editable so the user can
- * resolve the conflict). The MCP picker itself is a deferred follow-up.
+ * resolve the conflict). The MCP picker is `McpSection` (mcp-section.tsx).
  */
 export function KnowledgeSection({ assistant }: { assistant: Assistant }) {
   const t = useTranslations();

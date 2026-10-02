@@ -58,7 +58,8 @@ export default async function AppLayout({
       showWebSearch: env.SHOW_WEB_SEARCH
     },
     links: {
-      accessibilityStatement: env.ACCESSIBILITY_STATEMENT_URL ?? null
+      accessibilityStatement: env.ACCESSIBILITY_STATEMENT_URL ?? null,
+      helpCenter: env.SHOW_HELP_CENTER ? (env.HELP_CENTER_URL ?? null) : null
     },
     versions: { frontend: packageJson.version, backend: backendVersion }
   };

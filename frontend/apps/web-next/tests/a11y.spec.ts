@@ -290,6 +290,22 @@ for (const colorScheme of ["light", "dark"] as const) {
         });
       });
 
+      test("module login failed", async ({ page }) => {
+        await scan(page, "/module-login/failed?reason=module_unavailable", async () => {
+          await expect(
+            page.getByRole("link", { name: /tillbaka till eneo|back to eneo/i })
+          ).toBeVisible();
+        });
+      });
+
+      test("invitation", async ({ page }) => {
+        await scan(page, "/invite/e2e-a11y", async () => {
+          await expect(
+            page.getByRole("link", { name: /gå till inloggningen|go to the login page/i })
+          ).toBeVisible();
+        });
+      });
+
       test("login failed with the identity provider's diagnostics", async ({ page }) => {
         await scan(
           page,

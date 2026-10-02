@@ -1,8 +1,9 @@
 "use client";
 
 import { SideNavItem } from "@astryxdesign/core/SideNav";
-import { Building2, Shield } from "lucide-react";
+import { Building2, CircleHelp, ExternalLink, Shield } from "lucide-react";
 import { useTranslations } from "next-intl";
+import type { ComponentProps } from "react";
 import { useAppContext } from "@/components/providers/app-context";
 import { cn } from "@/lib/utils";
 import { useNavTarget } from "./nav-data";
@@ -24,10 +25,38 @@ function OrganizationItem() {
   );
 }
 
-/** "Organisation" and "Administration" (admins), then the profile button. */
+/** A plain anchor to another site, in a new tab (SideNavItem's own link is next/link). */
+function ExternalNavLink({ children, ...props }: ComponentProps<"a">) {
+  return (
+    <a {...props} target="_blank" rel="noopener noreferrer">
+      {children}
+    </a>
+  );
+}
+
+/**
+ * "Har du en fråga?" → the deployment's help centre (HELP_CENTER_URL, shown
+ * when SHOW_HELP_CENTER is on). It opens in a new tab, which the accessible
+ * name says, in the rail and the drawer too, where the row's own text is gone.
+ */
+function HelpCenterItem({ href }: { href: string }) {
+  const t = useTranslations();
+  return (
+    <SideNavItem
+      as={ExternalNavLink}
+      label={t("have_a_question")}
+      aria-label={`${t("have_a_question")} ${t("chat_opens_in_new_tab")}`}
+      icon={CircleHelp}
+      href={href}
+      endContent={<ExternalLink aria-hidden="true" className="size-3.5" />}
+    />
+  );
+}
+
+/** "Organisation" and "Administration" (admins), the help centre, then the profile button. */
 export function NavFooter({ variant }: { variant: NavVariant }) {
   const t = useTranslations();
-  const { can } = useAppContext();
+  const { can, links } = useAppContext();
   const isAdmin = can("admin");
 
   return (
@@ -38,6 +67,7 @@ export function NavFooter({ variant }: { variant: NavVariant }) {
           <SideNavItem label={t("shell_administration")} icon={Shield} href="/admin" />
         </>
       ) : null}
+      {links.helpCenter ? <HelpCenterItem href={links.helpCenter} /> : null}
       <div className="mt-1.5">
         <ProfileMenu />
       </div>

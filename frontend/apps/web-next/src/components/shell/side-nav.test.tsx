@@ -450,3 +450,58 @@ describe("DesktopSideNav (admin)", () => {
     expect(currentLinks()).toEqual([within(navigation).getByRole("link", { name: "Översikt" })]);
   });
 });
+
+describe("help centre link", () => {
+  const HELP_CENTER = "https://support.example.se/eneo";
+
+  function renderWithHelpCenter(variant: NavVariant, helpCenter: string | null) {
+    return renderInApp(<DesktopSideNav variant={variant} navId="side-nav" />, {
+      queryClient: seededClient(),
+      appContext: testAppContext({ permissions: ["admin"], links: { helpCenter } })
+    });
+  }
+
+  it.each(["main", "admin"] as const)(
+    "opens the deployment's help centre in a new tab from the %s navigation, and says so",
+    async (variant) => {
+      setRoute(variant === "admin" ? "/admin" : "/spaces/personal/chat");
+      const { container } = renderWithHelpCenter(variant, HELP_CENTER);
+      const link = screen.getByRole("link", { name: "Har du en fråga? (öppnas i en ny flik)" });
+
+      expect(link.getAttribute("href")).toBe(HELP_CENTER);
+      expect(link.getAttribute("target")).toBe("_blank");
+      expect(link.getAttribute("rel")?.split(" ")).toEqual(
+        expect.arrayContaining(["noopener", "noreferrer"])
+      );
+      // The visible text is in the name (WCAG 2.5.3), and it is never the current page.
+      expect(link.textContent).toContain("Har du en fråga?");
+      expect(link.getAttribute("aria-current")).toBeNull();
+      // Below Administration (main) and above the profile button.
+      const profile = screen.getByRole("button", { name: /Anna Lind/ });
+      expect(link.compareDocumentPosition(profile) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+      if (variant === "main") {
+        const admin = screen.getByRole("link", { name: "Administration" });
+        expect(admin.compareDocumentPosition(link) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+      }
+      await expectNoAxeViolations(container);
+    }
+  );
+
+  it("keeps the name in the icon rail", async () => {
+    document.cookie = `${SIDE_NAV_COLLAPSED_COOKIE}=1; path=/`;
+    renderInApp(<DesktopSideNav variant="main" navId="side-nav" defaultCollapsed />, {
+      queryClient: seededClient(),
+      appContext: testAppContext({ links: { helpCenter: HELP_CENTER } })
+    });
+    expect(
+      screen
+        .getByRole("link", { name: "Har du en fråga? (öppnas i en ny flik)" })
+        .getAttribute("href")
+    ).toBe(HELP_CENTER);
+  });
+
+  it("is absent when the deployment has no help centre", () => {
+    renderWithHelpCenter("main", null);
+    expect(screen.queryByRole("link", { name: /Har du en fråga/ })).toBeNull();
+  });
+});

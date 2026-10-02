@@ -79,3 +79,15 @@ it("still sends signed-out visitors to the login page", async () => {
   expect(response.status).toBe(307);
   expect(new URL(response.headers.get("location") ?? "").pathname).toBe("/login");
 });
+
+it("lets /module-login and /invite through signed out: they gate or explain themselves", async () => {
+  for (const path of [
+    "/module-login?module_key=reports&redirect_uri=https%3A%2F%2Fm.example%2Fcb&state=abc",
+    "/module-login/failed?reason=module_unavailable",
+    "/invite/org-1"
+  ]) {
+    const response = await proxy(new NextRequest(new URL(path, "http://localhost:3100")));
+    expect(response.status, path).toBe(200);
+    expect(response.headers.get("location"), path).toBeNull();
+  }
+});

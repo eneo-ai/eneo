@@ -69,7 +69,7 @@ export function testAppContext({
     federationStatus: { has_multi_tenant_federation: false },
     limits: { attachments: { formats: [] }, info_blobs: { formats: [] } },
     featureFlags: { showWebSearch: true },
-    links: { accessibilityStatement: null },
+    links: { accessibilityStatement: null, helpCenter: null },
     versions: { frontend: "0.1.0", backend: "1.2.3" }
   };
   return Object.fromEntries(

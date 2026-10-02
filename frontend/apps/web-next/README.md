@@ -41,6 +41,7 @@ SESSION_SECRET=
 
 # Feature flags
 SHOW_WEB_SEARCH=false
+# "Har du en fråga?" in the navigation: needs both the flag and the URL.
 SHOW_HELP_CENTER=false
 # HELP_CENTER_URL=
 # REQUEST_INTEGRATION_FORM_URL=
