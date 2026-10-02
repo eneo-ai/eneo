@@ -61,6 +61,7 @@ def test_tool_chunks_preserve_display_metadata_for_capability_and_skill_calls():
         "server_name": "External Images",
         "title": "Draw an image",
         "purpose": "image_generation",
+        "is_internal": None,
     }
     assert chunks[1]["providerMetadata"]["eneo"]["title"] == "Planning Skill"
 
@@ -107,14 +108,17 @@ def _generated_file() -> File:
     )
 
 
-def _tool(status: str | None, tool_call_id: str = "call-1") -> ToolCallMetadata:
+def _tool(
+    status: str | None, tool_call_id: str = "call-1", approved: bool | None = None
+) -> ToolCallMetadata:
     return ToolCallMetadata(
         server_name="files",
         tool_name="read_file",
         arguments={"path": "a.txt"},
         tool_call_id=tool_call_id,
-        approved=None,
+        approved=approved,
         result_status=status,
+        is_internal=True,
     )
 
 
@@ -405,14 +409,15 @@ async def test_tool_calls_and_approval_pause_resume():
             approval_id="approval-1",
             tool_calls_metadata=[_tool(status=None)],
         ),
-        # Approval granted: execution snapshots follow on the same stream.
+        # Approval granted: the adapter answers with the decided snapshot, then
+        # execution snapshots follow on the same stream.
         Completion(
             response_type=ResponseType.TOOL_CALL,
-            tool_calls_metadata=[_tool(status=None)],
+            tool_calls_metadata=[_tool(status="approved", approved=True)],
         ),
         Completion(
             response_type=ResponseType.TOOL_CALL,
-            tool_calls_metadata=[_tool(status="succeeded")],
+            tool_calls_metadata=[_tool(status="succeeded", approved=True)],
         ),
         Completion(response_type=ResponseType.TEXT, text="Done"),
     ]
@@ -424,6 +429,7 @@ async def test_tool_calls_and_approval_pause_resume():
         "start",
         "data-session",
         "data-tool-approval",
+        "data-tool-approval",
         "tool-input-available",
         "tool-output-available",
         "text-start",
@@ -432,10 +438,12 @@ async def test_tool_calls_and_approval_pause_resume():
         "finish",
     ]
 
-    approval = next(c for c in chunks if c["type"] == "data-tool-approval")
-    assert approval["id"] == "approval-1"
-    assert approval["data"]["status"] == "pending"
-    assert approval["data"]["tools"][0]["tool_name"] == "read_file"
+    pending, decided = (c for c in chunks if c["type"] == "data-tool-approval")
+    assert pending["id"] == decided["id"] == "approval-1"
+    assert pending["data"]["status"] == "pending"
+    assert pending["data"]["tools"][0]["tool_name"] == "read_file"
+    assert decided["data"]["status"] == "approved"
+    assert decided["data"]["tools"][0]["approved"] is True
 
     tool_input = next(c for c in chunks if c["type"] == "tool-input-available")
     assert tool_input["toolCallId"] == "call-1"
@@ -446,6 +454,7 @@ async def test_tool_calls_and_approval_pause_resume():
         "server_name": "files",
         "title": None,
         "purpose": None,
+        "is_internal": True,
     }
 
     tool_output = next(c for c in chunks if c["type"] == "tool-output-available")
@@ -473,6 +482,8 @@ async def test_tool_call_emits_mcp_resource_references():
         "start",
         "data-session",
         "data-mcp-tool-references",
+        # A call seen for the first time announces its input before its output.
+        "tool-input-available",
         "tool-output-available",
         "text-start",
         "text-delta",
@@ -492,6 +503,77 @@ async def test_tool_call_emits_mcp_resource_references():
             "mcp_tool_name": "files__read_file",
         }
     ]
+
+
+@pytest.mark.asyncio
+async def test_denied_approval_resolves_part_and_announces_the_call_first():
+    completions = [
+        Completion(
+            response_type=ResponseType.TOOL_APPROVAL_REQUIRED,
+            approval_id="approval-3",
+            tool_calls_metadata=[
+                _tool(status=None),
+                _tool(status=None, tool_call_id="call-2"),
+            ],
+        ),
+        # A denied call reaches the stream as a terminal status without any
+        # earlier execution snapshot.
+        Completion(
+            response_type=ResponseType.TOOL_CALL,
+            tool_calls_metadata=[
+                _tool(status="denied", approved=False),
+                _tool(status="approved", approved=True, tool_call_id="call-2"),
+            ],
+        ),
+    ]
+
+    chunks = await _collect(_response(completions))
+    types = [chunk["type"] for chunk in chunks]
+
+    # The AI SDK rejects an output for a tool call it has not seen, so the
+    # input phase always precedes the output phase of a call.
+    assert types == [
+        "start",
+        "data-session",
+        "data-tool-approval",
+        "data-tool-approval",
+        "tool-input-available",
+        "tool-output-error",
+        "tool-input-available",
+        "finish",
+    ]
+    decided = [c for c in chunks if c["type"] == "data-tool-approval"][1]
+    # One approved call: the run continues; per-call flags tell which.
+    assert decided["data"]["status"] == "approved"
+    assert [t["approved"] for t in decided["data"]["tools"]] == [False, True]
+    error = next(c for c in chunks if c["type"] == "tool-output-error")
+    assert error["toolCallId"] == "call-1"
+    assert error["errorText"] == "denied"
+
+
+@pytest.mark.asyncio
+async def test_tool_metadata_carries_is_internal_from_the_routed_server():
+    external = ToolCallMetadata(
+        server_name="files",  # an admin-named external server, not the built-in one
+        tool_name="read_file",
+        tool_call_id="call-x",
+        is_internal=False,
+    )
+    completions = [
+        Completion(
+            response_type=ResponseType.TOOL_APPROVAL_REQUIRED,
+            approval_id="approval-4",
+            tool_calls_metadata=[external],
+        ),
+    ]
+
+    chunks = await _collect(_response(completions))
+    approval = next(c for c in chunks if c["type"] == "data-tool-approval")
+    assert approval["data"]["tools"][0]["is_internal"] is False
+    assert (
+        _tool_chunks([external], {})[0]["providerMetadata"]["eneo"]["is_internal"]
+        is False
+    )
 
 
 @pytest.mark.asyncio

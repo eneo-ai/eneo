@@ -56,6 +56,8 @@ export function mapSessionMessages(messages: PersistedMessage[]): EneoUIMessage[
             server_name: tool.server_name,
             title: tool.title ?? null,
             purpose: tool.purpose ?? null,
+            // Eneo's own server or not, by the backend's routing (null before the flag existed).
+            is_internal: tool.is_internal ?? null,
             // Approval record for MCP tools that needed approval (null: none needed).
             approved: tool.approved ?? null
           }

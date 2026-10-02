@@ -15,7 +15,7 @@ import { unwrap } from "@/lib/api/errors";
 import type { Schema } from "@/lib/api/models";
 import { toastApiError } from "@/lib/api/toast";
 import { asString, hostOf } from "@/lib/chat/metadata";
-import type { EneoUIMessage, SessionData, ToolApprovalData } from "@/lib/chat/types";
+import type { EneoUIMessage, SessionData, ToolApprovalData, ToolCallInfo } from "@/lib/chat/types";
 import { cn } from "@/lib/utils";
 import { AttachmentPreviewDialog, FileTypeTile, useSignedUrl } from "./attachments";
 import { formatBytes } from "@/lib/format";
@@ -326,9 +326,18 @@ export function ToolApprovalCard({
   });
 
   const timedOut = data.status === "timeout_denied";
+  // A decision made here wins while its request is in flight; otherwise the
+  // stream's decided part (data-tool-approval with status approved/denied,
+  // e.g. decided from another tab) names each tool's outcome.
+  const decisionFor = (tool: ToolCallInfo): "approved" | "denied" | undefined => {
+    const local = tool.tool_call_id ? decisions[tool.tool_call_id] : undefined;
+    if (local) return local;
+    if (data.status === "pending" || timedOut) return undefined;
+    return tool.approved ? "approved" : "denied";
+  };
   const pending = timedOut
     ? []
-    : data.tools.filter((tool) => tool.tool_call_id && !decisions[tool.tool_call_id]);
+    : data.tools.filter((tool) => tool.tool_call_id && !decisionFor(tool));
   function decide(control: string, items: { tool_call_id: string; approved: boolean }[]) {
     if (running !== null || submit.isPending) return;
     setRunning(control);
@@ -358,7 +367,7 @@ export function ToolApprovalCard({
       </div>
       <ul className="flex flex-col gap-1.5">
         {data.tools.map((tool, index) => {
-          const decision = tool.tool_call_id ? decisions[tool.tool_call_id] : undefined;
+          const decision = decisionFor(tool);
           const name = `${tool.server_name}/${tool.tool_name}`;
           return (
             <li

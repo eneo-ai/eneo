@@ -12,9 +12,14 @@ Custom data parts (consumed by the web-next chat UI):
 - `data-mcp-tool-references`: MCP resource citations emitted by tool calls.
 - `data-token-usage`: transient prompt/completion/turn token counts.
 - `data-tool-approval`: MCP tool approval requests; reconciled in place by
-  part id (the approval_id), so a timeout updates the pending part. The
-  Redis-backed approval manager and POST /conversations/approve-tools/ are
-  reused unchanged; the stream stays open while approval is pending.
+  part id (the approval_id), so the decision (approved / denied) or a timeout
+  (timeout_denied) updates the pending part. The Redis-backed approval
+  manager and POST /conversations/approve-tools/ are reused unchanged; the
+  stream stays open while approval is pending.
+
+The wire contract (ids, ordering, terminal states, fixtures) is documented in
+frontend/apps/web-next/src/lib/chat/CONTRACT.md; the fixtures under
+backend/tests/fixtures/ui_message_stream/ are asserted by both test suites.
 """
 
 import json
@@ -50,6 +55,10 @@ _GENERATED_FILE_URL_TTL_SECONDS = 60 * 60 * 24
 # is still in the input phase.
 _TOOL_ERROR_STATUSES = {"failed", "denied", "timeout_denied"}
 
+# result_status values a tool call carries once its approval request has been
+# decided (by the user or by the approval timeout).
+_APPROVAL_DECIDED_STATUSES = {"approved", "denied", "timeout_denied"}
+
 
 def _event(chunk: dict[str, Any]) -> ServerSentEvent:
     return ServerSentEvent(json.dumps(chunk))
@@ -84,6 +93,12 @@ def _tool_chunks(
 ) -> list[dict[str, Any]]:
     """Maps eneo tool-call metadata onto dynamic-tool chunks.
 
+    Every tool call yields its `tool-input-available` chunk first: the AI SDK
+    rejects an output for a tool call it has not seen, and a denied approval
+    reaches the client as a terminal status without any earlier snapshot. A
+    terminal result_status then adds the output chunk. The caller drops the
+    repeats, so a snapshot that only repeats the input phase emits nothing new.
+
     The backend streams status snapshots (not tool outputs), so the output
     payload carries the execution status. Tool calls without a tool_call_id
     get a stable generated id per list position.
@@ -99,9 +114,20 @@ def _tool_chunks(
                     "server_name": tool.server_name,
                     "title": tool.title,
                     "purpose": tool.purpose,
+                    # Stamped by the server the call was routed to; clients
+                    # never infer it from the display name.
+                    "is_internal": tool.is_internal,
                 }
             },
         }
+        chunks.append(
+            {
+                "type": "tool-input-available",
+                "toolName": tool.tool_name,
+                "input": tool.arguments or {},
+                **base,
+            }
+        )
         status = tool.result_status
         if status == "succeeded":
             chunks.append(
@@ -109,15 +135,40 @@ def _tool_chunks(
             )
         elif status in _TOOL_ERROR_STATUSES:
             chunks.append({"type": "tool-output-error", "errorText": status, **base})
+    return chunks
+
+
+def _approval_decision_chunks(
+    pending_approvals: dict[str, list[str]], tools: "list[ToolCallMetadata]"
+) -> list[dict[str, Any]]:
+    """Resolves pending approval parts from a decided tool-call snapshot.
+
+    The adapter answers a decided approval with one TOOL_CALL snapshot whose
+    calls carry `approved` and a decided result_status. That snapshot updates
+    the pending `data-tool-approval` part in place: `approved` when at least
+    one call may run, `denied` when none may (per-call `approved` flags stay
+    authoritative), `timeout_denied` when the timeout decided it.
+    """
+    decided = {
+        tool.tool_call_id: tool
+        for tool in tools
+        if tool.tool_call_id and tool.result_status in _APPROVAL_DECIDED_STATUSES
+    }
+    chunks: list[dict[str, Any]] = []
+    for approval_id, tool_call_ids in list(pending_approvals.items()):
+        if not tool_call_ids or any(
+            call_id not in decided for call_id in tool_call_ids
+        ):
+            continue
+        del pending_approvals[approval_id]
+        decided_tools = [decided[call_id] for call_id in tool_call_ids]
+        if any(tool.approved for tool in decided_tools):
+            status = "approved"
+        elif all(tool.result_status == "timeout_denied" for tool in decided_tools):
+            status = "timeout_denied"
         else:
-            chunks.append(
-                {
-                    "type": "tool-input-available",
-                    "toolName": tool.tool_name,
-                    "input": tool.arguments or {},
-                    **base,
-                }
-            )
+            status = "denied"
+        chunks.append(_tool_approval_chunk(approval_id, decided_tools, status))
     return chunks
 
 
@@ -138,6 +189,7 @@ def _tool_approval_chunk(
                     "tool_call_id": tool.tool_call_id,
                     "approved": tool.approved,
                     "result_status": tool.result_status,
+                    "is_internal": tool.is_internal,
                 }
                 for tool in tools
             ],
@@ -256,6 +308,8 @@ async def _ui_message_chunks(
     reasoning_open = False
     tool_fallback_ids: dict[int, str] = {}
     emitted_tool_chunks: set[str] = set()
+    # approval_id -> tool_call_ids awaiting a decision (see _approval_decision_chunks).
+    pending_approvals: dict[str, list[str]] = {}
 
     assert not isinstance(response.answer, str)
     completion_stream: AsyncIterable[Completion] = response.answer
@@ -304,14 +358,17 @@ async def _ui_message_chunks(
             yield _generated_file_chunk(completion.generated_file, base_url)
 
         elif response_type == ResponseType.TOOL_CALL:
+            tools = list(completion.tool_calls_metadata or [])
+            # A decided approval resolves its pending part before the calls
+            # it covers move on (run, or fail as denied).
+            for chunk_dict in _approval_decision_chunks(pending_approvals, tools):
+                yield chunk_dict
             reference_chunk = _mcp_tool_references_chunk(
                 list(completion.mcp_tool_references or [])
             )
             if reference_chunk is not None:
                 yield reference_chunk
-            for chunk_dict in _tool_chunks(
-                list(completion.tool_calls_metadata or []), tool_fallback_ids
-            ):
+            for chunk_dict in _tool_chunks(tools, tool_fallback_ids):
                 # Tool snapshots repeat; emit each (id, phase) transition once.
                 key = f"{chunk_dict['toolCallId']}:{chunk_dict['type']}"
                 if key not in emitted_tool_chunks:
@@ -320,14 +377,17 @@ async def _ui_message_chunks(
 
         elif response_type == ResponseType.TOOL_APPROVAL_REQUIRED:
             assert completion.approval_id is not None
+            tools = list(completion.tool_calls_metadata or [])
+            pending_approvals[completion.approval_id] = [
+                tool.tool_call_id for tool in tools if tool.tool_call_id
+            ]
             yield _tool_approval_chunk(
-                approval_id=completion.approval_id,
-                tools=list(completion.tool_calls_metadata or []),
-                status="pending",
+                approval_id=completion.approval_id, tools=tools, status="pending"
             )
 
         elif response_type == ResponseType.TOOL_APPROVAL_TIMEOUT:
             assert completion.approval_id is not None
+            pending_approvals.pop(completion.approval_id, None)
             yield _tool_approval_chunk(
                 approval_id=completion.approval_id,
                 tools=list(completion.tool_calls_metadata or []),

@@ -18,6 +18,12 @@ export type ChatPartner = {
     token_limit?: number | null;
     vision?: boolean;
     reasoning?: boolean;
+    /**
+     * Whether the model can call tools. The backend drops every tool (MCP
+     * servers, capabilities, loopback knowledge and files) for a model
+     * without it; only an explicit `true` counts (partner-model.ts).
+     */
+    supports_tool_calling?: boolean | null;
   } | null;
   /** Group chats: assistants available for @mentions. */
   mentionableAssistants?: { id: string; handle: string }[];
@@ -76,11 +82,26 @@ export type ToolCallInfo = {
   tool_call_id?: string | null;
   approved?: boolean | null;
   result_status?: string | null;
+  /**
+   * Whether the call ran on one of Eneo's own servers (loopback knowledge and
+   * files, a built-in provider, Skill activation), decided by the server the
+   * call was routed to rather than its display name. Rows persisted before
+   * the flag existed carry none and fall back to the name.
+   */
+  is_internal?: boolean | null;
 };
 
+/**
+ * The `data-tool-approval` part (CONTRACT.md → Tool approval). One part per
+ * approval request, updated in place by its id (the approval_id):
+ * `pending` while the backend waits for POST /api/v1/conversations/approve-tools/,
+ * then `approved` (at least one call may run), `denied` (none may) or
+ * `timeout_denied` (nobody decided in time). Per-call `approved` flags are
+ * authoritative when the decisions were mixed.
+ */
 export type ToolApprovalData = {
   approval_id: string;
-  status: "pending" | "timeout_denied";
+  status: "pending" | "approved" | "denied" | "timeout_denied";
   tools: ToolCallInfo[];
 };
 

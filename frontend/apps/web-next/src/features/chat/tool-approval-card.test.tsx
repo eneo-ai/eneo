@@ -96,6 +96,24 @@ describe("ToolApprovalCard", () => {
     expect(api.POST).toHaveBeenCalledTimes(1);
   });
 
+  it("shows a decision that arrived with the stream, without actions", () => {
+    // Decided elsewhere (another tab, or an earlier turn): the decided
+    // data-tool-approval part names each tool's outcome.
+    renderCard({
+      approval_id: "a1",
+      status: "approved",
+      tools: [
+        { ...lookup, approved: true },
+        { ...register, approved: false }
+      ]
+    });
+
+    expect(screen.getByRole("heading", { name: "Verktygsgodkännande" })).toBeTruthy();
+    expect(screen.queryAllByRole("button")).toEqual([]);
+    expect(screen.getByText("Godkänt")).toBeTruthy();
+    expect(screen.getByText("Nekat")).toBeTruthy();
+  });
+
   it("shows tools that timed out as denied, without actions", () => {
     renderCard({ approval_id: "approval-4", status: "timeout_denied", tools: [lookup, register] });
     const card = screen.getByRole("region", { name: "Verktygsgodkännande" });
