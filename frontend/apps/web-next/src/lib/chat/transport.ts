@@ -1,4 +1,5 @@
 import { DefaultChatTransport, type UIMessageChunk } from "ai";
+import { apiErrorFromResponse } from "@/lib/api/errors";
 import type { ConversationBody, EneoDataParts, EneoUIMessage } from "./types";
 
 /** Per-send request state merged into the body by sendMessage(…, { body }). */
@@ -50,6 +51,25 @@ export function enforceStreamContract(): TransformStream<UIMessageChunk, UIMessa
   });
 }
 
+/**
+ * The SDK turns a refused response into `new Error(await response.text())`,
+ * which loses the status and hands the chat a raw JSON body. Refuse it here
+ * instead, as the EneoApiError every other request produces (status, backend
+ * code, message, trace id), so the chat can say what happened in a sentence
+ * (chat-error.ts).
+ */
+async function fetchOrThrow(input: RequestInfo | URL, init?: RequestInit): Promise<Response> {
+  const response = await fetch(input, init);
+  if (response.ok) return response;
+  let body: unknown;
+  try {
+    body = await response.json();
+  } catch {
+    body = undefined;
+  }
+  throw apiErrorFromResponse(response, body);
+}
+
 class EneoChatTransport extends DefaultChatTransport<EneoUIMessage> {
   protected override processResponseStream(
     stream: ReadableStream<Uint8Array>
@@ -66,6 +86,7 @@ class EneoChatTransport extends DefaultChatTransport<EneoUIMessage> {
 export function createChatTransport() {
   return new EneoChatTransport({
     api: "/api/chat",
+    fetch: fetchOrThrow,
     prepareSendMessagesRequest: ({ messages, body }) => {
       const lastMessage = messages[messages.length - 1];
       const question =

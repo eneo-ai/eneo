@@ -1,5 +1,6 @@
 "use client";
 
+import { modelDisplayName } from "@/lib/models/model-display-name";
 import {
   Selector,
   SelectorOption,
@@ -46,7 +47,7 @@ function vendorLabel(model: CompletionModel, fallback: string): string {
 }
 
 function modelName(model: ModelRef): string {
-  return model.nickname ?? model.name;
+  return modelDisplayName(model);
 }
 
 /**

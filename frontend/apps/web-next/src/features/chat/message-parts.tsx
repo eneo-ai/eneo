@@ -8,7 +8,7 @@ import { useMutation } from "@tanstack/react-query";
 import { Download, ExternalLink, ShieldAlert, ShieldCheck, ShieldX } from "lucide-react";
 import { useLocale, useTranslations } from "next-intl";
 import { useId, useRef, useState } from "react";
-import { MessageResponse } from "@/components/ai-elements/message";
+import { ANSWER_TEXT_CLASS, MessageResponse } from "@/components/ai-elements/message";
 import { useReturnFocus } from "@/components/ui/dialog-focus";
 import { browserApi } from "@/lib/api/browser";
 import { unwrap } from "@/lib/api/errors";
@@ -248,9 +248,7 @@ export function McpSnippetButton({
                 </p>
               )}
               {snippet.content ? (
-                <MessageResponse className="font-voice text-[15px] leading-[1.7]">
-                  {snippet.content}
-                </MessageResponse>
+                <MessageResponse className={ANSWER_TEXT_CLASS}>{snippet.content}</MessageResponse>
               ) : (
                 <p className="text-ax-text-secondary text-sm italic">
                   {t("mcp_resource_unknown_source")}

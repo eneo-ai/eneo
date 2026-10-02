@@ -10,8 +10,11 @@ import { iconUrl } from "@/components/composites/icon-field";
 import { useAppContext } from "@/components/providers/app-context";
 import { chatPartnerHref } from "@/features/assistants/assistants";
 import { spaceRouteId } from "@/features/spaces/space";
+import { spaceDisplayName } from "@/features/spaces/space-name";
+import { WhatsNewBanner } from "@/features/whats-new/release-banner";
 import { browserApi } from "@/lib/api/browser";
 import { unwrap } from "@/lib/api/errors";
+import { displayPartnerName } from "@/lib/chat/partner-name";
 import type { ChatPartner } from "@/lib/chat/types";
 import { cn } from "@/lib/utils";
 import { firstNameOf, greetingFor } from "./format";
@@ -73,6 +76,7 @@ type QuickAssistant = {
 
 /** Up to four assistants from the user's shared spaces (the dashboard query, shared cache). */
 function useQuickAssistants(enabled: boolean): QuickAssistant[] {
+  const t = useTranslations();
   const { data } = useQuery({
     queryKey: ["dashboard"],
     enabled,
@@ -87,7 +91,7 @@ function useQuickAssistants(enabled: boolean): QuickAssistant[] {
         id: assistant.id,
         name: assistant.name,
         iconId: assistant.icon_id ?? null,
-        spaceName: space.name,
+        spaceName: spaceDisplayName(space, t),
         href: chatPartnerHref(spaceRouteId(space), { type: "assistant", id: assistant.id })
       });
       if (result.length === 4) return result;
@@ -177,7 +181,7 @@ export function StartState({
           ) : (
             <EntityAvatar
               id={partner.id}
-              name={partner.name}
+              name={displayPartnerName(partner, t)}
               src={iconUrl(partner.iconId)}
               size="xl"
             />
@@ -187,15 +191,18 @@ export function StartState({
               ? (greeting ?? (
                   <span className="invisible">{t("hi_firstname", { firstName: name })}</span>
                 ))
-              : partner.name}
+              : displayPartnerName(partner, t)}
           </h1>
           <p className="text-ax-text-secondary max-w-xl text-base">
             {personal
               ? t("chat_start_subtitle")
-              : partner.description?.trim() || t("chat_start_ask", { name: partner.name })}
+              : partner.description?.trim() ||
+                t("chat_start_ask", { name: displayPartnerName(partner, t) })}
           </p>
         </div>
 
+        {/* The one-time release notice sits above the composer, never over it. */}
+        {personal && <WhatsNewBanner />}
         {composer}
 
         {personal && (

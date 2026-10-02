@@ -5,6 +5,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { browserApi } from "@/lib/api/browser";
 import { recentConversationsQueryOptions } from "@/lib/api/conversations";
 import type { ChatPartner, EneoUIMessage } from "@/lib/chat/types";
+import { expectNoAxeViolations } from "@/test/axe";
 import { renderInApp, testAppContext, testQueryClient } from "@/test/render";
 import { observedElements, reportResize } from "@/test/setup-dom";
 import { ChatView, type ActivityState } from "./chat-view";
@@ -12,7 +13,7 @@ import { ChatView, type ActivityState } from "./chat-view";
 const spies = vi.hoisted(() => ({
   announce: vi.fn(),
   sent: [] as { text: string; body: unknown }[],
-  mode: "fail" as "fail" | "answer" | "hold",
+  mode: "fail" as "fail" | "refused" | "json" | "answer" | "hold",
   titled: [] as string[],
   rated: [] as { path: string; params: unknown; body: unknown }[]
 }));
@@ -33,6 +34,12 @@ vi.mock("@/lib/chat/transport", () => ({
       const text = last?.parts.find((part) => part.type === "text");
       spies.sent.push({ text: text?.type === "text" ? text.text : "", body });
       if (spies.mode === "fail") throw new Error("Tjänsten svarar inte");
+      if (spies.mode === "refused") {
+        const { EneoApiError } = await import("@/lib/api/errors");
+        throw new EneoApiError("Not authenticated", { status: 401, traceId: "trace-1" });
+      }
+      // The SDK hands the backend's error text over as an Error message.
+      if (spies.mode === "json") throw new Error('{"message":"Not authenticated"}');
       if (spies.mode === "hold") {
         // Starts answering, then waits until the user stops it.
         return new ReadableStream({
@@ -270,12 +277,51 @@ describe("ChatView docked composer", () => {
 });
 
 describe("ChatView when generation fails", () => {
+  it("says the session expired when the request is refused, with status and trace id for support", async () => {
+    spies.mode = "refused";
+    renderInApp(<Harness />);
+    ask("Vilken gräns gäller?");
+
+    expect(await screen.findByText("Din session har gått ut. Logga in igen.")).toBeTruthy();
+    expect(spies.announce).toHaveBeenCalledWith("Din session har gått ut. Logga in igen.");
+    fireEvent.click(screen.getByRole("button", { name: "Visa detaljer" }));
+    const list = await screen.findByRole("list", { name: "Tekniska detaljer" });
+    expect(
+      within(list)
+        .getAllByRole("listitem")
+        .map((item) => item.textContent)
+    ).toEqual(["HTTP-status 401", "Not authenticated", "Spårnings-id trace-1"]);
+    await expectNoAxeViolations(document.body);
+  });
+
+  it("never shows a JSON error body", async () => {
+    spies.mode = "json";
+    renderInApp(<Harness />);
+    ask("Vilken gräns gäller?");
+
+    expect(await screen.findByText("Något gick fel. Försök igen.")).toBeTruthy();
+    expect(document.body.textContent).not.toContain("{");
+    fireEvent.click(screen.getByRole("button", { name: "Visa detaljer" }));
+    const list = await screen.findByRole("list", { name: "Tekniska detaljer" });
+    expect(within(list).getByText("Not authenticated")).toBeTruthy();
+    expect(document.body.textContent).not.toContain("{");
+  });
+
   it("shows and announces the error, keeps the question and retries it", async () => {
     renderInApp(<Harness />);
     ask("Vilken gräns gäller?");
 
-    expect(await screen.findByText("Tjänsten svarar inte")).toBeTruthy();
-    expect(spies.announce).toHaveBeenCalledWith("Tjänsten svarar inte");
+    // A sentence, never the raw error; the original text waits behind "Visa detaljer".
+    expect(await screen.findByText("Något gick fel. Försök igen.")).toBeTruthy();
+    expect(spies.announce).toHaveBeenCalledWith("Något gick fel. Försök igen.");
+    const details = screen.getByRole("button", { name: "Visa detaljer" });
+    expect(details.getAttribute("aria-expanded")).toBe("false");
+    const region = document.getElementById(details.getAttribute("aria-controls") ?? "")!;
+    expect(region.contains(screen.getByText("Tjänsten svarar inte"))).toBe(true);
+    fireEvent.click(details);
+    expect(details.getAttribute("aria-expanded")).toBe("true");
+    const list = within(region).getByRole("list", { name: "Tekniska detaljer" });
+    expect(within(list).getByText("Tjänsten svarar inte")).toBeTruthy();
     // The failed first question returns to the composer instead of vanishing.
     await waitFor(() =>
       expect(
@@ -314,7 +360,7 @@ describe("ChatView when generation fails", () => {
     await waitFor(() => expect(within(attachments).getByText(/Klar att använda/)).toBeTruthy());
 
     ask("Sammanfatta policyn");
-    expect(await screen.findByText("Tjänsten svarar inte")).toBeTruthy();
+    expect(await screen.findByText("Något gick fel. Försök igen.")).toBeTruthy();
     // Back in the composer (it has the remove button; the log's copy does not).
     await screen.findByRole("button", { name: "Ta bort Policy.pdf" });
     const restored = screen.getByRole("list", { name: "Bilagor" });

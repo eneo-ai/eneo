@@ -3,6 +3,7 @@
 import { useChat } from "@ai-sdk/react";
 import { Button } from "@astryxdesign/core/Button";
 import { ChatLayout, ChatMessageList, ChatSystemMessage } from "@astryxdesign/core/Chat";
+import { Collapsible } from "@astryxdesign/core/Collapsible";
 import { useAnnounce, useMediaQuery } from "@astryxdesign/core/hooks";
 import { Selector } from "@astryxdesign/core/Selector";
 import { useQueryClient } from "@tanstack/react-query";
@@ -22,7 +23,8 @@ import {
 import { useAppContext } from "@/components/providers/app-context";
 import { browserApi } from "@/lib/api/browser";
 import { invalidateConversationLists } from "@/lib/api/conversations";
-import { getErrorMessageForCode } from "@/lib/api/errors";
+import { describeChatFailure } from "@/lib/chat/chat-error";
+import { displayPartnerName } from "@/lib/chat/partner-name";
 import { createChatTransport, type ChatSendOptions } from "@/lib/chat/transport";
 import type { AnswerRating, ChatPartner, EneoUIMessage } from "@/lib/chat/types";
 import { deriveContextUsage, usePreflight } from "@/lib/chat/use-preflight";
@@ -275,10 +277,7 @@ export function ChatView({
           if (pending) releasePreviews(pending.attachments);
           return;
         }
-        announce(
-          getErrorMessageForCode(streamErrorCodeRef.current, t) ??
-            (failure.message || t("request_failed"))
-        );
+        announce(describeChatFailure(failure, streamErrorCodeRef.current, t).message);
         if (!pending || streamStartedRef.current) return;
         // Failed before the answer started: the question goes back to the
         // composer, attachments included. A first question takes the view back
@@ -468,11 +467,10 @@ export function ChatView({
     if (trigger) requestAnimationFrame(() => trigger.focus());
   }, [onActivityChange]);
 
-  const errorText = error
-    ? (getErrorMessageForCode(streamErrorCode, t) ?? (error.message || t("request_failed")))
-    : null;
+  const failure = error ? describeChatFailure(error, streamErrorCode, t) : null;
 
-  const assistantIdentity = { id: partner.id, name: partner.name, iconId: partner.iconId };
+  const partnerName = displayPartnerName(partner, t);
+  const assistantIdentity = { id: partner.id, name: partnerName, iconId: partner.iconId };
   const mention =
     partner.type === "group-chat" && (partner.mentionableAssistants?.length ?? 0) > 0 ? (
       <Selector
@@ -504,7 +502,7 @@ export function ChatView({
       />
     ) : null;
 
-  const composerLabel = t("chat_composer_label", { name: partner.name });
+  const composerLabel = t("chat_composer_label", { name: partnerName });
   const composerProps = {
     value: input,
     onChange: setInput,
@@ -558,20 +556,39 @@ export function ChatView({
       />
     ) : null;
 
-  // Generation failed: the error (also announced) and a retry of the same
-  // question. Shown in both layouts: a first question that fails before
-  // streaming starts puts the view back in the start state.
-  const errorNotice = errorText ? (
+  // Generation failed: one sentence (also announced), a retry of the same
+  // question and, for support, the technical facts behind "Visa detaljer".
+  // Shown in both layouts: a first question that fails before streaming
+  // starts puts the view back in the start state.
+  const errorNotice = failure ? (
     <ChatSystemMessage icon={<CircleAlert aria-hidden="true" className="text-ax-error size-4" />}>
-      <span className="flex flex-wrap items-center justify-center gap-2">
-        <span className="text-ax-error">{errorText}</span>
-        {lastQuestion && !busy && (
-          <Button
-            label={t("chat_retry")}
-            size="sm"
-            variant="secondary"
-            onClick={() => sendQuestion(lastQuestion.text, lastQuestion.files)}
-          />
+      <span className="flex flex-col items-center gap-2">
+        <span className="flex flex-wrap items-center justify-center gap-2">
+          <span className="text-ax-error">{failure.message}</span>
+          {lastQuestion && !busy && (
+            <Button
+              label={t("chat_retry")}
+              size="sm"
+              variant="secondary"
+              onClick={() => sendQuestion(lastQuestion.text, lastQuestion.files)}
+            />
+          )}
+        </span>
+        {failure.details.length > 0 && (
+          <Collapsible
+            trigger={t("chat_error_show_details")}
+            defaultIsOpen={false}
+            className="w-full max-w-prose"
+          >
+            <ul
+              aria-label={t("chat_error_details_label")}
+              className="text-ax-text-secondary flex flex-col gap-0.5 text-start font-mono text-xs break-words"
+            >
+              {failure.details.map((line) => (
+                <li key={line}>{line}</li>
+              ))}
+            </ul>
+          </Collapsible>
         )}
       </span>
     </ChatSystemMessage>

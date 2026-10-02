@@ -63,6 +63,12 @@ function renderMessages(ui: React.ReactNode) {
 }
 
 describe("ChatMessage", () => {
+  it("sets answers in the app's sans with a reading line height (the serif voice stays one token away)", () => {
+    const { container } = renderMessages(<ChatMessage message={answer} assistant={assistant} />);
+    expect(container.querySelector(".font-sans.leading-\\[1\\.7\\]")).toBeTruthy();
+    expect(container.querySelector(".font-voice")).toBeNull();
+  });
+
   it("identifies the user's question and shows its attachment as a file token", () => {
     renderMessages(<ChatMessage message={question} assistant={assistant} />);
     const article = screen.getByRole("article", { name: "Ditt meddelande" });

@@ -125,6 +125,7 @@ export function SpaceChat() {
       : space.name;
   const spaceInfo = {
     spaceName,
+    personalSpace: space.personal,
     securityClassification: space.security_classification?.name ?? null
   };
 

@@ -5,7 +5,6 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { expectNoAxeViolations } from "@/test/axe";
 import { renderInApp } from "@/test/render";
 import { ComposerAttachments } from "./attachments";
-import { ContextUsageBar } from "./context-usage-bar";
 import { ChatMcpServers, type McpServerSummary } from "./mcp-controls";
 import { McpSnippetButton } from "./message-parts";
 
@@ -90,41 +89,6 @@ describe("ChatMcpServers", () => {
     expect(within(popover).queryByRole("button", { name: "Alla av" })).toBeNull();
     expect(within(popover).queryByRole("switch", { name: "Kör verktyg automatiskt" })).toBeNull();
     await expectNoAxeViolations(popover);
-  });
-});
-
-describe("ContextUsageBar", () => {
-  const usage = {
-    contextLimit: 10_000,
-    lockedInputTokens: 6_000,
-    lockedOutputTokens: 1_500,
-    pendingTextTokens: 200,
-    pendingFileTokens: 0,
-    usedTokens: 7_700,
-    willExceedContext: false
-  };
-
-  it("explains the estimate in a popover and can be hidden", async () => {
-    renderInChat(
-      <ContextUsageBar
-        usage={usage}
-        modelName="Claude Haiku 4.5"
-        cumulativeTokens={9_000}
-        turnCount={2}
-      />
-    );
-    const bar = screen.getByRole("button", { name: /^Kontextanvändning:/ });
-    fireEvent.click(bar);
-    const popover = await screen.findByRole("dialog", { name: "Beräknad kontextanvändning" });
-    expect(within(popover).getByText("Ditt meddelande")).toBeTruthy();
-    expect(within(popover).getByText("Claude Haiku 4.5")).toBeTruthy();
-    await expectNoAxeViolations(popover);
-
-    fireEvent.click(within(popover).getByRole("button", { name: "Dölj fält" }));
-    await waitFor(() =>
-      expect(screen.getByRole("button", { name: "Visa kontextanvändning" })).toBeTruthy()
-    );
-    expect(screen.queryByRole("button", { name: /^Kontextanvändning:/ })).toBeNull();
   });
 });
 

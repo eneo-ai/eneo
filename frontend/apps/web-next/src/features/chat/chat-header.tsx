@@ -15,6 +15,7 @@ import { EntityAvatar } from "@/components/composites/entity-avatar";
 import { iconUrl } from "@/components/composites/icon-field";
 import { OPEN_NAV_EVENT } from "@/components/shell/routes";
 import { useOwnMobileHeader } from "@/components/shell/shell-context";
+import { displayPartnerName } from "@/lib/chat/partner-name";
 import type { ChatPartner } from "@/lib/chat/types";
 import { cn } from "@/lib/utils";
 import type { ChatPartnerSwitcherItem } from "./partner-switcher";
@@ -43,9 +44,10 @@ function PartnerTile({
   partner,
   size
 }: {
-  partner: Pick<ChatPartner, "id" | "name" | "iconId" | "type">;
+  partner: Pick<ChatPartner, "id" | "name" | "iconId" | "type" | "personalSpace">;
   size: "sm" | "md";
 }) {
+  const t = useTranslations();
   if (partner.type === "default-assistant" && !partner.iconId) {
     return (
       <span
@@ -62,7 +64,7 @@ function PartnerTile({
   return (
     <EntityAvatar
       id={partner.id}
-      name={partner.name}
+      name={displayPartnerName(partner, t)}
       src={iconUrl(partner.iconId)}
       size={size === "md" ? "md" : "sm"}
       className={size === "md" ? "size-[30px] rounded-[9px]" : "rounded-full"}
@@ -81,6 +83,8 @@ function SwitcherFace({
   variant: SwitcherVariant;
   interactive: boolean;
 }) {
+  const t = useTranslations();
+  const name = displayPartnerName(partner, t);
   const chevron = interactive && (
     <ChevronDown aria-hidden="true" className="text-ax-text-secondary size-4 shrink-0" />
   );
@@ -88,7 +92,7 @@ function SwitcherFace({
     return (
       <span className="flex min-w-0 flex-col items-center leading-tight">
         <span className="flex max-w-full min-w-0 items-center gap-1 text-[15px] font-semibold">
-          <span className="truncate">{partner.name}</span>
+          <span className="truncate">{name}</span>
           {chevron}
         </span>
         {subtitle && (
@@ -101,7 +105,7 @@ function SwitcherFace({
     return (
       <span className="flex min-w-0 items-center gap-1.5">
         <PartnerTile partner={partner} size="sm" />
-        <span className="truncate">{partner.name}</span>
+        <span className="truncate">{name}</span>
         {chevron}
       </span>
     );
@@ -110,7 +114,7 @@ function SwitcherFace({
     <span className="flex min-w-0 items-center gap-2.5">
       <PartnerTile partner={partner} size="md" />
       <span className="flex min-w-0 flex-col items-start leading-tight">
-        <span className="max-w-full truncate font-semibold">{partner.name}</span>
+        <span className="max-w-full truncate font-semibold">{name}</span>
         {subtitle && (
           <span className="text-ax-text-secondary max-w-full truncate text-xs font-normal">
             {subtitle}
@@ -171,7 +175,7 @@ export function PartnerSwitcher({
   return (
     <DropdownMenu
       button={{
-        label: t("chat_switch_assistant_named", { name: partner.name }),
+        label: t("chat_switch_assistant_named", { name: displayPartnerName(partner, t) }),
         variant: "ghost",
         className: SWITCHER_CLASS[variant],
         children: (
@@ -195,14 +199,22 @@ export function PartnerSwitcher({
           <DropdownMenuRadioItem
             key={itemValue(item)}
             value={itemValue(item)}
-            label={item.name}
+            label={displayPartnerName(
+              {
+                type: item.type === "default-assistant" ? "default-assistant" : "assistant",
+                name: item.name,
+                personalSpace: item.personalSpace
+              },
+              t
+            )}
             icon={
               <PartnerTile
                 partner={{
                   id: item.id,
                   name: item.name,
                   iconId: item.iconId ?? null,
-                  type: item.type === "default-assistant" ? "default-assistant" : "assistant"
+                  type: item.type === "default-assistant" ? "default-assistant" : "assistant",
+                  personalSpace: item.personalSpace
                 }}
                 size="sm"
               />
@@ -241,12 +253,22 @@ export type ChatHeaderProps = {
   minimal?: boolean;
 };
 
-function HistoryButton({ open, onToggle }: { open: boolean; onToggle: () => void }) {
+/** Opens the partner's conversation list; named after what it opens, with aria-expanded for the state. */
+function HistoryButton({
+  partner,
+  open,
+  onToggle
+}: {
+  partner: ChatPartner;
+  open: boolean;
+  onToggle: () => void;
+}) {
   const t = useTranslations();
+  const label = t("chat_history_with", { name: displayPartnerName(partner, t) });
   return (
     <IconButton
-      label={t("history")}
-      tooltip={t("history")}
+      label={label}
+      tooltip={label}
       icon={<History className="size-[18px]" />}
       variant="ghost"
       aria-expanded={open}
@@ -282,7 +304,12 @@ export function ChatHeader({
   const t = useTranslations();
   const subtitle = [partner.spaceName, modelName].filter(Boolean).join(" · ") || null;
   const mobileMenu: HeaderMenuItem[] = [
-    { label: historyOpen ? t("chat_history_close") : t("history"), onClick: onToggleHistory },
+    {
+      label: historyOpen
+        ? t("chat_history_close")
+        : t("chat_history_with", { name: displayPartnerName(partner, t) }),
+      onClick: onToggleHistory
+    },
     ...(view
       ? [
           {
@@ -344,7 +371,7 @@ export function ChatHeader({
             variant="ghost"
             onClick={onNewConversation}
           />
-          <HistoryButton open={historyOpen} onToggle={onToggleHistory} />
+          <HistoryButton partner={partner} open={historyOpen} onToggle={onToggleHistory} />
           {menuItems.length > 0 && (
             <MoreMenu label={t("chat_more_options")} items={menuItems} alignment="end" />
           )}

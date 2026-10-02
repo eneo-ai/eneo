@@ -63,10 +63,13 @@ afterEach(() => {
   vi.clearAllMocks();
 });
 
+// The backend names the personal space's default assistant "Default"; the
+// chat never shows that name (UX review C1).
 const personal: ChatPartner = {
   type: "default-assistant",
   id: "personal-1",
-  name: "Personlig assistent"
+  name: "Default",
+  personalSpace: true
 };
 
 const assistant: ChatPartner = {

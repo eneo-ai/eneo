@@ -5,13 +5,15 @@ import { Button as AxButton } from "@astryxdesign/core/Button";
 import { IconButton } from "@astryxdesign/core/IconButton";
 import { MoreMenu } from "@astryxdesign/core/MoreMenu";
 import { useInfiniteQuery } from "@tanstack/react-query";
-import { X } from "lucide-react";
+import { Search, X } from "lucide-react";
 import { useTranslations } from "next-intl";
 import { useEffect, useId, useRef, useState } from "react";
+import { TextInput } from "@/components/astryx/text-input";
 import { LoadingState } from "@/components/composites/loading-state";
 import { browserApi } from "@/lib/api/browser";
 import { unwrap } from "@/lib/api/errors";
 import { cursorPagination, flattenPages } from "@/lib/api/pagination";
+import { displayPartnerName } from "@/lib/chat/partner-name";
 import type { ChatPartner } from "@/lib/chat/types";
 import { rescueFocus } from "@/lib/focus-rescue";
 import { cn } from "@/lib/utils";
@@ -61,8 +63,27 @@ export function groupSessions<T extends SessionRow>(
 }
 
 /**
- * The partner's conversation history, grouped by date (Idag, Igår, …). Each
- * row opens the conversation; its menu renames or deletes it. "Visa fler"
+ * Conversations whose title contains the query (case-insensitive), over the
+ * pages loaded so far; "Visa fler" stays available to search further back.
+ */
+export function filterSessions<T extends SessionRow>(
+  sessions: T[],
+  query: string,
+  untitled: string
+): T[] {
+  const needle = query.trim().toLocaleLowerCase();
+  if (!needle) return sessions;
+  return sessions.filter((session) =>
+    (session.name || untitled).toLocaleLowerCase().includes(needle)
+  );
+}
+
+/**
+ * "Konversationer med <partner>": the conversations with this assistant or
+ * group chat, with a title search at the top and the rows grouped by date
+ * (Idag, Igår, …). The sidebar's "Senaste" is the primary list across all
+ * assistants; this panel is the complete list for one of them. Each row
+ * opens the conversation; its menu renames or deletes it. "Visa fler"
  * appends the next page and moves focus to the first row it added.
  */
 function HistoryPanel({
@@ -88,8 +109,10 @@ function HistoryPanel({
   const now = useNow();
   const headingRef = useRef<HTMLHeadingElement>(null);
   const listRef = useRef<HTMLDivElement>(null);
+  const [query, setQuery] = useState("");
   const [renaming, setRenaming] = useState<{ id: string; name: string } | null>(null);
   const [deleting, setDeleting] = useState<{ id: string; name: string } | null>(null);
+  const partnerName = displayPartnerName(partner, t);
   const { rename, remove } = useSessionMutations(partner, {
     onRenamed: (id, name) => {
       setRenaming(null);
@@ -128,7 +151,8 @@ function HistoryPanel({
   });
   const pages = history.data?.pages;
   const sessions = flattenPages(pages);
-  const groups = groupSessions(sessions, now);
+  const shown = filterSessions(sessions, query, t("chat_history_untitled"));
+  const groups = groupSessions(shown, now);
 
   // "Visa fler": once the page it asked for renders, focus that page's first
   // conversation (the button itself goes away with the last page).
@@ -158,9 +182,9 @@ function HistoryPanel({
           id={titleId}
           ref={headingRef}
           tabIndex={-1}
-          className="text-[13px] font-semibold focus:outline-none"
+          className="min-w-0 truncate text-[13px] font-semibold focus:outline-none"
         >
-          {t("history")}
+          {t("chat_history_with", { name: partnerName })}
         </h2>
         <IconButton
           label={t("chat_history_close")}
@@ -170,18 +194,43 @@ function HistoryPanel({
           onClick={onClose}
         />
       </div>
+      {sessions.length > 0 && (
+        <div className="border-ax-border shrink-0 border-b px-2 py-2">
+          <TextInput
+            label={t("chat_history_search")}
+            isLabelHidden
+            placeholder={t("chat_history_search")}
+            value={query}
+            onChange={setQuery}
+            startIcon={Search}
+            hasClear
+            size="sm"
+            width="100%"
+          />
+        </div>
+      )}
       <div ref={listRef} className="min-h-0 flex-1 overflow-y-auto p-2">
         {history.isPending ? (
           <LoadingState rows={6} className="p-2" />
         ) : history.isError ? (
           <p className="text-ax-error p-2 text-[13px]">{t("request_failed")}</p>
         ) : sessions.length === 0 ? (
-          <p className="text-ax-text-secondary p-2 text-[13px]">{t("chat_history_empty")}</p>
+          <p className="text-ax-text-secondary p-2 text-[13px]">
+            {t("chat_history_empty_with", { name: partnerName })}
+          </p>
+        ) : shown.length === 0 ? (
+          <p className="text-ax-text-secondary p-2 text-[13px]">
+            {t("chat_history_no_matches", { query: query.trim() })}
+          </p>
         ) : (
           groups.map((group, index) => (
             <section
               key={`${group.bucket}-${index}`}
-              aria-label={group.bucket ? t(BUCKET_KEY[group.bucket]) : t("history")}
+              aria-label={
+                group.bucket
+                  ? t(BUCKET_KEY[group.bucket])
+                  : t("chat_history_with", { name: partnerName })
+              }
               className="flex flex-col"
             >
               {group.bucket && (
@@ -281,6 +330,7 @@ export function HistoryAside({
 }: Omit<Parameters<typeof HistoryPanel>[0], "focusHeadingOnMount"> & { inline: boolean }) {
   const t = useTranslations();
   const asideRef = useRef<HTMLElement>(null);
+  const label = t("chat_history_with", { name: displayPartnerName(props.partner, t) });
 
   useEffect(() => {
     const aside = asideRef.current;
@@ -296,12 +346,7 @@ export function HistoryAside({
 
   if (!inline) {
     return (
-      <BottomSheet
-        isOpen
-        onOpenChange={(open) => !open && onClose()}
-        label={t("history")}
-        height="tall"
-      >
+      <BottomSheet isOpen onOpenChange={(open) => !open && onClose()} label={label} height="tall">
         <HistoryPanel {...props} onClose={onClose} />
       </BottomSheet>
     );
@@ -311,7 +356,7 @@ export function HistoryAside({
     <aside
       ref={asideRef}
       id="chat-history"
-      aria-label={t("history")}
+      aria-label={label}
       className="bg-ax-sunken border-ax-border flex w-72 shrink-0 flex-col border-s"
     >
       <HistoryPanel {...props} onClose={onClose} focusHeadingOnMount />

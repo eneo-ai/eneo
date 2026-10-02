@@ -303,7 +303,26 @@ describe("ChatPage", () => {
 
     await waitFor(() => expect(screen.queryByRole("log")).toBeNull());
     expect(api.DELETE).toHaveBeenCalled();
-    await waitFor(() => expect(document.activeElement).toBe(composer()));
+    // The menu outlives the conversation (it always offers the context
+    // meter), so the dialog hands focus back to it; nothing is lost.
+    await waitFor(() => expect(document.activeElement).toBe(more));
+  });
+
+  it("pins the context meter from the chat menu and offers to hide it again", async () => {
+    renderPage(null);
+    const [more] = screen.getAllByRole("button", { name: "Fler alternativ" });
+    fireEvent.click(more!);
+    const menu = document.getElementById(more!.getAttribute("aria-controls") ?? "")!;
+    expect(within(menu).queryByRole("menuitem", { name: "Dölj kontextanvändning" })).toBeNull();
+    fireEvent.click(within(menu).getByRole("menuitem", { name: "Visa kontextanvändning" }));
+    expect(window.localStorage.getItem("contextUsageBarPinned")).toBe("true");
+
+    fireEvent.click(more!);
+    const reopened = document.getElementById(more!.getAttribute("aria-controls") ?? "")!;
+    expect(
+      await within(reopened).findByRole("menuitem", { name: "Dölj kontextanvändning" })
+    ).toBeTruthy();
+    window.localStorage.clear();
   });
 
   it("has no axe violations with a loaded conversation", async () => {
@@ -362,7 +381,7 @@ describe("ChatPage while an answer streams", () => {
 
     await act(async () => failure.resolve());
     await waitFor(() => expect(screen.queryByRole("log")).toBeNull());
-    expect(await screen.findByText("Tjänsten svarar inte")).toBeTruthy();
+    expect(await screen.findByText("Något gick fel. Försök igen.")).toBeTruthy();
     // One h1 (the start state's), the question back in the composer, focus with it.
     expect(h1Texts()).toEqual(["Upphandlingsassistenten"]);
     expect(composer().value).toBe("Vilken gräns gäller?");

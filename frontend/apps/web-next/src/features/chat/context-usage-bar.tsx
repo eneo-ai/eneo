@@ -2,38 +2,48 @@
 
 import { Button } from "@astryxdesign/core/Button";
 import { Popover } from "@astryxdesign/core/Popover";
-import { Eye, EyeOff, Info, TriangleAlert } from "lucide-react";
+import { EyeOff, Info, TriangleAlert } from "lucide-react";
 import { useLocale, useTranslations } from "next-intl";
 import { useMemo, useState, useSyncExternalStore } from "react";
 import type { ContextUsage } from "@/lib/chat/use-preflight";
 import { cn } from "@/lib/utils";
 
-const VISIBILITY_STORAGE_KEY = "contextUsageBarVisible";
+const PINNED_STORAGE_KEY = "contextUsageBarPinned";
 
-// localStorage-backed visibility, read via useSyncExternalStore so there's no
-// setState-in-effect and no hydration mismatch (server snapshot = visible).
-const visibilityListeners = new Set<() => void>();
+// localStorage-backed "always show" preference, read via useSyncExternalStore
+// so there's no setState-in-effect and no hydration mismatch (server
+// snapshot = not pinned, which renders nothing).
+const pinListeners = new Set<() => void>();
 
-function subscribeVisibility(callback: () => void) {
-  visibilityListeners.add(callback);
-  return () => visibilityListeners.delete(callback);
+function subscribePinned(callback: () => void) {
+  pinListeners.add(callback);
+  return () => pinListeners.delete(callback);
 }
 
-function readVisibility() {
+function readPinned() {
   try {
-    return window.localStorage.getItem(VISIBILITY_STORAGE_KEY) !== "false";
+    return window.localStorage.getItem(PINNED_STORAGE_KEY) === "true";
   } catch {
-    return true;
+    return false;
   }
 }
 
-function writeVisibility(next: boolean) {
+/**
+ * Whether the user asked to always see the meter (the chat menu's "Visa
+ * kontextanvändning"). Without it the meter appears on its own only from
+ * SHOW_FROM_PERCENT of the window.
+ */
+export function useContextUsagePinned(): boolean {
+  return useSyncExternalStore(subscribePinned, readPinned, () => false);
+}
+
+export function setContextUsagePinned(next: boolean) {
   try {
-    window.localStorage.setItem(VISIBILITY_STORAGE_KEY, next ? "true" : "false");
+    window.localStorage.setItem(PINNED_STORAGE_KEY, next ? "true" : "false");
   } catch {
     // Ignore persistence failures (private mode / blocked storage).
   }
-  for (const listener of visibilityListeners) listener();
+  for (const listener of pinListeners) listener();
 }
 
 /**
@@ -51,15 +61,20 @@ const SEGMENT_CLASS: Record<string, string> = {
   pendingFiles: "bg-ax-orange"
 };
 
-/** Below this share of the context window the bar stays out of the way (shown on composer focus). */
-const QUIET_BELOW_PERCENT = 70;
+/**
+ * From this share of the context window the meter shows on its own. Below it
+ * the conversation has room and the meter is noise under the composer, so
+ * nothing renders unless the user pinned it from the chat menu.
+ */
+export const SHOW_FROM_PERCENT = 60;
 
 /**
- * Context-usage bar ported from the Svelte `ContextUsageBar`: a segmented
- * progress bar above the composer with a detailed popover breaking the estimate
+ * Context-usage meter ported from the Svelte `ContextUsageBar`: a segmented
+ * progress bar under the composer with a detailed popover breaking the estimate
  * into locked (last turn) vs pending (your text/files) tokens, the running
  * conversation total, and an over-limit warning. Advisory only — the provider
- * validates the final payload.
+ * validates the final payload. Shown from SHOW_FROM_PERCENT of the window,
+ * when the estimate overflows, or always when pinned.
  */
 export function ContextUsageBar({
   usage,
@@ -81,8 +96,7 @@ export function ContextUsageBar({
     return (value: number) => nf.format(value);
   }, [locale]);
 
-  // Persisted show/hide preference; server snapshot defaults to visible.
-  const isVisible = useSyncExternalStore(subscribeVisibility, readVisibility, () => true);
+  const pinned = useContextUsagePinned();
   const [open, setOpen] = useState(false);
 
   const {
@@ -134,26 +148,10 @@ export function ContextUsageBar({
     return SEGMENT_CLASS[key] ?? "bg-ax-text-secondary";
   }
 
-  if (!hasUsage) return null;
-
-  const quiet = projectedPercent < QUIET_BELOW_PERCENT && !willExceed;
-  // Quiet: keeps its space but only shows while the composer has focus.
-  const quietClass = quiet ? "invisible group-focus-within/composer:visible" : undefined;
-
-  if (!isVisible) {
-    return (
-      <div className={cn("flex w-full justify-end px-1", quietClass)}>
-        <button
-          type="button"
-          onClick={() => writeVisibility(true)}
-          aria-label={t("context_usage_show_bar")}
-          className="text-ax-text-secondary hover:text-ax-text focus-visible:outline-ring rounded-ax-inner flex size-6 items-center justify-center focus-visible:outline-2 focus-visible:outline-offset-2"
-        >
-          <Eye className="size-3.5" aria-hidden />
-        </button>
-      </div>
-    );
-  }
+  // The meter earns its place when the window is filling up; otherwise only a
+  // pin from the chat menu shows it.
+  const warranted = projectedPercent >= SHOW_FROM_PERCENT || willExceed;
+  if (!hasUsage || (!warranted && !pinned)) return null;
 
   const percentLabel = projectedPercent.toFixed(projectedPercent >= 10 ? 0 : 1);
 
@@ -285,16 +283,22 @@ export function ContextUsageBar({
         ) : (
           <span />
         )}
-        <Button
-          label={t("context_usage_hide_bar")}
-          variant="ghost"
-          size="sm"
-          icon={<EyeOff className="size-3" aria-hidden />}
-          onClick={() => {
-            setOpen(false);
-            writeVisibility(false);
-          }}
-        />
+        {/* Only a pinned meter can be hidden here: from SHOW_FROM_PERCENT it
+            stays, as the warning it is. */}
+        {pinned && !warranted ? (
+          <Button
+            label={t("context_usage_menu_hide")}
+            variant="ghost"
+            size="sm"
+            icon={<EyeOff className="size-3" aria-hidden />}
+            onClick={() => {
+              setOpen(false);
+              setContextUsagePinned(false);
+            }}
+          />
+        ) : (
+          <span />
+        )}
       </div>
     </div>
   );
@@ -314,10 +318,7 @@ export function ContextUsageBar({
         type="button"
         aria-haspopup="dialog"
         aria-expanded={open}
-        className={cn(
-          "text-ax-text-secondary hover:text-ax-text focus-visible:outline-ring rounded-ax-inner flex min-h-6 w-full items-center gap-3 px-1 text-[11px] leading-none transition-colors focus-visible:outline-2 focus-visible:outline-offset-2",
-          quietClass
-        )}
+        className="text-ax-text-secondary hover:text-ax-text focus-visible:outline-ring rounded-ax-inner flex min-h-6 w-full items-center gap-3 px-1 text-[11px] leading-none transition-colors focus-visible:outline-2 focus-visible:outline-offset-2"
       >
         <span className="sr-only">{t("context_usage")}: </span>
         <div

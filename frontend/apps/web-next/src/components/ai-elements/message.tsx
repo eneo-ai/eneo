@@ -17,6 +17,15 @@ import {
 
 export type MessageResponseProps = ComponentProps<typeof Streamdown>;
 
+/**
+ * Typography of assistant answers (and quoted source snippets): the app's
+ * sans (Figtree, `font-sans`) at 16px with a roomier line height than the UI
+ * chrome, so answers read as prose without changing voice mid-screen. The
+ * serif voice is still one token away: swap `font-sans` for `font-voice`
+ * (Source Serif 4, `--font-voice` in globals.css) and nothing else moves.
+ */
+export const ANSWER_TEXT_CLASS = "font-sans text-ax-text text-base leading-[1.7]";
+
 const streamdownPlugins = { cjk, code, math, mermaid };
 
 // Streamdown REPLACES its defaults when `remarkPlugins`/`rehypePlugins` are

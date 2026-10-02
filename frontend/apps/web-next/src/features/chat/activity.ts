@@ -1,3 +1,4 @@
+import { modelDisplayName } from "@/lib/models/model-display-name";
 import type { Schema } from "@/lib/api/models";
 import { citedSourceIndices } from "@/lib/chat/inref";
 import { asString, hostOf } from "@/lib/chat/metadata";
@@ -153,16 +154,24 @@ function knowledgeStep(
   return { kind: "knowledge", key: "knowledge", status: "done", hits: documents.length, origins };
 }
 
-/** The model that wrote an answer: its nickname, else its name. */
+/** The model that wrote an answer: its nickname, else a readable form of its name. */
 export function modelName(message: EneoUIMessage): string | null {
   const fromMetadata = message.metadata?.completionModel;
   if (fromMetadata) {
-    return asString(fromMetadata.nickname) ?? asString(fromMetadata.name);
+    return (
+      modelDisplayName({
+        nickname: asString(fromMetadata.nickname),
+        name: asString(fromMetadata.name) ?? ""
+      }) || null
+    );
   }
   const session = message.parts.find((part) => part.type === "data-session");
   if (session?.type === "data-session" && session.data.completion_model) {
     const model = session.data.completion_model;
-    return asString(model.nickname) ?? asString(model.name);
+    return (
+      modelDisplayName({ nickname: asString(model.nickname), name: asString(model.name) ?? "" }) ||
+      null
+    );
   }
   return null;
 }

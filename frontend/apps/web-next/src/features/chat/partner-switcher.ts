@@ -11,6 +11,8 @@ export type ChatPartnerSwitcherItem = {
   name: string;
   href: string;
   iconId?: string | null;
+  /** The item lives in the personal space (see displayPartnerName). */
+  personalSpace?: boolean;
   active: boolean;
 };
 
@@ -33,6 +35,7 @@ export function chatPartnerSwitcherItems({
           name: space.default_assistant.name,
           href: `/spaces/${routeId}/chat`,
           iconId: space.default_assistant.icon_id,
+          personalSpace: space.personal,
           active: activeType === "default-assistant" || activeId === space.default_assistant.id
         }
       ]

@@ -58,13 +58,13 @@ function renderSelector(props: Partial<React.ComponentProps<typeof ModelSelector
 }
 
 function trigger() {
-  return screen.getByRole("button", { name: /^Completion-modell: / });
+  return screen.getByRole("button", { name: /^Chattmodell: / });
 }
 
 describe("ModelSelector", () => {
   it("names the trigger by its label and the chosen model", async () => {
     const { container } = renderSelector();
-    const button = screen.getByRole("button", { name: "Completion-modell: GPT-4o" });
+    const button = screen.getByRole("button", { name: "Chattmodell: GPT-4o" });
     expect(button.getAttribute("aria-haspopup")).toBe("listbox");
     expect(button.getAttribute("aria-expanded")).toBe("false");
     await expectNoAxeViolations(container);
@@ -155,7 +155,7 @@ describe("ModelSelector", () => {
     fireEvent.click(trigger());
     fireEvent.click(await screen.findByRole("option", { name: /Claude Sonnet 4/ }));
 
-    const button = screen.getByRole("button", { name: "Completion-modell: Claude Sonnet 4" });
+    const button = screen.getByRole("button", { name: "Chattmodell: Claude Sonnet 4" });
     await waitFor(() => expect(document.activeElement).toBe(button));
     expect(button.getAttribute("aria-busy")).toBe("true");
     expect((button as HTMLButtonElement).disabled).toBe(false);
@@ -163,7 +163,7 @@ describe("ModelSelector", () => {
     rerender(<ModelSelector models={MODELS} selectedId="sonnet" onSelect={onSelect} size="sm" />);
     await act(async () => finishSave());
     expect(button.getAttribute("aria-busy")).toBeNull();
-    expect(button.getAttribute("aria-label")).toBe("Completion-modell: Claude Sonnet 4");
+    expect(button.getAttribute("aria-label")).toBe("Chattmodell: Claude Sonnet 4");
   });
 
   it("goes back to the saved model when the save fails", async () => {
@@ -172,16 +172,14 @@ describe("ModelSelector", () => {
     fireEvent.click(trigger());
     fireEvent.click(await screen.findByRole("option", { name: /Claude Sonnet 4/ }));
 
-    await waitFor(() =>
-      expect(trigger().getAttribute("aria-label")).toBe("Completion-modell: GPT-4o")
-    );
+    await waitFor(() => expect(trigger().getAttribute("aria-label")).toBe("Chattmodell: GPT-4o"));
     expect(trigger().getAttribute("aria-busy")).toBeNull();
   });
 
   it("says when the saved model is no longer offered", () => {
     renderSelector({ selectedId: "retired-model" });
     expect(
-      screen.getByRole("button", { name: "Completion-modell: Stöds ej vald modell" }).textContent
+      screen.getByRole("button", { name: "Chattmodell: Stöds ej vald modell" }).textContent
     ).toContain("Stöds ej vald modell");
   });
 
@@ -189,7 +187,7 @@ describe("ModelSelector", () => {
     const { container } = renderSelector({
       locked: { id: "gpt-4o", name: "gpt-4o", nickname: "GPT-4o", org: "OpenAI" }
     });
-    const field = screen.getByRole("combobox", { name: "Completion-modell" });
+    const field = screen.getByRole("combobox", { name: "Chattmodell" });
     expect(field.getAttribute("aria-readonly")).toBe("true");
     expect(field.textContent).toContain("GPT-4o");
     const description = field
@@ -212,7 +210,7 @@ describe("ModelSelector", () => {
     fireEvent.click(trigger());
 
     // On a phone the list opens as a bottom sheet named by the field.
-    const sheet = await screen.findByRole("dialog", { name: "Completion-modell" });
+    const sheet = await screen.findByRole("dialog", { name: "Chattmodell" });
     const option = within(sheet).getAllByRole("option")[0]!;
     // The theme gives this Astryx part 44 px on a coarse pointer
     // (eneo-theme.ts → adaptations; globals-css.test.ts checks the CSS).

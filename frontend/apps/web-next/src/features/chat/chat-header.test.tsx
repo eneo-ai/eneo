@@ -109,7 +109,10 @@ describe("ChatHeader", () => {
     const onToggleHistory = vi.fn();
     const onNewConversation = vi.fn();
     renderHeader({ historyOpen: true, onToggleHistory, onNewConversation });
-    const history = screen.getByRole("button", { name: "Historik" });
+    // Named after what it opens; aria-expanded carries the state.
+    const history = screen.getByRole("button", {
+      name: "Konversationer med Upphandlingsassistenten"
+    });
     expect(history.getAttribute("aria-expanded")).toBe("true");
     fireEvent.click(history);
     expect(onToggleHistory).toHaveBeenCalled();

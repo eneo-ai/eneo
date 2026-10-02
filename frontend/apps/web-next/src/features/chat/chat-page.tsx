@@ -14,6 +14,7 @@ import { mapSessionMessages } from "@/lib/chat/map-session";
 import type { ChatPartner, EneoUIMessage } from "@/lib/chat/types";
 import { ChatHeader, PartnerSwitcher, type HeaderMenuItem } from "./chat-header";
 import { ChatView, type ActivityState } from "./chat-view";
+import { setContextUsagePinned, useContextUsagePinned } from "./context-usage-bar";
 import { HistoryAside } from "./history-panel";
 import { InsightsPanel } from "./insights-panel";
 import type { ChatPartnerSwitcherItem } from "./partner-switcher";
@@ -256,6 +257,9 @@ export function ChatPage({
       ? null
       : t("chat_loading_conversation");
   const isPersonal = partner.type === "default-assistant";
+  // The context meter under the composer shows itself only when the window
+  // is filling up; this pins it for people who want to watch it.
+  const contextUsagePinned = useContextUsagePinned();
 
   const menuItems: HeaderMenuItem[] = [
     ...(sessionId
@@ -269,6 +273,10 @@ export function ChatPage({
     ...(editHref
       ? [{ label: t("chat_edit_assistant"), onClick: () => router.push(editHref) }]
       : []),
+    {
+      label: contextUsagePinned ? t("context_usage_menu_hide") : t("context_usage_menu_show"),
+      onClick: () => setContextUsagePinned(!contextUsagePinned)
+    },
     ...(sessionId
       ? [
           {

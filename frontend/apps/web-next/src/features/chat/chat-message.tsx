@@ -17,7 +17,7 @@ import {
   citationComponents,
   useCitationRemarkPlugins
 } from "@/components/ai-elements/citation";
-import { MessageResponse } from "@/components/ai-elements/message";
+import { ANSWER_TEXT_CLASS, MessageResponse } from "@/components/ai-elements/message";
 import { iconUrl } from "@/components/composites/icon-field";
 import { EntityAvatar } from "@/components/composites/entity-avatar";
 import { useAppContext } from "@/components/providers/app-context";
@@ -358,7 +358,7 @@ function AssistantMessage({
                 onOpenSource={openSource}
               >
                 <MessageResponse
-                  className="font-voice text-ax-text text-base leading-[1.62]"
+                  className={ANSWER_TEXT_CLASS}
                   remarkPlugins={remarkPlugins}
                   components={citationComponents}
                   isAnimating={streamingThis}
@@ -400,7 +400,7 @@ function AssistantMessage({
 /**
  * One conversation message. User questions are right-aligned bubbles; answers
  * carry a header (tile, assistant, model), the activity pill that opens the
- * Aktivitet panel, the answer in the serif voice with inline citations, tool
+ * Aktivitet panel, the answer as prose with inline citations, tool
  * approvals, files and an actions row. Shared by ChatView and the design mock
  * page so the two never drift: ChatView owns data and streaming, this owns the
  * presentation.

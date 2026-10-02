@@ -4,6 +4,7 @@
  */
 import { Chat } from "@ai-sdk/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { EneoApiError } from "@/lib/api/errors";
 import { sseResponse, toSseBody } from "./contract-fixtures";
 import { createChatTransport, enforceStreamContract } from "./transport";
 import type { EneoUIMessage } from "./types";
@@ -32,8 +33,8 @@ const textDelta = { type: "text-delta", id: "text-0", delta: "Hello" };
 const textEnd = { type: "text-end", id: "text-0" };
 const finish = { type: "finish" };
 
-async function run(body: string) {
-  fetchMock.mockResolvedValueOnce(sseResponse(body));
+async function run(body: string | Response) {
+  fetchMock.mockResolvedValueOnce(typeof body === "string" ? sseResponse(body) : body);
   let finished: { isAbort: boolean; isError: boolean } | null = null;
   const chat = new Chat<EneoUIMessage>({
     transport: createChatTransport(),
@@ -70,6 +71,33 @@ describe("a well-formed stream", () => {
       text: "Hello",
       state: "done"
     });
+  });
+});
+
+describe("a refused response", () => {
+  it("fails as an EneoApiError carrying the status, code and message, never the raw body", async () => {
+    const result = await run(
+      new Response(JSON.stringify({ message: "Not authenticated", eneo_error_code: 9001 }), {
+        status: 401,
+        headers: { "content-type": "application/json", "x-trace-id": "trace-1" }
+      })
+    );
+    expectFailed(result);
+    const error = result.chat.error as EneoApiError;
+    expect(error).toBeInstanceOf(EneoApiError);
+    expect(error.status).toBe(401);
+    expect(error.code).toBe(9001);
+    expect(error.message).toBe("Not authenticated");
+    expect(error.traceId).toBe("trace-1");
+  });
+
+  it("keeps the status when the refused body is not JSON", async () => {
+    const result = await run(new Response("<html>Bad gateway</html>", { status: 502 }));
+    expectFailed(result);
+    const error = result.chat.error as EneoApiError;
+    expect(error).toBeInstanceOf(EneoApiError);
+    expect(error.status).toBe(502);
+    expect(error.message).not.toContain("<html>");
   });
 });
 

@@ -60,6 +60,8 @@ const partner: ChatPartner = {
   id: "assistant-1",
   name: "Upphandlingsassistenten"
 };
+/** The panel is the partner's own list; the sidebar's "Senaste" spans every partner. */
+const HEADING = "Konversationer med Upphandlingsassistenten";
 
 /** Opens a row's menu and returns the menu item with the given name. */
 async function rowMenuItem(row: string, item: string) {
@@ -92,8 +94,8 @@ function renderHistory({
 describe("HistoryAside", () => {
   it("groups conversations by date, marks the open one and selects on click", async () => {
     const { onSelect } = renderHistory();
-    const aside = screen.getByRole("complementary", { name: "Historik" });
-    await waitFor(() => expect(document.activeElement?.textContent).toBe("Historik"));
+    const aside = screen.getByRole("complementary", { name: HEADING });
+    await waitFor(() => expect(document.activeElement?.textContent).toBe(HEADING));
 
     const today = await within(aside).findByRole("region", { name: "Idag" });
     const current = within(today).getByRole("button", { name: "Upphandlingsanalys" });
@@ -105,7 +107,7 @@ describe("HistoryAside", () => {
 
   it("closes on Escape", async () => {
     const { onClose } = renderHistory();
-    const heading = await screen.findByRole("heading", { name: "Historik" });
+    const heading = await screen.findByRole("heading", { name: HEADING });
     fireEvent.keyDown(heading, { key: "Escape" });
     expect(onClose).toHaveBeenCalled();
   });
@@ -146,7 +148,7 @@ describe("HistoryAside", () => {
     await waitFor(() => expect(onDeleted).toHaveBeenCalledWith("s2"));
     expect(screen.queryByRole("button", { name: "Protokoll KS" })).toBeNull();
     await waitFor(() =>
-      expect(document.activeElement).toBe(screen.getByRole("heading", { name: "Historik" }))
+      expect(document.activeElement).toBe(screen.getByRole("heading", { name: HEADING }))
     );
   });
 
@@ -180,6 +182,56 @@ describe("HistoryAside", () => {
         .getAllByRole("menuitem")
         .map((item) => item.textContent)
     ).toEqual(["Byt namn", "Ta bort"]);
+  });
+
+  it("filters the loaded conversations by title and keeps older pages reachable", async () => {
+    api.rows.push({ id: "s3", name: "Budget 2027", updated_at: new Date(now).toISOString() });
+    renderHistory();
+    await screen.findByRole("button", { name: "Protokoll KS" });
+
+    const search = screen.getByRole("textbox", { name: "Sök konversation" });
+    fireEvent.change(search, { target: { value: "PROTO" } });
+    expect(screen.getByRole("button", { name: "Protokoll KS" })).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "Upphandlingsanalys" })).toBeNull();
+    // The search covers what is loaded; the next page is still one click away.
+    expect(screen.getByRole("button", { name: "Visa fler konversationer" })).toBeTruthy();
+
+    fireEvent.change(search, { target: { value: "budget" } });
+    expect(screen.getByText('Inga konversationer matchar "budget".')).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "Visa fler konversationer" }));
+    expect(await screen.findByRole("button", { name: "Budget 2027" })).toBeTruthy();
+
+    fireEvent.change(search, { target: { value: "" } });
+    expect(screen.getByRole("button", { name: "Upphandlingsanalys" })).toBeTruthy();
+  });
+
+  it("says whose conversations are missing, without a search field", async () => {
+    api.rows = [];
+    renderHistory();
+    expect(
+      await screen.findByText(
+        "Inga konversationer med Upphandlingsassistenten ännu. Din första fråga hamnar här."
+      )
+    ).toBeTruthy();
+    expect(screen.queryByRole("textbox", { name: "Sök konversation" })).toBeNull();
+  });
+
+  it("names the personal assistant's list after the personal assistant", async () => {
+    renderInApp(
+      <HistoryAside
+        inline
+        partner={{ type: "default-assistant", id: "d", name: "Default", personalSpace: true }}
+        activeSessionId={null}
+        onSelect={vi.fn()}
+        onDeleted={vi.fn()}
+        onClose={vi.fn()}
+      />,
+      { queryClient: testQueryClient() }
+    );
+    expect(
+      await screen.findByRole("heading", { name: "Konversationer med Personlig assistent" })
+    ).toBeTruthy();
+    expect(screen.queryByText(/Default/)).toBeNull();
   });
 
   it("names untitled conversations", async () => {

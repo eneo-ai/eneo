@@ -43,6 +43,8 @@ export type ChatPartner = {
   iconId?: string | null;
   /** Name of the space the partner lives in (header subtitle). */
   spaceName?: string | null;
+  /** The partner lives in the user's personal space (its default assistant is the personal assistant). */
+  personalSpace?: boolean;
   /** The space's security classification label, when it has one. */
   securityClassification?: string | null;
   /** Collections and websites the partner searches (named activity steps and sources). */
