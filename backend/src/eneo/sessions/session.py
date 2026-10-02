@@ -260,3 +260,9 @@ SSE_MODELS = [
 
 # Add standalone enums that need to be included in the openapi schema
 SSE_ENUMS = [EneoEventType]
+
+
+class DocumentExportRequest(BaseModel):
+    """A Markdown document of the conversation, asked for in another format."""
+
+    format: Literal["docx", "pdf"] = Field(description="The format to export to.")

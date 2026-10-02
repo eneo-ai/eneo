@@ -10,6 +10,7 @@ const ctxKey = Symbol("Message references");
 export function initReferenceContext(params: {
   references: () => InfoBlob[];
   renderer: () => CustomRenderers["inref"];
+  fileRenderer?: () => CustomRenderers["file"];
 }) {
   const data = {
     state: {
@@ -21,6 +22,9 @@ export function initReferenceContext(params: {
     },
     get CustomRenderer() {
       return params.renderer();
+    },
+    get FileRenderer() {
+      return params.fileRenderer?.();
     }
   };
 

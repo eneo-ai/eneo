@@ -51,7 +51,15 @@ ATTACHED_FILE_REFERENCES_INSTRUCTION = (
     "wants done. Never ask the user to re-upload a file listed in a reference entry. "
     "Prefer a tool suited to the file and task. When no specific tool fits or a "
     'chosen tool fails, read_file ("Read attached file"), when available, accepts '
-    "the same file_ref in its url input. Images should go to image tools, not read_file."
+    "the same file_ref in its url input. Images should go to image tools, not read_file. "
+    "For Selected table rows, pass the provided file reference, including sheet and "
+    "source_rows, unchanged to inspect_table and query_table. These are coordinates "
+    "in the immutable original file, not values or positions in a sorted query result. "
+    "The runtime filters the source before running DuckDB SQL. Use query_table for "
+    "comparisons, totals and calculations before answering; do not calculate from "
+    "quoted text, earlier samples or a full-file text dump. Keep the filter for "
+    "follow-up queries on that selection. If the tools cannot apply source_rows, "
+    "explain the limitation instead of guessing or silently querying other rows."
 )
 
 

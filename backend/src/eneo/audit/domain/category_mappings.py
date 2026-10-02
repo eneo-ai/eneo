@@ -118,6 +118,7 @@ CATEGORY_MAPPINGS = {
     ActionType.FILE_ORIGINAL_DOWNLOAD_LINK_CREATED.value: "file_operations",
     ActionType.FILE_ORIGINAL_DOWNLOADED.value: "file_operations",
     ActionType.FILE_SIGNED_URL_MINTED.value: "file_operations",
+    ActionType.DOCUMENT_EXPORTED.value: "file_operations",
     ActionType.INFO_BLOB_ORIGINAL_DOWNLOAD_LINK_CREATED.value: "file_operations",
     # Integration Events (20 actions)
     ActionType.INTEGRATION_ADDED.value: "integration_events",

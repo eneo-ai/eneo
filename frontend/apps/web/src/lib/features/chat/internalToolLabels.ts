@@ -6,6 +6,7 @@
 
 import { m } from "$lib/paraglide/messages";
 import { getCapability, type CapabilityPurpose } from "$lib/features/mcp/capabilities";
+import { referencedFileId } from "./fileReference";
 
 type ToolArgs = Record<string, unknown> | undefined;
 
@@ -287,9 +288,6 @@ export function capabilityProviderDetail(call: ToolCallLike): string | null {
   return call.server_name;
 }
 
-/** Path of a signed file reference URL, mirroring the backend's parser. */
-const FILE_DOWNLOAD_PATH = /\/api\/v1\/files\/([0-9a-fA-F-]{36})\/original\/download\/?$/;
-
 /**
  * File id referenced by a read_file call on Eneo's internal files server, or
  * null for any other tool call. Lets the UI resolve which attachment a tool
@@ -302,13 +300,7 @@ export function internalReadFileId(
   isInternal?: boolean | null
 ): string | null {
   if (serverName !== "files" || toolName !== "read_file" || !isOwnServer(isInternal)) return null;
-  const url = args?.url;
-  if (typeof url !== "string") return null;
-  try {
-    return FILE_DOWNLOAD_PATH.exec(new URL(url).pathname)?.[1] ?? null;
-  } catch {
-    return null;
-  }
+  return referencedFileId(args?.url);
 }
 
 /** Whether a generate_image call edits reference images rather than starting from text. */

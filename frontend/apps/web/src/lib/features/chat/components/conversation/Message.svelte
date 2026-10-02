@@ -9,7 +9,7 @@
   import { browser } from "$app/environment";
   import { getChatService } from "../../ChatService.svelte";
   import { setMessageContext } from "../../MessageContext.svelte";
-  import { isInternalToolCall } from "../../internalToolLabels";
+  import { isBuiltinToolCall } from "../../internalToolLabels";
 
   interface Props {
     message: ConversationMessage;
@@ -66,13 +66,13 @@
     const hasReasoning =
       (((message as Record<string, unknown>).reasoning as string | undefined) ?? "").trim().length >
       0;
-    // Built-in tool calls render their own shimmer line (InternalToolStep),
+    // Built-in and capability tool calls render their own shimmer line (InternalToolStep),
     // which keeps animating until the first answer token — suppress the badge
     // so "Tänker..." never shows next to "Söker kunskap…".
     const toolCalls = ((message as Record<string, unknown>).mcp_tool_calls ??
       message.tool_calls ??
-      []) as Array<{ server_name: string; is_internal?: boolean | null }>;
-    const hasInternalToolActivity = toolCalls.some((tc) => isInternalToolCall(tc));
+      []) as Array<{ server_name: string; is_internal?: boolean | null; purpose?: string | null }>;
+    const hasBuiltinToolActivity = toolCalls.some((tc) => isBuiltinToolCall(tc));
     // Show typing indicator only while waiting for text to start, not during streaming
     return (
       isLast &&
@@ -80,7 +80,7 @@
       !isGeneratingImage &&
       !hasStartedStreaming &&
       !hasReasoning &&
-      !hasInternalToolActivity
+      !hasBuiltinToolActivity
     );
   });
 
