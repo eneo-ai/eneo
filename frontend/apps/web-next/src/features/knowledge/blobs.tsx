@@ -9,12 +9,14 @@ import {
   pixel,
   proportional,
   useTablePagination,
+  useTableRowStatus,
   useTableSortable,
   useTableSortableState,
   type TableColumn,
   type TableSortComparator
 } from "@astryxdesign/core/Table";
 import { Table } from "@/components/astryx/table";
+import { useRecentInfoBlobIds } from "@/features/jobs/recent-results";
 import { VisuallyHidden } from "@astryxdesign/core/VisuallyHidden";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Check, Copy, FileText, Pencil, SearchX, Trash2 } from "lucide-react";
@@ -293,6 +295,15 @@ export function BlobTable({
     label: t("space_files_pagination_label")
   });
 
+  // Files whose upload job finished moments ago are pointed out in the
+  // refreshed list (features/jobs/recent-results.ts), so a user who waited for
+  // "bearbetas…" sees where the file landed without hunting for it.
+  const recentInfoBlobIds = useRecentInfoBlobIds();
+  const rowStatusPlugin = useTableRowStatus<InfoBlob>({
+    getStatus: (blob) =>
+      recentInfoBlobIds.has(blob.id) ? { status: "success", label: t("file_just_added") } : null
+  });
+
   if (blobs.length === 0) {
     return <EmptyState icon={<FileText />} title={t("no_files_uploaded_yet")} />;
   }
@@ -342,7 +353,7 @@ export function BlobTable({
             columns={columns}
             idKey="id"
             aria-labelledby={labelledBy}
-            plugins={{ sort: sortPlugin, pagination: paginationPlugin }}
+            plugins={{ sort: sortPlugin, pagination: paginationPlugin, rowStatus: rowStatusPlugin }}
           />
         </SpaceTableFrame>
       )}

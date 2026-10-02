@@ -103,6 +103,17 @@ export function UploadBlobsDialog({
     queryFn: () => unwrap(browserApi.GET("/api/v1/storage/")),
     enabled: open && can("admin")
   });
+  // The app context's user is read once on the server; the quota it carries
+  // goes stale with every upload. This query starts from that value and is
+  // refreshed whenever a job finishes (features/jobs/job-invalidation.ts).
+  const { data: me } = useQuery({
+    queryKey: ["users", "me"],
+    queryFn: () => unwrap(browserApi.GET("/api/v1/users/me/")),
+    initialData: user,
+    enabled: open
+  });
+  const quotaLimit = me.quota_limit ?? user.quota_limit;
+  const quotaUsed = me.quota_used ?? user.quota_used;
 
   const errors = useMemo<ValidationError[]>(() => {
     const found: ValidationError[] = [];
@@ -124,8 +135,7 @@ export function UploadBlobsDialog({
     }
 
     const remainingCandidates: number[] = [];
-    if (user.quota_limit != null)
-      remainingCandidates.push(user.quota_limit - (user.quota_used ?? 0));
+    if (quotaLimit != null) remainingCandidates.push(quotaLimit - (quotaUsed ?? 0));
     if (storage?.limit != null) remainingCandidates.push(storage.limit - storage.total_used);
     if (remainingCandidates.length > 0) {
       const remaining = Math.min(...remainingCandidates);
@@ -136,7 +146,7 @@ export function UploadBlobsDialog({
     }
     return found;
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [files, storage, user.quota_limit, user.quota_used, t]);
+  }, [files, storage, quotaLimit, quotaUsed, t]);
 
   const noFilesProblem = submitted && files.length === 0 ? t("form_problem_choose_files") : null;
 

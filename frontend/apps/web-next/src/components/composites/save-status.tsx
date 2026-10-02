@@ -1,6 +1,7 @@
 "use client";
 
-import { Check, CircleAlert, Loader2, OctagonX } from "lucide-react";
+import { CircleAlert, Loader2, OctagonX } from "lucide-react";
+import { SuccessMark } from "./success-mark";
 import { useTranslations } from "next-intl";
 import { createContext, useCallback, useContext, useEffect, useMemo, useState } from "react";
 import { useAnnounce } from "@astryxdesign/core/hooks";
@@ -134,12 +135,7 @@ export function SaveStatusIndicator() {
   } else {
     content = (
       <span className="text-muted-foreground inline-flex items-center gap-1.5 text-sm">
-        <Check
-          key={landings}
-          aria-hidden="true"
-          data-just-saved={justSaved || undefined}
-          className={justSaved ? "animate-in fade-in zoom-in-50 size-3.5 duration-300" : "size-3.5"}
-        />
+        <SuccessMark size="sm" replayKey={justSaved ? landings : undefined} />
         {t("all_changes_saved")}
       </span>
     );

@@ -1,5 +1,5 @@
 import { crawlFailureMessageKey } from "@/features/knowledge/crawl-run-state";
-import type { Job } from "./use-jobs";
+import type { Job } from "./jobs";
 
 type JobTask = Job["task"];
 type FailureCode = NonNullable<Job["failure_code"]>;

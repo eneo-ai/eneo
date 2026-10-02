@@ -120,10 +120,10 @@ it("keeps saving visible until every save for the key has settled", async () => 
 it("pops the check mark in when a save lands, and not before", async () => {
   const first = deferred();
   const { container } = renderWithStatus(<AutosaveProbe saves={[() => first.promise]} />);
-  const check = () => container.querySelector(".lucide-check");
+  const check = () => container.querySelector("[data-success-mark]");
 
   // At rest on first render: a plain check, nothing animates.
-  expect(check()?.getAttribute("data-just-saved")).toBeNull();
+  expect(check()?.getAttribute("class")).not.toContain("animate-in");
 
   fireEvent.click(screen.getByRole("button", { name: "Run" }));
   expect(screen.getByText("Saving...")).toBeDefined();
@@ -132,7 +132,6 @@ it("pops the check mark in when a save lands, and not before", async () => {
 
   // The landing animates (tw-animate-css enter utilities; the global
   // reduced-motion rule shortens them to nothing).
-  expect(check()?.getAttribute("data-just-saved")).toBe("true");
   expect(check()?.getAttribute("class")).toContain("animate-in");
 });
 

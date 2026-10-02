@@ -1589,5 +1589,11 @@
   "prompt_library_restored": "Version {version} återställdes som version {current}.",
   "prompt_library_saved_as_version": "”{name}” sparades som version {version}.",
   "prompt_library_created": "”{name}” skapades.",
-  "prompt_library_deleted": "”{name}” togs bort."
+  "prompt_library_deleted": "”{name}” togs bort.",
+  "file_uploaded_processing": "Uppladdad, bearbetas…",
+  "job_toast_upload_ready": "{name} är klar och sökbar.",
+  "job_toast_completed": "{name} är klar.",
+  "job_toast_failed": "{name} misslyckades.",
+  "job_toast_cancelled": "{name} stoppades.",
+  "file_just_added": "Nyss tillagd"
 }

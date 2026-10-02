@@ -10,6 +10,7 @@ import { useTranslations } from "next-intl";
 import { useId, useState } from "react";
 import { cn } from "@/lib/utils";
 import { isCancelledCrawl, isCrawlWithWarnings, jobFailureMessage } from "./job-failure-message";
+import { SuccessMark } from "@/components/composites/success-mark";
 import { isJobActive, useJobActivity, type Job, type Upload } from "./use-jobs";
 
 /** Job task → i18n key for the panel section heading. */
@@ -137,7 +138,10 @@ function JobRow({ job }: { job: Job }) {
       ) : job.status === "failed" ? (
         <span className="text-ax-error min-w-fit font-medium">{t("failed")}</span>
       ) : (
-        <span className="text-ax-success min-w-fit font-medium">{t("done")}</span>
+        <span className="text-ax-success inline-flex min-w-fit items-center gap-1.5 font-medium">
+          <SuccessMark size="sm" />
+          {t("done")}
+        </span>
       )}
     </div>
   );

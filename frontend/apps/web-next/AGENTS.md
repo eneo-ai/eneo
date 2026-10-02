@@ -204,6 +204,17 @@ the default name on a backend name collision (9017).
   yet (`astryx-provider.tsx`). For other client-only values use `useHydrated()`
   (`src/lib/hooks/use-hydrated.ts`) instead of effect + setState, below the
   page's providers.
+- **Background jobs** (`src/features/jobs/`): `JobsProvider` polls `GET
+/jobs` (2 s while something runs or was just started, 30 s otherwise; paused
+  in hidden tabs) and compares snapshots with `job-transitions.ts`. Every job
+  the client starts goes through `trackJob(job)` so its completion counts even
+  when the first poll already says "complete". A finished job toasts and
+  announces (`job-feedback.ts`), refreshes the query keys in
+  `job-invalidation.ts` (add a prefix there when a new kind of job lands
+  somewhere new) and records its info-blob in `recent-results.ts`, which the
+  file table uses to mark the row "Nyss tillagd". Nothing in the app needs a
+  reload to see a job's result; if something does, the missing invalidation
+  key is the bug.
 - **Fonts**: Figtree for UI and assistant answers (`font-sans`; answers use
   `ANSWER_TEXT_CLASS` in `ai-elements/message.tsx`), JetBrains Mono (`font-mono`).
   Source Serif 4 stays loaded as `font-voice` so the answer voice can be flipped
@@ -308,6 +319,10 @@ focus-visible:outline-offset-2 focus-visible:outline-ring`);
   (only `current` marks a crumb as this page; a crumb without `href` is a plain
   label), `actions?` (legacy `children` still work), `headingLevel?`,
   `headingRef?`, `tour?`.
+- `SuccessMark` (`success-mark.tsx`) — the one green check-in-a-circle for a
+  save that landed, a job that finished, a file that became searchable; give
+  it a growing `replayKey` to pop it in once per success. Decorative; the text
+  beside it carries the meaning.
 - `QueryStateBoundary` / `ListError` (`query-state.tsx`) — the one loading and
   error state for a list or section: skeleton rows while pending, an error banner
   with the catalog message, "Försök igen" (refetch) and status/code/trace behind

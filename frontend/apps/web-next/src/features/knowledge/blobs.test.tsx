@@ -12,10 +12,13 @@ const api = vi.hoisted(() => ({
 }));
 vi.mock("@/lib/api/browser", () => ({ browserApi: api }));
 
+import { recordFinishedJob, resetRecentResults } from "@/features/jobs/recent-results";
+import type { Job } from "@/features/jobs/jobs";
 import { AddTextDialog, BlobTable } from "./blobs";
 
 afterEach(() => {
   cleanup();
+  resetRecentResults();
   vi.clearAllMocks();
 });
 
@@ -28,6 +31,27 @@ const names = () =>
     .map((button) => button.textContent);
 
 describe("BlobTable", () => {
+  it("marks the file a job just produced as newly added", () => {
+    const id = "5d1b9c1e-0b4e-4c21-9d7c-2f0f0a6d3e11";
+    recordFinishedJob({
+      id: "job",
+      task: "upload_info_blob",
+      status: "complete",
+      result_location: `/api/v1/info-blobs/${id}/`
+    } as Job);
+    const { container } = renderInApp(
+      <BlobTable
+        blobs={[blob("other", "Gammal.pdf", 10), blob(id, "Ny.pdf", 20)]}
+        canEdit={false}
+        labelledBy="files"
+      />
+    );
+    // Astryx's row-status plugin marks the row with a named status signifier.
+    const marks = within(container).getAllByRole("img", { name: "Nyss tillagd" });
+    expect(marks).toHaveLength(1);
+    expect(marks[0]?.closest("tr")?.textContent).toContain("Ny.pdf");
+  });
+
   it("keeps the upload order until a header sorts it", async () => {
     const { container } = renderInApp(
       <>

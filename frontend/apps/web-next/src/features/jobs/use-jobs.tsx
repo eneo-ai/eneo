@@ -1,5 +1,6 @@
 "use client";
 
+import { useAnnounce } from "@astryxdesign/core/hooks";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useTranslations } from "next-intl";
 import {
@@ -14,10 +15,14 @@ import {
 } from "react";
 import { browserApi } from "@/lib/api/browser";
 import { EneoApiError, getErrorMessage, unwrap } from "@/lib/api/errors";
-import type { Schema } from "@/lib/api/models";
 import { toast } from "@/lib/toast";
+import { describeJobOutcome } from "./job-feedback";
+import { invalidateAfterJobs } from "./job-invalidation";
+import { diffJobs, EMPTY_LEDGER, rememberActiveJob, type JobLedger } from "./job-transitions";
+import { isJobActive, JOBS_KEY, type Job } from "./jobs";
+import { recordFinishedJob } from "./recent-results";
 
-export type Job = Schema<"JobPublic">;
+export { isJobActive, type Job } from "./jobs";
 
 export type Upload = {
   id: string;
@@ -35,24 +40,6 @@ const FAST_POLL_MS = 2_000;
 /** Poll fast for this long after a job is registered, then fall back. */
 const FAST_POLL_WINDOW_MS = 15_000;
 const MAX_UPLOAD_CONNECTIONS = 5;
-
-/**
- * Query keys that job completion can affect: knowledge lists and counts
- * (uploads, crawls, integration pulls all land as info-blobs) and app runs.
- * Invalidation only refetches mounted queries, so being broad is cheap.
- */
-const JOB_INVALIDATION_KEYS = [
-  ["spaces"],
-  ["collections"],
-  ["websites"],
-  ["integration-knowledge"],
-  ["info-blobs"],
-  ["apps"]
-];
-
-export function isJobActive(job: Job): boolean {
-  return job.status === "in progress" || job.status === "queued";
-}
 
 /** The client-side upload queue, as a store the job indicator subscribes to. */
 type UploadStore = {
@@ -87,8 +74,12 @@ function createUploadStore(): UploadStore {
  * (useJobActivity).
  */
 type JobsContextValue = {
-  /** Register a backend job: switches to fast polling for quick feedback. */
-  trackJob: () => void;
+  /**
+   * Register a backend job: switches to fast polling for quick feedback.
+   * Pass the job the call returned so its completion is caught even when the
+   * first poll already reports it finished (see job-transitions.ts).
+   */
+  trackJob: (job?: Job) => void;
   /** Queue files for upload into a collection. */
   queueUploads: (collectionId: string, files: File[]) => void;
   clearFinishedUploads: () => void;
@@ -149,15 +140,12 @@ const fetchJobs = async (): Promise<Job[]> => (await unwrap(browserApi.GET("/api
 export function JobsProvider({ children }: { children: React.ReactNode }) {
   const t = useTranslations();
   const queryClient = useQueryClient();
+  const announce = useAnnounce();
 
   const fastPollUntil = useRef(0);
-  const [announcement, setAnnouncement] = useState<{ id: number; message: string } | null>(null);
-  const announce = useCallback((message: string) => {
-    setAnnouncement({ id: Date.now(), message });
-  }, []);
 
   const { data: jobs = NO_JOBS } = useQuery({
-    queryKey: ["jobs"],
+    queryKey: JOBS_KEY,
     queryFn: fetchJobs,
     // Jobs can be created by another tab or appear after trackJob's first
     // fetch. Keep checking even when the latest response is empty.
@@ -167,44 +155,52 @@ export function JobsProvider({ children }: { children: React.ReactNode }) {
         : SLOW_POLL_MS
   });
 
-  // Detect active → terminal transitions (or jobs aging out of the window)
-  // and refresh the data they produced. A failed crawl counts too: its
-  // partial results and its outcome are part of the knowledge it touched.
-  const previousJobs = useRef<Map<string, Job>>(new Map());
+  // Each snapshot is compared with the last one: a job that was active and
+  // now has an outcome gets a toast, an announcement and a row highlight, and
+  // the data it produced is refreshed. The ledger lives in a ref because it
+  // is bookkeeping, not render state.
+  const ledger = useRef<JobLedger>(EMPTY_LEDGER);
+  const handleSnapshot = useCallback(
+    (snapshot: readonly Job[]) => {
+      const diff = diffJobs(ledger.current, snapshot);
+      ledger.current = diff.ledger;
+      for (const { job, outcome } of diff.transitions) {
+        const feedback = describeJobOutcome(job, outcome, t);
+        if (feedback.tone === "success") {
+          toast.success(feedback.title);
+        } else if (feedback.tone === "error") {
+          toast.error(feedback.title, { description: feedback.description });
+        } else {
+          toast.info(feedback.title);
+        }
+        announce(feedback.title);
+        recordFinishedJob(job);
+      }
+      // A vanished job finished (or was cleaned up) without reporting; its
+      // data may still have changed, so refresh as for a reported outcome.
+      if (diff.transitions.length > 0 || diff.vanished.length > 0) {
+        invalidateAfterJobs(queryClient);
+      }
+    },
+    [announce, queryClient, t]
+  );
   useEffect(() => {
-    const next = new Map(jobs.map((job) => [job.id, job]));
-    const previous = previousJobs.current;
-    previousJobs.current = next;
+    handleSnapshot(jobs);
+  }, [handleSnapshot, jobs]);
 
-    let finished = false;
-    const announcements: string[] = [];
-    for (const job of next.values()) {
-      const old = previous.get(job.id);
-      if (old === undefined || !isJobActive(old)) continue;
-      const name = job.name ?? job.id;
-      if (job.status === "complete") {
-        finished = true;
-        announcements.push(t("job_completed_announcement", { name }));
-      } else if (job.status === "failed") {
-        finished = true;
-        announcements.push(t("job_failed_announcement", { name }));
+  const trackJob = useCallback(
+    (job?: Job) => {
+      if (job) {
+        ledger.current = rememberActiveJob(ledger.current, job);
+        // The cached list may already show this job finished. Judge it now:
+        // a refetch that returns identical data does not re-run the effect.
+        handleSnapshot(queryClient.getQueryData<Job[]>(JOBS_KEY) ?? NO_JOBS);
       }
-    }
-    if (finished || next.size < previous.size) {
-      for (const queryKey of JOB_INVALIDATION_KEYS) {
-        void queryClient.invalidateQueries({ queryKey });
-      }
-    }
-    const timeoutIds = announcements.map((message) =>
-      window.setTimeout(() => announce(message), 0)
-    );
-    return () => timeoutIds.forEach((timeoutId) => window.clearTimeout(timeoutId));
-  }, [announce, jobs, queryClient, t]);
-
-  const trackJob = useCallback(() => {
-    fastPollUntil.current = Date.now() + FAST_POLL_WINDOW_MS;
-    void queryClient.invalidateQueries({ queryKey: ["jobs"] });
-  }, [queryClient]);
+      fastPollUntil.current = Date.now() + FAST_POLL_WINDOW_MS;
+      void queryClient.invalidateQueries({ queryKey: JOBS_KEY });
+    },
+    [handleSnapshot, queryClient]
+  );
 
   // Upload queue: canonical state in refs (mutated by async callbacks),
   // mirrored into the store the job indicator renders from.
@@ -238,12 +234,14 @@ export function JobsProvider({ children }: { children: React.ReactNode }) {
         uploadInfoBlob(upload.collectionId, upload.file, (progress) =>
           patchUpload(id, { progress })
         )
-          .then(() => {
+          .then((job) => {
             runningRef.current.delete(id);
             uploadsRef.current.delete(id);
+            // The bytes are in; the file is searchable only when its job
+            // completes, which gets its own toast (job-feedback.ts).
             announce(t("upload_completed_announcement", { name: upload.file.name }));
-            toast.success(t("file_uploaded"), { description: upload.file.name });
-            trackJob();
+            toast.info(t("file_uploaded_processing"), { description: upload.file.name });
+            trackJob(job);
           })
           .catch((error: unknown) => {
             runningRef.current.delete(id);
@@ -296,16 +294,7 @@ export function JobsProvider({ children }: { children: React.ReactNode }) {
     [trackJob, queueUploads, clearFinishedUploads, uploadStore]
   );
 
-  return (
-    <JobsContext.Provider value={value}>
-      {children}
-      {announcement ? (
-        <span key={announcement.id} className="sr-only" role="status" aria-live="polite">
-          {announcement.message}
-        </span>
-      ) : null}
-    </JobsContext.Provider>
-  );
+  return <JobsContext.Provider value={value}>{children}</JobsContext.Provider>;
 }
 
 export function useJobs(): JobsContextValue {
@@ -322,7 +311,7 @@ export function useJobs(): JobsContextValue {
  */
 export function useJobActivity(): { jobs: Job[]; uploads: Upload[]; runningCount: number } {
   const { uploadStore } = useJobs();
-  const { data: jobs = NO_JOBS } = useQuery({ queryKey: ["jobs"], queryFn: fetchJobs });
+  const { data: jobs = NO_JOBS } = useQuery({ queryKey: JOBS_KEY, queryFn: fetchJobs });
   const uploads = useSyncExternalStore(
     uploadStore.subscribe,
     uploadStore.getSnapshot,
