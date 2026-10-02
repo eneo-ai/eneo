@@ -79,15 +79,27 @@ test("does not link to an issue that is not an epic", () => {
   assert.ok(addsNeedsEpic(calls));
 });
 
-test("never replaces an existing native parent", () => {
+const withParent = task({ parent_issue_url: "https://api.github.com/repos/eneo-ai/eneo/issues/1" });
+
+test("an existing epic parent clears needs:epic without a new link", () => {
   const { calls } = runIntake(issueEvent, [
-    {
-      args: "api repos/eneo-ai/eneo/issues/7",
-      stdout: task({ parent_issue_url: "https://api.github.com/repos/eneo-ai/eneo/issues/1" }),
-    },
+    { args: "api repos/eneo-ai/eneo/issues/7", stdout: withParent },
+    { args: "api repos/eneo-ai/eneo/issues/1", stdout: { number: 1, labels: [{ name: "kind:epic" }] } },
   ]);
   assert.ok(!calls.some((c) => c.includes("sub_issues")));
   assert.ok(calls.some((c) => c.includes("--remove-label needs:epic")));
+});
+
+test("a non-epic parent keeps needs:epic and is never replaced", () => {
+  const { calls } = runIntake(issueEvent, [
+    noComments,
+    { args: "api repos/eneo-ai/eneo/issues/7", stdout: withParent },
+    { args: "api repos/eneo-ai/eneo/issues/1", stdout: { number: 1, labels: [{ name: "bug" }] } },
+    { args: "api repos/eneo-ai/eneo/issues/545", stdout: epic },
+  ]);
+  assert.ok(!calls.some((c) => c.includes("sub_issues")), "the body's epic must not replace the parent");
+  assert.ok(!calls.some((c) => c.includes("--remove-label needs:epic")));
+  assert.ok(addsNeedsEpic(calls));
 });
 
 test("uses live PR links, not the webhook payload", () => {

@@ -325,7 +325,7 @@ Preferred relationship:
 2. Create development task issues with the Development task template.
 3. Fill in the task's `Parent epic` field as `#123`.
 
-The GitHub sub-issue relationship is the parent link. Intake creates it from the `Parent epic` field when the task has no parent yet, provided the field holds exactly one `#123` or issue URL in this repository and that issue is an epic. It never replaces an existing parent. Tasks without a parent keep `needs:epic`, even if another issue is mentioned elsewhere in the task.
+The GitHub sub-issue relationship is the parent link. Intake creates it from the `Parent epic` field when the task has no parent yet, provided the field holds exactly one `#123` or issue URL in this repository and that issue is an epic. It never replaces an existing parent. Tasks whose parent is missing or is not an epic keep `needs:epic`, even if another issue is mentioned elsewhere in the task.
 
 Pull requests should close the task issue, not the epic. This keeps the roadmap at outcome level and the code review at implementation level.
 

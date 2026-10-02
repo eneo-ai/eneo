@@ -63,9 +63,13 @@ async function handleIssue(item) {
   }
 
   // The native sub-issue relationship is the parent. The form field is only
-  // the input used to create it when it is missing.
+  // the input used to create it when it is missing; an existing parent is
+  // never replaced, so a non-epic parent keeps needs:epic.
   const epic = taskEpicLink(item);
-  if (epic.linked || (epic.number && linkToEpic(item, epic.number))) {
+  const hasEpic = epic.parent
+    ? isEpicIssue(item, epic.parent)
+    : Boolean(epic.number && linkToEpic(item, epic.number));
+  if (hasEpic) {
     if (labels.includes("needs:epic")) removeLabel(item.number, "needs:epic");
     return;
   }
@@ -136,7 +140,7 @@ function inferIssueKind(item, labels) {
 
 function taskEpicLink(item) {
   if (item.parent_issue_url) {
-    return { linked: true };
+    return { parent: item.parent_issue_url.replace(/^https:\/\/api\.github\.com\//, "") };
   }
 
   // Accept exactly one reference to this repository; anything else stays a
@@ -147,23 +151,27 @@ function taskEpicLink(item) {
     || (value.toLowerCase().startsWith(url.toLowerCase()) && /^(\d+)$/.exec(value.slice(url.length)));
   const number = match ? Number(match[1]) : null;
 
-  return { linked: false, number: number && number !== item.number ? number : null };
+  return { number: number && number !== item.number ? number : null };
 }
 
-function linkToEpic(item, epicNumber) {
-  const epic = runGh(["api", `repos/${repo}/issues/${epicNumber}`], {
-    capture: true,
-    allowFailure: true,
-  });
-  if (epic.status !== 0) {
+function isEpicIssue(item, path) {
+  const response = runGh(["api", path], { capture: true, allowFailure: true });
+  if (response.status !== 0) {
     return false;
   }
 
-  const target = JSON.parse(epic.stdout);
-  const isEpic = getLabelNames(target).includes("kind:epic")
-    || /^epic$/i.test(target.type?.name || "");
-  if (target.pull_request || !isEpic) {
-    console.log(`Issue #${item.number}: #${epicNumber} is not an epic. Kept needs:epic.`);
+  const target = JSON.parse(response.stdout);
+  const isEpic = !target.pull_request && (
+    getLabelNames(target).includes("kind:epic") || /^epic$/i.test(target.type?.name || "")
+  );
+  if (!isEpic) {
+    console.log(`Issue #${item.number}: parent #${target.number} is not an epic. Kept needs:epic.`);
+  }
+  return isEpic;
+}
+
+function linkToEpic(item, epicNumber) {
+  if (!isEpicIssue(item, `repos/${repo}/issues/${epicNumber}`)) {
     return false;
   }
 
@@ -257,42 +265,42 @@ function runGh(args, options = {}) {
 
 function runSelfTest() {
   const section = (value) => `## Parent epic\n${value}\n\n## Problem\nMentions #999.`;
-  assert.deepEqual(taskEpicLink({ number: 5, body: section("#123") }), { linked: false, number: 123 });
+  assert.deepEqual(taskEpicLink({ number: 5, body: section("#123") }), { number: 123 });
   assert.deepEqual(
     taskEpicLink({ number: 5, body: section(`https://github.com/${repo}/issues/123`) }),
-    { linked: false, number: 123 },
+    { number: 123 },
   );
   assert.deepEqual(
     taskEpicLink({ number: 5, body: section("") }),
-    { linked: false, number: null },
+    { number: null },
     "an empty Parent epic field must not fall back to unrelated issue references",
   );
   assert.deepEqual(
     taskEpicLink({ number: 5, body: section("#5") }),
-    { linked: false, number: null },
+    { number: null },
     "a task cannot be its own epic",
   );
   assert.deepEqual(
     taskEpicLink({ number: 5, body: section("https://github.com/other/repo/issues/123") }),
-    { linked: false, number: null },
+    { number: null },
     "only epics in this repository can be linked automatically",
   );
   for (const value of ["#123 #456", "https://notgithub.com/eneo-ai/eneo/issues/123", "see #123"]) {
     assert.deepEqual(
       taskEpicLink({ number: 5, body: section(value.replace("eneo-ai/eneo", repo)) }),
-      { linked: false, number: null },
+      { number: null },
       `ambiguous or foreign reference must not be linked: ${value}`,
     );
   }
   assert.deepEqual(
     taskEpicLink({ number: 5, body: "Legacy task. Parent #123." }),
-    { linked: false, number: null },
+    { number: null },
     "a body without a Parent epic field is not a parent link",
   );
   assert.deepEqual(
     taskEpicLink({ number: 5, body: section(""), parent_issue_url: "https://api.github.com/repos/x/y/issues/1" }),
-    { linked: true },
-    "a native parent counts even when the form field is empty",
+    { parent: "repos/x/y/issues/1" },
+    "a native parent is checked even when the form field is empty",
   );
 
   const pr = (overrides) => ({
