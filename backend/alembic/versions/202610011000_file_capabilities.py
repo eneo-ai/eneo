@@ -9,7 +9,7 @@ opt their own roles in. The YAML template in
 ``server/dependencies/predefined_roles.yml`` covers new tenants.
 
 Revision ID: 202610011000
-Revises: 202609291000
+Revises: 202609221000
 Create Date: 2026-10-01
 
 """
@@ -20,7 +20,7 @@ from alembic import op
 
 # revision identifiers, used by Alembic.
 revision = "202610011000"
-down_revision = "202609291000"
+down_revision = "202609221000"
 branch_labels = None
 depends_on = None
 

@@ -1,11 +1,12 @@
 import { describe, expect, test } from "bun:test";
 import { runIsolated } from "../../src/sandbox";
 import { chartConfigSchema } from "../../src/tools/charts/config";
-import { renderChart, renderPng } from "../../src/tools/charts/engine/render";
+import { renderChart, renderPng, renderSvg } from "../../src/tools/charts/engine/render";
 import { executeChart } from "../../src/tools/charts/execute";
 import type { ChartRendering } from "../../src/tools/charts/ports";
 import { chartSpecSchema, validateChartSpec } from "../../src/tools/charts/spec";
-import { escapeXml, niceTicks, palette, renderSvg } from "../../src/tools/charts/svg";
+import { PALETTE, chartOptions, imageStyle } from "../../src/tools/charts/options";
+import { chartView } from "../../src/tools/charts/view";
 import { chartTools } from "../../src/tools/charts/tool";
 import { RichResult, type CallContext } from "../../src/tools/types";
 
@@ -45,70 +46,76 @@ describe("chart specification", () => {
     ).toThrow();
   });
 });
-describe("SVG drawing", () => {
-  test("escapes user text, names every series and uses the fixed palette order", () => {
+describe("chart image", () => {
+  test("escapes user text, names every series and keeps the palette order", () => {
     const svg = renderSvg(bars, { width: 1200, height: 675, locale: "sv-SE" });
     expect(svg).toContain("&lt;b&gt;&quot;2025&quot;&lt;/b&gt;");
     expect(svg).not.toContain("<b>");
     expect(svg).toContain("Kvinnor");
     expect(svg).toContain("Män");
-    expect(svg).toContain(`fill="${palette[0]}"`);
-    expect(svg).toContain(`fill="${palette[1]}"`);
+    expect(svg).toContain(`fill="${PALETTE.light[0]}"`);
+    expect(svg).toContain(`fill="${PALETTE.light[1]}"`);
     expect(svg).toContain("49 800 st");
-    expect(
-      svg.startsWith('<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="675"'),
-    ).toBe(true);
-    expect(escapeXml("a&b")).toBe("a&amp;b");
+    expect(svg.startsWith('<svg width="1200" height="675"')).toBe(true);
   });
-  test("draws every chart type, breaks lines at missing values and rotates long labels", () => {
+  test("draws every chart type, breaks lines at missing values and tilts long labels", () => {
     const line = chartSpecSchema.parse({
       type: "line",
       labels: ["2019", "2020", "2021"],
       series: [{ name: "A", values: [1, null, 3] }],
     });
     const lineSvg = renderSvg(line, { width: 800, height: 450, locale: "en-GB" });
-    expect(lineSvg.match(/<path d="M[^"]*" fill="none"/g)).toHaveLength(1);
-    expect(lineSvg).toMatch(/d="M[\d. ]+M[\d. ]+" fill="none"/);
+    const drawn = new RegExp(`<path d="([^"]*)" fill="none"[^>]*stroke="${PALETTE.light[0]}"`);
+    // The pen lifts over the missing value: two starts, no stroke between them.
+    expect(drawn.exec(lineSvg)?.[1]?.match(/M/g)).toHaveLength(2);
     const pie = chartSpecSchema.parse({
       type: "pie",
       labels: ["Förskola", "Grundskola"],
       series: [{ name: "Elever", values: [25, 75] }],
     });
     const pieSvg = renderSvg(pie, { width: 800, height: 600, locale: "sv-SE" });
-    expect(pieSvg).toContain("75 %");
-    expect(pieSvg.match(/<path d="M[^"]*A[^"]*"/g)).toHaveLength(2);
+    expect(pieSvg).toContain("Grundskola: 75\u00a0%");
+    expect(pieSvg).toContain(`fill="${PALETTE.light[1]}"`);
     const scatter = chartSpecSchema.parse({
       type: "scatter",
       series: [{ name: "S", values: [1, 2], x: [10, 20] }],
     });
-    expect(renderSvg(scatter, { width: 800, height: 600, locale: "sv-SE" })).toContain("<circle");
+    const scatterSvg = renderSvg(scatter, { width: 800, height: 600, locale: "sv-SE" });
+    expect(scatterSvg.match(new RegExp(`fill="${PALETTE.light[0]}"`, "g"))).toHaveLength(2);
     const wide = chartSpecSchema.parse({
       type: "bar",
       labels: Array.from({ length: 30 }, (_, i) => `Kommun med långt namn ${i}`),
       series: [{ name: "A", values: Array.from({ length: 30 }, (_, i) => i) }],
     });
-    expect(renderSvg(wide, { width: 1200, height: 675, locale: "sv-SE" })).toContain("rotate(-35)");
+    expect(renderSvg(wide, { width: 1200, height: 675, locale: "sv-SE" })).toMatch(
+      /transform="matrix\(0\.819,-0\.574[^"]*"[^>]*>Kommun med långt namn 0</,
+    );
   });
-  test("follows the host theme and font and marks every value for the widget", () => {
-    const dark = renderSvg(bars, {
-      width: 800,
-      height: 450,
-      locale: "sv-SE",
-      theme: "dark",
-      font: "Inter, sans-serif",
+  test("sums each stack above it and names a few lines where they end", () => {
+    const stacked = chartSpecSchema.parse({
+      type: "bar",
+      stacked: true,
+      labels: ["Q1", "Q2"],
+      unit: "mnkr",
+      series: [
+        { name: "Skatt", values: [120, 135] },
+        { name: "Avvikelse", values: [-12, 8] },
+      ],
     });
-    expect(dark).toContain('fill="#1b1b1a"');
-    expect(dark).toContain('font-family="Inter, sans-serif"');
-    expect(dark).toContain('data-series="1" data-index="0"');
-    expect(dark).toContain('data-legend="1"');
-    const light = renderSvg(bars, { width: 800, height: 450, locale: "sv-SE" });
-    expect(light).toContain('fill="#fcfcfb"');
-    expect(light).not.toContain("#1b1b1a");
-  });
-  test("chooses readable tick steps", () => {
-    expect(niceTicks(0, 97)).toEqual([0, 20, 40, 60, 80, 100]);
-    expect(niceTicks(-5, 5)).toEqual([-6, -4, -2, 0, 2, 4, 6]);
-    expect(niceTicks(3, 3)).toEqual([0, 2, 4, 6]);
+    const stackedSvg = renderSvg(stacked, { width: 1200, height: 675, locale: "sv-SE" });
+    expect(stackedSvg).toContain(">108\u00a0mnkr<");
+    expect(stackedSvg).toContain(">143\u00a0mnkr<");
+    const lines = chartSpecSchema.parse({
+      type: "line",
+      labels: ["jan", "feb"],
+      series: [
+        { name: "Skola", values: [1, 2] },
+        { name: "Vård", values: [2, 3] },
+      ],
+    });
+    const linesSvg = renderSvg(lines, { width: 1200, height: 675, locale: "sv-SE" });
+    // Once in the legend and once at the end of its line.
+    expect(linesSvg.match(/>Skola</g)).toHaveLength(2);
   });
 });
 describe("PNG rendering", () => {
@@ -221,5 +228,112 @@ describe("create_chart", () => {
     )) as ChartRendering;
     expect(rendering.points).toBe(4);
     expect(rendering.bytes).toBeGreaterThan(0);
+  });
+});
+
+describe("interactive charts", () => {
+  const config = chartConfigSchema.parse({ width: 800, height: 450 });
+  const access = { allowedFileOrigins: [], maxBytes: 1024 * 1024, timeoutMs: 5000 };
+  const ctx = { tenantId: "", userId: "", showsViews: true };
+  const view = { uri: "ui://charts/test", html: "<p>Chart</p>" };
+  test("defaults to validated app data without rendering an image, and keeps explicit PNG and old-client output", async () => {
+    const tool = chartTools(config, executeChart, access, view)[0]!;
+    const result = await tool.execute(bars, ctx);
+    expect(result).not.toBeInstanceOf(RichResult);
+    expect(result).toMatchObject({ presentation: "interactive", chart: bars, points: 4 });
+    expect(result).not.toHaveProperty("png_base64");
+    expect(
+      ((await tool.execute({ ...bars, format: "png" }, ctx)) as RichResult).images[0]?.mimeType,
+    ).toBe("image/png");
+    expect(
+      ((await tool.execute(bars, { ...ctx, showsViews: false })) as RichResult).images,
+    ).toHaveLength(1);
+    expect(
+      ((await chartTools(config, executeChart, access)[0]!.execute(bars, ctx)) as RichResult)
+        .images,
+    ).toHaveLength(1);
+    const svg = (await tool.execute({ ...bars, include_svg: true }, ctx)) as RichResult;
+    expect(svg.structured.svg).toContain("<svg");
+    expect(svg.structured.presentation).toBe("image");
+  });
+  test("resolves source data in the isolated job and never exposes its signed reference in app data", async () => {
+    const origin = "http://backend:8000";
+    const url =
+      origin + "/api/v1/files/11111111-1111-4111-8111-111111111111/original/download/?token=secret";
+    const tool = chartTools(
+      config,
+      executeChart,
+      {
+        ...access,
+        download: (async () => ({
+          bytes: Buffer.from("year,amount\n2024,10\n2025,20\n"),
+          contentType: "text/csv",
+        })) as never,
+      },
+      view,
+    )[0]!;
+    const result = await tool.execute(
+      {
+        type: "scatter",
+        source: { url, filename: "data.csv", label_column: "year", value_columns: ["amount"] },
+      },
+      { ...ctx, fileOrigin: origin },
+    );
+    expect(result).toMatchObject({
+      chart: { type: "scatter", series: [{ name: "amount", x: [2024, 2025], values: [10, 20] }] },
+    });
+    expect(JSON.stringify(result)).not.toContain("token=");
+  });
+  test("rejects interactive payloads that would be dropped by the host instead of silently truncating them", async () => {
+    const spec = chartSpecSchema.parse({
+      type: "line",
+      labels: Array(2000).fill("å".repeat(80)),
+      series: [{ name: "s", values: Array(2000).fill(1) }],
+    });
+    await expect(
+      executeChart({ kind: "render_chart", spec, config, interactive: true, includeSvg: false }),
+    ).rejects.toMatchObject({ code: "CHART_DATA_TOO_LARGE" });
+  });
+  test("the app is self-contained and fits the host's resource limit", async () => {
+    const app = await chartView();
+    expect(app.uri).toMatch(/^ui:\/\/charts\/chart-[a-f0-9]{12}\.html$/);
+    expect(Buffer.byteLength(app.html)).toBeLessThan(2 * 1024 * 1024);
+    expect(app.ui).toEqual({ prefersBorder: true });
+    expect(app.html).not.toMatch(/<(?:script|link)\b[^>]*(?:src|href)=["']https?:\/\//i);
+  });
+  test("maps nulls, stacks and scatter coordinates to ECharts without accepting raw options", () => {
+    const style = { ...imageStyle(1200, "en-GB"), textSize: 12 };
+    const option = chartOptions(
+      { ...bars, stacked: true },
+      style,
+      { selected: { Män: false }, zoom: { start: 10, end: 70 } },
+    );
+    expect(option).toMatchObject({
+      color: [...PALETTE.light],
+      tooltip: { renderMode: "richText" },
+      legend: { selected: { Män: false } },
+      dataZoom: [{ type: "slider", start: 10, end: 70 }],
+      series: [
+        { stack: "values", data: [49800, 4600] },
+        { stack: "values", data: [50100, null] },
+      ],
+    });
+    const scatter = chartSpecSchema.parse({
+      type: "scatter",
+      series: [{ name: "s", x: [2, 4], values: [3, null] }],
+    });
+    const unzoomed = { selected: {}, zoom: { start: 0, end: 100 } };
+    expect(chartOptions(scatter, { ...style, dark: true }, unzoomed)).toMatchObject({
+      color: [...PALETTE.dark],
+      xAxis: { type: "value" },
+      series: [
+        {
+          data: [
+            [2, 3],
+            [4, null],
+          ],
+        },
+      ],
+    });
   });
 });

@@ -7,7 +7,9 @@ from pydantic import (
     BaseModel,
     ConfigDict,
     Field,
+    SerializerFunctionWrapHandler,
     field_validator,
+    model_serializer,
     model_validator,
 )
 
@@ -15,6 +17,7 @@ from eneo.ai_models.completion_models.completion_model import CompletionModel
 from eneo.authentication.signed_urls import redact_reference_tokens
 from eneo.files.file_models import File, FileMetadata, FilePublic
 from eneo.info_blobs.info_blob import InfoBlobInDB, InfoBlobPublicNoText
+from eneo.libs.json_text import escape_null_characters
 from eneo.logging.logging import (
     LoggingDetails,
     LoggingDetailsInDB,
@@ -104,6 +107,12 @@ class ToolCallInfo(BaseModel):
         panel, the tool-result endpoint, provider replay).
         """
         return redact_reference_tokens(value)
+
+    @model_serializer(mode="wrap")
+    def _storage_safe_record(self, handler: SerializerFunctionWrapHandler):
+        # Failed/pending calls must remain persistable too. Do not mutate the
+        # arguments: execution rejects invalid text and lets the model retry.
+        return escape_null_characters(handler(self))
 
     # The prefixed tool identifier the LLM sees when calling (e.g.
     # `server__tool`). Needed for replay so the tool_use name matches the

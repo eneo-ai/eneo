@@ -576,3 +576,15 @@ The file failed Eneo's checks (wrong type for the function, active content, or
 over `MCP_TOOL_FILE_MAX_BYTES`). The backend log names the reason. Only
 sources serving create files, or ask a file for CSV exports, can deliver
 files.
+
+## Runtime availability and Charts
+
+The standard deployment includes the isolated tool service. **Admin > Tools**
+shows its status and guidance for version, connection and confinement problems.
+Operators deploy the matching application and runtime release bundle.
+
+**Charts** is a Function with its own role permission and space and assistant
+settings. Add its built-in provider under **Admin > Tools > Functions > Charts**.
+It produces bar, line, pie and scatter images from inline values or a CSV/Excel
+source. The file-creation provider also accepts existing PNG/JPEG images in Word
+and PDF reports. Existing providers and role grants are preserved on upgrade.

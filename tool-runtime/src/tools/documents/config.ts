@@ -1,6 +1,7 @@
 import { z } from "zod";
 
-export const FORMATS = ["docx", "xlsx", "pdf"] as const;
+// txt and md are only produced by filling a template of that format.
+export const FORMATS = ["docx", "xlsx", "pdf", "txt", "md"] as const;
 export type ExportFormat = (typeof FORMATS)[number];
 export const documentConfigSchema = z
   .object({

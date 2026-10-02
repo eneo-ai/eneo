@@ -1,6 +1,7 @@
 from typing import TYPE_CHECKING, cast
 
 from eneo.assistants.api.assistant_models import (
+    AssistantAttachmentPublic,
     AssistantPublic,
     AssistantType,
     DefaultAssistant,
@@ -15,8 +16,8 @@ from eneo.completion_models.presentation.completion_model_assembler import (
 )
 from eneo.files.file_models import (
     AcceptedFileType,
-    FilePublic,
     FileRestrictions,
+    FileType,
     Limit,
 )
 from eneo.files.text import TextMimeTypes
@@ -74,8 +75,18 @@ class AssistantAssembler:
         )
 
     def _get_attachments(self, assistant: Assistant):
+        # has_download_reference follows the same readability rule as the file
+        # service projection: a TEXT file whose stored original this deployment
+        # can serve. The editor shows the "open with tool" control only then.
         return [
-            FilePublic(**attachment.model_dump())
+            AssistantAttachmentPublic(
+                **attachment.model_dump(),
+                inline_text=assistant.attachment_inline_text.get(attachment.id, True),
+                has_download_reference=(
+                    attachment.file_type is FileType.TEXT
+                    and attachment.original_available
+                ),
+            )
             for attachment in assistant.attachments
         ]
 

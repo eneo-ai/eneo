@@ -672,8 +672,8 @@ class MCPClient:
             auth_credentials: Authentication credentials from tenant settings
             timeout: Connection timeout in seconds (defaults to 30s)
             identity_headers: Acting user/tenant X-Eneo-* headers. Sent on every
-                request ONLY when this server has ``forward_identity=True`` —
-                identity is PII egress, opted into per server.
+                request for bundled servers (opaque IDs only). External servers
+                require ``forward_identity=True`` for identity egress.
             on_tools_list_changed: Fired (best-effort) when the server pushes a
                 ``notifications/tools/list_changed``. Progressive-discovery
                 servers emit this after a tool like ``load_tools`` activates new
@@ -766,7 +766,17 @@ class MCPClient:
         # Forward acting user/tenant identity only when this server opted in.
         # Added after the bearer token; the builder never emits Authorization,
         # so this cannot clobber it.
-        if getattr(self.mcp_server, "forward_identity", False):
+        if is_bundled_server(self.mcp_server.http_auth_type):
+            # Bundled execution needs opaque IDs for cache isolation and scheduling,
+            # including registrations made before identity forwarding was enabled.
+            headers.update(
+                {
+                    key: value
+                    for key, value in self.identity_headers.items()
+                    if key.lower() in ("x-eneo-user-id", "x-eneo-tenant-id")
+                }
+            )
+        elif getattr(self.mcp_server, "forward_identity", False):
             headers.update(self.identity_headers)
 
         return headers

@@ -12,16 +12,27 @@ import asyncio
 import json
 import re
 import time
-from collections.abc import Iterable
+from collections.abc import Iterable, Mapping
 from types import TracebackType
 from typing import TYPE_CHECKING, Any, cast
 from uuid import UUID
 
-from eneo.authentication.signed_urls import reference_file_ids
+from eneo.authentication.signed_urls import (
+    reference_file_ids,
+    use_current_file_references,
+)
+from eneo.files.model_file_references import (
+    FILE_HANDLE_INSTRUCTION,
+    UnknownFileReference,
+    model_file_references,
+    model_file_schema,
+    resolve_file_handles,
+)
 from eneo.internal_mcp.constants import (
     FILES_SERVER_NAME,
     IMAGE_GENERATION_SERVER_NAME,
 )
+from eneo.libs.json_text import contains_null_character
 from eneo.main.config import get_settings
 from eneo.main.logging import get_logger
 from eneo.mcp_servers.domain.entities.mcp_server import (
@@ -177,6 +188,7 @@ class MCPProxySession:
         # Files whose signed reference links this request minted. Tool-call
         # arguments may only carry links to these (see allow_file_references).
         self._reference_file_ids: set[UUID] = set()
+        self._reference_urls: dict[UUID, str] = {}
 
         # Build tool registry from DB (no connections needed)
         self._tool_registry: dict[str, tuple[MCPServer, str, str | None]] = {}
@@ -852,7 +864,25 @@ class MCPProxySession:
         Returns:
             List of tool definitions ready for LLM consumption
         """
-        return self._tools_for_llm
+        # The provider schema remains authoritative on the wire. Only the model
+        # interface accepts local file handles in URL slots.
+        return [
+            {
+                **tool,
+                "function": {
+                    **tool["function"],
+                    "description": FILE_HANDLE_INSTRUCTION
+                    + "\n\n"
+                    + tool["function"]["description"],
+                    "parameters": model_file_schema(tool["function"]["parameters"]),
+                },
+            }
+            for tool in self._tools_for_llm
+        ]
+
+    def model_result_text(self, text: str) -> str:
+        """Strip file credentials only from model text, preserving provider UI resources."""
+        return cast(str, model_file_references(text, self._reference_urls))
 
     def get_allowed_tool_names(self) -> set[str]:
         """
@@ -996,7 +1026,9 @@ class MCPProxySession:
             )
             return client
 
-    def allow_file_references(self, file_ids: Iterable[UUID]) -> None:
+    def allow_file_references(
+        self, file_ids: Iterable[UUID] | Mapping[UUID, str]
+    ) -> None:
         """Admit signed reference links to these files in tool-call arguments.
 
         The completion layer registers the files it minted links for: this
@@ -1005,9 +1037,13 @@ class MCPProxySession:
         still-valid link to another conversation's file, reaching the model
         through pasted text or a tool result, would otherwise be fetched by
         whichever tool the model handed it to. Links to any other file are
-        refused in :meth:`call_tool` before a server is contacted.
+        refused in :meth:`call_tool` before a server is contacted. Passing a
+        mapping also registers the current issued URLs for exact tool inputs;
+        these URLs are request-local credentials and must never be logged.
         """
         self._reference_file_ids.update(file_ids)
+        if isinstance(file_ids, Mapping):
+            self._reference_urls.update(cast(Mapping[UUID, str], file_ids))
 
     def _files_read_file_entry(self) -> tuple[str, str | None] | None:
         """Prefixed name + title of the loopback read_file, when registered.
@@ -1130,7 +1166,43 @@ class MCPProxySession:
 
         server, original_tool_name, _ = self._tool_registry[tool_name]
 
-        foreign_file_ids = reference_file_ids(arguments) - self._reference_file_ids
+        if contains_null_character(arguments):
+            return {
+                "content": [
+                    {
+                        "type": "text",
+                        "text": (
+                            "INVALID_TEXT: Tool arguments contain a null control character (U+0000). "
+                            "The tool was not executed. Correct the affected text using the source "
+                            "data, use ordinary spaces for number grouping, and retry the call. "
+                            "Do not claim that a file has been created."
+                        ),
+                    }
+                ],
+                "is_error": True,
+            }
+
+        try:
+            arguments = resolve_file_handles(arguments, self._reference_urls)
+        except UnknownFileReference:
+            return {
+                "content": [
+                    {
+                        "type": "text",
+                        "text": (
+                            "UNKNOWN_FILE_REFERENCE: Use an exact file_ref from the current "
+                            "conversation attachments or generated-file results. The tool was "
+                            "not executed. Do not construct URLs or ask for a re-upload."
+                        ),
+                    }
+                ],
+                "is_error": True,
+            }
+
+        foreign_file_ids = (
+            reference_file_ids(arguments, include_redacted=True)
+            - self._reference_file_ids
+        )
         if foreign_file_ids:
             logger.warning(
                 "[MCPProxy] Refused %s on '%s': reference link to a file outside "
@@ -1143,6 +1215,10 @@ class MCPProxySession:
                 "content": [{"type": "text", "text": FOREIGN_REFERENCE_NOTICE}],
                 "is_error": True,
             }
+
+        # Use the request's issued link, not a token copied/generated by the
+        # model. Admission runs first; resolution uses the trusted origin and file route.
+        arguments = use_current_file_references(arguments, self._reference_urls)
 
         logger.debug(f"[MCPProxy] Calling {original_tool_name} on '{server.name}'")
 

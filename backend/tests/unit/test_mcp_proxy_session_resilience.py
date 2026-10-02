@@ -488,7 +488,7 @@ def test_live_tool_refresh_only_exposes_db_approved_definitions():
     assert changed is False
     assert proxy.get_allowed_tool_names() == {"server__tool"}
     [definition] = proxy.get_tools_for_llm()
-    assert definition["function"]["description"] == "Test tool"
+    assert definition["function"]["description"].endswith("Test tool")
     assert definition["function"]["parameters"] == {
         "type": "object",
         "properties": {},
@@ -664,7 +664,7 @@ async def test_user_only_definition_drift_is_queued_without_exposure_or_overwrit
     await first_observation.prepare_tools_for_context()
 
     [definition] = first_observation.get_tools_for_llm()
-    assert definition["function"]["description"] == "Approved ordinary_only"
+    assert definition["function"]["description"].endswith("Approved ordinary_only")
     assert definition["function"]["parameters"] == original_schema
     assert approved.pending_description == "Changed user-only contract"
     assert approved.pending_input_schema == changed_schema
@@ -1294,15 +1294,16 @@ class TestConversationBoundReferences:
         assert encoded["is_error"] is True
         call_tool.assert_not_awaited()
 
-    async def test_redacted_link_carries_no_credential_and_passes(self):
+    async def test_foreign_redacted_link_cannot_be_resolved_or_dispatched(self):
         from eneo.authentication.signed_urls import redact_reference_tokens
 
         proxy, call_tool = self._proxy()
         arguments = {"url": redact_reference_tokens(_reference_url(uuid4()))}
 
-        await proxy.call_tool("tabular__tool", arguments)
+        result = await proxy.call_tool("tabular__tool", arguments)
 
-        call_tool.assert_awaited_once()
+        assert result["is_error"] is True
+        call_tool.assert_not_awaited()
 
     async def test_other_urls_are_not_affected(self):
         proxy, call_tool = self._proxy()
@@ -1568,3 +1569,155 @@ class TestTruncateToolResult:
         without_notice = {**truncated, "content": truncated["content"][:-1]}
         serialized = json.dumps(without_notice, ensure_ascii=False, default=str)
         assert len(serialized) <= max_chars + 200
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "arguments",
+    [
+        {"content": "1\x0025"},
+        {"sheets": [{"rows": [["a\x00b"]]}]},
+        {"bad\x00key": "value"},
+    ],
+)
+async def test_invalid_text_is_recoverable_and_never_dispatched(arguments):
+    proxy = MCPProxySession([_make_server()])
+    name = next(iter(proxy._tool_registry))
+    result = await proxy.call_tool(name, arguments)
+    assert result["is_error"] is True
+    assert "INVALID_TEXT" in result["content"][0]["text"]
+    assert "retry" in result["content"][0]["text"]
+
+
+@pytest.mark.asyncio
+async def test_dispatch_uses_current_authorized_reference_and_blocks_foreign_redacted_link():
+    server = _make_server(name="tabular")
+    proxy = MCPProxySession([server])
+    client_call = AsyncMock(return_value={"content": []})
+    proxy._clients[server.id] = SimpleNamespace(call_tool=client_call)
+    file_id = uuid4()
+    current = _reference_url(file_id)
+    proxy.allow_file_references({file_id: current})
+    damaged = current.split("?token=")[0] + "?token=incorrect-token"
+    await proxy.call_tool("tabular__tool", {"file": {"url": damaged}})
+    client_call.assert_awaited_once_with("tool", {"file": {"url": current}})
+    foreign = _reference_url(uuid4()).split("?token=")[0] + "?token=REDACTED"
+    result = await proxy.call_tool("tabular__tool", {"file": {"url": foreign}})
+    assert result["is_error"] is True
+    assert client_call.await_count == 1
+
+
+@pytest.mark.asyncio
+async def test_workbook_rewrite_binds_all_sheet_sources_to_current_authorized_link():
+    from copy import deepcopy
+
+    server = _make_server(name="documents")
+    proxy = MCPProxySession([server])
+    client_call = AsyncMock(return_value={"content": []})
+    proxy._clients[server.id] = SimpleNamespace(call_tool=client_call)
+    file_id = uuid4()
+    current = _reference_url(file_id)
+    proxy.allow_file_references({file_id: current})
+    path = current.split("?")[0]
+    arguments = {
+        "revises": {"url": path + "?token=REDACTED", "filename": "report.xlsx"},
+        "sheets": [
+            {"name": "Updated", "columns": ["Budget"], "rows": [[123]]},
+            {
+                "name": "Departments",
+                "source": {"url": path + "?token=wrong", "sheet": "Departments"},
+            },
+            {
+                "name": "Accounts",
+                "source": {"url": path + "LITERALLY?token=wrong", "sheet": "Accounts"},
+            },
+            {"name": "Read me", "source": {"url": path, "sheet": "Read me"}},
+        ],
+    }
+    original = deepcopy(arguments)
+    result = await proxy.call_tool("documents__tool", arguments)
+    assert not result.get("is_error")
+    sent = client_call.await_args.args[1]
+    assert sent["revises"]["url"] == current
+    assert sent["sheets"][0] == original["sheets"][0]
+    assert all(sheet["source"]["url"] == current for sheet in sent["sheets"][1:])
+    assert [sheet["source"]["sheet"] for sheet in sent["sheets"][1:]] == [
+        "Departments",
+        "Accounts",
+        "Read me",
+    ]
+    assert arguments == original
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("suffix", ["", "LITERALLY?token=wrong"])
+async def test_malformed_reference_cannot_bypass_conversation_file_admission(suffix):
+    server = _make_server(name="documents")
+    proxy = MCPProxySession([server])
+    client_call = AsyncMock(return_value={"content": []})
+    proxy._clients[server.id] = SimpleNamespace(call_tool=client_call)
+    own_id = uuid4()
+    proxy.allow_file_references({own_id: _reference_url(own_id)})
+    foreign = _reference_url(uuid4()).split("?")[0] + suffix
+    result = await proxy.call_tool(
+        "documents__tool", {"sheets": [{"source": {"url": foreign}}]}
+    )
+    assert result["is_error"]
+    assert "does not belong to this conversation" in result["content"][0]["text"]
+    client_call.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_file_handles_resolve_for_external_provider_and_echoes_stay_credential_free():
+    import json
+    from copy import deepcopy
+
+    from eneo.files.model_file_references import file_handle
+
+    server = _make_server(name="external_documents")
+    proxy = MCPProxySession([server])
+
+    async def echo(name, arguments):
+        return {"content": [{"type": "text", "text": json.dumps(arguments)}]}
+
+    client_call = AsyncMock(side_effect=echo)
+    proxy._clients[server.id] = SimpleNamespace(call_tool=client_call)
+    source, image = uuid4(), uuid4()
+    source_url, image_url = _reference_url(source), _reference_url(image)
+    proxy.allow_file_references({source: source_url})
+    unknown_args = {"images": [{"url": file_handle(image)}]}
+    refused = await proxy.call_tool("external_documents__tool", unknown_args)
+    assert refused["is_error"]
+    assert "UNKNOWN_FILE_REFERENCE" in refused["content"][0]["text"]
+    client_call.assert_not_awaited()
+    # A generated chart becomes available only after the completion layer saves it.
+    proxy.allow_file_references({image: image_url})
+    arguments = {"revises": {"url": file_handle(source)}, **unknown_args}
+    original = deepcopy(arguments)
+    result = await proxy.call_tool("external_documents__tool", arguments)
+    client_call.assert_awaited_once_with(
+        "tool", {"revises": {"url": source_url}, "images": [{"url": image_url}]}
+    )
+    model_text = proxy.model_result_text(result["content"][0]["text"])
+    assert json.loads(model_text) == arguments
+    assert "token=" not in model_text
+    # Provider resource/display data remains unmodified for the host renderer.
+    assert image_url in result["content"][0]["text"]
+    assert arguments == original
+
+
+@pytest.mark.asyncio
+async def test_handle_from_another_request_is_not_an_authorization_grant():
+    from eneo.files.model_file_references import file_handle
+
+    server = _make_server(name="files")
+    first, second = MCPProxySession([server]), MCPProxySession([server])
+    file_id = uuid4()
+    first.allow_file_references({file_id: _reference_url(file_id)})
+    # Even knowing the file ID (or allowing it without a current URL) grants no token.
+    second.allow_file_references([file_id])
+    client_call = AsyncMock()
+    second._clients[server.id] = SimpleNamespace(call_tool=client_call)
+    result = await second.call_tool("files__tool", {"url": file_handle(file_id)})
+    assert result["is_error"]
+    client_call.assert_not_awaited()

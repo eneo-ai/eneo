@@ -33,6 +33,7 @@ from eneo.ai_models.completion_models.completion_model import (
     ToolCallMetadata,
     function_definition_to_tool,
 )
+from eneo.authentication.signed_urls import redact_reference_tokens_in_json
 from eneo.completion_models.domain.skill_activation import (
     SKILL_ACTIVATION_TOOL_NAME,
     InvalidSkillToolCallError,
@@ -55,6 +56,7 @@ from eneo.completion_models.infrastructure.message_payload import (
 from eneo.completion_models.infrastructure.static_prompts import (
     MCP_TOOL_REFERENCES_INSTRUCTION,
 )
+from eneo.files.model_file_references import file_handle
 from eneo.logging.logging import LoggingDetails
 from eneo.main.exceptions import APIKeyNotConfiguredException, OpenAIException
 from eneo.main.logging import get_logger
@@ -82,9 +84,9 @@ MCP_IMAGE_PLACEHOLDER_TEMPLATE = (
     "[Image {index} ({mime_type}) was generated and is shown to the user.]"
 )
 # The same for a generated document or spreadsheet (an admitted binary
-# resource); the user gets it as a download.
+# resource); the user opens or downloads it from the answer.
 MCP_FILE_PLACEHOLDER_TEMPLATE = (
-    "[File {index} ({filename}) was created and is offered to the user as a download.]"
+    "[File {index} ({filename}) was created and is shown to the user with your answer.]"
 )
 
 # Markdown image token: ![alt](url "optional title"). Captures the url only.
@@ -332,9 +334,46 @@ class _GeneratedFileChunks:
             else:
                 documents += 1
                 label = f"File {documents}"
-            if chunk.reference_url:
-                lines.append(f"Reference url for {label}: {chunk.reference_url}")
+            if chunk.reference_url and chunk.generated_file is not None:
+                lines.append(
+                    f"File reference for {label}: {file_handle(chunk.generated_file.id)}"
+                )
         return "\n".join([text, *lines]) if text else "\n".join(lines)
+
+
+class _ArgumentDeltas:
+    """The argument text of pending tool calls, handed out in pieces.
+
+    A client shows what a call still being written will do (the text of a
+    document) from these pieces. Each piece is cut from the redacted text so
+    far, so a signed reference token is never sent. A call whose redacted
+    text stops extending what was already sent gets no further pieces.
+    """
+
+    # Smaller pieces wait for more text: one event per provider token would
+    # rescan a long document's arguments thousands of times.
+    _MIN_PIECE = 32
+
+    def __init__(self) -> None:
+        self._sent: dict[int, str] = {}
+        self._seen: dict[int, int] = {}
+        self._stopped: set[int] = set()
+
+    def next(self, index: int, arguments: str, *, flush: bool = False) -> str | None:
+        """The text of call ``index`` not yet handed out, or None to wait."""
+        if index in self._stopped:
+            return None
+        unseen = len(arguments) - self._seen.get(index, 0)
+        if unseen <= 0 or (unseen < self._MIN_PIECE and not flush):
+            return None
+        self._seen[index] = len(arguments)
+        sent = self._sent.get(index, "")
+        redacted = redact_reference_tokens_in_json(arguments)
+        if not redacted.startswith(sent):
+            self._stopped.add(index)
+            return None
+        self._sent[index] = redacted
+        return redacted[len(sent) :] or None
 
 
 class _LiteLLMUsageDetails(Protocol):
@@ -1497,6 +1536,8 @@ class TenantModelAdapter(CompletionModelAdapter):
                             )
                             display_text = llm_text
                             result_status = "failed"
+                        assert mcp_proxy is not None
+                        llm_text = mcp_proxy.model_result_text(llm_text)
                         messages.append(
                             {
                                 "role": "tool",
@@ -1785,6 +1826,7 @@ class TenantModelAdapter(CompletionModelAdapter):
                 inside_thinking = False
                 thinking_stripped = False
                 pending_emitted: set[int] = set()
+                argument_deltas = _ArgumentDeltas()
                 request_prompt_tokens = 0
                 provider_reported_prompt_tokens = False
                 request_completion_tokens = 0
@@ -1901,6 +1943,23 @@ class TenantModelAdapter(CompletionModelAdapter):
                                     ],
                                 )
 
+                        # Forward the arguments of announced calls as they are
+                        # written, so a client can show them before the call runs.
+                        for idx in sorted(
+                            {tc_delta.index for tc_delta in delta.tool_calls}
+                            & pending_emitted
+                        ):
+                            acc = res.tool_calls_acc[idx]
+                            piece = argument_deltas.next(
+                                idx, acc["function"]["arguments"]
+                            )
+                            if piece:
+                                yield Completion(
+                                    response_type=ResponseType.TOOL_CALL_DELTA,
+                                    tool_call_id=acc["id"],
+                                    arguments_delta=piece,
+                                )
+
                     # Handle text content with thinking-block stripping
                     content = delta.content or ""
 
@@ -1938,6 +1997,18 @@ class TenantModelAdapter(CompletionModelAdapter):
                             if cleaned:
                                 yield Completion(text=cleaned)
                         buffer = ""
+
+                for idx in sorted(pending_emitted):
+                    acc = res.tool_calls_acc[idx]
+                    piece = argument_deltas.next(
+                        idx, acc["function"]["arguments"], flush=True
+                    )
+                    if piece:
+                        yield Completion(
+                            response_type=ResponseType.TOOL_CALL_DELTA,
+                            tool_call_id=acc["id"],
+                            arguments_delta=piece,
+                        )
 
                 if provider_reported_prompt_tokens:
                     res.cumulative_input_tokens += request_prompt_tokens
@@ -2374,7 +2445,7 @@ class TenantModelAdapter(CompletionModelAdapter):
                             # ask path can persist each as a file before the
                             # tool-call metadata that references it arrives.
                             # Once saved, a chunk carries the file's reference
-                            # URL, which the model gets with this result so it
+                            # URL. Only its stable handle reaches the model so it
                             # can pass the file to another tool in this turn.
                             generated = _GeneratedFileChunks(images_for_call)
                             for chunk in generated.chunks:
@@ -2389,6 +2460,7 @@ class TenantModelAdapter(CompletionModelAdapter):
                                 result_status = "failed"
                             else:
                                 llm_text = generated.append_references(llm_text)
+                            llm_text = mcp_proxy.model_result_text(llm_text)
                             messages.append(
                                 {
                                     "role": "tool",

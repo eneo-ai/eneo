@@ -230,6 +230,7 @@ class Settings(BaseSettings):
     )
 
     app_version: str = _set_app_version()
+    app_revision: str = "unknown"
 
     # Environment setting (development, staging, production)
     # Controls error detail exposure in API responses

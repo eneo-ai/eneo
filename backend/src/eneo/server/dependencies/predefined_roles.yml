@@ -11,6 +11,7 @@ roles:
       - image_generation
       - file_analysis
       - file_creation
+      - charts
 
   - name: 'AI Configurator'
     permissions:
@@ -29,6 +30,7 @@ roles:
       - image_generation
       - file_analysis
       - file_creation
+      - charts
 
   - name: 'Owner'
     permissions:
@@ -54,3 +56,4 @@ roles:
       - image_generation
       - file_analysis
       - file_creation
+      - charts

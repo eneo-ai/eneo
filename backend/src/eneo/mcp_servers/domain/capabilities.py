@@ -9,6 +9,7 @@ CapabilityPurpose = Literal[
     "image_generation",
     "file_analysis",
     "file_creation",
+    "charts",
 ]
 
 

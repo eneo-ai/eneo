@@ -1,3 +1,4 @@
+import { Scheduler } from "../src/scheduler";
 import { describe, expect, test } from "bun:test";
 import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
@@ -5,7 +6,7 @@ import { join } from "node:path";
 import { REQUIRE_CONFINEMENT } from "../src/child";
 import { computeConfigSchema } from "../src/tools/compute/config";
 import { tabularConfigSchema } from "../src/tools/tabular/config";
-import { concurrencyLimit, confinement, runIsolated } from "../src/sandbox";
+import { confinement, runIsolated } from "../src/sandbox";
 
 const config = computeConfigSchema.parse({});
 
@@ -93,15 +94,12 @@ describe("confinement", () => {
     directory: string,
     script: string,
   ): Promise<Record<string, string>> {
-    const child = Bun.spawn(
-      [...confinement(job, directory), process.execPath, "-e", script],
-      {
-        cwd: new URL("..", import.meta.url).pathname,
-        env: { PATH: process.env.PATH ?? "", TMPDIR: directory },
-        stdout: "pipe",
-        stderr: "ignore",
-      },
-    );
+    const child = Bun.spawn([...confinement(job, directory), process.execPath, "-e", script], {
+      cwd: new URL("..", import.meta.url).pathname,
+      env: { PATH: process.env.PATH ?? "", TMPDIR: directory },
+      stdout: "pipe",
+      stderr: "ignore",
+    });
     return JSON.parse(await new Response(child.stdout).text());
   }
 
@@ -164,7 +162,11 @@ describe("confinement", () => {
       await writeFile(join(directory, "marker"), "");
       // No launcher: the child starts unconfined and has to notice that for itself.
       const child = Bun.spawn(
-        [process.execPath, new URL("../src/child.ts", import.meta.url).pathname, REQUIRE_CONFINEMENT],
+        [
+          process.execPath,
+          new URL("../src/child.ts", import.meta.url).pathname,
+          REQUIRE_CONFINEMENT,
+        ],
         {
           env: { PATH: process.env.PATH ?? "", TMPDIR: directory },
           stdin: new Blob([JSON.stringify({ job: { kind: "env" } })]),
@@ -181,19 +183,23 @@ describe("confinement", () => {
     }
   });
 
-  test.skipIf(!enforced.files)("a confined job still passes when confinement is required", async () => {
-    const outcome = await runIsolated(
-      { job: { kind: "compute", code: "return 1 + 1;", input: null }, config },
-      10_000,
-      { requireConfinement: true },
-    );
-    expect(outcome).toMatchObject({ ok: true, result: 2 });
-  });
+  test.skipIf(!enforced.files)(
+    "a confined job still passes when confinement is required",
+    async () => {
+      const outcome = await runIsolated(
+        { job: { kind: "compute", code: "return 1 + 1;", input: null }, config },
+        10_000,
+        { requireConfinement: true },
+      );
+      expect(outcome).toMatchObject({ ok: true, result: 2 });
+    },
+  );
 });
 
 describe("concurrency limit", () => {
   test("never runs more than the slot count at once", async () => {
-    const limit = concurrencyLimit(2);
+    const scheduler = new Scheduler(2);
+    const limit = (task: () => Promise<void>) => scheduler.run(task);
     let running = 0;
     let peak = 0;
     const task = async () => {

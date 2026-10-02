@@ -39,6 +39,9 @@ class _AsyncChunkStream:
 
 
 class _FakeMCPProxy:
+    def model_result_text(self, text: str) -> str:
+        return text
+
     def __init__(self) -> None:
         self.calls: list[list[tuple[str, dict[str, object]]]] = []
 

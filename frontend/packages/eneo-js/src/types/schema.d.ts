@@ -10290,7 +10290,7 @@ export interface components {
     AskAssistant: {
       /** Disabled Capabilities */
       disabled_capabilities?: (
-        "web_search" | "image_generation" | "file_analysis" | "file_creation"
+        "web_search" | "image_generation" | "file_analysis" | "file_creation" | "charts"
       )[];
       /** Disabled Mcp Server Ids */
       disabled_mcp_server_ids?: string[];
@@ -10353,6 +10353,54 @@ export interface components {
       /** Active User Count */
       active_user_count: number;
     };
+    /** AssistantAttachmentInput */
+    AssistantAttachmentInput: {
+      /**
+       * Id
+       * Format: uuid
+       */
+      id: string;
+      /**
+       * Inline Text
+       * @description True: the attachment's text is placed in the prompt on every turn. False: the assistant gets a signed reference URL instead and opens the file with a tool when needed (requires a stored original and a model that can call tools; otherwise the text is inlined).
+       * @default true
+       */
+      inline_text?: boolean;
+    };
+    /** AssistantAttachmentPublic */
+    AssistantAttachmentPublic: {
+      /** Created At */
+      created_at?: string | null;
+      /** Updated At */
+      updated_at?: string | null;
+      /**
+       * Id
+       * Format: uuid
+       */
+      id: string;
+      /** Name */
+      name: string;
+      /** Mimetype */
+      mimetype: string;
+      /** Size */
+      size: number;
+      /** Original Size */
+      original_size?: number | null;
+      /** Transcription */
+      transcription?: string | null;
+      /** Token Count */
+      token_count?: number | null;
+      /**
+       * Has Download Reference
+       * @default false
+       */
+      has_download_reference?: boolean;
+      /**
+       * Inline Text
+       * @default true
+       */
+      inline_text?: boolean;
+    };
     /** AssistantCreatePublic */
     AssistantCreatePublic: {
       /** Name */
@@ -10370,7 +10418,7 @@ export interface components {
       logging_enabled?: boolean | null;
       /** Enabled Capabilities */
       enabled_capabilities?:
-        ("web_search" | "image_generation" | "file_analysis" | "file_creation")[] | null;
+        ("web_search" | "image_generation" | "file_analysis" | "file_creation" | "charts")[] | null;
       /**
        * Space Id
        * Format: uuid
@@ -10553,7 +10601,7 @@ export interface components {
       id: string;
       /** Enabled Capabilities */
       enabled_capabilities?: (
-        "web_search" | "image_generation" | "file_analysis" | "file_creation"
+        "web_search" | "image_generation" | "file_analysis" | "file_creation" | "charts"
       )[];
       /** Available Capabilities */
       available_capabilities?: components["schemas"]["CapabilityAvailability"][];
@@ -10569,7 +10617,7 @@ export interface components {
       /** Logging Enabled */
       logging_enabled: boolean | null;
       /** Attachments */
-      attachments: components["schemas"]["FilePublic"][];
+      attachments: components["schemas"]["AssistantAttachmentPublic"][];
       allowed_attachments: components["schemas"]["FileRestrictions"];
       /** Groups */
       groups: components["schemas"]["CollectionPublic"][];
@@ -11253,6 +11301,7 @@ export interface components {
     BundledToolList: {
       /** Items */
       items: components["schemas"]["BundledToolPublic"][];
+      runtime?: components["schemas"]["RuntimeStatus"] | null;
       /** Count */
       readonly count: number;
     };
@@ -11304,7 +11353,7 @@ export interface components {
        * Purpose
        * @enum {string}
        */
-      purpose: "web_search" | "image_generation" | "file_analysis" | "file_creation";
+      purpose: "web_search" | "image_generation" | "file_analysis" | "file_creation" | "charts";
       /** Available */
       available: boolean;
       /** Reason */
@@ -11979,7 +12028,7 @@ export interface components {
       disabled_mcp_server_ids?: string[];
       /** Disabled Capabilities */
       disabled_capabilities?: (
-        "web_search" | "image_generation" | "file_analysis" | "file_creation"
+        "web_search" | "image_generation" | "file_analysis" | "file_creation" | "charts"
       )[];
     };
     /** Counts */
@@ -12397,7 +12446,7 @@ export interface components {
       name: string;
       /** Enabled Capabilities */
       enabled_capabilities?:
-        ("web_search" | "image_generation" | "file_analysis" | "file_creation")[] | null;
+        ("web_search" | "image_generation" | "file_analysis" | "file_creation" | "charts")[] | null;
       from_template?: components["schemas"]["TemplateCreate"] | null;
     };
     /** CreateSpaceGroupsRequest */
@@ -12718,7 +12767,7 @@ export interface components {
       id: string;
       /** Enabled Capabilities */
       enabled_capabilities?: (
-        "web_search" | "image_generation" | "file_analysis" | "file_creation"
+        "web_search" | "image_generation" | "file_analysis" | "file_creation" | "charts"
       )[];
       /** Available Capabilities */
       available_capabilities?: components["schemas"]["CapabilityAvailability"][];
@@ -12734,7 +12783,7 @@ export interface components {
       /** Logging Enabled */
       logging_enabled: boolean | null;
       /** Attachments */
-      attachments: components["schemas"]["FilePublic"][];
+      attachments: components["schemas"]["AssistantAttachmentPublic"][];
       allowed_attachments: components["schemas"]["FileRestrictions"];
       /** Groups */
       groups: components["schemas"]["CollectionPublic"][];
@@ -12931,11 +12980,11 @@ export interface components {
       available_capabilities?: components["schemas"]["CapabilityAvailability"][];
       /** Enabled Capabilities */
       enabled_capabilities?: (
-        "web_search" | "image_generation" | "file_analysis" | "file_creation"
+        "web_search" | "image_generation" | "file_analysis" | "file_creation" | "charts"
       )[];
       /** Default Disabled Capabilities */
       default_disabled_capabilities?: (
-        "web_search" | "image_generation" | "file_analysis" | "file_creation"
+        "web_search" | "image_generation" | "file_analysis" | "file_creation" | "charts"
       )[];
       /** Models Enforced */
       models_enforced: boolean;
@@ -14817,7 +14866,13 @@ export interface components {
        * @default general
        * @enum {string}
        */
-      purpose?: "general" | "web_search" | "image_generation" | "file_analysis" | "file_creation";
+      purpose?:
+        | "general"
+        | "web_search"
+        | "image_generation"
+        | "file_analysis"
+        | "file_creation"
+        | "charts";
       /** Description */
       description?: string | null;
       /** Http Auth Config Schema */
@@ -14901,7 +14956,13 @@ export interface components {
        * @default general
        * @enum {string}
        */
-      purpose?: "general" | "web_search" | "image_generation" | "file_analysis" | "file_creation";
+      purpose?:
+        | "general"
+        | "web_search"
+        | "image_generation"
+        | "file_analysis"
+        | "file_creation"
+        | "charts";
       /** Image Model Id */
       image_model_id?: string | null;
       image_model?: components["schemas"]["MCPServerBackingModelPublic"] | null;
@@ -15024,7 +15085,13 @@ export interface components {
        * @default general
        * @enum {string}
        */
-      purpose?: "general" | "web_search" | "image_generation" | "file_analysis" | "file_creation";
+      purpose?:
+        | "general"
+        | "web_search"
+        | "image_generation"
+        | "file_analysis"
+        | "file_creation"
+        | "charts";
       /** Image Model Id */
       image_model_id?: string | null;
       image_model?: components["schemas"]["MCPServerBackingModelPublic"] | null;
@@ -15230,7 +15297,15 @@ export interface components {
       http_auth_type?: ("none" | "bearer" | "api_key_header" | "internal") | null;
       /** Purpose */
       purpose?:
-        ("general" | "web_search" | "image_generation" | "file_analysis" | "file_creation") | null;
+        | (
+            | "general"
+            | "web_search"
+            | "image_generation"
+            | "file_analysis"
+            | "file_creation"
+            | "charts"
+          )
+        | null;
       /** Description */
       description?: string | null;
       /** Http Auth Config Schema */
@@ -17188,7 +17263,7 @@ export interface components {
       logging_enabled?: boolean | null;
       /** Enabled Capabilities */
       enabled_capabilities?:
-        ("web_search" | "image_generation" | "file_analysis" | "file_creation")[] | null;
+        ("web_search" | "image_generation" | "file_analysis" | "file_creation" | "charts")[] | null;
       /** Space Id */
       space_id?: string | null;
       prompt?: components["schemas"]["PromptCreate"] | null;
@@ -17211,7 +17286,7 @@ export interface components {
        */
       completion_model?: components["schemas"]["ModelId"] | null;
       /** Attachments */
-      attachments?: components["schemas"]["ModelId"][] | null;
+      attachments?: components["schemas"]["AssistantAttachmentInput"][] | null;
       /** Mcp Tools */
       mcp_tools?: components["schemas"]["MCPToolSetting"][] | null;
       /**
@@ -17361,7 +17436,7 @@ export interface components {
     PartialUpdateSpaceRequest: {
       /** Enabled Capabilities */
       enabled_capabilities?:
-        ("web_search" | "image_generation" | "file_analysis" | "file_creation")[] | null;
+        ("web_search" | "image_generation" | "file_analysis" | "file_creation" | "charts")[] | null;
       /** Name */
       name?: string | null;
       /** Description */
@@ -17514,7 +17589,8 @@ export interface components {
       | "web_search"
       | "image_generation"
       | "file_analysis"
-      | "file_creation";
+      | "file_creation"
+      | "charts";
     /** PermissionPublic */
     PermissionPublic: {
       name: components["schemas"]["Permission"];
@@ -17559,7 +17635,7 @@ export interface components {
        * Purpose
        * @enum {string}
        */
-      purpose: "web_search" | "image_generation" | "file_analysis" | "file_creation";
+      purpose: "web_search" | "image_generation" | "file_analysis" | "file_creation" | "charts";
       /**
        * Is Default Enabled
        * @default true
@@ -17624,6 +17700,22 @@ export interface components {
       other_bytes: number;
     };
     /**
+     * PreflightAttachment
+     * @description A persistent attachment as the assistant editor is about to save it.
+     */
+    PreflightAttachment: {
+      /**
+       * Id
+       * Format: uuid
+       */
+      id: string;
+      /**
+       * Inline Text
+       * @default true
+       */
+      inline_text?: boolean;
+    };
+    /**
      * PreflightRequest
      * @description Request shape for /conversations/preflight.
      *
@@ -17654,6 +17746,8 @@ export interface components {
       tools?: components["schemas"]["UseTools"] | null;
       /** Assistant Prompt */
       assistant_prompt?: string | null;
+      /** Attachments */
+      attachments?: components["schemas"]["PreflightAttachment"][] | null;
     };
     /**
      * PreflightResponse
@@ -18283,6 +18377,61 @@ export interface components {
        * @default []
        */
       files?: components["schemas"]["ModelId"][];
+    };
+    /** RuntimeStatus */
+    RuntimeStatus: {
+      /**
+       * Configured
+       * @default false
+       */
+      configured?: boolean;
+      /**
+       * State
+       * @default not_configured
+       * @enum {string}
+       */
+      state?: "not_configured" | "ready" | "unreachable" | "unauthorized" | "unverified";
+      /** Expected Version */
+      expected_version: string;
+      /**
+       * Expected Revision
+       * @default unknown
+       */
+      expected_revision?: string;
+      /** Version */
+      version?: string | null;
+      /** Revision */
+      revision?: string | null;
+      /** Warnings */
+      warnings?: (
+        | "version_mismatch"
+        | "revision_mismatch"
+        | "unverified"
+        | "confinement_unavailable"
+        | "file_origin_unreachable"
+        | "file_origin_not_allowed"
+        | "file_origin_unknown"
+      )[];
+      /** Files Confined */
+      files_confined?: boolean | null;
+      /** Tcp Confined */
+      tcp_confined?: boolean | null;
+      /**
+       * File Origin
+       * @default unknown
+       * @enum {string}
+       */
+      file_origin?: "reachable" | "unreachable" | "not_allowed" | "unknown";
+      /**
+       * Active
+       * @default 0
+       */
+      active?: number;
+      /**
+       * Queued
+       * @default 0
+       */
+      queued?: number;
     };
     /**
      * ScheduleState
@@ -19812,7 +19961,7 @@ export interface components {
       data_retention_days?: number | null;
       /** Enabled Capabilities */
       enabled_capabilities?: (
-        "web_search" | "image_generation" | "file_analysis" | "file_creation"
+        "web_search" | "image_generation" | "file_analysis" | "file_creation" | "charts"
       )[];
       /** Available Capabilities */
       available_capabilities?: components["schemas"]["CapabilityAvailability"][];
@@ -21397,7 +21546,9 @@ export interface components {
     /** UpdateSpaceDryRunResponse */
     UpdateSpaceDryRunResponse: {
       /** Capabilities */
-      capabilities?: ("web_search" | "image_generation" | "file_analysis" | "file_creation")[];
+      capabilities?: (
+        "web_search" | "image_generation" | "file_analysis" | "file_creation" | "charts"
+      )[];
       /** Assistants */
       assistants: components["schemas"]["AssistantSparse"][];
       /** Group Chats */
@@ -22649,6 +22800,25 @@ export interface components {
       mcp_tool_references?: components["schemas"]["McpToolReferencePublic"][];
     };
     /**
+     * SSEToolCallDelta
+     * @description The next piece of a pending tool call's arguments, as raw JSON text.
+     *
+     *     Sent while the model writes the call, so a client can show what it will
+     *     do (the text of a document) before it runs. Signed reference tokens are
+     *     redacted. The complete arguments follow in the call's `tool_call` event.
+     */
+    SSEToolCallDelta: {
+      /**
+       * Session Id
+       * Format: uuid
+       */
+      session_id: string;
+      /** Tool Call Id */
+      tool_call_id: string;
+      /** Arguments Delta */
+      arguments_delta: string;
+    };
+    /**
      * SSEToolApprovalRequired
      * @description Event emitted when MCP tools require user approval before execution.
      */
@@ -22735,6 +22905,11 @@ export interface components {
       session_id: string;
       /** Generated Files */
       generated_files: components["schemas"]["FilePublic"][];
+      /**
+       * Tool Call Id
+       * @default null
+       */
+      tool_call_id?: string | null;
     };
     /** SSEFirstChunk */
     SSEFirstChunk: {
@@ -29093,6 +29268,8 @@ export interface operations {
                 session_id: string;
                 /** Generated Files */
                 generated_files: components["schemas"]["FilePublic"][];
+                /** Tool Call Id */
+                tool_call_id?: string | null;
                 $defs: {
                   /** FilePublic */
                   FilePublic: {
@@ -38325,6 +38502,7 @@ export interface operations {
       };
       header?: {
         range?: string | null;
+        "if-none-match"?: string | null;
       };
       path: {
         id: string;
@@ -38342,6 +38520,13 @@ export interface operations {
       };
       /** @description Successfully downloaded part of the original audio */
       206: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content?: never;
+      };
+      /** @description Access revalidated; original content is unchanged */
+      304: {
         headers: {
           [name: string]: unknown;
         };
@@ -43214,7 +43399,14 @@ export interface operations {
       query?: {
         tags?: string[] | null;
         purpose?:
-          | ("general" | "web_search" | "image_generation" | "file_analysis" | "file_creation")
+          | (
+              | "general"
+              | "web_search"
+              | "image_generation"
+              | "file_analysis"
+              | "file_creation"
+              | "charts"
+            )
           | null;
       };
       header?: never;
@@ -43316,7 +43508,14 @@ export interface operations {
     parameters: {
       query?: {
         purpose?:
-          | ("general" | "web_search" | "image_generation" | "file_analysis" | "file_creation")
+          | (
+              | "general"
+              | "web_search"
+              | "image_generation"
+              | "file_analysis"
+              | "file_creation"
+              | "charts"
+            )
           | null;
       };
       header?: never;

@@ -12,16 +12,22 @@ export type SheetSpec = {
  * sources; the renderer fills in `path`, a file in its own directory.
  */
 export type FileSource = { index: number; path?: string };
+export type DocumentImage = FileSource & { id: string; caption?: string; widthPercent?: number };
 export type DocumentSpec =
   | {
       kind: "markdown";
       title: string;
       content: string;
       language: "sv" | "en";
+      images?: DocumentImage[];
       /** A downloaded Word document the content is rendered into (DOCX output only). */
       template?: FileSource;
+      /** Values for the template's other {{placeholders}}, by name. */
+      fields?: Record<string, string>;
     }
-  | { kind: "sheets"; title: string; sheets: SheetSpec[] };
+  | { kind: "sheets"; title: string; sheets: SheetSpec[] }
+  /** A downloaded template whose {{placeholders}} are filled; the output keeps its format. */
+  | { kind: "fill"; template: FileSource; values: Record<string, string> };
 
 /** A sheet read from a downloaded CSV or XLSX file instead of inline rows. */
 export type SheetSource = FileSource & { isXlsx: boolean; sheet?: string };
@@ -33,7 +39,7 @@ export type SheetRequest = {
 };
 /** What a render job asks for: inline content, or sheets still to be read from files. */
 export type DocumentRequest =
-  | Extract<DocumentSpec, { kind: "markdown" }>
+  | Extract<DocumentSpec, { kind: "markdown" | "fill" }>
   | { kind: "sheets"; title: string; sheets: SheetRequest[] };
 
 /** Child job: render one document and write its bytes to `outputPath` (a parent-owned file). */

@@ -1,0 +1,6 @@
+/* Keep a readable window of rows even in a short panel; the view can scroll. */
+:root[data-mode="fullscreen"] [data-view="query-result"] .eneo-rows {
+  flex: 1 0 20rem;
+  min-height: 20rem;
+  max-height: none;
+}

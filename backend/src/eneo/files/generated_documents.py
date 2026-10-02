@@ -1,4 +1,4 @@
-"""Admission checks for documents a tool generated (DOCX, XLSX, PDF, CSV).
+"""Admission checks for documents a tool generated (DOCX, XLSX, PDF, text).
 
 A generated document is untrusted provider output that Eneo will store and
 offer for download. Before it becomes a File its bytes must match the declared
@@ -16,7 +16,9 @@ import zipfile
 from eneo.mcp_servers.domain.entities.mcp_server import (
     CSV_MIME_TYPE,
     DOCX_MIME_TYPE,
+    MARKDOWN_MIME_TYPE,
     PDF_MIME_TYPE,
+    TXT_MIME_TYPE,
     XLSX_MIME_TYPE,
 )
 
@@ -32,6 +34,8 @@ _REQUIRED_PART = {
     DOCX_MIME_TYPE: "word/document.xml",
     XLSX_MIME_TYPE: "xl/workbook.xml",
 }
+# Stored and downloaded as text, never rendered: the bytes only have to be text.
+_TEXT_TYPES = frozenset({CSV_MIME_TYPE, TXT_MIME_TYPE, MARKDOWN_MIME_TYPE})
 # Macros, ActiveX, embedded OLE objects and workbook links to other files.
 _FORBIDDEN_PART = re.compile(
     r"(^|/)(vbaProject\.bin|vbaData\.xml)$|(^|/)(activeX|embeddings|externalLinks)/",
@@ -56,8 +60,8 @@ def validate_generated_document(data: bytes, mime_type: str) -> None:
     """Raise ``GeneratedDocumentRejected`` unless ``data`` is a safe ``mime_type``."""
     if mime_type == PDF_MIME_TYPE:
         _validate_pdf(data)
-    elif mime_type == CSV_MIME_TYPE:
-        _validate_csv(data)
+    elif mime_type in _TEXT_TYPES:
+        _validate_text(data)
     elif mime_type in _REQUIRED_PART:
         _validate_ooxml(data, _REQUIRED_PART[mime_type])
     else:
@@ -74,16 +78,16 @@ def _validate_pdf(data: bytes) -> None:
         raise GeneratedDocumentRejected("PDF contains active content")
 
 
-def _validate_csv(data: bytes) -> None:
-    # Values stay exactly as produced (a leading "=" or "-" is data here);
+def _validate_text(data: bytes) -> None:
+    # CSV values stay exactly as produced (a leading "=" or "-" is data here);
     # spreadsheet formula injection is the concern of whoever opens the file
     # in a spreadsheet, and Eneo's own spreadsheet renderer keeps text as text.
     if not data or b"\x00" in data:
-        raise GeneratedDocumentRejected("Not a text CSV file")
+        raise GeneratedDocumentRejected("Not a text file")
     try:
         data.decode("utf-8")
     except UnicodeDecodeError as exc:
-        raise GeneratedDocumentRejected("CSV files must use UTF-8") from exc
+        raise GeneratedDocumentRejected("Text files must use UTF-8") from exc
 
 
 def _validate_ooxml(data: bytes, required_part: str) -> None:

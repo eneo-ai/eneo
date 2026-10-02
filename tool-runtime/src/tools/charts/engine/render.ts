@@ -2,11 +2,48 @@
 // HTTP process. The tool entrypoint (tool.ts) never imports this file.
 import { Resvg } from "@resvg/resvg-js";
 import type { ChartConfig } from "../config";
+import { setPlatformAPI } from "echarts/core";
+import { init } from "../echarts";
+import { imageOptions, imageStyle } from "../options";
 import type { ChartRendering } from "../ports";
 import { validateChartSpec, type ChartSpec } from "../spec";
-import { renderSvg } from "../svg";
 
 export class RenderError extends Error {}
+
+// No canvas measures text here, and ECharts' own estimate assumes a narrower face than the
+// DejaVu Sans the image is set in. Widths in em, by the kind of character.
+const NARROW = /[ijlI.,:;'|!\s]/;
+const WIDE = /[mwMW%@]/;
+function measureText(text: string, font?: string) {
+  const size = Number(/(\d+(?:\.\d+)?)px/.exec(font ?? "")?.[1] ?? 12);
+  const bold = /\b(bold|[6-9]00)\b/.test(font ?? "") ? 1.1 : 1;
+  let em = 0;
+  for (const character of text)
+    em += NARROW.test(character)
+      ? 0.33
+      : WIDE.test(character)
+        ? 0.95
+        : /[A-ZÅÄÖ\d]/.test(character)
+          ? 0.67
+          : 0.6;
+  return { width: em * size * bold };
+}
+setPlatformAPI({ measureText });
+
+/** The chart as SVG, drawn by ECharts without a browser. */
+export function renderSvg(
+  spec: ChartSpec,
+  options: { width: number; height: number; locale: string },
+): string {
+  const { width, height } = options;
+  const chart = init(null, null, { renderer: "svg", ssr: true, width, height });
+  try {
+    chart.setOption(imageOptions(spec, imageStyle(width, options.locale), { width, height }));
+    return chart.renderToSVGString();
+  } finally {
+    chart.dispose();
+  }
+}
 export function renderPng(svg: string, width: number): Buffer {
   const renderer = new Resvg(svg, {
     fitTo: { mode: "width", value: width },

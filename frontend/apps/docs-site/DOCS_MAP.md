@@ -51,14 +51,14 @@ Page paths are relative to `frontend/apps/docs-site/src/content/`. Code paths ar
 
 ## Knowledge, retrieval, MCP and skills
 
-| Code                                                                                                                                            | Pages                                                            |
-| ----------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------- |
-| `backend/src/eneo/files/**`, `info_blobs/**`, `embedding_models/infrastructure/datastore.py`, `groups_legacy/**` (upload, extraction, chunking) | `guides/document-processing.mdx`                                 |
-| `backend/src/eneo/websites/**`, `crawler/**`                                                                                                    | `guides/document-processing.mdx`                                 |
-| `backend/src/eneo/assistants/references.py`, `internal_mcp/**`, `completion_models/infrastructure/context_builder.py`                           | `docs/knowledge-retrieval-and-mcp.mdx`                           |
-| `backend/src/eneo/mcp_servers/**`, `frontend/apps/web/src/routes/(app)/admin/mcp-servers/**`, space MCP selection UI                            | `guides/mcp-servers.mdx`, `docs/knowledge-retrieval-and-mcp.mdx` |
-| `backend/src/eneo/skills/**`, skill permissions in `roles/**`, `frontend/apps/web/src/routes/(app)/admin/skills/**`                             | `guides/skills.mdx`                                              |
-| `backend/src/eneo/integration/**` (SharePoint) , `frontend/apps/web/src/routes/(app)/admin/integrations/**`                                     | `guides/sharepoint-integration.mdx`                              |
+| Code                                                                                                                                                                                                          | Pages                                                            |
+| ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------- |
+| `backend/src/eneo/files/**`, `info_blobs/**`, `embedding_models/infrastructure/datastore.py`, `groups_legacy/**` (upload, extraction, chunking)                                                               | `guides/document-processing.mdx`                                 |
+| `backend/src/eneo/websites/**`, `crawler/**`                                                                                                                                                                  | `guides/document-processing.mdx`                                 |
+| `backend/src/eneo/assistants/references.py`, `internal_mcp/**`, `completion_models/infrastructure/context_builder.py`, `frontend/apps/web/src/routes/(app)/spaces/[spaceId]/assistants/[assistantId]/edit/**` | `docs/knowledge-retrieval-and-mcp.mdx`                           |
+| `backend/src/eneo/mcp_servers/**`, `frontend/apps/web/src/routes/(app)/admin/mcp-servers/**`, space MCP selection UI                                                                                          | `guides/mcp-servers.mdx`, `docs/knowledge-retrieval-and-mcp.mdx` |
+| `backend/src/eneo/skills/**`, skill permissions in `roles/**`, `frontend/apps/web/src/routes/(app)/admin/skills/**`                                                                                           | `guides/skills.mdx`                                              |
+| `backend/src/eneo/integration/**` (SharePoint) , `frontend/apps/web/src/routes/(app)/admin/integrations/**`                                                                                                   | `guides/sharepoint-integration.mdx`                              |
 
 ## Storage, workers and operations
 
@@ -78,3 +78,7 @@ Page paths are relative to `frontend/apps/docs-site/src/content/`. Code paths ar
 | `.github/workflows/export-roadmap.yml`, `.github/workflows/add-to-project.yml`, `.github/workflows/pr-labels.yml`, `.github/scripts/**`, `scripts/export_github_roadmap.mjs`, `.github/ISSUE_TEMPLATE/**`, `AGENTS.md` | `contributing/project-roadmap.mdx`  |
 | `docs/CONTRIBUTING.md`, `docs/DEPLOYMENT_WORKFLOW.md`, `docs/CODE_QUALITY.md`                                                                                                                                          | `contributing/index.mdx`            |
 | `frontend/apps/docs-site/**` (the site itself)                                                                                                                                                                         | `frontend/apps/docs-site/README.md` |
+
+Bundled tool runtime, diagnostics, scheduling and release bundles are documented in
+`docs/builtin-tool-servers.mdx`, `guides/capabilities.mdx`, `guides/deployment.mdx`
+and repository `docs/deployment/TOOL_RUNTIME.md`.

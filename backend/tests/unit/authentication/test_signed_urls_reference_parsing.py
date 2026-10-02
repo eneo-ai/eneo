@@ -6,7 +6,10 @@ HMAC token is the sole authorizer, so links minted against either the public
 origin or the tool-facing reference base URL both resolve.
 """
 
+import json
 from uuid import uuid4
+
+import pytest
 
 from eneo.authentication.signed_urls import (
     REDACTED_TOKEN,
@@ -192,3 +195,101 @@ class TestRestoreReferenceTokens:
         live = _signed_url(uuid4())
         assert restore_reference_tokens(live, {uuid4(): "x"}) == live
         assert restore_reference_tokens(None, {}) is None
+
+
+class TestCurrentReferences:
+    def test_nested_inputs_use_current_link_without_mutating_arguments(self):
+        from eneo.authentication.signed_urls import use_current_file_references
+
+        file_id = uuid4()
+        current = _signed_url(file_id)
+        for token in ("old-token", "REDACTED", "incorrect-token"):
+            old = current.split("?token=")[0] + "?token=" + token
+            args = {"file": {"url": old}, "images": [{"url": old}]}
+            result = use_current_file_references(args, {file_id: current})
+            assert result["file"]["url"] == current
+            assert result["images"][0]["url"] == current
+            assert args["file"]["url"] == old
+
+    def test_no_credentials_for_foreign_origins_paths_or_files(self):
+        from eneo.authentication.signed_urls import use_current_file_references
+
+        file_id = uuid4()
+        current = _signed_url(file_id)
+        for url in (
+            current.replace("eneo.example", "foreign.example"),
+            current.replace("https://", "http://"),
+            current.replace("eneo.example", "eneo.example@foreign.example"),
+            current.replace("/api/v1/", "/different/api/v1/"),
+            current + "#fragment",
+            _signed_url(uuid4()),
+        ):
+            assert use_current_file_references(url, {file_id: current}) == url
+        assert use_current_file_references(current, {}) == current
+
+
+@pytest.mark.parametrize(
+    "suffix",
+    ["", "?token=", "LITERALLY?token=model-token", "extra-word/?token=model-token"],
+)
+def test_known_reference_is_resolved_without_relying_on_model_token_or_suffix(suffix):
+    from eneo.authentication.signed_urls import use_current_file_references
+
+    file_id = uuid4()
+    current = _signed_url(file_id)
+    supplied = current.split("?")[0] + suffix
+    assert use_current_file_references(supplied, {file_id: current}) == current
+    assert use_current_file_references(supplied, {}) == supplied
+
+
+@pytest.mark.parametrize("suffix", ["", "?token=", "LITERALLY?token=model-token"])
+def test_conversation_admission_identifies_tokenless_and_malformed_links(suffix):
+    file_id = uuid4()
+    supplied = _signed_url(file_id).split("?")[0] + suffix
+    assert reference_file_ids({"source": {"url": supplied}}, include_redacted=True) == {
+        file_id
+    }
+
+
+def test_reference_repair_does_not_guess_origins_paths_ids_or_embedded_prose():
+    from eneo.authentication.signed_urls import use_current_file_references
+
+    file_id = uuid4()
+    current = _signed_url(file_id)
+    path = current.split("?")[0]
+    for supplied in (
+        path.replace("eneo.example", "foreign.example"),
+        path.replace("https://", "http://"),
+        path.replace("eneo.example", "eneo.example@foreign.example"),
+        path.replace("/api/v1/", "/different/api/v1/"),
+        path.replace("/original/", "/processing/"),
+        path + "../other?token=bad",
+        path + "%2e%2e?token=bad",
+        path + "extra/nested?token=bad",
+        path + "#fragment",
+        path + "?token=bad extra prose",
+        path + "?token=bad\n",
+        "See " + path,
+        _signed_url(uuid4()).split("?")[0],
+    ):
+        assert use_current_file_references(supplied, {file_id: current}) == supplied
+
+
+@pytest.mark.parametrize("tail", ["", "LITERALLY", "other/path", "LITERALLY/"])
+def test_tokens_are_masked_even_when_the_original_download_path_is_malformed(tail):
+    from eneo.authentication.signed_urls import redact_reference_tokens_in_json
+
+    # A synthetic token: never print a real credential in test output.
+    url = f"https://eneo.example/api/v1/files/{uuid4()}/original/download/{tail}?token=synthetic.credential="
+    nested = {"sheets": [{"source": {"url": url}}]}
+    masked = redact_reference_tokens(nested)
+    assert masked["sheets"][0]["source"]["url"].endswith("token=REDACTED")
+    for raw in (json.dumps(nested), json.dumps(nested).replace("/", r"\/")):
+        assert "synthetic" not in redact_reference_tokens_in_json(raw)
+        # Streaming fragments must not disclose the token before JSON is complete.
+        token_start = raw.index("synthetic")
+        for length in range(
+            token_start + 1, token_start + len("synthetic.credential=") + 1
+        ):
+            redacted = redact_reference_tokens_in_json(raw[:length])
+            assert redacted == raw[:token_start] + "REDACTED"

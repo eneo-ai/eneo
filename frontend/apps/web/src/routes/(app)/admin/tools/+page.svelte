@@ -1,4 +1,6 @@
 <script lang="ts">
+  import RuntimeStatus from "$lib/features/mcp/RuntimeStatus.svelte";
+  import type { RuntimeDiagnostics } from "$lib/features/mcp/runtimeStatus";
   import { Page } from "$lib/components/layout";
   import { Button } from "$lib/components/ui/button/index.js";
   import * as DropdownMenu from "$lib/components/ui/dropdown-menu/index.js";
@@ -173,6 +175,7 @@
     </Page.Tabbar>
   </Page.Header>
   <Page.Main>
+    <RuntimeStatus status={(data.bundled as { runtime?: RuntimeDiagnostics }).runtime} />
     <Page.Tab id="functions">
       <div class="py-6 pr-6">
         <div class="mx-auto flex w-full max-w-5xl flex-col gap-6">

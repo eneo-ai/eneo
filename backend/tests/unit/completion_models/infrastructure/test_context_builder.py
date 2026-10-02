@@ -17,6 +17,7 @@ import pytest
 from eneo.completion_models.infrastructure import context_builder
 from eneo.completion_models.infrastructure.context_builder import ContextBuilder
 from eneo.files.file_models import File, FileType
+from eneo.files.model_file_references import file_handle
 from eneo.questions.question import ToolCallInfo
 
 
@@ -92,7 +93,7 @@ def _image_tool_call(result: str, generated_file_ids) -> ToolCallInfo:
     )
 
 
-def test_replayed_arguments_carry_fresh_reference_urls():
+def test_replayed_legacy_arguments_carry_handles_without_credentials():
     file_id = uuid4()
     call = ToolCallInfo(
         server_name="tabular",
@@ -127,7 +128,7 @@ def test_replayed_arguments_carry_fresh_reference_urls():
     )
 
     assert messages[0].tool_calls[0].arguments == {
-        "file": {"url": fresh, "filename": "a.xlsx"}
+        "file": {"url": file_handle(file_id), "filename": "a.xlsx"}
     }
 
 
@@ -157,8 +158,8 @@ def test_replayed_references_follow_image_and_file_placeholders():
 
     assert messages[0].tool_calls[0].result == (
         f"{result}\n"
-        "Reference url for Image 1: https://x/i\n"
-        "Reference url for File 1: https://x/d"
+        f"File reference for Image 1: {file_handle(image)}\n"
+        f"File reference for File 1: {file_handle(document)}"
     )
 
 
@@ -189,8 +190,8 @@ def test_replayed_tool_result_carries_a_reference_url_per_generated_image():
 
     assert messages[0].tool_calls[0].result == (
         f"{result}\n"
-        "Reference url for Image 1: https://x/1\n"
-        "Reference url for Image 2: https://x/2"
+        f"File reference for Image 1: {file_handle(first)}\n"
+        f"File reference for Image 2: {file_handle(second)}"
     )
     # The persisted row is untouched: URLs are short-lived and replay-time only.
     assert call.result == result
@@ -213,3 +214,15 @@ def test_replayed_tool_result_is_unchanged_without_a_minted_url():
     messages, _ = ContextBuilder()._build_messages(session, max_tokens=10_000)
 
     assert messages[0].tool_calls[0].result == result
+
+
+@pytest.mark.parametrize("has_files", [False, True])
+def test_deliverable_defaults_apply_with_tools_even_without_new_attachments(has_files):
+    from eneo.completion_models.infrastructure.context_builder import _Prompt
+    from eneo.completion_models.infrastructure.static_prompts import (
+        TOOL_DELIVERABLE_INSTRUCTION,
+    )
+
+    prompt = _Prompt(has_tools=True, has_file_references=has_files)
+    assert TOOL_DELIVERABLE_INSTRUCTION in str(prompt)
+    assert TOOL_DELIVERABLE_INSTRUCTION not in str(_Prompt(has_tools=False))

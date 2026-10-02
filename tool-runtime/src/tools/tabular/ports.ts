@@ -1,6 +1,13 @@
 import type { TabularColumn } from "./engine/types";
 import type { TabularConfig } from "./config";
 
+/** Formula values come from Excel's saved results; this runtime never recalculates. */
+export type CalculationDiagnostics = {
+  formula_cells: number;
+  missing_cached_results: number;
+  recalculated: false;
+};
+
 /** One parsed sheet as cached on disk: `csv` is the file name inside the cache entry. */
 export type SheetMetadata = {
   name: string;
@@ -9,11 +16,16 @@ export type SheetMetadata = {
   rejectedRows: number;
   sampleRows: Array<Record<string, unknown>>;
   csv: string;
+  calculation?: CalculationDiagnostics;
+  queryable?: boolean;
+  sourceRows?: number[];
+  explicitHeader?: boolean;
 };
 
 /** Child job: validate and convert one downloaded file, writing sheet CSVs to `outputDir`. */
 export type IngestJob = {
   kind: "tabular_ingest";
+  selection?: import("./selection").SourceSelection;
   inputPath: string;
   isXlsx: boolean;
   contentType: string;
@@ -25,7 +37,8 @@ export type IngestJob = {
 export type QueryJob = {
   kind: "tabular_query";
   csvPath: string;
-  tables: { alias: string; csvPath: string }[];
+  explicitHeader?: boolean;
+  tables: { alias: string; csvPath: string; explicitHeader?: boolean }[];
   statements: string[];
   explain: boolean;
   config: TabularConfig;

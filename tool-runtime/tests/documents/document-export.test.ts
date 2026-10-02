@@ -309,6 +309,109 @@ describe("engines", () => {
       renderDocument("pdf", document, { template: await makeTemplate("x") }),
     ).rejects.toThrow("docx");
   });
+  test("placeholders are filled in the body, header and footer of a Word template", async () => {
+    const { Document, Footer, Header, Packer, Paragraph, TextRun } = await import("docx");
+    const template = Buffer.from(
+      await Packer.toBuffer(
+        new Document({
+          sections: [
+            {
+              headers: { default: new Header({ children: [new Paragraph("Dnr {{ dnr }}")] }) },
+              footers: { default: new Footer({ children: [new Paragraph("{{enhet}}")] }) },
+              children: [
+                // Word splits a placeholder across runs when it was edited in place.
+                new Paragraph({
+                  children: [
+                    new TextRun("Till "),
+                    new TextRun({ text: "{{na", bold: true }),
+                    new TextRun({ text: "mn}}", bold: true }),
+                    new TextRun(", från {{enhet}} och {{enhet}}"),
+                  ],
+                }),
+                new Paragraph("{{adress}}"),
+              ],
+            },
+          ],
+        }),
+      ),
+    );
+    const fill = (values: Record<string, string>) =>
+      renderDocument("docx", { kind: "fill", template: { index: 0 }, values }, { template });
+    const { buffer } = await fill({
+      dnr: "KS-2026-12",
+      namn: "Anna & Björn <Berg>",
+      enhet: "Kansliet",
+      adress: "Storgatan 1\n852 30 Sundsvall",
+    });
+    const xml = await unzipText(buffer, "word/document.xml");
+    expect(xml).not.toContain("{{");
+    expect(xml).toContain("Anna &amp; Björn &lt;Berg&gt;");
+    expect(xml.match(/Kansliet/g)).toHaveLength(2);
+    // The value takes the formatting of the run its placeholder sat in.
+    expect(xml).toMatch(/<w:rPr><w:b\/>[\s\S]*?<\/w:rPr><w:t[^>]*>Anna/);
+    expect(xml).toMatch(/Storgatan 1<\/w:t><\/w:r><w:r>(<w:rPr>.*?<\/w:rPr>)?<w:br\/>/);
+    expect(await unzipText(buffer, "word/header1.xml")).toContain("KS-2026-12");
+    expect(await unzipText(buffer, "word/footer1.xml")).toContain("Kansliet");
+
+    // Every placeholder needs a value; the refusal names them so the caller can supply them.
+    const missing = fill({ namn: "Anna", enhet: "" });
+    await expect(missing).rejects.toMatchObject({ code: "TEMPLATE_VALUES_MISSING" });
+    await expect(missing).rejects.toThrow("No value was given for: adress, dnr.");
+    const blank = await fill({ dnr: "", namn: "", enhet: "", adress: "" });
+    expect(await unzipText(blank.buffer, "word/document.xml")).not.toContain("{{");
+    await expect(
+      renderDocument(
+        "docx",
+        { kind: "fill", template: { index: 0 }, values: { a: "b" } },
+        { template: Buffer.from("not a zip") },
+      ),
+    ).rejects.toThrow("not a Word");
+  });
+  test("placeholders are filled in a text template", async () => {
+    const fill = (template: string | Buffer, values: Record<string, string>) =>
+      renderDocument(
+        "md",
+        { kind: "fill", template: { index: 0 }, values },
+        { template: Buffer.from(template) },
+      );
+    const { buffer } = await fill("# {{ rubrik }}\n\nHej {{namn}}, {{namn}}!\n", {
+      rubrik: "Kallelse",
+      namn: "Åsa {{rubrik}}",
+    });
+    // A value is text: a placeholder inside it is not filled again.
+    expect(buffer.toString()).toBe("# Kallelse\n\nHej Åsa {{rubrik}}, Åsa {{rubrik}}!\n");
+    await expect(fill("Hej {{namn}}", {})).rejects.toMatchObject({
+      code: "TEMPLATE_VALUES_MISSING",
+    });
+    await expect(fill("Ingen markör", { namn: "x" })).rejects.toThrow("no {{placeholders}}");
+    await expect(fill(Buffer.from([0xff, 0xfe, 0x7b]), {})).rejects.toMatchObject({
+      code: "INVALID_FILE",
+    });
+  });
+  test("a layout template's other placeholders are filled from fields", async () => {
+    const JSZip = (await import("jszip")).default;
+    const zip = await JSZip.loadAsync(await makeTemplate("Handläggare: {{handläggare}}"));
+    zip.file(
+      "word/header1.xml",
+      (await zip.file("word/header1.xml")!.async("string")).replace(
+        "Sundsvalls kommun",
+        "Dnr {{dnr}}",
+      ),
+    );
+    const template = Buffer.from(await zip.generateAsync({ type: "nodebuffer" }));
+    const fields = { dnr: "KS-2026-12", handläggare: "Anna Berg" };
+    const { buffer } = await renderDocument("docx", { ...document, fields }, { template });
+    // A value lands in a run of its own beside the text around the placeholder.
+    const textOf = async (name: string) => (await unzipText(buffer, name)).replace(/<[^>]+>/g, "");
+    const text = await textOf("word/document.xml");
+    expect(text).toContain("Tjänsteskrivelse");
+    expect(text).toContain("Handläggare: Anna Berg");
+    expect(text).not.toContain("{{");
+    expect(await textOf("word/header1.xml")).toContain("Dnr KS-2026-12");
+    await expect(
+      renderDocument("docx", { ...document, fields: { dnr: "x" } }, { template }),
+    ).rejects.toMatchObject({ code: "TEMPLATE_VALUES_MISSING" });
+  });
   test("refuses mismatched specs", async () => {
     await expect(renderDocument("xlsx", document)).rejects.toThrow("needs sheets");
   });
@@ -506,6 +609,35 @@ describe("tools", () => {
     ).rejects.toThrow("Only .docx");
   });
 
+  test("a filled template comes back in the template's own format and name", async () => {
+    sources.set("txt", { bytes: Buffer.from("Hej {{namn}}!"), contentType: "text/plain" });
+    const template = { url: sourceUrl("txt"), filename: "Brev mall.txt" };
+    const result = (await tools.fill_template!.execute(
+      { template, values: { namn: "Anna" } },
+      withOrigin,
+    )) as RichResult;
+    expect(result.structured).toMatchObject({ filename: "Brev mall.txt", format: "txt" });
+    expect(result.files[0]!.mimeType).toBe("text/plain");
+    expect(Buffer.from(result.files[0]!.blob, "base64").toString()).toBe("Hej Anna!");
+    expect(requests.at(-1)!.document).toMatchObject({ kind: "fill", template: { index: 0 } });
+    // The refusal that lists the placeholders reaches the caller as written.
+    await expect(
+      tools.fill_template!.execute({ template, values: {} }, withOrigin),
+    ).rejects.toMatchObject({ code: "TEMPLATE_VALUES_MISSING" });
+    await expect(
+      tools.fill_template!.execute(
+        { template: { url: sourceUrl("txt"), filename: "blankett.pdf" }, values: {} },
+        withOrigin,
+      ),
+    ).rejects.toThrow("Only .docx");
+    await expect(
+      tools.create_document!.execute(
+        { title: "x", content: "y", fields: { dnr: "1" } },
+        withOrigin,
+      ),
+    ).rejects.toMatchObject({ code: "FIELDS_WITHOUT_TEMPLATE" });
+  });
+
   test("revising a Word document keeps its layout and name and says what it replaces", async () => {
     sources.set("tpl2", {
       bytes: await makeTemplate("Mall"),
@@ -551,6 +683,84 @@ describe("tools", () => {
       withOrigin,
     )) as RichResult;
     expect(pdf.structured).toMatchObject({ filename: "Beslut.pdf", replaces: "Beslut.pdf" });
+  });
+
+  test("a Markdown document is the content itself under its title, and is the default", async () => {
+    const result = (await tools.create_document!.execute(
+      { title: "Införandeplan", content: "## Faser\n\n- [ ] Pilot" },
+      context,
+    )) as RichResult;
+    expect(result.structured).toMatchObject({ filename: "Införandeplan.md", format: "md" });
+    expect(String(result.structured.delivered)).toContain("beside the conversation");
+    expect(result.files[0]!.mimeType).toBe("text/markdown");
+    expect(Buffer.from(result.files[0]!.blob, "base64").toString("utf8")).toBe(
+      "# Införandeplan\n\n## Faser\n\n- [ ] Pilot\n",
+    );
+    // Content with a heading of its own is kept as written.
+    const titled = (await tools.create_document!.execute(
+      { title: "Plan", content: "# Egen rubrik\n\nText.", format: "md" },
+      context,
+    )) as RichResult;
+    expect(Buffer.from(titled.files[0]!.blob, "base64").toString("utf8")).toBe(
+      "# Egen rubrik\n\nText.\n",
+    );
+  });
+
+  test("revising a Markdown document keeps its format and name without fetching it", async () => {
+    const result = (await tools.create_document!.execute(
+      {
+        title: "Plan v2",
+        content: "# Plan\n\nNy fas.",
+        revises: { url: sourceUrl("never-fetched"), filename: "Införandeplan.md" },
+      },
+      withOrigin,
+    )) as RichResult;
+    expect(result.structured).toMatchObject({
+      filename: "Införandeplan.md",
+      format: "md",
+      replaces: "Införandeplan.md",
+    });
+  });
+
+  test("an edit changes the passage it names and leaves the rest of the document", async () => {
+    const earlier = "# Plan\n\nFas ett startar i maj.\n\n- Ansvarig: IT\n- Ansvarig: IT\n";
+    sources.set("plan", { bytes: Buffer.from(earlier), contentType: "text/markdown" });
+    const result = (await tools.edit_document!.execute(
+      {
+        revises: { url: sourceUrl("plan"), filename: "Införandeplan.md" },
+        edits: [
+          { find: "startar i maj", replace: "startar i juni" },
+          { find: "Ansvarig: IT", replace: "Ansvarig: HR", occurrence: 2 },
+        ],
+      },
+      withOrigin,
+    )) as RichResult;
+    expect(result.structured).toMatchObject({
+      filename: "Införandeplan.md",
+      format: "md",
+      replaces: "Införandeplan.md",
+    });
+    expect(Buffer.from(result.files[0]!.blob, "base64").toString("utf8")).toBe(
+      "# Plan\n\nFas ett startar i juni.\n\n- Ansvarig: IT\n- Ansvarig: HR\n",
+    );
+    expect(result.files[0]!.mimeType).toBe("text/markdown");
+  });
+
+  test("an edit that cannot be placed says what to pass instead, and only Markdown is edited", async () => {
+    sources.set("plan", { bytes: Buffer.from("- a\n- a\n"), contentType: "text/markdown" });
+    const revises = { url: sourceUrl("plan"), filename: "Plan.md" };
+    await expect(
+      tools.edit_document!.execute({ revises, edits: [{ find: "a", replace: "b" }] }, withOrigin),
+    ).rejects.toThrow(/occurs 2 times/);
+    await expect(
+      tools.edit_document!.execute(
+        {
+          revises: { url: sourceUrl("plan"), filename: "Plan.docx" },
+          edits: [{ find: "a", replace: "b", occurrence: 1 }],
+        },
+        withOrigin,
+      ),
+    ).rejects.toThrow();
   });
 
   test("revising a workbook reuses its name and says what it replaces", async () => {

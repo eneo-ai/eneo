@@ -48,6 +48,7 @@ class ResponseType(str, Enum):
     REASONING = "reasoning"
     ENEO_EVENT = "eneo_event"
     TOOL_CALL = "tool_call"
+    TOOL_CALL_DELTA = "tool_call_delta"
     TOOL_APPROVAL_REQUIRED = "tool_approval_required"
     TOOL_APPROVAL_TIMEOUT = "tool_approval_timeout"
     FILES = "image"
@@ -173,6 +174,11 @@ class Completion:
     reference_chunks: Optional[list[InfoBlobChunkInDBWithScore]] = None
     tool_call: Optional[FunctionCall] = None
     tool_calls_metadata: Optional[list[ToolCallMetadata]] = None  # For TOOL_CALL events
+    # TOOL_CALL_DELTA events: the next piece of a pending call's argument JSON
+    # as the model writes it, so a client can show the arguments (a document's
+    # text) before the call runs. Never persisted.
+    tool_call_id: Optional[str] = None
+    arguments_delta: Optional[str] = None
     mcp_tool_references: Optional[list[McpToolReference]] = None
     approval_id: Optional[str] = None  # For TOOL_APPROVAL_REQUIRED events
     image: Optional[GeneratedFile] = None  # For FILES events (streaming)

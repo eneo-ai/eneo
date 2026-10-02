@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 from typing import TYPE_CHECKING
 from uuid import UUID
 
@@ -51,6 +51,7 @@ class AssistantFactory:
         completion_model_kwargs: ModelKwargs | None = None,
         logging_enabled: bool = False,
         attachments: list["File"] | None = None,
+        attachment_inline_text: Mapping[UUID, bool] | None = None,
         collections: list["Collection"] | None = None,
         integration_knowledge_list: list["IntegrationKnowledge"] | None = None,
         template: AssistantTemplate | None = None,
@@ -75,6 +76,7 @@ class AssistantFactory:
             completion_model=completion_model,
             completion_model_kwargs=completion_model_kwargs,
             attachments=attachments or [],
+            attachment_inline_text=attachment_inline_text,
             logging_enabled=logging_enabled,
             websites=[],
             collections=collections or [],
@@ -150,6 +152,9 @@ class AssistantFactory:
             completion_model=completion_model,
             completion_model_kwargs=completion_model_kwargs,
             attachments=list(attachments),
+            attachment_inline_text={
+                row.file_id: row.inline_text for row in assistant_in_db.attachments
+            },
             logging_enabled=assistant_in_db.logging_enabled,
             websites=[],
             collections=[],
@@ -267,6 +272,9 @@ class AssistantFactory:
             completion_model=completion_model,
             completion_model_kwargs=completion_model_kwargs,
             attachments=list(attachments),
+            attachment_inline_text={
+                row.file_id: row.inline_text for row in assistant_in_db.attachments
+            },
             logging_enabled=assistant_in_db.logging_enabled,
             websites=assistant_websites,
             collections=collections,

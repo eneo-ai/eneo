@@ -1,3 +1,4 @@
+import { checkCancellation, work } from "../../work";
 import { lookup } from "node:dns/promises";
 import { request as httpRequest } from "node:http";
 import { request as httpsRequest } from "node:https";
@@ -92,7 +93,7 @@ function downloadError(error: unknown, hostname: string): ToolError {
     "Could not download the file. Check that its signed URL is valid and unexpired.",
   );
 }
-const PROBE_TIMEOUT_MS = 3000;
+const PROBE_TIMEOUT_MS = 2000;
 /**
  * Checks that a file URL's host can be reached at all, so an unreachable origin fails at intake
  * instead of in the worker a moment later. Only a TCP connection is made: the signed URL is
@@ -133,11 +134,26 @@ export async function probeUrl(raw: string, config: DownloadPolicy): Promise<voi
   }
 }
 
+export type DownloadOptions = { etag?: string; signal?: AbortSignal };
+export type DownloadedFile = {
+  bytes: Buffer;
+  contentType: string;
+  name: string;
+  etag?: string;
+  notModified?: boolean;
+};
+
 export async function downloadFile(
   raw: string,
   config: DownloadPolicy,
-): Promise<{ bytes: Buffer; contentType: string; name: string }> {
+  options: DownloadOptions = {},
+): Promise<DownloadedFile> {
+  const signal = options.signal ?? work.getStore()?.signal;
+  checkCancellation(signal);
   const controller = new AbortController();
+  const abort = () => controller.abort(signal?.reason);
+  signal?.addEventListener("abort", abort, { once: true });
+  if (signal?.aborted) abort();
   const timer = setTimeout(() => controller.abort(), config.download_timeout_ms);
   let hostname = "";
   try {
@@ -147,67 +163,92 @@ export async function downloadFile(
       hostname = resolved.hostname;
       const pinned = resolved.pinned;
       if (controller.signal.aborted) throw new Error("timeout");
-      const response = await new Promise<{ redirect?: string; bytes: Buffer; contentType: string }>(
-        (resolve, reject) => {
-          const transport = url.protocol === "https:" ? httpsRequest : httpRequest;
-          const req = transport(
-            url,
-            {
-              signal: controller.signal,
-              headers: { "accept-encoding": "identity" },
-              lookup: (_hostname, options, callback) => {
-                if (options.all) callback(null, [pinned]);
-                else callback(null, pinned.address, pinned.family);
-              },
+      const response = await new Promise<{
+        redirect?: string;
+        bytes: Buffer;
+        contentType: string;
+        etag?: string;
+        notModified?: boolean;
+      }>((resolve, reject) => {
+        const transport = url.protocol === "https:" ? httpsRequest : httpRequest;
+        const req = transport(
+          url,
+          {
+            headers: {
+              "accept-encoding": "identity",
+              ...(options.etag ? { "if-none-match": options.etag } : {}),
             },
-            (res) => {
-              if ([301, 302, 303, 307, 308].includes(res.statusCode ?? 0)) {
-                const location = res.headers.location;
-                res.destroy();
-                if (!location) reject(new Error("redirect"));
-                else resolve({ redirect: location, bytes: Buffer.alloc(0), contentType: "" });
-                return;
-              }
-              if (
-                res.statusCode !== 200 ||
-                (res.headers["content-encoding"] && res.headers["content-encoding"] !== "identity")
-              ) {
-                res.destroy();
-                reject(new Error(`response:${res.statusCode ?? 0}`));
-                return;
-              }
-              if (Number(res.headers["content-length"] ?? 0) > config.max_upload_bytes) {
+            lookup: (_hostname, options, callback) => {
+              if (options.all) callback(null, [pinned]);
+              else callback(null, pinned.address, pinned.family);
+            },
+          },
+          (res) => {
+            if ([301, 302, 303, 307, 308].includes(res.statusCode ?? 0)) {
+              const location = res.headers.location;
+              res.destroy();
+              if (!location) reject(new Error("redirect"));
+              else resolve({ redirect: location, bytes: Buffer.alloc(0), contentType: "" });
+              return;
+            }
+            if (res.statusCode === 304 && options.etag) {
+              res.resume();
+              resolve({
+                bytes: Buffer.alloc(0),
+                contentType: "",
+                etag: options.etag,
+                notModified: true,
+              });
+              return;
+            }
+            if (
+              res.statusCode !== 200 ||
+              (res.headers["content-encoding"] && res.headers["content-encoding"] !== "identity")
+            ) {
+              res.destroy();
+              reject(new Error(`response:${res.statusCode ?? 0}`));
+              return;
+            }
+            if (Number(res.headers["content-length"] ?? 0) > config.max_upload_bytes) {
+              res.destroy();
+              reject(new ToolError("FILE_TOO_LARGE", "File exceeds the upload size limit."));
+              return;
+            }
+            const chunks: Buffer[] = [];
+            let size = 0;
+            res.on("data", (chunk: Buffer) => {
+              size += chunk.length;
+              if (size > config.max_upload_bytes) {
                 res.destroy();
                 reject(new ToolError("FILE_TOO_LARGE", "File exceeds the upload size limit."));
-                return;
-              }
-              const chunks: Buffer[] = [];
-              let size = 0;
-              res.on("data", (chunk: Buffer) => {
-                size += chunk.length;
-                if (size > config.max_upload_bytes) {
-                  res.destroy();
-                  reject(new ToolError("FILE_TOO_LARGE", "File exceeds the upload size limit."));
-                } else chunks.push(chunk);
-              });
-              res.on("error", reject);
-              res.on("end", () =>
-                resolve({
-                  bytes: Buffer.concat(chunks),
-                  contentType: String(res.headers["content-type"] ?? "").split(";")[0]!,
-                }),
-              );
-            },
-          );
-          req.on("error", reject);
-          req.end();
-        },
-      );
+              } else chunks.push(chunk);
+            });
+            res.on("error", reject);
+            res.on("end", () =>
+              resolve({
+                bytes: Buffer.concat(chunks),
+                contentType: String(res.headers["content-type"] ?? "").split(";")[0]!,
+                etag: typeof res.headers.etag === "string" ? res.headers.etag : undefined,
+              }),
+            );
+          },
+        );
+        const abortRequest = () => {
+          req.destroy(new Error("Download timed out"));
+          reject(new Error("Download timed out"));
+        };
+        controller.signal.addEventListener("abort", abortRequest, { once: true });
+        req.once("close", () => controller.signal.removeEventListener("abort", abortRequest));
+        req.on("error", reject);
+        if (controller.signal.aborted) abortRequest();
+        else req.end();
+      });
       if (response.redirect) {
         url = validateUrl(new URL(response.redirect, url).href, config);
         continue;
       }
-      if (!response.bytes.length)
+      checkCancellation(signal);
+      if (!response.bytes.length && !response.notModified)
         throw new ToolError("EMPTY_FILE", "The downloaded file is empty.");
       return {
         ...response,
@@ -216,6 +257,7 @@ export async function downloadFile(
     }
     throw new ToolError("DOWNLOAD_FAILED", "Too many download redirects.");
   } catch (error) {
+    checkCancellation(signal);
     // An aborted socket reports a reset; the deadline is the real cause.
     throw downloadError(
       controller.signal.aborted && !(error instanceof ToolError) ? new Error("timeout") : error,
@@ -223,5 +265,6 @@ export async function downloadFile(
     );
   } finally {
     clearTimeout(timer);
+    signal?.removeEventListener("abort", abort);
   }
 }

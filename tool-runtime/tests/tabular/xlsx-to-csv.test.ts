@@ -92,3 +92,24 @@ describe("convertXlsxToCsvSheets", () => {
     expect(sheets.map((s) => s.name)).toEqual(["Data"]);
   });
 });
+
+it("reports ordinary/shared formulas and distinguishes missing results from zero, false and empty text", async () => {
+  const book = new ExcelJS.Workbook();
+  const sheet = book.addWorksheet("Calculations");
+  sheet.addRow(["id", "value"]);
+  sheet.addRow([1, { formula: "1-1", result: 0 }]);
+  sheet.addRow([2, { formula: "1=2", result: false }]);
+  sheet.addRow([3, { formula: '""', result: "" }]);
+  sheet.addRow([4, { formula: "2+2" }]);
+  sheet.addRow([5, { sharedFormula: "B2", result: 3 }]);
+  book.addWorksheet("No results").getCell("A1").value = { formula: "1+1" };
+  const bytes = Buffer.from(await book.xlsx.writeBuffer());
+  const sheets = await convertXlsxToCsvSheets(bytes);
+  expect(sheets[0]!.calculation).toEqual({
+    formula_cells: 5, missing_cached_results: 1, recalculated: false,
+  });
+  expect(sheets[0]!.csv.toString()).toContain("1,0");
+  expect(sheets[0]!.csv.toString()).toContain("2,false");
+  expect(sheets[1]!.calculation?.missing_cached_results).toBe(1);
+  expect(sheets[1]!.csv.length).toBe(0);
+});

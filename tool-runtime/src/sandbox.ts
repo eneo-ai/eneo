@@ -1,3 +1,4 @@
+import { checkCancellation, work } from "./work";
 import { spawn } from "node:child_process";
 import { existsSync } from "node:fs";
 import { mkdir, mkdtemp, rm } from "node:fs/promises";
@@ -72,6 +73,7 @@ export function jobPaths(job: SandboxJob["job"]): JobPaths {
 export type SandboxOptions = {
   /** Refuse to run a job that is not confined (TOOL_RUNTIME_REQUIRE_CONFINEMENT). */
   requireConfinement?: boolean;
+  signal?: AbortSignal;
 };
 
 /**
@@ -112,6 +114,8 @@ export async function runIsolated(
   timeoutMs: number,
   options: SandboxOptions = {},
 ): Promise<Record<string, unknown>> {
+  const signal = options.signal ?? work.getStore()?.signal;
+  checkCancellation(signal);
   await mkdir(ROOT, { recursive: true, mode: 0o700 });
   const directory = await mkdtemp(join(ROOT, `${process.pid}-`));
   const env: Record<string, string> = { TMPDIR: directory };
@@ -147,6 +151,15 @@ export async function runIsolated(
           child.kill("SIGKILL");
         }
       };
+      const abort = () => {
+        failure =
+          signal?.reason instanceof ToolError
+            ? signal.reason
+            : new ToolError("CANCELLED", "The operation was cancelled.");
+        kill();
+      };
+      signal?.addEventListener("abort", abort, { once: true });
+      if (signal?.aborted) abort();
       const timer = setTimeout(() => {
         failure = new ToolError("TIMEOUT", "Operation exceeded its whole-job deadline.");
         kill();
@@ -164,6 +177,7 @@ export async function runIsolated(
       child.stdin.on("error", () => {});
       child.on("close", (code) => {
         clearTimeout(timer);
+        signal?.removeEventListener("abort", abort);
         if (failure || code !== 0) {
           reject(failure ?? new ToolError("SANDBOX_CRASH", "Execution process failed."));
           return;
@@ -181,23 +195,4 @@ export async function runIsolated(
   } finally {
     await rm(directory, { recursive: true, force: true });
   }
-}
-
-/** Allows at most `slots` concurrent calls; the rest wait in arrival order. */
-export function concurrencyLimit(slots: number) {
-  let active = 0;
-  const waiting: Array<() => void> = [];
-  return async function run<T>(task: () => Promise<T>): Promise<T> {
-    // A released slot passes straight to the next waiter, so a newcomer cannot take it between
-    // the release and the hand-over.
-    if (active >= slots) await new Promise<void>((resolve) => waiting.push(resolve));
-    else active++;
-    try {
-      return await task();
-    } finally {
-      const next = waiting.shift();
-      if (next) next();
-      else active--;
-    }
-  };
 }

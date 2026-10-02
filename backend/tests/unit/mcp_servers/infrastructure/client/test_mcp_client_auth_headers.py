@@ -77,3 +77,34 @@ class TestAuthHeaderConstruction:
         headers = await client._build_auth_headers()
 
         assert "X-Eneo-File-Origin" not in headers
+
+
+async def test_existing_bundled_registration_forwards_only_opaque_identity(monkeypatch):
+    settings = get_settings().model_copy(
+        update={
+            "tool_runtime_url": "http://tool-runtime:3010",
+            "tool_runtime_token": "runtime-secret",
+            "file_reference_base_url": "http://backend:8000",
+        }
+    )
+    monkeypatch.setattr(client_module, "get_settings", lambda: settings)
+    server = _make_server()
+    server.http_auth_type = "bundled"
+    server.forward_identity = False
+    server.http_url = "http://tool-runtime:3010/mcp/compute"
+    identity = {
+        "X-Eneo-Tenant-Id": str(uuid4()),
+        "X-Eneo-User-Id": str(uuid4()),
+        "X-Eneo-User-Email": "private@example.com",
+    }
+    headers = await MCPClient(
+        server, None, identity_headers=identity
+    )._build_auth_headers()
+    assert headers["X-Eneo-User-Id"] == identity["X-Eneo-User-Id"]
+    assert headers["X-Eneo-Tenant-Id"] == identity["X-Eneo-Tenant-Id"]
+    assert "X-Eneo-User-Email" not in headers
+    server.http_auth_type = "bearer"
+    headers = await MCPClient(
+        server, None, identity_headers=identity
+    )._build_auth_headers()
+    assert not any(key.lower().startswith("x-eneo-") for key in headers)

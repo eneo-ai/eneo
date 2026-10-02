@@ -80,10 +80,13 @@ const MAX_ENUMERATED_DISTINCT = 50;
  * of rejected lines is returned so the envelope can report partial coverage
  * instead of the file silently failing or silently passing.
  */
-export async function describeCsv(csvPath: string): Promise<DescribeCsvResult> {
+export async function describeCsv(
+  csvPath: string,
+  explicitHeader = false,
+): Promise<DescribeCsvResult> {
   const conn = await openIngestConnection();
   try {
-    const csvLit = quoteSqlString(csvPath);
+    const csvLit = quoteSqlString(csvPath) + (explicitHeader ? ", header = true" : "");
 
     const descReader = await conn.runAndReadAll(
       `DESCRIBE SELECT * FROM read_csv_auto(${csvLit}, ignore_errors = true)`,
@@ -251,9 +254,10 @@ function compareValues(a: string, b: string): number {
 export const TABLE_ALIAS = /^[a-z][a-z0-9_]{0,30}$/;
 export type RunQueryInput = {
   csvPath: string;
+  explicitHeader?: boolean;
   sql: string;
   /** Further CSV files materialized as additional tables named by alias (never `t`). */
-  tables?: { alias: string; csvPath: string }[];
+  tables?: { alias: string; csvPath: string; explicitHeader?: boolean }[];
   /** Maximum rows returned to the caller. The wrapper requests `rowLimit + 1`
    *  so we can detect truncation. Defaults to `tabularQueryLimits().rowLimit`. */
   rowLimit?: number;
@@ -359,13 +363,13 @@ export async function runQuery(input: RunQueryInput): Promise<RunQueryResult> {
       //    malformed lines instead of failing the whole scan and records
       //    them in `reject_errors` — counted below for the coverage envelope.
       await conn.run(
-        `CREATE TEMPORARY TABLE t AS SELECT * FROM read_csv_auto(${quoteSqlString(input.csvPath)}, store_rejects = true)`,
+        `CREATE TEMPORARY TABLE t AS SELECT * FROM read_csv_auto(${quoteSqlString(input.csvPath)}${input.explicitHeader ? ", header = true" : ""}, store_rejects = true)`,
       );
       for (const table of input.tables ?? []) {
         if (!TABLE_ALIAS.test(table.alias) || table.alias === "t")
           throw new QueryRejectedError(`Invalid table alias: ${table.alias}`);
         await conn.run(
-          `CREATE TEMPORARY TABLE ${table.alias} AS SELECT * FROM read_csv_auto(${quoteSqlString(table.csvPath)}, ignore_errors = true)`,
+          `CREATE TEMPORARY TABLE ${table.alias} AS SELECT * FROM read_csv_auto(${quoteSqlString(table.csvPath)}${table.explicitHeader ? ", header = true" : ""}, ignore_errors = true)`,
         );
       }
 

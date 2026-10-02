@@ -11,6 +11,8 @@ const environmentSchema = z.object({
     .min(32, "TOOL_RUNTIME_TOKEN must be at least 32 characters (use `openssl rand -hex 32`)"),
   PORT: z.coerce.number().int().min(1).max(65_535).default(3010),
   MAX_CONCURRENCY: z.coerce.number().int().min(1).max(256).default(16),
+  MAX_QUEUE: z.coerce.number().int().min(0).max(256).default(32),
+  MAX_QUEUE_PER_GROUP: z.coerce.number().int().min(0).max(256).default(8),
   COMPUTE_TIMEOUT_MS: z.coerce.number().int().optional(),
   COMPUTE_MEMORY_MB: z.coerce.number().int().optional(),
   // Optional hard limit on where tabular tools may fetch files. Eneo sends its file origin
@@ -56,6 +58,8 @@ export type RuntimeConfig = {
   token: string;
   port: number;
   maxConcurrency: number;
+  maxQueue: number;
+  maxQueuePerGroup: number;
   requireConfinement: boolean;
   compute: ComputeConfig;
   tabular: { config: TabularConfig; allowedFileOrigins: string[]; concurrency: number };
@@ -68,6 +72,8 @@ export function loadConfig(environment: Record<string, string | undefined>): Run
     token: parsed.TOOL_RUNTIME_TOKEN,
     port: parsed.PORT,
     maxConcurrency: parsed.MAX_CONCURRENCY,
+    maxQueue: parsed.MAX_QUEUE,
+    maxQueuePerGroup: parsed.MAX_QUEUE_PER_GROUP,
     requireConfinement: parsed.TOOL_RUNTIME_REQUIRE_CONFINEMENT,
     compute: computeConfigSchema.parse({
       ...(parsed.COMPUTE_TIMEOUT_MS !== undefined ? { timeout_ms: parsed.COMPUTE_TIMEOUT_MS } : {}),

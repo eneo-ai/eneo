@@ -4,7 +4,7 @@ on:
   issues:
     types: [opened, edited, reopened, labeled, unlabeled]
   pull_request_target:
-    types: [opened, edited, reopened, ready_for_review, labeled, unlabeled]
+    types: [opened, edited, reopened, ready_for_review, converted_to_draft, labeled, unlabeled]
 
 permissions:
   contents: read

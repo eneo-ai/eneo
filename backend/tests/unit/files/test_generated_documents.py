@@ -12,7 +12,9 @@ from eneo.files.generated_documents import (
 from eneo.mcp_servers.domain.entities.mcp_server import (
     CSV_MIME_TYPE,
     DOCX_MIME_TYPE,
+    MARKDOWN_MIME_TYPE,
     PDF_MIME_TYPE,
+    TXT_MIME_TYPE,
     XLSX_MIME_TYPE,
     generated_filename,
 )
@@ -131,20 +133,28 @@ class TestPdf:
             validate_generated_document(data, PDF_MIME_TYPE)
 
 
-class TestCsv:
+_TEXT_TYPES = [CSV_MIME_TYPE, TXT_MIME_TYPE, MARKDOWN_MIME_TYPE]
+
+
+class TestText:
     def test_accepts_utf8_csv_with_data_that_looks_like_formulas(self):
         validate_generated_document(
             "region,diff\nNorrmalm,-316\n=SUM,1\nÅre,2\n".encode(), CSV_MIME_TYPE
         )
 
+    @pytest.mark.parametrize("mime_type", [TXT_MIME_TYPE, MARKDOWN_MIME_TYPE])
+    def test_accepts_a_filled_text_template(self, mime_type):
+        validate_generated_document("# Kallelse\n\nHej Åsa!\n".encode(), mime_type)
+
+    @pytest.mark.parametrize("mime_type", _TEXT_TYPES)
     @pytest.mark.parametrize(
         "data",
         [b"", b"a,b\n1,\x002\n", "a;b\n1;2\n".encode("utf-16")],
         ids=["empty", "nul-byte", "utf-16"],
     )
-    def test_rejects_empty_binary_or_non_utf8(self, data):
+    def test_rejects_empty_binary_or_non_utf8(self, data, mime_type):
         with pytest.raises(GeneratedDocumentRejected):
-            validate_generated_document(data, CSV_MIME_TYPE)
+            validate_generated_document(data, mime_type)
 
 
 def test_rejects_undeclared_types():
@@ -167,6 +177,8 @@ def test_rejects_undeclared_types():
         ("x://a/.hidden", DOCX_MIME_TYPE, "hidden.docx"),
         ("x://a/...", DOCX_MIME_TYPE, "document.docx"),
         (None, XLSX_MIME_TYPE, "document.xlsx"),
+        ("x://a/Brev%20mall.txt", TXT_MIME_TYPE, "Brev mall.txt"),
+        ("x://a/Kallelse.md", MARKDOWN_MIME_TYPE, "Kallelse.md"),
     ],
 )
 def test_generated_filename_is_safe_and_typed(uri, mime_type, expected):

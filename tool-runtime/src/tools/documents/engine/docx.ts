@@ -4,6 +4,7 @@ import {
   Document,
   ExternalHyperlink,
   HeadingLevel,
+  ImageRun,
   LevelFormat,
   Packer,
   PageBreak,
@@ -18,6 +19,9 @@ import {
 } from "docx";
 import { parseMarkdown, type Block, type Inline } from "../markdown/parse";
 import type { DocumentSpec } from "../ports";
+
+import { fitImage, type DocumentImages } from "./images";
+import { pageContentSize } from "./template";
 
 const BULLETS = "bullets";
 const NUMBERS = "numbers";
@@ -42,12 +46,46 @@ function runs(inlines: Inline[], extra: { italics?: boolean } = {}): ParagraphCh
 }
 function paragraphs(
   blocks: Block[],
+  images: DocumentImages,
+  page: { width: number; height: number },
   options: IParagraphOptions & { listLevel?: number } = {},
 ): (Paragraph | Table)[] {
   const out: (Paragraph | Table)[] = [];
   const level = options.listLevel ?? 0;
   for (const block of blocks) {
     switch (block.type) {
+      case "image": {
+        const image = images.get(block.id)!;
+        const size = fitImage(image, page.width - level * 36, page.height - 120);
+        out.push(
+          new Paragraph({
+            alignment: AlignmentType.CENTER,
+            keepNext: !!image.caption,
+            children: [
+              new ImageRun({
+                type: image.type,
+                data: image.bytes,
+                transformation: { width: size.width / 0.75, height: size.height / 0.75 },
+                altText: {
+                  name: block.alt || block.id,
+                  description: block.alt,
+                  title: image.caption ?? block.alt,
+                },
+              }),
+            ],
+          }),
+        );
+        if (image.caption)
+          out.push(
+            new Paragraph({
+              alignment: AlignmentType.CENTER,
+              keepLines: true,
+              spacing: { after: 160 },
+              children: [new TextRun({ text: image.caption, italics: true, size: 18 })],
+            }),
+          );
+        break;
+      }
       case "heading":
         out.push(
           new Paragraph({
@@ -78,7 +116,7 @@ function paragraphs(
             }),
           );
           out.push(
-            ...paragraphs(item.children, {
+            ...paragraphs(item.children, images, page, {
               listLevel: level + 1,
               indent: { left: 720 * (level + 1) },
             }),
@@ -109,19 +147,12 @@ function paragraphs(
         break;
       }
       case "quote":
-        for (const inner of paragraphs(block.blocks))
-          out.push(
-            inner instanceof Paragraph
-              ? new Paragraph({
-                  children: runs([], {}),
-                  ...(inner as unknown as { options?: IParagraphOptions }).options,
-                  indent: { left: 720 },
-                  border: {
-                    left: { style: BorderStyle.SINGLE, size: 12, color: "999999", space: 8 },
-                  },
-                })
-              : inner,
-          );
+        out.push(
+          ...paragraphs(block.blocks, images, page, {
+            indent: { left: 720 },
+            border: { left: { style: BorderStyle.SINGLE, size: 12, color: "999999", space: 8 } },
+          }),
+        );
         break;
       case "code":
         for (const line of block.text.split("\n"))
@@ -151,7 +182,7 @@ function paragraphs(
 }
 export async function renderDocx(
   document: Extract<DocumentSpec, { kind: "markdown" }>,
-  options: { organisationName?: string } = {},
+  options: { organisationName?: string; images?: DocumentImages; template?: Buffer } = {},
 ): Promise<Buffer> {
   const blocks = parseMarkdown(document.content);
   const body: (Paragraph | Table)[] = [];
@@ -160,7 +191,11 @@ export async function renderDocx(
     body.push(
       new Paragraph({ heading: HeadingLevel.TITLE, children: [new TextRun(document.title)] }),
     );
-  body.push(...paragraphs(blocks));
+  const page =
+    options.template && document.images?.length
+      ? await pageContentSize(options.template)
+      : { width: 451, height: 650 };
+  body.push(...paragraphs(blocks, options.images ?? new Map(), page));
   const doc = new Document({
     title: document.title,
     creator: options.organisationName ?? "Eneo",

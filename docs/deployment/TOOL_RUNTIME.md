@@ -1,6 +1,6 @@
 # Bundled tool runtime
 
-The tool runtime is an optional container shipped with Eneo. It serves
+The tool runtime is an isolated container included in the standard Eneo deployment. It serves
 Eneo-maintained MCP tools from an isolated process, never from the backend.
 It has four endpoints:
 
@@ -10,12 +10,19 @@ It has four endpoints:
   attached CSV and XLSX files (more formats will follow). It is added as the
   provider of the **Ask a file** capability (`file_analysis`, "Fråga fil" in
   Swedish).
-- `/mcp/file-creation`: `create_document`, which renders Word (DOCX) or PDF
-  from Markdown, optionally into a Word template from the conversation, and
-  `create_spreadsheet`, which builds XLSX workbooks with named sheets and typed
-  cells. It provides **Create a file** (`file_creation`).
+- `/mcp/file-creation`: `create_document`, which writes a Markdown document
+  shown beside the conversation (the default, for plans, summaries and drafts)
+  or renders Word (DOCX) or PDF from Markdown, optionally into a Word template
+  from the conversation,
+  `edit_document`, which changes named passages of a Markdown document it
+  wrote earlier and leaves the rest as it was,
+  `fill_template`, which fills the `{{placeholders}}` of a Word, text or
+  Markdown template, and `create_spreadsheet`, which builds XLSX workbooks with
+  named sheets and typed cells. It provides **Create a file**
+  (`file_creation`).
 - `/mcp/charts`: `create_chart`, which draws bar, line, pie and scatter charts
-  as PNG images. It is added as an ordinary MCP server.
+  interactively through an MCP App, with PNG output on request or when app
+  views are unavailable. It provides **Charts** (`charts`, "Diagram" in Swedish).
 
 ## Chaining tools without copying data
 
@@ -23,22 +30,46 @@ Large data moves between tools as Eneo files, never through the model:
 
 1. `query_table` with `export: true` writes its complete result (up to 200,000
    rows) as a CSV file. Eneo saves it as a visible download and hands the model
-   a signed reference URL for it in the same answer.
-2. `create_spreadsheet` takes that URL as a sheet `source`, and `create_chart`
+   a stable, credential-free `file_ref` for it in the same answer.
+2. The model passes that handle in the URL field of a sheet `source` or chart
+   `source`. Eneo resolves it to the current authorized signed URL immediately
+   before dispatch. `create_spreadsheet` uses it as a sheet `source`, and `create_chart`
    takes it as its `source` with a label column and value columns. Each
    downloads the file with the same checks as the tabular tools: Eneo's origin
    only, and access checked on every download.
 
 The providers share nothing but those Eneo-owned files and links, so any of
 them can be replaced by an external provider that follows the same MCP
-conventions. The same-turn reference needs a streaming chat; over the
-non-streaming API, the reference arrives on the next turn. Charts are PNG
-images; interactive MCP Apps widgets are not supported.
+conventions. The runtime and external providers still receive normal signed URLs;
+they do not need to implement Eneo's model-facing handles. Handles are identifiers,
+not permissions, and are resolved only against the current conversation's allowed
+files. The same-turn reference needs a streaming chat; over the
+non-streaming API, the reference arrives on the next turn. Charts normally
+use an interactive view in Eneo.
+
+## Provider view resources
+
+The runtime ships self-contained MCP Apps table and chart resources for
+compatible hosts. Eneo's runtime integration displays tool results as text,
+images and downloadable files. Charts fall back to PNG when the caller does
+not advertise app-view support.
+
+### Enabling the Charts function after upgrading
+
+Apply migration `202610011200`, then add **Built into Eneo** under
+**Admin → Tools → Functions → Charts** and activate it. Enable **Charts** on the
+space and assistant, and grant its role permission. Existing roles receive no
+automatic permission grant; new predefined roles include it. The migration
+only widens the capability constraints and preserves all existing settings.
+Existing bundled general chart servers keep their current attachments and
+can coexist with the new provider. Retire those general servers through the
+admin UI after configuring the function to avoid offering the same tool twice.
+Their old general-tool access rules continue to apply until then.
 
 ## TL;DR
 
-- Optional. Eneo runs normally without it.
-- It has no database, no console, no operator API and no registration sync.
+- Included by default. Capabilities remain opt-in; ordinary Eneo runs without it.
+- It has no database, no console, no operator mutation API and no registration sync.
   Eneo registers it through **Admin > Tools** like any other MCP server.
 - The only credential is a shared bearer (`TOOL_RUNTIME_TOKEN`). Eneo reads it
   from its settings at connect time, so it is never stored in the database.
@@ -57,7 +88,7 @@ layers:
    arguments before the runtime is contacted, so a link from another
    conversation is never fetched, whoever put it there.
 2. **The runtime holds no credentials and no data of its own.** It has no
-   database and no signing key, and with the overlay no route to Postgres,
+   database and no signing key, and with the standard deployment no route to Postgres,
    Redis or the internet. It can only redeem the links Eneo handed it.
 3. **Each job runs in its own process, confined before it starts.** The
    launcher ([landrun](https://github.com/zouuup/landrun), Linux Landlock)
@@ -68,7 +99,7 @@ layers:
    engines (DuckDB, the renderers, the JavaScript engine).
 4. **The container limits what an escape could reach.** Read-only root
    filesystem, no capabilities, no privilege escalation and an internal
-   network (see the overlay).
+   network (see the standard Compose stack).
 
 Layer 3 needs a host kernel with Landlock: Linux 5.13 or later for files, 6.7
 or later for the TCP restriction. Docker's default seccomp profile allows it.
@@ -89,12 +120,12 @@ What this does not cover:
   gVisor (`runtime: runsc` on the service) adds that layer where the host
   offers it. It protects the host, not one conversation from another, so it
   complements the confinement above and does not replace it.
-- Parsed sheets stay in `/tmp` (memory-backed) for follow-up questions, 30
+- Original bytes and parsed sheets stay in `/tmp` (memory-backed) for follow-up questions, 30
   minutes by default. With confinement, only the server process and the jobs
   that query that same file can read them.
   `TOOL_RUNTIME_TABULAR_CACHE_TTL_SECONDS` shortens that, down to 60 seconds,
   and expired entries are removed on a timer.
-- Deployments that do not use the overlay (another orchestrator, the
+- Deployments that do not use the standard Compose stack (another orchestrator, the
   development container) must provide layer 4 themselves: no egress, a
   read-only root filesystem and no capabilities.
 
@@ -121,8 +152,9 @@ returns bounded JSON output.
 
 ## What the file analysis tools can and cannot do
 
-The model passes the signed URL of an attachment, exactly as Eneo put it in the
-conversation. The runtime then works as follows:
+The model passes the attachment's stable `file_ref` in the tool's URL input.
+Eneo resolves it against the request's authorized files and sends the signed URL
+to the runtime. The runtime then works as follows:
 
 1. It accepts only URLs of the form
    `<origin>/api/v1/files/<id>/original/download/?token=…`. The origin must be
@@ -130,15 +162,17 @@ conversation. The runtime then works as follows:
    `FILE_REFERENCE_BASE_URL`), never one chosen by the model. Any other URL is
    refused before a request is made. `TOOL_RUNTIME_FILE_ORIGINS` optionally
    pins the allowed origins on the runtime side as well.
-2. It downloads the file on every call. Eneo checks the token each time, so a
-   revoked or expired link stops working at once. Downloads are capped at 20
-   MiB and 15 s, pin the resolved address and re-validate redirects.
+2. It revalidates the current signed link on every call. Eneo checks the token,
+   tenant, file and content accessibility before returning bytes or HTTP 304
+   for unchanged content. Invalid links never use the cache. Downloads remain
+   capped at 20 MiB and 15 s, with pinned addresses and checked redirects.
+   Older servers without validators return the full file.
 3. It parses the file in a sandbox child. CSV must be UTF-8. XLSX goes through
    a zip-bomb guard and is converted to one CSV per sheet. At most 20 sheets
    and 64 MiB expanded.
 4. It caches the parsed sheets on local disk for 30 minutes
    (`TOOL_RUNTIME_TABULAR_CACHE_TTL_SECONDS`), keyed by tenant, user and the
-   downloaded bytes' hash. The cache never replaces the download in step 2, so
+   downloaded bytes' hash. The cache never replaces the access check in step 2, so
    it can never grant access. A miss simply parses again, and expired entries
    are removed on a timer.
 5. It runs the model's SQL in a separate sandbox child with a fresh DuckDB.
@@ -147,21 +181,40 @@ conversation. The runtime then works as follows:
    by DuckDB's own parser. Queries are limited to 500 rows, 10 s, 256 MB and
    1 thread.
 
-The file analysis server forwards the user's identity, which the cache needs.
+Bundled calls forward opaque user and tenant IDs for caching and scheduling.
+External providers retain their identity opt-in.
 At most `TOOL_RUNTIME_TABULAR_CONCURRENCY` (default 2) DuckDB children run at
 once; other calls wait. Formulas are read as their cached values. Writing
 spreadsheets is not part of this endpoint.
 
-## Word templates
+## Templates
 
-`create_document` takes an optional `template`: the signed reference of a
-`.docx` the user attached in the chat or an administrator attached to the
-assistant. The runtime downloads it under the same policy as other
-attachments, refuses macro-enabled files, and renders the content into it:
-the template keeps its styles, headers, footers, numbering and page setup. A
-paragraph in the template reading `{{content}}` marks where the content goes;
-without one the template's body is replaced. Eneo checks the result like any
-other generated document.
+A template is a file the user attached in the chat or an administrator
+attached to the assistant, named by its signed reference. The runtime downloads
+it under the same policy as other attachments, and Eneo checks the result like
+any other generated document. There are two ways to use one:
+
+- **A layout to write into.** `create_document` takes an optional `template`,
+  a `.docx`, and renders the content into it: the template keeps its styles,
+  headers, footers, numbering and page setup. A paragraph in the template
+  reading `{{content}}` marks where the content goes; without one the
+  template's body is replaced. Other placeholders in the template (for example
+  `{{diarienummer}}` in the header) are filled from the optional `fields`.
+- **A form to fill in.** `fill_template` takes a `.docx`, `.txt` or `.md` with
+  placeholders such as `{{namn}}` and a value for each. The result is the same
+  file with the values in place, in the template's own format. In a Word file
+  the placeholders are found in the body, headers and footers, and a value
+  takes the formatting of the text its placeholder had.
+
+Values are plain text. Every placeholder needs a value (an empty one leaves it
+blank); a call that misses one fails and lists the template's placeholders, so
+the assistant can ask the user for what it does not know. Macro-enabled Word
+files are refused.
+
+Only the `{{name}}` notation is read. Word's own fields (content controls and
+mail-merge fields) are left as they are, repeating rows and conditions are not
+supported, and a PDF cannot be used as a template: text in a finished PDF
+cannot be replaced reliably, so the Word original is needed.
 
 ## Upgrading the runtime
 
@@ -185,68 +238,103 @@ and its edited variation.
 
 ## Created documents and spreadsheets
 
-The renderers run in a sandbox child and return the file inside the tool result
-as a standard MCP embedded resource. The runtime keeps no copy and serves no
-download links. Eneo then does the following:
+Created files are saved with the answer and can be downloaded as their original
+bytes. The file tools support Markdown, Word, PDF and Excel output, revisions
+and template filling.
 
-1. It admits the file only because the server provides `file_creation`
-   (DOCX, PDF, XLSX). The same resource from any other server stays an
-   ordinary result.
-2. It checks the bytes: OOXML packages must be well-formed, bounded and free of
-   macros, embedded objects and externally loaded content. PDFs must be
-   complete and free of script, launch actions and embedded files.
-3. It saves the document as a File in the conversation, with extracted text and
-   its exact original. The user downloads it from a chip under the answer. It
-   survives reloads, follows the conversation's access rules and is deleted with
-   the conversation.
+## Deploy, upgrade and roll back
 
-Spreadsheets store text as text: a value starting with `=` is never written as a
-formula. Formula writing, templates and editing existing files are not part of
-this release. `DOCUMENT_ORGANISATION_NAME` sets the name shown in document
-footers.
+Frontend, backend and runtime share one Eneo version and source revision.
+The application image workflow publishes a complete bundle only after component
+checks and a combined smoke test pass. There is no separate runtime version.
 
-## Enable it
+Download `release.env` and `release.json` from the selected GitHub release,
+or the completed workflow artifact for a development build. The JSON manifest
+records the version, revision and three immutable image digests. Take deployment
+templates from that recorded source revision as well. The environment
+file supplies those references to Compose, including the backend image used by
+workers and initialization jobs. After configuring the usual environment files:
 
-1. Generate a token: `openssl rand -hex 32`.
-2. In `.env`, set the image digest and the token:
+```bash
+python3 setup.py
+docker compose --env-file .env --env-file release.env up -d
+```
 
-   ```bash
-   ENEO_TOOL_RUNTIME_IMAGE=ghcr.io/eneo-ai/eneo-tool-runtime:0.1.0-eneo.1@sha256:<digest>
-   TOOL_RUNTIME_TOKEN=<token>
-   ```
+The setup helper creates a strong runtime token only when absent, protects
+`.env` with mode 0600, and preserves existing settings without printing secrets.
+Without a bundle, `python3 setup.py --version X.Y.Z` selects one explicit shared
+version. Digest-pinned bundles are preferred.
 
-   The overlay hands this token to the runtime, the backend and the worker,
-   and points the backend at `http://tool-runtime:3010`. Nothing goes into
-   `env_backend.env` for the runtime itself.
+The standard stack starts the runtime and connects the backend and general
+worker. File references default to `http://backend:8000`. Override
+`FILE_REFERENCE_BASE_URL` in Compose's `.env` when needed;
+`TOOL_RUNTIME_FILE_ORIGINS` follows it unless explicitly overridden.
+The setup helper carries existing runtime URL, token, and file-origin overrides
+from `env_backend.env` into `.env` when absent there. Thereafter, these Compose
+values take precedence; keep overrides in `.env`.
 
-3. For file analysis and Word templates, the runtime must be able to reach Eneo's signed file
-   links. In `env_backend.env`:
+For existing installations, remove the old runtime image pin from `.env`,
+adopt the complete bundle, and remove the extra runtime overlay/profile.
+`docker-compose.tool-runtime.yml` remains an empty compatibility shim for one
+release. Registrations, external providers, permissions and activation decisions
+are preserved. Installing the service does not enable capabilities.
 
-   ```bash
-   FILE_REFERENCE_BASE_URL=http://backend:8000
-   ```
+In **Admin > Tools > Functions**, turn on **Ask a file**, **Create a file** or
+**Charts**, then grant the desired space and assistant access. **Compute**
+remains under **MCP servers**. Existing roles still need the permissions
+described above; active external providers are not replaced automatically.
 
-   Eneo tells the runtime this origin on every call. To have the runtime
-   enforce it as well, also set `TOOL_RUNTIME_FILE_ORIGINS=http://backend:8000`
-   in `.env`.
+To omit the runtime explicitly:
 
-4. Start it with the overlay and profile:
+```bash
+docker compose --env-file .env --env-file release.env \
+  -f docker-compose.yml -f docker-compose.without-tools.yml up -d
+```
 
-   ```bash
-   docker compose -f docker-compose.yml -f docker-compose.tool-runtime.yml \
-     --profile tool-runtime up -d
-   ```
+Stop an existing `tool-runtime` container first when adopting the opt-out.
+Do not enable the `disabled-tool-runtime` profile. Backend startup/readiness
+does not depend on runtime health.
 
-5. In **Admin > Tools > MCP servers**, open **Add MCP Server** and pick
-   **Compute** or **Charts** under *Built into Eneo*. Eneo tests the connection
-   and discovers the tools. Review them, then enable the server in the spaces
-   that should use it.
-6. In **Admin > Tools > Functions**, the **Ask a file** and **Create a file**
-   cards offer the provider built into Eneo: **Turn on** adds it and makes it
-   the default when no provider is active yet. Then enable the capabilities in
-   spaces and assistants. Their permissions (`file_analysis`, `file_creation`)
-   are granted to the predefined User, AI Configurator and Owner roles. Custom
-   roles need them added.
+Upgrade by replacing both bundle files together and recreating application
+services. Roll back using the previous complete bundle, observing the release's
+normal database rollback constraints. This change adds no database migration.
+External deployment automation must consume the bundle; floating image tags
+cannot change atomically.
+
+## Diagnostics
+
+**Admin > Tools** shows status even after providers have been registered:
+missing configuration, unreachable service, rejected credentials, unknown or
+mismatched versions, unavailable confinement and file-origin problems.
+Version/revision mismatches warn while calls remain allowed. A reachable file
+origin proves only TCP connectivity, not access to a particular file.
+
+Backend probes have a three-second deadline and a 30-second local cache.
+They never gate tool execution or ordinary chat. Private `GET /diagnostics`
+requires the runtime bearer token; public health endpoints expose basic health.
+
+## File reuse and scheduling
+
+Original bytes and parsed sheets share a 256 MiB cache and a 30-minute idle
+lifetime, configured through `TOOL_RUNTIME_TABULAR_CACHE_MB` and
+`TOOL_RUNTIME_TABULAR_CACHE_TTL_SECONDS`. Every use revalidates the current
+signed link with Eneo. Cache failures never authorize stale data. Entries are
+scoped to user and tenant, pinned during jobs, and discarded on restart.
+Legacy calls without caller identity bypass original-byte caching.
+
+Defaults are 16 active calls and two native-engine jobs. Waiting caller groups
+take turns, borrowing idle capacity. The group currently maps to a tenant;
+there are no persistent quotas or distributed scheduling. Each replica schedules
+locally. `TOOL_RUNTIME_MAX_QUEUE` permits 32 waiting calls and
+`TOOL_RUNTIME_MAX_QUEUE_PER_GROUP` permits eight per group.
+
+Full queues return a busy result. Queue time counts toward the call deadline.
+Cancellation removes waiting jobs, aborts downloads and kills active child
+process groups before cleanup. Health and discovery do not wait for job slots.
+
+Structured events report request ID, tool, queue/execution time, cache
+revalidation, transferred bytes and cancellation. They omit tokens, signed URLs,
+file contents and model arguments.
 
 ## Rotate the token
 
@@ -267,12 +355,12 @@ Docker Desktop):
 Each concurrent compute call costs about 32 MiB for its child process. A
 tabular query child can use up to 256 MB for DuckDB. Such children, and the
 document renderers, share `TOOL_RUNTIME_TABULAR_CONCURRENCY` slots, so only
-that many run at once. The overlay caps the
+that many run at once. The standard stack caps the
 container at 2 GiB, 2 CPUs and 256 processes. `/tmp` is a 512 MiB tmpfs that
 holds job scratch space and the 256 MiB parsed-sheet cache, and it counts
 towards memory. If you raise either concurrency setting, raise `mem_limit` with
-it. Requests beyond `TOOL_RUNTIME_MAX_CONCURRENCY` get HTTP 429 and surface in
-chat as a tool error.
+it. Calls wait within the queue limits. Full queues return a busy tool result;
+excess HTTP intake gets HTTP 429.
 
 ## Failure behaviour
 

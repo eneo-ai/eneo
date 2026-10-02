@@ -37,24 +37,23 @@ TOOL_NAMING_INSTRUCTION = (
 # (build_file_references_string) carries only mechanics, so multi-turn
 # histories do not repeat this text.
 ATTACHED_FILE_REFERENCES_INSTRUCTION = (
-    'Some messages list attached files as JSON entries whose "url" is a '
-    "signed attachment reference, not a web link. Open a referenced file "
-    "only when answering the user's message requires its content. An "
-    "attachment by itself is not a request to read, summarize or ingest it: "
-    "if the message does not ask anything about the file, respond to the "
-    "message, acknowledge the attachment and ask what the user wants done "
-    "with it. When the content is needed, pass the url, exactly as written, "
-    "to a tool that accepts a URL input. The url's host carries no meaning: "
-    "never judge from the url whether a file is readable, and never ask the "
-    "user to re-upload a file listed in a reference entry. Prefer a tool "
-    "suited to the file and the task; when no more specific tool fits or a "
-    'chosen tool fails, the read_file ("Read attached file") tool, when '
-    "available, accepts every reference url. Use it rather than telling the "
-    'user a file cannot be read. Entries with "kind": "image" are images '
-    "(attached by the user or generated earlier in this conversation): pass "
-    "their url to an image tool to edit them or make variations, never to "
-    "read_file."
+    'Some messages list attached files as JSON entries with a "file_ref" '
+    "(eneo-file:...). This is a stable file identifier, not a URL or credential. "
+    "When content is needed, pass file_ref unchanged in the tool's URL input; "
+    "Eneo supplies the authorized URL before execution. Never construct, copy "
+    "or repair download URLs or tokens. Use the references in this request, "
+    "including references returned for newly generated files. "
+    "Entries introduced as attached to this assistant by its author are standing "
+    "material available on every turn, not something the user just uploaded. "
+    "Open a referenced file only when answering the user's message requires its "
+    "content. An attachment alone is not a request to read or summarize it. "
+    "If the message does not ask about it, acknowledge it and ask what the user "
+    "wants done. Never ask the user to re-upload a file listed in a reference entry. "
+    "Prefer a tool suited to the file and task. When no specific tool fits or a "
+    'chosen tool fails, read_file ("Read attached file"), when available, accepts '
+    "the same file_ref in its url input. Images should go to image tools, not read_file."
 )
+
 
 SHOW_REFERENCES_PROMPT = """Use the provided sources delimited by triple quotes to answer questions.
 Only use the sources to answer questions. You MUST reference every source you use by adding an inline XML self-closing tag immediately after the information: <inref id="<source_id>"/>
@@ -98,3 +97,30 @@ The title should be in the language of the conversation.
 
 The title should be no more than 10 words.
 """
+
+
+# Presentation defaults apply to any provider; concrete inputs belong to its schema.
+TOOL_DELIVERABLE_INSTRUCTION = (
+    "Deliver the result in the form the user requested, using the available tools. "
+    "For a chart or report, keep intermediate queries and calculation tables internal "
+    "when the provider supports a hidden-output option. Show tables when the user "
+    "requests them or they are themselves a useful final result. Summarize the "
+    "important findings concisely; users need not specify these presentation mechanics. "
+    "When asked to turn an analysis and its charts into a Word or PDF report, "
+    "include the relevant charts in the document by default, with descriptive captions "
+    "and sizing that fits the page while preserving their aspect ratio. Reuse existing "
+    "chart images when available; otherwise export the charts as images for embedding. "
+    "Keep images created only for embedding out of chat when the provider supports it, "
+    "especially when the interactive charts are already visible. Use the current "
+    "attachment references and the tools' declared inputs; never invent an image input "
+    "or a display option for a provider. Honor explicit user preferences over these "
+    "defaults. Do not ask users to explain the export or embedding mechanics. "
+    "If an available tool cannot produce the requested deliverable, explain the "
+    "limitation. Correct and retry recoverable tool failures. Claim a file was created "
+    "only after a successful tool result actually supplies it; an attempted call is "
+    "not a completed file. Filename links in chat open the file preview; the separate "
+    "Download button saves it. Introduce a file link as 'Open' or 'View', or simply "
+    "name the file, rather than labelling the link 'Download'. If explaining how to "
+    "save a file, refer to its Download button. Do not include null control characters "
+    "in tool arguments."
+)

@@ -7,6 +7,18 @@ COPY package.json bun.lock ./
 RUN --mount=type=cache,target=/root/.bun/install/cache \
     bun install --frozen-lockfile --production
 
+# The tool views (MCP Apps) are built into single pages here; the runtime only reads them, so
+# React, Astryx and the bundler never reach the final image.
+FROM oven/bun:1.3.14-slim AS views
+WORKDIR /app
+COPY package.json bun.lock ./
+RUN --mount=type=cache,target=/root/.bun/install/cache \
+    bun install --frozen-lockfile
+COPY tsconfig.json ./
+COPY scripts ./scripts
+COPY src ./src
+RUN bun run build:views
+
 # landrun confines every sandbox child with Landlock before it starts (see src/sandbox.ts).
 # Built from source at a pinned version, which the Go checksum database verifies; keep it in
 # step with the build:landrun script in package.json.
@@ -37,11 +49,13 @@ RUN apt-get update \
     && rm -rf /var/lib/apt/lists/*
 WORKDIR /app
 ENV NODE_ENV=production \
-    APP_VERSION=${VERSION}
+    APP_VERSION=${VERSION} \
+    APP_REVISION=${GIT_SHA}
 COPY --from=landrun /landrun /usr/local/bin/landrun
 COPY --from=deps /app/node_modules ./node_modules
 COPY package.json tsconfig.json ./
 COPY src ./src
+COPY --from=views /app/dist ./dist
 USER bun
 EXPOSE 3010
 HEALTHCHECK --interval=15s --timeout=5s --start-period=10s --retries=3 \

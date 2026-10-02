@@ -1,5 +1,6 @@
 // Markdown to a small block tree. Only the lexer of `marked` is used; no HTML is ever rendered,
-// links keep http, https and mailto only, images become their alt text and nothing here
+// links keep http, https and mailto only. Declared image:ID blocks embed local assets;
+// other images become alt text and nothing here
 // touches the network. The engines render this tree, never the markdown.
 import { marked, type Token, type Tokens } from "marked";
 
@@ -25,7 +26,8 @@ export type Block =
   | { type: "quote"; blocks: Block[] }
   | { type: "code"; text: string; language?: string }
   | { type: "hr" }
-  | { type: "pagebreak" };
+  | { type: "pagebreak" }
+  | { type: "image"; id: string; alt: string };
 
 export const MAX_LIST_DEPTH = 4;
 export const MAX_TABLE_COLUMNS = 16;
@@ -100,9 +102,17 @@ function blocks(tokens: Token[], depth: number): Block[] {
         });
         break;
       }
-      case "paragraph":
-        out.push({ type: "paragraph", runs: inline((token as Tokens.Paragraph).tokens) });
+      case "paragraph": {
+        const children = (token as Tokens.Paragraph).tokens;
+        const image =
+          children.length === 1 && children[0]?.type === "image"
+            ? (children[0] as Tokens.Image)
+            : undefined;
+        const id = image && /^image:([A-Za-z][A-Za-z0-9_-]{0,63})$/.exec(image.href)?.[1];
+        if (id) out.push({ type: "image", id, alt: image!.text });
+        else out.push({ type: "paragraph", runs: inline(children) });
         break;
+      }
       case "text": {
         // Loose list items and blockquotes carry bare text tokens.
         const text = token as Tokens.Text;

@@ -6,11 +6,13 @@ export const MIME_BY_FORMAT: Record<ExportFormat, string> = {
   docx: "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
   xlsx: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
   pdf: "application/pdf",
+  txt: "text/plain",
+  md: "text/markdown",
 };
 export function safeFilename(input: string | undefined, format: ExportFormat): string {
   const base = (input ?? "")
     .normalize("NFC")
-    .replace(/\.(docx|xlsx|pdf)$/i, "")
+    .replace(/\.(docx|xlsx|pdf|txt|md)$/i, "")
     .replace(/[\u0000-\u001f\u007f-\u009f"\\/:;*?<>|]/g, "")
     .replace(/\s+/g, " ")
     .trim()

@@ -1,3 +1,4 @@
+import { selectCsvRows } from "./selection";
 // Runs inside sandbox children only: parses untrusted workbooks and executes model-written SQL.
 // The parent never imports this file, so neither ExcelJS nor native DuckDB loads in it.
 import { readFile, writeFile } from "node:fs/promises";
@@ -13,7 +14,13 @@ const XLSX_TYPES = [
   "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
   "application/octet-stream",
 ];
-const CSV_TYPES = ["text/csv", "application/csv", "text/plain", "application/octet-stream"];
+const CSV_TYPES = [
+  "text/tab-separated-values",
+  "text/csv",
+  "application/csv",
+  "text/plain",
+  "application/octet-stream",
+];
 const MAX_METADATA_BYTES = 256 * 1024;
 
 export async function executeIngest(job: IngestJob): Promise<{ sheets: SheetMetadata[] }> {
@@ -36,9 +43,19 @@ export async function executeIngest(job: IngestJob): Promise<{ sheets: SheetMeta
       throw new ToolError("INVALID_FILE", "CSV files must use UTF-8 encoding.");
     }
   }
-  let sheets;
+  let sheets: import("./engine/xlsx-to-csv").SheetCsv[];
   try {
-    sheets = job.isXlsx ? await convertXlsxToCsvSheets(bytes) : [{ name: "Sheet1", csv: bytes }];
+    sheets = job.isXlsx
+      ? await convertXlsxToCsvSheets(bytes, job.selection)
+      : [
+          {
+            name: "Sheet1",
+            csv: job.selection ? selectCsvRows(bytes, job.selection) : bytes,
+            ...(job.selection
+              ? { sourceRows: job.selection.source_rows, explicitHeader: true }
+              : {}),
+          },
+        ];
   } catch (error) {
     if (error instanceof ToolError) throw error;
     throw new ToolError("INVALID_FILE", "The workbook could not be read.");
@@ -51,18 +68,45 @@ export async function executeIngest(job: IngestJob): Promise<{ sheets: SheetMeta
     throw new ToolError("INGEST_LIMIT", "Workbook is empty or exceeds sheet/expanded size limits.");
   const metadata: SheetMetadata[] = [];
   for (const [i, sheet] of sheets.entries()) {
+    if (!sheet.csv.length && sheet.calculation) {
+      metadata.push({
+        name: sheet.name,
+        csv: "",
+        columns: [],
+        rowCount: 0,
+        rejectedRows: 0,
+        sampleRows: [],
+        calculation: sheet.calculation,
+        queryable: false,
+      });
+      continue;
+    }
     const csv = `${i}.csv`;
     const path = join(job.outputDir, csv);
     await writeFile(path, sheet.csv, { mode: 0o600 });
     let description;
     try {
-      description = await describeCsv(path);
+      description = await describeCsv(path, sheet.explicitHeader);
     } catch {
       throw new ToolError("INVALID_FILE", `Sheet ${sheet.name} could not be parsed as a table.`);
     }
     if (!description.columns.length)
       throw new ToolError("INVALID_FILE", "Sheet has no parseable columns.");
-    metadata.push({ ...description, name: sheet.name, csv });
+    if (
+      sheet.sourceRows &&
+      (description.rowCount !== sheet.sourceRows.length || description.rejectedRows)
+    )
+      throw new ToolError(
+        "INVALID_SELECTION",
+        "The selected records could not be represented exactly. No comparison was performed.",
+      );
+    metadata.push({
+      ...description,
+      name: sheet.name,
+      csv,
+      ...(sheet.sourceRows ? { sourceRows: sheet.sourceRows, explicitHeader: true } : {}),
+      ...(sheet.calculation ? { calculation: sheet.calculation } : {}),
+    });
   }
   if (Buffer.byteLength(JSON.stringify(metadata)) > MAX_METADATA_BYTES)
     throw new ToolError("INGEST_LIMIT", "The workbook's column profile is too large.");
@@ -77,6 +121,7 @@ export async function executeQuery(job: QueryJob): Promise<QueryJobResult> {
     try {
       const outcome = await runQuery({
         csvPath: job.csvPath,
+        explicitHeader: job.explicitHeader,
         sql,
         tables: job.tables,
         explainOnly: job.explain,

@@ -38,6 +38,7 @@ CAPABILITY_PURPOSES: tuple[CapabilityPurpose, ...] = (
     "image_generation",
     "file_analysis",
     "file_creation",
+    "charts",
 )
 
 # Purposes whose providers deliver files. A binary embedded resource of one
@@ -51,8 +52,19 @@ DOCX_MIME_TYPE = (
 XLSX_MIME_TYPE = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
 PDF_MIME_TYPE = "application/pdf"
 CSV_MIME_TYPE = "text/csv"
+TXT_MIME_TYPE = "text/plain"
+MARKDOWN_MIME_TYPE = "text/markdown"
 GENERATED_FILE_TYPES_BY_PURPOSE: dict[str, frozenset[str]] = {
-    "file_creation": frozenset({DOCX_MIME_TYPE, PDF_MIME_TYPE, XLSX_MIME_TYPE}),
+    # Text and Markdown come from filling a template of that format.
+    "file_creation": frozenset(
+        {
+            DOCX_MIME_TYPE,
+            PDF_MIME_TYPE,
+            XLSX_MIME_TYPE,
+            TXT_MIME_TYPE,
+            MARKDOWN_MIME_TYPE,
+        }
+    ),
     # A full query result, so large data moves between tools as a file
     # instead of through the model.
     "file_analysis": frozenset({CSV_MIME_TYPE}),
@@ -62,6 +74,8 @@ _GENERATED_FILE_EXTENSIONS: dict[str, str] = {
     XLSX_MIME_TYPE: "xlsx",
     PDF_MIME_TYPE: "pdf",
     CSV_MIME_TYPE: "csv",
+    TXT_MIME_TYPE: "txt",
+    MARKDOWN_MIME_TYPE: "md",
 }
 _UNSAFE_FILENAME_CHARACTERS = re.compile(r"[\x00-\x1f\x7f/\\:*?\"<>|]+")
 
@@ -124,7 +138,7 @@ class BundledToolSpec:
 
 BUNDLED_TOOLS: dict[str, BundledToolSpec] = {
     "compute": BundledToolSpec(purpose=GENERAL_PURPOSE, forward_identity=False),
-    "charts": BundledToolSpec(purpose=GENERAL_PURPOSE, forward_identity=False),
+    "charts": BundledToolSpec(purpose="charts", forward_identity=False),
     "file-analysis": BundledToolSpec(purpose="file_analysis", forward_identity=True),
     "file-creation": BundledToolSpec(purpose="file_creation", forward_identity=False),
 }

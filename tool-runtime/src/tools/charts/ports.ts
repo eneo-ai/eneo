@@ -11,6 +11,8 @@ export type ChartJob = {
   spec: ChartSpec;
   source?: ChartSource;
   includeSvg: boolean;
+  /** Resolve and validate data for an app instead of rasterizing an image. */
+  interactive?: boolean;
   config: ChartConfig;
 };
 export type ChartRendering = {
@@ -21,3 +23,7 @@ export type ChartRendering = {
   points: number;
   svg?: string;
 };
+
+/** Validated data only: never ECharts options, URLs, scripts or source credentials. */
+export type InteractiveChart = { chart: ChartSpec; points: number; locale: string };
+export type ChartResult = ChartRendering | InteractiveChart;

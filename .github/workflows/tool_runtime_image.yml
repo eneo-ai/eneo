@@ -1,28 +1,20 @@
 name: Tool Runtime Image
-
-# Tests, builds, scans, and publishes the optional bundled tool runtime
-# (ghcr.io/eneo-ai/eneo-tool-runtime). It is a separate image with its own
-# version (tool-runtime/VERSION), so the application images are never blocked
-# by this workflow.
-#
-# - Pull requests and other branches: tests, typecheck, image build, SBOM and
-#   vulnerability gate; nothing is pushed.
-# - Push to develop: the same checks, then publication of
-#   ghcr.io/eneo-ai/eneo-tool-runtime:<VERSION> with provenance and SBOM
-#   attestations. A published version tag is never moved.
+# Validates pull requests; publication is owned by the application coordinator.
 
 on:
-  push:
-    branches:
-      - develop
-    paths:
-      - tool-runtime/**
-      - .github/workflows/tool_runtime_image.yml
   pull_request:
-    paths:
-      - tool-runtime/**
-      - .github/workflows/tool_runtime_image.yml
-  workflow_dispatch:
+    paths: ['tool-runtime/**', '.github/workflows/tool_runtime_image.yml']
+  workflow_call:
+    inputs:
+      version:
+        required: true
+        type: string
+      revision:
+        required: true
+        type: string
+      publish:
+        default: false
+        type: boolean
 
 env:
   REGISTRY: ghcr.io
@@ -50,21 +42,14 @@ jobs:
         with:
           persist-credentials: false
 
-      - name: Resolve image version and publication mode
+      - name: Resolve supplied build identity
         id: version
+        env:
+          BUILD_VERSION: ${{ inputs.version || '0.0.0-dev' }}
+          PUBLISH: ${{ inputs.publish || false }}
         run: |
-          set -euo pipefail
-          version="$(tr -d '[:space:]' <VERSION)"
-          [[ "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+-eneo\.[0-9]+$ ]]
-          publish=false
-          if [[ "$GITHUB_REF" == "refs/heads/develop" \
-            && ( "$GITHUB_EVENT_NAME" == "push" || "$GITHUB_EVENT_NAME" == "workflow_dispatch" ) ]]; then
-            publish=true
-          fi
-          {
-            echo "version=$version"
-            echo "publish=$publish"
-          } >>"$GITHUB_OUTPUT"
+          echo "version=$BUILD_VERSION" >>"$GITHUB_OUTPUT"
+          echo "publish=$PUBLISH" >>"$GITHUB_OUTPUT"
 
       - name: Set up Bun
         uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2
@@ -128,7 +113,7 @@ jobs:
           tags: eneo-tool-runtime:candidate
           build-args: |
             VERSION=${{ env.VERSION }}
-            GIT_SHA=${{ github.sha }}
+            GIT_SHA=${{ inputs.revision || github.sha }}
             SOURCE_URL=${{ github.server_url }}/${{ github.repository }}
 
       - name: Smoke test the candidate
@@ -175,22 +160,15 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Refuse to move a published version tag
+      - name: Reuse only verified published images
         if: env.PUBLISH == 'true'
-        run: |
-          set -euo pipefail
-          if docker buildx imagetools inspect "$REGISTRY/$IMAGE_NAME:$VERSION" >/dev/null 2>/tmp/inspect.err; then
-            echo "::error::$REGISTRY/$IMAGE_NAME:$VERSION already exists. Bump tool-runtime/VERSION."
-            exit 1
-          fi
-          grep -qiE 'not found|manifest unknown' /tmp/inspect.err || {
-            cat /tmp/inspect.err >&2
-            echo "::error::Could not determine whether the tag exists; refusing to publish."
-            exit 1
-          }
+        id: reuse
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: python3 scripts/release_bundle.py reuse --component tool-runtime
 
       - name: Build and push multi-platform image
-        if: env.PUBLISH == 'true'
+        if: env.PUBLISH == 'true' && steps.reuse.outputs.exists != 'true'
         id: push
         uses: docker/build-push-action@263435318d21b8e681c14492fe198d362a7d2c83 # v6
         with:
@@ -202,11 +180,11 @@ jobs:
           tags: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ env.VERSION }}
           build-args: |
             VERSION=${{ env.VERSION }}
-            GIT_SHA=${{ github.sha }}
+            GIT_SHA=${{ inputs.revision || github.sha }}
             SOURCE_URL=${{ github.server_url }}/${{ github.repository }}
 
       - name: Attest image provenance
-        if: env.PUBLISH == 'true'
+        if: env.PUBLISH == 'true' && steps.reuse.outputs.exists != 'true'
         uses: actions/attest@59d89421af93a897026c735860bf21b6eb4f7b26 # v4
         with:
           subject-name: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
@@ -216,4 +194,4 @@ jobs:
       - name: Publication summary
         if: env.PUBLISH == 'true'
         run: |
-          echo "Published \`$REGISTRY/$IMAGE_NAME:$VERSION@${{ steps.push.outputs.digest }}\`" >>"$GITHUB_STEP_SUMMARY"
+          echo "Published \`$REGISTRY/$IMAGE_NAME:$VERSION@${{ steps.reuse.outputs.digest || steps.push.outputs.digest }}\`" >>"$GITHUB_STEP_SUMMARY"

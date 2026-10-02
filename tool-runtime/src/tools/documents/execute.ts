@@ -7,8 +7,9 @@ import type { RenderJob, RenderResult } from "./ports";
 
 export async function executeRender(job: RenderJob): Promise<RenderResult> {
   const document = await resolveSources(job.document);
-  const templatePath = document.kind === "markdown" ? document.template?.path : undefined;
-  if (document.kind === "markdown" && document.template && !templatePath)
+  const template = document.kind === "sheets" ? undefined : document.template;
+  const templatePath = template?.path;
+  if (template && !templatePath)
     throw new ToolError("RENDER_FAILED", "The template was not downloaded.");
   let rendered;
   try {
@@ -17,6 +18,7 @@ export async function executeRender(job: RenderJob): Promise<RenderResult> {
       ...(templatePath ? { template: await readFile(templatePath) } : {}),
     });
   } catch (error) {
+    if (error instanceof ToolError) throw error;
     if (error instanceof RenderError) throw new ToolError("RENDER_FAILED", error.message);
     throw new ToolError(
       "RENDER_FAILED",

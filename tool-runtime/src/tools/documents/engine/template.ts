@@ -10,6 +10,7 @@ export class TemplateError extends Error {}
 /** A paragraph whose text is exactly this marks where the content goes. */
 export const CONTENT_PLACEHOLDER = "{{content}}";
 const MAX_EXPANDED_BYTES = 64 * 1024 * 1024;
+const IMAGE_TYPE = "http://schemas.openxmlformats.org/officeDocument/2006/relationships/image";
 const HYPERLINK_TYPE =
   "http://schemas.openxmlformats.org/officeDocument/2006/relationships/hyperlink";
 const NUMBERING_TYPE =
@@ -21,6 +22,21 @@ type Zip = Awaited<ReturnType<(typeof import("jszip"))["loadAsync"]>>;
 
 async function part(zip: Zip, name: string): Promise<string | undefined> {
   return zip.file(name)?.async("string");
+}
+
+/** Opens a Word file the user supplied: a bounded zip with a document part and no macros. */
+export async function openWordTemplate(template: Buffer): Promise<Zip> {
+  if (template.length < 2 || template.readUInt16LE(0) !== 0x4b50)
+    throw new TemplateError("The template is not a Word (.docx) file.");
+  assertZipWithinBounds(template, MAX_EXPANDED_BYTES);
+  const JSZip = (await import("jszip")).default;
+  const zip = await JSZip.loadAsync(template);
+  const contentTypes = await part(zip, "[Content_Types].xml");
+  if (!zip.file("word/document.xml") || !contentTypes)
+    throw new TemplateError("The template is not a Word (.docx) file.");
+  if (/macroEnabled|vbaProject/i.test(contentTypes))
+    throw new TemplateError("The template contains macros and cannot be used.");
+  return zip;
 }
 
 /** The children of `<w:body>` split into content and the trailing section properties. */
@@ -118,7 +134,8 @@ function mergeHyperlinks(
     if (!relationship.includes(HYPERLINK_TYPE)) continue;
     const id = /\bId="([^"]+)"/.exec(relationship)?.[1];
     if (!id) continue;
-    const fresh = `rIdEneo${next++}`;
+    let fresh = `rIdEneo${next++}`;
+    while (templateRels.includes(`Id="${fresh}"`)) fresh = `rIdEneo${next++}`;
     renamed = renamed.replaceAll(`r:id="${id}"`, `r:id="${fresh}"`);
     additions.push(relationship.replace(`Id="${id}"`, `Id="${fresh}"`));
   }
@@ -148,20 +165,13 @@ function mergeNamespaces(templateDocument: string, renderedDocument: string): st
  * or with the content in place of a paragraph reading `{{content}}`.
  */
 export async function applyTemplate(rendered: Buffer, template: Buffer): Promise<Buffer> {
-  if (template.length < 2 || template.readUInt16LE(0) !== 0x4b50)
-    throw new TemplateError("The template is not a Word (.docx) file.");
-  assertZipWithinBounds(template, MAX_EXPANDED_BYTES);
-  const JSZip = (await import("jszip")).default;
-  const zip = await JSZip.loadAsync(template);
-  const templateDocument = await part(zip, "word/document.xml");
-  const contentTypes = await part(zip, "[Content_Types].xml");
+  const zip = await openWordTemplate(template);
+  const templateDocument = (await part(zip, "word/document.xml"))!;
+  let contentTypes = (await part(zip, "[Content_Types].xml"))!;
   const templateRels = await part(zip, "word/_rels/document.xml.rels");
-  if (!templateDocument || !contentTypes || !templateRels)
-    throw new TemplateError("The template is not a Word (.docx) file.");
-  if (/macroEnabled|vbaProject/i.test(contentTypes))
-    throw new TemplateError("The template contains macros and cannot be used.");
+  if (!templateRels) throw new TemplateError("The template is not a Word (.docx) file.");
 
-  const renderedZip = await JSZip.loadAsync(rendered);
+  const renderedZip = await (await import("jszip")).default.loadAsync(rendered);
   const renderedDocument = (await part(renderedZip, "word/document.xml")) ?? "";
   const numbering = mergeNumbering(
     splitBody(renderedDocument).content,
@@ -173,6 +183,46 @@ export async function applyTemplate(rendered: Buffer, template: Buffer): Promise
     await part(renderedZip, "word/_rels/document.xml.rels"),
     templateRels,
   );
+  // Copy image parts and give every relationship a fresh identity in the template.
+  let imageNumber = 1;
+  const renderedRels = (await part(renderedZip, "word/_rels/document.xml.rels")) ?? "";
+  for (const match of renderedRels.matchAll(/<Relationship\b[^>]*\/>/g)) {
+    const relation = match[0];
+    if (!relation.includes(IMAGE_TYPE)) continue;
+    const oldId = /\bId="([^"]+)"/.exec(relation)?.[1];
+    const target = /\bTarget="([^"]+)"/.exec(relation)?.[1];
+    if (!oldId || !target || !/^media\/[A-Za-z0-9_.-]+\.(png|jpg|jpeg)$/.test(target))
+      throw new TemplateError("The rendered image relationship is invalid.");
+    const bytes = await renderedZip.file(`word/${target}`)?.async("nodebuffer");
+    if (!bytes) throw new TemplateError("A rendered image is missing.");
+    const ext = target.split(".").pop()!;
+    let fresh: string, name: string;
+    do {
+      fresh = `rIdEneoImage${imageNumber}`;
+      name = `media/eneo-image-${imageNumber++}.${ext}`;
+    } while (hyperlinks.rels.includes(`Id="${fresh}"`) || zip.file(`word/${name}`));
+    zip.file(`word/${name}`, bytes);
+    hyperlinks.content = hyperlinks.content.replaceAll(`r:embed="${oldId}"`, `r:embed="${fresh}"`);
+    hyperlinks.rels = hyperlinks.rels.replace(
+      "</Relationships>",
+      `<Relationship Id="${fresh}" Type="${IMAGE_TYPE}" Target="${name}"/></Relationships>`,
+    );
+    contentTypes = contentTypes.replace(
+      "</Types>",
+      `<Override PartName="/word/${name}" ContentType="image/${ext === "png" ? "png" : "jpeg"}"/></Types>`,
+    );
+  }
+  // Drawing IDs must also remain distinct from the template's header/body drawings.
+  let drawingId = 0;
+  for (const name of Object.keys(zip.files).filter((name) => /^word\/.*\.xml$/.test(name))) {
+    const xml = (await part(zip, name)) ?? "";
+    drawingId = Math.max(drawingId, maxId(xml, /<wp:docPr\b[^>]*\bid="(\d+)"/g));
+  }
+  hyperlinks.content = hyperlinks.content.replace(
+    /(<wp:docPr\b[^>]*\bid=")\d+/g,
+    (_match, prefix) => `${prefix}${++drawingId}`,
+  );
+  zip.file("[Content_Types].xml", contentTypes);
   const body = splitBody(templateDocument);
   const document = mergeNamespaces(templateDocument, renderedDocument).replace(
     body.content + body.sectPr,
@@ -197,4 +247,38 @@ export async function applyTemplate(rendered: Buffer, template: Buffer): Promise
   if (numbering.numbering !== undefined) zip.file("word/numbering.xml", numbering.numbering);
   zip.file("word/_rels/document.xml.rels", rels);
   return Buffer.from(await zip.generateAsync({ type: "nodebuffer", compression: "DEFLATE" }));
+}
+
+/** Conservative usable page dimensions, in points, for figures placed into a template. */
+export async function pageContentSize(
+  template: Buffer,
+): Promise<{ width: number; height: number }> {
+  const zip = await openWordTemplate(template);
+  const document = (await part(zip, "word/document.xml"))!;
+  const sections = [...document.matchAll(/<w:sectPr\b[^>]*>[\s\S]*?<\/w:sectPr>/g)].map(
+    (m) => m[0],
+  );
+  const sizes = (sections.length ? sections : [""]).map((section) => {
+    const page = /<w:pgSz\b[^>]*\/>/.exec(section)?.[0] ?? "";
+    const margin = /<w:pgMar\b[^>]*\/>/.exec(section)?.[0] ?? "";
+    const value = (xml: string, name: string, fallback: number) => {
+      const raw = new RegExp(`w:${name}="(\\d+)"`).exec(xml)?.[1];
+      return raw === undefined ? fallback : Number(raw);
+    };
+    return {
+      width:
+        (value(page, "w", 11906) -
+          value(margin, "left", 1440) -
+          value(margin, "right", 1440) -
+          value(margin, "gutter", 0)) /
+        20,
+      height:
+        (value(page, "h", 16838) - value(margin, "top", 1440) - value(margin, "bottom", 1440)) / 20,
+    };
+  });
+  const width = Math.min(...sizes.map((s) => s.width));
+  const height = Math.min(...sizes.map((s) => s.height));
+  if (width < 72 || height < 200)
+    throw new TemplateError("The template leaves too little room for document content.");
+  return { width, height };
 }

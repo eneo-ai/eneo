@@ -24,4 +24,5 @@ PERMISSIONS_WITH_DESCRIPTION = {
     Permission.IMAGE_GENERATION: "Use image generation in chats where an assistant offers it. Without this permission image generation tools are never attached for the user.",
     Permission.FILE_ANALYSIS: "Ask questions about attached files (CSV and Excel today) in chats where an assistant offers it. Without this permission file analysis tools are never attached for the user.",
     Permission.FILE_CREATION: "Create Word, PDF and Excel files in chats where an assistant offers it. Without this permission file creation tools are never attached for the user.",
+    Permission.CHARTS: "Create charts in chats where an assistant offers it. Without this permission chart tools are never attached for the user.",
 }

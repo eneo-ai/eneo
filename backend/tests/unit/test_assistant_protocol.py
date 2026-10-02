@@ -68,6 +68,22 @@ def test_tool_call_sse_preserves_null_tool_call_id():
     assert payload["tools"][0]["tool_call_id"] is None
 
 
+def test_tool_call_delta_sse_carries_the_call_and_its_next_arguments():
+    event = to_sse_response(
+        Completion(
+            response_type=ResponseType.TOOL_CALL_DELTA,
+            tool_call_id="call_1",
+            arguments_delta='{"title":"Pl',
+        ),
+        uuid4(),
+    )
+
+    assert event.event == "tool_call_delta"
+    payload = json.loads(event.data)
+    assert payload["tool_call_id"] == "call_1"
+    assert payload["arguments_delta"] == '{"title":"Pl'
+
+
 def test_tool_call_sse_carries_the_capability_purpose():
     """A capability provider's call is rendered by purpose, so the purpose
     must reach the client alongside the provider's name."""

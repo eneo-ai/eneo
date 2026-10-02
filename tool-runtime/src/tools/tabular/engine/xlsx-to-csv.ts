@@ -19,7 +19,12 @@
  * blank-only columns are dropped, and blank rows are skipped.
  */
 import ExcelJS from "exceljs";
+import { ToolError } from "../../../errors";
+import type { SourceSelection } from "../selection";
+import type { CalculationDiagnostics } from "../ports";
 import JSZip from "jszip";
+import { SaxesParser } from "saxes";
+import { posix } from "node:path";
 import { assertZipWithinBounds } from "../zip-guard";
 
 export type SheetCsv = {
@@ -27,6 +32,9 @@ export type SheetCsv = {
   name: string;
   /** UTF-8 CSV bytes ready to write to S3. */
   csv: Buffer;
+  calculation?: CalculationDiagnostics;
+  sourceRows?: number[];
+  explicitHeader?: boolean;
 };
 
 /** Excel's own ceiling for a worksheet name. */
@@ -37,7 +45,10 @@ const MAX_SHEET_NAME_LENGTH = 31;
  * Skips fully-empty sheets (those produce zero-byte CSVs and would just
  * confuse the LLM later).
  */
-export async function convertXlsxToCsvSheets(xlsxBytes: Buffer): Promise<SheetCsv[]> {
+export async function convertXlsxToCsvSheets(
+  xlsxBytes: Buffer,
+  selection?: SourceSelection,
+): Promise<SheetCsv[]> {
   // XLSX is a zip; refuse decompression bombs before ExcelJS inflates it.
   assertZipWithinBounds(xlsxBytes);
   const { bytes, originalNames } = await normalizeSheetNames(xlsxBytes);
@@ -47,16 +58,58 @@ export async function convertXlsxToCsvSheets(xlsxBytes: Buffer): Promise<SheetCs
   // type cast is purely to satisfy the outdated upstream signature.
   await workbook.xlsx.load(bytes as unknown as Parameters<typeof workbook.xlsx.load>[0]);
 
+  const emptyResults = await emptyFormulaResults(bytes);
   const out: SheetCsv[] = [];
-  for (const worksheet of workbook.worksheets) {
+  const requested = selection
+    ? workbook.worksheets.filter(
+        (sheet) =>
+          !selection.sheet ||
+          (originalNames.get(sheet.name.toLowerCase()) ?? sheet.name) === selection.sheet,
+      )
+    : workbook.worksheets;
+  if (selection && requested.length !== 1)
+    throw new ToolError("UNKNOWN_SHEET", "Select one exact worksheet from the original file.");
+  for (const worksheet of requested) {
     // ExcelJS counts rows even when they contain only stylings; `rowCount`
     // includes the trailing empty rows that operators sometimes leave. We
     // skip a sheet only when its actual row range is empty.
+    if (selection && selection.source_rows.some((row) => row > worksheet.rowCount))
+      throw new ToolError(
+        "INVALID_SELECTION",
+        "A selected source row is outside the worksheet. Reopen the file and select again.",
+      );
     if (worksheet.actualRowCount === 0) continue;
 
-    const csv = worksheetToCsv(worksheet);
-    if (csv === null) continue;
-    out.push({ name: originalNames.get(worksheet.name.toLowerCase()) ?? worksheet.name, csv });
+    const empty = emptyResults.get(worksheet.name) ?? new Set<string>();
+    const calculation: CalculationDiagnostics = {
+      formula_cells: 0,
+      missing_cached_results: 0,
+      recalculated: false,
+    };
+    worksheet.eachRow((row) =>
+      row.eachCell((cell) => {
+        if (selection && !selection.source_rows.includes(row.number)) return;
+        const value = cellValue(cell, empty);
+        if (
+          value &&
+          typeof value === "object" &&
+          ("formula" in value || "sharedFormula" in value)
+        ) {
+          calculation.formula_cells++;
+          if (value.result === undefined || value.result === null)
+            calculation.missing_cached_results++;
+        }
+      }),
+    );
+    const csv = worksheetToCsv(worksheet, empty, selection?.source_rows);
+    // Retain diagnostics even when every cell is an uncalculated formula.
+    if (csv === null && calculation.formula_cells === 0) continue;
+    out.push({
+      name: originalNames.get(worksheet.name.toLowerCase()) ?? worksheet.name,
+      csv: csv ?? Buffer.alloc(0),
+      ...(selection ? { sourceRows: selection.source_rows, explicitHeader: true } : {}),
+      ...(calculation.formula_cells ? { calculation } : {}),
+    });
   }
   return out;
 }
@@ -68,12 +121,36 @@ export async function convertXlsxToCsvSheets(xlsxBytes: Buffer): Promise<SheetCs
  * cached result, error → its code), so a workbook that converted before
  * converts the same way now, minus the ragged rows.
  */
-function worksheetToCsv(worksheet: ExcelJS.Worksheet): Buffer | null {
+function worksheetToCsv(
+  worksheet: ExcelJS.Worksheet,
+  empty: Set<string>,
+  sourceRows?: number[],
+): Buffer | null {
+  if (sourceRows) {
+    // Read immutable source coordinates before dropping blanks or inferring a header.
+    const width = worksheet.columnCount;
+    if (width > 200)
+      throw new ToolError("INVALID_SELECTION", "The selection has too many columns (maximum 200).");
+    return Buffer.from(
+      [1, ...sourceRows]
+        .map((number) => {
+          const row = worksheet.getRow(number);
+          return Array.from({ length: width }, (_, column) => {
+            const text = cellToText(cellValue(row.getCell(column + 1), empty));
+            return '"' + text.replaceAll('"', '""') + '"';
+          }).join(",");
+        })
+        .join("\r\n") + "\r\n",
+    );
+  }
   const rows: string[][] = [];
   let width = 0;
   worksheet.eachRow({ includeEmpty: false }, (row) => {
     // `row.values` is 1-based: index 0 is always empty.
-    const values = (row.values as ExcelJS.CellValue[]).slice(1).map(cellToText);
+    const values = Array<string>(row.cellCount).fill("");
+    row.eachCell((cell, column) => {
+      values[column - 1] = cellToText(cellValue(cell, empty));
+    });
     if (!values.some((v) => v.trim() !== "")) return;
     rows.push(values);
     for (let i = values.length - 1; i >= 0; i--) {
@@ -90,6 +167,90 @@ function worksheetToCsv(worksheet: ExcelJS.Worksheet): Buffer | null {
     return padded.map(csvField).join(",");
   });
   return Buffer.from(lines.join("\n") + "\n", "utf8");
+}
+
+/**
+ * ExcelJS's value getter omits falsy formula results. Its parsed model retains
+ * zero and false; explicit empty-string caches need the worksheet XML because
+ * the parser discards empty <v> text too.
+ */
+function cellValue(cell: ExcelJS.Cell, empty: Set<string>): ExcelJS.CellValue {
+  const value = cell.value;
+  if (value && typeof value === "object" && ("formula" in value || "sharedFormula" in value)) {
+    const result = empty.has(cell.address)
+      ? ""
+      : (cell.model as { result?: ExcelJS.CellValue }).result;
+    return { ...value, result } as ExcelJS.CellValue;
+  }
+  return value;
+}
+
+/** Read only cache presence, never execute formulas or load external resources. */
+async function emptyFormulaResults(bytes: Buffer): Promise<Map<string, Set<string>>> {
+  const zip = await JSZip.loadAsync(bytes);
+  const relations = new Map<string, string>();
+  const sheets = new Map<string, string>();
+  function parse(
+    xml: string,
+    open: (name: string, attrs: Record<string, string>) => void,
+    close: (name: string) => void = () => {},
+    text: (value: string) => void = () => {},
+  ) {
+    const parser = new SaxesParser();
+    parser.on("opentag", (tag) => open(tag.name.split(":").at(-1)!, tag.attributes));
+    parser.on("closetag", (tag) => close(tag.name.split(":").at(-1)!));
+    parser.on("text", text);
+    parser.write(xml).close();
+  }
+  parse(await zip.file("xl/_rels/workbook.xml.rels")!.async("string"), (name, attrs) => {
+    if (name === "Relationship" && attrs.TargetMode !== "External") {
+      const target = attrs.Target?.startsWith("/")
+        ? attrs.Target.slice(1)
+        : posix.join("xl", attrs.Target ?? "");
+      if (target.startsWith("xl/")) relations.set(attrs.Id!, target);
+    }
+  });
+  parse(await zip.file("xl/workbook.xml")!.async("string"), (name, attrs) => {
+    if (name === "sheet") sheets.set(attrs.name!, attrs["r:id"]!);
+  });
+  const result = new Map<string, Set<string>>();
+  for (const [name, relation] of sheets) {
+    const entry = zip.file(relations.get(relation) ?? "");
+    if (!entry) continue;
+    const empty = new Set<string>();
+    let address = "",
+      stringCell = false,
+      formula = false,
+      hasValue = false,
+      value = "",
+      inValue = false;
+    parse(
+      await entry.async("string"),
+      (tag, attrs) => {
+        if (tag === "c") {
+          address = attrs.r ?? "";
+          stringCell = attrs.t === "str";
+          formula = false;
+          hasValue = false;
+          value = "";
+        }
+        if (tag === "f") formula = true;
+        if (tag === "v") {
+          hasValue = true;
+          inValue = true;
+        }
+      },
+      (tag) => {
+        if (tag === "v") inValue = false;
+        if (tag === "c" && formula && stringCell && hasValue && value === "") empty.add(address);
+      },
+      (text) => {
+        if (inValue) value += text;
+      },
+    );
+    result.set(name, empty);
+  }
+  return result;
 }
 
 function cellToText(value: ExcelJS.CellValue): string {

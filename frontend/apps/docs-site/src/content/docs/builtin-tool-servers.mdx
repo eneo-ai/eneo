@@ -240,3 +240,14 @@ Things a new built-in server would hit that are not yet generic:
 - Test placement is inconsistent: the newest server tests sit in
   `tests/unit/internal_mcp/`, the knowledge and files tests sit at
   `tests/unit/test_*_mcp_server.py`. New servers should use the former.
+
+## Runtime releases and diagnostics
+
+The isolated provider ships in the same verified release bundle as the backend
+and frontend. Admin > Tools reports its availability, version, confinement and
+file-origin diagnostics. Calls use bounded scheduling, cancellation and a
+revalidated disposable file cache. See the [deployment guide](/guides/deployment)
+and repository `docs/deployment/TOOL_RUNTIME.md` for installation and limits.
+
+The provider also ships self-contained table and chart resources for MCP Apps
+compatible hosts. Eneo's runtime integration uses text, images and files.

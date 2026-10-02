@@ -24,7 +24,7 @@ class SpaceCapabilities(BaseCrossReference):
     __table_args__ = (
         CheckConstraint(
             "purpose IN ('web_search', 'image_generation', 'file_analysis', "
-            "'file_creation')",
+            "'file_creation', 'charts')",
             name="ck_space_capability_purpose",
         ),
     )
@@ -45,7 +45,7 @@ class AssistantCapabilities(BaseCrossReference):
     __table_args__ = (
         CheckConstraint(
             "purpose IN ('web_search', 'image_generation', 'file_analysis', "
-            "'file_creation')",
+            "'file_creation', 'charts')",
             name="ck_assistant_capability_purpose",
         ),
     )
@@ -72,7 +72,7 @@ class GovernancePolicyCapabilities(BaseCrossReference):
     __table_args__ = (
         CheckConstraint(
             "purpose IN ('web_search', 'image_generation', 'file_analysis', "
-            "'file_creation')",
+            "'file_creation', 'charts')",
             name="ck_policy_capability_purpose",
         ),
     )

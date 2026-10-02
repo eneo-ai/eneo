@@ -4,6 +4,7 @@ from uuid import UUID
 from pydantic import AnyHttpUrl, BaseModel, Field, computed_field, model_validator
 
 from eneo.main.models import NOT_PROVIDED, ModelId, NotProvided
+from eneo.mcp_servers.application.runtime_status import RuntimeStatus
 from eneo.mcp_servers.domain.entities.mcp_server import (
     DEFAULT_AUDIENCE_PRIORITY,
     MCP_TOOL_CATALOG_DEFAULT_MAX_BYTES,
@@ -25,6 +26,7 @@ MCPServerPurpose = Literal[
     "image_generation",
     "file_analysis",
     "file_creation",
+    "charts",
 ]
 MCPServerAudience = Literal["everyone", "groups"]
 
@@ -114,7 +116,7 @@ class BundledToolPublic(BaseModel):
 
 
 class BundledToolList(BaseListModel[BundledToolPublic]):
-    pass
+    runtime: RuntimeStatus | None = None
 
 
 class BundledServerCreate(BaseModel):

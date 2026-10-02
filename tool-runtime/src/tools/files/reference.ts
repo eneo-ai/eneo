@@ -1,3 +1,6 @@
+import { createHash } from "node:crypto";
+import { fileCache } from "./cache";
+import { checkCancellation } from "../../work";
 import { z } from "zod";
 import { ToolError } from "../../errors";
 import type { DownloadPolicy } from "../tabular/config";
@@ -29,11 +32,17 @@ function referenceTo(extensions: readonly string[]) {
     .strict();
 }
 /** A table source: CSV or XLSX. */
-export const fileReference = referenceTo(["csv", "xlsx"]);
+export const fileReference = referenceTo(["csv", "tsv", "xlsx"]);
+/** Raster images embedded in documents; bytes are validated in the sandbox. */
+export const imageReference = referenceTo(["png", "jpg", "jpeg"]);
 /** A Word document used as a template. */
 export const documentReference = referenceTo(["docx"]);
+/** A template whose {{placeholders}} are filled: Word, plain text or Markdown. */
+export const templateReference = referenceTo(["docx", "txt", "md"]);
 /** A document created earlier that a new one replaces. */
-export const earlierDocumentReference = referenceTo(["docx", "pdf"]);
+export const earlierDocumentReference = referenceTo(["md", "docx", "pdf"]);
+/** A Markdown document created earlier, whose text is changed in place. */
+export const earlierMarkdownReference = referenceTo(["md"]);
 /** A workbook created earlier that a new one replaces. */
 export const earlierWorkbookReference = referenceTo(["xlsx"]);
 export type FileReference = z.infer<typeof fileReference>;
@@ -89,7 +98,19 @@ export async function fetchReference(
     download_timeout_ms: access.timeoutMs,
     allowed_origins: [{ origin, allow_private: true }],
   };
-  const file = await (access.download ?? downloadFile)(ref.url, policy);
+  checkCancellation();
+  const cache = ctx.tenantId && ctx.userId ? fileCache() : undefined;
+  const identity = createHash("sha256")
+    .update([ctx.tenantId, ctx.userId, origin, url.pathname.replace(/\/$/, "")].join("\n"))
+    .digest("hex");
+  const file = cache
+    ? await cache.fetch(identity, (options) =>
+        (access.download ?? downloadFile)(ref.url, policy, options),
+      )
+    : await (access.download ?? downloadFile)(ref.url, policy);
+  checkCancellation();
+  if (file.bytes.length > access.maxBytes)
+    throw new ToolError("FILE_TOO_LARGE", "File exceeds this tool's upload size limit.");
   return {
     bytes: file.bytes,
     contentType: file.contentType,

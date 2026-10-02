@@ -171,8 +171,8 @@ BUNDLED_TOOL_NAMES: dict[str, str] = {
 }
 BUNDLED_TOOL_DESCRIPTIONS: dict[str, str] = {
     "charts": (
-        "Draws bar, line, pie and scatter charts as images in an isolated "
-        "sandbox, from inline values or a CSV/XLSX file in the conversation."
+        "Creates interactive bar, line, pie and scatter charts, with PNG image "
+        "export, from inline values or a CSV/XLSX file in the conversation."
     ),
     "file-analysis": (
         "Answers questions about attached files in an isolated sandbox: CSV "
@@ -644,6 +644,7 @@ class MCPServerService:
                 tenant_id=self.user.tenant_id, http_auth_type=BUNDLED_AUTH_TYPE
             )
             if (tool := self._bundled_tool_of(server)) is not None
+            and server.purpose == BUNDLED_TOOLS[tool].purpose
         }
         return [
             BundledTool(
@@ -676,6 +677,7 @@ class MCPServerService:
             )
         if any(
             self._bundled_tool_of(server) == tool
+            and server.purpose == BUNDLED_TOOLS[tool].purpose
             for server in await self.repo.query(
                 tenant_id=self.user.tenant_id, http_auth_type=BUNDLED_AUTH_TYPE
             )

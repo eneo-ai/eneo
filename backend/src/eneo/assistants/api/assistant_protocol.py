@@ -36,6 +36,7 @@ from eneo.sessions.session import (
     SSEToolApprovalRequired,
     SSEToolApprovalTimeout,
     SSEToolCall,
+    SSEToolCallDelta,
     TokenUsageEvent,
     ToolCallInfo,
 )
@@ -215,6 +216,7 @@ def to_sse_response(chunk: Completion, session_id: "UUID") -> ServerSentEvent:
         data = SSEFiles(
             session_id=session_id,
             generated_files=[FilePublic(**chunk.generated_file.model_dump())],
+            tool_call_id=chunk.image.tool_call_id if chunk.image else None,
         )
 
     elif chunk.response_type == ResponseType.ENEO_EVENT:
@@ -262,6 +264,13 @@ def to_sse_response(chunk: Completion, session_id: "UUID") -> ServerSentEvent:
                 )
                 for ref in (chunk.mcp_tool_references or [])
             ],
+        )
+
+    elif chunk.response_type == ResponseType.TOOL_CALL_DELTA:
+        data = SSEToolCallDelta(
+            session_id=session_id,
+            tool_call_id=chunk.tool_call_id or "",
+            arguments_delta=chunk.arguments_delta or "",
         )
 
     elif chunk.response_type == ResponseType.TOOL_APPROVAL_REQUIRED:

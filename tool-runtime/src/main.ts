@@ -1,17 +1,23 @@
+import { rm } from "node:fs/promises";
+import { CacheStore } from "./cache";
+import { FileCache, installFileCache } from "./tools/files/cache";
+import { Scheduler } from "./scheduler";
 import { loadConfig } from "./config";
 import type { SandboxJob } from "./child";
-import { concurrencyLimit, runIsolated } from "./sandbox";
+import { runIsolated } from "./sandbox";
 import { createHandler, type Endpoint } from "./server";
 import type { ComputeOutcome } from "./tools/compute/ports";
 import { computeTools } from "./tools/compute/tool";
 import { defaultCacheRoot, SheetCache } from "./tools/tabular/cache";
 import type { QueryJobResult, SheetMetadata } from "./tools/tabular/ports";
 import { tabularTools } from "./tools/tabular/tool";
+import { queryResultView } from "./tools/tabular/view";
 import type { RenderResult } from "./tools/documents/ports";
 import { documentTools, fileRenderer, spreadsheetTools } from "./tools/documents/tool";
 import { chartConfigSchema } from "./tools/charts/config";
-import type { ChartRendering } from "./tools/charts/ports";
+import type { ChartResult } from "./tools/charts/ports";
 import { chartTools } from "./tools/charts/tool";
+import { chartView } from "./tools/charts/view";
 
 const config = loadConfig(process.env);
 const isolate = (job: SandboxJob, timeoutMs: number) =>
@@ -46,12 +52,27 @@ const endpoints: Endpoint[] = [
   },
 ];
 const tabular = config.tabular.config;
-const slot = concurrencyLimit(config.tabular.concurrency);
+const nativeScheduler = new Scheduler(
+  config.tabular.concurrency,
+  config.maxConcurrency,
+  config.maxConcurrency,
+);
+const slot = <T>(task: () => Promise<T>) => nativeScheduler.run(task);
 // Budgets keep one call (downloads, a parse, a query) inside Eneo's 60 s tool-call timeout.
+// Cache is disposable. A replacement process must not retain old plaintext.
+await rm(defaultCacheRoot(), { recursive: true, force: true });
+const cacheStore = new CacheStore(
+  defaultCacheRoot(),
+  tabular.cache_ttl_ms,
+  tabular.cache_max_bytes,
+);
+installFileCache(new FileCache(cacheStore));
 const sheetCache = new SheetCache(
   defaultCacheRoot(),
   tabular.cache_ttl_ms,
   tabular.cache_max_bytes,
+  cacheStore,
+  tabular.max_upload_bytes + tabular.max_expanded_bytes,
 );
 // Parsed sheets are plaintext on disk: they leave within one sweep of expiring.
 sheetCache.sweepEvery(Math.max(30_000, Math.min(tabular.cache_ttl_ms, 5 * 60_000)));
@@ -65,6 +86,7 @@ endpoints.push({
     config: tabular,
     allowedFileOrigins: config.tabular.allowedFileOrigins,
     cache: sheetCache,
+    resultView: await queryResultView(),
     executor: {
       ingest: (job) =>
         slot(
@@ -74,9 +96,7 @@ endpoints.push({
             },
         ),
       query: (job) =>
-        slot(
-          async () => (await isolate({ job }, queryJobTimeoutMs)) as unknown as QueryJobResult,
-        ),
+        slot(async () => (await isolate({ job }, queryJobTimeoutMs)) as unknown as QueryJobResult),
     },
   }),
 });
@@ -107,12 +127,13 @@ endpoints.push(
     toolTimeoutMs: renderTimeoutMs + 5_000,
     tools: chartTools(
       chartConfigSchema.parse({}),
-      (job) => slot(async () => (await isolate({ job }, renderTimeoutMs)) as ChartRendering),
+      (job) => slot(async () => (await isolate({ job }, renderTimeoutMs)) as ChartResult),
       {
         allowedFileOrigins: config.tabular.allowedFileOrigins,
         maxBytes: tabular.max_upload_bytes,
         timeoutMs: tabular.download_timeout_ms,
       },
+      await chartView(),
     ),
   },
 );
@@ -120,6 +141,11 @@ endpoints.push(
 const fetch = createHandler({
   token: config.token,
   maxConcurrency: config.maxConcurrency,
+  maxQueue: config.maxQueue,
+  maxQueuePerGroup: config.maxQueuePerGroup,
+  confinement: { files: confinement.files === true, tcp: confinement.tcp === true },
+  nativeStatus: () => nativeScheduler.status,
+  allowedFileOrigins: config.tabular.allowedFileOrigins,
   endpoints,
 });
 

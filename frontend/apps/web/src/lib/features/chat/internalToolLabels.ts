@@ -155,6 +155,10 @@ const CAPABILITY_STEPS: Record<
     running: () => m.tool_file_analysis(),
     done: () => m.tool_file_analysis_done()
   },
+  charts: {
+    running: () => m.tool_charts(),
+    done: () => m.tool_charts_done()
+  },
   file_creation: {
     running: () => m.tool_file_creation(),
     done: () => m.tool_file_creation_done()

@@ -1,19 +1,19 @@
 /**
  * Capability purposes: MCP servers that act as the tenant's provider for one
- * capability (web search, image generation, file analysis, file creation). The backend resolves an attached
+ * capability (web search, image generation, file analysis, file creation, charts). The backend resolves an attached
  * capability marker to the active provider at ask time, so every surface here
  * treats them as on/off capabilities rather than as servers.
  *
  * Adding a capability means adding one entry here (plus its messages); every
  * admin, space, assistant and chat surface renders from this list.
  */
-import { FilePlus, FileSearch, Globe, Image } from "@lucide/svelte";
+import { ChartColumn, FilePlus, FileSearch, Globe, Image } from "@lucide/svelte";
 import { m } from "$lib/paraglide/messages";
 
 export const GENERAL_PURPOSE = "general";
 
 export type CapabilityPurpose =
-  "web_search" | "image_generation" | "file_analysis" | "file_creation";
+  "web_search" | "image_generation" | "file_analysis" | "file_creation" | "charts";
 
 export type CapabilityDescriptor = {
   purpose: CapabilityPurpose;
@@ -100,6 +100,20 @@ export const CAPABILITIES: readonly CapabilityDescriptor[] = [
       label: m.tools_templates_guide,
       url: "https://docs.eneo.ai/guides/capabilities#word-templates"
     }
+  },
+  {
+    purpose: "charts",
+    icon: ChartColumn,
+    label: m.charts,
+    providerNamePlaceholder: m.charts_provider_name_placeholder,
+    providerManagedNote: m.charts_provider_managed_note,
+    forwardIdentityHint: m.charts_forward_identity_hint,
+    capabilityHint: m.charts_capability_hint,
+    spaceHint: m.charts_space_group_hint,
+    noActiveProviderHint: m.charts_no_active_provider_hint,
+    notAvailableHereHint: m.charts_not_available_here_hint,
+    classificationHint: m.charts_classification_hint,
+    bundledDescription: m.tools_builtin_charts_description
   }
 ];
 

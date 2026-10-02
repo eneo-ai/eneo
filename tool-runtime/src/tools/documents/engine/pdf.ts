@@ -12,6 +12,8 @@ const FONTS = {
   bold: `${FONT_DIR}/DejaVuSans-Bold.ttf`,
   mono: `${FONT_DIR}/DejaVuSansMono.ttf`,
 };
+import { fitImage, type DocumentImages } from "./images";
+
 const MARGIN = 56;
 const BODY = 10.5;
 const HEADINGS = [20, 15, 12.5];
@@ -27,7 +29,7 @@ async function fontsAvailable(): Promise<void> {
 }
 export async function renderPdf(
   document: Extract<DocumentSpec, { kind: "markdown" }>,
-  options: { organisationName?: string } = {},
+  options: { organisationName?: string; images?: DocumentImages } = {},
 ): Promise<Rendered> {
   await fontsAvailable();
   const blocks = parseMarkdown(document.content);
@@ -65,6 +67,33 @@ export async function renderPdf(
   const write = (list: Block[], indent = 0) => {
     for (const block of list) {
       switch (block.type) {
+        case "image": {
+          const image = options.images!.get(block.id)!;
+          const availableWidth = width() - indent;
+          pdf.font("body").fontSize(9);
+          const captionHeight = image.caption
+            ? pdf.heightOfString(image.caption, { width: availableWidth }) + 8
+            : 0;
+          const size = fitImage(
+            image,
+            availableWidth,
+            pdf.page.height - pdf.page.margins.top - pdf.page.margins.bottom - captionHeight - 16,
+          );
+          if (pdf.y + size.height + captionHeight + 12 > pdf.page.height - pdf.page.margins.bottom)
+            pdf.addPage();
+          const x = pdf.page.margins.left + indent + (availableWidth - size.width) / 2;
+          const y = pdf.y;
+          pdf.image(image.bytes, x, y, { width: size.width, height: size.height });
+          pdf.x = pdf.page.margins.left;
+          pdf.y = y + size.height + 6;
+          if (image.caption)
+            pdf.font("body").fontSize(9).text(image.caption, {
+              width: availableWidth,
+              align: "center",
+            });
+          pdf.moveDown(0.5);
+          break;
+        }
         case "heading":
           pdf.moveDown(block.level === 1 ? 0.6 : 0.4);
           writeRuns(

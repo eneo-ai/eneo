@@ -51,6 +51,7 @@ The provided `docker-compose.yml` file defines all the services needed to run En
 - **`traefik`**: A reverse proxy that handles incoming traffic, routes it to the correct service, and automatically manages SSL certificates
 - **`frontend`**: The web interface for Eneo
 - **`backend`**: The main API and application logic
+- **`tool-runtime`**: Isolated execution for bundled tools, enabled by administrators
 - **`worker`**: A background service for processing heavy tasks like document ingestion, crawling, and audit log exports
 - **`db`**: A PostgreSQL database with the pgvector extension for storing all application data
 - **`redis`**: An in-memory data store used for caching and managing background jobs
@@ -73,7 +74,11 @@ First, copy the provided template files to create your local environment configu
 cp env_backend.template env_backend.env
 cp env_frontend.template env_frontend.env
 cp env_db.template env_db.env
+cp .env.template .env
+python3 setup.py
 ```
+
+Download the selected release's completed `release.env` and `release.json` alongside these files. Use `--env-file .env --env-file release.env` with Compose commands.
 
 ### Step 2: Configure Your Environment
 
@@ -163,10 +168,10 @@ With the configuration complete, you can now start all the services.
 docker network create proxy_tier
 
 # Start all services in the background
-docker compose up -d
+docker compose --env-file .env --env-file release.env up -d
 ```
 
-> **Note on networks**: `proxy_tier` is the only network you create manually. The compose file also defines two managed networks: `data_net` (internal — PostgreSQL and Redis are isolated from the internet and from Traefik/frontend) and `module_net` (used by optional module containers). See the [network isolation section](deployment/README.md#network-isolation) for details, and [MODULES.md](deployment/MODULES.md) for enabling optional modules.
+> **Note on networks**: `proxy_tier` is the only network you create manually. The compose file also defines managed networks including `tool_runtime_net` (private tools runtime access), `data_net` (internal — PostgreSQL and Redis are isolated from the internet and from Traefik/frontend) and `module_net` (used by optional module containers). See the [network isolation section](deployment/README.md#network-isolation) for details, and [MODULES.md](deployment/MODULES.md) for enabling optional modules.
 
 The initial startup may take a few minutes as Docker downloads the necessary container images. Once done, you can visit `https://your-domain.com` in your browser.
 
@@ -196,13 +201,14 @@ docker compose ps
 docker compose logs -f backend
 ```
 
-**Update to the latest container images:**
+**Update using a completed application release bundle:**
+Download the selected release's `release.env` and `release.json`, then run:
 ```bash
-docker compose pull
-docker compose up -d
+docker compose --env-file .env --env-file release.env pull
+docker compose --env-file .env --env-file release.env up -d
 ```
 
-> **Production Tip:** For production deployments, consider pinning to specific version tags (e.g., `v1.2.3`) instead of using `latest`. This gives you control over when updates are applied. See [Version Pinning](#production-best-practice-version-pinning) for details.
+Use those environment-file arguments for all Compose commands below when deploying a bundle.
 
 **Stop and remove all containers:**
 ```bash
@@ -229,62 +235,22 @@ Eneo uses several Docker volumes for persistent data storage:
 
 ### Production Best Practice: Version Pinning
 
-For production deployments, we **strongly recommend** pinning to specific version tags instead of using `latest`.
+Frontend, backend, and tools runtime share one version and source revision. Use the
+completed bundle from [GitHub Releases](https://github.com/eneo-ai/eneo/releases):
+`release.json` records the revision and immutable image digests, and `release.env`
+applies them to every application service, including workers and initialization.
 
-**Why pin versions?**
-- **Predictable deployments** - Know exactly which version is running
-- **Controlled upgrades** - Test new versions in staging before production
-- **Easy rollbacks** - Return to a previous working version if issues arise
-- **Audit trail** - Clear version history in your docker-compose.yml
+For source examples, set one `ENEO_VERSION` (for example `2.3.0` for Git tag
+`v2.3.0`). No application image defaults to `latest`. Run `python3 setup.py`
+once to create a protected runtime token if absent; it preserves existing settings.
 
-**How to pin versions:**
+Registry aliases change sequentially. External deployment systems must wait for the
+completed bundle and deploy all its images together. Keep the previous bundle for
+rollback, subject to the release's database compatibility guidance.
 
-The example `docker-compose.yml` uses `:latest` tags to keep documentation current, but you should replace these with specific versions:
-
-```yaml
-# ❌ Example (uses latest - not recommended for production)
-frontend:
-  image: ghcr.io/eneo-ai/eneo-frontend:latest
-
-backend:
-  image: ghcr.io/eneo-ai/eneo-backend:latest
-
-worker:
-  image: ghcr.io/eneo-ai/eneo-backend:latest
-```
-
-```yaml
-# ✅ Production (pinned to specific version)
-frontend:
-  image: ghcr.io/eneo-ai/eneo-frontend:v1.2.3
-
-backend:
-  image: ghcr.io/eneo-ai/eneo-backend:v1.2.3
-
-worker:
-  image: ghcr.io/eneo-ai/eneo-backend:v1.2.3
-```
-
-**Where to find versions:**
-- GitHub Releases: https://github.com/eneo-ai/eneo/releases
-- Container Registry: https://github.com/orgs/eneo-ai/packages
-
-**Controlled upgrade workflow:**
-```bash
-# 1. Check for new versions at GitHub releases
-
-# 2. Update version tags in docker-compose.yml
-#    Change: v1.2.3 → v1.2.4
-
-# 3. Pull the specific version
-docker compose pull
-
-# 4. Deploy the updated version
-docker compose up -d
-
-# 5. Verify the new version is running
-docker compose exec backend python -c "import eneo; print(eneo.__version__)"
-```
+The runtime is included automatically. Administrators still activate capabilities
+in Admin → Tools. See [Tools runtime](deployment/TOOL_RUNTIME.md) for migration
+from the old overlay, diagnostics, and deployments that omit the runtime.
 
 ### Before You Upgrade
 
@@ -301,23 +267,15 @@ docker run --rm -v eneo_eneo_postgres_data:/data -v $(pwd):/backup ubuntu tar cz
 
 ### Upgrading Between Minor Versions
 
-For routine updates (e.g., v1.2.3 → v1.2.4):
+Download the next completed bundle, preserve the previous bundle, and apply it:
 
-**With version pinning (recommended):**
 ```bash
-# 1. Edit docker-compose.yml and update version tags
-# 2. Pull and deploy the new version
-docker compose pull
-docker compose up -d
+docker compose --env-file .env --env-file release.env pull
+docker compose --env-file .env --env-file release.env up -d
 ```
 
-**With latest tags (if you haven't pinned versions yet):**
-```bash
-docker compose pull
-docker compose up -d
-```
-
-> **Note:** Using pinned versions gives you control over when updates are applied. With `latest`, updates happen whenever you run `docker compose pull`, which may introduce unexpected changes.
+Check service health and Admin → Tools after deployment. To roll back, apply the
+previous complete bundle with the same commands, after checking database compatibility.
 
 ### Upgrading Between Major Versions or After Long Gaps
 
@@ -344,7 +302,7 @@ docker volume rm eneo_eneo_postgres_data eneo_eneo_redis_data eneo_eneo_backend_
 # Verify volumes are removed: docker volume ls
 
 # 4. Start with fresh installation
-docker compose up -d
+docker compose --env-file .env --env-file release.env up -d
 
 # 5. Restore data if needed (advanced)
 # docker compose exec -T db psql -U postgres eneo < backup.sql

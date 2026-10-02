@@ -6,7 +6,7 @@ Quick deployment reference for Eneo using Docker Compose.
 
 ## Files in This Directory
 
-- `docker-compose.yml` - Complete production stack (Traefik, frontend, backend, worker, PostgreSQL, Redis)
+- `docker-compose.yml` - Complete production stack (Traefik, frontend, backend, worker, tools runtime, PostgreSQL, Redis)
 - `docker-compose.object-content.yml` - Optional bundled SeaweedFS profile
 - `.env.template` - Optional object-store profile, endpoint, and secret inputs
 - `docker-compose.modules.yml` - Optional module overlay (inert unless a `--profile` is passed; see [MODULES.md](MODULES.md))
@@ -15,6 +15,7 @@ Quick deployment reference for Eneo using Docker Compose.
 - `env_db.template` - Database credentials
 - `env_modules.template` / `env_module_ttt.template` - Module configuration (only needed when enabling modules)
 - `OBJECT_CONTENT.md` - Offline object-content operations reference
+- `MCP_APPS.md` - Optional interactive tool views (MCP Apps): the extra hostname, settings and what administrators approve
 
 ## Quick Start
 
@@ -54,9 +55,11 @@ chmod 600 .env env_backend.env env_frontend.env env_db.env
 #    - ORIGIN=https://your-domain.com
 #    - PUBLIC_ORIGIN=https://your-domain.com
 
-# 6. Deploy
+# 6. Download release.env and release.json from the selected Eneo release.
+# Generate only the missing runtime token, preserving existing settings.
+python3 setup.py
 docker network create proxy_tier
-docker compose up -d
+docker compose --env-file .env --env-file release.env up -d
 
 # 7. Verify db-init completed successfully (wait ~30 seconds for startup)
 docker logs eneo_db_init
@@ -184,3 +187,10 @@ This usually means db-init started before PostgreSQL was ready. The docker-compo
 **Step-by-Step Guide:** [DEPLOYMENT.md](../DEPLOYMENT.md)
 
 **Multi-Tenancy Setup:** See [Advanced Configuration](../DEPLOYMENT.md#advanced-configuration--features) for per-tenant credentials and federation
+
+## Application release bundle
+
+Frontend, backend, workers and tools runtime use one verified release bundle.
+Use the same environment-file arguments for later Compose commands. Keep both
+bundle files for rollback; update them together. See [TOOL_RUNTIME.md](TOOL_RUNTIME.md)
+for diagnostics, migration from the old overlay, and explicitly omitting tools.

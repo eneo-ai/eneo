@@ -3,7 +3,7 @@ import logging
 import re
 from collections import defaultdict
 from dataclasses import dataclass
-from typing import Any, Optional, Protocol, Sequence, cast
+from typing import Any, Collection, Optional, Protocol, Sequence, cast
 from uuid import UUID
 
 from typing_extensions import override
@@ -15,7 +15,6 @@ from eneo.ai_models.completion_models.completion_model import (
     MessageToolCall,
     function_definition_to_tool,
 )
-from eneo.authentication.signed_urls import restore_reference_tokens
 from eneo.completion_models.domain.skill_activation import (
     SKILL_ACTIVATION_TOOL_NAME,
 )
@@ -27,10 +26,12 @@ from eneo.completion_models.infrastructure.static_prompts import (
     ATTACHED_FILE_REFERENCES_INSTRUCTION,
     HALLUCINATION_GUARD,
     SHOW_REFERENCES_PROMPT,
+    TOOL_DELIVERABLE_INSTRUCTION,
     TOOL_NAMING_INSTRUCTION,
     TRANSCRIPTION_PROMPT,
 )
 from eneo.files.file_models import File, FileType
+from eneo.files.model_file_references import file_handle, model_file_references
 from eneo.questions.question import ToolCallInfo
 from eneo.sessions.session import SessionInDB
 from eneo.tokens.token_utils import (
@@ -60,8 +61,8 @@ def _replayable_tool_calls(
     fall back to the split `tool_name` for legacy rows that predate this field.
 
     Images the call generated are named in `result` only by placeholder. When
-    a fresh reference URL exists for one, it is appended here (never
-    persisted: the URL is short-lived), so the model can hand the image back
+    an authorized reference exists for one, its stable handle is appended
+    here so the model can hand the image back
     to an image tool on a later turn.
     """
     if not tool_calls:
@@ -80,12 +81,10 @@ def _replayable_tool_calls(
             MessageToolCall(
                 tool_call_id=tc.tool_call_id,
                 tool_name=tc.mcp_tool_name or tc.tool_name,
-                # Stored arguments carry reference URLs with the token
-                # redacted; a model copying its own earlier call would send a
-                # dead link. Replay them with this request's fresh URLs.
+                # Legacy URLs become credential-free handles on replay, too.
                 arguments=cast(
                     "dict[str, object] | None",
-                    restore_reference_tokens(tc.arguments, file_reference_urls or {}),
+                    model_file_references(tc.arguments, file_reference_urls or {}),
                 ),
                 result=_with_generated_image_references(tc, file_reference_urls),
             )
@@ -105,7 +104,7 @@ def _with_generated_image_references(
     result already carries: they appear in the order the files were persisted
     for this call, so the n-th placeholder names the n-th generated file.
     """
-    result = tc.result or ""
+    result = model_file_references(tc.result or "", file_reference_urls or {})
     if not tc.generated_file_ids or not file_reference_urls:
         return result
     labels = [
@@ -118,7 +117,7 @@ def _with_generated_image_references(
         return labels[position] if position < len(labels) else f"Image {position + 1}"
 
     lines = [
-        f"Reference url for {label(position)}: {file_reference_urls[file_id]}"
+        f"File reference for {label(position)}: {file_handle(file_id)}"
         for position, file_id in enumerate(tc.generated_file_ids)
         if file_id in file_reference_urls
     ]
@@ -182,7 +181,23 @@ class _InformationChunkLike(Protocol):
     content: str
 
 
-def build_files_string(files: list[File], model_name: str = "") -> str:
+USER_FILES_PREAMBLE = (
+    "Below are files uploaded by the user. "
+    "You should act like you can see the files themselves, "
+    "and not reveal the specific formatting "
+    "you see below:"
+)
+ASSISTANT_FILES_PREAMBLE = (
+    "Below are files attached to this assistant by its author. "
+    "You should act like you can see the files themselves, "
+    "and not reveal the specific formatting "
+    "you see below:"
+)
+
+
+def build_files_string(
+    files: list[File], model_name: str = "", preamble: str = USER_FILES_PREAMBLE
+) -> str:
     if not files:
         return ""
 
@@ -196,52 +211,76 @@ def build_files_string(files: list[File], model_name: str = "") -> str:
         blocks.append(f"{header}\n{file.text or ''}")
 
     files_string = "\n\n---\n\n".join(blocks)
-    return (
-        "Below are files uploaded by the user. "
-        "You should act like you can see the files themselves, "
-        "and not reveal the specific formatting "
-        "you see below:"
-        f"\n\n{files_string}"
-    )
+    return f"{preamble}\n\n{files_string}"
 
 
-def build_file_references_string(
+def _file_reference_entries(
     files: list[File], file_reference_urls: dict[UUID, str]
-) -> str:
-    """Surface signed download URLs for attached files to the model.
-
-    Lets the model pass a URL to whichever MCP tool accepts a URL input so the
-    tool can fetch the original file. Only files present in
-    ``file_reference_urls`` (those with a durably stored original) get an
-    entry; the rest keep relying on the inlined text from
-    ``build_files_string``.
-    """
-    entries = [
+) -> list[str]:
+    return [
         json.dumps(
             {
                 "kind": "image" if file.file_type == FileType.IMAGE else "document",
                 "filename": file.name,
                 "mimetype": file.mimetype,
                 "size_bytes": file.size,
-                "url": file_reference_urls[file.id],
+                "file_ref": file_handle(file.id),
             }
         )
         for file in files
         if file.id in file_reference_urls
     ]
+
+
+def build_assistant_file_references_string(
+    files: list[File], file_reference_urls: dict[UUID, str]
+) -> str:
+    """Reference entries for persistent attachments marked "open with tool".
+
+    Rendered on the current user message (never the system prompt: the signed
+    urls change every request and would defeat prompt caching there) with a
+    preamble that tells the model these are the author's standing files, not
+    something the user just uploaded. Behavioral rules live in
+    ATTACHED_FILE_REFERENCES_INSTRUCTION.
+    """
+    entries = _file_reference_entries(files, file_reference_urls)
+    if not entries:
+        return ""
+    references = "\n".join(entries)
+    return (
+        "Files attached to this assistant by its author (one JSON entry per "
+        "file). They are available on every turn of this conversation, not "
+        "only when the user mentions them. Their raw bytes are NOT in this "
+        'prompt; each "url" is a signed file reference for tools that accept '
+        "a URL input.\n\n"
+        f"{references}"
+    )
+
+
+def build_file_references_string(
+    files: list[File], file_reference_urls: dict[UUID, str]
+) -> str:
+    """Surface credential-free handles for attached files to the model.
+
+    The proxy resolves these into URLs for whichever MCP tool consumes them. Only files present in
+    ``file_reference_urls`` (those with a durably stored original) get an
+    entry; the rest keep relying on the inlined text from
+    ``build_files_string``.
+    """
+    entries = _file_reference_entries(files, file_reference_urls)
     if not entries:
         return ""
 
     references = "\n".join(entries)
     # Mechanics only: the behavioral rules (never judge readability from the
-    # url, never ask for re-upload, read_file as fallback, images go to image
+    # reference, never ask for re-upload, read_file as fallback, images go to image
     # tools) live in ATTACHED_FILE_REFERENCES_INSTRUCTION, stated once in the
     # system prompt. This block repeats per message with referenced files,
     # history included.
     return (
         "Files in this message (one JSON entry per file). Their raw bytes are "
-        'NOT in this prompt; each "url" is a signed file reference for tools '
-        "that accept a URL input.\n\n"
+        "NOT in this prompt; pass file_ref in the tool's URL input. "
+        "Eneo resolves it before execution; do not construct URLs or tokens.\n\n"
         f"{references}"
     )
 
@@ -288,6 +327,7 @@ class _Prompt:
         # ahead of the data blocks below.
         if self.has_tools:
             components.append(TOOL_NAMING_INSTRUCTION)
+            components.append(TOOL_DELIVERABLE_INSTRUCTION)
 
         # Attached-file reference entries render in the messages; state the
         # tool-arbitration rule once here instead of per message. Meaningless
@@ -506,7 +546,9 @@ class _Prompt:
         )
 
     def add_attachments(self, files: list[File]) -> None:
-        self.attachments = build_files_string(files=files, model_name=self.model_name)
+        self.attachments = build_files_string(
+            files=files, model_name=self.model_name, preamble=ASSISTANT_FILES_PREAMBLE
+        )
 
     def get_tokens_of_knowledge(self) -> int:
         return self._knowledge_tokens
@@ -652,6 +694,7 @@ class ContextBuilder:
         file_reference_urls: dict[UUID, str] | None = None,
         inline_file_text: bool = True,
         knowledge_catalog: str = "",
+        url_only_prompt_file_ids: Collection[UUID] = (),
     ) -> Context:
         if files is None:
             files = []
@@ -676,8 +719,20 @@ class ContextBuilder:
             file_reference_urls=file_reference_urls,
             inline_file_text=inline_file_text,
         )
+        # Persistent attachments marked "open with tool" render as reference
+        # entries on the current message, before any per-message files, and
+        # their text is withheld from the system prompt below. Placed ahead of
+        # the token count so the block is budgeted like the rest of the input.
+        if url_only_prompt_file_ids and file_reference_urls:
+            attachment_references = build_assistant_file_references_string(
+                [f for f in prompt_files if f.id in url_only_prompt_file_ids],
+                file_reference_urls,
+            )
+            if attachment_references:
+                _input_string = f"{attachment_references}\n\n{_input_string}"
         # Attachment images (prompt_files) travel with every request, the same
         # way attachment text does — they ride on the current user message.
+        # Pages rendered from a URL-only attachment stay out, like its text.
         current_images: list[File] = []
         if vision:
             current_images = self._get_files_by_type(files, FileType.IMAGE)
@@ -686,6 +741,7 @@ class ContextBuilder:
                 file
                 for file in self._get_files_by_type(prompt_files, FileType.IMAGE)
                 if file.id not in seen_image_ids
+                and file.parent_file_id not in url_only_prompt_file_ids
             ]
         tokens_used_input = count_message_tokens(
             [{"role": "user", "content": _input_string}], model_name
@@ -717,7 +773,11 @@ class ContextBuilder:
             transcription=bool(transcription_inputs),
         )
         _prompt.add_attachments(
-            files=self._get_files_by_type(prompt_files, FileType.TEXT)
+            files=[
+                file
+                for file in self._get_files_by_type(prompt_files, FileType.TEXT)
+                if file.id not in url_only_prompt_file_ids
+            ]
         )
         # Tool-mode knowledge: a token-cheap catalog of searchable sources; the
         # content itself stays behind the knowledge-MCP search tool.

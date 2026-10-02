@@ -456,12 +456,29 @@ class FileService:
         # once the write block closes, so a read after it would fail.
         async with self._write_transaction():
             file_id = await self._persist_prepared_file(prepared)
-            info = await self.get_file_by_id(file_id)
+            return await self._generated_file(file_id, image_data)
+
+    async def _generated_file(self, file_id: UUID, data: bytes) -> File:
+        """The File for content a tool produced and this service just stored.
+
+        ``original_available`` is read from what was stored, by the loader's
+        rule. The completion layer mints a reference URL only for a file that
+        carries it, and that URL is how a later tool in the same answer is
+        handed the file. Call inside the write transaction.
+        """
+        info = await self.get_file_by_id(file_id)
+        references = await self.repo.get_content_references([file_id])
+        original = readable_original_reference(
+            info.file_type,
+            references,
+            object_store_configured=self._object_content.object_store_configured,
+        )
         return File(
             **info.model_dump(),
-            blob=image_data,
+            blob=data,
             text=None,
             transcription=None,
+            original_available=original is not None,
         )
 
     async def save_generated_document(
@@ -490,13 +507,7 @@ class FileService:
                 file_id = await self._persist_prepared_file(
                     replace(prepared, derivatives=())
                 )
-                info = await self.get_file_by_id(file_id)
-        return File(
-            **info.model_dump(),
-            blob=data,
-            text=None,
-            transcription=None,
-        )
+                return await self._generated_file(file_id, data)
 
     async def _persist_prepared_file(
         self,

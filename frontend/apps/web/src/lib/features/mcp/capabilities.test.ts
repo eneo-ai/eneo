@@ -6,6 +6,7 @@ vi.mock("$lib/paraglide/messages", () => ({
   m: new Proxy({}, { get: (_target, key) => () => String(key) })
 }));
 vi.mock("@lucide/svelte", () => ({
+  ChartColumn: "ChartColumn",
   FilePlus: "FilePlus",
   FileSearch: "FileSearch",
   Globe: "Globe",
@@ -27,7 +28,8 @@ describe("capability descriptors", () => {
       "web_search",
       "image_generation",
       "file_analysis",
-      "file_creation"
+      "file_creation",
+      "charts"
     ]);
   });
 

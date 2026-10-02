@@ -8,6 +8,7 @@ from eneo.authentication.endpoint_access import (
     Authorization,
     endpoint_access,
 )
+from eneo.mcp_servers.application.runtime_status import runtime_status
 from eneo.roles.permissions import Permission
 
 if TYPE_CHECKING:
@@ -303,6 +304,7 @@ async def get_bundled_tools(container: Container = _WITH_USER):
     service = container.mcp_server_service()
     tools = await service.list_bundled_tools()
     return BundledToolList(
+        runtime=await runtime_status(),
         items=[
             BundledToolPublic(
                 tool=tool.tool,
@@ -311,7 +313,7 @@ async def get_bundled_tools(container: Container = _WITH_USER):
                 mcp_server_id=tool.mcp_server_id,
             )
             for tool in tools
-        ]
+        ],
     )
 
 

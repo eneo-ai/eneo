@@ -254,3 +254,45 @@ class TestUpdateBundled:
 
         with pytest.raises(BadRequestException):
             await service.update_mcp_server(server.id, http_auth_type=BUNDLED_AUTH_TYPE)
+
+
+class TestChartFunction:
+    async def test_creates_inactive_provider_without_changing_legacy_server(
+        self, monkeypatch, runtime_configured
+    ):
+        service, repo, user = _make_service(monkeypatch)
+        legacy = _bundled_server(user.tenant_id, "charts")
+        repo.query.return_value = [legacy]
+        result = await service.create_bundled_mcp_server("charts")
+        assert result.server.purpose == "charts"
+        assert result.server.is_enabled is False
+        assert result.server.forward_identity is False
+        assert legacy.purpose == "general"
+        assert legacy.is_enabled is True
+        repo.update.assert_not_called()
+
+    async def test_existing_function_prevents_duplicate(
+        self, monkeypatch, runtime_configured
+    ):
+        service, repo, user = _make_service(monkeypatch)
+        provider = _bundled_server(user.tenant_id, "charts")
+        provider.purpose = "charts"
+        repo.query.return_value = [provider]
+        with pytest.raises(NameCollisionException):
+            await service.create_bundled_mcp_server("charts")
+        repo.add.assert_not_called()
+
+    async def test_catalog_does_not_confuse_legacy_server_with_function(
+        self, monkeypatch, runtime_configured
+    ):
+        service, repo, user = _make_service(monkeypatch)
+        legacy = _bundled_server(user.tenant_id, "charts")
+        repo.query.return_value = [legacy]
+        tools = {tool.tool: tool for tool in await service.list_bundled_tools()}
+        assert tools["charts"].purpose == "charts"
+        assert tools["charts"].mcp_server_id is None
+        provider = _bundled_server(user.tenant_id, "charts")
+        provider.purpose = "charts"
+        repo.query.return_value = [provider, legacy]
+        tools = {tool.tool: tool for tool in await service.list_bundled_tools()}
+        assert tools["charts"].mcp_server_id == provider.id
