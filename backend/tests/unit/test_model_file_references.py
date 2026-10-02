@@ -36,6 +36,7 @@ def test_handles_are_stable_and_do_not_encode_credentials():
 @pytest.mark.parametrize(
     "handle",
     [file_handle(uuid4()), "eneo-file:invented", "eneo-file:", "eneo-file:" + "a" * 33],
+    ids=["unknown", "malformed", "empty", "too-long"],
 )
 def test_unknown_malformed_and_unavailable_handles_fail_closed(handle):
     with pytest.raises(UnknownFileReference):
