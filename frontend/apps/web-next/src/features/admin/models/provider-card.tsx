@@ -1,14 +1,12 @@
 "use client";
 
 import { Button } from "@astryxdesign/core/Button";
-import { Dialog, DialogHeader } from "@astryxdesign/core/Dialog";
 import {
   DropdownMenu,
   DropdownMenuDivider,
   DropdownMenuItem
 } from "@astryxdesign/core/DropdownMenu";
 import { Heading } from "@astryxdesign/core/Heading";
-import { Layout, LayoutContent, LayoutFooter } from "@astryxdesign/core/Layout";
 import { TableBody, TableHeader, TableHeaderCell, TableRow } from "@astryxdesign/core/Table";
 import { Table } from "@/components/astryx/table";
 import { Text } from "@astryxdesign/core/Text";
@@ -23,6 +21,7 @@ import type { SecurityClassification } from "@/features/admin/security-classific
 import { useRemovalMutation } from "@/features/spaces/removal";
 import { browserApi } from "@/lib/api/browser";
 import { toast } from "@/lib/toast";
+import { DeleteBlockedDialog } from "./delete-blocked-dialog";
 import { deleteProvider, PROVIDERS_KEY } from "./model-providers";
 import { ModelRow } from "./model-row";
 import { MODELS_KEY } from "./models";
@@ -97,49 +96,6 @@ function ModelTable({
         ))}
       </TableBody>
     </Table>
-  );
-}
-
-/**
- * Why a provider cannot be deleted yet: the backend refuses a provider that
- * still has models. The menu item says so too; this is what choosing it
- * anyway opens, instead of a confirmation that would fail.
- */
-function DeleteBlockedDialog({
-  open,
-  onOpenChange,
-  name,
-  count
-}: {
-  open: boolean;
-  onOpenChange: (open: boolean) => void;
-  name: string;
-  count: number;
-}) {
-  const t = useTranslations();
-  const descriptionId = useId();
-  // One way out besides Escape and the backdrop: "Stäng" (no header X).
-  return (
-    <Dialog isOpen={open} onOpenChange={onOpenChange} aria-describedby={descriptionId}>
-      <Layout
-        height="auto"
-        header={<DialogHeader title={t("provider_delete_blocked_title", { name })} />}
-        content={
-          <LayoutContent>
-            <p id={descriptionId} className="text-sm">
-              {t("provider_delete_blocked_description", { count })}
-            </p>
-          </LayoutContent>
-        }
-        footer={
-          <LayoutFooter>
-            <div className="flex justify-end">
-              <Button label={t("close")} onClick={() => onOpenChange(false)} />
-            </div>
-          </LayoutFooter>
-        }
-      />
-    </Dialog>
   );
 }
 
@@ -286,8 +242,8 @@ export function ProviderCard({
         <DeleteBlockedDialog
           open={showDelete}
           onOpenChange={setShowDelete}
-          name={section.name}
-          count={modelCount}
+          title={t("provider_delete_blocked_title", { name: section.name })}
+          description={t("provider_delete_blocked_description", { count: modelCount })}
         />
       ) : (
         <ConfirmDialogControlled

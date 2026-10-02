@@ -10,9 +10,9 @@ import { useMemo, useState } from "react";
 import { ProviderLogo } from "@/components/ai-elements/provider-logo";
 import type { ProviderOption } from "./model-providers";
 
-type CapabilityFilter = "all" | "embedding" | "transcription";
+type CapabilityFilter = "all" | "embedding" | "transcription" | "image";
 
-const CAPABILITY_FILTERS: CapabilityFilter[] = ["all", "embedding", "transcription"];
+const CAPABILITY_FILTERS: CapabilityFilter[] = ["all", "embedding", "transcription", "image"];
 
 function filterLabel(t: (key: string) => string, filter: CapabilityFilter): string {
   switch (filter) {
@@ -20,6 +20,8 @@ function filterLabel(t: (key: string) => string, filter: CapabilityFilter): stri
       return t("provider_capability_embeddings");
     case "transcription":
       return t("provider_capability_speech");
+    case "image":
+      return t("provider_capability_image");
     default:
       return t("all_providers");
   }
@@ -31,6 +33,7 @@ function ModeTokens({ modes }: { modes: string[] }) {
   if (modes.includes("completion")) labels.push(t("provider_capability_chat"));
   if (modes.includes("embedding")) labels.push(t("provider_capability_embeddings"));
   if (modes.includes("transcription")) labels.push(t("provider_capability_speech"));
+  if (modes.includes("image")) labels.push(t("provider_capability_image"));
   return (
     <ul className="flex flex-wrap gap-1">
       {labels.map((label) => (

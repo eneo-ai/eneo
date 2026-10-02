@@ -57,6 +57,15 @@ const presentation = {
   embedding_models: [model({ id: "e1", name: "e5-large", nickname: "E5", provider_id: "p2" })],
   transcription_models: [
     model({ id: "t1", name: "whisper-1", nickname: "Whisper", provider_id: "p1" })
+  ],
+  image_models: [
+    model({
+      id: "i1",
+      name: "gpt-image-1",
+      nickname: "GPT Image 1",
+      provider_id: "p1",
+      cost_per_image: "0.04"
+    })
   ]
 } as unknown as ModelsPresentation;
 
@@ -127,7 +136,7 @@ describe("provider status", () => {
   it("groups provider-backed models and lists providers that need a key first", () => {
     expect(sections.map((section) => section.name)).toEqual(["Mistral", "OpenAI", "vLLM"]);
     const openai = sections.find((section) => section.name === "OpenAI")!;
-    expect(openai.models.map(({ model }) => model.id)).toEqual(["c1", "c2", "t1"]);
+    expect(openai.models.map(({ model }) => model.id)).toEqual(["c1", "c2", "t1", "i1"]);
     expect(openai.status).toBe("ready");
     expect(sections[0]!.needsKey).toBe(true);
   });
@@ -158,6 +167,7 @@ describe("filters", () => {
     expect(unclassified.flatMap(({ models }) => models.map(({ model }) => model.id))).toEqual([
       "c1",
       "t1",
+      "i1",
       "e1"
     ]);
   });
@@ -169,23 +179,30 @@ describe("filters", () => {
       );
     expect(ids("gpt-4o")).toEqual(["c1"]);
     expect(ids("whisper")).toEqual(["t1"]);
+    expect(ids("gpt image")).toEqual(["i1"]);
     expect(ids("vllm")).toEqual(["e1"]);
-    expect(ids("  ")).toHaveLength(4);
+    expect(ids("  ")).toHaveLength(5);
   });
 
   it("counts models per type with the other filters applied", () => {
     expect(countByKind(sections, { search: "", security: "all" })).toEqual({
-      all: 4,
+      all: 5,
       completion: 2,
       embedding: 1,
-      transcription: 1
+      transcription: 1,
+      image: 1
     });
-    expect(countByKind(sections, { search: "gpt", security: "all" })).toEqual({
-      all: 2,
-      completion: 2,
+    expect(countByKind(sections, { search: "whisper", security: "all" })).toEqual({
+      all: 1,
+      completion: 0,
       embedding: 0,
-      transcription: 0
+      transcription: 1,
+      image: 0
     });
+    // Every kind is counted the same way: the image model matches "gpt" too.
+    expect(
+      filterSections(sections, { ...all, kind: "image" }).map(({ section }) => section.name)
+    ).toEqual(["OpenAI"]);
   });
 });
 
@@ -278,7 +295,7 @@ describe("lifecycle and attention", () => {
 });
 
 describe("prices", () => {
-  it("formats per 1M tokens, per minute or unknown", () => {
+  it("formats per 1M tokens, per minute, per image or unknown", () => {
     expect(
       modelPrice(
         model({ input_cost_per_token: "0.000003", output_cost_per_token: "0.000015" }),
@@ -289,6 +306,11 @@ describe("prices", () => {
       kind: "minute",
       value: "$0.006"
     });
+    expect(modelPrice(model({ cost_per_image: "0.04" }), "image")).toEqual({
+      kind: "image",
+      value: "$0.04"
+    });
+    expect(modelPrice(model({}), "image")).toEqual({ kind: "unknown" });
     expect(modelPrice(model({}), "embedding")).toEqual({ kind: "unknown" });
   });
 });

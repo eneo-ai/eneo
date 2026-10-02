@@ -16,7 +16,11 @@ const SAFE_ID = /^[a-z]+(?:-(?:[a-z]+|\d{1,2}))*$/;
 const ACRONYMS: Record<string, string> = { gpt: "GPT", ai: "AI" };
 
 export function modelDisplayName(model: ModelNameSource): string {
-  const chosen = model.nickname?.trim() || model.display_name?.trim();
+  // A display name that merely repeats the id (the backend's default) is no
+  // name at all; it is humanised like a missing one.
+  const displayName = model.display_name?.trim();
+  const chosen =
+    model.nickname?.trim() || (displayName && displayName !== model.name.trim() ? displayName : "");
   return chosen || humaniseModelId(model.name);
 }
 

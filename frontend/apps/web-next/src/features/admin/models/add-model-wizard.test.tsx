@@ -82,17 +82,32 @@ function tenantModel(overrides: Partial<AdminModel>): AdminModel {
   } as AdminModel;
 }
 
+/** The provider's image models, served when the list is asked for that mode. */
+const liveImageModels = [
+  { name: "gpt-image-1", display_name: "GPT Image 1", mode: "image", cost_per_image: 0.04 }
+];
+
 function renderWizard({
   initialProviderId,
   models = [],
-  providersLoaded = true
-}: { initialProviderId?: string; models?: AdminModel[]; providersLoaded?: boolean } = {}) {
-  api.GET.mockImplementation((path: string) => {
-    if (path.endsWith("/models/")) return ok(liveModels);
-    if (path.endsWith("/model-defaults/")) return ok({ error: "not found" });
-    if (path === "/api/v1/admin/model-providers/") return ok([existing]);
-    return ok([]);
-  });
+  providersLoaded = true,
+  caps = capabilities
+}: {
+  initialProviderId?: string;
+  models?: AdminModel[];
+  providersLoaded?: boolean;
+  caps?: typeof capabilities;
+} = {}) {
+  api.GET.mockImplementation(
+    (path: string, options?: { params?: { query?: { mode?: string } } }) => {
+      if (path.endsWith("/models/")) {
+        return ok(options?.params?.query?.mode === "image" ? liveImageModels : liveModels);
+      }
+      if (path.endsWith("/model-defaults/")) return ok({ error: "not found" });
+      if (path === "/api/v1/admin/model-providers/") return ok([existing]);
+      return ok([]);
+    }
+  );
   api.POST.mockImplementation((path: string) => {
     if (path === "/api/v1/admin/model-providers/") return ok({ ...existing, id: "p-new" });
     if (path.endsWith("/validate-model/")) return ok({ success: true });
@@ -100,7 +115,7 @@ function renderWizard({
   });
   const queryClient = testQueryClient();
   if (providersLoaded) queryClient.setQueryData(PROVIDERS_KEY, [existing]);
-  queryClient.setQueryData(CAPABILITIES_KEY, capabilities);
+  queryClient.setQueryData(CAPABILITIES_KEY, caps);
   queryClient.setQueryData(FAVORITES_KEY, []);
   queryClient.setQueryData(MODELS_KEY, {
     completion_models: models,
@@ -442,6 +457,51 @@ describe("the add-model wizard's catalog", () => {
     // Typing again clears it.
     fireEvent.change(id, { target: { value: "kommun-mistral-2" } });
     expect(id.getAttribute("aria-invalid")).toBeNull();
+  });
+
+  it("creates an image model with its per-image price and the auto request defaults", async () => {
+    const imageCapable = {
+      ...capabilities,
+      providers: { openai: { ...capabilities.providers.openai, modes: ["completion", "image"] } }
+    };
+    const { dialog, onOpenChange } = renderWizard({
+      initialProviderId: "p-vllm",
+      caps: imageCapable
+    });
+    // The provider does both: the type is chosen in the step.
+    const type = await within(dialog).findByRole("combobox", { name: /^Modelltyp/ });
+    expect(type.textContent).toContain("Chatt");
+    fireEvent.keyDown(type, { key: "Enter" });
+    fireEvent.click(await screen.findByRole("option", { name: "Bildgenerering" }));
+
+    const pick = await within(dialog).findByRole("checkbox", { name: /GPT Image 1/ });
+    expect(within(dialog).getByText(/\$0\.04\/bild/)).toBeTruthy();
+    expect(within(dialog).queryByRole("checkbox", { name: /gpt-5/ })).toBeNull();
+    fireEvent.click(pick);
+    fireEvent.click(within(dialog).getByRole("button", { name: "Lägg till 1 modell" }));
+
+    await waitFor(() => expect(onOpenChange).toHaveBeenCalledWith(false));
+    expect(api.POST).toHaveBeenCalledWith(
+      "/api/v1/admin/model-providers/{provider_id}/validate-model/",
+      {
+        params: { path: { provider_id: "p-vllm" } },
+        body: { model_name: "gpt-image-1", model_type: "image" }
+      }
+    );
+    expect(api.POST).toHaveBeenCalledWith("/api/v1/admin/tenant-models/image/", {
+      body: {
+        provider_id: "p-vllm",
+        name: "gpt-image-1",
+        display_name: "GPT Image 1",
+        family: "openai",
+        hosting: "swe",
+        cost_per_image: 0.04,
+        default_size: "auto",
+        default_quality: "auto",
+        security_classification: null
+      }
+    });
+    expect(toast.success).toHaveBeenCalledWith("1 modell tillagd");
   });
 
   it("keeps the picks when the list is filtered", async () => {

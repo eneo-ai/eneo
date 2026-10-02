@@ -17,7 +17,14 @@ import {
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { browserApi } from "@/lib/api/browser";
 import { modelDisplayName } from "@/lib/models/model-display-name";
-import { type AdminModel, modelUsageDetailsQueryOptions } from "./models";
+import { useImageOptionLabels } from "./image-model-options";
+import {
+  type AdminModel,
+  imageModelUsedBy,
+  type MigratableModelKind,
+  type ModelKind,
+  modelUsageDetailsQueryOptions
+} from "./models";
 
 /** Labels for the entity types the usage endpoint returns; an unknown one shows as sent. */
 const ENTITY_TYPE_KEYS = new Map([
@@ -28,7 +35,11 @@ const ENTITY_TYPE_KEYS = new Map([
   ["app_template", "model_usage_type_app_template"]
 ]);
 
-/** Read-only model details: properties (Info) + which resources use it (Usage). */
+/**
+ * Read-only model details: properties (Info) + which resources use it
+ * (Usage). Image models have no usage endpoint, so they show the properties
+ * alone, with their request defaults and the capability sources on them.
+ */
 export function ModelDetailDialog({
   model,
   kind,
@@ -36,7 +47,7 @@ export function ModelDetailDialog({
   onOpenChange
 }: {
   model: AdminModel;
-  kind: "completion" | "transcription";
+  kind: Exclude<ModelKind, "embedding">;
   open: boolean;
   onOpenChange: (open: boolean) => void;
 }) {
@@ -48,26 +59,40 @@ export function ModelDetailDialog({
         <DialogHeader>
           <DialogTitle>{modelDisplayName(model)}</DialogTitle>
         </DialogHeader>
-        <Tabs defaultValue="info">
-          <TabsList>
-            <TabsTrigger value="info">{t("model_detail_tab_info")}</TabsTrigger>
-            <TabsTrigger value="usage">{t("model_detail_tab_usage")}</TabsTrigger>
-          </TabsList>
-          <TabsContent value="info" className="pt-4">
-            <InfoTab model={model} t={t} />
-          </TabsContent>
-          <TabsContent value="usage" className="pt-4">
-            <UsageTab modelId={model.id} kind={kind} open={open} t={t} />
-          </TabsContent>
-        </Tabs>
+        {kind === "image" ? (
+          <InfoTab model={model} kind={kind} t={t} />
+        ) : (
+          <Tabs defaultValue="info">
+            <TabsList>
+              <TabsTrigger value="info">{t("model_detail_tab_info")}</TabsTrigger>
+              <TabsTrigger value="usage">{t("model_detail_tab_usage")}</TabsTrigger>
+            </TabsList>
+            <TabsContent value="info" className="pt-4">
+              <InfoTab model={model} kind={kind} t={t} />
+            </TabsContent>
+            <TabsContent value="usage" className="pt-4">
+              <UsageTab modelId={model.id} kind={kind} open={open} t={t} />
+            </TabsContent>
+          </Tabs>
+        )}
       </DialogContent>
     </Dialog>
   );
 }
 
-function InfoTab({ model, t }: { model: AdminModel; t: ReturnType<typeof useTranslations> }) {
+function InfoTab({
+  model,
+  kind,
+  t
+}: {
+  model: AdminModel;
+  kind: Exclude<ModelKind, "embedding">;
+  t: ReturnType<typeof useTranslations>;
+}) {
+  const imageLabels = useImageOptionLabels();
   const get = (key: string) => (model as Record<string, unknown>)[key];
   const contextWindow = get("max_input_tokens");
+  const usedBy = imageModelUsedBy(model);
 
   return (
     <dl className="grid grid-cols-1 gap-x-6 gap-y-2 text-sm sm:grid-cols-2">
@@ -84,15 +109,45 @@ function InfoTab({ model, t }: { model: AdminModel; t: ReturnType<typeof useTran
       {typeof contextWindow === "number" && (
         <Field label={t("model_context_label")} value={contextWindow.toLocaleString()} />
       )}
-      <div>
-        <dt className="text-muted-foreground text-xs">{t("capabilities")}</dt>
-        <dd className="flex flex-wrap gap-1 pt-0.5">
-          {get("vision") === true && <Badge variant="outline">{t("capability_vision")}</Badge>}
-          {get("reasoning") === true && (
-            <Badge variant="outline">{t("capability_reasoning")}</Badge>
+      {kind === "image" ? (
+        <>
+          {/* The request defaults the image tool uses when the assistant does not ask. */}
+          <Field
+            label={t("image_default_size")}
+            value={imageLabels.size(get("default_size") as string | undefined)}
+          />
+          <Field
+            label={t("image_default_quality")}
+            value={imageLabels.quality(get("default_quality") as string | undefined)}
+          />
+          {usedBy.length > 0 && (
+            <div className="sm:col-span-2">
+              <dt className="text-muted-foreground text-xs">
+                {t("model_used_by_image_generation")}
+              </dt>
+              <dd>
+                <ul className="flex flex-wrap gap-1 pt-0.5">
+                  {usedBy.map((source) => (
+                    <li key={source.id} className="flex">
+                      <Badge variant="outline">{source.name}</Badge>
+                    </li>
+                  ))}
+                </ul>
+              </dd>
+            </div>
           )}
-        </dd>
-      </div>
+        </>
+      ) : (
+        <div>
+          <dt className="text-muted-foreground text-xs">{t("capabilities")}</dt>
+          <dd className="flex flex-wrap gap-1 pt-0.5">
+            {get("vision") === true && <Badge variant="outline">{t("capability_vision")}</Badge>}
+            {get("reasoning") === true && (
+              <Badge variant="outline">{t("capability_reasoning")}</Badge>
+            )}
+          </dd>
+        </div>
+      )}
     </dl>
   );
 }
@@ -104,7 +159,7 @@ function UsageTab({
   t
 }: {
   modelId: string;
-  kind: "completion" | "transcription";
+  kind: MigratableModelKind;
   open: boolean;
   t: ReturnType<typeof useTranslations>;
 }) {

@@ -16,7 +16,12 @@ import { useTranslations } from "next-intl";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { flushSync } from "react-dom";
 import { LoadingState } from "@/components/composites/loading-state";
-import { formatCostPerMillionTokens, formatTokens } from "@/features/ai-models/format-model-stats";
+import {
+  formatCostPerImage,
+  formatCostPerMillionTokens,
+  formatCostPerMinute,
+  formatTokens
+} from "@/features/ai-models/format-model-stats";
 import { securityClassificationsQueryOptions } from "@/features/admin/security-classifications/security-classifications";
 import { browserApi } from "@/lib/api/browser";
 import { toastApiError } from "@/lib/api/toast";
@@ -47,7 +52,8 @@ const NO_CLASSIFICATION = "__none__";
 const MODEL_LISTS = {
   completion: "completion_models",
   embedding: "embedding_models",
-  transcription: "transcription_models"
+  transcription: "transcription_models",
+  image: "image_models"
 } as const satisfies Record<ModelKind, keyof ModelsPresentation>;
 
 type ExistingModel = Pick<AdminModel, "name" | "nickname" | "provider_id" | "is_deprecated">;
@@ -66,6 +72,24 @@ function capabilityLabels(t: ReturnType<typeof useTranslations>, model: CatalogM
     model.supports_function_calling ? t("model_label_tool_calling") : null,
     model.supports_reasoning ? t("model_label_reasoning") : null
   ].filter((label): label is string => label !== null);
+}
+
+/** The catalog's indicative price in the unit the model type is priced in. */
+function catalogPrice(
+  t: ReturnType<typeof useTranslations>,
+  model: CatalogModel,
+  mode: ModelKind
+): string | null {
+  if (mode === "image") {
+    const value = formatCostPerImage(model.cost_per_image);
+    return value ? t("model_cost_chip_per_image", { value }) : null;
+  }
+  if (mode === "transcription") {
+    const cost = formatCostPerMinute(model.cost_per_minute);
+    return cost ? t("model_cost_per_minute", { cost }) : null;
+  }
+  const price = formatCostPerMillionTokens(model.input_cost_per_token);
+  return price ? t("price_per_million", { price }) : null;
 }
 
 /** The display name a pick is created with. */
@@ -290,6 +314,20 @@ export function ModelCatalogStep({
               security_classification: selectedClassification
             });
           }
+          if (mode === "image") {
+            return createTenantModel(browserApi, "image", {
+              provider_id: providerId,
+              name: model.name,
+              display_name: displayName,
+              family: providerType,
+              hosting: "swe",
+              cost_per_image: model.cost_per_image ?? null,
+              // The request defaults are edited afterwards; "auto" lets the model decide.
+              default_size: "auto",
+              default_quality: "auto",
+              security_classification: selectedClassification
+            });
+          }
           if (mode === "transcription") {
             return createTenantModel(browserApi, "transcription", {
               provider_id: providerId,
@@ -471,14 +509,14 @@ export function ModelCatalogStep({
                 >
                   {listed.map((model) => {
                     const added = isAdded(model);
-                    const price = formatCostPerMillionTokens(model.input_cost_per_token);
+                    const price = catalogPrice(t, model, mode);
                     const capabilities = capabilityLabels(t, model);
                     const details = [
                       // In words, not only as the dimmed checkbox (WCAG 1.4.1).
                       added ? t("provider_form_model_added") : null,
                       model.display_name && model.display_name !== model.name ? model.name : null,
                       model.max_input_tokens ? formatTokens(model.max_input_tokens) : null,
-                      price ? t("price_per_million", { price }) : null
+                      price
                     ].filter(Boolean);
                     return (
                       <CheckboxListItem

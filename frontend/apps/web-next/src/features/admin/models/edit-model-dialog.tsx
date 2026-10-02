@@ -27,6 +27,15 @@ import type { SecurityClassification } from "@/features/admin/security-classific
 import { browserApi } from "@/lib/api/browser";
 import { toastApiError } from "@/lib/api/toast";
 import { toast } from "@/lib/toast";
+import {
+  IMAGE_QUALITIES,
+  IMAGE_SIZES,
+  type ImageQuality,
+  type ImageSize,
+  isImageQuality,
+  isImageSize,
+  useImageOptionLabels
+} from "./image-model-options";
 import { type AdminModel, MODELS_KEY, type ModelKind, updateTenantModel } from "./models";
 
 /** Stored cost is per-token (tiny); the form edits the friendlier per-1M value. */
@@ -52,7 +61,14 @@ function hasTools(model: AdminModel): model is AdminModel & { supports_tool_call
   return "supports_tool_calling" in model;
 }
 
-/** Full metadata edit for a tenant (custom) completion model. */
+/** Token limits and token prices apply to the kinds priced per token. */
+const TOKEN_PRICED: ReadonlySet<ModelKind> = new Set(["completion", "embedding"]);
+
+/**
+ * Full metadata edit for a tenant (custom) model: the fields of its kind
+ * (token limits and prices, per-minute price, or an image model's per-image
+ * price and request defaults) plus hosting, stability and classification.
+ */
 export function EditModelDialog({
   model,
   kind,
@@ -70,6 +86,7 @@ export function EditModelDialog({
 }) {
   const t = useTranslations();
   const queryClient = useQueryClient();
+  const imageLabels = useImageOptionLabels();
 
   const [displayName, setDisplayName] = useState(model.nickname ?? model.name);
   const [litellmName, setLitellmName] = useState(model.name);
@@ -100,6 +117,17 @@ export function EditModelDialog({
   const [costPerMinute, setCostPerMinute] = useState(
     "cost_per_minute" in model ? String(model.cost_per_minute ?? "") : ""
   );
+  const [costPerImage, setCostPerImage] = useState(
+    "cost_per_image" in model ? String(model.cost_per_image ?? "") : ""
+  );
+  const [defaultSize, setDefaultSize] = useState<ImageSize>(
+    "default_size" in model && isImageSize(model.default_size) ? model.default_size : "auto"
+  );
+  const [defaultQuality, setDefaultQuality] = useState<ImageQuality>(
+    "default_quality" in model && isImageQuality(model.default_quality)
+      ? model.default_quality
+      : "auto"
+  );
   const [vision, setVision] = useState("vision" in model ? (model.vision ?? false) : false);
   const [reasoning, setReasoning] = useState(
     "reasoning" in model ? (model.reasoning ?? false) : false
@@ -127,6 +155,19 @@ export function EditModelDialog({
           stability: stability.trim() || null,
           input_cost_per_token: perMillionToPerToken(inputCost),
           output_cost_per_token: perMillionToPerToken(outputCost),
+          security_classification
+        });
+      }
+      if (kind === "image") {
+        return updateTenantModel(browserApi, "image", model.id, {
+          display_name: displayName.trim(),
+          description: description.trim() || null,
+          hosting: hosting.trim() || null,
+          open_source: openSource,
+          stability: stability.trim() || null,
+          cost_per_image: numericOrNull(costPerImage),
+          default_size: defaultSize,
+          default_quality: defaultQuality,
           security_classification
         });
       }
@@ -245,7 +286,7 @@ export function EditModelDialog({
             </Label>
           </div>
 
-          {kind !== "transcription" && (
+          {TOKEN_PRICED.has(kind) && (
             <div className="grid grid-cols-2 gap-4">
               <div className="flex flex-col gap-1.5">
                 <Label htmlFor="model-max-input">{t("max_input_tokens")}</Label>
@@ -301,7 +342,81 @@ export function EditModelDialog({
             </div>
           )}
 
-          {kind !== "transcription" && (
+          {kind === "image" && (
+            <>
+              <div className="flex flex-col gap-1.5">
+                <Label htmlFor="model-cost-image">{t("cost_per_image")}</Label>
+                <Input
+                  id="model-cost-image"
+                  type="number"
+                  min={0}
+                  step="any"
+                  inputMode="decimal"
+                  value={costPerImage}
+                  aria-describedby="model-cost-image-help"
+                  onChange={(event) => setCostPerImage(event.target.value)}
+                />
+                <p id="model-cost-image-help" className="text-muted-foreground text-xs">
+                  {t("cost_per_image_help")}
+                </p>
+              </div>
+              {/* The request defaults the image tool uses when the assistant does not ask. */}
+              <div className="grid grid-cols-2 gap-4">
+                <div className="flex flex-col gap-1.5">
+                  <Label htmlFor="model-default-size">{t("image_default_size")}</Label>
+                  <Select
+                    value={defaultSize}
+                    onValueChange={(value) => isImageSize(value) && setDefaultSize(value)}
+                  >
+                    <SelectTrigger
+                      id="model-default-size"
+                      className="w-full"
+                      aria-describedby="model-default-size-help"
+                    >
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {IMAGE_SIZES.map((size) => (
+                        <SelectItem key={size} value={size}>
+                          {imageLabels.size(size)}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                  <p id="model-default-size-help" className="text-muted-foreground text-xs">
+                    {t("image_default_size_help")}
+                  </p>
+                </div>
+                <div className="flex flex-col gap-1.5">
+                  <Label htmlFor="model-default-quality">{t("image_default_quality")}</Label>
+                  <Select
+                    value={defaultQuality}
+                    onValueChange={(value) => isImageQuality(value) && setDefaultQuality(value)}
+                  >
+                    <SelectTrigger
+                      id="model-default-quality"
+                      className="w-full"
+                      aria-describedby="model-default-quality-help"
+                    >
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {IMAGE_QUALITIES.map((quality) => (
+                        <SelectItem key={quality} value={quality}>
+                          {imageLabels.quality(quality)}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                  <p id="model-default-quality-help" className="text-muted-foreground text-xs">
+                    {t("image_default_quality_help")}
+                  </p>
+                </div>
+              </div>
+            </>
+          )}
+
+          {TOKEN_PRICED.has(kind) && (
             <div className="grid grid-cols-2 gap-4">
               <div className="flex flex-col gap-1.5">
                 <Label htmlFor="model-input-cost">{t("input_cost_per_token")}</Label>

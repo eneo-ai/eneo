@@ -22,6 +22,7 @@ export interface CatalogModel {
   input_cost_per_token?: number | null;
   output_cost_per_token?: number | null;
   cost_per_minute?: number | null;
+  cost_per_image?: number | null;
 }
 
 /** Providers whose API can't enumerate models (Azure lists deployments, not models). */
@@ -50,7 +51,8 @@ function mapCatalogModel(item: Record<string, unknown>): CatalogModel {
     output_vector_size: num(item.output_vector_size),
     input_cost_per_token: cost(item.input_cost_per_token),
     output_cost_per_token: cost(item.output_cost_per_token),
-    cost_per_minute: cost(item.cost_per_minute)
+    cost_per_minute: cost(item.cost_per_minute),
+    cost_per_image: cost(item.cost_per_image)
   };
 }
 

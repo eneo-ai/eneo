@@ -71,7 +71,24 @@ const presentation = {
       security_classification: { id: "s3", name: "Klass 3", security_level: 3 }
     }
   ],
-  transcription_models: []
+  transcription_models: [],
+  image_models: [
+    {
+      id: "i1",
+      name: "gpt-image-1",
+      nickname: "GPT Image 1",
+      is_deprecated: false,
+      is_org_enabled: true,
+      is_org_default: false,
+      provider_id: "p-images",
+      cost_per_image: "0.04",
+      default_size: "auto",
+      default_quality: "high",
+      security_classification: null,
+      // The built-in image generation runs on it: it cannot be deleted.
+      used_by_mcp_servers: [{ id: "cap-1", name: "Bildgenerering", purpose: "image_generation" }]
+    }
+  ]
 } as unknown as ModelsPresentation;
 
 const provider = (id: string, name: string, type: string, key: string | null) => ({
@@ -94,7 +111,8 @@ const providers = [
   // Self-hosted: no key needed.
   provider("p-vllm", "vLLM", "hosted_vllm", null),
   // Needs a key but has none (and no models yet).
-  provider("p-openai", "OpenAI", "openai", null)
+  provider("p-openai", "OpenAI", "openai", null),
+  provider("p-images", "OpenAI Images", "openai", "...9c1e")
 ];
 
 /** vLLM's key is optional; every other type needs one (the backend's defaults). */
@@ -217,7 +235,7 @@ describe("ModelsPage", () => {
   it("filters by type with counts and announces the result", async () => {
     renderPage();
     const types = screen.getByRole("radiogroup", { name: "Modelltyp" });
-    expect(within(types).getByRole("radio", { name: "Alla (3)" })).toBeTruthy();
+    expect(within(types).getByRole("radio", { name: "Alla (4)" })).toBeTruthy();
     expect(within(types).getByRole("radio", { name: "Chatt (2)" })).toBeTruthy();
 
     fireEvent.click(within(types).getByRole("radio", { name: "Inbäddning (1)" }));
@@ -233,6 +251,61 @@ describe("ModelsPage", () => {
         "1 modell visas"
       )
     );
+  });
+
+  it("lists image models with their type, per-image price and the source that runs on them", async () => {
+    renderPage();
+    const images = screen.getByRole("region", { name: "OpenAI Images" });
+    expect(within(images).getByText("1 modell · nyckel ...9c1e")).toBeTruthy();
+    expect(within(images).getByText("GPT Image 1")).toBeTruthy();
+    expect(within(images).getByText("gpt-image-1")).toBeTruthy();
+    // With every type shown, the type column says which this is.
+    expect(within(images).getByRole("cell", { name: "Bildgenerering" })).toBeTruthy();
+    expect(within(images).getByText("$0.04/bild")).toBeTruthy();
+    expect(within(images).getByTitle("Används av Bildgenerering")).toBeTruthy();
+
+    const types = screen.getByRole("radiogroup", { name: "Modelltyp" });
+    fireEvent.click(within(types).getByRole("radio", { name: "Bildgenerering (1)" }));
+    expect(screen.queryByRole("region", { name: "Anthropic" })).toBeNull();
+    expect(screen.getByRole("region", { name: "OpenAI Images" })).toBeTruthy();
+    await expectNoAxeViolations(document.body);
+  });
+
+  it("enables and disables an image model through its own endpoint", async () => {
+    renderPage();
+    const toggle = screen.getByRole("switch", { name: "Aktivera GPT Image 1" });
+    expect((toggle as HTMLInputElement).checked).toBe(true);
+
+    fireEvent.click(toggle);
+
+    await waitFor(() =>
+      expect(api.POST).toHaveBeenCalledWith("/api/v1/image-models/{id}/", {
+        params: { path: { id: "i1" } },
+        body: { is_org_enabled: false }
+      })
+    );
+  });
+
+  it("says at the delete action, and when it is chosen, why an image model a source runs on stays", async () => {
+    renderPage();
+    const menu = openRowMenu("GPT Image 1");
+    const remove = within(menu).getByRole("menuitem", { name: /^Ta bort/ });
+    // Reachable like any item, with its reason as text (not a dimmed item).
+    expect(remove.getAttribute("aria-disabled")).toBeNull();
+    expect(remove.textContent).toContain("Kan inte tas bort: används av Bildgenerering");
+
+    fireEvent.click(remove);
+
+    const dialog = await screen.findByRole("dialog", {
+      name: "GPT Image 1 kan inte tas bort än",
+      description: /Modellen används av Bildgenerering\./
+    });
+    expect(within(dialog).queryByRole("button", { name: "Ta bort" })).toBeNull();
+    await expectNoAxeViolations(document.body);
+
+    fireEvent.click(within(dialog).getByRole("button", { name: "Stäng" }));
+    await waitFor(() => expect(dialog.hasAttribute("open")).toBe(false));
+    expect(api.DELETE).not.toHaveBeenCalled();
   });
 
   it("searches model names, technical ids and provider names", () => {

@@ -1,4 +1,5 @@
 import {
+  formatCostPerImage,
   formatCostPerMillionTokens,
   formatCostPerMinute,
   getDeprecationStatus
@@ -37,7 +38,11 @@ function flatten(presentation: ModelsPresentation): KindedModel[] {
   return [
     ...presentation.completion_models.map((model) => ({ model, kind: "completion" as const })),
     ...presentation.embedding_models.map((model) => ({ model, kind: "embedding" as const })),
-    ...presentation.transcription_models.map((model) => ({ model, kind: "transcription" as const }))
+    ...presentation.transcription_models.map((model) => ({
+      model,
+      kind: "transcription" as const
+    })),
+    ...presentation.image_models.map((model) => ({ model, kind: "image" as const }))
   ];
 }
 
@@ -104,7 +109,13 @@ export function buildProviderSections(
 }
 
 export type KindFilter = "all" | ModelKind;
-export const KIND_FILTERS: KindFilter[] = ["all", "completion", "embedding", "transcription"];
+export const KIND_FILTERS: KindFilter[] = [
+  "all",
+  "completion",
+  "embedding",
+  "transcription",
+  "image"
+];
 
 /** Security filter value for models without a classification. */
 export const UNCLASSIFIED = "__unclassified__";
@@ -177,7 +188,8 @@ export function countByKind(
     all: 0,
     completion: 0,
     embedding: 0,
-    transcription: 0
+    transcription: 0,
+    image: 0
   };
   for (const section of sections) {
     for (const { kind } of sectionModels(section, { ...filters, kind: "all" })) {
@@ -253,10 +265,18 @@ export function modelsAttention(
 export type ModelPrice =
   | { kind: "tokens"; input: string | null; output: string | null }
   | { kind: "minute"; value: string }
+  | { kind: "image"; value: string }
   | { kind: "unknown" };
 
-/** Indicative price: per 1M tokens (in / out), or per audio minute for transcription. */
+/**
+ * Indicative price: per 1M tokens (in / out), per audio minute for
+ * transcription, or per generated image for image models.
+ */
 export function modelPrice(model: AdminModel, kind: ModelKind): ModelPrice {
+  if (kind === "image") {
+    const value = formatCostPerImage((model as { cost_per_image?: string | null }).cost_per_image);
+    return value ? { kind: "image", value } : { kind: "unknown" };
+  }
   if (kind === "transcription") {
     const value = formatCostPerMinute(
       (model as { cost_per_minute?: string | null }).cost_per_minute

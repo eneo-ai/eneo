@@ -33,7 +33,8 @@ const presentation = {
     model("c3", "Llama", "p-groq")
   ],
   embedding_models: [model("e1", "E5 Large", "p-vllm")],
-  transcription_models: []
+  transcription_models: [],
+  image_models: []
 } as unknown as ModelsPresentation;
 
 function provider(id: string, name: string, overrides: Partial<ModelProvider> = {}): ModelProvider {

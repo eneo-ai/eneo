@@ -7,13 +7,17 @@ export type ModelsPresentation = Schema<"ModelsPresentation">;
 export type CompletionModelAdmin = Schema<"CompletionModelSecurityStatus">;
 export type EmbeddingModelAdmin = Schema<"EmbeddingModelSecurityStatus">;
 export type TranscriptionModelAdmin = Schema<"TranscriptionModelSecurityStatus">;
-export type AdminModel = CompletionModelAdmin | EmbeddingModelAdmin | TranscriptionModelAdmin;
+export type ImageModelAdmin = Schema<"ImageModelSecurityStatus">;
+export type AdminModel =
+  CompletionModelAdmin | EmbeddingModelAdmin | TranscriptionModelAdmin | ImageModelAdmin;
 export type TenantCompletionModelCreate = Schema<"TenantCompletionModelCreate">;
 export type TenantCompletionModelUpdate = Schema<"TenantCompletionModelUpdate">;
 export type TenantEmbeddingModelCreate = Schema<"TenantEmbeddingModelCreate">;
 export type TenantEmbeddingModelUpdate = Schema<"TenantEmbeddingModelUpdate">;
 export type TenantTranscriptionModelCreate = Schema<"TenantTranscriptionModelCreate">;
 export type TenantTranscriptionModelUpdate = Schema<"TenantTranscriptionModelUpdate">;
+export type TenantImageModelCreate = Schema<"TenantImageModelCreate">;
+export type TenantImageModelUpdate = Schema<"TenantImageModelUpdate">;
 export type ModelUsageStatistics = Schema<"ModelUsageStatistics">;
 export type TranscriptionModelUsageStats = Schema<"TranscriptionModelUsageStats">;
 export type ValidationResult = Schema<"ValidationResult">;
@@ -21,7 +25,8 @@ export type ModelMigrationHistory = Schema<"ModelMigrationHistory"> & {
   model_type: "completion" | "transcription";
 };
 
-export type ModelKind = "completion" | "embedding" | "transcription";
+export type ModelKind = "completion" | "embedding" | "transcription" | "image";
+/** Kinds with usage endpoints (and so a detail dialog's usage tab and a migrate flow). */
 export type MigratableModelKind = "completion" | "transcription";
 
 export const MODELS_KEY = ["admin-models"];
@@ -206,9 +211,25 @@ export function createTenantModel(
 ): Promise<unknown>;
 export function createTenantModel(
   api: EneoClient,
+  kind: "image",
+  body: TenantImageModelCreate
+): Promise<unknown>;
+export function createTenantModel(
+  api: EneoClient,
   kind: ModelKind,
-  body: TenantCompletionModelCreate | TenantEmbeddingModelCreate | TenantTranscriptionModelCreate
+  body:
+    | TenantCompletionModelCreate
+    | TenantEmbeddingModelCreate
+    | TenantTranscriptionModelCreate
+    | TenantImageModelCreate
 ) {
+  if (kind === "image") {
+    return unwrap(
+      api.POST("/api/v1/admin/tenant-models/image/", {
+        body: body as TenantImageModelCreate
+      })
+    );
+  }
   if (kind === "embedding") {
     return unwrap(
       api.POST("/api/v1/admin/tenant-models/embedding/", {
@@ -250,10 +271,28 @@ export function updateTenantModel(
 ): Promise<unknown>;
 export function updateTenantModel(
   api: EneoClient,
+  kind: "image",
+  modelId: string,
+  body: TenantImageModelUpdate
+): Promise<unknown>;
+export function updateTenantModel(
+  api: EneoClient,
   kind: ModelKind,
   modelId: string,
-  body: TenantCompletionModelUpdate | TenantEmbeddingModelUpdate | TenantTranscriptionModelUpdate
+  body:
+    | TenantCompletionModelUpdate
+    | TenantEmbeddingModelUpdate
+    | TenantTranscriptionModelUpdate
+    | TenantImageModelUpdate
 ) {
+  if (kind === "image") {
+    return unwrap(
+      api.PUT("/api/v1/admin/tenant-models/image/{model_id}/", {
+        params: { path: { model_id: modelId } },
+        body: body as TenantImageModelUpdate
+      })
+    );
+  }
   if (kind === "embedding") {
     return unwrap(
       api.PUT("/api/v1/admin/tenant-models/embedding/{model_id}/", {
@@ -274,6 +313,13 @@ export function updateTenantModel(
 }
 
 export function deleteTenantModel(api: EneoClient, kind: ModelKind, modelId: string) {
+  if (kind === "image") {
+    return unwrap(
+      api.DELETE("/api/v1/admin/tenant-models/image/{model_id}/", {
+        params: { path: { model_id: modelId } }
+      })
+    );
+  }
   if (kind === "embedding") {
     return unwrap(
       api.DELETE("/api/v1/admin/tenant-models/embedding/{model_id}/", {
@@ -306,6 +352,14 @@ export function validateProviderModel(
       body
     })
   );
+}
+
+/**
+ * Capability sources (the built-in image generation) that run on an image
+ * model. While any exists the backend refuses to delete the model (9039).
+ */
+export function imageModelUsedBy(model: AdminModel): { id: string; name: string }[] {
+  return "used_by_mcp_servers" in model ? (model.used_by_mcp_servers ?? []) : [];
 }
 
 export function adminModelsQueryOptions(api: EneoClient) {

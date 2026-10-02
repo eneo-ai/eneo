@@ -1,6 +1,14 @@
 import { describe, expect, it } from "vitest";
 import { humaniseModelId, modelDisplayName, modelTechnicalId } from "./model-display-name";
 
+describe("modelDisplayName (display name equal to the id)", () => {
+  it("humanises when the display name only repeats the id", () => {
+    expect(modelDisplayName({ name: "claude-opus-4-6", display_name: "claude-opus-4-6" })).toBe(
+      "Claude Opus 4.6"
+    );
+  });
+});
+
 describe("modelDisplayName", () => {
   it("prefers the nickname, then the catalog display name", () => {
     expect(modelDisplayName({ name: "claude-haiku-4-5", nickname: "Haiku" })).toBe("Haiku");

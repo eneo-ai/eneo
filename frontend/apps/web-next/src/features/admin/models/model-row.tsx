@@ -34,6 +34,7 @@ import { toastApiError } from "@/lib/api/toast";
 import { toast } from "@/lib/toast";
 import { cn } from "@/lib/utils";
 import { modelDisplayName, modelTechnicalId } from "@/lib/models/model-display-name";
+import { DeleteBlockedDialog } from "./delete-blocked-dialog";
 import { EditModelDialog } from "./edit-model-dialog";
 import { MigrateModelDialog } from "./migrate-model-dialog";
 import { useModelTypeLabel } from "./model-type-label";
@@ -41,6 +42,7 @@ import { ModelDetailDialog } from "./model-detail-dialog";
 import {
   type AdminModel,
   deleteTenantModel,
+  imageModelUsedBy,
   type MigratableModelKind,
   MODELS_KEY,
   type ModelKind
@@ -67,6 +69,10 @@ async function updateModelFlags(kind: ModelKind, id: string, flags: ModelFlags):
         params: { path: { id } },
         body: flags
       })
+    );
+  } else if (kind === "image") {
+    await unwrap(
+      browserApi.POST("/api/v1/image-models/{id}/", { params: { path: { id } }, body: flags })
     );
   } else {
     await unwrap(
@@ -118,7 +124,10 @@ function Capabilities({ model }: { model: AdminModel }) {
   );
 }
 
-/** Mono price, right-aligned by the cell; screen readers get "Indata $5, utdata $25". */
+/**
+ * Mono price, right-aligned by the cell; screen readers get "Indata $5,
+ * utdata $25". Per-minute and per-image prices carry their unit.
+ */
 function Price({ model, kind }: { model: AdminModel; kind: ModelKind }) {
   const t = useTranslations();
   const price = modelPrice(model, kind);
@@ -137,6 +146,13 @@ function Price({ model, kind }: { model: AdminModel; kind: ModelKind }) {
     return (
       <span className="font-mono text-xs tabular-nums">
         {t("model_cost_per_minute", { cost: price.value })}
+      </span>
+    );
+  }
+  if (price.kind === "image") {
+    return (
+      <span className="font-mono text-xs tabular-nums">
+        {t("model_cost_chip_per_image", { value: price.value })}
       </span>
     );
   }
@@ -176,7 +192,9 @@ export function ModelRow({
   const [showMigrate, setShowMigrate] = useState(false);
   const [showDetail, setShowDetail] = useState(false);
   const [showDelete, setShowDelete] = useState(false);
-  const canViewDetail = kind === "completion" || kind === "transcription";
+  // Embedding models have no detail view; image models get the properties
+  // without a usage tab (no usage endpoint).
+  const canViewDetail = kind !== "embedding";
 
   const label = modelDisplayName(model);
   // Each returns the refetch, so a mutation stays pending until the list has
@@ -232,6 +250,12 @@ export function ModelRow({
     (kind === "completion" || kind === "transcription") &&
     !("migrated_to_model_id" in model && model.migrated_to_model_id);
   const canDelete = !readonly;
+  // Capability sources (the built-in image generation) that run on this
+  // image model: the backend refuses to delete it while any exists, so the
+  // menu says so and choosing it explains instead of failing.
+  const usedBy = imageModelUsedBy(model);
+  const usedByNames = usedBy.map((source) => source.name).join(", ");
+  const deleteBlocked = usedBy.length > 0;
   const lifecycle = modelLifecycle(model);
   // Menu groups: open/change the model · org-wide flags · delete.
   const hasModelActions = canViewDetail || canEdit || canMigrate;
@@ -319,6 +343,9 @@ export function ModelRow({
                 variant="warning"
                 label={t("model_label_retiring", { date: lifecycle.date })}
               />
+            )}
+            {deleteBlocked && (
+              <Badge variant="warning" label={t("model_used_by_image_generation")} />
             )}
           </div>
           {technicalId && (
@@ -421,6 +448,13 @@ export function ModelRow({
               <DropdownMenuItem
                 icon={Trash2}
                 label={t("delete")}
+                // The reason is at the action, and the item stays reachable:
+                // Astryx menus skip disabled items, reason and all.
+                description={
+                  deleteBlocked
+                    ? t("model_delete_blocked_used_by", { names: usedByNames })
+                    : undefined
+                }
                 variant="destructive"
                 onClick={() => setShowDelete(true)}
               />
@@ -449,12 +483,20 @@ export function ModelRow({
         {canViewDetail && (
           <ModelDetailDialog
             model={model}
-            kind={kind as "completion" | "transcription"}
+            kind={kind as Exclude<ModelKind, "embedding">}
             open={showDetail}
             onOpenChange={setShowDetail}
           />
         )}
-        {canDelete && (
+        {canDelete && deleteBlocked && (
+          <DeleteBlockedDialog
+            open={showDelete}
+            onOpenChange={setShowDelete}
+            title={t("admin_models_delete_blocked_title", { name: label })}
+            description={t("admin_models_delete_blocked_description", { names: usedByNames })}
+          />
+        )}
+        {canDelete && !deleteBlocked && (
           <ConfirmDialogControlled
             open={showDelete}
             onOpenChange={setShowDelete}

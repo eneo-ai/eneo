@@ -8,7 +8,12 @@ import type { ProviderOption } from "./model-providers";
 import { ProviderPicker } from "./provider-picker";
 
 const options: ProviderOption[] = [
-  { type: "openai", name: "OpenAI", modes: ["completion", "embedding"], selfHosted: false },
+  {
+    type: "openai",
+    name: "OpenAI",
+    modes: ["completion", "embedding", "image"],
+    selfHosted: false
+  },
   { type: "anthropic", name: "Anthropic", modes: ["completion"], selfHosted: false },
   {
     type: "hosted_vllm",
@@ -60,6 +65,10 @@ it("filters by capability, self-hosting and search", () => {
   fireEvent.click(within(capabilities).getByRole("radio", { name: "Tal-till-text" }));
   expect(screen.queryByRole("button", { name: "Lägg till OpenAI" })).toBeNull();
   expect(screen.getByRole("button", { name: "Lägg till vLLM" })).toBeTruthy();
+
+  fireEvent.click(within(capabilities).getByRole("radio", { name: "Bildgenerering" }));
+  expect(screen.getByRole("button", { name: "Lägg till OpenAI" })).toBeTruthy();
+  expect(screen.queryByRole("button", { name: "Lägg till vLLM" })).toBeNull();
 
   fireEvent.click(within(capabilities).getByRole("radio", { name: "Alla leverantörer" }));
   const selfHosted = screen.getByRole("button", { name: "Självhostad" });

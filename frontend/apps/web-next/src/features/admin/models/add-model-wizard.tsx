@@ -49,7 +49,7 @@ const STEP_FOCUS = [
 type Step = "provider" | "credentials" | "models";
 
 function supportedModelKinds(modes: string[] | undefined): ModelKind[] {
-  const ordered: ModelKind[] = ["completion", "embedding", "transcription"];
+  const ordered: ModelKind[] = ["completion", "embedding", "transcription", "image"];
   const modeSet = new Set(modes ?? []);
   const supported = ordered.filter((mode) => modeSet.has(mode));
   return supported.length > 0 ? supported : ["completion"];
