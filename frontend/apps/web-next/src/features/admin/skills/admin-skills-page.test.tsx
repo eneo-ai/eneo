@@ -69,7 +69,7 @@ describe("admin skill runtime policy", () => {
         }
       })
     );
-    expect(await screen.findByText("skills_runtime_policy_saved")).toBeTruthy();
+    expect((await screen.findAllByText("skills_runtime_policy_saved")).length).toBeGreaterThan(0);
     expect(
       get.mock.calls.filter(([path]) => String(path).endsWith("model-projections"))
     ).toHaveLength(2);
@@ -136,7 +136,7 @@ describe("admin skill runtime policy", () => {
     expect(put).toHaveBeenCalledTimes(1);
 
     resolve({ data: { ...policy, max_attached_skills: 9 }, response: new Response("{}") });
-    expect(await screen.findByText("skills_runtime_policy_saved")).toBeTruthy();
+    expect((await screen.findAllByText("skills_runtime_policy_saved")).length).toBeGreaterThan(0);
     expect(document.activeElement).toBe(save);
   });
 
@@ -152,7 +152,9 @@ describe("admin skill runtime policy", () => {
     await waitFor(() =>
       expect(post).toHaveBeenCalledWith("/api/v1/settings/skills/runtime-policy/reset")
     );
-    expect(await screen.findByText("skills_runtime_policy_reset_done")).toBeTruthy();
+    expect((await screen.findAllByText("skills_runtime_policy_reset_done")).length).toBeGreaterThan(
+      0
+    );
   });
 
   it("names the model impact table by its heading", async () => {

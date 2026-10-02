@@ -2,9 +2,10 @@
 
 import { releases, visibleEntries } from "@eneo/whats-new";
 import type { EntryArea, Locale, Release, ReleaseEntry } from "@eneo/whats-new";
+import { useAnnounce } from "@astryxdesign/core/hooks";
 import { Sparkles } from "lucide-react";
 import { useLocale, useTranslations } from "next-intl";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { PageHeader } from "@/components/composites/page-header";
 import { useAppContext } from "@/components/providers/app-context";
 import { Badge } from "@/components/ui/badge";
@@ -47,6 +48,16 @@ export function WhatsNewPage({ title }: { title: string }) {
   const current = releases.find((release) => release.version === selectedVersion) ?? null;
   const entries = current ? filterEntries(current, filters, isAdmin) : [];
   const total = current ? visibleEntries(current, isAdmin).length : 0;
+  const countText = t("whats_new_count", { shown: entries.length, total });
+  const announce = useAnnounce();
+  const announcedCount = useRef<string | null>(null);
+  useEffect(() => {
+    // Filter changes announce the new result count; the first paint does not.
+    if (announcedCount.current !== null && announcedCount.current !== countText) {
+      announce(countText);
+    }
+    announcedCount.current = countText;
+  }, [countText, announce]);
   const areas = current ? areasPresent(current, isAdmin) : [];
 
   useEffect(() => {
@@ -194,9 +205,7 @@ export function WhatsNewPage({ title }: { title: string }) {
                     }
                   />
                   <label htmlFor="show-me-only">{t("whats_new_filter_show_me")}</label>
-                  <span className="text-muted-foreground ml-auto text-xs" aria-live="polite">
-                    {t("whats_new_count", { shown: entries.length, total })}
-                  </span>
+                  <span className="text-muted-foreground ml-auto text-xs">{countText}</span>
                 </div>
               </div>
             )}

@@ -67,11 +67,6 @@ export function GovernancePolicyPage() {
         />
       </div>
 
-      {/* Live region for save status (announced by screen readers) */}
-      <div role="status" aria-live="polite" className="sr-only">
-        {draft.saveAnnouncement}
-      </div>
-
       <PolicySaveBar
         dirty={draft.dirty}
         saveError={draft.saveError}

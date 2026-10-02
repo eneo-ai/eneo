@@ -1,10 +1,11 @@
 "use client";
 
+import { useAnnounce } from "@astryxdesign/core/hooks";
 import { useQuery } from "@tanstack/react-query";
 import { CircleAlert, RotateCcw } from "lucide-react";
 import Link from "next/link";
 import { useLocale, useTranslations } from "next-intl";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { flushSync } from "react-dom";
 import { ConfirmDialogControlled } from "@/components/composites/confirm-dialog";
 import { FieldProblem, fieldProblemProps } from "@/components/composites/field-problem";
@@ -126,6 +127,18 @@ function PolicyEditor({
   const [resetOpen, setResetOpen] = useState(false);
   const [error, setError] = useState<"save" | "reset" | null>(null);
   const [status, setStatus] = useState<"saved" | "reset" | "unchanged" | null>(null);
+  const statusText =
+    status === "saved"
+      ? t("skills_runtime_policy_saved")
+      : status === "reset"
+        ? t("skills_runtime_policy_reset_done")
+        : status === "unchanged"
+          ? t("form_nothing_to_save")
+          : "";
+  const announce = useAnnounce();
+  useEffect(() => {
+    if (statusText) announce(statusText);
+  }, [statusText, announce]);
   const [submitted, setSubmitted] = useState(false);
 
   const limitProblem = (field: (typeof LIMIT_FIELDS)[number]) =>
@@ -247,15 +260,7 @@ function PolicyEditor({
         </Alert>
       )}
       <div className="flex flex-wrap items-center justify-between gap-3 border-t pt-4">
-        <p role="status" className="text-muted-foreground text-sm" aria-live="polite">
-          {status === "saved"
-            ? t("skills_runtime_policy_saved")
-            : status === "reset"
-              ? t("skills_runtime_policy_reset_done")
-              : status === "unchanged"
-                ? t("form_nothing_to_save")
-                : ""}
-        </p>
+        <p className="text-muted-foreground text-sm">{statusText}</p>
         <div className="flex flex-wrap gap-2">
           <Button
             variant="outline"

@@ -84,14 +84,20 @@ ships must be release-ready: correct, accessible, tested and without dead ends.
 
 - **Search Astryx first** (`bunx astryx search "<behaviour>" --type hook`, then
   `--type component`) before writing behaviour yourself: focus handling
-  (`useFocusTrap`, `useFocusReturnVisibility`, `useListFocus`), shortcuts
-  (`useHotkeys`), breakpoints (`useMediaQuery`), announcements (`useAnnounce`),
-  copying (`useClipboard`), clickable cards with nested actions
-  (`useClickableContainer`), truncation and overflow (`useTruncation`,
-  `useOverflow`), table sorting, filtering, pagination and selection (the
-  `Table` plugins), and the chat hooks (`useChatStreamScroll`,
-  `useChatNewMessages`, `useStreamingText`, `useChatComposerTokens`,
-  `useTriggerMenu`).
+  (`useFocusTrap`, `useListFocus`), shortcuts (`useHotkeys`), breakpoints
+  (`useMediaQuery`), announcements (`useAnnounce`: never a hand-rolled
+  `aria-live`/`role="status"` region), copying (`useClipboard`), clickable
+  cards with nested actions (`useClickableContainer`), overflow (`useOverflow`),
+  truncation (`useTruncation`, exported from `@astryxdesign/core/Text`, paired
+  with `Tooltip`), free-text tags (`Tokenizer` with `hasCreate`), table
+  sorting, filtering, pagination, selection and row expansion (the `Table`
+  plugins), and the chat hooks from `@astryxdesign/core/Chat`
+  (`useChatStreamScroll`, `useChatNewMessages`, `useChatComposerTokens`,
+  `useChatPasteAsToken`) plus `useStreamingText` from `/hooks`.
+  `useFocusReturnVisibility`, `useTriggerMenu` and `useScrollSpy` exist in
+  Astryx's dist but are not exported; do not import them. Astryx has no
+  debounce, before-unload or cursor-pagination hook: ours live in
+  `src/lib/hooks`.
 - **One implementation per behaviour.** When an Astryx hook or component
   replaces ours, delete our version and its tests in the same change instead
   of keeping both.

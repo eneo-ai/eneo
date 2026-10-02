@@ -473,7 +473,7 @@ export function RolesPage() {
               </div>
             </fieldset>
             <DialogFooter className="items-center justify-between gap-3">
-              <span className="text-muted-foreground text-sm tabular-nums" aria-live="polite">
+              <span className="text-muted-foreground text-sm tabular-nums">
                 {t("permissions_selected_count", {
                   selected: selected.length,
                   total: permissionsQuery.data?.length ?? 0

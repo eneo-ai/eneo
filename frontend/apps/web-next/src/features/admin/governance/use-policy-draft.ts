@@ -1,5 +1,6 @@
 "use client";
 
+import { useAnnounce } from "@astryxdesign/core/hooks";
 import { useQueryClient } from "@tanstack/react-query";
 import { useTranslations } from "next-intl";
 import { useEffect, useMemo, useReducer, useRef, useState } from "react";
@@ -191,13 +192,12 @@ export function usePolicyDraft(input: PolicyDraftInput) {
   // ---- Save lifecycle ------------------------------------------------------
   const [saving, setSaving] = useState(false);
   const [saveError, setSaveError] = useState<string | null>(null);
-  const [saveAnnouncement, setSaveAnnouncement] = useState("");
+  const announce = useAnnounce();
   const [pendingConfirm, setPendingConfirm] = useState<ConfirmKey[] | null>(null);
 
   const doSave = async () => {
     setSaving(true);
     setSaveError(null);
-    setSaveAnnouncement("");
     try {
       const update = buildUpdate(
         state,
@@ -214,10 +214,10 @@ export function usePolicyDraft(input: PolicyDraftInput) {
       await unwrap(browserApi.PUT("/api/v1/admin/governance-policy/", { body: update }));
       await queryClient.invalidateQueries({ queryKey: GOVERNANCE_POLICY_KEY });
       setPendingConfirm(null);
-      setSaveAnnouncement(t("governance_save_success"));
+      announce(t("governance_save_success"));
     } catch (error) {
       setSaveError((error as { message?: string }).message ?? t("governance_save_error"));
-      setSaveAnnouncement(t("governance_save_failure"));
+      announce(t("governance_save_failure"));
     } finally {
       setSaving(false);
     }
@@ -307,7 +307,6 @@ export function usePolicyDraft(input: PolicyDraftInput) {
     canSave,
     saving,
     saveError,
-    saveAnnouncement,
     pendingConfirm,
     save,
     confirmSave: () => void doSave(),

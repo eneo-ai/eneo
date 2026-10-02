@@ -1,9 +1,10 @@
 "use client";
 
+import { useAnnounce } from "@astryxdesign/core/hooks";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Download } from "lucide-react";
 import { useTranslations } from "next-intl";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { Button } from "@/components/ui/button";
 import {
   Dialog,
@@ -113,6 +114,12 @@ export function ExportDialog({
             : status
               ? t("audit_exporting")
               : t("audit_export_preparing");
+  const announce = useAnnounce();
+  useEffect(() => {
+    // Each change of the export's state is announced once; polling that keeps
+    // the same text says nothing.
+    if (jobId) announce(statusMessage);
+  }, [jobId, statusMessage, announce]);
 
   function reset() {
     setJobId(null);
@@ -136,9 +143,7 @@ export function ExportDialog({
         {jobId ? (
           <div className="flex flex-col gap-3">
             {!statusIsError && <Progress value={status?.progress ?? 0} />}
-            <p className="text-muted-foreground text-sm" role="status" aria-live="polite">
-              {statusMessage}
-            </p>
+            <p className="text-muted-foreground text-sm">{statusMessage}</p>
           </div>
         ) : (
           <div className="flex flex-col gap-3">
