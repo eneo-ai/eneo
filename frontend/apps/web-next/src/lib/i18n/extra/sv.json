@@ -1481,5 +1481,9 @@
   "website_not_yet_crawled": "Inte indexerad ännu",
   "website_pages_indexed": "{success} av {total} sidor indexerade",
   "website_pages_indexed_with_files": "{successPages} av {totalPages} sidor, {successFiles} av {totalFiles} filer",
-  "website_sync_interval": "Synkintervall"
+  "website_sync_interval": "Synkintervall",
+  "crawl_skipped": "Hoppad över",
+  "files_failed": "{count} filer misslyckades",
+  "sync_skipped": "Synkronisering hoppades över",
+  "synced_with_warnings": "Synkroniserad med varningar"
 }

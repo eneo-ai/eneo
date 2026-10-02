@@ -52,7 +52,7 @@ describe("CrawlRunsTable", () => {
 
     // Named like the website page's tab it fills.
     expect(screen.getByRole("table", { name: "Indexeringar" })).toBeTruthy();
-    expect(statusColumn()).toEqual(["Slutförd med varningar", "MisslyckadesTimeout", "Slutförd"]);
+    expect(statusColumn()).toEqual(["Delvis klar", "MisslyckadesTimeout", "Slutförd"]);
     expect(
       screen.getByRole("button", { name: "Sortera efter Startad, sorterat fallande" })
     ).toBeTruthy();
@@ -82,7 +82,7 @@ describe("CrawlRunsTable", () => {
     expect(within(cell).getByText("3 sidor och 1 fil lyckades")).toBeTruthy();
     expect(within(cell).getByText("1 sida misslyckades")).toBeTruthy();
     // The breakdown is text, reachable without a pointer (no title tooltip).
-    expect(within(cell).getByText("Tomma sidor: 1")).toBeTruthy();
+    expect(within(cell).getByText("Inget textinnehåll: 1")).toBeTruthy();
     expect(cell.querySelector("[title]")).toBeNull();
   });
 

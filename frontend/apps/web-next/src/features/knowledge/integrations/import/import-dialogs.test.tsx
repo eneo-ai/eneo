@@ -101,7 +101,7 @@ it("Confluence: moves focus to the warning when the space has no embedding model
   fireEvent.click(within(dialog).getByRole("button", { name: "Importera yta" }));
 
   expect(document.activeElement?.textContent).toContain(
-    "Denna yta har för närvarande inga inbäddningsmodeller aktiverade"
+    "Den här ytan har inga aktiverade inbäddningsmodeller"
   );
   expect(api.POST).not.toHaveBeenCalled();
 });

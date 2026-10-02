@@ -39,7 +39,7 @@ describe("WebsiteDialog", () => {
     api.GET.mockImplementation(() => ok(null));
     api.POST.mockImplementation(() => ok({ id: "website-1" }));
     const dialog = renderDialog();
-    fireEvent.change(field(dialog, /^URL/), { target: { value: "https://sundsvall.se" } });
+    fireEvent.change(field(dialog, /^Webbadress/), { target: { value: "https://sundsvall.se" } });
     fireEvent.click(within(dialog).getByRole("button", { name: "Skapa webbplats" }));
 
     await waitFor(() => expect(api.POST).toHaveBeenCalledTimes(1));
@@ -53,7 +53,7 @@ describe("WebsiteDialog", () => {
     expect((create as HTMLButtonElement).disabled).toBe(false);
 
     fireEvent.submit(create.closest("form")!);
-    const url = field(dialog, /^URL/);
+    const url = field(dialog, /^Webbadress/);
     expect(url.getAttribute("aria-invalid")).toBe("true");
     expect(document.getElementById(url.getAttribute("aria-describedby")!)?.textContent).toBe(
       "Detta fält är obligatoriskt"
@@ -79,7 +79,7 @@ describe("WebsiteDialog", () => {
     api.GET.mockImplementation(() => ok(null));
     api.POST.mockReturnValue(new Promise(() => {}));
     const dialog = renderDialog();
-    fireEvent.change(field(dialog, /^URL/), {
+    fireEvent.change(field(dialog, /^Webbadress/), {
       target: { value: "https://intranat.sundsvall.se" }
     });
     fireEvent.click(within(dialog).getByRole("switch", { name: /HTTP Basic Authentication/ }));
@@ -152,7 +152,7 @@ describe("WebsiteDialog", () => {
     );
     api.POST.mockReturnValue(new Promise(() => {}));
     const dialog = renderDialog();
-    fireEvent.change(field(dialog, /^URL/), { target: { value: "https://sundsvall.se" } });
+    fireEvent.change(field(dialog, /^Webbadress/), { target: { value: "https://sundsvall.se" } });
     const create = within(dialog).getByRole("button", { name: "Skapa webbplats" });
     create.focus();
     fireEvent.click(create);

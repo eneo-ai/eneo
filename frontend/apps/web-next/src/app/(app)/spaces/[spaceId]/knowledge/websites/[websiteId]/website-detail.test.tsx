@@ -124,7 +124,7 @@ describe("WebsiteDetail", () => {
     fireEvent.click(await screen.findByRole("button", { name: "Synkronisera nu" }));
     fireEvent.click(
       within(await screen.findByRole("alertdialog")).getByRole("button", {
-        name: "Starta indexering"
+        name: "Starta synkronisering"
       })
     );
 
@@ -135,12 +135,12 @@ describe("WebsiteDetail", () => {
     );
   });
 
-  it("keeps focus on a busy Starta indexering and starts one crawl", async () => {
+  it("keeps focus on a busy Starta synkronisering and starts one crawl", async () => {
     post.mockReturnValue(new Promise(() => {}));
     renderInApp(<WebsiteDetail websiteId="website-1" />);
     fireEvent.click(await screen.findByRole("button", { name: "Synkronisera nu" }));
     const dialog = await screen.findByRole("alertdialog", { name: "Synkronisera webbplats" });
-    const start = within(dialog).getByRole("button", { name: "Starta indexering" });
+    const start = within(dialog).getByRole("button", { name: "Starta synkronisering" });
     start.focus();
 
     fireEvent.click(start);

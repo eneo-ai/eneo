@@ -5869,5 +5869,9 @@
   "website_not_yet_crawled": "Not yet crawled",
   "website_pages_indexed": "{success} of {total} pages indexed",
   "website_pages_indexed_with_files": "{successPages} of {totalPages} pages, {successFiles} of {totalFiles} files",
-  "website_sync_interval": "Sync interval"
+  "website_sync_interval": "Sync interval",
+  "crawl_skipped": "Skipped",
+  "files_failed": "{count} files failed",
+  "sync_skipped": "Sync skipped",
+  "synced_with_warnings": "Synced with warnings"
 }
