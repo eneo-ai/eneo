@@ -7,6 +7,7 @@ object-content subsystem; these tests only exercise the reference surface.
 """
 
 import json
+import time
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock
 from uuid import UUID, uuid4
@@ -48,7 +49,7 @@ class TestSignedTokenTenantClaim:
         file_id, tenant_id = uuid4(), uuid4()
         token = generate_signed_token(
             file_id=file_id,
-            expires_at=2_000_000_000,
+            expires_at=int(time.time()) + 60,
             content_disposition=ContentDisposition.ATTACHMENT,
             tenant_id=tenant_id,
         )
@@ -60,7 +61,7 @@ class TestSignedTokenTenantClaim:
         file_id, tenant_id = uuid4(), uuid4()
         token = generate_file_original_download_token(
             file_id=file_id,
-            expires_at=2_000_000_000,
+            expires_at=int(time.time()) + 60,
             content_disposition=ContentDisposition.ATTACHMENT,
             tenant_id=tenant_id,
         )
@@ -71,7 +72,7 @@ class TestSignedTokenTenantClaim:
     def test_tampered_tenant_is_rejected(self):
         token = generate_signed_token(
             file_id=uuid4(),
-            expires_at=2_000_000_000,
+            expires_at=int(time.time()) + 60,
             content_disposition=ContentDisposition.ATTACHMENT,
             tenant_id=uuid4(),
         )
@@ -117,6 +118,7 @@ class TestBuildSignedOriginalDownloadUrl:
             file_id=uuid4(),
             base_url="https://eneo.example.se",
             expires_in=10 * FILE_ORIGINAL_SIGNED_URL_MAXIMUM_EXPIRY_SECONDS,
+            tenant_id=uuid4(),
         )
         payload = verify_file_original_download_token(url.split("token=")[1])
         assert payload is not None

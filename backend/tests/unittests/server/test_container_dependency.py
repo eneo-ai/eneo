@@ -11,6 +11,7 @@ from starlette.responses import StreamingResponse
 from starlette.types import ASGIApp, Message, Receive, Scope, Send
 
 from eneo.main.container.container import Container
+from eneo.main.exceptions import AuthenticationException
 from eneo.object_content.content import StorageKind
 from eneo.object_content.deployment_policy import UploadAdmissionSnapshot
 from eneo.server.dependencies import container as container_dependency
@@ -54,6 +55,36 @@ class _Transaction:
 
     async def __aexit__(self, *_args: object) -> None:
         self._session._in_transaction = False
+
+
+@pytest.mark.parametrize("assistant_key", [False, True])
+async def test_explicit_options_endpoint_cannot_skip_authentication(
+    assistant_key: bool,
+) -> None:
+    session = _Session()
+    authenticate = AsyncMock(
+        side_effect=AuthenticationException("Credentials required")
+    )
+    container = SimpleNamespace(
+        session=lambda: session,
+        user_service=lambda: SimpleNamespace(
+            authenticate=authenticate,
+            authenticate_with_assistant_api_key=authenticate,
+        ),
+    )
+    dependency = container_dependency.get_container(
+        with_user=not assistant_key,
+        with_user_from_assistant_api_key=assistant_key,
+    )
+    arguments = {"id": None} if assistant_key else {}
+    with pytest.raises(AuthenticationException, match="Credentials required"):
+        await dependency(
+            request=SimpleNamespace(method="OPTIONS"),
+            token=None,
+            api_key=None,
+            container=container,
+            **arguments,
+        )
 
 
 async def test_inactive_user_setup_uses_non_ambient_authentication_transaction(

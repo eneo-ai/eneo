@@ -9,6 +9,12 @@ from __future__ import annotations
 
 import pytest
 
+from eneo.authentication.endpoint_access import (
+    Authentication,
+    Authorization,
+    endpoint_access,
+)
+
 
 @pytest.fixture
 async def allowed_origin(db_container, admin_user):
@@ -76,6 +82,11 @@ async def test_500_exposes_trace_headers(app, allowed_origin, same_origin):
     from httpx import ASGITransport, AsyncClient
 
     @app.get("/api/v1/_test_force_500")
+    @endpoint_access(
+        authentication=Authentication.PUBLIC,
+        authorization=Authorization.PUBLIC,
+        reason="Test-only route for error response trace headers.",
+    )
     async def _force_500():
         raise RuntimeError("forced error for integration test")
 

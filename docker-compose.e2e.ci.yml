@@ -91,7 +91,7 @@ services:
       JWT_ALGORITHM: HS256
       JWT_SECRET: ci-test-jwt-secret-not-for-production-0123456789
       JWT_TOKEN_PREFIX: Bearer
-      URL_SIGNING_KEY: test_key
+      URL_SIGNING_KEY: unit-test-url-signing-key-with-at-least-32-bytes
       MAX_IN_QUESTION: "1"
       # Browser E2E exercises healthy PostgreSQL-inline mode without a remote
       # byte plane. Real S3 persistence/integrity/recovery uses the dedicated

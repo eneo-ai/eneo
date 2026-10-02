@@ -1465,5 +1465,21 @@
   "form_problem_confirm_override": "Tick the box to force the migration.",
   "storage_limit_invalid": "Enter a positive value, for example 10 MB.",
   "form_changes_discarded": "The changes were discarded.",
-  "form_nothing_to_discard": "No changes to discard."
+  "form_nothing_to_discard": "No changes to discard.",
+  "cant_sync_while_crawl_running": "Can't sync while a crawl is already running",
+  "confirm_delete_crawl_end": "?",
+  "confirm_delete_crawl_start": "Do you really want to delete",
+  "crawl_skipped_duplicate": "Skipped – another crawl is already running",
+  "delete_crawl": "Delete crawl",
+  "full_url_sitemap": "Full URL to your sitemap.xml file",
+  "leave_blank_keep_password": "Leave blank to keep current password",
+  "url_description": "URL from where to start indexing (including https://)",
+  "website_all_pages_indexed": "All {count} pages indexed",
+  "website_crawl_in_progress": "Crawl in progress",
+  "website_crawl_result": "Crawl result",
+  "website_last_crawled": "Last crawled",
+  "website_not_yet_crawled": "Not yet crawled",
+  "website_pages_indexed": "{success} of {total} pages indexed",
+  "website_pages_indexed_with_files": "{successPages} of {totalPages} pages, {successFiles} of {totalFiles} files",
+  "website_sync_interval": "Sync interval"
 }

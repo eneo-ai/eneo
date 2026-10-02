@@ -8,6 +8,11 @@ from fastapi import APIRouter, Depends, Query
 from typing_extensions import TypedDict
 
 from eneo.authentication.auth_dependencies import get_current_active_user
+from eneo.authentication.endpoint_access import (
+    Authentication,
+    Authorization,
+    endpoint_access,
+)
 from eneo.database.database import AsyncSession, get_session_with_transaction
 from eneo.main.config import get_settings
 from eneo.model_providers.domain.connection_check import (
@@ -33,7 +38,7 @@ from eneo.model_providers.presentation.model_provider_models import (
     ModelProviderUpdate,
     ValidateModelRequest,
 )
-from eneo.roles.permissions import Permission, validate_permission
+from eneo.roles.permissions import Permission
 from eneo.server.protocol import responses
 from eneo.settings.encryption_service import EncryptionService
 from eneo.tenants.provider_field_config import (
@@ -144,12 +149,16 @@ def _public(
     description="List all model providers for the tenant.",
     responses=responses.get_responses([403, 503]),
 )
+@endpoint_access(
+    authentication=Authentication.USER,
+    authorization=Permission.ADMIN,
+    reason="Organization configuration and provider credential use require admin permission.",
+)
 async def list_providers(
     user: CurrentUser,
     service: ServiceDep,
 ) -> list[ModelProviderPublic]:
     """List all model providers for the tenant."""
-    validate_permission(user, Permission.ADMIN)
     providers = await service.get_all()
     return [_public(provider, service) for provider in providers]
 
@@ -161,6 +170,11 @@ async def list_providers(
         "Get supported model types and top models per provider type from LiteLLM."
     ),
     responses=responses.get_responses([]),
+)
+@endpoint_access(
+    authentication=Authentication.USER,
+    authorization=Authorization.AUTHENTICATED,
+    reason="Tenant members may read provider catalogue metadata without using provider credentials.",
 )
 async def get_provider_capabilities(
     _user: CurrentUser,
@@ -309,6 +323,11 @@ async def get_provider_capabilities(
     description="Get the tenant's favorite provider types.",
     responses=responses.get_responses([]),
 )
+@endpoint_access(
+    authentication=Authentication.USER,
+    authorization=Authorization.AUTHENTICATED,
+    reason="Tenant members may read provider catalogue metadata without using provider credentials.",
+)
 async def get_favorite_providers(
     user: CurrentUser,
     session: SessionDep,
@@ -324,7 +343,12 @@ async def get_favorite_providers(
     "/favorites/",
     response_model=dict[str, list[str]],
     description="Set the tenant's favorite provider types.",
-    responses=responses.get_responses([]),
+    responses=responses.get_responses([403]),
+)
+@endpoint_access(
+    authentication=Authentication.USER,
+    authorization=Permission.ADMIN,
+    reason="Organization configuration and provider credential use require admin permission.",
 )
 async def set_favorite_providers(
     body: FavoriteProvidersUpdate,
@@ -345,6 +369,11 @@ async def set_favorite_providers(
         "model_cost database."
     ),
     responses=responses.get_responses([]),
+)
+@endpoint_access(
+    authentication=Authentication.USER,
+    authorization=Authorization.AUTHENTICATED,
+    reason="Tenant members may read provider catalogue metadata without using provider credentials.",
 )
 async def get_model_defaults(
     model_name: str,
@@ -400,13 +429,17 @@ async def get_model_defaults(
     response_model=ModelProviderPublic,
     responses=responses.get_responses([403, 404, 503]),
 )
+@endpoint_access(
+    authentication=Authentication.USER,
+    authorization=Permission.ADMIN,
+    reason="Organization configuration and provider credential use require admin permission.",
+)
 async def get_provider(
     provider_id: UUID,
     user: CurrentUser,
     service: ServiceDep,
 ) -> ModelProviderPublic:
     """Get a specific model provider."""
-    validate_permission(user, Permission.ADMIN)
     provider = await service.get_by_id(provider_id)
     return _public(provider, service)
 
@@ -417,13 +450,17 @@ async def get_provider(
     description="Create a new model provider.",
     responses=responses.get_responses([400, 403, 409, 503]),
 )
+@endpoint_access(
+    authentication=Authentication.USER,
+    authorization=Permission.ADMIN,
+    reason="Organization configuration and provider credential use require admin permission.",
+)
 async def create_provider(
     data: ModelProviderCreate,
     user: CurrentUser,
     service: ServiceDep,
 ) -> ModelProviderPublic:
     """Create a new model provider."""
-    validate_permission(user, Permission.ADMIN)
     provider = await service.create(
         tenant_id=user.tenant_id,
         name=data.name,
@@ -440,7 +477,12 @@ async def create_provider(
     "/{provider_id}/",
     response_model=ModelProviderPublic,
     description="Update an existing model provider.",
-    responses=responses.get_responses([403, 404, 409, 503]),
+    responses=responses.get_responses([400, 403, 404, 409, 503]),
+)
+@endpoint_access(
+    authentication=Authentication.USER,
+    authorization=Permission.ADMIN,
+    reason="Organization configuration and provider credential use require admin permission.",
 )
 async def update_provider(
     provider_id: UUID,
@@ -449,7 +491,6 @@ async def update_provider(
     service: ServiceDep,
 ) -> ModelProviderPublic:
     """Update an existing model provider."""
-    validate_permission(user, Permission.ADMIN)
     provider = await service.update(
         provider_id=provider_id,
         name=data.name,
@@ -473,6 +514,11 @@ async def update_provider(
     ),
     responses=responses.get_responses([403, 404, 503]),
 )
+@endpoint_access(
+    authentication=Authentication.USER,
+    authorization=Permission.ADMIN,
+    reason="Organization configuration and provider credential use require admin permission.",
+)
 async def list_provider_models(
     provider_id: UUID,
     user: CurrentUser,
@@ -490,7 +536,6 @@ async def list_provider_models(
     ``output_vector_size``. When ``mode`` is supplied the server returns
     only matching entries — consumers don't need to filter client-side.
     """
-    validate_permission(user, Permission.ADMIN)
     return await service.list_available_models(provider_id, mode=mode)
 
 
@@ -507,12 +552,16 @@ async def list_provider_models(
     ),
     responses=responses.get_responses([400, 403, 404, 503]),
 )
+@endpoint_access(
+    authentication=Authentication.USER,
+    authorization=Permission.ADMIN,
+    reason="Organization configuration and provider credential use require admin permission.",
+)
 async def check_provider_connection(
     provider_id: UUID,
     user: CurrentUser,
     service: ServiceDep,
 ) -> ModelProviderPublic:
-    validate_permission(user, Permission.ADMIN)
     provider, _check = await service.check_connection(provider_id)
     return _public(provider, service)
 
@@ -536,13 +585,17 @@ _LEGACY_TEST_ERRORS: dict[ConnectionCheckError, str] = {
     ),
     responses=responses.get_responses([403, 404, 503]),
 )
+@endpoint_access(
+    authentication=Authentication.USER,
+    authorization=Permission.ADMIN,
+    reason="Organization configuration and provider credential use require admin permission.",
+)
 async def test_provider(
     provider_id: UUID,
     user: CurrentUser,
     service: ServiceDep,
 ) -> dict[str, Any]:
     """Test connectivity to a model provider."""
-    validate_permission(user, Permission.ADMIN)
     try:
         _provider, check = await service.check_connection(provider_id)
     except ConnectionCheckNotSupportedException as exc:
@@ -566,6 +619,11 @@ async def test_provider(
     ),
     responses=responses.get_responses([403, 404, 503]),
 )
+@endpoint_access(
+    authentication=Authentication.USER,
+    authorization=Permission.ADMIN,
+    reason="Organization configuration and provider credential use require admin permission.",
+)
 async def validate_model(
     provider_id: UUID,
     body: ValidateModelRequest,
@@ -573,7 +631,6 @@ async def validate_model(
     service: ServiceDep,
 ) -> dict[str, Any]:
     """Validate that a model works with this provider by making a minimal API call."""
-    validate_permission(user, Permission.ADMIN)
     return await service.validate_model(provider_id, body.model_name, body.model_type)
 
 
@@ -582,6 +639,11 @@ async def validate_model(
     response_model=dict[str, str],
     description="Delete a model provider.",
     responses=responses.get_responses([400, 403, 404, 503]),
+)
+@endpoint_access(
+    authentication=Authentication.USER,
+    authorization=Permission.ADMIN,
+    reason="Organization configuration and provider credential use require admin permission.",
 )
 async def delete_provider(
     provider_id: UUID,
@@ -592,6 +654,5 @@ async def delete_provider(
 
     Will fail if the provider has models attached to it.
     """
-    validate_permission(user, Permission.ADMIN)
     await service.delete(provider_id)
     return {"message": "Provider deleted successfully"}

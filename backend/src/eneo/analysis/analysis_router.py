@@ -26,6 +26,11 @@ from eneo.analysis.analysis import (
     MetadataStatisticsAggregated,
 )
 from eneo.analysis.analysis_job_manager import AnalysisJobManager
+from eneo.authentication.endpoint_access import (
+    Authentication,
+    Authorization,
+    endpoint_access,
+)
 from eneo.jobs.job_manager import job_manager
 from eneo.jobs.job_models import Task
 from eneo.jobs.task_models import AnalyzeConversationInsightsTask
@@ -42,6 +47,11 @@ from eneo.sessions.session import SessionMetadataPublic, SessionPublic
 from eneo.sessions.session_protocol import (
     to_session_metadata_paginated_response,
     to_session_public,
+)
+
+_TENANT_ANALYTICS_ACCESS_REASON = "Tenant analytics require the insights permission."
+_RESOURCE_INSIGHTS_ACCESS_REASON = (
+    "AnalysisService checks insight access to the requested assistant or group chat."
 )
 
 logger = get_logger(__name__)
@@ -95,6 +105,11 @@ def _default_analytics_range(
     description="Get total tenant counts.",
     responses=responses.get_responses([403]),
 )
+@endpoint_access(
+    authentication=Authentication.USER,
+    authorization=Authorization.AUTHENTICATED,
+    reason=_TENANT_ANALYTICS_ACCESS_REASON,
+)
 async def get_counts(
     container: Annotated[Container, Depends(get_container(with_user=True))],
 ):
@@ -108,6 +123,11 @@ async def get_counts(
     response_model=MetadataStatistics,
     description="Get metadata statistics for analytics.",
     responses=responses.get_responses([403]),
+)
+@endpoint_access(
+    authentication=Authentication.USER,
+    authorization=Authorization.AUTHENTICATED,
+    reason=_TENANT_ANALYTICS_ACCESS_REASON,
 )
 async def get_metadata(
     container: Annotated[Container, Depends(get_container(with_user=True))],
@@ -138,6 +158,11 @@ async def get_metadata(
     response_model=AssistantActivityStats,
     description="Get assistant activity statistics for the tenant.",
     responses=responses.get_responses([403]),
+)
+@endpoint_access(
+    authentication=Authentication.USER,
+    authorization=Authorization.AUTHENTICATED,
+    reason=_TENANT_ANALYTICS_ACCESS_REASON,
 )
 async def get_assistant_activity(
     container: Annotated[Container, Depends(get_container(with_user=True))],
@@ -170,6 +195,11 @@ async def get_assistant_activity(
     description="Get aggregated analytics data in hourly buckets.",
     responses=responses.get_responses([403]),
 )
+@endpoint_access(
+    authentication=Authentication.USER,
+    authorization=Authorization.AUTHENTICATED,
+    reason=_TENANT_ANALYTICS_ACCESS_REASON,
+)
 async def get_metadata_aggregated(
     container: Annotated[Container, Depends(get_container(with_user=True))],
     start_date: datetime | None = None,
@@ -195,6 +225,11 @@ async def get_metadata_aggregated(
     response_model=PaginatedResponse[Message],
     description="Get the questions asked to an assistant within a time range.",
     responses=responses.get_responses([400, 403, 404]),
+)
+@endpoint_access(
+    authentication=Authentication.USER,
+    authorization=Authorization.AUTHENTICATED,
+    reason=_RESOURCE_INSIGHTS_ACCESS_REASON,
 )
 async def get_most_recent_questions(
     assistant_id: UUID,
@@ -242,6 +277,11 @@ async def get_most_recent_questions(
     response_model=CursorPaginatedResponse[AssistantInsightQuestion],
     description="Get paginated question history for an assistant.",
     responses=responses.get_responses([400, 403, 404]),
+)
+@endpoint_access(
+    authentication=Authentication.USER,
+    authorization=Authorization.AUTHENTICATED,
+    reason=_RESOURCE_INSIGHTS_ACCESS_REASON,
 )
 async def get_most_recent_questions_paginated(
     assistant_id: UUID,
@@ -292,6 +332,11 @@ async def get_most_recent_questions_paginated(
     description="Count the good and bad ratings of an assistant's answers within a time range.",
     responses=responses.get_responses([400, 403, 404]),
 )
+@endpoint_access(
+    authentication=Authentication.USER,
+    authorization=Authorization.AUTHENTICATED,
+    reason=_RESOURCE_INSIGHTS_ACCESS_REASON,
+)
 async def get_assistant_feedback_counts(
     assistant_id: UUID,
     container: Annotated[Container, Depends(get_container(with_user=True))],
@@ -324,6 +369,11 @@ async def get_assistant_feedback_counts(
     response_model=None,
     description="Ask a question using an assistant's recent questions as context.",
     responses=responses.get_responses([400, 403, 404]),
+)
+@endpoint_access(
+    authentication=Authentication.USER,
+    authorization=Authorization.AUTHENTICATED,
+    reason=_RESOURCE_INSIGHTS_ACCESS_REASON,
 )
 async def ask_question_about_questions(
     assistant_id: UUID,
@@ -387,6 +437,11 @@ async def ask_question_about_questions(
     response_model=None,
     description="Ask a question about an assistant's or group chat's conversations.",
     responses=responses.get_responses([400, 403, 404]),
+)
+@endpoint_access(
+    authentication=Authentication.USER,
+    authorization=Authorization.AUTHENTICATED,
+    reason=_RESOURCE_INSIGHTS_ACCESS_REASON,
 )
 async def ask_unified_questions_about_questions(
     ask_analysis: AskAnalysis,
@@ -523,6 +578,11 @@ async def ask_unified_questions_about_questions(
     response_model=ConversationInsightResponse,
     responses=responses.get_responses([400, 403, 404]),
 )
+@endpoint_access(
+    authentication=Authentication.USER,
+    authorization=Authorization.AUTHENTICATED,
+    reason=_RESOURCE_INSIGHTS_ACCESS_REASON,
+)
 async def get_conversation_insights(
     container: Annotated[Container, Depends(get_container(with_user=True))],
     request: Annotated[ConversationInsightRequest, Depends()],
@@ -554,7 +614,12 @@ async def get_conversation_insights(
     "/conversation-insights/jobs/{job_id}/",
     response_model=AnalysisJobStatusResponse,
     description="Get the status of a conversation insights analysis job.",
-    responses=responses.get_responses([404]),
+    responses=responses.get_responses([403, 404]),
+)
+@endpoint_access(
+    authentication=Authentication.USER,
+    authorization=Authorization.AUTHENTICATED,
+    reason="Current insight access to the job's assistant or group chat is required.",
 )
 async def get_conversation_insight_job(
     job_id: UUID,
@@ -565,6 +630,8 @@ async def get_conversation_insight_job(
     job = await manager.get_job(tenant_id=tenant_id, job_id=job_id)
     if job is None:
         raise NotFoundException("Insights analysis job not found")
+
+    await container.analysis_service().authorize_insight_job(job)
 
     return AnalysisJobStatusResponse(
         job_id=job.job_id,
@@ -580,6 +647,11 @@ async def get_conversation_insight_job(
     "/conversation-insights/sessions/",
     response_model=CursorPaginatedResponse[SessionMetadataPublic],
     responses=responses.get_responses([400, 403, 404]),
+)
+@endpoint_access(
+    authentication=Authentication.USER,
+    authorization=Authorization.AUTHENTICATED,
+    reason=_RESOURCE_INSIGHTS_ACCESS_REASON,
 )
 async def get_conversation_insight_sessions(
     container: Annotated[Container, Depends(get_container(with_user=True))],
@@ -672,6 +744,11 @@ async def get_conversation_insight_sessions(
     "/conversation-insights/sessions/{session_id}/",
     response_model=SessionPublic,
     responses=responses.get_responses([403, 404]),
+)
+@endpoint_access(
+    authentication=Authentication.USER,
+    authorization=Authorization.AUTHENTICATED,
+    reason=_RESOURCE_INSIGHTS_ACCESS_REASON,
 )
 async def get_conversation_insight_session(
     session_id: UUID,

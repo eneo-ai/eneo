@@ -341,10 +341,13 @@ async def test_missing_original_is_typed_and_never_falls_back(
         "The exact original is not available for this file."
     )
 
+    async with db_container() as container:
+        tenant_id = container.user().tenant_id
     token = generate_file_original_download_token(
         file_id=file_id,
         expires_at=int(time.time()) + 60,
         content_disposition=ContentDisposition.ATTACHMENT,
+        tenant_id=tenant_id,
     )
     download = await client.get(
         f"/api/v1/files/{file_id}/original/download/",
@@ -405,6 +408,7 @@ async def test_legacy_image_is_not_exposed_as_an_exact_original(
         file_id=file_id,
         expires_at=int(time.time()) + 60,
         content_disposition=ContentDisposition.ATTACHMENT,
+        tenant_id=user.tenant_id,
     )
     original_download = await client.get(
         f"/api/v1/files/{file_id}/original/download/",
@@ -761,10 +765,13 @@ async def test_original_audio_range_reads_only_verified_chunks_from_real_store(
                 file_id=file_id,
                 expires_at=int(time.time()) + 60,
                 content_disposition=ContentDisposition.ATTACHMENT,
+                tenant_id=tenant_id,
             )
             response = await file_router.download_original_file_signed(
                 id=file_id,
-                token=token,
+                access=file_router.authorize_original_signed_file(
+                    id=file_id, token=token
+                ),
                 range=(
                     f"bytes={settings.multipart_part_bytes + 1}-"
                     f"{settings.multipart_part_bytes + 5}"

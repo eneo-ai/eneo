@@ -4,7 +4,6 @@ from eneo.internal_mcp.availability import (
 )
 from eneo.internal_mcp.constants import (
     FILES_SERVER_NAME,
-    INTERNAL_MCP_SERVER_NAMES,
     KNOWLEDGE_SERVER_NAME,
 )
 from eneo.internal_mcp.files import build_files_mcp_server
@@ -18,7 +17,6 @@ from eneo.internal_mcp.registry import (
 __all__ = [
     "FILES_SERVER_NAME",
     "INTERNAL_MCP_SERVERS",
-    "INTERNAL_MCP_SERVER_NAMES",
     "InternalMCPAvailability",
     "KNOWLEDGE_SERVER_NAME",
     "build_files_mcp_server",

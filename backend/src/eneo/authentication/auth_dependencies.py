@@ -10,11 +10,13 @@ from eneo.authentication.api_key_resolver import (
 )
 from eneo.authentication.api_key_router_helpers import raise_api_key_http_error
 from eneo.authentication.auth_models import ApiKeyPermission
+from eneo.authentication.endpoint_access import (
+    Authentication,
+    authenticates,
+)
 from eneo.main.config import get_settings
 from eneo.main.container.container import Container
-from eneo.main.exceptions import UnauthorizedException
 from eneo.main.logging import get_logger
-from eneo.roles.permissions import Permission, validate_permission
 from eneo.server.dependencies.auth_definitions import OAUTH2_SCHEME
 from eneo.server.dependencies.container import get_container
 from eneo.tenants.tenant import TenantState
@@ -45,6 +47,7 @@ async def _get_api_key_from_header(
     return api_key
 
 
+@authenticates(Authentication.USER)
 async def get_current_active_user(
     request: Request,
     token: Annotated[str, Security(OAUTH2_SCHEME)],
@@ -58,6 +61,7 @@ async def get_current_active_user(
         _raise_api_key_http_error(exc, request=request)
 
 
+@authenticates(Authentication.USER)
 async def get_current_active_user_with_quota(
     request: Request,
     token: Annotated[str, Security(OAUTH2_SCHEME)],
@@ -73,6 +77,7 @@ async def get_current_active_user_with_quota(
         _raise_api_key_http_error(exc, request=request)
 
 
+@authenticates(Authentication.ASSISTANT)
 async def get_user_from_token_or_assistant_api_key(
     id: UUID,
     request: Request,
@@ -89,6 +94,7 @@ async def get_user_from_token_or_assistant_api_key(
         _raise_api_key_http_error(exc, request=request)
 
 
+@authenticates(Authentication.ASSISTANT)
 async def get_user_from_token_or_assistant_api_key_without_assistant_id(
     request: Request,
     token: Annotated[str, Security(OAUTH2_SCHEME)],
@@ -102,18 +108,6 @@ async def get_user_from_token_or_assistant_api_key_without_assistant_id(
         )
     except ApiKeyValidationError as exc:
         _raise_api_key_http_error(exc, request=request)
-
-
-def require_permission(permission: Permission) -> Callable[..., Awaitable[None]]:
-    async def _dep(
-        user: Annotated[UserInDB, Depends(get_current_active_user)],
-    ) -> None:
-        try:
-            validate_permission(user, permission)
-        except UnauthorizedException as e:
-            raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=str(e))
-
-    return _dep
 
 
 def require_api_key_permission(
@@ -134,26 +128,6 @@ def require_api_key_permission(
         request.state._required_api_key_permission = required.value
 
     return _api_key_permission_dep
-
-
-async def require_session_auth(
-    _: Annotated[UserInDB, Depends(get_current_active_user)],
-    request: Request,
-) -> None:
-    """Reject API-key-authenticated callers; require a session token.
-
-    Depends on ``get_current_active_user`` so authentication has run and
-    populated ``request.state.api_key`` (when applicable) by the time we
-    inspect it.
-    """
-    if getattr(request.state, "api_key", None) is not None:
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail={
-                "code": "session_auth_required",
-                "message": "This endpoint requires a session token.",
-            },
-        )
 
 
 async def require_user_identity(
@@ -185,19 +159,19 @@ async def require_user_identity(
         )
 
 
-async def require_storage_administration(
+async def require_active_storage_identity(
     user: Annotated[UserInDB, Depends(get_current_active_user)],
 ) -> None:
-    """Require an eligible administrator holding the storage permission.
+    """Require active, non-deleted identities for deployment storage operations.
 
-    Storage administration is a normal permission, granted to the Owner role
-    by default, rather than a separate deployment-wide flag.
+    EndpointAccess owns the STORAGE permission and SESSION requirements.
+    This additional lifecycle rule rejects invited/deleted users too, while
+    ordinary authentication allows onboarding flows for invited users.
     """
     if (
         user.state is not UserState.ACTIVE
         or user.deleted_at is not None
         or user.tenant.state is not TenantState.ACTIVE
-        or Permission.STORAGE not in user.permissions
     ):
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,

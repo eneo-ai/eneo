@@ -88,6 +88,8 @@ Navigate to **Admin** → **Models** and click **Add Model**. The wizard guides 
 
 After adding a provider, use the **Test** button to verify that credentials are valid and the endpoint is reachable. The system makes a minimal API call to confirm connectivity.
 
+A stored API key is only ever sent to the endpoint it was entered for. When you change a provider's endpoint (scheme, host, port or base path), the edit dialog asks for the API key again and the backend rejects the change unless a new key is supplied. Renaming a provider, toggling it, or re-entering the same endpoint in a different spelling does not require the key. Providers configured without a key can change endpoint freely.
+
 ### Step 3: Enable Models for Users
 
 Once a provider is configured and models are added, tenant admins can enable specific models for their organization through the Models page.
@@ -144,6 +146,7 @@ All provider credentials are managed per-tenant and encrypted at rest. There are
 ### Admin UI (Recommended)
 
 Use the Admin UI provider wizard to add, update, or remove provider credentials. This is the primary method for managing providers.
+Discovering models, testing a provider connection, and validating a model with its stored credentials require an organization administrator.
 
 ### Sysadmin API
 

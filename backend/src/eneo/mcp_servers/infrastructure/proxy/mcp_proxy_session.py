@@ -26,7 +26,6 @@ from eneo.main.logging import get_logger
 from eneo.mcp_servers.domain.entities.mcp_server import (
     MCPServer,
     MCPServerTool,
-    is_builtin_provider,
     is_capability_purpose,
 )
 from eneo.mcp_servers.infrastructure.client.mcp_client import (
@@ -88,7 +87,8 @@ def _trace_server_name(server: MCPServer) -> str:
     files servers are; that lets the chat label them in the UI language
     instead of showing the server-side English title under the row's name.
     """
-    if is_builtin_provider(server.http_auth_type) and server.purpose:
+    if server.is_internal and is_capability_purpose(server.purpose):
+        assert server.purpose is not None
         return server.purpose
     return server.name
 
@@ -99,9 +99,7 @@ def _tool_call_timeout_for(server: MCPServer) -> int | None:
     The built-in image generation provider runs an image model whose calls
     routinely outlast a general MCP tool call, so it gets its own budget.
     """
-    if is_builtin_provider(server.http_auth_type) and (
-        server.purpose == IMAGE_GENERATION_SERVER_NAME
-    ):
+    if server.is_internal and server.purpose == IMAGE_GENERATION_SERVER_NAME:
         return _settings.image_generation_timeout_seconds
     return None
 
@@ -782,6 +780,19 @@ class MCPProxySession:
         server, original_tool_name, title = self._tool_registry[prefixed_tool_name]
         return (_trace_server_name(server), original_tool_name, title)
 
+    def is_internal_tool(self, prefixed_tool_name: str) -> bool:
+        """Whether a prefixed tool belongs to one of Eneo's own loopback servers.
+
+        Decided by ``MCPServer.is_internal`` (the ephemeral knowledge and
+        files servers, and built-in provider rows), never by the server's
+        name: an admin-registered server named like an internal one is still
+        external. Unknown tools are external.
+        """
+        entry = self._tool_registry.get(prefixed_tool_name)
+        if entry is None:
+            return False
+        return bool(entry[0].is_internal)
+
     def get_tool_purpose(self, prefixed_tool_name: str) -> str | None:
         """The capability a tool call serves, or None for general servers.
 
@@ -881,7 +892,11 @@ class MCPProxySession:
         stale.
         """
         for prefixed_name, (server, name, title) in self._tool_registry.items():
-            if server.name == FILES_SERVER_NAME and name == "read_file":
+            if (
+                server.is_internal
+                and server.name == FILES_SERVER_NAME
+                and name == "read_file"
+            ):
                 return prefixed_name, title
         return None
 

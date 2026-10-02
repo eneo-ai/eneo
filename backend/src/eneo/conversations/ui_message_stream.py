@@ -152,6 +152,7 @@ def _generated_file_chunk(file: Any, base_url: str) -> dict[str, Any]:
         file_id=public.id,
         expires_at=expires_at,
         content_disposition=ContentDisposition.INLINE,
+        tenant_id=file.tenant_id,
     )
     url = f"{base_url.rstrip('/')}/api/v1/files/{public.id}/download/?token={token}"
     return {

@@ -33,12 +33,13 @@ CHAT_PERMISSIONS = {
 }
 NOW = datetime(2026, 9, 26, 12, 0, tzinfo=timezone.utc)
 ORG_SPACE_ID = uuid4()
+TENANT_ID = uuid4()
 
 
 def _user(permissions=CHAT_PERMISSIONS, group_ids: frozenset[UUID] = frozenset()):
     return SimpleNamespace(
         id=uuid4(),
-        tenant_id=uuid4(),
+        tenant_id=TENANT_ID,
         permissions=set(permissions),
         user_groups_ids=set(group_ids),
         active_api_key=None,
@@ -55,6 +56,7 @@ def _space(
 ) -> SpaceAccessFacts:
     return SpaceAccessFacts(
         id=uuid4(),
+        tenant_id=TENANT_ID,
         user_id=owner_id,
         tenant_space_id=None if organization or owner_id else ORG_SPACE_ID,
         members={member[0]: SpaceRoleFact(id=member[0], role=member[1])}

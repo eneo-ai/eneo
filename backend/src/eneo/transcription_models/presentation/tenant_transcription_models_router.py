@@ -8,10 +8,11 @@ from fastapi import APIRouter, Depends
 from pydantic import BaseModel, Field
 
 from eneo.authentication.auth_dependencies import get_current_active_user
+from eneo.authentication.endpoint_access import Authentication, endpoint_access
 from eneo.database.database import AsyncSession, get_session_with_transaction
 from eneo.main.container.container import Container
 from eneo.main.models import ModelId
-from eneo.roles.permissions import Permission, validate_permission
+from eneo.roles.permissions import Permission
 from eneo.server.dependencies.container import get_container
 from eneo.server.protocol import responses
 from eneo.tenant_models.application.tenant_model_service import (
@@ -86,6 +87,11 @@ def _service(
     response_model=TranscriptionModelPublic,
     responses=responses.get_responses([400, 403, 404, 409]),
 )
+@endpoint_access(
+    authentication=Authentication.USER,
+    authorization=Permission.ADMIN,
+    reason="This operation requires Permission.ADMIN before accessing tenant resources.",
+)
 async def create_tenant_transcription_model(
     model_create: TenantTranscriptionModelCreate,
     user: CurrentUser,
@@ -93,7 +99,6 @@ async def create_tenant_transcription_model(
     container: ContainerDep,
 ):
     """Create a new tenant-specific transcription model."""
-    validate_permission(user, Permission.ADMIN)
 
     service = _service(session, user, container)
     transcription_model = await service.create(model_create)
@@ -108,6 +113,11 @@ async def create_tenant_transcription_model(
     response_model=TranscriptionModelPublic,
     responses=responses.get_responses([403, 404, 409]),
 )
+@endpoint_access(
+    authentication=Authentication.USER,
+    authorization=Permission.ADMIN,
+    reason="This operation requires Permission.ADMIN before accessing tenant resources.",
+)
 async def update_tenant_transcription_model(
     model_id: UUID,
     model_update: TenantTranscriptionModelUpdate,
@@ -116,7 +126,6 @@ async def update_tenant_transcription_model(
     container: ContainerDep,
 ):
     """Update a tenant-specific transcription model."""
-    validate_permission(user, Permission.ADMIN)
 
     service = _service(session, user, container)
     transcription_model = await service.update(model_id, model_update)
@@ -131,6 +140,11 @@ async def update_tenant_transcription_model(
     response_model=None,
     responses=responses.get_responses([400, 403, 404]),
 )
+@endpoint_access(
+    authentication=Authentication.USER,
+    authorization=Permission.ADMIN,
+    reason="This operation requires Permission.ADMIN before accessing tenant resources.",
+)
 async def delete_tenant_transcription_model(
     model_id: UUID,
     user: CurrentUser,
@@ -138,7 +152,6 @@ async def delete_tenant_transcription_model(
     container: ContainerDep,
 ):
     """Delete a tenant-specific transcription model."""
-    validate_permission(user, Permission.ADMIN)
 
     service = _service(session, user, container)
     await service.delete(model_id)

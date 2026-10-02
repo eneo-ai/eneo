@@ -8,6 +8,7 @@ from eneo.ai_models.completion_models.completion_model import (
     CompletionModelSparse,
     ModelKwargs,
 )
+from eneo.data_retention.constants import MAX_RETENTION_DAYS, MIN_RETENTION_DAYS
 from eneo.files.file_models import FilePublic, FileRestrictions
 from eneo.main.models import (
     NOT_PROVIDED,
@@ -77,7 +78,16 @@ class AppUpdateRequest(BaseModel):
     completion_model: Optional[ModelId] = None
     completion_model_kwargs: Optional[ModelKwargs] = None
     transcription_model: Optional[ModelId] = None
-    data_retention_days: Union[int, None, NotProvided] = NOT_PROVIDED
+    data_retention_days: Union[int, None, NotProvided] = Field(
+        default=NOT_PROVIDED,
+        ge=MIN_RETENTION_DAYS,
+        le=MAX_RETENTION_DAYS,
+        description=(
+            "Conversation retention override. Requires space administration permission "
+            "in shared and organization spaces. "
+            "Set to null to inherit the space policy; omit to leave unchanged."
+        ),
+    )
     icon_id: Union[UUID, None, NotProvided] = Field(
         default=NOT_PROVIDED,
         description="Icon ID referencing an uploaded icon. Set to null to remove.",

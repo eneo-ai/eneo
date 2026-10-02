@@ -6,6 +6,7 @@ from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from eneo.authentication.endpoint_access import Authentication, authenticates
 from eneo.database.database import get_session_with_transaction
 from eneo.database.tables.tenant_table import Tenants
 
@@ -16,6 +17,7 @@ def _hash(token: str) -> str:
     return hashlib.sha256(token.encode("utf-8")).hexdigest()
 
 
+@authenticates(Authentication.SCIM)
 async def require_scim_auth(
     credentials: HTTPAuthorizationCredentials | None = Depends(_bearer),
     session: AsyncSession = Depends(get_session_with_transaction),

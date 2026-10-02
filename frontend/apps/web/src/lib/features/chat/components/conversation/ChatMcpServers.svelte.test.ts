@@ -54,6 +54,42 @@ describe("ChatMcpServers", () => {
     expect([...disabledServerIds].sort()).toEqual(["server-a", "server-b"]);
   });
 
+  it("renders every tool unavailable when the model cannot call tools", async () => {
+    const reason = "model_no_tool_calling";
+    render(ChatMcpServers, {
+      servers: [
+        { id: "server-a", name: "Server A", available: false, reason },
+        { id: "server-b", name: "Server B", available: false, reason }
+      ],
+      capabilityServers: [
+        {
+          id: "capability:web_search",
+          name: "web_search",
+          purpose: "web_search",
+          available: false,
+          reason
+        }
+      ],
+      modelSupportsTools: false,
+      disabledServerIds: new SvelteSet<string>(),
+      autoAcceptTools: true
+    });
+
+    await page
+      .getByRole("button", { name: m.mcp_servers_status_aria({ active: 0, total: 3 }) })
+      .click();
+
+    for (const name of ["Server A", "Server B", m.web_search()]) {
+      await expect.element(page.getByRole("switch", { name })).toBeDisabled();
+    }
+    // The header notice plus one subtitle per row.
+    expect(page.getByText(m.tools_readiness_model_no_tool_calling()).elements()).toHaveLength(4);
+    expect(
+      page.getByRole("switch", { name: m.mcp_run_tools_automatically() }).elements()
+    ).toHaveLength(0);
+    expect(page.getByRole("button", { name: m.mcp_all_off() }).elements()).toHaveLength(0);
+  });
+
   it("toggles a stable capability-purpose key", async () => {
     const disabledServerIds = new SvelteSet<string>();
 

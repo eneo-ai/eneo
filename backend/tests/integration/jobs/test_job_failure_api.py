@@ -16,7 +16,7 @@ async def admin_token(db_container, patch_auth_service_jwt, admin_user) -> str:
         return container.auth_service().create_access_token_for_user(admin_user)
 
 
-async def test_job_apis_mask_legacy_knowledge_prose_and_preserve_other_results(
+async def test_job_apis_mask_legacy_failure_prose_and_preserve_successful_results(
     client,
     db_container,
     admin_user,
@@ -55,6 +55,7 @@ async def test_job_apis_mask_legacy_knowledge_prose_and_preserve_other_results(
                     task=Task.CRAWL.value,
                     status=Status.FAILED.value,
                     result_location="The crawl exceeded its configured time limit",
+                    failure_code="remote_unreachable",
                     finished_at=now,
                 ),
             ]
@@ -71,9 +72,8 @@ async def test_job_apis_mask_legacy_knowledge_prose_and_preserve_other_results(
     assert jobs[str(complete_knowledge_id)]["result_location"] == (
         "/api/v1/info-blobs/123/"
     )
-    assert jobs[str(failed_crawl_id)]["result_location"] == (
-        "The crawl exceeded its configured time limit"
-    )
+    assert jobs[str(failed_crawl_id)]["result_location"] is None
+    assert jobs[str(failed_crawl_id)]["failure_code"] == "remote_unreachable"
 
     response = await client.get(
         f"/api/v1/jobs/{failed_knowledge_id}/",

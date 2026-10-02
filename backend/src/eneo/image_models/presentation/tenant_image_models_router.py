@@ -8,6 +8,7 @@ from fastapi import APIRouter, Depends
 from pydantic import BaseModel, Field
 
 from eneo.authentication.auth_dependencies import get_current_active_user
+from eneo.authentication.endpoint_access import Authentication, endpoint_access
 from eneo.database.database import AsyncSession, get_session_with_transaction
 from eneo.image_models.presentation.image_model_models import (
     ImageModelPublic,
@@ -16,7 +17,7 @@ from eneo.image_models.presentation.image_model_models import (
 )
 from eneo.main.container.container import Container
 from eneo.main.models import ModelId
-from eneo.roles.permissions import Permission, validate_permission
+from eneo.roles.permissions import Permission
 from eneo.server.dependencies.container import get_container
 from eneo.server.protocol import responses
 from eneo.tenant_models.application.tenant_model_service import (
@@ -104,14 +105,17 @@ def _service(
     response_model=ImageModelPublic,
     responses=responses.get_responses([400, 403, 404, 409]),
 )
+@endpoint_access(
+    authentication=Authentication.USER,
+    authorization=Permission.ADMIN,
+    reason="This operation requires Permission.ADMIN before accessing tenant resources.",
+)
 async def create_tenant_image_model(
     model_create: TenantImageModelCreate,
     user: CurrentUser,
     session: DBSession,
     container: ContainerDep,
 ):
-    validate_permission(user, Permission.ADMIN)
-
     service = _service(session, user, container)
     image_model = await service.create(model_create)
     await session.commit()
@@ -125,6 +129,11 @@ async def create_tenant_image_model(
     response_model=ImageModelPublic,
     responses=responses.get_responses([403, 404, 409]),
 )
+@endpoint_access(
+    authentication=Authentication.USER,
+    authorization=Permission.ADMIN,
+    reason="This operation requires Permission.ADMIN before accessing tenant resources.",
+)
 async def update_tenant_image_model(
     model_id: UUID,
     model_update: TenantImageModelUpdate,
@@ -132,8 +141,6 @@ async def update_tenant_image_model(
     session: DBSession,
     container: ContainerDep,
 ):
-    validate_permission(user, Permission.ADMIN)
-
     service = _service(session, user, container)
     image_model = await service.update(model_id, model_update)
     await session.commit()
@@ -147,14 +154,17 @@ async def update_tenant_image_model(
     response_model=None,
     responses=responses.get_responses([400, 403, 404]),
 )
+@endpoint_access(
+    authentication=Authentication.USER,
+    authorization=Permission.ADMIN,
+    reason="This operation requires Permission.ADMIN before accessing tenant resources.",
+)
 async def delete_tenant_image_model(
     model_id: UUID,
     user: CurrentUser,
     session: DBSession,
     container: ContainerDep,
 ):
-    validate_permission(user, Permission.ADMIN)
-
     service = _service(session, user, container)
     await service.delete(model_id)
     await session.commit()

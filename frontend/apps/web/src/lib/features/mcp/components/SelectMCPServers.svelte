@@ -11,10 +11,10 @@
   import { Switch } from "$lib/components/ui/switch/index.js";
   import * as Tooltip from "$lib/components/ui/tooltip/index.js";
   import { m } from "$lib/paraglide/messages";
-  import { ChevronRight } from "@lucide/svelte";
+  import { ChevronRight, LockKeyhole } from "@lucide/svelte";
   import { SvelteSet } from "svelte/reactivity";
   import { isCapabilityPurpose } from "$lib/features/mcp/capabilities";
-  import { readinessMessage } from "$lib/features/mcp/readiness";
+  import { modelSupportsToolCalling, readinessMessage } from "$lib/features/mcp/readiness";
 
   interface MCPTool {
     id: string;
@@ -57,7 +57,12 @@
   /** Type-safe view of selectedMCPServers */
   let servers = $derived((selectedMCPServers ?? []) as unknown as MCPServer[]);
 
-  let modelSupportsTools = $derived(selectedModel?.supports_tool_calling !== false);
+  // A picked model without tool calling never receives any server: rows stay
+  // saved but read as unavailable, and only already-selected ones can be
+  // switched off. No model picked is a separate state handled by the editor.
+  let modelBlocksTools = $derived(
+    selectedModel != null && !modelSupportsToolCalling(selectedModel)
+  );
 
   const {
     state: { currentSpace }
@@ -258,7 +263,7 @@
 </script>
 
 <div class="space-y-1" role="group" aria-label={m.mcp_servers()}>
-  {#if !modelSupportsTools}
+  {#if modelBlocksTools}
     <p
       class="label-warning border-label-default bg-label-dimmer text-label-stronger mb-2 rounded-md border px-2 py-1 text-sm"
     >
@@ -294,7 +299,9 @@
     <div class="divide-dimmer border-default divide-y overflow-hidden rounded-xl border">
       {#each generalAvailableServers as server (server.id)}
         {@const isSelected = isServerSelected(server.id)}
-        {@const unavailable = server.is_enabled === false}
+        {@const serverDisabled = server.is_enabled === false}
+        {@const unavailable = serverDisabled || modelBlocksTools}
+        {@const unavailableReason = serverDisabled ? "server_disabled" : "model_no_tool_calling"}
         {@const hasTools = isSelected && !unavailable && server.tools && server.tools.length > 0}
         {@const isExpanded = expandedServers.has(server.id)}
         {@const toolCount = server.tools?.length ?? 0}
@@ -323,11 +330,17 @@
                 <Field.Content>
                   <Field.Label for={`${uid}-${server.id}`}>
                     <span class="text-default font-medium">{server.name}</span>
-                    {#if unavailable}
+                    {#if serverDisabled}
                       <span
                         class="bg-warning-dimmer text-warning-stronger inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-xs font-medium"
                         >{m.disabled()}</span
                       >
+                    {:else if unavailable}
+                      <span
+                        class="bg-warning-dimmer text-warning-stronger inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-xs font-medium"
+                      >
+                        <LockKeyhole class="h-3 w-3" aria-hidden="true" />{m.not_available()}
+                      </span>
                     {/if}
                     {#if hasTools}
                       <span
@@ -344,7 +357,7 @@
                       id={`${uid}-${server.id}-description`}
                       class="text-muted text-xs leading-snug"
                     >
-                      {readinessMessage("server_disabled")}
+                      {readinessMessage(unavailableReason)}
                     </Field.Description>
                   {:else if server.description}
                     <Field.Description

@@ -1,8 +1,12 @@
 from datetime import date, datetime, timezone
 from enum import Enum
 from typing import Any, Literal, Optional
+from urllib.parse import urlsplit
 from uuid import UUID, uuid4
 
+from eneo.embedding_models.domain.embedding_model_repo import (
+    guard_embedding_provider_update,
+)
 from eneo.main.exceptions import (
     BadRequestException,
     EncryptionNotConfiguredException,
@@ -15,9 +19,13 @@ from eneo.model_providers.domain.connection_check import (
 from eneo.model_providers.domain.model_defaults_lookup import resolve_model_defaults
 from eneo.model_providers.domain.model_provider import ModelProvider
 from eneo.model_providers.domain.provider_api import (
+    DEFAULT_ENDPOINTS,
     configured_endpoint,
     connection_check_request,
     models_list_request,
+)
+from eneo.model_providers.infrastructure.litellm_provider import (
+    embedding_provider_configuration,
 )
 from eneo.model_providers.infrastructure.model_provider_repository import (
     ModelProviderRepository,
@@ -40,6 +48,58 @@ UNCHANGED = Unchanged.UNCHANGED
 
 class ConnectionCheckNotSupportedException(BadRequestException):
     """No cheap authenticated call is known for this provider."""
+
+
+def effective_endpoint(provider_type: str, config: dict[str, Any]) -> str | None:
+    """The destination a provider's credentials are sent to.
+
+    A configured ``endpoint`` wins; otherwise the provider type's default,
+    when it has one. ``None`` means the transport picks the destination
+    itself (LiteLLM's built-in base for that provider).
+    """
+    raw = config.get("endpoint")
+    if isinstance(raw, str) and raw.strip():
+        return raw.strip()
+    return DEFAULT_ENDPOINTS.get(provider_type)
+
+
+def normalize_destination(endpoint: str | None) -> str | None:
+    """Canonical ``scheme://host[:port]/path`` for comparing destinations.
+
+    Scheme and host are case-insensitive, a default port is the same as no
+    port, and trailing slashes do not change where a request goes. A
+    different scheme, host, port, base path or query does.
+    """
+    if endpoint is None:
+        return None
+    value = endpoint.strip()
+    if not value:
+        return None
+    parts = urlsplit(value if "://" in value else f"//{value}")
+    scheme = parts.scheme.lower()
+    host = (parts.hostname or "").lower()
+    try:
+        port: int | None = parts.port
+    except ValueError:
+        port = None
+        host = parts.netloc.lower()
+    if (scheme, port) in (("http", 80), ("https", 443)):
+        port = None
+    netloc = f"{host}:{port}" if port is not None else host
+    path = parts.path.rstrip("/")
+    query = f"?{parts.query}" if parts.query else ""
+    return f"{scheme}://{netloc}{path}{query}"
+
+
+def _has_stored_api_key(credentials: dict[str, Any]) -> bool:
+    value = credentials.get("api_key")
+    return isinstance(value, str) and bool(value.strip())
+
+
+def _is_masked_api_key(value: str) -> bool:
+    """A value that is only the display form of a key, never a key."""
+    stripped = value.strip()
+    return stripped.startswith("...") or set(stripped) <= set("*•·")
 
 
 def _coerce_to_epoch(value: Any) -> float:
@@ -397,8 +457,26 @@ class ModelProviderService:
         it describes settings the provider no longer has.
         """
         # Get existing provider
-        provider = await self.repository.get_by_id(provider_id)
+        provider = await self.repository.get_by_id(provider_id, for_update=True)
         connection_settings_changed = False
+
+        merged_config = {**provider.config, **(config or {})}
+        next_credentials = (
+            credentials if credentials is not None else provider.credentials
+        )
+        if embedding_provider_configuration(
+            provider.provider_type, provider.credentials, provider.config
+        ) != embedding_provider_configuration(
+            provider.provider_type, next_credentials, merged_config
+        ):
+            # Locking the provider also blocks new model attachments until the
+            # semantic edit commits. Model locks coordinate knowledge assignments.
+            await guard_embedding_provider_update(self.repository.session, provider_id)
+        # A frozen embedding route is refused above; an allowed destination
+        # change still has to come with its own key.
+        self._require_replacement_key_for_new_destination(
+            provider, merged_config, credentials
+        )
 
         # Check for duplicate names if name is being changed
         if name is not None and name != provider.name:
@@ -415,9 +493,8 @@ class ModelProviderService:
 
         if config is not None:
             # Merge with existing config so unchanged fields are preserved
-            merged = {**provider.config, **config}
-            connection_settings_changed |= merged != provider.config
-            provider.config = merged
+            connection_settings_changed |= merged_config != provider.config
+            provider.config = merged_config
 
         if is_active is not None:
             provider.is_active = is_active
@@ -428,6 +505,43 @@ class ModelProviderService:
         return await self.repository.update(
             provider, clear_connection_check=connection_settings_changed
         )
+
+    @staticmethod
+    def _require_replacement_key_for_new_destination(
+        provider: ModelProvider,
+        merged_config: dict[str, Any],
+        credentials: Optional[dict[str, Any]],
+    ) -> None:
+        """A stored key is never sent to a destination it was not entered for.
+
+        When the effective endpoint changes and the provider holds a key, the
+        update must carry an explicitly typed replacement. An omitted, blank
+        or masked display value is rejected before anything is written. Keys
+        entered for an unchanged destination are validated only for shape.
+        """
+        if credentials is not None:
+            raw = credentials.get("api_key")
+            if isinstance(raw, str) and raw.strip() and _is_masked_api_key(raw):
+                raise BadRequestException(
+                    "The API key looks like the masked display value; "
+                    "enter the actual key."
+                )
+
+        current = normalize_destination(
+            effective_endpoint(provider.provider_type, provider.config)
+        )
+        proposed = normalize_destination(
+            effective_endpoint(provider.provider_type, merged_config)
+        )
+        if current == proposed or not _has_stored_api_key(provider.credentials):
+            return
+
+        replacement = credentials.get("api_key") if credentials is not None else None
+        if not isinstance(replacement, str) or not replacement.strip():
+            raise BadRequestException(
+                "Changing the provider endpoint requires entering a new API key; "
+                "the stored key is not reused for a different destination."
+            )
 
     async def delete(self, provider_id: UUID) -> None:
         """Delete a provider.

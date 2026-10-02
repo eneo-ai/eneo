@@ -12,8 +12,8 @@ This lease gives each acquisition a unique owner token and keeps the lock alive
 with a watchdog that periodically refreshes the TTL while the operation runs.
 The TTL therefore acts as a crash-detection window (failover if the worker dies)
 rather than a hard cap on operation duration. Refresh and release are
-owner-verified via the same Lua scripts used for leader election, so a holder can
-never extend or delete another holder's lock.
+owner-verified by atomic Lua operations, so a holder can never extend or delete
+another holder's lock.
 
 If the watchdog loses the lease, it cancels the task running the protected block.
 That cancellation is cooperative and best-effort: full write-side exclusion after
@@ -115,7 +115,7 @@ async def redis_lease(
                 # refresh completes, and the watchdog would renew forever while
                 # the exit waits on it.
                 async with asyncio.timeout(refresh_timeout):
-                    still_owner = await LuaScripts.refresh_leader_lock(
+                    still_owner = await LuaScripts.refresh_owned_lock(
                         redis_client, key, owner, ttl_seconds
                     )
             except Exception as exc:
@@ -153,7 +153,7 @@ async def redis_lease(
         with contextlib.suppress(asyncio.CancelledError):
             await watchdog
         try:
-            await LuaScripts.release_leader_lock(redis_client, key, owner)
+            await LuaScripts.release_owned_lock(redis_client, key, owner)
         except Exception as exc:
             # Non-critical: the lock will expire on its own.
             logger.debug(

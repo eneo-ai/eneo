@@ -10,11 +10,16 @@ from uuid import UUID, uuid4
 import httpx
 import pytest
 from cryptography.fernet import Fernet
-from fastapi import FastAPI
+from fastapi import Depends, FastAPI, Request
 from fastapi.testclient import TestClient
 
 from eneo.authentication.auth_dependencies import get_current_active_user
+from eneo.authentication.endpoint_access import (
+    authorize_user,
+    require_endpoint_access,
+)
 from eneo.database.database import get_session_with_transaction
+from eneo.model_providers.domain import model_provider_service as service_module
 from eneo.model_providers.domain.connection_check import (
     ConnectionCheck,
     ConnectionCheckError,
@@ -233,9 +238,14 @@ class TestUpdateAndCreate:
 
         assert repository.update.await_args.kwargs == {"clear_connection_check": False}
 
-    async def test_a_changed_endpoint_clears_the_check(self) -> None:
+    async def test_a_changed_endpoint_clears_the_check(self, monkeypatch) -> None:
         provider = _provider(config={"endpoint": "https://llm.example.se"})
         service, repository = _service(provider)
+        # A new destination freezes used embedding routes; that lock is a
+        # database concern outside this check.
+        monkeypatch.setattr(
+            service_module, "guard_embedding_provider_update", AsyncMock()
+        )
 
         await service.update(provider.id, config={"endpoint": "https://ny.example.se"})
 
@@ -272,12 +282,22 @@ class TestUpdateAndCreate:
 
 
 def _client(service: Any, *, admin: bool = True) -> TestClient:
-    app = FastAPI()
+    app = FastAPI(dependencies=[Depends(require_endpoint_access)])
     app.include_router(router, prefix="/model-providers")
     add_exception_handlers(app)
-    app.dependency_overrides[get_current_active_user] = lambda: SimpleNamespace(
-        tenant_id=uuid4(), permissions=[Permission.ADMIN] if admin else []
+    user = SimpleNamespace(
+        tenant_id=uuid4(),
+        permissions=[Permission.ADMIN] if admin else [],
+        active_api_key=None,
     )
+
+    def current_user(request: Request) -> SimpleNamespace:
+        # The routes carry their admission in @endpoint_access; production
+        # authentication enforces it, so this stand-in does the same.
+        authorize_user(request, user)  # type: ignore[arg-type]
+        return user
+
+    app.dependency_overrides[get_current_active_user] = current_user
     app.dependency_overrides[get_session_with_transaction] = lambda: MagicMock()
     app.dependency_overrides[get_model_provider_service] = lambda: service
     return TestClient(app, raise_server_exceptions=False)

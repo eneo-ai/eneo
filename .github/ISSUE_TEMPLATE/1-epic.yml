@@ -1,7 +1,7 @@
 name: Epic
 description: Plan a roadmap-level outcome that can own multiple development tasks.
 title: "[Epic]: "
-labels: ["kind:epic", "enhancement"]
+labels: ["kind:epic"]
 projects: ["eneo-ai/5"]
 body:
   - type: markdown
@@ -83,7 +83,6 @@ body:
         - Docs
         - Security
         - Other
-      default: 5
     validations:
       required: true
 

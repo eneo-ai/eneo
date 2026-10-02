@@ -202,7 +202,11 @@ async def test_download_sets_digest_and_unicode_filename_headers(monkeypatch):
         info_blob_repo = staticmethod(lambda: repo)
         object_content_service = staticmethod(lambda: object_content)
 
-    response = await info_blobs_router.download_original(blob_id, "token", Container())
+    response = await info_blobs_router.download_original(
+        blob_id,
+        info_blobs_router.authorize_original_download(blob_id, "token"),
+        Container(),
+    )
     assert open_download.await_args.kwargs == {
         "repo": repo,
         "object_content": object_content,

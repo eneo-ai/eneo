@@ -53,6 +53,7 @@ def _make_idp_token(
     iss: str = ISSUER,
     aud: str = AUDIENCE,
     email: str | None = "user@example.com",
+    email_verified: bool | None = True,
     exp_offset: int = 3600,
     algorithm: str = "RS256",
 ) -> str:
@@ -66,6 +67,8 @@ def _make_idp_token(
     }
     if email is not None:
         payload["email"] = email
+    if email_verified is not None:
+        payload["email_verified"] = email_verified
     return jwt.encode(payload, private_pem, algorithm=algorithm, headers={"kid": kid})
 
 
@@ -141,7 +144,16 @@ class UserRepoStub:
     async def get_user_by_email(self, email: str):
         return self.users_by_email.get(email.lower())
 
-    async def get_user_by_username(self, username: str):
+    async def get_user_by_id_and_tenant_id(self, user_id, tenant_id):
+        for user in self.users_by_email.values():
+            if user.id == user_id and user.tenant_id == tenant_id:
+                return user
+        return None
+
+    async def has_removed_user_by_email(self, email: str, tenant_id) -> bool:  # noqa: ARG002
+        return False
+
+    async def get_user_by_username(self, username: str, with_deleted: bool = False):  # noqa: ARG002
         for user in self.users_by_email.values():
             if user.username == username:
                 return user
@@ -207,6 +219,8 @@ def _make_settings(**overrides) -> SimpleNamespace:
         oidc_accepted_audience=AUDIENCE,
         oidc_jwks_cache_ttl_seconds=3600,
         oidc_tenant_id=None,
+        # JIT admission requires allowed domains (resolve_federated_user).
+        oidc_allowed_domains=["example.com"],
     )
     defaults.update(overrides)
     return SimpleNamespace(**defaults)

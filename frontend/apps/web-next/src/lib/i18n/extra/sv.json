@@ -1465,5 +1465,21 @@
   "form_problem_confirm_override": "Kryssa i rutan för att tvinga igenom migreringen.",
   "storage_limit_invalid": "Ange ett positivt värde, till exempel 10 MB.",
   "form_changes_discarded": "Ändringarna ignorerades.",
-  "form_nothing_to_discard": "Inga ändringar att ignorera."
+  "form_nothing_to_discard": "Inga ändringar att ignorera.",
+  "cant_sync_while_crawl_running": "Kan inte synkronisera medan en indexering redan pågår",
+  "confirm_delete_crawl_end": "?",
+  "confirm_delete_crawl_start": "Vill du verkligen ta bort",
+  "crawl_skipped_duplicate": "Hoppad över - en annan indexering pågår redan",
+  "delete_crawl": "Radera indexering",
+  "full_url_sitemap": "Full URL till din sitemap.xml-fil",
+  "leave_blank_keep_password": "Lämna tomt för att behålla nuvarande lösenord",
+  "url_description": "URL att börja indexera från (inklusive https://)",
+  "website_all_pages_indexed": "Alla {count} sidor indexerade",
+  "website_crawl_in_progress": "Indexering pågår",
+  "website_crawl_result": "Indexeringsresultat",
+  "website_last_crawled": "Senast indexerad",
+  "website_not_yet_crawled": "Inte indexerad ännu",
+  "website_pages_indexed": "{success} av {total} sidor indexerade",
+  "website_pages_indexed_with_files": "{successPages} av {totalPages} sidor, {successFiles} av {totalFiles} filer",
+  "website_sync_interval": "Synkintervall"
 }

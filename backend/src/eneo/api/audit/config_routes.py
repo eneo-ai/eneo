@@ -11,8 +11,9 @@ from eneo.audit.schemas.audit_config_schemas import (
     AuditConfigResponse,
     AuditConfigUpdateRequest,
 )
+from eneo.authentication.endpoint_access import Authentication, endpoint_access
 from eneo.main.container.container import Container
-from eneo.roles.permissions import Permission, validate_permission
+from eneo.roles.permissions import Permission
 from eneo.server.dependencies.container import get_container
 from eneo.server.protocol import responses
 
@@ -29,6 +30,11 @@ router = APIRouter(prefix="/config")
     description="Retrieve all audit category configurations for the current tenant.",
     responses=responses.get_responses([403]),
 )
+@endpoint_access(
+    authentication=Authentication.USER,
+    authorization=Permission.ADMIN,
+    reason="This operation requires Permission.ADMIN before accessing tenant resources.",
+)
 async def get_audit_config(
     container: Annotated[Container, Depends(get_container(with_user=True))],
 ) -> AuditConfigResponse:
@@ -41,9 +47,6 @@ async def get_audit_config(
     Requires admin permission.
     """
     user = container.user()
-
-    # Validate admin permissions
-    validate_permission(user, Permission.ADMIN)
 
     audit_config_service = container.audit_config_service()
 
@@ -58,6 +61,11 @@ async def get_audit_config(
     summary="Update audit category configuration",
     description="Update one or more audit category configurations for the current tenant.",
     responses=responses.get_responses([400, 403]),
+)
+@endpoint_access(
+    authentication=Authentication.USER,
+    authorization=Permission.ADMIN,
+    reason="This operation requires Permission.ADMIN before accessing tenant resources.",
 )
 async def update_audit_config(
     request: AuditConfigUpdateRequest,
@@ -75,9 +83,6 @@ async def update_audit_config(
     from eneo.audit.domain.entity_types import EntityType
 
     user = container.user()
-
-    # Validate admin permissions
-    validate_permission(user, Permission.ADMIN)
 
     audit_config_service = container.audit_config_service()
     audit_service = container.audit_service()
@@ -132,6 +137,11 @@ async def update_audit_config(
     description="Retrieve all 65 actions with their enabled status for the modal UI.",
     responses=responses.get_responses([403]),
 )
+@endpoint_access(
+    authentication=Authentication.USER,
+    authorization=Permission.ADMIN,
+    reason="This operation requires Permission.ADMIN before accessing tenant resources.",
+)
 async def get_action_config(
     container: Annotated[Container, Depends(get_container(with_user=True))],
 ) -> ActionConfigResponse:
@@ -144,9 +154,6 @@ async def get_action_config(
     Requires admin permission.
     """
     user = container.user()
-
-    # Validate admin permissions
-    validate_permission(user, Permission.ADMIN)
 
     audit_config_service = container.audit_config_service()
 
@@ -161,6 +168,11 @@ async def get_action_config(
     summary="Update per-action audit configuration",
     description="Update one or more action-level audit configurations.",
     responses=responses.get_responses([400, 403]),
+)
+@endpoint_access(
+    authentication=Authentication.USER,
+    authorization=Permission.ADMIN,
+    reason="This operation requires Permission.ADMIN before accessing tenant resources.",
 )
 async def update_action_config(
     request: ActionConfigUpdateRequest,
@@ -178,9 +190,6 @@ async def update_action_config(
     from eneo.audit.domain.entity_types import EntityType
 
     user = container.user()
-
-    # Validate admin permissions
-    validate_permission(user, Permission.ADMIN)
 
     audit_config_service = container.audit_config_service()
     audit_service = container.audit_service()

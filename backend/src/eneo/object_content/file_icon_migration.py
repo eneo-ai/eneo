@@ -17,7 +17,7 @@ from pydantic import ValidationError
 
 
 async def _preflight(timeout_seconds: int) -> tuple[str, int]:
-    from eneo.main.config import get_settings
+    from eneo.main.config import InvalidConfiguration, get_settings
     from eneo.object_content.file_icon_preflight import (
         FileIconPreflightReport,
         PreflightIssue,
@@ -28,7 +28,7 @@ async def _preflight(timeout_seconds: int) -> tuple[str, int]:
         report = await run_file_icon_preflight(
             get_settings().database_url, timeout_seconds=timeout_seconds
         )
-    except (ValidationError, ValueError):
+    except (InvalidConfiguration, ValidationError, ValueError):
         report = FileIconPreflightReport(
             blockers=[
                 PreflightIssue(
@@ -128,6 +128,7 @@ def main() -> None:
         if arguments.command == "preflight":
             result, exit_code = asyncio.run(_preflight(arguments.timeout_seconds))
         elif arguments.command == "cleanup":
+            from eneo.main.config import InvalidConfiguration
             from eneo.object_content.file_icon_cleanup import FileIconCleanupRefused
 
             try:
@@ -138,7 +139,7 @@ def main() -> None:
                     {"outcome": "blocked", "detail": str(error)}, indent=2
                 )
                 exit_code = 2
-            except (ValidationError, ValueError):
+            except (InvalidConfiguration, ValidationError, ValueError):
                 result = json.dumps(
                     {
                         "outcome": "incomplete",

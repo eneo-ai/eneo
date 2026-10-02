@@ -37,6 +37,7 @@ class SpaceRoleFact:
 @dataclass(frozen=True, slots=True)
 class SpaceAccessFacts:
     id: UUID | None
+    tenant_id: UUID | None
     user_id: UUID | None
     tenant_space_id: UUID | None
     members: Mapping[UUID, SpaceRoleFact]
@@ -61,6 +62,7 @@ class SpaceAccessFacts:
     def from_space(cls, space: "Space") -> "SpaceAccessFacts":
         return cls(
             id=space.id,
+            tenant_id=space.tenant_id,
             user_id=space.user_id,
             tenant_space_id=space.tenant_space_id,
             members={
@@ -199,6 +201,7 @@ SHARED_SPACE_PERMISSIONS = {
         SpaceResourceType.INFO_BLOB: {
             SpaceAction.READ,
             SpaceAction.CREATE,
+            SpaceAction.EDIT,
             SpaceAction.DELETE,
         },
         SpaceResourceType.SPACE: {
@@ -271,6 +274,7 @@ SHARED_SPACE_PERMISSIONS = {
         SpaceResourceType.INFO_BLOB: {
             SpaceAction.READ,
             SpaceAction.CREATE,
+            SpaceAction.EDIT,
             SpaceAction.DELETE,
         },
         SpaceResourceType.SPACE: {
@@ -357,6 +361,7 @@ PERSONAL_SPACE_PERMISSIONS = {
         SpaceResourceType.INFO_BLOB: {
             SpaceAction.READ,
             SpaceAction.CREATE,
+            SpaceAction.EDIT,
             SpaceAction.DELETE,
         },
         SpaceResourceType.SPACE: {
@@ -436,6 +441,7 @@ ORG_SPACE_PERMISSIONS = {
         SpaceResourceType.INFO_BLOB: {
             SpaceAction.READ,
             SpaceAction.CREATE,
+            SpaceAction.EDIT,
             SpaceAction.DELETE,
         },
         SpaceResourceType.SPACE: {
@@ -547,10 +553,11 @@ class SpaceActor:
         """Derive a space role from the active API key's scope and permission.
 
         Applies to both service and user-owned keys. Returns None when no
-        key is active, or when the key's scope does not cover this space.
+        key is active, when the space belongs to another tenant than the
+        key, or when the key's scope does not cover this space.
 
-        Scope → access:
-          - tenant-scoped     → every space in the tenant
+        Scope → access (always within the key's own tenant):
+          - tenant-scoped     → every space in the key's tenant
           - space-scoped      → only the matching space
           - assistant/app     → only the parent space of that resource
 
@@ -563,12 +570,17 @@ class SpaceActor:
         if key is None:
             return None
 
+        # A key never reaches outside its own tenant, whatever its scope.
+        # Facts without a tenant cannot prove membership, so they deny.
+        if self.space.tenant_id is None or key.tenant_id != self.space.tenant_id:
+            return None
+
         scope_type = key.scope_type
         if hasattr(scope_type, "value"):
             scope_type = scope_type.value
 
         if scope_type == "tenant":
-            pass  # tenant keys cover every space
+            pass  # tenant keys cover every space in their own tenant
         elif scope_type == "space":
             if key.scope_id != self.space.id:
                 return None
@@ -768,6 +780,12 @@ class SpaceActor:
             action=SpaceAction.EDIT,
             resource_type=SpaceResourceType.SPACE,
         )
+
+    def can_edit_retention(self) -> bool:
+        """Preserve personal ownership; managed spaces use policy administration."""
+        if self.space.is_personal():
+            return self.can_edit_assistants() or self.can_edit_apps()
+        return self.can_edit_space()
 
     def can_delete_space(self):
         return self.can_perform_action(
@@ -1074,6 +1092,12 @@ class SpaceActor:
     def can_create_info_blobs(self):
         return self.can_perform_action(
             action=SpaceAction.CREATE,
+            resource_type=SpaceResourceType.INFO_BLOB,
+        )
+
+    def can_edit_info_blobs(self):
+        return self.can_perform_action(
+            action=SpaceAction.EDIT,
             resource_type=SpaceResourceType.INFO_BLOB,
         )
 

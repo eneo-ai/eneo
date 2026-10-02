@@ -14,6 +14,12 @@ from eneo.authentication.auth_dependencies import (
     get_scope_filter,
     require_user_identity,
 )
+from eneo.authentication.endpoint_access import (
+    Authentication,
+    Authorization,
+    authenticates,
+    endpoint_access,
+)
 from eneo.authentication.signed_urls import (
     generate_info_blob_original_download_token,
     verify_info_blob_original_download_token,
@@ -60,6 +66,11 @@ CurrentUserDep = Annotated[UserInDB, Depends(get_current_active_user)]
     response_model=PaginatedResponse[InfoBlobPublicNoText],
     responses=responses.get_responses([]),
 )
+@endpoint_access(
+    authentication=Authentication.USER,
+    authorization=Authorization.AUTHENTICATED,
+    reason="InfoBlobService enforces access to the parent collection and space.",
+)
 async def get_info_blob_ids(
     request: Request,
     container: ContainerDep,
@@ -84,6 +95,11 @@ async def get_info_blob_ids(
     response_model=InfoBlobPublic,
     responses=responses.get_responses([403, 404]),
 )
+@endpoint_access(
+    authentication=Authentication.USER,
+    authorization=Authorization.AUTHENTICATED,
+    reason="InfoBlobService enforces access to the parent collection and space.",
+)
 async def get_info_blob(
     id: Annotated[UUID, Path()],
     container: ContainerDep,
@@ -105,6 +121,11 @@ async def get_info_blob(
         "short-lived URL for the exact uploaded bytes."
     ),
 )
+@endpoint_access(
+    authentication=Authentication.USER,
+    authorization=Authorization.AUTHENTICATED,
+    reason="InfoBlobService enforces access to the parent collection and space.",
+)
 async def generate_original_signed_url(
     id: UUID,
     request: Request,
@@ -114,12 +135,14 @@ async def generate_original_signed_url(
     service = container.info_blob_service()
     blob = await service.ensure_original_available(id)
     user = container.user()
-    expires_at = int(time.time()) + signed_url_req.expires_in
+    issued_at = int(time.time())
+    expires_at = issued_at + signed_url_req.expires_in
     token = generate_info_blob_original_download_token(
         info_blob_id=id,
         expires_at=expires_at,
         content_disposition=signed_url_req.content_disposition,
         tenant_id=blob.tenant_id,
+        issued_at=issued_at,
     )
     await container.audit_service().log_async(
         tenant_id=user.tenant_id,
@@ -159,6 +182,14 @@ def _validate_original_claims(id: UUID, token: str) -> tuple[ContentDisposition,
         raise AuthenticationException("Invalid token claims") from None
 
 
+@authenticates(Authentication.SIGNED_URL)
+def authorize_original_download(
+    id: UUID,
+    token: Annotated[str, Query()],
+) -> tuple[ContentDisposition, UUID]:
+    return _validate_original_claims(id, token)
+
+
 @router.get(
     "/{id}/original/download/",
     response_class=Response,
@@ -190,12 +221,19 @@ def _validate_original_claims(id: UUID, token: str) -> tuple[ContentDisposition,
         "signed token."
     ),
 )
+@endpoint_access(
+    authentication=Authentication.SIGNED_URL,
+    authorization=Authorization.SIGNED_URL,
+    reason="A purpose-separated signed token authorizes its original knowledge file and tenant.",
+)
 async def download_original(
     id: UUID,
-    token: Annotated[str, Query()],
+    access: Annotated[
+        tuple[ContentDisposition, UUID], Depends(authorize_original_download)
+    ],
     container: Annotated[Container, Depends(get_container(with_transaction=False))],
 ) -> ClosingStreamingResponse:
-    disposition, tenant_id = _validate_original_claims(id, token)
+    disposition, tenant_id = access
     download = await open_info_blob_original_download(
         repo=container.info_blob_repo(),
         object_content=container.object_content_service(),
@@ -224,6 +262,11 @@ async def download_original(
     description="Updates an info-blob by id. Omitted fields are not updated.",
     responses=responses.get_responses([400, 403, 404, 409]),
 )
+@endpoint_access(
+    authentication=Authentication.USER,
+    authorization=Authorization.AUTHENTICATED,
+    reason="InfoBlobService enforces access to the parent collection and space.",
+)
 async def update_info_blob(
     id: Annotated[UUID, Path()],
     info_blob: InfoBlobUpdatePublic,
@@ -251,6 +294,11 @@ async def update_info_blob(
     description="Deletes an info-blob by id. Returns the deleted object.",
     responses=responses.get_responses([403, 404]),
 )
+@endpoint_access(
+    authentication=Authentication.USER,
+    authorization=Authorization.AUTHENTICATED,
+    reason="InfoBlobService enforces access to the parent collection and space.",
+)
 async def delete_info_blob(
     id: Annotated[UUID, Path()],
     container: ContainerDep,
@@ -272,6 +320,11 @@ async def delete_info_blob(
     response_model=PaginatedResponse[InfoBlobPublicNoText],
     description="Returns the info-blobs of a space (without text).",
     responses=responses.get_responses([]),
+)
+@endpoint_access(
+    authentication=Authentication.USER,
+    authorization=Authorization.AUTHENTICATED,
+    reason="InfoBlobService enforces access to the parent collection and space.",
 )
 async def get_space_info_blobs(
     space_id: Annotated[UUID, Path()],

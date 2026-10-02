@@ -55,7 +55,6 @@ from eneo.completion_models.infrastructure.message_payload import (
 from eneo.completion_models.infrastructure.static_prompts import (
     MCP_TOOL_REFERENCES_INSTRUCTION,
 )
-from eneo.internal_mcp.constants import INTERNAL_MCP_SERVER_NAMES
 from eneo.logging.logging import LoggingDetails
 from eneo.main.exceptions import APIKeyNotConfiguredException, OpenAIException
 from eneo.main.logging import get_logger
@@ -709,6 +708,7 @@ class TenantModelAdapter(CompletionModelAdapter):
                         }
                     ),
                     mcp_tool_name=SKILL_ACTIVATION_TOOL_NAME,
+                    is_internal=True,
                 )
             )
         return metadata
@@ -733,6 +733,7 @@ class TenantModelAdapter(CompletionModelAdapter):
                 result_status="completed",
                 result=json.dumps({"activated": True, "mode": "always"}),
                 mcp_tool_name=SKILL_ACTIVATION_TOOL_NAME,
+                is_internal=True,
             )
             for key, display_name in runtime.initially_active_skills()
         ]
@@ -1511,6 +1512,7 @@ class TenantModelAdapter(CompletionModelAdapter):
                                 result=display_text,
                                 mcp_tool_name=call.name,
                                 purpose=mcp_proxy.get_tool_purpose(call.name),
+                                is_internal=mcp_proxy.is_internal_tool(call.name),
                                 meta=result.get("meta") or None,
                             )
                         )
@@ -1733,6 +1735,9 @@ class TenantModelAdapter(CompletionModelAdapter):
             def _tool_purpose(name: str) -> str | None:
                 return mcp_proxy.get_tool_purpose(name) if mcp_proxy else None
 
+            def _tool_is_internal(name: str) -> bool:
+                return mcp_proxy.is_internal_tool(name) if mcp_proxy else False
+
             # Shared state for tool call accumulation and usage across stream draining
             class _StreamResult:
                 def __init__(self) -> None:
@@ -1887,6 +1892,7 @@ class TenantModelAdapter(CompletionModelAdapter):
                                             result_status="pending",
                                             mcp_tool_name=name,
                                             purpose=_tool_purpose(name),
+                                            is_internal=_tool_is_internal(name),
                                         )
                                     ],
                                 )
@@ -2067,6 +2073,7 @@ class TenantModelAdapter(CompletionModelAdapter):
                                         tool_call_id=call.call_id,
                                         result_status="deferred",
                                         purpose=_tool_purpose(call.name),
+                                        is_internal=_tool_is_internal(call.name),
                                         result=json.dumps(
                                             {
                                                 "deferred": True,
@@ -2142,6 +2149,7 @@ class TenantModelAdapter(CompletionModelAdapter):
                                 tool_call_id=tc["id"],
                                 mcp_tool_name=name,
                                 purpose=mcp_proxy.get_tool_purpose(name),
+                                is_internal=mcp_proxy.is_internal_tool(name),
                             )
                         )
                     tool_args_by_call_id: dict[str, dict[str, Any] | None] = {}
@@ -2151,20 +2159,27 @@ class TenantModelAdapter(CompletionModelAdapter):
                                 _tool_metadata_arguments(tm)
                             )
 
-                    # Approval flow
+                    # Approval flow. Tools of Eneo's own loopback servers
+                    # (knowledge, files, built-in providers) are core
+                    # capabilities: approval controls apply only to external
+                    # MCP servers, even when both kinds are called in one
+                    # round. Internal is a property of the server entity, not
+                    # of its name, so an external server named like an
+                    # internal one still goes through approval.
+                    internal_call_ids = {
+                        tm.tool_call_id
+                        for tm in tool_metadata
+                        if tm.tool_call_id is not None
+                        and tm.mcp_tool_name is not None
+                        and mcp_proxy.is_internal_tool(tm.mcp_tool_name)
+                    }
                     approval_metadata = [
                         tm
                         for tm in tool_metadata
-                        if tm.server_name not in INTERNAL_MCP_SERVER_NAMES
+                        if tm.tool_call_id not in internal_call_ids
                     ]
-                    # Eneo's internal knowledge/files tools are read-only core
-                    # capabilities. Approval controls apply only to external MCP
-                    # servers, even when both kinds are called in one round.
                     decision_map: dict[str, tuple[bool, str | None]] = {
-                        tm.tool_call_id: (True, None)
-                        for tm in tool_metadata
-                        if tm.tool_call_id is not None
-                        and tm.server_name in INTERNAL_MCP_SERVER_NAMES
+                        call_id: (True, None) for call_id in internal_call_ids
                     }
                     timed_out = False
                     if require_tool_approval and approval_manager and approval_metadata:
@@ -2225,6 +2240,7 @@ class TenantModelAdapter(CompletionModelAdapter):
                                         result_status="timeout_denied",
                                         mcp_tool_name=tm.mcp_tool_name,
                                         purpose=tm.purpose,
+                                        is_internal=tm.is_internal,
                                     )
                                     for tm in approval_metadata
                                 ],
@@ -2253,6 +2269,7 @@ class TenantModelAdapter(CompletionModelAdapter):
                                     ),
                                     mcp_tool_name=tm.mcp_tool_name,
                                     purpose=tm.purpose,
+                                    is_internal=tm.is_internal,
                                 )
                                 for tm in tool_metadata
                             ],
@@ -2282,6 +2299,7 @@ class TenantModelAdapter(CompletionModelAdapter):
                                     result_status="approved",
                                     mcp_tool_name=tm.mcp_tool_name,
                                     purpose=tm.purpose,
+                                    is_internal=tm.is_internal,
                                 )
                                 for tm in tool_metadata
                             ],
@@ -2389,6 +2407,9 @@ class TenantModelAdapter(CompletionModelAdapter):
                                     purpose=mcp_proxy.get_tool_purpose(
                                         tc["function"]["name"]
                                     ),
+                                    is_internal=mcp_proxy.is_internal_tool(
+                                        tc["function"]["name"]
+                                    ),
                                     meta=result_data.get("meta") or None,
                                 )
                             )
@@ -2446,6 +2467,9 @@ class TenantModelAdapter(CompletionModelAdapter):
                                 result=json.dumps(denial_payload),
                                 mcp_tool_name=tc["function"]["name"],
                                 purpose=mcp_proxy.get_tool_purpose(
+                                    tc["function"]["name"]
+                                ),
+                                is_internal=mcp_proxy.is_internal_tool(
                                     tc["function"]["name"]
                                 ),
                             )
@@ -2543,6 +2567,7 @@ class TenantModelAdapter(CompletionModelAdapter):
                                     result=refusal_payload,
                                     mcp_tool_name=name,
                                     purpose=_tool_purpose(name),
+                                    is_internal=_tool_is_internal(name),
                                 )
                             )
                         yield Completion(

@@ -9,8 +9,12 @@ from eneo.audit.application.audit_metadata import AuditMetadata
 from eneo.audit.domain.action_types import ActionType
 from eneo.audit.domain.entity_types import EntityType
 from eneo.authentication.auth_dependencies import (
-    require_permission,
     require_user_for_creation,
+)
+from eneo.authentication.endpoint_access import (
+    Authentication,
+    Authorization,
+    endpoint_access,
 )
 from eneo.main.container.container import Container
 from eneo.roles.permissions import Permission
@@ -37,6 +41,11 @@ _ContainerDep = Annotated[Container, Depends(get_container(with_user=True))]
     response_model=list[PermissionPublic],
     responses=responses.get_responses([404]),
 )
+@endpoint_access(
+    authentication=Authentication.USER,
+    authorization=Authorization.AUTHENTICATED,
+    reason="Tenant members may discover available permissions and role templates.",
+)
 async def get_permissions(
     container: _ContainerDep,
 ) -> list[PermissionPublic]:
@@ -49,6 +58,11 @@ async def get_permissions(
     description="List the predefined role templates available for creating roles.",
     responses=responses.get_responses([]),
     response_model=None,
+)
+@endpoint_access(
+    authentication=Authentication.USER,
+    authorization=Authorization.AUTHENTICATED,
+    reason="Tenant members may discover available permissions and role templates.",
 )
 async def get_role_templates(
     container: Container = Depends(get_container(with_user=True)),
@@ -66,6 +80,11 @@ async def get_role_templates(
     response_model=RolesPaginatedResponse,
     responses=responses.get_responses([403]),
 )
+@endpoint_access(
+    authentication=Authentication.USER,
+    authorization=Permission.ADMIN,
+    reason="Managing tenant roles requires the admin permission.",
+)
 async def get_roles(
     container: _ContainerDep,
 ) -> RolesPaginatedResponse:
@@ -80,6 +99,11 @@ async def get_roles(
     response_model=RolePublic,
     responses=responses.get_responses([403, 404]),
 )
+@endpoint_access(
+    authentication=Authentication.USER,
+    authorization=Permission.ADMIN,
+    reason="Managing tenant roles requires the admin permission.",
+)
 async def get_role_by_id(
     role_id: UUID,
     container: _ContainerDep,
@@ -93,6 +117,11 @@ async def get_role_by_id(
     description="Create a new role for the current tenant.",
     response_model=RolePublic,
     responses=responses.get_responses([400, 403]),
+)
+@endpoint_access(
+    authentication=Authentication.USER,
+    authorization=Permission.ADMIN,
+    reason="Managing tenant roles requires the admin permission.",
 )
 async def create_role(
     role: RoleCreateRequest,
@@ -129,6 +158,11 @@ async def create_role(
     description="Update an existing role by id.",
     response_model=RolePublic,
     responses=responses.get_responses([400, 403, 404]),
+)
+@endpoint_access(
+    authentication=Authentication.USER,
+    authorization=Permission.ADMIN,
+    reason="Managing tenant roles requires the admin permission.",
 )
 async def update_role(
     role_id: UUID,
@@ -180,6 +214,11 @@ async def update_role(
     response_model=RolePublic,
     responses=responses.get_responses([400, 403, 404]),
 )
+@endpoint_access(
+    authentication=Authentication.USER,
+    authorization=Permission.ADMIN,
+    reason="Managing tenant roles requires the admin permission.",
+)
 async def delete_role_by_id(
     role_id: UUID,
     container: _ContainerDep,
@@ -218,6 +257,11 @@ async def delete_role_by_id(
     description="Reset a role's permissions to its default template.",
     response_model=RolePublic,
     responses=responses.get_responses([400, 403, 404]),
+)
+@endpoint_access(
+    authentication=Authentication.USER,
+    authorization=Permission.ADMIN,
+    reason="Managing tenant roles requires the admin permission.",
 )
 async def reset_role_to_default(
     role_id: UUID,
@@ -261,7 +305,11 @@ async def reset_role_to_default(
     description="Set the given role as the tenant's default role.",
     response_model=RolePublic,
     responses=responses.get_responses([403, 404]),
-    dependencies=[Depends(require_permission(Permission.ADMIN))],
+)
+@endpoint_access(
+    authentication=Authentication.USER,
+    authorization=Permission.ADMIN,
+    reason="Managing tenant roles requires the admin permission.",
 )
 async def set_default_role(
     role_id: UUID,
@@ -303,7 +351,11 @@ async def set_default_role(
     description="Clear the tenant's default role.",
     responses=responses.get_responses([403]),
     response_model=None,
-    dependencies=[Depends(require_permission(Permission.ADMIN))],
+)
+@endpoint_access(
+    authentication=Authentication.USER,
+    authorization=Permission.ADMIN,
+    reason="Managing tenant roles requires the admin permission.",
 )
 async def clear_default_role(
     container: Container = Depends(get_container(with_user=True)),

@@ -41,6 +41,11 @@ from sse_starlette import EventSourceResponse
 
 from eneo.ai_models.completion_models.completion_model import Completion, ResponseType
 from eneo.authentication.auth_dependencies import require_user_for_creation
+from eneo.authentication.endpoint_access import (
+    Authentication,
+    Authorization,
+    endpoint_access,
+)
 from eneo.help_assistants.api.run_models import (
     AvailabilityResponse,
     ContinueTurnRequest,
@@ -191,6 +196,11 @@ def _to_json_response(response: HelperRunResponse) -> HelperRunResponsePublic:
     description="Start a new helper run for a target assistant (JSON or SSE).",
     responses=responses.streaming_response(HelperRunResponsePublic, [400, 403, 404]),
 )
+@endpoint_access(
+    authentication=Authentication.USER,
+    authorization=Authorization.AUTHENTICATED,
+    reason="HelperRunService requires edit access to the target and ownership of the run.",
+)
 async def start_helper_run(
     body: StartRunRequest,
     container: HelperRunContainer,
@@ -223,6 +233,11 @@ async def start_helper_run(
     description="Follow-up turn on an existing helper run (JSON or SSE).",
     responses=responses.streaming_response(HelperRunResponsePublic, [400, 403, 404]),
 )
+@endpoint_access(
+    authentication=Authentication.USER,
+    authorization=Authorization.AUTHENTICATED,
+    reason="HelperRunService requires edit access to the target and ownership of the run.",
+)
 async def continue_helper_run(
     run_id: UUID,
     body: ContinueTurnRequest,
@@ -253,6 +268,11 @@ async def continue_helper_run(
     description="Transition a helper run to a terminal status (completed/abandoned/failed).",
     responses=responses.get_responses([400, 403, 404]),
 )
+@endpoint_access(
+    authentication=Authentication.USER,
+    authorization=Authorization.AUTHENTICATED,
+    reason="HelperRunService requires edit access to the target and ownership of the run.",
+)
 async def update_helper_run_status(
     run_id: UUID,
     body: UpdateStatusRequest,
@@ -275,6 +295,11 @@ async def update_helper_run_status(
     response_model=AvailabilityResponse,
     description="Pre-flight signal for whether the prompt-guide button should render.",
     responses=responses.get_responses([403]),
+)
+@endpoint_access(
+    authentication=Authentication.USER,
+    authorization=Authorization.AUTHENTICATED,
+    reason="HelperRunService requires edit access to the target and ownership of the run.",
 )
 async def get_helper_availability(
     kind: HelperKind,

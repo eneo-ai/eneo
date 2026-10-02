@@ -30,6 +30,11 @@ from eneo.authentication.auth_models import (
     ApiKeyNotificationTargetType,
     audit_actor_for,
 )
+from eneo.authentication.endpoint_access import (
+    Authentication,
+    Authorization,
+    endpoint_access,
+)
 from eneo.database.database import AsyncSession
 from eneo.main.container.container import Container
 from eneo.main.models import (
@@ -63,6 +68,9 @@ if TYPE_CHECKING:
     from eneo.main.models import NotProvided
 
 router = APIRouter()
+_ASSISTANT_ACCESS_REASON = (
+    "AssistantService enforces assistant permissions and space membership."
+)
 logger = logging.getLogger(__name__)
 ApiKeyRevokingContainer = Annotated[
     Container,
@@ -75,6 +83,11 @@ ApiKeyRevokingContainer = Annotated[
     response_model=AssistantPublic,
     description="Create a new assistant in a space.",
     responses=responses.get_responses([403, 404]),
+)
+@endpoint_access(
+    authentication=Authentication.USER,
+    authorization=Authorization.AUTHENTICATED,
+    reason=_ASSISTANT_ACCESS_REASON,
 )
 async def create_assistant(
     request: Request,
@@ -167,6 +180,14 @@ async def create_assistant(
     description="List assistants. Requires Admin permission if `for_tenant` is `true`.",
     responses=responses.get_responses([403]),
 )
+@endpoint_access(
+    authentication=Authentication.USER,
+    authorization=Authorization.AUTHENTICATED,
+    reason=(
+        "Lists caller-created assistants. Tenant-wide listing requires admin "
+        "permission and rejects resource-scoped API keys."
+    ),
+)
 async def get_assistants(
     request: Request,
     container: Annotated[Container, Depends(get_container(with_user=True))],
@@ -241,6 +262,11 @@ async def _assistant_response(
     "/{id}/",
     response_model=AssistantPublic,
     responses=responses.get_responses([400, 403, 404]),
+)
+@endpoint_access(
+    authentication=Authentication.USER,
+    authorization=Authorization.AUTHENTICATED,
+    reason=_ASSISTANT_ACCESS_REASON,
 )
 async def get_assistant(
     id: UUID,
@@ -580,6 +606,11 @@ def _build_assistant_update_changes(
     responses=responses.get_responses([400, 403, 404]),
     description="Update an assistant. Omitted fields are left unchanged.",
 )
+@endpoint_access(
+    authentication=Authentication.USER,
+    authorization=Authorization.AUTHENTICATED,
+    reason=_ASSISTANT_ACCESS_REASON,
+)
 async def update_assistant(
     id: UUID,
     assistant: AssistantUpdatePublic,
@@ -773,6 +804,11 @@ async def update_assistant(
     description="Delete an assistant.",
     responses=responses.get_responses([403, 404]),
 )
+@endpoint_access(
+    authentication=Authentication.USER,
+    authorization=Authorization.AUTHENTICATED,
+    reason=_ASSISTANT_ACCESS_REASON,
+)
 async def delete_assistant(
     id: UUID,
     container: ApiKeyRevokingContainer,
@@ -849,6 +885,11 @@ async def delete_assistant(
     response_model=AskResponse,
     description="Ask an assistant and start a new session. Streams the response as Server-Sent Events if `stream` is `true`.",
     responses=responses.streaming_response(AskResponse, [400, 403, 404]),
+)
+@endpoint_access(
+    authentication=Authentication.ASSISTANT,
+    authorization=Authorization.AUTHENTICATED,
+    reason=_ASSISTANT_ACCESS_REASON,
 )
 async def ask_assistant(
     id: UUID,
@@ -931,6 +972,11 @@ async def ask_assistant(
     responses=responses.get_responses([400, 403, 404]),
     dependencies=[Depends(require_resource_permission_for_method("conversations"))],
 )
+@endpoint_access(
+    authentication=Authentication.USER,
+    authorization=Authorization.AUTHENTICATED,
+    reason=_ASSISTANT_ACCESS_REASON,
+)
 async def get_assistant_sessions(
     id: UUID,
     container: Annotated[Container, Depends(get_container(with_user=True))],
@@ -965,6 +1011,11 @@ async def get_assistant_sessions(
     responses=responses.get_responses([400, 403, 404]),
     dependencies=[Depends(require_resource_permission_for_method("conversations"))],
 )
+@endpoint_access(
+    authentication=Authentication.USER,
+    authorization=Authorization.AUTHENTICATED,
+    reason=_ASSISTANT_ACCESS_REASON,
+)
 async def get_assistant_session(
     id: UUID,
     session_id: UUID,
@@ -984,6 +1035,11 @@ async def get_assistant_session(
     description="Delete a session belonging to an assistant.",
     responses=responses.get_responses([400, 403, 404]),
     dependencies=[Depends(require_resource_permission_for_method("conversations"))],
+)
+@endpoint_access(
+    authentication=Authentication.USER,
+    authorization=Authorization.AUTHENTICATED,
+    reason=_ASSISTANT_ACCESS_REASON,
 )
 async def delete_assistant_session(
     id: UUID,
@@ -1043,6 +1099,11 @@ async def delete_assistant_session(
     description="Ask a follow-up question in an existing session. Streams the response as Server-Sent Events if `stream` is `true`.",
     responses=responses.streaming_response(AskResponse, [400, 403, 404]),
 )
+@endpoint_access(
+    authentication=Authentication.ASSISTANT,
+    authorization=Authorization.AUTHENTICATED,
+    reason=_ASSISTANT_ACCESS_REASON,
+)
 async def ask_followup(
     id: UUID,
     session_id: UUID,
@@ -1086,6 +1147,11 @@ async def ask_followup(
     responses=responses.get_responses([400, 403, 404]),
     dependencies=[Depends(require_resource_permission_for_method("conversations"))],
 )
+@endpoint_access(
+    authentication=Authentication.ASSISTANT,
+    authorization=Authorization.AUTHENTICATED,
+    reason=_ASSISTANT_ACCESS_REASON,
+)
 async def leave_feedback(
     id: UUID,
     session_id: UUID,
@@ -1111,6 +1177,11 @@ async def leave_feedback(
     status_code=204,
     description="Transfer an assistant to another space.",
     responses=responses.get_responses([403, 404]),
+)
+@endpoint_access(
+    authentication=Authentication.USER,
+    authorization=Authorization.AUTHENTICATED,
+    reason=_ASSISTANT_ACCESS_REASON,
 )
 async def transfer_assistant_to_space(
     id: UUID,
@@ -1183,6 +1254,11 @@ async def transfer_assistant_to_space(
     description="List the prompt history for an assistant.",
     responses=responses.get_responses([404]),
 )
+@endpoint_access(
+    authentication=Authentication.USER,
+    authorization=Authorization.AUTHENTICATED,
+    reason=_ASSISTANT_ACCESS_REASON,
+)
 async def get_prompts(
     id: UUID, container: Annotated[Container, Depends(get_container(with_user=True))]
 ):
@@ -1200,6 +1276,11 @@ async def get_prompts(
     response_model=AssistantPublic,
     description="Publish or unpublish an assistant.",
     responses=responses.get_responses([403, 404]),
+)
+@endpoint_access(
+    authentication=Authentication.USER,
+    authorization=Authorization.AUTHENTICATED,
+    reason=_ASSISTANT_ACCESS_REASON,
 )
 async def publish_assistant(
     id: UUID,
@@ -1272,6 +1353,11 @@ async def publish_assistant(
     description="Get all MCP servers associated with an assistant.",
     responses=responses.get_responses([403, 404]),
 )
+@endpoint_access(
+    authentication=Authentication.USER,
+    authorization=Authorization.AUTHENTICATED,
+    reason=_ASSISTANT_ACCESS_REASON,
+)
 async def get_assistant_mcp_servers(
     id: UUID,
     container: Annotated[Container, Depends(get_container(with_user=True))],
@@ -1300,6 +1386,11 @@ async def get_assistant_mcp_servers(
     response_model=None,
     description="Add an MCP server to an assistant.",
     responses=responses.get_responses([400, 403, 404]),
+)
+@endpoint_access(
+    authentication=Authentication.USER,
+    authorization=Authorization.AUTHENTICATED,
+    reason=_ASSISTANT_ACCESS_REASON,
 )
 async def add_mcp_to_assistant(
     id: UUID,
@@ -1345,6 +1436,11 @@ async def add_mcp_to_assistant(
     status_code=204,
     description="Remove an MCP server from an assistant.",
     responses=responses.get_responses([403, 404]),
+)
+@endpoint_access(
+    authentication=Authentication.USER,
+    authorization=Authorization.AUTHENTICATED,
+    reason=_ASSISTANT_ACCESS_REASON,
 )
 async def remove_mcp_from_assistant(
     id: UUID,

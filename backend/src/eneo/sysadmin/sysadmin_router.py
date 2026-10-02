@@ -40,6 +40,11 @@ from eneo.audit.domain.action_types import ActionType
 from eneo.audit.domain.actor_types import ActorType
 from eneo.audit.domain.entity_types import EntityType
 from eneo.authentication import auth
+from eneo.authentication.endpoint_access import (
+    Authentication,
+    Authorization,
+    endpoint_access,
+)
 from eneo.completion_models.presentation.completion_model_models import (
     MigrationResult,
     ModelMigrationRequest,
@@ -80,8 +85,8 @@ from eneo.tenants.tenant import (
 )
 from eneo.users.user import (
     UserAddSuperAdmin,
-    UserCreated,
-    UserInDB,
+    UserSysAdminCreated,
+    UserSysAdminView,
     UserUpdatePublic,
 )
 from eneo.worker.usage_stats_tasks import recalculate_tenant_usage_stats_direct
@@ -93,6 +98,9 @@ router = APIRouter(
     # Router-level 401: every route requires the super API key, so all of them
     # can return 401. Declared once here instead of per-route get_responses.
     responses=responses.get_responses([401]),
+)
+_DEPLOYMENT_ADMIN_ACCESS_REASON = (
+    "Deployment administration requires the configured super API key."
 )
 
 
@@ -133,9 +141,14 @@ class OIDCDebugToggleResponse(BaseModel):
 
 @router.post(
     "/users/",
-    response_model=UserCreated,
+    response_model=UserSysAdminCreated,
     description="Register a new user as sysadmin and return the created user with an access token.",
     responses=responses.get_responses([400, 401]),
+)
+@endpoint_access(
+    authentication=Authentication.SYSADMIN,
+    authorization=Authorization.SYSADMIN,
+    reason=_DEPLOYMENT_ADMIN_ACCESS_REASON,
 )
 async def register_new_user(
     new_user: UserAddSuperAdmin,
@@ -168,17 +181,19 @@ async def register_new_user(
         },
     )
 
-    return UserCreated(
-        **created_user.model_dump(exclude={"api_key"}),
-        access_token=access_token,
-    )
+    return UserSysAdminCreated.from_user_and_token(created_user, access_token)
 
 
 @router.get(
     "/users/",
-    response_model=PaginatedResponse[UserInDB],
+    response_model=PaginatedResponse[UserSysAdminView],
     description="List all users across all tenants.",
     responses=responses.get_responses([]),
+)
+@endpoint_access(
+    authentication=Authentication.SYSADMIN,
+    authorization=Authorization.SYSADMIN,
+    reason=_DEPLOYMENT_ADMIN_ACCESS_REASON,
 )
 async def get_all_users(
     container: Annotated[Container, Depends(get_container())],
@@ -186,21 +201,28 @@ async def get_all_users(
     user_service = container.user_service()
     users_in_db = await user_service.get_all_users()
 
-    return protocol.to_paginated_response(users_in_db)
+    return protocol.to_paginated_response(
+        [UserSysAdminView.from_user(user) for user in users_in_db]
+    )
 
 
 @router.get(
     "/users/{user_id}/",
-    response_model=UserInDB,
+    response_model=UserSysAdminView,
     description="Get a single user by id.",
     responses=responses.get_responses([404]),
+)
+@endpoint_access(
+    authentication=Authentication.SYSADMIN,
+    authorization=Authorization.SYSADMIN,
+    reason=_DEPLOYMENT_ADMIN_ACCESS_REASON,
 )
 async def get_user(
     user_id: UUID,
     container: Annotated[Container, Depends(get_container())],
 ):
     user_service = container.user_service()
-    return await user_service.get_user(user_id)
+    return UserSysAdminView.from_user(await user_service.get_user(user_id))
 
 
 @router.delete(
@@ -208,6 +230,11 @@ async def get_user(
     response_model=DeleteResponse,
     description="Delete a user by id.",
     responses=responses.get_responses([400, 404]),
+)
+@endpoint_access(
+    authentication=Authentication.SYSADMIN,
+    authorization=Authorization.SYSADMIN,
+    reason=_DEPLOYMENT_ADMIN_ACCESS_REASON,
 )
 async def delete_user(
     user_id: UUID,
@@ -248,9 +275,14 @@ async def delete_user(
 
 @router.post(
     "/users/{user_id}/",
-    response_model=UserInDB,
+    response_model=UserSysAdminView,
     description="Update a user by id; omitted fields are left unchanged.",
     responses=responses.get_responses([400, 404]),
+)
+@endpoint_access(
+    authentication=Authentication.SYSADMIN,
+    authorization=Authorization.SYSADMIN,
+    reason=_DEPLOYMENT_ADMIN_ACCESS_REASON,
 )
 async def update_user(
     user_id: UUID,
@@ -295,7 +327,7 @@ async def update_user(
         },
     )
 
-    return updated_user
+    return UserSysAdminView.from_user(updated_user)
 
 
 @router.post(
@@ -304,6 +336,11 @@ async def update_user(
     response_model=None,
     description="Issue an access token for the given user.",
     responses=responses.get_responses([404]),
+)
+@endpoint_access(
+    authentication=Authentication.SYSADMIN,
+    authorization=Authorization.SYSADMIN,
+    reason=_DEPLOYMENT_ADMIN_ACCESS_REASON,
 )
 async def get_access_token(
     user_id: UUID,
@@ -322,6 +359,11 @@ async def get_access_token(
     response_model=PaginatedResponse[TenantWithMaskedCredentials],
     description="List all tenants with API credentials masked, optionally filtered by domain.",
     responses=responses.get_responses([]),
+)
+@endpoint_access(
+    authentication=Authentication.SYSADMIN,
+    authorization=Authorization.SYSADMIN,
+    reason=_DEPLOYMENT_ADMIN_ACCESS_REASON,
 )
 async def get_tenants(
     container: Annotated[Container, Depends(get_container())],
@@ -356,6 +398,11 @@ async def get_tenants(
     response_model=TenantWithMaskedCredentials,
     description="Create a new tenant and return it with masked credentials.",
     responses=responses.get_responses([400]),
+)
+@endpoint_access(
+    authentication=Authentication.SYSADMIN,
+    authorization=Authorization.SYSADMIN,
+    reason=_DEPLOYMENT_ADMIN_ACCESS_REASON,
 )
 async def create_tenant(
     tenant: TenantBase,
@@ -397,6 +444,11 @@ async def create_tenant(
     response_model=TenantWithMaskedCredentials,
     description="Update a tenant by id and return it with masked credentials.",
     responses=responses.get_responses([400, 404]),
+)
+@endpoint_access(
+    authentication=Authentication.SYSADMIN,
+    authorization=Authorization.SYSADMIN,
+    reason=_DEPLOYMENT_ADMIN_ACCESS_REASON,
 )
 async def update_tenant(
     id: UUID,
@@ -454,6 +506,11 @@ async def update_tenant(
     description="Delete a tenant by id and return it with masked credentials.",
     responses=responses.get_responses([404]),
 )
+@endpoint_access(
+    authentication=Authentication.SYSADMIN,
+    authorization=Authorization.SYSADMIN,
+    reason=_DEPLOYMENT_ADMIN_ACCESS_REASON,
+)
 async def delete_tenant_by_id(
     id: UUID,
     container: Annotated[Container, Depends(get_container())],
@@ -498,6 +555,11 @@ async def delete_tenant_by_id(
     description="List the predefined roles loaded from configuration.",
     responses=responses.get_responses([]),
 )
+@endpoint_access(
+    authentication=Authentication.SYSADMIN,
+    authorization=Authorization.SYSADMIN,
+    reason=_DEPLOYMENT_ADMIN_ACCESS_REASON,
+)
 async def get_predefined_roles():
     from eneo.server.dependencies.predefined_roles import (
         load_predefined_roles_from_config,
@@ -511,6 +573,11 @@ async def get_predefined_roles():
     response_model=None,
     description="Trigger crawls for all websites scheduled to run weekly.",
     responses=responses.get_responses([]),
+)
+@endpoint_access(
+    authentication=Authentication.SYSADMIN,
+    authorization=Authorization.SYSADMIN,
+    reason=_DEPLOYMENT_ADMIN_ACCESS_REASON,
 )
 async def crawl_all_weekly_websites(
     container: Annotated[Container, Depends(get_container())],
@@ -540,6 +607,11 @@ def _get_storage_backend(redis_client: object | None) -> str:
         200: {"description": "Debug flag state updated."},
         401: {"description": "Missing or invalid super API key."},
     },
+)
+@endpoint_access(
+    authentication=Authentication.SYSADMIN,
+    authorization=Authorization.SYSADMIN,
+    reason=_DEPLOYMENT_ADMIN_ACCESS_REASON,
 )
 async def toggle_oidc_debug(
     payload: OIDCDebugToggleRequest,
@@ -585,6 +657,11 @@ async def toggle_oidc_debug(
         401: {"description": "Missing or invalid super API key."},
     },
 )
+@endpoint_access(
+    authentication=Authentication.SYSADMIN,
+    authorization=Authorization.SYSADMIN,
+    reason=_DEPLOYMENT_ADMIN_ACCESS_REASON,
+)
 async def get_oidc_debug_status(
     container: Annotated[Container, Depends(get_container_for_sysadmin())],
 ):
@@ -605,6 +682,11 @@ async def get_oidc_debug_status(
     response_model=PaginatedResponse[EmbeddingModelLegacy],
     responses=responses.get_responses([404]),
 )
+@endpoint_access(
+    authentication=Authentication.SYSADMIN,
+    authorization=Authorization.SYSADMIN,
+    reason=_DEPLOYMENT_ADMIN_ACCESS_REASON,
+)
 async def get_embedding_models(
     embedding_model_repo: Annotated[
         AdminEmbeddingModelsService,
@@ -619,6 +701,11 @@ async def get_embedding_models(
     "/completion-models/",
     response_model=PaginatedResponse[CompletionModelPublic],
     responses=responses.get_responses([404]),
+)
+@endpoint_access(
+    authentication=Authentication.SYSADMIN,
+    authorization=Authorization.SYSADMIN,
+    reason=_DEPLOYMENT_ADMIN_ACCESS_REASON,
 )
 async def get_completion_models(
     completion_model_repo: Annotated[
@@ -638,6 +725,11 @@ async def get_completion_models(
     response_model=CompletionModelPublic,
     description="Enable or disable a completion model for a specific tenant.",
     responses=responses.get_responses([400, 404]),
+)
+@endpoint_access(
+    authentication=Authentication.SYSADMIN,
+    authorization=Authorization.SYSADMIN,
+    reason=_DEPLOYMENT_ADMIN_ACCESS_REASON,
 )
 async def enable_completion_model(
     id: UUID,
@@ -692,6 +784,11 @@ async def enable_completion_model(
     description="Enable or disable an embedding model for a specific tenant.",
     responses=responses.get_responses([400, 404]),
 )
+@endpoint_access(
+    authentication=Authentication.SYSADMIN,
+    authorization=Authorization.SYSADMIN,
+    reason=_DEPLOYMENT_ADMIN_ACCESS_REASON,
+)
 async def enable_embedding_model(
     id: UUID,
     embedding_model_id: UUID,
@@ -745,6 +842,11 @@ async def enable_embedding_model(
     description="Add an allowed CORS origin for a tenant.",
     responses=responses.get_responses([]),
 )
+@endpoint_access(
+    authentication=Authentication.SYSADMIN,
+    authorization=Authorization.SYSADMIN,
+    reason=_DEPLOYMENT_ADMIN_ACCESS_REASON,
+)
 async def add_origin(
     origin: AllowedOriginCreate,
     container: Annotated[Container, Depends(get_container())],
@@ -777,6 +879,11 @@ async def add_origin(
     description="List allowed CORS origins, optionally filtered by tenant.",
     responses=responses.get_responses([]),
 )
+@endpoint_access(
+    authentication=Authentication.SYSADMIN,
+    authorization=Authorization.SYSADMIN,
+    reason=_DEPLOYMENT_ADMIN_ACCESS_REASON,
+)
 async def get_origins(
     container: Annotated[Container, Depends(get_container())],
     tenant_id: Annotated[UUID | None, Query()] = None,
@@ -796,6 +903,11 @@ async def get_origins(
     status_code=204,
     description="Delete an allowed CORS origin by id (idempotent).",
     responses=responses.get_responses([]),
+)
+@endpoint_access(
+    authentication=Authentication.SYSADMIN,
+    authorization=Authorization.SYSADMIN,
+    reason=_DEPLOYMENT_ADMIN_ACCESS_REASON,
 )
 async def delete_origin(
     id: UUID,
@@ -828,6 +940,11 @@ async def delete_origin(
     response_model=dict[str, str | bool],
     description="Recalculate usage statistics for a specific tenant.",
     responses=responses.get_responses([404, 500]),
+)
+@endpoint_access(
+    authentication=Authentication.SYSADMIN,
+    authorization=Authorization.SYSADMIN,
+    reason=_DEPLOYMENT_ADMIN_ACCESS_REASON,
 )
 async def recalculate_tenant_usage_statistics(
     tenant_id: UUID,
@@ -876,6 +993,11 @@ async def recalculate_tenant_usage_statistics(
     description="Recalculate usage statistics for all active tenants.",
     responses=responses.get_responses([500]),
 )
+@endpoint_access(
+    authentication=Authentication.SYSADMIN,
+    authorization=Authorization.SYSADMIN,
+    reason=_DEPLOYMENT_ADMIN_ACCESS_REASON,
+)
 async def recalculate_all_tenants_usage_statistics(
     container: Annotated[Container, Depends(get_container_for_sysadmin())],
 ) -> dict[str, str | bool]:
@@ -921,6 +1043,11 @@ async def recalculate_all_tenants_usage_statistics(
     response_model=MigrationResult,
     description="Migrate completion model usage from one model to another for a specific tenant.",
     responses=responses.get_responses([400, 403, 404, 500]),
+)
+@endpoint_access(
+    authentication=Authentication.SYSADMIN,
+    authorization=Authorization.SYSADMIN,
+    reason=_DEPLOYMENT_ADMIN_ACCESS_REASON,
 )
 async def migrate_completion_model_for_tenant(
     tenant_id: UUID,
@@ -1064,6 +1191,11 @@ async def migrate_completion_model_for_tenant(
     response_model=dict,
     description="Migrate completion model usage from one model to another across all active tenants.",
     responses=responses.get_responses([400, 403, 404, 500]),
+)
+@endpoint_access(
+    authentication=Authentication.SYSADMIN,
+    authorization=Authorization.SYSADMIN,
+    reason=_DEPLOYMENT_ADMIN_ACCESS_REASON,
 )
 async def migrate_completion_model_for_all_tenants(
     model_id: UUID,
@@ -1314,6 +1446,11 @@ async def migrate_completion_model_for_all_tenants(
     description="Create global completion model metadata (system-wide operation).",
     responses=responses.get_responses([400, 401, 409]),
 )
+@endpoint_access(
+    authentication=Authentication.SYSADMIN,
+    authorization=Authorization.SYSADMIN,
+    reason=_DEPLOYMENT_ADMIN_ACCESS_REASON,
+)
 async def create_completion_model(
     model_data: CompletionModelCreate,
     container: Annotated[Container, Depends(get_container_for_sysadmin())],
@@ -1353,6 +1490,11 @@ async def create_completion_model(
     response_model=CompletionModelSparse,
     description="Update global completion model metadata (system-wide operation).",
     responses=responses.get_responses([401, 404, 409]),
+)
+@endpoint_access(
+    authentication=Authentication.SYSADMIN,
+    authorization=Authorization.SYSADMIN,
+    reason=_DEPLOYMENT_ADMIN_ACCESS_REASON,
 )
 async def update_completion_model_metadata(
     id: UUID,
@@ -1397,6 +1539,11 @@ async def update_completion_model_metadata(
     response_model=None,
     description="Soft-delete global completion model metadata (system-wide operation).",
     responses=responses.get_responses([404, 400, 401]),
+)
+@endpoint_access(
+    authentication=Authentication.SYSADMIN,
+    authorization=Authorization.SYSADMIN,
+    reason=_DEPLOYMENT_ADMIN_ACCESS_REASON,
 )
 async def delete_completion_model(
     id: UUID,
@@ -1449,6 +1596,11 @@ async def delete_completion_model(
     description="Create global embedding model metadata (system-wide operation).",
     responses=responses.get_responses([400, 401, 409]),
 )
+@endpoint_access(
+    authentication=Authentication.SYSADMIN,
+    authorization=Authorization.SYSADMIN,
+    reason=_DEPLOYMENT_ADMIN_ACCESS_REASON,
+)
 async def create_embedding_model(
     model_data: EmbeddingModelCreate,
     container: Annotated[Container, Depends(get_container_for_sysadmin())],
@@ -1481,7 +1633,12 @@ async def create_embedding_model(
     "/embedding-models/{id}/metadata",
     response_model=EmbeddingModelSparse,
     description="Update global embedding model metadata (system-wide operation).",
-    responses=responses.get_responses([401, 404, 409]),
+    responses=responses.get_responses([400, 401, 404, 409]),
+)
+@endpoint_access(
+    authentication=Authentication.SYSADMIN,
+    authorization=Authorization.SYSADMIN,
+    reason=_DEPLOYMENT_ADMIN_ACCESS_REASON,
 )
 async def update_embedding_model_metadata(
     id: UUID,
@@ -1526,6 +1683,11 @@ async def update_embedding_model_metadata(
     response_model=None,
     description="Soft-delete global embedding model metadata (system-wide operation).",
     responses=responses.get_responses([404, 400, 401]),
+)
+@endpoint_access(
+    authentication=Authentication.SYSADMIN,
+    authorization=Authorization.SYSADMIN,
+    reason=_DEPLOYMENT_ADMIN_ACCESS_REASON,
 )
 async def delete_embedding_model(
     id: UUID,
@@ -1629,6 +1791,11 @@ async def delete_embedding_model(
         404: {"description": "Tenant not found"},
     },
 )
+@endpoint_access(
+    authentication=Authentication.SYSADMIN,
+    authorization=Authorization.SYSADMIN,
+    reason=_DEPLOYMENT_ADMIN_ACCESS_REASON,
+)
 async def create_scim_token(
     tenant_id: UUID,
     container: Annotated[Container, Depends(get_container_for_sysadmin())],
@@ -1650,6 +1817,11 @@ async def create_scim_token(
         404: {"description": "Tenant not found"},
     },
 )
+@endpoint_access(
+    authentication=Authentication.SYSADMIN,
+    authorization=Authorization.SYSADMIN,
+    reason=_DEPLOYMENT_ADMIN_ACCESS_REASON,
+)
 async def get_scim_token_status(
     tenant_id: UUID,
     container: Annotated[Container, Depends(get_container_for_sysadmin())],
@@ -1669,6 +1841,11 @@ async def get_scim_token_status(
         204: {"description": "Token revoked — SCIM disabled for this tenant"},
         404: {"description": "Tenant not found"},
     },
+)
+@endpoint_access(
+    authentication=Authentication.SYSADMIN,
+    authorization=Authorization.SYSADMIN,
+    reason=_DEPLOYMENT_ADMIN_ACCESS_REASON,
 )
 async def delete_scim_token(
     tenant_id: UUID,

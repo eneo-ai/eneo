@@ -354,6 +354,7 @@ class SessionRepository:
             if space is None:
                 space = spaces[row.space_id] = SpaceAccessFacts(
                     id=row.space_id,
+                    tenant_id=tenant_id,
                     user_id=row.space_user_id,
                     tenant_space_id=row.tenant_space_id,
                     members=(

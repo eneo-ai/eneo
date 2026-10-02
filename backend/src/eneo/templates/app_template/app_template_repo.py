@@ -70,6 +70,35 @@ class AppTemplateRepository:
 
         return self.factory.create_app_template(item=record)
 
+    async def get_consumable(
+        self, app_template_id: "UUID", tenant_id: "UUID"
+    ) -> Optional["AppTemplate"]:
+        """Get a template the tenant may create an app from.
+
+        Matches id AND deleted_at IS NULL AND (tenant_id = ? OR tenant_id IS NULL):
+        the tenant's own templates and global templates, never another
+        tenant's or a deleted one. Consumption goes through here, not get_by_id.
+        """
+        query = (
+            select(self._db_model)
+            .options(*self._options)
+            .where(
+                self._db_model.id == app_template_id,
+                self._db_model.deleted_at.is_(None),
+                or_(
+                    self._db_model.tenant_id == tenant_id,
+                    self._db_model.tenant_id.is_(None),
+                ),
+            )
+        )
+
+        record = await self.session.scalar(query)
+
+        if not record:
+            return None
+
+        return self.factory.create_app_template(item=record)
+
     async def get_app_template_list(
         self, tenant_id: Optional["UUID"] = None
     ) -> list["AppTemplate"]:

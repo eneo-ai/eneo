@@ -11,6 +11,7 @@ from sqlalchemy.orm import aliased, selectinload
 from sqlalchemy.sql.dml import ReturningInsert, ReturningUpdate
 
 from eneo.actors.actors.space_actor import SpaceAccessFacts, SpaceRoleFact
+from eneo.authentication.auth_models import ApiKeyScopeType
 from eneo.database.database import AsyncSession
 from eneo.database.tables.ai_models_table import (
     CompletionModels,
@@ -70,7 +71,6 @@ from eneo.database.tables.spaces_table import (
 from eneo.database.tables.user_groups_table import UserGroups
 from eneo.database.tables.users_table import Users
 from eneo.database.tables.websites_spaces_table import WebsitesSpaces
-from eneo.database.tables.websites_table import CrawlRuns as CrawlRunsTable
 from eneo.database.tables.websites_table import Websites as WebsitesTable
 from eneo.files.file_content_loader import FileAttachmentGroup, FileContentLoader
 from eneo.files.file_models import File, FileMetadata
@@ -1311,9 +1311,7 @@ class SpaceRepository:
         stmt = (
             sa.select(ws)
             .where(WEBSITE_SOURCE.visible_to(space_ids))
-            .options(
-                selectinload(ws.latest_crawl).selectinload(CrawlRunsTable.job),  # type: ignore[attr-defined]
-            )
+            .options(selectinload(ws.latest_crawl))  # type: ignore[attr-defined]
             .order_by(ws.created_at)
         )
 
@@ -1675,8 +1673,21 @@ class SpaceRepository:
         await self._set_group_chats(entry_in_db, space.group_chats)
         return await self.one(id=entry_in_db.id)
 
+    def _in_caller_tenant(
+        self, query: sa.Select[tuple[Spaces]]
+    ) -> sa.Select[tuple[Spaces]]:
+        """Restrict a request-facing space lookup to the caller's tenant.
+
+        Every lookup that addresses a space by an id taken from the request
+        (directly, or through one of its resources) goes through here, so a
+        foreign-tenant id resolves to "not found" rather than to a space the
+        actor then has to reject. Lookups that address a tenant explicitly,
+        such as ``get_space_by_name_and_tenant``, stay privileged.
+        """
+        return query.where(Spaces.tenant_id == self.user.tenant_id)
+
     async def one_or_none(self, id: UUID) -> Optional[Space]:
-        query = sa.select(Spaces).where(Spaces.id == id)
+        query = self._in_caller_tenant(sa.select(Spaces).where(Spaces.id == id))
 
         return await self._get_from_query(query)
 
@@ -1897,12 +1908,16 @@ class SpaceRepository:
         return spaces
 
     async def get_personal_space(self, user_id: UUID) -> Space | None:
-        query = sa.select(Spaces).where(Spaces.user_id == user_id)
+        query = self._in_caller_tenant(
+            sa.select(Spaces).where(Spaces.user_id == user_id)
+        )
 
         return await self._get_from_query(query)
 
     async def get_space_by_assistant(self, assistant_id: UUID) -> Space:
-        query = sa.select(Spaces).join(Assistants).where(Assistants.id == assistant_id)
+        query = self._in_caller_tenant(
+            sa.select(Spaces).join(Assistants).where(Assistants.id == assistant_id)
+        )
 
         space = await self._get_from_query(query)
 
@@ -1912,7 +1927,9 @@ class SpaceRepository:
         return space
 
     async def get_space_by_app(self, app_id: UUID) -> Space:
-        query = sa.select(Spaces).join(Apps).where(Apps.id == app_id)
+        query = self._in_caller_tenant(
+            sa.select(Spaces).join(Apps).where(Apps.id == app_id)
+        )
 
         space = await self._get_from_query(query)
 
@@ -1922,7 +1939,9 @@ class SpaceRepository:
         return space
 
     async def get_space_by_service(self, service_id: UUID) -> Space:
-        query = sa.select(Spaces).join(Services).where(Services.id == service_id)
+        query = self._in_caller_tenant(
+            sa.select(Spaces).join(Services).where(Services.id == service_id)
+        )
 
         space = await self._get_from_query(query)
 
@@ -1932,7 +1951,7 @@ class SpaceRepository:
         return space
 
     async def get_space_by_group_chat(self, group_chat_id: UUID) -> Space:
-        query = (
+        query = self._in_caller_tenant(
             sa.select(Spaces)
             .join(GroupChatsTable)
             .where(GroupChatsTable.id == group_chat_id)
@@ -1957,6 +1976,12 @@ class SpaceRepository:
         if info_blob.tenant_id != self.user.tenant_id:
             return []
         source, source_id = knowledge_source_for(info_blob)
+        return await self.get_knowledge_source_read_access(source, source_id)
+
+    async def get_knowledge_source_read_access(
+        self, source: KnowledgeSource, source_id: UUID
+    ) -> list[SpaceAccessFacts]:
+        """Reader memberships for a source in this tenant, including distribution."""
         source_space_ids = source.spaces_seeing(source_id, self.user.tenant_id)
         user_group_ids = sa.select(UserGroups.id).where(
             UserGroups.id.in_(self.user.user_groups_ids),
@@ -1970,6 +1995,7 @@ class SpaceRepository:
         query = (
             sa.select(
                 Spaces.id,
+                Spaces.tenant_id,
                 Spaces.user_id,
                 Spaces.tenant_space_id,
                 sa.Nullable(SpacesUsers.role),
@@ -2009,7 +2035,7 @@ class SpaceRepository:
                     SpacesUserGroups.role,
                 ).where(
                     SpacesUserGroups.space_id.in_(
-                        [space_id for space_id, _, _, _ in spaces]
+                        [space_id for space_id, _, _, _, _ in spaces]
                     ),
                     group_membership,
                 )
@@ -2022,6 +2048,7 @@ class SpaceRepository:
         return [
             SpaceAccessFacts(
                 id=space_id,
+                tenant_id=tenant_id,
                 user_id=user_id,
                 tenant_space_id=tenant_space_id,
                 members=(
@@ -2034,11 +2061,46 @@ class SpaceRepository:
                 assistant_ids=frozenset(),
                 app_ids=frozenset(),
             )
-            for space_id, user_id, tenant_space_id, role in spaces
+            for space_id, tenant_id, user_id, tenant_space_id, role in spaces
         ]
 
-    async def get_space_by_collection(self, collection_id: UUID) -> Space:
+    async def get_knowledge_source_owner_access(
+        self, source: KnowledgeSource, source_id: UUID
+    ) -> SpaceAccessFacts | None:
+        """The owning space of a source in this tenant, without membership facts.
+
+        For service API keys, which have no memberships and authorize through
+        their scope and permission in ``SpaceActor``.
+        """
         query = (
+            sa.select(
+                Spaces.id, Spaces.tenant_id, Spaces.user_id, Spaces.tenant_space_id
+            )
+            .join(source.table, source.table.space_id == Spaces.id)
+            .where(
+                source.table.id == source_id,
+                source.table.tenant_id == self.user.tenant_id,
+                Spaces.tenant_id == self.user.tenant_id,
+            )
+        )
+        space = (await self.session.execute(query)).tuples().one_or_none()
+        if space is None:
+            return None
+        space_id, tenant_id, user_id, tenant_space_id = space
+        return SpaceAccessFacts(
+            id=space_id,
+            tenant_id=tenant_id,
+            user_id=user_id,
+            tenant_space_id=tenant_space_id,
+            members={},
+            group_members={},
+            default_assistant_id=None,
+            assistant_ids=frozenset(),
+            app_ids=frozenset(),
+        )
+
+    async def get_space_by_collection(self, collection_id: UUID) -> Space:
+        query = self._in_caller_tenant(
             sa.select(Spaces)
             .join(CollectionsTable)
             .where(CollectionsTable.id == collection_id)
@@ -2051,8 +2113,77 @@ class SpaceRepository:
 
         return space
 
+    async def get_website_access_facts(self, website_id: UUID) -> SpaceAccessFacts:
+        """Load only this caller's facts for website access, not the space aggregate."""
+        space = await self.session.scalar(
+            sa.select(Spaces)
+            .join(WebsitesTable, WebsitesTable.space_id == Spaces.id)
+            .where(WebsitesTable.id == website_id)
+            .where(WebsitesTable.tenant_id == self.user.tenant_id)
+            .where(Spaces.tenant_id == self.user.tenant_id)
+        )
+        if space is None:
+            raise NotFoundException("Website not found")
+
+        member_rows = await self.session.execute(
+            sa.select(SpacesUsers.user_id, SpacesUsers.role)
+            .join(Users, Users.id == SpacesUsers.user_id)
+            .where(
+                SpacesUsers.space_id == space.id,
+                SpacesUsers.user_id == self.user.id,
+                Users.deleted_at.is_(None),
+            )
+        )
+        group_rows = await self.session.execute(
+            sa.select(SpacesUserGroups.user_group_id, SpacesUserGroups.role)
+            .join(UserGroups, UserGroups.id == SpacesUserGroups.user_group_id)
+            .where(SpacesUserGroups.space_id == space.id)
+            .where(SpacesUserGroups.user_group_id.in_(self.user.user_groups_ids))
+            .where(
+                sa.or_(
+                    UserGroups.state.is_(None),
+                    UserGroups.state != UserGroupState.DELETED.value,
+                )
+            )
+        )
+        assistant_ids: Sequence[UUID] = ()
+        app_ids: Sequence[UUID] = ()
+        key = self.user.active_api_key
+        if key is not None and key.scope_type == ApiKeyScopeType.ASSISTANT:
+            assistant_ids = (
+                await self.session.scalars(
+                    sa.select(Assistants.id).where(
+                        Assistants.space_id == space.id,
+                        Assistants.id == key.scope_id,
+                        Assistants.is_default.is_(False),
+                    )
+                )
+            ).all()
+        elif key is not None and key.scope_type == ApiKeyScopeType.APP:
+            app_ids = (
+                await self.session.scalars(
+                    sa.select(Apps.id).where(
+                        Apps.space_id == space.id, Apps.id == key.scope_id
+                    )
+                )
+            ).all()
+        return SpaceAccessFacts(
+            id=space.id,
+            tenant_id=space.tenant_id,
+            user_id=space.user_id,
+            tenant_space_id=space.tenant_space_id,
+            members={id: SpaceRoleFact(id=id, role=role) for id, role in member_rows},
+            group_members={
+                id: SpaceRoleFact(id=id, role=role) for id, role in group_rows
+            },
+            # Website access never uses the default assistant's identity.
+            default_assistant_id=None,
+            assistant_ids=frozenset(assistant_ids),
+            app_ids=frozenset(app_ids),
+        )
+
     async def get_space_by_website(self, website_id: UUID) -> Space:
-        query = (
+        query = self._in_caller_tenant(
             sa.select(Spaces).join(WebsitesTable).where(WebsitesTable.id == website_id)
         )
 
@@ -2066,7 +2197,7 @@ class SpaceRepository:
     async def get_space_by_integration_knowledge(
         self, integration_knowledge_id: UUID
     ) -> Space:
-        query = (
+        query = self._in_caller_tenant(
             sa.select(Spaces)
             .join(IntegrationKnowledge)
             .where(IntegrationKnowledge.id == integration_knowledge_id)

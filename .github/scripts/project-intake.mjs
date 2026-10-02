@@ -3,6 +3,7 @@
 import fs from "node:fs";
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
+import { getSectionWithPresence, issueLabelChanges } from "./label-policy.mjs";
 
 const dryRun = process.argv.includes("--dry-run");
 const selfTest = process.argv.includes("--self-test");
@@ -30,7 +31,9 @@ if (!issue && !pullRequest) {
 }
 
 if (issue) {
-  await handleIssue(issue);
+  // Re-read after queued edits or a manual rerun instead of applying stale labels.
+  const current = runGh(["api", `repos/${repo}/issues/${issue.number}`], { capture: true });
+  await handleIssue(JSON.parse(current.stdout));
 } else {
   await handlePullRequest(pullRequest);
 }
@@ -41,6 +44,17 @@ async function handleIssue(item) {
 
   if (kind) {
     addLabel(item.number, `kind:${kind}`);
+    if (!labels.includes(`kind:${kind}`)) labels.push(`kind:${kind}`);
+  }
+
+  const changes = issueLabelChanges({
+    body: item.body || "", previousBody: event.changes?.body?.from, labels,
+  });
+  if (changes.add.length || changes.remove.length) {
+    const args = ["issue", "edit", String(item.number), "--repo", repo];
+    if (changes.add.length) args.push("--add-label", changes.add.join(","));
+    if (changes.remove.length) args.push("--remove-label", changes.remove.join(","));
+    runGh(args);
   }
 
   if (kind !== "task") {
@@ -136,31 +150,7 @@ function hasClosingIssueReference(value) {
 }
 
 function hasHeading(body, heading) {
-  const escaped = escapeRegExp(heading);
-  return new RegExp(`^#{2,6}\\s+${escaped}\\s*$`, "im").test(body);
-}
-
-function getSectionWithPresence(body, headings) {
-  for (const heading of headings) {
-    const escaped = escapeRegExp(heading);
-    const pattern = new RegExp(
-      `^#{2,6}\\s+${escaped}\\s*$([\\s\\S]*?)(?=^#{2,6}\\s+|$(?![\\s\\S]))`,
-      "im",
-    );
-    const match = body.match(pattern);
-
-    if (match) {
-      return {
-        found: true,
-        value: match[1].trim(),
-      };
-    }
-  }
-
-  return {
-    found: false,
-    value: "",
-  };
+  return getSectionWithPresence(body, [heading]).found;
 }
 
 function getLabelNames(item) {
@@ -168,9 +158,7 @@ function getLabelNames(item) {
 }
 
 function addLabel(number, label) {
-  runGh(["issue", "edit", String(number), "--repo", repo, "--add-label", label], {
-    allowFailure: true,
-  });
+  runGh(["issue", "edit", String(number), "--repo", repo, "--add-label", label]);
 }
 
 function removeLabel(number, label) {
@@ -215,7 +203,7 @@ function addMissingEpicComment(number) {
 function runGh(args, options = {}) {
   const printable = ["gh", ...args].join(" ");
 
-  if (dryRun) {
+  if (dryRun && !options.capture) {
     console.log(`[dry-run] ${printable}`);
     return { status: 0, stdout: "" };
   }
@@ -224,6 +212,8 @@ function runGh(args, options = {}) {
     encoding: "utf8",
     stdio: options.capture ? ["ignore", "pipe", "pipe"] : "inherit",
     env: process.env,
+    timeout: 60_000,
+    maxBuffer: 1024 * 1024,
   });
 
   const status = result.status ?? 1;
@@ -240,10 +230,6 @@ function runGh(args, options = {}) {
     status,
     stdout: result.stdout || "",
   };
-}
-
-function escapeRegExp(value) {
-  return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }
 
 function runSelfTest() {

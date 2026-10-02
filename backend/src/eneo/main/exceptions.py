@@ -90,6 +90,8 @@ class ErrorCodes(int, Enum):
     LOCAL_PASSWORD_CHANGE_UNAVAILABLE = 9060
     CURRENT_PASSWORD_INCORRECT = 9061
     SKILL_REMOVAL_BUSY = 9062
+    WEBSITE_CRAWL_ACTIVE = 9063
+    WEBSITE_CRAWL_CLEANUP_PENDING = 9064
     # A prompt library entry the personal assistant governance policy uses
     # cannot be deleted until the policy stops using it.
     PROMPT_IN_USE_BY_GOVERNANCE = 9069
@@ -162,12 +164,16 @@ class AuthenticationException(Exception):
     pass
 
 
+class FederatedLoginDenied(AuthenticationException):
+    """A valid OIDC identity is not permitted to join or access this tenant."""
+
+
 class BadRequestException(Exception):
     pass
 
 
 class ModelInUseException(Exception):
-    """Raised when trying to soft-delete a model that is still referenced.
+    """Raised when deleting or semantically changing a model still in use.
 
     Surfaced as 400 with a dedicated error code so the frontend can show a
     localized "Model is in use" message and offer the migration flow as a
@@ -179,6 +185,14 @@ class ModelInUseException(Exception):
 
 
 class QuotaExceededException(Exception):
+    pass
+
+
+class TenantQuotaExceededException(QuotaExceededException):
+    pass
+
+
+class UserQuotaExceededException(QuotaExceededException):
     pass
 
 

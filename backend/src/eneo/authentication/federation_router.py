@@ -15,10 +15,16 @@ from jwt import PyJWKClient as _PyJWKClient
 from pydantic import BaseModel
 from typing_extensions import NotRequired, TypedDict
 
-from eneo.authentication.federated_user_service import FederatedUserService
+from eneo.authentication.auth_models import FederatedIdentity
+from eneo.authentication.endpoint_access import (
+    Authentication,
+    Authorization,
+    endpoint_access,
+)
 from eneo.main.aiohttp_client import aiohttp_client
 from eneo.main.config import get_settings, validate_redirect_uri
 from eneo.main.container.container import Container
+from eneo.main.exceptions import FederatedLoginDenied
 from eneo.main.logging import get_logger
 from eneo.main.request_context import set_request_context
 from eneo.observability.debug_toggle import is_debug_enabled
@@ -286,6 +292,11 @@ class FederationStatusResponse(BaseModel):
     ),
     responses=responses.get_responses([]),
 )
+@endpoint_access(
+    authentication=Authentication.PUBLIC,
+    authorization=Authorization.PUBLIC,
+    reason="Federation discovery and login handshake precede an Eneo session; AuthService validates exchanged credentials and state.",
+)
 async def get_federation_status(
     container: Annotated[Container, Depends(get_container())],
 ) -> FederationStatusResponse:
@@ -369,6 +380,11 @@ async def get_federation_status(
     ),
     responses=responses.get_responses([]),
 )
+@endpoint_access(
+    authentication=Authentication.PUBLIC,
+    authorization=Authorization.PUBLIC,
+    reason="Federation discovery and login handshake precede an Eneo session; AuthService validates exchanged credentials and state.",
+)
 async def list_tenants(
     container: Annotated[Container, Depends(get_container())],
 ) -> TenantListResponse:
@@ -418,6 +434,11 @@ async def list_tenants(
         404: {"description": "Tenant not found or not configured"},
         500: {"description": "Federation or redirect configuration missing"},
     },
+)
+@endpoint_access(
+    authentication=Authentication.PUBLIC,
+    authorization=Authorization.PUBLIC,
+    reason="Federation discovery and login handshake precede an Eneo session; AuthService validates exchanged credentials and state.",
 )
 async def initiate_auth(
     container: Annotated[Container, Depends(get_container())],
@@ -798,6 +819,11 @@ async def initiate_auth(
         404: {"description": "Tenant or user not found"},
     },
 )
+@endpoint_access(
+    authentication=Authentication.PUBLIC,
+    authorization=Authorization.PUBLIC,
+    reason="Federation discovery and login handshake precede an Eneo session; AuthService validates exchanged credentials and state.",
+)
 async def auth_callback(
     callback: CallbackRequest,
     container: Annotated[Container, Depends(get_container())],
@@ -811,7 +837,7 @@ async def auth_callback(
     3. Exchanges authorization code for tokens
     4. Validates ID token (signature, audience, expiry, at_hash)
     5. Validates email domain against tenant's allowed_domains
-    6. Looks up existing user (NO auto-creation)
+    6. Resolves an active tenant member or provisions under the shared JIT policy
     7. Issues Eneo JWT token
 
     Args:
@@ -1514,24 +1540,18 @@ async def auth_callback(
                 },
             )
 
-            email = payload.get(email_claim)
-
-            if not email:
-                logger.error(
-                    "Email claim not found in ID token",
-                    extra={
-                        "tenant_id": str(tenant_id),
-                        "correlation_id": correlation_id,
-                        "email_claim": email_claim,
-                        "payload_keys": list(payload.keys()),
-                    },
+            try:
+                identity = FederatedIdentity.from_claims(
+                    payload, email_claim=email_claim
                 )
+            except ValueError as exc:
                 raise HTTPException(
                     status_code=status.HTTP_401_UNAUTHORIZED,
-                    detail="Email claim not found in ID token",
+                    detail=str(exc),
                     headers={"X-Correlation-ID": correlation_id},
-                )
+                ) from exc
 
+            email = identity.email
             set_request_context(user_email=email)
             await _log_oidc_debug(
                 redis_client=redis_client,
@@ -1540,38 +1560,35 @@ async def auth_callback(
                 email=email,
                 email_claim=email_claim,
             )
-
-            # Resolve the email to a user (format + allowed-domain checks,
-            # JIT provisioning, tenant membership) via the shared service
-            # also used by the OIDC resource-server bearer path.
             try:
-                audit_service = container.audit_service()
-            except Exception:  # pragma: no cover - dependency injector safety net
-                audit_service = None
-
-            federated_user_service = FederatedUserService(
-                user_repo=container.user_repo(),
-                tenant_repo=container.tenant_repo(),
-                audit_service=audit_service,
-            )
-
-            async def _resolution_debug(event: str, **payload: Any) -> None:
+                user, created = await container.user_service().resolve_federated_user(
+                    identity=identity,
+                    tenant_id=tenant_id,
+                    allowed_domains=federation_config.get("allowed_domains") or [],
+                    correlation_id=correlation_id,
+                )
+            except FederatedLoginDenied as exc:
                 await _log_oidc_debug(
                     redis_client=redis_client,
                     correlation_id=correlation_id,
-                    event=f"callback.{event}",
+                    event="callback.user_denied",
                     tenant_slug=tenant_slug,
-                    **payload,
+                    reason=str(exc),
                 )
+                raise HTTPException(
+                    status_code=status.HTTP_403_FORBIDDEN,
+                    detail=str(exc),
+                    headers={"X-Correlation-ID": correlation_id},
+                ) from exc
 
-            user = await federated_user_service.resolve_user(
-                email=email,
-                tenant_id=tenant_id,
-                allowed_domains=federation_config.get("allowed_domains"),
-                correlation_id=correlation_id,
-                tenant_slug=tenant_slug,
-                debug=_resolution_debug,
-            )
+            if created:
+                await _log_oidc_debug(
+                    redis_client=redis_client,
+                    correlation_id=correlation_id,
+                    event="callback.jit_provisioning",
+                    tenant_slug=tenant_slug,
+                    email=email,
+                )
 
             # Create JWT token for existing user
             access_token_response = auth_service.create_access_token_for_user(user)

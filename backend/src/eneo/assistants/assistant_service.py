@@ -655,8 +655,10 @@ class AssistantService:
         name: str | None = None,
         enabled_capabilities: list[CapabilityPurpose] | None = None,
     ):
-        template = await self.assistant_template_service.get_assistant_template(
-            assistant_template_id=template_data.id
+        template = (
+            await self.assistant_template_service.get_consumable_assistant_template(
+                assistant_template_id=template_data.id
+            )
         )
 
         if (
@@ -1375,6 +1377,17 @@ class AssistantService:
             if not actor.can_toggle_insight():
                 raise UnauthorizedException("Only admins can toggle insights")
 
+        if is_provided(data_retention_days) and not actor.can_edit_retention():
+            raise UnauthorizedException(
+                "Only space admins can change conversation retention",
+                code="forbidden_action",
+                context={
+                    "resource_type": "assistant",
+                    "action": "update_retention",
+                    "auth_layer": "domain_policy",
+                },
+            )
+
         assistant = space.get_assistant(assistant_id=assistant_id)
 
         # Access to the personal default assistant requires PERSONAL_CHAT.
@@ -1820,7 +1833,7 @@ class AssistantService:
         can_read = (
             actor.can_read_default_assistant()
             if is_personal_default
-            else actor.can_read_assistants()
+            else actor.can_read_assistant(assistant=assistant)
         )
         if not can_read:
             raise UnauthorizedException(
@@ -1996,7 +2009,7 @@ class AssistantService:
         Help Assistants live in the org-space, whose only members are the
         tenant admins added by ``SpaceService.ensure_org_admin_members`` —
         regular users are never org-space members and therefore cannot pass
-        the ``actor.can_read_assistants()`` check in :meth:`get_assistant`.
+        the ``actor.can_read_assistant()`` check in :meth:`get_assistant`.
         But the Prompt Guide is, by design (PRD §5/§6/§10), usable by *any*
         authenticated user who has ``EDIT`` rights on the *target* assistant:
         their authorization is governed by those target-edit rights plus the
@@ -2294,6 +2307,7 @@ class AssistantService:
                                                 result=tc.result,
                                                 mcp_tool_name=tc.mcp_tool_name,
                                                 purpose=tc.purpose,
+                                                is_internal=tc.is_internal,
                                                 meta=tc.meta,
                                             )
                                         )
@@ -2338,6 +2352,7 @@ class AssistantService:
                                                 result_status=tc.result_status,
                                                 mcp_tool_name=tc.mcp_tool_name,
                                                 purpose=tc.purpose,
+                                                is_internal=tc.is_internal,
                                             )
                                         )
                             yield chunk
@@ -2375,6 +2390,7 @@ class AssistantService:
                                                 or "timeout_denied",
                                                 mcp_tool_name=tc.mcp_tool_name,
                                                 purpose=tc.purpose,
+                                                is_internal=tc.is_internal,
                                             )
                                         )
                             yield chunk
@@ -2577,6 +2593,7 @@ class AssistantService:
                             result=tc.result,
                             mcp_tool_name=tc.mcp_tool_name,
                             purpose=tc.purpose,
+                            is_internal=tc.is_internal,
                             meta=tc.meta,
                         )
                         for tc in non_streaming_tool_metadata
@@ -3375,7 +3392,7 @@ class AssistantService:
         assistant = space.get_assistant(assistant_id=assistant_id)
         actor = self.actor_manager.get_space_actor_from_space(space=space)
 
-        if not actor.can_read_assistants():
+        if not actor.can_read_assistant(assistant=assistant):
             raise UnauthorizedException(
                 "You do not have permission to read assistants in this space.",
                 code="forbidden_action",

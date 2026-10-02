@@ -12,7 +12,7 @@ from eneo.main.exceptions import BadRequestException, NotFoundException
 @pytest.fixture
 def service():
     return SharePointTreeService(
-        user_integration_repo=AsyncMock(),
+        user_integration_service=AsyncMock(),
         sharepoint_auth_router=AsyncMock(),
         space_repo=AsyncMock(),
     )
@@ -29,7 +29,9 @@ class TestGetFolderTreeTypedExceptions:
             )
 
     async def test_missing_user_integration_raises_not_found(self, service):
-        service.user_integration_repo.one.side_effect = Exception("gone")
+        service.user_integration_service.get_authorized_integration.side_effect = (
+            NotFoundException("gone")
+        )
 
         with pytest.raises(NotFoundException):
             await service.get_folder_tree(
@@ -40,8 +42,10 @@ class TestGetFolderTreeTypedExceptions:
 
     async def test_unauthenticated_integration_raises_bad_request(self, service):
         integration = MagicMock()
-        integration.authenticated = False
-        service.user_integration_repo.one.return_value = integration
+        service.user_integration_service.get_authorized_integration.side_effect = (
+            BadRequestException("not authenticated")
+        )
+        service.user_integration_service.get_authorized_integration.return_value.integration = integration
 
         with pytest.raises(BadRequestException):
             await service.get_folder_tree(
@@ -53,8 +57,8 @@ class TestGetFolderTreeTypedExceptions:
     async def test_missing_space_raises_not_found(self, service):
         integration = MagicMock()
         integration.authenticated = True
-        service.user_integration_repo.one.return_value = integration
-        service.space_repo.one.side_effect = Exception("no space")
+        service.user_integration_service.get_authorized_integration.return_value.integration = integration
+        service.space_repo.one.side_effect = NotFoundException("no space")
 
         with pytest.raises(NotFoundException):
             await service.get_folder_tree(

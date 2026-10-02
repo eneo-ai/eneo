@@ -6,6 +6,9 @@
 
 ## Planning
 <!-- Link the development task this PR closes. The task owns the parent epic link. -->
+<!-- Apply the actual GitHub labels before requesting review: one primary change
+     type and at least one area. See .github/PROJECT_WORKFLOW.md#required-labels.
+     Labels written only in this description do not satisfy the required check. -->
 
 - Task: Fixes #
 
