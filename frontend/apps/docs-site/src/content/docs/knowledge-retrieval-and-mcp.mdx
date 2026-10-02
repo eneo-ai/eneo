@@ -51,6 +51,45 @@ flowchart LR
   model --> answer[Grounded answer and references]
 ```
 
+## Configure material in the assistant editor
+
+The **Assistentens material** (Assistant material) section brings persistent
+file attachments and existing knowledge selectors together. **Bilagor**
+(Attachments) contains all attached files and the file uploader. Each file
+shows whether it is loaded before every answer or opened on demand; changing
+its reading mode does not move it out of Attachments.
+
+**Kunskap** (Knowledge) and **Organisationskunskap** (Organization knowledge)
+are separate sections below the attachments and uploader. The knowledge summary
+states whether searches run on demand or before every answer. Personal and
+organization knowledge retain their existing selectors and origins.
+
+Use **Ändra** (Change) on a file to choose between **Öppna vid behov** (Open
+when needed) and **Läs in inför varje svar** (Load before every answer). The
+editor explains when the selected model, file type, stored original or deployment
+prevents on-demand access. Changing the model does not overwrite
+the saved file preference.
+
+**Hantering av material** (Material handling) shows the knowledge search timing
+and chat-document handling controls directly, without a collapsed section. These
+remain independent: the knowledge setting controls searches for relevant passages, the
+chat setting controls user-uploaded documents, and each persistent attachment
+has its own setting. Rules, tone and procedures are configured in **Prompt** or
+**Skills**, both under **Instruktioner** (Instructions).
+
+This organization does not change knowledge uploads, extraction, indexing or
+the assistant save flow. Newly uploaded assistant attachments default to opening
+on demand. When on-demand access is unavailable, their content is loaded upfront
+instead. Existing attachments retain their saved reading mode. Chat document
+text is still included directly, and knowledge still uses injected retrieval
+unless configured otherwise. On-demand file attachments are not automatically
+indexed as knowledge.
+
+The **Fast kontext** (Fixed context) meter estimates prompt text and directly
+loaded attachments. It is not a total request estimate: chat history, skills,
+tool definitions, references and retrieved content also consume context.
+Including content does not guarantee the assistant will follow it.
+
 ## Keep four concepts separate
 
 Several things are called "knowledge" or "integration" in normal conversation,

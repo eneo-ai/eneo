@@ -2,7 +2,7 @@
 #
 # Licensed under the MIT License.
 
-from typing import TYPE_CHECKING, Optional
+from typing import TYPE_CHECKING, Collection, Optional
 
 from eneo.completion_models.infrastructure.context_builder import (
     count_attachment_tokens,
@@ -13,7 +13,11 @@ from eneo.completion_models.infrastructure.static_prompts import (
 )
 from eneo.conversations.conversation_models import PreflightResponse
 from eneo.files.file_models import FileType
-from eneo.files.file_reference import inline_file_text_for_model, url_only_file_ids
+from eneo.files.file_reference import (
+    inline_file_text_for_model,
+    url_only_attachment_ids,
+    url_only_file_ids,
+)
 from eneo.governance_policy.domain.policy_resolver import (
     select_effective_completion_model,
     select_effective_inline_file_text,
@@ -192,6 +196,7 @@ class ConversationService:
         group_chat_id: Optional["UUID"] = None,
         tool_assistant_id: Optional["UUID"] = None,
         assistant_prompt: str | None = None,
+        attachments: "list[tuple[UUID, bool]] | None" = None,
     ) -> PreflightResponse:
         """Estimate the tokens this request would add to context, without sending.
 
@@ -228,6 +233,24 @@ class ConversationService:
                 model_name=model_name,
                 inline_file_text=inline_file_text,
             )
+        if attachments:
+            # The editor's unsaved attachment set: persistent attachments follow
+            # their own per-file mode, not the upload toggle. One marked "open
+            # with tool" is sent as a signed URL and costs nothing here.
+            attachment_files = await self.file_service.get_files_by_ids(
+                file_ids=[file_id for file_id, _ in attachments]
+            )
+            url_only = url_only_attachment_ids(
+                attachment_files, dict(attachments), model
+            )
+            attachment_tokens, excluded = await self._count_preflight_files(
+                files=attachment_files,
+                model=model,
+                model_name=model_name,
+                url_only_ids=url_only,
+            )
+            file_tokens += attachment_tokens
+            excluded_file_count += excluded
 
         assistant_attachment_tokens = 0
         prompt_tokens = 0
@@ -244,9 +267,9 @@ class ConversationService:
             )
             prompt_tokens = baseline.prompt_tokens
             skill_context_tokens = baseline.skill_context_tokens
-            # Assistant attachments are exempt from URL-only mode: the send
-            # path always inlines their text (they get no URL references), so
-            # count them fully regardless of inline_file_text.
+            # The baseline already excludes attachments marked "open with
+            # tool" (sent as signed URLs); what remains is inlined whole, so
+            # the assistant-wide upload toggle does not apply here.
             assistant_attachment_tokens, _ = await self._count_preflight_files(
                 files=baseline.attachments,
                 model=model,
@@ -271,6 +294,7 @@ class ConversationService:
         model: "CompletionModel",
         model_name: str,
         inline_file_text: bool = True,
+        url_only_ids: "Collection[UUID] | None" = None,
     ) -> tuple[int, int]:
         # Document uploads (PDF/DOCX/PPTX) are TEXT-type. An image-only PDF
         # has no extractable text of its own but still yields derived vision
@@ -280,8 +304,14 @@ class ConversationService:
 
         # A URL-only document is sent as its signed URL (a tiny block), not its
         # extracted text or derived images — so it must not be counted here at
-        # all and reads as excluded. Same predicate as the send path.
-        url_only = url_only_file_ids(document_files, inline_file_text)
+        # all and reads as excluded. Same predicate as the send path: uploads
+        # follow the assistant-wide toggle, persistent attachments pass their
+        # own per-file set in ``url_only_ids``.
+        url_only = (
+            set(url_only_ids)
+            if url_only_ids is not None
+            else url_only_file_ids(document_files, inline_file_text)
+        )
         if url_only:
             document_files = [f for f in document_files if f.id not in url_only]
         image_files = (
