@@ -9,6 +9,8 @@ export type LoadingStateProps = {
   rows?: number;
   /** `rows`: list/table-height bars (default) · `text`: paragraph lines. */
   variant?: "rows" | "text";
+  /** Height of each bar in the `rows` variant, in px (default 40); 320 for a chart area. */
+  height?: number;
   className?: string;
 };
 
@@ -22,7 +24,13 @@ const TEXT_WIDTHS = ["100%", "92%", "96%", "70%"];
  * @example
  * {isPending ? <LoadingState rows={5} /> : <UserTable users={users} />}
  */
-export function LoadingState({ label, rows = 3, variant = "rows", className }: LoadingStateProps) {
+export function LoadingState({
+  label,
+  rows = 3,
+  variant = "rows",
+  height = 40,
+  className
+}: LoadingStateProps) {
   const t = useTranslations();
   const isText = variant === "text";
 
@@ -38,7 +46,7 @@ export function LoadingState({ label, rows = 3, variant = "rows", className }: L
         <Skeleton
           key={index}
           index={index}
-          height={isText ? 14 : 40}
+          height={isText ? 14 : height}
           width={isText ? TEXT_WIDTHS[index % TEXT_WIDTHS.length] : "100%"}
           radius={isText ? 1 : 2}
         />

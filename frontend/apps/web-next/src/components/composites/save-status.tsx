@@ -56,11 +56,15 @@ export function useSetSaveStatus() {
   return useContext(SetStatusContext);
 }
 
+type IndicatorState = "error" | "saving" | "dirty" | "saved";
+
 /**
  * Header chip reflecting the aggregate save state: an error (linking to the
  * field that failed) wins over an in-flight save, which wins over dirty local
  * drafts, which wins over the resting "all saved" state. `aria-live` announces
- * transitions to screen readers.
+ * transitions to screen readers. When a save lands, the check mark pops in
+ * once (tw-animate-css; the global reduced-motion rule turns it off), so the
+ * flip from "Sparar…" to "Alla ändringar sparade" is seen, not just read.
  */
 export function SaveStatusIndicator() {
   const t = useTranslations();
@@ -69,6 +73,26 @@ export function SaveStatusIndicator() {
   const errorKey = keys.find((key) => statuses[key] === "error");
   const saving = keys.some((key) => statuses[key] === "saving");
   const dirtyCount = keys.filter((key) => statuses[key] === "dirty").length;
+  const state: IndicatorState = errorKey
+    ? "error"
+    : saving
+      ? "saving"
+      : dirtyCount
+        ? "dirty"
+        : "saved";
+
+  // The check animates only when a save just landed, not on first render:
+  // remember the previous state and count the landings (state adjusted during
+  // render, React's pattern for deriving from a change), so each landing
+  // restarts the animation (the key changes) while the resting state stays
+  // still.
+  const [previous, setPrevious] = useState(state);
+  const [landings, setLandings] = useState(0);
+  if (previous !== state) {
+    setPrevious(state);
+    if (state === "saved" && previous === "saving") setLandings(landings + 1);
+  }
+  const justSaved = state === "saved" && landings > 0;
 
   let content: React.ReactNode;
   if (errorKey) {
@@ -98,7 +122,12 @@ export function SaveStatusIndicator() {
   } else {
     content = (
       <span className="text-muted-foreground inline-flex items-center gap-1.5 text-sm">
-        <Check aria-hidden="true" className="size-3.5" />
+        <Check
+          key={landings}
+          aria-hidden="true"
+          data-just-saved={justSaved || undefined}
+          className={justSaved ? "animate-in fade-in zoom-in-50 size-3.5 duration-300" : "size-3.5"}
+        />
         {t("all_changes_saved")}
       </span>
     );

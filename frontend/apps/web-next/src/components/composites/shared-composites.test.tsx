@@ -7,6 +7,7 @@ import { ENTITY_TONES, entityAccent, entityTone } from "@/lib/entity-accent";
 import { expectNoAxeViolations } from "@/test/axe";
 import { EmptyState } from "./empty-state";
 import { EntityAvatar, entityInitials } from "./entity-avatar";
+import { AREA_HUES, IconTile } from "./icon-tile";
 import { LoadingState } from "./loading-state";
 import { PageHeader } from "./page-header";
 import { StatusLabel } from "./status-label";
@@ -90,6 +91,29 @@ describe("EmptyState", () => {
     const { container } = render(<EmptyState title="Tomt">{false}</EmptyState>);
     expect(container.querySelectorAll("button")).toHaveLength(0);
     expect(container.textContent).toBe("Tomt");
+  });
+});
+
+describe("IconTile", () => {
+  it("is a decorative tile in the area's hue, neutral by default", () => {
+    const { container, rerender } = render(<IconTile icon={<Bot />} />);
+    const tile = container.firstElementChild!;
+    expect(tile.getAttribute("aria-hidden")).toBe("true");
+    expect(tile.className).toContain("bg-ax-muted");
+
+    rerender(<IconTile icon={<Bot />} hue={AREA_HUES.assistants} size="sm" />);
+    expect(tile.className).toContain("bg-ax-purple-muted");
+    expect(tile.className).toContain("text-ax-purple");
+    expect(tile.className).toContain("size-8");
+  });
+
+  it("gives an EmptyState's icon the area's hue, and keeps the meaning in the text", () => {
+    const { container } = render(
+      <EmptyState icon={<Inbox />} hue={AREA_HUES.knowledge} title="Inga källor ännu" />
+    );
+    const tile = container.querySelector("[aria-hidden='true'].bg-ax-blue-muted");
+    expect(tile).toBeTruthy();
+    expect(screen.getByRole("heading", { name: "Inga källor ännu" })).toBeTruthy();
   });
 });
 

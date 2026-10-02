@@ -117,6 +117,25 @@ it("keeps saving visible until every save for the key has settled", async () => 
   await waitFor(() => expect(screen.getByText("All changes saved!")).toBeDefined());
 });
 
+it("pops the check mark in when a save lands, and not before", async () => {
+  const first = deferred();
+  const { container } = renderWithStatus(<AutosaveProbe saves={[() => first.promise]} />);
+  const check = () => container.querySelector(".lucide-check");
+
+  // At rest on first render: a plain check, nothing animates.
+  expect(check()?.getAttribute("data-just-saved")).toBeNull();
+
+  fireEvent.click(screen.getByRole("button", { name: "Run" }));
+  expect(screen.getByText("Saving...")).toBeDefined();
+  await act(async () => first.resolve());
+  await waitFor(() => expect(screen.getByText("All changes saved!")).toBeDefined());
+
+  // The landing animates (tw-animate-css enter utilities; the global
+  // reduced-motion rule shortens them to nothing).
+  expect(check()?.getAttribute("data-just-saved")).toBe("true");
+  expect(check()?.getAttribute("class")).toContain("animate-in");
+});
+
 it("commits a dirty autosave field when the document is hidden", async () => {
   const save = vi.fn(() => Promise.resolve());
   renderWithStatus(<AutosaveFieldProbe save={save} />);

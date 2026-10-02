@@ -487,4 +487,37 @@
       inset: -10px;
     }
   }
+  /* DateRangeInput's toggle is built the same way (the audit log's period filter). */
+  .astryx-date-range-input > button:has(> .astryx-date-range-input-toggle-icon) {
+    min-inline-size: 24px;
+    min-block-size: 24px;
+    margin: -4px;
+  }
+  @media (pointer: coarse) {
+    .astryx-date-range-input > button:has(> .astryx-date-range-input-toggle-icon) {
+      position: relative;
+    }
+    .astryx-date-range-input > button:has(> .astryx-date-range-input-toggle-icon)::after {
+      content: "";
+      position: absolute;
+      inset: -10px;
+    }
+  }
+}
+
+/*
+ * 12. Tab strips narrower than their tabs (the space tabs on a phone, an
+ *    editor's section links) scroll inside Astryx's TabList, which fades the
+ *    edges and keeps the current tab in view. Snapping lands a swipe on a whole
+ *    tab instead of half a label; `proximity`, so a deliberate stop between
+ *    tabs holds, and the strip's own scroll-padding keeps the snapped tab clear
+ *    of the fade.
+ */
+@layer components {
+  .astryx-tab-strip {
+    scroll-snap-type: x proximity;
+  }
+  .astryx-tab {
+    scroll-snap-align: start;
+  }
 }
