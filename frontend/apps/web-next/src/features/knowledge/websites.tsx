@@ -8,11 +8,13 @@ import { MoreMenu } from "@astryxdesign/core/MoreMenu";
 import {
   pixel,
   proportional,
+  TableSelectionToolbar,
   useTableSelection,
   useTableSelectionState,
   useTableSortable,
   useTableSortableState,
   type TableColumn,
+  type TableSelectionState,
   type UseTableSortableConfig
 } from "@astryxdesign/core/Table";
 import { Table } from "@/components/astryx/table";
@@ -405,6 +407,14 @@ export function WebsitesTab({ canCreate, labelledBy }: { canCreate: boolean; lab
   const selectedIds = visibleWebsites
     .filter((website) => selected.has(website.id))
     .map((website) => website.id);
+  // One selection across the per-model tables; each table's own
+  // useTableSelectionState reads and writes this same set.
+  const selectionState: TableSelectionState = {
+    selectedKeys: selected,
+    selectedCount: selected.size,
+    hasSelection: selected.size > 0,
+    clearSelection: () => setSelected(new Set())
+  };
   const comparators = useMemo(() => websiteComparators(collator.compare), [collator]);
   // Sorted by the column headers; one sort order across the model groups.
   const { sortedData, sortConfig } = useTableSortableState<Website, WebsiteSortKey>({
@@ -561,54 +571,61 @@ export function WebsitesTab({ canCreate, labelledBy }: { canCreate: boolean; lab
       }}
     />
   );
+  // Astryx's selection toolbar owns the count and "clear selection"; the
+  // actions for the selected rows are ours. Only visible rows count as
+  // selected (see selectedIds), so the toolbar follows that count.
+  const selectionToolbar =
+    selectedIds.length > 0 ? (
+      <TableSelectionToolbar
+        selection={selectionState}
+        label={t("websites_bulk_actions")}
+        clearLabel={t("clear_selection")}
+        renderSelectionLabel={() => t("websites_selected_count", { count: selectedIds.length })}
+        startContent={
+          <>
+            {canCreate && selectedStoppableIds.length > 0
+              ? stopButton(selectedStoppableIds, "stop_selected_crawls")
+              : null}
+            {selectedDeletableIds.length > 0 ? (
+              <AstryxButton
+                variant="destructive"
+                label={
+                  bulkDelete.isPending
+                    ? t("removing_websites")
+                    : t("remove_selected_websites", { count: selectedDeletableIds.length })
+                }
+                icon={<Trash2 aria-hidden="true" />}
+                isLoading={bulkDelete.isPending}
+                isInterruptible
+                onClick={() => {
+                  if (!bulkPending) setDeleteTargets(selectedDeletableIds);
+                }}
+              />
+            ) : null}
+            {canCreate ? (
+              <AstryxButton
+                label={
+                  bulkRecrawl.isPending
+                    ? t("syncing")
+                    : t("sync_selected", { count: selectedIds.length })
+                }
+                variant="primary"
+                icon={<RefreshCw aria-hidden="true" />}
+                isLoading={bulkRecrawl.isPending}
+                isInterruptible
+                onClick={() => {
+                  if (!bulkPending) bulkRecrawl.mutate(selectedIds);
+                }}
+              />
+            ) : null}
+          </>
+        }
+      />
+    ) : null;
   const action = (
     <>
-      {selectedIds.length > 0 ? (
-        <>
-          {canCreate && selectedStoppableIds.length > 0
-            ? stopButton(selectedStoppableIds, "stop_selected_crawls")
-            : null}
-          {selectedDeletableIds.length > 0 ? (
-            <AstryxButton
-              variant="destructive"
-              label={
-                bulkDelete.isPending
-                  ? t("removing_websites")
-                  : t("remove_selected_websites", { count: selectedDeletableIds.length })
-              }
-              icon={<Trash2 aria-hidden="true" />}
-              isLoading={bulkDelete.isPending}
-              isInterruptible
-              onClick={() => {
-                if (!bulkPending) setDeleteTargets(selectedDeletableIds);
-              }}
-            />
-          ) : null}
-          {canCreate ? (
-            <AstryxButton
-              label={
-                bulkRecrawl.isPending
-                  ? t("syncing")
-                  : t("sync_selected", { count: selectedIds.length })
-              }
-              variant="primary"
-              icon={<RefreshCw aria-hidden="true" />}
-              isLoading={bulkRecrawl.isPending}
-              isInterruptible
-              onClick={() => {
-                if (!bulkPending) bulkRecrawl.mutate(selectedIds);
-              }}
-            />
-          ) : null}
-        </>
-      ) : (
-        <>
-          {canCreate && stoppableIds.length > 0
-            ? stopButton(stoppableIds, "stop_all_crawls")
-            : null}
-          {canCreate ? connectButton : null}
-        </>
-      )}
+      {canCreate && stoppableIds.length > 0 ? stopButton(stoppableIds, "stop_all_crawls") : null}
+      {canCreate ? connectButton : null}
       {!canCreate ? <NoCreatePermissionInfo resourceType={t("resource_websites")} /> : null}
       {createDialog}
       <ConfirmDialogControlled
@@ -669,6 +686,7 @@ export function WebsitesTab({ canCreate, labelledBy }: { canCreate: boolean; lab
   return (
     <div className="flex flex-col gap-6">
       {toolbar}
+      {selectionToolbar}
       {(grouped ? models : [null]).map((model) => {
         const rows = model
           ? sortedData.filter((website) => website.embedding_model.id === model.id)

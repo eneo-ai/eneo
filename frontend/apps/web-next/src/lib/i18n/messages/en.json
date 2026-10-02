@@ -5874,5 +5874,7 @@
   "synced_with_warnings": "Synced with warnings",
   "login_too_many_attempts_later": "Too many failed login attempts. Try again later.",
   "provider_form_api_key_masked": "That looks like the key's masked display value. Enter the actual API key.",
-  "conversation_retention_space_admin_only": "Only space administrators can change retention."
+  "conversation_retention_space_admin_only": "Only space administrators can change retention.",
+  "websites_bulk_actions": "Actions for selected websites",
+  "websites_selected_count": "{count, plural, one {# selected website} other {# selected websites}}"
 }

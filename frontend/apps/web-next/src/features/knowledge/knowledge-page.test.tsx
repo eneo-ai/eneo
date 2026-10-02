@@ -198,10 +198,19 @@ describe("KnowledgePage", () => {
 
     fireEvent.click(screen.getByRole("checkbox", { name: "Markera Intranätet" }));
     expect(screen.getByRole("button", { name: "Synkronisera valda (1)" })).toBeTruthy();
-    expect(screen.queryByRole("button", { name: "Anslut webbplats" })).toBeNull();
+    // The selection toolbar (Astryx TableSelectionToolbar) names the count and
+    // offers "clear"; the tab's own actions stay where they were.
+    const bulk = screen.getByRole("toolbar", { name: "Åtgärder för valda webbplatser" });
+    expect(within(bulk).getByText("1 vald webbplats")).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Anslut webbplats" })).toBeTruthy();
 
     fireEvent.click(screen.getByRole("checkbox", { name: "Markera alla rader" }));
     expect(screen.getByRole("button", { name: "Synkronisera valda (2)" })).toBeTruthy();
+    expect(within(bulk).getByText("2 valda webbplatser")).toBeTruthy();
+
+    fireEvent.click(within(bulk).getByRole("button", { name: "Rensa val" }));
+    expect(screen.queryByRole("toolbar", { name: "Åtgärder för valda webbplatser" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Synkronisera valda (2)" })).toBeNull();
   });
 
   it("lists integrations in a bordered table sorted by name, with folders and status dots", async () => {

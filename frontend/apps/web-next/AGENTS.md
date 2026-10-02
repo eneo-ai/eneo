@@ -91,7 +91,8 @@ ships must be release-ready: correct, accessible, tested and without dead ends.
   truncation (`useTruncation`, exported from `@astryxdesign/core/Text`, paired
   with `Tooltip`), free-text tags (`Tokenizer` with `hasCreate`), table
   sorting, filtering, pagination, selection and row expansion (the `Table`
-  plugins), and the chat hooks from `@astryxdesign/core/Chat`
+  plugins; `TableSelectionToolbar` for the selected rows' bulk actions, as
+  the websites tab does), and the chat hooks from `@astryxdesign/core/Chat`
   (`useChatStreamScroll`, `useChatNewMessages`, `useChatComposerTokens`,
   `useChatPasteAsToken`) plus `useStreamingText` from `/hooks`.
   `useFocusReturnVisibility`, `useTriggerMenu` and `useScrollSpy` exist in
