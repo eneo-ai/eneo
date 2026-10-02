@@ -204,9 +204,15 @@ the default name on a backend name collision (9017).
   yet (`astryx-provider.tsx`). For other client-only values use `useHydrated()`
   (`src/lib/hooks/use-hydrated.ts`) instead of effect + setState, below the
   page's providers.
-- **Background jobs** (`src/features/jobs/`): `JobsProvider` polls `GET
-/jobs` (2 s while something runs or was just started, 30 s otherwise; paused
-  in hidden tabs) and compares snapshots with `job-transitions.ts`. Every job
+- **Background jobs** (`src/features/jobs/`): the backend publishes every job
+  status change after commit (`eneo/jobs/job_events.py`) and streams them per
+  user as server-sent events; `job-events.ts` receives them through the
+  `/api/jobs/events` proxy (one EventSource per tab, browser reconnect, a
+  30 s retry after a refusal) and writes each update into the `["jobs"]`
+  cache. `JobsProvider` still polls `GET /jobs` as the safety net (30 s while
+  the feed is open; 2 s while it is down and something runs or was just
+  started; paused in hidden tabs) and compares snapshots with
+  `job-transitions.ts`. Every job
   the client starts goes through `trackJob(job)` so its completion counts even
   when the first poll already says "complete". A finished job toasts and
   announces (`job-feedback.ts`), refreshes the query keys in

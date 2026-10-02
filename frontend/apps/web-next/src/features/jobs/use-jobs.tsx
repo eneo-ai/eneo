@@ -16,6 +16,7 @@ import {
 import { browserApi } from "@/lib/api/browser";
 import { EneoApiError, getErrorMessage, unwrap } from "@/lib/api/errors";
 import { toast } from "@/lib/toast";
+import { subscribeJobEvents, useJobEventsConnected } from "./job-events";
 import { describeJobOutcome } from "./job-feedback";
 import { invalidateAfterJobs } from "./job-invalidation";
 import { diffJobs, EMPTY_LEDGER, rememberActiveJob, type JobLedger } from "./job-transitions";
@@ -144,16 +145,36 @@ export function JobsProvider({ children }: { children: React.ReactNode }) {
 
   const fastPollUntil = useRef(0);
 
+  // The live feed (job-events.ts) delivers every status change the moment it
+  // is committed. Polling stays as the safety net: slow while the feed is
+  // open, fast while it is down and something is running or was just started.
+  const live = useJobEventsConnected();
   const { data: jobs = NO_JOBS } = useQuery({
     queryKey: JOBS_KEY,
     queryFn: fetchJobs,
-    // Jobs can be created by another tab or appear after trackJob's first
-    // fetch. Keep checking even when the latest response is empty.
     refetchInterval: (query) =>
-      Date.now() < fastPollUntil.current || query.state.data?.some(isJobActive)
+      !live && (Date.now() < fastPollUntil.current || query.state.data?.some(isJobActive))
         ? FAST_POLL_MS
         : SLOW_POLL_MS
   });
+  useEffect(
+    () =>
+      subscribeJobEvents(
+        (job) => {
+          // A pushed update goes straight into the cached list; the snapshot
+          // effect below then treats it like a poll that saw the change.
+          queryClient.setQueryData<Job[]>(JOBS_KEY, (current = NO_JOBS) =>
+            current.some((item) => item.id === job.id)
+              ? current.map((item) => (item.id === job.id ? job : item))
+              : [...current, job]
+          );
+        },
+        () => {
+          void queryClient.invalidateQueries({ queryKey: JOBS_KEY });
+        }
+      ),
+    [queryClient]
+  );
 
   // Each snapshot is compared with the last one: a job that was active and
   // now has an outcome gets a toast, an announcement and a row highlight, and

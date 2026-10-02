@@ -33,6 +33,30 @@ afterEach(() => {
   vi.clearAllMocks();
 });
 
+it("reports a pushed job update without waiting for a poll", async () => {
+  vi.useFakeTimers({ toFake: ["setInterval", "clearInterval"] });
+  const fake = (await import("./job-events.test-support")).installFakeEventSource();
+  api.items = [{ ...job, task: "upload_info_blob" }];
+  renderInApp(
+    <JobsProvider>
+      <JobIndicator />
+    </JobsProvider>
+  );
+  await screen.findByRole("button", { name: "Aviseringar, 1 pågår" });
+  const polls = vi.mocked(browserApi.GET).mock.calls.length;
+
+  await act(async () => {
+    fake.latest().open();
+    fake.latest().job({ ...job, task: "upload_info_blob", status: "complete" });
+  });
+
+  await screen.findByRole("button", { name: "Aviseringar" });
+  expect(toast.success).toHaveBeenCalledWith("Avtal.pdf är klar och sökbar.");
+  // The feed is open: nothing fetched the list again to learn this.
+  expect(browserApi.GET).toHaveBeenCalledTimes(polls);
+  fake.restore();
+});
+
 it("keeps its context still when the jobs arrive", async () => {
   // The provider sits above every page: a context that changes while React
   // still hydrates a page makes React render the page again from scratch.

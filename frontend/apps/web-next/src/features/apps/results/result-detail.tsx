@@ -1,5 +1,6 @@
 "use client";
 
+import { useJobEventsConnected } from "@/features/jobs/job-events";
 import { Button } from "@astryxdesign/core/Button";
 import { useClipboard } from "@astryxdesign/core/hooks";
 import { Tab, TabList } from "@astryxdesign/core/TabList";
@@ -217,10 +218,12 @@ export function ResultDetail({
   newRunHref: string;
 }) {
   const t = useTranslations();
+  // The job feed refreshes app runs when they finish; poll only while it is down.
+  const live = useJobEventsConnected();
   const { data: run } = useSuspenseQuery({
     ...appRunQueryOptions(browserApi, runId),
     refetchInterval: (query) =>
-      query.state.data && isRunActive(query.state.data.status) ? RESULT_POLL_MS : false
+      !live && query.state.data && isRunActive(query.state.data.status) ? RESULT_POLL_MS : false
   });
 
   const complete = !isRunActive(run.status);

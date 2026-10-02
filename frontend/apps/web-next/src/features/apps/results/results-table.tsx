@@ -1,5 +1,6 @@
 "use client";
 
+import { useJobEventsConnected } from "@/features/jobs/job-events";
 import { useMutation, useQueryClient, useSuspenseQuery } from "@tanstack/react-query";
 import { FileText, MoreHorizontal, Paperclip, Trash2 } from "lucide-react";
 import Link from "next/link";
@@ -122,10 +123,13 @@ export function ResultsTable({
   resultHref: (runId: string) => string;
 }) {
   const t = useTranslations();
+  // A finished run arrives through the job feed (every run is a job), which
+  // refreshes this list; polling only covers the time the feed is down.
+  const live = useJobEventsConnected();
   const { data: runs } = useSuspenseQuery({
     ...appRunsQueryOptions(browserApi, appId),
     refetchInterval: (query) =>
-      query.state.data?.some((run) => isRunActive(run.status)) ? RESULTS_POLL_MS : false
+      !live && query.state.data?.some((run) => isRunActive(run.status)) ? RESULTS_POLL_MS : false
   });
 
   if (runs.length === 0) {
