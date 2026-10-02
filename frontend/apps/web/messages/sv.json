@@ -371,7 +371,6 @@
   "assistants": "Assistenter",
   "assistants_created": "Assistenter skapade",
   "assistants_intro_text": "Assistenter är AI-aktiverade hjälpare som du kan chatta med. Börja bygga din egen assistent eller konfigurera en av våra mallar.",
-  "attach_further_instructions": "Bifoga ytterligare instruktioner, till exempel riktlinjer eller viktig information. Assistenten kommer alltid att se allt som inkluderas som bilaga.",
   "attachments": "Bilagor",
   "avatar": "Ikon",
   "avatar_current": "Nuvarande ikon",
@@ -877,9 +876,6 @@
   "model_settings": "Modellinställningar",
   "model_settings_description": "Konfigurera modellspecifika parametrar för mer kontroll över svaret.",
   "knowledge_mode": "Kunskapsläge",
-  "knowledge_mode_description": "Hur bifogad kunskap når modellen. 'Vid behov' låter assistenten söka i sin kunskap endast när frågan kräver det. 'Infoga alltid' hämtar vid varje meddelande och fyller prompten med resultat (äldre beteende, används automatiskt för modeller utan verktygsstöd).",
-  "knowledge_mode_tool": "Vid behov (sökverktyg)",
-  "knowledge_mode_inject": "Infoga alltid",
   "knowledge_attached_aria": "Bifogade kunskapskällor: {count}",
   "tool_search_knowledge": "Söker kunskap",
   "tool_search_knowledge_done": "Sökte i kunskap",
@@ -1035,7 +1031,6 @@
   "section_not_enabled": "{section} är för närvarande inte aktiverat i denna yta",
   "security": "Säkerhet",
   "select_a_space": "Välj en yta",
-  "select_additional_knowledge": "Välj ytterligare kunskapskällor som denna assistent kommer att kunna söka i för relevanta svar.",
   "select_colour_scheme": "Välj färgschema",
   "select_preset_behavior": "Välj en förinställning för hur denna modell ska bete sig, eller konfigurera dess parametrar manuellt.",
   "select_user_group": "Välj en användargrupp...",
@@ -1754,7 +1749,6 @@
   "item_s_skipped": "{count} objekt hoppad över",
   "no_changes": "Inga ändringar",
   "organization_knowledge": "Organisationskunskap",
-  "organization_knowledge_description": "Välj ytterligare källor från din organisations utrymme som den här assistenten kan söka i för att hitta relevanta svar.",
   "add_knowledge_personal": "Lägg till kunskap (Personlig)",
   "add_knowledge_organization": "Lägg till kunskap (Organisation)",
   "admin_integrations_description": "Konfigurera kunskapsintegrationer för din organisation. Användare kan ansluta sina personliga konton eller använda organisationsövergripande konfigurationer.",
@@ -4654,7 +4648,5 @@
   "material_open_when_needed": "Öppna vid behov",
   "material_read_directly": "Läs in direkt",
   "config_attachment_meter_scope": "Uppskattning för instruktionstext och bilagor som läses in direkt. Chatthistorik, skills, verktyg och hämtat innehåll tillkommer.",
-  "material_attachments_description": "Filer som är bifogade till assistenten. Varje fil visar om den läses in inför varje svar eller öppnas vid behov.",
-  "conversation_documents_count_aria": "Dokument ({count})",
-  "conversation_documents_heading": "Dokument"
+  "material_attachments_description": "Filer som är bifogade till assistenten. Varje fil visar om den läses in inför varje svar eller öppnas vid behov."
 }
