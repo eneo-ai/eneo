@@ -1305,17 +1305,14 @@ class SpaceRepository:
             .options(selectinload(Prompts.user))
         )
         prompt_records = await self.session.execute(stmt)
-        prompts = prompt_records.all()
+        # One index, first row per assistant wins: matching per assistant by
+        # scanning every row made each hidden-inclusive space load quadratic.
+        prompt_by_assistant_id: dict[UUID, Prompts] = {}
+        for prompt, assistant_id in prompt_records.all():
+            prompt_by_assistant_id.setdefault(assistant_id, prompt)
 
         for assistant in assistants:
-            assistant.prompt = next(  # type: ignore[attr-defined]
-                (
-                    prompt
-                    for prompt, assistant_id in prompts
-                    if assistant_id == assistant.id
-                ),
-                None,
-            )
+            assistant.prompt = prompt_by_assistant_id.get(assistant.id)  # type: ignore[attr-defined]
 
         # For each assistant, load MCP servers with tools and apply space+assistant overrides
         for assistant in assistants:
