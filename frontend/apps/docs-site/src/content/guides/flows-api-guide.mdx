@@ -1712,6 +1712,7 @@ The published runtime API is intentionally not “open to anyone who can see the
 - service keys can inspect only their **own** runs and evidence
 - user-principal run owners need `FLOWS_TRACE` for their own evidence access
 - a service key never becomes a user-principal operator just because the key is scoped to a space with admin-level permission
+- after a flow is deleted, the same rules still decide who may read its runs, results, reviews, transcripts and evidence, and that history follows the flow's run-history retention rule; every run action (create, cancel, redispatch, retry, review decisions, transcript edits, uploads) answers 404
 
 ### Standard error envelope
 

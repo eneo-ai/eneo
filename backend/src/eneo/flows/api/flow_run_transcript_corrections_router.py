@@ -15,6 +15,8 @@ from eneo.flows.api import flow_access_context
 from eneo.flows.api.flow_api_common import (
     FLOW_RUN_COMMIT_BEFORE_RESPONSE_CLAUSE,
     FLOW_RUN_FORBIDDEN_DESCRIPTION,
+    RETIRED_FLOW_HISTORY_READ_CLAUSE,
+    RETIRED_FLOW_MUTATION_NOT_FOUND_CLAUSE,
     commit_flow_runtime_write_before_response,
     error_response,
 )
@@ -72,6 +74,7 @@ router = APIRouter()
         "can see what changed between saves. Reverts appear as revisions of "
         "their own. Reading history is an audited evidence view; the same "
         "authorization as the run's evidence applies."
+        f" {RETIRED_FLOW_HISTORY_READ_CLAUSE}"
     ),
     responses={
         403: error_response(
@@ -128,9 +131,10 @@ async def list_flow_run_transcript_correction_revisions(
                 flow_id=id,
                 required_access=FlowApiAction.VIEW,
                 allow_service_key_principals=True,
+                history=True,
             )
             run = await container.flow_run_service().get_run(
-                run_id=run_id, flow_id=id, access_kind="content"
+                run_id=run_id, flow_id=id, access_kind="content", history=True
             )
             service = container.flow_run_evidence_service()
             page = await service.list_transcript_correction_revisions(
@@ -138,6 +142,7 @@ async def list_flow_run_transcript_correction_revisions(
                 step_id=step_id,
                 after_revision=after_revision,
                 limit=limit,
+                history=True,
             )
             user = container.user()
             presenter = FlowServicePrincipalActorPresenter(
@@ -326,7 +331,7 @@ def _present_transcript_corrections(
     status_code=status.HTTP_200_OK,
     operation_id="list_flow_run_transcript_corrections",
     summary="List flow run transcript corrections",
-    description=_FLOW_RUN_TRANSCRIPT_CORRECTIONS_LIST_DESCRIPTION,
+    description=f"{_FLOW_RUN_TRANSCRIPT_CORRECTIONS_LIST_DESCRIPTION.rstrip()}\n\n{RETIRED_FLOW_HISTORY_READ_CLAUSE}",
     responses={
         403: error_response(
             description=FLOW_RUN_FORBIDDEN_DESCRIPTION,
@@ -377,13 +382,15 @@ async def list_flow_run_transcript_corrections(
                 flow_id=id,
                 required_access=FlowApiAction.VIEW,
                 allow_service_key_principals=True,
+                history=True,
             )
             run = await container.flow_run_service().get_run(
-                run_id=run_id, flow_id=id, access_kind="content"
+                run_id=run_id, flow_id=id, access_kind="content", history=True
             )
             views = await container.flow_transcript_corrections_service().list_for_run(
                 flow_id=id,
                 run_id=run_id,
+                history=True,
             )
             response = [_present_transcript_corrections(view) for view in views]
             user = container.user()
@@ -439,7 +446,7 @@ async def list_flow_run_transcript_corrections(
             context={"auth_layer": "tenant_role"},
         ),
         404: error_response(
-            description="Run or step result not found for this flow and tenant.",
+            description=f"Run or step result not found for this flow and tenant. {RETIRED_FLOW_MUTATION_NOT_FOUND_CLAUSE}",
             message="Flow run step result not found.",
             eneo_error_code=ErrorCodes.NOT_FOUND,
             code="not_found",

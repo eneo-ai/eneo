@@ -291,9 +291,12 @@ async def test_get_flow_run_evidence_delegates_to_evidence_service(monkeypatch):
         run_id=run.id,
         flow_id=flow_id,
         access_kind="evidence_view",
+        history=True,
     )
     run_service.get_redacted_evidence_bundle.assert_awaited_once_with(
-        run_id=run.id, run=run
+        run_id=run.id,
+        run=run,
+        history=True,
     )
     audit_service.log.assert_awaited_once()
     assert (
@@ -367,6 +370,7 @@ async def test_list_flow_run_provider_calls_forwards_cursor_and_audits_page(
         run_id=run.id,
         flow_id=flow_id,
         access_kind="evidence_view",
+        history=True,
     )
     evidence_service.list_provider_calls.assert_awaited_once_with(
         run_id=run.id,
@@ -375,6 +379,7 @@ async def test_list_flow_run_provider_calls_forwards_cursor_and_audits_page(
         after_event_id=after_event_id,
         attempt_id=attempt_id,
         run=run,
+        history=True,
     )
     audit_service.log.assert_awaited_once()
     assert audit_service.log.await_args.kwargs["metadata"]["extra"] == {
@@ -861,6 +866,7 @@ async def test_export_flow_run_evidence_returns_json_attachment(monkeypatch):
         detail="redacted",
         run=run,
         export_reason="support_debug",
+        history=True,
     )
     audit_service.log.assert_awaited_once()
     assert (
@@ -1075,12 +1081,14 @@ async def test_export_flow_run_evidence_passes_raw_detail_and_reason(monkeypatch
         run_id=run.id,
         flow_id=flow_id,
         access_kind="evidence_export_raw",
+        history=True,
     )
     run_service.export_evidence_json.assert_awaited_once_with(
         run_id=run.id,
         detail="raw",
         run=run,
         export_reason="government_audit_request",
+        history=True,
     )
     assert container.audit_service.return_value.log.await_args.kwargs["metadata"][
         "extra"
@@ -1581,6 +1589,7 @@ async def test_artifact_signed_url_delegates_to_service_and_audits(monkeypatch):
         run_id=run_id,
         flow_id=flow_id,
         file_id=file_id,
+        history=True,
     )
     assert response.url.startswith("https://app.example.com/api/v1/files/")
     assert str(file_id) in response.url
@@ -1662,6 +1671,7 @@ async def test_input_file_signed_url_delegates_to_service_and_audits(monkeypatch
         run_id=run_id,
         flow_id=flow_id,
         file_id=file_id,
+        history=True,
     )
     assert response.url.startswith("https://app.example.com/api/v1/files/")
     assert str(file_id) in response.url

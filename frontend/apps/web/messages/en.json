@@ -6217,6 +6217,8 @@
   "flow_run_retention_load_more_spaces": "Load more Spaces",
   "flow_run_retention_target_search": "Search",
   "flow_run_retention_target_no_match": "No match.",
+  "flow_run_retention_target_retired": "Deleted",
+  "flow_run_retention_retired_flow_note": "This flow is deleted and can no longer run. Its history stays readable and follows the retention rule for this flow.",
   "flow_run_retention_target_partial": "Search covers the {count} loaded so far.",
   "flow_run_retention_load_more_flows": "Load more Flows",
   "flow_run_retention_space_title": "Space policy: {space}",

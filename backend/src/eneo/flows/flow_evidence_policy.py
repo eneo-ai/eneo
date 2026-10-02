@@ -45,18 +45,26 @@ FLOW_EVIDENCE_POLICY_CLASS3_KEYS: Final[frozenset[str]] = frozenset(
 
 
 @dataclass(frozen=True, slots=True)
-class FlowEvidenceAccessContext:
-    """The two facts that decide whether evidence content may be disclosed.
+class FlowHistoryAccessContext:
+    """The facts that authorize reading a flow's runs, live or retired.
 
     Read as one narrow row rather than through the full Flow aggregate: the
-    decision needs sensitivity and the space's classification, not the flow's
-    steps, and it must not depend on a space read that enforces membership.
+    decisions need the space, publication, sensitivity and the space's current
+    classification, not the flow's steps, and must not depend on a space read
+    that enforces membership. A retired (deleted) flow keeps this row, so its
+    history stays readable with current authorization and follows its retention rule.
     """
 
     flow_id: UUID
     space_id: UUID
+    published: bool
+    retired: bool
     sensitive: bool
     classification_level: int
+
+    @property
+    def id(self) -> UUID:
+        return self.flow_id
 
     @property
     def classified(self) -> bool:

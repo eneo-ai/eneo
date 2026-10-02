@@ -16,6 +16,7 @@ from eneo.authentication.endpoint_access import (
 )
 from eneo.flows.api import flow_access_context
 from eneo.flows.api.flow_api_common import (
+    RETIRED_FLOW_HISTORY_READ_CLAUSE,
     error_response,
 )
 from eneo.flows.api.flow_assembler import FlowAssembler
@@ -118,7 +119,7 @@ _RAW_REASON_REQUIRED_MESSAGE: Final[str] = (
     status_code=status.HTTP_200_OK,
     operation_id="get_flow_run_evidence",
     summary="Get flow run evidence trace",
-    description=_FLOW_EVIDENCE_DESCRIPTION,
+    description=f"{_FLOW_EVIDENCE_DESCRIPTION.rstrip()}\n\n{RETIRED_FLOW_HISTORY_READ_CLAUSE}",
     responses={
         403: error_response(
             description=_FLOW_TRACE_FORBIDDEN_DESCRIPTION,
@@ -172,6 +173,7 @@ async def get_flow_run_evidence(
                 flow_id=id,
                 required_access=FlowApiAction.VIEW,
                 allow_service_key_principals=True,
+                history=True,
             )
             user = container.user()
             evidence_service = container.flow_run_evidence_service()
@@ -179,10 +181,12 @@ async def get_flow_run_evidence(
                 run_id=run_id,
                 flow_id=id,
                 access_kind="evidence_view",
+                history=True,
             )
             evidence = await evidence_service.get_redacted_evidence_bundle(
                 run_id=run_id,
                 run=run,
+                history=True,
             )
             presenter = FlowServicePrincipalActorPresenter(
                 api_key_repo=container.api_key_v2_repo(),
@@ -253,7 +257,7 @@ async def get_flow_run_evidence(
     status_code=status.HTTP_200_OK,
     operation_id="list_flow_run_provider_calls",
     summary="List flow run provider calls",
-    description=_FLOW_PROVIDER_CALLS_DESCRIPTION,
+    description=f"{_FLOW_PROVIDER_CALLS_DESCRIPTION.rstrip()}\n\n{RETIRED_FLOW_HISTORY_READ_CLAUSE}",
     responses={
         403: error_response(
             description=_FLOW_TRACE_FORBIDDEN_DESCRIPTION,
@@ -325,6 +329,7 @@ async def list_flow_run_provider_calls(
                 flow_id=id,
                 required_access=FlowApiAction.VIEW,
                 allow_service_key_principals=True,
+                history=True,
             )
             user = container.user()
             evidence_service = container.flow_run_evidence_service()
@@ -332,6 +337,7 @@ async def list_flow_run_provider_calls(
                 run_id=run_id,
                 flow_id=id,
                 access_kind="evidence_view",
+                history=True,
             )
             page = await evidence_service.list_provider_calls(
                 run_id=run_id,
@@ -340,6 +346,7 @@ async def list_flow_run_provider_calls(
                 after_event_id=after_event_id,
                 attempt_id=attempt_id,
                 run=run,
+                history=True,
             )
             await log_flow_trace_audit_or_raise(
                 container=container,
@@ -374,7 +381,7 @@ async def list_flow_run_provider_calls(
     status_code=status.HTTP_200_OK,
     operation_id="export_flow_run_evidence",
     summary="Export flow run evidence bundle",
-    description=_FLOW_EVIDENCE_EXPORT_DESCRIPTION,
+    description=f"{_FLOW_EVIDENCE_EXPORT_DESCRIPTION.rstrip()}\n\n{RETIRED_FLOW_HISTORY_READ_CLAUSE}",
     responses={
         200: {
             "model": FlowRunEvidenceExportResponse,
@@ -495,6 +502,7 @@ async def export_flow_run_evidence(
                 flow_id=id,
                 required_access=FlowApiAction.VIEW,
                 allow_service_key_principals=True,
+                history=True,
             )
             access_kind = (
                 "evidence_export_raw" if detail == "raw" else "evidence_export_redacted"
@@ -517,12 +525,14 @@ async def export_flow_run_evidence(
                 run_id=run_id,
                 flow_id=id,
                 access_kind=access_kind,
+                history=True,
             )
             export_payload = await evidence_service.export_evidence_json(
                 run_id=run_id,
                 detail=detail,
                 run=run,
                 export_reason=export_reason,
+                history=True,
             )
             filename = f"flow-run-evidence-{run_id}.json"
             validated_export = FlowRunEvidenceExportResponse.model_validate(

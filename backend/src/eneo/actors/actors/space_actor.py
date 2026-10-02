@@ -10,7 +10,6 @@ from eneo.main.models import ResourcePermission
 from eneo.roles.permissions import Permission, has_permission
 
 if TYPE_CHECKING:
-    from eneo.flows.domain.flow import Flow
     from eneo.spaces.space import Space
     from eneo.users.user import UserInDB
 
@@ -1022,7 +1021,7 @@ class SpaceActor:
             resource_type=SpaceResourceType.FLOW,
         )
 
-    def can_read_flow(self, flow: "Flow"):
+    def can_read_flow(self, flow: PublishableResource):
         return self.can_perform_action(
             action=SpaceAction.READ,
             resource_type=SpaceResourceType.FLOW,

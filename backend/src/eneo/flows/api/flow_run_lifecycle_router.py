@@ -29,6 +29,8 @@ from eneo.flows.api.flow_api_common import (
     FLOW_RUN_COMMIT_BEFORE_RESPONSE_CLAUSE,
     FLOW_RUN_FORBIDDEN_DESCRIPTION,
     FLOW_RUN_SERVICE_KEY_REVIEW_CLAUSE,
+    RETIRED_FLOW_HISTORY_READ_CLAUSE,
+    RETIRED_FLOW_MUTATION_NOT_FOUND_CLAUSE,
     audit_actor_kwargs,
     commit_flow_runtime_write_before_response,
     error_response,
@@ -390,7 +392,7 @@ async def get_flow_run_capacity(
             context={"auth_layer": "api_key_scope"},
         ),
         404: error_response(
-            description="Flow not found in tenant scope.",
+            description=f"Flow not found in tenant scope. {RETIRED_FLOW_MUTATION_NOT_FOUND_CLAUSE}",
             message="Flow not found.",
             eneo_error_code=ErrorCodes.NOT_FOUND,
             code="not_found",
@@ -552,7 +554,7 @@ async def create_flow_run(
     status_code=status.HTTP_200_OK,
     operation_id="list_flow_runs",
     summary="List flow runs",
-    description=_FLOW_RUN_LIST_DESCRIPTION,
+    description=f"{_FLOW_RUN_LIST_DESCRIPTION.rstrip()}\n\n{RETIRED_FLOW_HISTORY_READ_CLAUSE}",
     responses={
         200: {
             "description": (
@@ -626,6 +628,7 @@ async def list_flow_runs(
         flow_id=id,
         required_access=FlowApiAction.VIEW,
         allow_service_key_principals=True,
+        history=True,
     )
     run_service = container.flow_run_service()
     runs = await run_service.list_run_statuses(
@@ -634,6 +637,7 @@ async def list_flow_runs(
         mine=mine,
         limit=limit + 1,
         offset=offset,
+        history=True,
     )
     page_runs = runs[:limit]
     assembler = FlowAssembler()
@@ -650,7 +654,7 @@ async def list_flow_runs(
     status_code=status.HTTP_200_OK,
     operation_id="get_flow_run_status",
     summary="Get flow run status",
-    description=_FLOW_RUN_STATUS_DESCRIPTION,
+    description=f"{_FLOW_RUN_STATUS_DESCRIPTION.rstrip()}\n\n{RETIRED_FLOW_HISTORY_READ_CLAUSE}",
     responses={
         403: error_response(
             description=FLOW_RUN_FORBIDDEN_DESCRIPTION,
@@ -688,10 +692,12 @@ async def get_flow_run_status(
         flow_id=id,
         required_access=FlowApiAction.VIEW,
         allow_service_key_principals=True,
+        history=True,
     )
     run = await container.flow_run_service().get_run_status(
         run_id=run_id,
         flow_id=id,
+        history=True,
     )
     return FlowAssembler.to_run_summary_public(run)
 
@@ -702,7 +708,7 @@ async def get_flow_run_status(
     status_code=status.HTTP_200_OK,
     operation_id="get_flow_run",
     summary="Get flow run",
-    description=_FLOW_RUN_DETAIL_DESCRIPTION,
+    description=f"{_FLOW_RUN_DETAIL_DESCRIPTION.rstrip()}\n\n{RETIRED_FLOW_HISTORY_READ_CLAUSE}",
     responses={
         403: error_response(
             description=FLOW_RUN_FORBIDDEN_DESCRIPTION,
@@ -757,11 +763,13 @@ async def get_flow_run(
                 flow_id=id,
                 required_access=FlowApiAction.VIEW,
                 allow_service_key_principals=True,
+                history=True,
             )
             run_service = container.flow_run_service()
             run_view = await run_service.get_run_detail_with_result_files_and_usage(
                 run_id=run_id,
                 flow_id=id,
+                history=True,
             )
             response = FlowAssembler().to_run_detail_public(
                 run_view.run,
@@ -812,7 +820,7 @@ async def get_flow_run(
             context={"auth_layer": "api_key_scope"},
         ),
         404: error_response(
-            description="Run not found for this flow and tenant.",
+            description=f"Run not found for this flow and tenant. {RETIRED_FLOW_MUTATION_NOT_FOUND_CLAUSE}",
             message="Flow run not found.",
             eneo_error_code=ErrorCodes.NOT_FOUND,
             code="not_found",
@@ -893,7 +901,7 @@ async def cancel_flow_run(
             context={"auth_layer": "api_key_scope"},
         ),
         404: error_response(
-            description="Run not found for this flow and tenant.",
+            description=f"Run not found for this flow and tenant. {RETIRED_FLOW_MUTATION_NOT_FOUND_CLAUSE}",
             message="Flow run not found.",
             eneo_error_code=ErrorCodes.NOT_FOUND,
             code="not_found",

@@ -28,6 +28,15 @@ FLOW_RUN_FORBIDDEN_DESCRIPTION = (
     "`flow_service_key_principal_not_supported`."
 )
 
+RETIRED_FLOW_HISTORY_READ_CLAUSE = (
+    "Also available for a deleted (retired) flow, read-only; its run history "
+    "follows the flow's retention rule."
+)
+
+RETIRED_FLOW_MUTATION_NOT_FOUND_CLAUSE = (
+    "A deleted flow cannot be run or changed, so it is not found."
+)
+
 FLOW_RUN_SERVICE_KEY_REVIEW_CLAUSE = (
     "Service-key human-review clients should use a service-owned `sk_` key with "
     "`resource_permissions.flows = write`; inspect `steps_requiring_review`, "

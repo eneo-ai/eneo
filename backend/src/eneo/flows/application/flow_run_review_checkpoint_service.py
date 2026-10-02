@@ -650,11 +650,13 @@ class FlowRunReviewCheckpointService:
         *,
         flow_id: UUID,
         run_id: UUID,
+        history: bool = False,
     ) -> FlowRunReviewCheckpoint | None:
         run = await self.access_policy.load_run(
             run_id=run_id,
             flow_id=flow_id,
             access_kind="content",
+            history=history,
         )
         return await self.flow_run_review_checkpoint_repo.get_active_review_checkpoint(
             run_id=run.id,

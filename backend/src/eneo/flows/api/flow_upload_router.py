@@ -25,7 +25,10 @@ from eneo.authentication.endpoint_access import (
 from eneo.database.database import AsyncSession
 from eneo.files.file_models import FilePublic
 from eneo.flows.api import flow_access_context
-from eneo.flows.api.flow_api_common import error_response
+from eneo.flows.api.flow_api_common import (
+    RETIRED_FLOW_MUTATION_NOT_FOUND_CLAUSE,
+    error_response,
+)
 from eneo.flows.api.flow_models import FlowRunContractPublic
 from eneo.flows.api.flow_runtime_paths import (
     DELETE_RUNTIME_FILE_PATH,
@@ -174,7 +177,7 @@ Service-key principals may use this endpoint for published-flow runtime only.
             context={"auth_layer": "api_key_scope"},
         ),
         404: error_response(
-            description="Flow not found in tenant scope.",
+            description=f"Flow not found in tenant scope. {RETIRED_FLOW_MUTATION_NOT_FOUND_CLAUSE}",
             message="Flow not found.",
             eneo_error_code=ErrorCodes.NOT_FOUND,
             code="not_found",
@@ -248,7 +251,7 @@ through that Flow's runtime upload endpoint.
             context={"auth_layer": "api_key_scope"},
         ),
         404: error_response(
-            description="Flow not found in tenant scope.",
+            description=f"Flow not found in tenant scope. {RETIRED_FLOW_MUTATION_NOT_FOUND_CLAUSE}",
             message="Flow not found.",
             eneo_error_code=ErrorCodes.NOT_FOUND,
             code="not_found",
@@ -346,7 +349,7 @@ typed 409 conflict.
         404: error_response(
             description=(
                 "Flow not found, or runtime file is not owned by the caller or "
-                "was not uploaded for this Flow."
+                f"was not uploaded for this Flow. {RETIRED_FLOW_MUTATION_NOT_FOUND_CLAUSE}"
             ),
             message="Not found",
             eneo_error_code=ErrorCodes.NOT_FOUND,

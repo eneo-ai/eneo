@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from dataclasses import replace
 from datetime import datetime, timezone
 from types import SimpleNamespace
 from typing import cast, get_args
@@ -23,8 +24,8 @@ from eneo.flows.application.flow_run_access_policy import (
 from eneo.flows.domain.flow import FlowRun, FlowRunStatus
 from eneo.flows.domain.flow_run_exceptions import FlowRunNotFoundError
 from eneo.flows.flow_evidence_policy import (
-    FlowEvidenceAccessContext,
     FlowEvidencePolicy,
+    FlowHistoryAccessContext,
     flow_metadata_marks_sensitive,
 )
 from eneo.main.exceptions import NotFoundException, UnauthorizedException
@@ -107,6 +108,14 @@ def _policy_with_space(
         get_current_role=lambda: role
     )
     flow_repo.get.return_value = flow
+    flow_repo.get_history_access_context.return_value = FlowHistoryAccessContext(
+        flow_id=flow.id,
+        space_id=space.id,
+        published=True,
+        retired=False,
+        sensitive=False,
+        classification_level=security_level,
+    )
     space_service.get_space.return_value = space
     return FlowRunAccessPolicy(
         user=user,
@@ -318,9 +327,11 @@ async def test_admin_service_key_evidence_access_requires_key_capability(
     policy = _policy(service_user, flow_run_repo=flow_run_repo)
     cast(
         AsyncMock, policy.flow_repo
-    ).get_evidence_access_context.return_value = FlowEvidenceAccessContext(
+    ).get_history_access_context.return_value = FlowHistoryAccessContext(
         flow_id=flow_id,
         space_id=uuid4(),
+        published=True,
+        retired=False,
         sensitive=False,
         classification_level=0,
     )
@@ -383,9 +394,11 @@ async def test_load_run_rejects_sensitive_flow_export_when_policy_disabled(
         space_id=uuid4(),
         metadata_json={"care_data_policy": {"sensitive": True}},
     )
-    flow_repo.get_evidence_access_context.return_value = FlowEvidenceAccessContext(
+    flow_repo.get_history_access_context.return_value = FlowHistoryAccessContext(
         flow_id=flow_id,
         space_id=flow_repo.get.return_value.space_id,
+        published=True,
+        retired=False,
         sensitive=True,
         classification_level=0,
     )
@@ -409,9 +422,10 @@ async def test_load_run_rejects_sensitive_flow_export_when_policy_disabled(
     )
     assert exc_info.value.code == "flow_run_evidence_forbidden"
     assert exc_info.value.context == {"auth_layer": "flow_runtime_policy"}
-    flow_repo.get_evidence_access_context.assert_awaited_once_with(
+    flow_repo.get_history_access_context.assert_awaited_once_with(
         flow_id=flow_id,
         tenant_id=user.tenant_id,
+        include_retired=False,
     )
 
 
@@ -463,9 +477,11 @@ def _disclosure_policy(
     )
     # The disclosure decision reads the narrow evidence-access context, so the
     # double answers it with the real typed value rather than a mock.
-    flow_repo.get_evidence_access_context.return_value = FlowEvidenceAccessContext(
+    flow_repo.get_history_access_context.return_value = FlowHistoryAccessContext(
         flow_id=flow.id,
         space_id=flow.space_id,
+        published=True,
+        retired=False,
         sensitive=flow_metadata_marks_sensitive(metadata_json),
         classification_level=security_level,
     )
@@ -652,9 +668,11 @@ async def test_service_key_access_matrix_is_capability_exact(
         role="viewer",
     )
     flow = flow_repo.get.return_value
-    flow_repo.get_evidence_access_context.return_value = FlowEvidenceAccessContext(
+    flow_repo.get_history_access_context.return_value = FlowHistoryAccessContext(
         flow_id=flow.id,
         space_id=flow.space_id,
+        published=True,
+        retired=False,
         sensitive=False,
         classification_level=0,
     )
@@ -714,9 +732,11 @@ async def test_space_manager_access_matrix_is_role_and_classification_exact(
         security_level=security_level,
     )
     flow = flow_repo.get.return_value
-    flow_repo.get_evidence_access_context.return_value = FlowEvidenceAccessContext(
+    flow_repo.get_history_access_context.return_value = FlowHistoryAccessContext(
         flow_id=flow.id,
         space_id=flow.space_id,
+        published=True,
+        retired=False,
         sensitive=False,
         classification_level=security_level,
     )
@@ -782,7 +802,7 @@ def test_access_denials_preserve_message_code_and_layer(
     assert exc_info.value.context == {"auth_layer": "test_layer"}
 
 
-async def test_space_and_evidence_context_lookups_are_cached_per_flow(user) -> None:
+async def test_space_and_flow_context_lookups_are_cached_per_flow(user) -> None:
     flow_repo = AsyncMock()
     policy = _policy_with_space(
         user,
@@ -791,34 +811,70 @@ async def test_space_and_evidence_context_lookups_are_cached_per_flow(user) -> N
         role="owner",
         security_level=2,
     )
-    flow = flow_repo.get.return_value
-    context = FlowEvidenceAccessContext(
-        flow_id=flow.id,
-        space_id=flow.space_id,
-        sensitive=False,
-        classification_level=2,
-    )
-    flow_repo.get_evidence_access_context.return_value = context
+    context = flow_repo.get_history_access_context.return_value
 
-    assert await policy.load_space_access(flow_id=flow.id) == (
-        policy.actor_manager.get_space_actor_from_space.return_value,
-        2,
-    )
-    assert await policy.load_space_access(flow_id=flow.id) == (
-        policy.actor_manager.get_space_actor_from_space.return_value,
-        2,
-    )
-    assert await policy._load_evidence_access_context(flow_id=flow.id) == context
-    assert await policy._load_evidence_access_context(flow_id=flow.id) == context
+    for _ in range(2):
+        assert await policy.load_space_access(flow_id=context.flow_id) == (
+            policy.actor_manager.get_space_actor_from_space.return_value,
+            2,
+        )
+        assert (
+            await policy._load_flow_context(flow_id=context.flow_id, history=False)
+            == context
+        )
 
-    cast(AsyncMock, flow_repo.get).assert_awaited_once_with(
-        flow_id=flow.id,
-        tenant_id=user.tenant_id,
+    # The space and the flow row are each read once; the live aggregate never.
+    cast(AsyncMock, flow_repo.get).assert_not_awaited()
+    cast(AsyncMock, policy.space_service.get_space).assert_awaited_once_with(
+        context.space_id
     )
-    cast(AsyncMock, flow_repo.get_evidence_access_context).assert_awaited_once_with(
-        flow_id=flow.id,
+    cast(AsyncMock, flow_repo.get_history_access_context).assert_awaited_once_with(
+        flow_id=context.flow_id,
         tenant_id=user.tenant_id,
+        include_retired=False,
     )
+
+
+async def test_live_read_refuses_a_retired_flow_whose_space_a_history_read_cached(
+    user,
+) -> None:
+    flow_repo = AsyncMock()
+    policy = _policy_with_space(
+        user, flow_repo=flow_repo, flow_run_repo=AsyncMock(), role="owner"
+    )
+    retired = replace(flow_repo.get_history_access_context.return_value, retired=True)
+
+    async def history_row(*, flow_id, tenant_id, include_retired):
+        _ = (flow_id, tenant_id)
+        if not include_retired:
+            raise NotFoundException("Flow not found.")
+        return retired
+
+    flow_repo.get_history_access_context.side_effect = history_row
+
+    actor, _level = await policy.load_space_access(
+        flow_id=retired.flow_id, history=True
+    )
+    assert actor is policy.actor_manager.get_space_actor_from_space.return_value
+    with pytest.raises(NotFoundException):
+        await policy.load_space_access(flow_id=retired.flow_id)
+    with pytest.raises(NotFoundException):
+        await policy.can_list_all_runs_in_flow(flow_id=retired.flow_id)
+    assert await policy.can_list_all_runs_in_flow(flow_id=retired.flow_id, history=True)
+
+
+async def test_history_read_cannot_authorize_a_mutation(user) -> None:
+    flow_repo = AsyncMock()
+    policy = _policy_with_space(
+        user, flow_repo=flow_repo, flow_run_repo=AsyncMock(), role="owner"
+    )
+    run = _run(user, flow_repo.get_history_access_context.return_value.flow_id)
+
+    with pytest.raises(NotFoundException):
+        await policy.ensure_can_access_run(run, access_kind="cancel", history=True)
+
+    cast(AsyncMock, flow_repo.get_history_access_context).assert_not_awaited()
+    await policy.ensure_can_access_run(run, access_kind="cancel")
 
 
 async def test_service_key_raw_export_fails_closed_in_classification_three(
@@ -839,9 +895,11 @@ async def test_service_key_raw_export_fails_closed_in_classification_three(
         security_level=3,
     )
     flow = flow_repo.get.return_value
-    flow_repo.get_evidence_access_context.return_value = FlowEvidenceAccessContext(
+    flow_repo.get_history_access_context.return_value = FlowHistoryAccessContext(
         flow_id=flow.id,
         space_id=flow.space_id,
+        published=True,
+        retired=False,
         sensitive=False,
         classification_level=3,
     )

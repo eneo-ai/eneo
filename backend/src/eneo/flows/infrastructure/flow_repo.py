@@ -54,7 +54,7 @@ from eneo.flows.enums import (
     final_step_output_type,
 )
 from eneo.flows.flow_evidence_policy import (
-    FlowEvidenceAccessContext,
+    FlowHistoryAccessContext,
     flow_metadata_marks_sensitive_or_unreadable,
 )
 from eneo.flows.flow_resource_bindings import (
@@ -312,22 +312,26 @@ class FlowRepository:
 
         return await self.get(flow_id, tenant_id)
 
-    async def get_evidence_access_context(
+    async def get_history_access_context(
         self,
         *,
         flow_id: UUID,
         tenant_id: UUID,
-    ) -> FlowEvidenceAccessContext:
-        """Read only what decides whether evidence content may be disclosed.
+        include_retired: bool,
+    ) -> FlowHistoryAccessContext:
+        """Read only what authorizes reading the flow's runs.
 
         `get` loads the whole Flow aggregate including every step, and reading
         the space through the space service enforces membership that a tenant
         admin is not subject to. This one row answers the question directly.
+        A retired flow is found only when the caller asks for history.
         """
         stmt = (
             sa.select(
                 Flows.id,
                 Flows.space_id,
+                Flows.published_version,
+                Flows.deleted_at,
                 Flows.metadata_json,
                 SecurityClassification.security_level,
             )
@@ -339,15 +343,25 @@ class FlowRepository:
             )
             .where(Flows.id == flow_id)
             .where(Flows.tenant_id == tenant_id)
-            .where(Flows.deleted_at.is_(None))
         )
+        if not include_retired:
+            stmt = stmt.where(Flows.deleted_at.is_(None))
         row = (await self.session.execute(stmt)).one_or_none()
         if row is None:
             raise NotFoundException("Flow not found.")
-        resolved_flow_id, space_id, metadata_json, security_level = row
-        return FlowEvidenceAccessContext(
+        (
+            resolved_flow_id,
+            space_id,
+            published_version,
+            deleted_at,
+            metadata_json,
+            security_level,
+        ) = row
+        return FlowHistoryAccessContext(
             flow_id=resolved_flow_id,
             space_id=space_id,
+            published=published_version is not None,
+            retired=deleted_at is not None,
             sensitive=flow_metadata_marks_sensitive_or_unreadable(metadata_json),
             classification_level=(
                 security_level if isinstance(security_level, int) else 0

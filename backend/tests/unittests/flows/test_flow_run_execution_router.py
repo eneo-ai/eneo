@@ -179,10 +179,11 @@ async def test_get_flow_graph_keeps_run_version_snapshot_visible_after_unpublish
     assert len(llm_nodes) == 1
     assert llm_nodes[0].id == str(snapshot_step_id)
     assert llm_nodes[0].label == "Snapshot step"
-    # The live Flow read authorizes access; graph content stays pinned to the run.
+    # The gate authorizes access; graph content stays pinned to the run.
     flow_run_service.get_run_versioned_view.assert_awaited_once_with(
         flow_id=flow_id,
         run_id=run.id,
+        history=True,
     )
     flow_run_service.get_run.assert_not_awaited()
     flow_run_service.list_step_results.assert_not_awaited()
@@ -293,6 +294,7 @@ async def test_get_flow_graph_rejects_run_snapshot_without_executable_steps():
     flow_run_service.get_run_versioned_view.assert_awaited_once_with(
         flow_id=flow_id,
         run_id=run.id,
+        history=True,
     )
     flow_run_service.list_step_results.assert_not_awaited()
     container.flow_version_repo.assert_not_called()
@@ -861,25 +863,31 @@ async def test_flow_run_endpoints_delegate_to_run_service(monkeypatch):
         "updated_at",
     }
     assert step_response == []
-    # get_flow is called once per endpoint via enforce_flow_scope space check.
-    assert flow_service.get_flow.await_count == 4
+    # Every endpoint authorizes through the gate's narrow history row, once
+    # each, and never loads the live Flow aggregate.
+    gate = container.flow_repo.return_value.get_history_access_context
+    assert gate.await_count == 4
+    assert {call.kwargs["include_retired"] for call in gate.await_args_list} == {True}
+    assert flow_service.get_flow.await_count == 0
     run_service.list_run_statuses.assert_awaited_once_with(
-        flow_id=flow_id, statuses=None, mine=False, limit=21, offset=2
+        flow_id=flow_id, statuses=None, mine=False, limit=21, offset=2, history=True
     )
     run_service.get_run_detail_with_result_files_and_usage.assert_awaited_once_with(
-        run_id=run.id, flow_id=flow_id
+        run_id=run.id, flow_id=flow_id, history=True
     )
     run_service.get_run_status.assert_awaited_once_with(
         run_id=run.id,
         flow_id=flow_id,
+        history=True,
     )
     run_service.get_run.assert_awaited_once_with(
         run_id=run.id,
         flow_id=flow_id,
         access_kind="content",
+        history=True,
     )
     run_service.list_step_results_with_files.assert_awaited_once_with(
-        run_id=run.id, flow_id=flow_id
+        run_id=run.id, flow_id=flow_id, history=True
     )
     assert audit_service.log.await_count == 2
     assert [

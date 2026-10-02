@@ -677,6 +677,7 @@ That split is deliberate. A service key is a **runtime principal**, not a draft 
 - **Published runtime is broader.** Published flows can be executed by a user principal or a service key, but runtime visibility still depends on who owns the run and who is a trusted operator.
 - **Own-run isolation matters.** Service keys are always own-run-only. They do not become cross-run space operators, even if the key is scoped to a space.
 - **Trusted operator roles use user principals.** In this context, trusted in-space operators means **space owner** and **space admin**. Tenant admin remains the tenant-wide trusted operator.
+- **Deleted flow history is view and export only.** Deleting a flow retires it. Its run list, run status and detail, step outputs, run graph, evidence, provider calls, evidence export, review history, transcript reads and run file links stay readable with the caller's current authorization (scope, membership, run ownership, service key and current space classification), and the history follows the flow's run-history retention rule. Creating, cancelling, redispatching or retrying a run, review decisions, transcript corrections and regeneration, and runtime uploads answer 404 for a deleted flow.
 - **Single-flow runtime lookups should use the published projection.** Runtime consumers should prefer `GET /api/v1/flows/{id}/published/` over the user-principal current-definition endpoint.
 
 <Callout type="info">

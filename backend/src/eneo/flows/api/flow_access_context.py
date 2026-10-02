@@ -26,6 +26,7 @@ from eneo.users.user import UserInDB
 if TYPE_CHECKING:
     from eneo.actors.actors.space_actor import SpaceActor
     from eneo.flows.domain.flow import Flow
+    from eneo.flows.flow_evidence_policy import FlowHistoryAccessContext
     from eneo.spaces.space import Space
 
 
@@ -81,26 +82,35 @@ async def enforce_flow_scope(
     required_access: FlowApiAction = FlowApiAction.VIEW,
     allow_service_key_principals: bool = False,
     require_published_for_service_key: bool = False,
+    history: bool = False,
 ) -> Space:
-    """Refuse a caller who may not read the flow; return the space it was checked in."""
+    """Refuse a caller who may not read the flow; return the space it was checked in.
+
+    `history` also admits a retired (deleted) flow, for routes that only read
+    its run history. History reads never mutate; any mutation needs a live flow.
+    """
     scope_filter = get_scope_filter(request)
     _ensure_flow_scope_type_allowed(
         scope_filter,
         scope_mismatch_message="API key scope does not permit flow access.",
     )
+    flow = await container.flow_repo().get_history_access_context(
+        flow_id=flow_id,
+        tenant_id=container.user().tenant_id,
+        include_retired=history,
+    )
     # A service key on a route that does not allow one is refused in here,
     # before any space is loaded; every caller that passes is loaded below.
-    access_context = await resolve_flow_access_context(
-        request,
+    _ensure_flow_reachable(
         container,
-        flow_id=flow_id,
+        flow,
+        scope_filter=scope_filter,
         required_access=required_access,
         allow_service_key_principals=allow_service_key_principals,
         require_published_for_service_key=require_published_for_service_key,
-        scope_filter=scope_filter,
-        load_actor_context=False,
+        scope_mismatch_message="API key space scope does not match requested flow.",
     )
-    space, actor = await _space_and_actor(container, access_context.flow)
+    space, actor = await _space_and_actor(container, flow.space_id)
 
     if not actor.can_read_flows():
         raise UnauthorizedException(
@@ -108,7 +118,7 @@ async def enforce_flow_scope(
             code="insufficient_space_permission",
             context={"auth_layer": "space_membership"},
         )
-    if not actor.can_read_flow(access_context.flow):
+    if not actor.can_read_flow(flow):
         raise UnauthorizedException(
             "You do not have permission to access this flow.",
             code="insufficient_space_permission",
@@ -118,10 +128,36 @@ async def enforce_flow_scope(
 
 
 async def _space_and_actor(
-    container: Container, flow: Flow
+    container: Container, space_id: UUID
 ) -> tuple[Space, SpaceActor]:
-    space = await container.space_service().get_space(flow.space_id)
+    space = await container.space_service().get_space(space_id)
     return space, container.actor_manager().get_space_actor_from_space(space)
+
+
+def _ensure_flow_reachable(
+    container: Container,
+    flow: Flow | FlowHistoryAccessContext,
+    *,
+    scope_filter: ScopeFilter,
+    required_access: FlowApiAction,
+    allow_service_key_principals: bool,
+    require_published_for_service_key: bool,
+    scope_mismatch_message: str,
+) -> None:
+    if scope_filter.space_id is not None and scope_filter.space_id != flow.space_id:
+        _raise_scope_mismatch(scope_mismatch_message)
+    if (
+        require_published_for_service_key
+        and allow_service_key_principals
+        and FlowPrincipal.from_user(container.user()).is_service_key
+        and not flow.published
+    ):
+        raise NotFoundException("Flow not found.")
+    _ensure_required_flow_action(
+        container.user(),
+        required_access=required_access,
+        allow_service_key_principals=allow_service_key_principals,
+    )
 
 
 def _ensure_required_flow_action(
@@ -145,48 +181,29 @@ async def resolve_flow_access_context(
     required_access: FlowApiAction = FlowApiAction.VIEW,
     allow_service_key_principals: bool = False,
     require_published_for_service_key: bool = False,
-    scope_filter: ScopeFilter | None = None,
-    load_actor_context: bool = True,
     scope_mismatch_message: str = "API key space scope does not match requested flow.",
 ) -> FlowAccessContext:
-    resolved_scope_filter = scope_filter or get_scope_filter(request)
+    scope_filter = get_scope_filter(request)
     _ensure_flow_scope_type_allowed(
-        resolved_scope_filter,
+        scope_filter,
         scope_mismatch_message=scope_mismatch_message,
     )
 
     flow_service = container.flow_service()
     flow = await flow_service.get_flow(flow_id)
-    if (
-        resolved_scope_filter.space_id is not None
-        and resolved_scope_filter.space_id != flow.space_id
-    ):
-        _raise_scope_mismatch(scope_mismatch_message)
-
-    if (
-        require_published_for_service_key
-        and allow_service_key_principals
-        and FlowPrincipal.from_user(container.user()).is_service_key
-        and flow.published_version is None
-    ):
-        raise NotFoundException("Flow not found.")
-
-    _ensure_required_flow_action(
-        container.user(),
+    _ensure_flow_reachable(
+        container,
+        flow,
+        scope_filter=scope_filter,
         required_access=required_access,
         allow_service_key_principals=allow_service_key_principals,
+        require_published_for_service_key=require_published_for_service_key,
+        scope_mismatch_message=scope_mismatch_message,
     )
-
-    if not load_actor_context:
-        return FlowAccessContext(
-            flow=flow,
-            scope_filter=resolved_scope_filter,
-        )
-
-    space, actor = await _space_and_actor(container, flow)
+    space, actor = await _space_and_actor(container, flow.space_id)
     return FlowAccessContext(
         flow=flow,
-        scope_filter=resolved_scope_filter,
+        scope_filter=scope_filter,
         space=space,
         actor=actor,
     )

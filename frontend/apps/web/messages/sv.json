@@ -6217,6 +6217,8 @@
   "flow_run_retention_load_more_spaces": "Ladda fler ytor",
   "flow_run_retention_target_search": "Sök",
   "flow_run_retention_target_no_match": "Ingen träff.",
+  "flow_run_retention_target_retired": "Raderat",
+  "flow_run_retention_retired_flow_note": "Flödet är raderat och kan inte längre köras. Historiken går att läsa och följer flödets gallringsregel.",
   "flow_run_retention_target_partial": "Sökningen gäller de {count} som lästs in.",
   "flow_run_retention_load_more_flows": "Ladda fler flöden",
   "flow_run_retention_space_title": "Policy för ytan: {space}",

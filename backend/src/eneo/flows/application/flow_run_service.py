@@ -861,11 +861,13 @@ class FlowRunService:
         run_id: UUID,
         flow_id: UUID | None = None,
         access_kind: FlowRunAccessKind = "status",
+        history: bool = False,
     ) -> FlowRun:
         return await self.access_policy.load_run(
             run_id=run_id,
             flow_id=flow_id,
             access_kind=access_kind,
+            history=history,
         )
 
     async def get_run_status(
@@ -873,10 +875,12 @@ class FlowRunService:
         *,
         run_id: UUID,
         flow_id: UUID | None = None,
+        history: bool = False,
     ) -> FlowRunStatusSnapshot:
         return await self.access_policy.load_run_status(
             run_id=run_id,
             flow_id=flow_id,
+            history=history,
         )
 
     async def list_run_statuses(
@@ -887,10 +891,11 @@ class FlowRunService:
         mine: bool = False,
         limit: int | None = None,
         offset: int | None = None,
+        history: bool = False,
     ) -> list[FlowRunStatusSnapshot]:
         principal = self._principal()
         own_runs_only = mine or not await self._lists_every_run(
-            principal, flow_id=flow_id
+            principal, flow_id=flow_id, history=history
         )
         # A principal holds exactly one of the two ids, so filtering on both
         # keeps the runs it started.
@@ -907,7 +912,7 @@ class FlowRunService:
         )
 
     async def _lists_every_run(
-        self, principal: FlowPrincipal, *, flow_id: UUID | None
+        self, principal: FlowPrincipal, *, flow_id: UUID | None, history: bool
     ) -> bool:
         """Tenant admins list every run in the tenant, and same-space admins and
         owners every run of a flow in their space. Everyone else, service keys
@@ -918,7 +923,9 @@ class FlowRunService:
             return True
         return (
             flow_id is not None
-            and await self.access_policy.can_list_all_runs_in_flow(flow_id=flow_id)
+            and await self.access_policy.can_list_all_runs_in_flow(
+                flow_id=flow_id, history=history
+            )
         )
 
     async def list_step_results(
@@ -938,11 +945,13 @@ class FlowRunService:
         *,
         flow_id: UUID,
         run_id: UUID,
+        history: bool = False,
     ) -> FlowRunVersionedView:
         run = await self.get_run(
             run_id=run_id,
             flow_id=flow_id,
             access_kind="content",
+            history=history,
         )
         published_definition = await load_published_definition(
             flow_version_repo=self.flow_version_repo,
@@ -967,11 +976,13 @@ class FlowRunService:
         *,
         flow_id: UUID,
         run_id: UUID,
+        history: bool = False,
     ) -> FlowRunWithResultFilesAndUsage:
         run = await self.get_run(
             run_id=run_id,
             flow_id=flow_id,
             access_kind="content",
+            history=history,
         )
         return await self.enrich_run_with_result_files_and_usage(run=run)
 
@@ -980,10 +991,12 @@ class FlowRunService:
         *,
         flow_id: UUID,
         run_id: UUID,
+        history: bool = False,
     ) -> FlowRunDetailView:
         run_view = await self.get_run_with_result_files_and_usage(
             flow_id=flow_id,
             run_id=run_id,
+            history=history,
         )
         webhook_deliveries = (
             await self.webhook_delivery_repo.list_run_delivery_statuses(
@@ -1087,8 +1100,11 @@ class FlowRunService:
         *,
         run_id: UUID,
         flow_id: UUID | None = None,
+        history: bool = False,
     ) -> tuple[FlowRunStepResultWithFiles, ...]:
-        run = await self.get_run(run_id=run_id, flow_id=flow_id, access_kind="content")
+        run = await self.get_run(
+            run_id=run_id, flow_id=flow_id, access_kind="content", history=history
+        )
         step_results = await self.flow_run_repo.list_step_results(
             run_id=run.id,
             tenant_id=self.user.tenant_id,

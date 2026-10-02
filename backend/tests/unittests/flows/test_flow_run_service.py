@@ -63,7 +63,7 @@ from eneo.flows.enums import (
 from eneo.flows.flow_api_error_code import FlowApiErrorCode
 from eneo.flows.flow_api_exceptions import FlowBadRequestException
 from eneo.flows.flow_evidence_policy import (
-    FlowEvidenceAccessContext,
+    FlowHistoryAccessContext,
     flow_metadata_marks_sensitive_or_unreadable,
 )
 from eneo.flows.flow_input_limits import FlowInputLimits
@@ -169,9 +169,11 @@ def _seed_flow_repo(flow_repo, flow) -> None:
     """
     flow_repo.get.return_value = flow
     flow_repo.lock_publication_pointer.return_value = flow.published_version
-    flow_repo.get_evidence_access_context.return_value = FlowEvidenceAccessContext(
+    flow_repo.get_history_access_context.return_value = FlowHistoryAccessContext(
         flow_id=flow.id,
         space_id=flow.space_id,
+        published=True,
+        retired=False,
         sensitive=flow_metadata_marks_sensitive_or_unreadable(flow.metadata_json),
         classification_level=0,
     )
@@ -4655,6 +4657,7 @@ async def test_export_evidence_json_attributes_service_key_actor_to_key_id(user)
     access_policy.ensure_can_access_run.assert_awaited_once_with(
         run,
         access_kind="evidence_export_redacted",
+        history=False,
     )
 
 

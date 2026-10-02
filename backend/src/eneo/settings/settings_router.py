@@ -937,9 +937,11 @@ async def list_flow_run_retention_space_targets(
     operation_id="list_flow_run_retention_flow_targets",
     summary="List Flows available for retention administration in a Space",
     description=(
-        "List active Flows in one Organization-scoped Space, including Flows the "
+        "List the Flows in one Organization-scoped Space, including Flows the "
         "Organization administrator cannot discover through membership-scoped Flow "
-        "authoring APIs. The bounded response contains identifiers and names only."
+        "authoring APIs, and deleted Flows that still have run history (marked "
+        "retired). The bounded response contains identifiers, names and the retired "
+        "flag only."
     ),
     responses={
         403: _flow_settings_admin_forbidden_response(),
@@ -1037,6 +1039,7 @@ async def replace_space_flow_run_retention_policy(
         "the effective policy. A complete Flow policy replaces its inherited policy, "
         "which allows one Flow to keep 90 days while its Space keeps 60 and the "
         "Organization default remains 30. Reading the policy never deletes run data."
+        " A deleted Flow is accepted."
     ),
     responses={
         403: _flow_settings_admin_forbidden_response(),
@@ -1065,6 +1068,7 @@ async def get_flow_run_retention_policy(
         "retention remains editable after a Flow definition is published because it "
         "does not mutate the published definition. The initial modes require a later "
         "explicit administrator action; saving this policy never schedules deletion."
+        " A deleted Flow is accepted."
     ),
     responses={
         403: _flow_settings_admin_forbidden_response(),
@@ -1162,6 +1166,7 @@ async def purge_space_flow_run_history(
         "and expired unbound live transcripts in this Flow, with a transaction audit. "
         "The limit applies separately to runs and transcripts, with separate counts. "
         "Review-required runs and unresolved deliveries remain stored."
+        " A deleted Flow is accepted."
     ),
     responses={
         403: _flow_settings_admin_forbidden_response(),
@@ -1268,6 +1273,7 @@ async def list_space_flow_run_retention_review_queue(
         "reached its age threshold, including a policy inherited from its Space or "
         "Organization. The bounded response deliberately omits inputs and outputs. "
         "Reading it is side-effect free and cannot approve or delete run history."
+        " A deleted Flow is accepted."
     ),
     responses={
         400: _flow_retention_invalid_cursor_response(),

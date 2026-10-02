@@ -62,6 +62,8 @@ Open **Admin → Flow settings → Retention and preservation**.
 
 The selectors use an Organization-wide administrative catalog. They include non-personal Spaces and active Flows even when the administrator is not a member of the target Space; ordinary Space and Flow authoring lists remain membership-scoped.
 
+A deleted Flow that still has run history stays in the Flow selector with a **Deleted** badge. Deleting a Flow retires it: it can no longer run, but its runs, results, reviews and evidence stay readable with each reader's current permissions and follow the Flow's retention rule. Its Flow policy, review queue and purge keep working. A deleted Flow without runs is not listed.
+
 1. Set or leave unset the Organization default.
 2. Select a Space only when it needs an exception.
 3. Select an individual Flow only when it needs a more specific exception.
@@ -109,7 +111,7 @@ The settings UI does not weaken the ordinary membership-scoped Space and Flow AP
 | Spaces | `GET /settings/flow-run-retention-policy/targets/spaces`                  |
 | Flows  | `GET /settings/flow-run-retention-policy/targets/spaces/{space_id}/flows` |
 
-Both responses are bounded to 200 rows per page and return identifiers and current names, not Flow definitions or run content.
+Both responses are bounded to 200 rows per page and return identifiers and current names, not Flow definitions or run content. Each Flow row also carries `retired`, which is `true` for a deleted Flow listed because it still has run history.
 The admin UI loads the first page and offers explicit **Load more** actions for
 large Organizations instead of downloading every Space and Flow into the
 browser when the settings page opens. Personal Spaces are outside this catalog,

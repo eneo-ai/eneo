@@ -50,7 +50,7 @@ from eneo.flows.domain.rag_evidence import (
 from eneo.flows.domain.rag_evidence_policy import FlowRagEvidencePolicy
 from eneo.flows.flow_api_error_code import FlowApiErrorCode
 from eneo.flows.flow_evidence_policy import (
-    FlowEvidenceAccessContext,
+    FlowHistoryAccessContext,
     flow_metadata_marks_sensitive_or_unreadable,
 )
 from eneo.flows.flow_run_provenance import (
@@ -105,9 +105,11 @@ def _seed_flow_repo(flow_repo, flow) -> None:
     double that returned a mock there would withhold every passage.
     """
     flow_repo.get.return_value = flow
-    flow_repo.get_evidence_access_context.return_value = FlowEvidenceAccessContext(
+    flow_repo.get_history_access_context.return_value = FlowHistoryAccessContext(
         flow_id=flow.id,
         space_id=flow.space_id,
+        published=True,
+        retired=False,
         sensitive=flow_metadata_marks_sensitive_or_unreadable(flow.metadata_json),
         classification_level=0,
     )
@@ -422,6 +424,7 @@ async def test_list_provider_calls_authorizes_run_and_forwards_page_cursor(user)
     access_policy.ensure_can_access_run.assert_awaited_once_with(
         run,
         access_kind="evidence_view",
+        history=False,
     )
     provider_call_repo.list_evidence_page.assert_awaited_once_with(
         run_id=run.id,
@@ -856,6 +859,7 @@ async def test_preloaded_run_is_revalidated_before_evidence_is_returned(
     ensure_can_access_run.assert_awaited_once_with(
         run,
         access_kind="evidence_view",
+        history=False,
     )
     flow_run_repo.get.assert_not_awaited()
 

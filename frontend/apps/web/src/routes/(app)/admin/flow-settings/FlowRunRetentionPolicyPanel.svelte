@@ -92,6 +92,10 @@
     return sortedSpaces.find((space) => space.id === selectedSpaceId)?.name ?? "";
   }
 
+  const selectedFlowRetired = $derived(
+    sortedFlows.some((flow) => flow.id === selectedFlowId && flow.retired)
+  );
+
   function selectedFlowName(): string {
     return sortedFlows.find((flow) => flow.id === selectedFlowId)?.name ?? "";
   }
@@ -376,9 +380,13 @@
           onLoadMore={loadMoreFlows}
         />
         <Field.Description>
-          {selectedSpaceId && sortedFlows.length === 0 && !scopeLoading
-            ? m.flow_run_retention_space_has_no_flows()
-            : m.flow_run_retention_select_flow_description()}
+          {#if selectedFlowRetired}
+            {m.flow_run_retention_retired_flow_note()}
+          {:else if selectedSpaceId && sortedFlows.length === 0 && !scopeLoading}
+            {m.flow_run_retention_space_has_no_flows()}
+          {:else}
+            {m.flow_run_retention_select_flow_description()}
+          {/if}
         </Field.Description>
       </Field.Field>
     </div>

@@ -13,6 +13,7 @@ from eneo.authentication.endpoint_access import (
 )
 from eneo.flows.api import flow_access_context
 from eneo.flows.api.flow_api_common import (
+    RETIRED_FLOW_MUTATION_NOT_FOUND_CLAUSE,
     commit_flow_runtime_write_before_response,
     error_response,
 )
@@ -78,7 +79,7 @@ shared input files remain available while the child references them.
             code=FlowApiErrorCode.RUN_ACCESS_DENIED,
         ),
         404: error_response(
-            description="The source flow or run is unavailable in tenant scope.",
+            description=f"The source flow or run is unavailable in tenant scope. {RETIRED_FLOW_MUTATION_NOT_FOUND_CLAUSE}",
             message="The source flow or run is unavailable in tenant scope.",
             eneo_error_code=ErrorCodes.NOT_FOUND,
             code="not_found",

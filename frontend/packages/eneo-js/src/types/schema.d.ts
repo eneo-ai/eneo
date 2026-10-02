@@ -4626,7 +4626,7 @@ export interface paths {
     };
     /**
      * Get transcript source detail for one attempt
-     * @description Returns up to 200 segments with absolute indexes and the complete source hash. Follow next_segment_index until null. Send source_hash unchanged as segments_hash when saving corrections or regenerating. Speaker review detail is included only at start_segment_index=0. Component omissions describe production evidence, not the current availability of word timings. Content authorization and a committed access audit are required.
+     * @description Returns up to 200 segments with absolute indexes and the complete source hash. Follow next_segment_index until null. Send source_hash unchanged as segments_hash when saving corrections or regenerating. Speaker review detail is included only at start_segment_index=0. Component omissions describe production evidence, not the current availability of word timings. Content authorization and a committed access audit are required. Also available for a deleted (retired) flow, read-only; its run history follows the flow's retention rule.
      */
     get: operations["get_flow_run_transcript_source"];
     put?: never;
@@ -4731,6 +4731,9 @@ export interface paths {
      *
      *     Service-key principals may use this endpoint for published-flow runtime topology and for
      *     their own run snapshots. Authoring still requires a user principal.
+     *
+     *     With `run_id`, also available for a deleted (retired) flow, read-only; its run history
+     *     follows the flow's retention rule. Without `run_id`, a deleted flow is not found.
      */
     get: operations["get_flow_graph"];
     put?: never;
@@ -4893,6 +4896,8 @@ export interface paths {
      *         Current runtime visibility is policy-based: callers always list their own runs, tenant admins
      *         can list runs across the tenant, same-space admins and owners can list run metadata for flows
      *         in their space, and service-key principals can list only their own runs.
+     *
+     *     Also available for a deleted (retired) flow, read-only; its run history follows the flow's retention rule.
      */
     get: operations["list_flow_runs"];
     put?: never;
@@ -4979,6 +4984,8 @@ export interface paths {
      *         Current runtime visibility is policy-based: callers always see their own runs, tenant admins
      *         can inspect runs across the tenant, same-space admins and owners can inspect run metadata for
      *         flows in their space, and service-key principals can inspect only their own runs.
+     *
+     *     Also available for a deleted (retired) flow, read-only; its run history follows the flow's retention rule.
      */
     get: operations["get_flow_run"];
     put?: never;
@@ -5010,6 +5017,8 @@ export interface paths {
      *     The file_id must reference an artifact that was actually produced by a step in the specified run.
      *
      *     Service-key principals are supported for their own runtime artifacts in v1.
+     *
+     *     Also available for a deleted (retired) flow, read-only; its run history follows the flow's retention rule.
      */
     post: operations["generate_flow_run_artifact_signed_url"];
     delete?: never;
@@ -5077,6 +5086,8 @@ export interface paths {
      *     - user-principal run owners may inspect own-run evidence when `FLOWS_TRACE` permits it
      *     - service keys may inspect only their own-run evidence when explicit machine evidence capability
      *       allows it
+     *
+     *     Also available for a deleted (retired) flow, read-only; its run history follows the flow's retention rule.
      */
     get: operations["get_flow_run_evidence"];
     put?: never;
@@ -5103,6 +5114,8 @@ export interface paths {
      *     - raw/full export is a stricter surface, especially for classification 3 spaces
      *     - service keys may export only their own-run evidence and only when explicit machine evidence
      *       capability allows it
+     *
+     *     Also available for a deleted (retired) flow, read-only; its run history follows the flow's retention rule.
      */
     get: operations["export_flow_run_evidence"];
     put?: never;
@@ -5134,6 +5147,8 @@ export interface paths {
      *
      *     The file_id must be listed in a step result's `runtime_input_file_ids` for the specified run.
      *     Audio downloads honour HTTP Range requests, so the URL can be used directly as a media source.
+     *
+     *     Also available for a deleted (retired) flow, read-only; its run history follows the flow's retention rule.
      */
     post: operations["generate_flow_run_input_file_signed_url"];
     delete?: never;
@@ -5158,6 +5173,8 @@ export interface paths {
      *     state afterward. `outcome_unknown` means the runtime cannot prove the remote outcome;
      *     a local evidence-persistence failure is reported separately in the run error details.
      *     Use `after_event_id` for cursor pagination and `attempt_id` to narrow one attempt.
+     *
+     *     Also available for a deleted (retired) flow, read-only; its run history follows the flow's retention rule.
      */
     get: operations["list_flow_run_provider_calls"];
     put?: never;
@@ -5262,6 +5279,8 @@ export interface paths {
      *     checkpoints for runs they own, while human callers follow the existing flow view policy.
      *
      *     Service-key human-review clients should use a service-owned `sk_` key with `resource_permissions.flows = write`; inspect `steps_requiring_review`, then expect review checkpoints to pause at `awaiting_review` rather than auto-approve, and use the same key to mutate only checkpoints for runs it created.
+     *
+     *     Also available for a deleted (retired) flow, read-only; its run history follows the flow's retention rule.
      */
     get: operations["get_active_flow_run_review_checkpoint"];
     put?: never;
@@ -5402,7 +5421,7 @@ export interface paths {
     };
     /**
      * List review checkpoint edits
-     * @description Page through the changes a reviewer made at this checkpoint in the order they happened (ascending revision, continuing after `after_revision`): the edited output before and after each change, or the correction set that was folded in. The first page's baseline is revision 1, the step's original output. Reading history is an audited evidence view; the same authorization as the run's evidence applies.
+     * @description Page through the changes a reviewer made at this checkpoint in the order they happened (ascending revision, continuing after `after_revision`): the edited output before and after each change, or the correction set that was folded in. The first page's baseline is revision 1, the step's original output. Reading history is an audited evidence view; the same authorization as the run's evidence applies. Also available for a deleted (retired) flow, read-only; its run history follows the flow's retention rule.
      */
     get: operations["list_flow_run_review_checkpoint_edits"];
     put?: never;
@@ -5503,6 +5522,8 @@ export interface paths {
      *
      *         Status polling is authorized but not audit-logged as a distinct business event. Retrieve the
      *         content-bearing run detail only when a user or client needs the run input or result.
+     *
+     *     Also available for a deleted (retired) flow, read-only; its run history follows the flow's retention rule.
      */
     get: operations["get_flow_run_status"];
     put?: never;
@@ -5531,6 +5552,8 @@ export interface paths {
      *     inspect runs across the tenant, trusted in-space operators (space owner and space admin) can
      *     inspect content for runs in their space, and service-key principals can inspect only their own
      *     runs.
+     *
+     *     Also available for a deleted (retired) flow, read-only; its run history follows the flow's retention rule.
      */
     get: operations["list_flow_run_steps"];
     put?: never;
@@ -5648,6 +5671,8 @@ export interface paths {
      *
      *     Content access is audit-logged before the response. If the required audit cannot
      *     be committed, the endpoint returns 503 and exposes no transcript words.
+     *
+     *     Also available for a deleted (retired) flow, read-only; its run history follows the flow's retention rule.
      */
     get: operations["get_flow_run_transcript_words"];
     put?: never;
@@ -5686,6 +5711,8 @@ export interface paths {
      *
      *     Content access is audit-logged before the response. If the required audit cannot
      *     be committed, the endpoint returns 503 and exposes no transcript corrections.
+     *
+     *     Also available for a deleted (retired) flow, read-only; its run history follows the flow's retention rule.
      */
     get: operations["list_flow_run_transcript_corrections"];
     put?: never;
@@ -5705,7 +5732,7 @@ export interface paths {
     };
     /**
      * List transcript correction revisions
-     * @description Page through the committed correction sets of one transcription step in the order they were saved (ascending revision, continuing after `after_revision`), each with the revision it replaced so a reviewer can see what changed between saves. Reverts appear as revisions of their own. Reading history is an audited evidence view; the same authorization as the run's evidence applies.
+     * @description Page through the committed correction sets of one transcription step in the order they were saved (ascending revision, continuing after `after_revision`), each with the revision it replaced so a reviewer can see what changed between saves. Reverts appear as revisions of their own. Reading history is an audited evidence view; the same authorization as the run's evidence applies. Also available for a deleted (retired) flow, read-only; its run history follows the flow's retention rule.
      */
     get: operations["list_flow_run_transcript_correction_revisions"];
     put?: never;
@@ -7824,12 +7851,12 @@ export interface paths {
     };
     /**
      * Get a Flow run-history retention policy
-     * @description Return the Flow override, the inherited Space or Organization policy, and the effective policy. A complete Flow policy replaces its inherited policy, which allows one Flow to keep 90 days while its Space keeps 60 and the Organization default remains 30. Reading the policy never deletes run data.
+     * @description Return the Flow override, the inherited Space or Organization policy, and the effective policy. A complete Flow policy replaces its inherited policy, which allows one Flow to keep 90 days while its Space keeps 60 and the Organization default remains 30. Reading the policy never deletes run data. A deleted Flow is accepted.
      */
     get: operations["get_flow_run_retention_policy"];
     /**
      * Replace a Flow run-history retention policy
-     * @description Replace the complete Flow override or clear it to inherit. Operational retention remains editable after a Flow definition is published because it does not mutate the published definition. The initial modes require a later explicit administrator action; saving this policy never schedules deletion.
+     * @description Replace the complete Flow override or clear it to inherit. Operational retention remains editable after a Flow definition is published because it does not mutate the published definition. The initial modes require a later explicit administrator action; saving this policy never schedules deletion. A deleted Flow is accepted.
      */
     put: operations["replace_flow_run_retention_policy"];
     post?: never;
@@ -7850,7 +7877,7 @@ export interface paths {
     put?: never;
     /**
      * Preview or purge due Flow run history
-     * @description Apply the administrator purge to one Flow in the authenticated tenant. Dry-run is the default and reports candidates without deleting anything. Real batches delete due terminal runs under the effective preserve policy and expired unbound live transcripts in this Flow, with a transaction audit. The limit applies separately to runs and transcripts, with separate counts. Review-required runs and unresolved deliveries remain stored.
+     * @description Apply the administrator purge to one Flow in the authenticated tenant. Dry-run is the default and reports candidates without deleting anything. Real batches delete due terminal runs under the effective preserve policy and expired unbound live transcripts in this Flow, with a transaction audit. The limit applies separately to runs and transcripts, with separate counts. Review-required runs and unresolved deliveries remain stored. A deleted Flow is accepted.
      */
     post: operations["purge_flow_run_history"];
     delete?: never;
@@ -7868,7 +7895,7 @@ export interface paths {
     };
     /**
      * List runs awaiting retention review for one Flow
-     * @description List terminal runs for one Flow whose effective review_required policy has reached its age threshold, including a policy inherited from its Space or Organization. The bounded response deliberately omits inputs and outputs. Reading it is side-effect free and cannot approve or delete run history.
+     * @description List terminal runs for one Flow whose effective review_required policy has reached its age threshold, including a policy inherited from its Space or Organization. The bounded response deliberately omits inputs and outputs. Reading it is side-effect free and cannot approve or delete run history. A deleted Flow is accepted.
      */
     get: operations["list_flow_run_retention_review_queue"];
     put?: never;
@@ -8012,7 +8039,7 @@ export interface paths {
     };
     /**
      * List Flows available for retention administration in a Space
-     * @description List active Flows in one Organization-scoped Space, including Flows the Organization administrator cannot discover through membership-scoped Flow authoring APIs. The bounded response contains identifiers and names only.
+     * @description List the Flows in one Organization-scoped Space, including Flows the Organization administrator cannot discover through membership-scoped Flow authoring APIs, and deleted Flows that still have run history (marked retired). The bounded response contains identifiers, names and the retired flag only.
      */
     get: operations["list_flow_run_retention_flow_targets"];
     put?: never;
@@ -22885,6 +22912,11 @@ export interface components {
        */
       name: string;
       /**
+       * Retired
+       * @description True when the Flow is deleted. A deleted Flow is listed only while it still has run history, which its retention rule governs; it can no longer run.
+       */
+      retired: boolean;
+      /**
        * Space Id
        * Format: uuid
        * @description Space that owns the Flow.
@@ -22900,6 +22932,7 @@ export interface components {
      *         {
      *           "id": "00000000-0000-0000-0000-000000000301",
      *           "name": "Supplier assessment",
+     *           "retired": false,
      *           "space_id": "00000000-0000-0000-0000-000000000201"
      *         }
      *       ]
@@ -56610,7 +56643,7 @@ export interface operations {
           "application/json": components["schemas"]["GeneralError"];
         };
       };
-      /** @description Flow not found in tenant scope. */
+      /** @description Flow not found in tenant scope. A deleted flow cannot be run or changed, so it is not found. */
       404: {
         headers: {
           [name: string]: unknown;
@@ -56800,7 +56833,7 @@ export interface operations {
           "application/json": components["schemas"]["GeneralError"];
         };
       };
-      /** @description Flow not found in tenant scope. */
+      /** @description Flow not found in tenant scope. A deleted flow cannot be run or changed, so it is not found. */
       404: {
         headers: {
           [name: string]: unknown;
@@ -57105,7 +57138,7 @@ export interface operations {
           "application/json": components["schemas"]["GeneralError"];
         };
       };
-      /** @description Run not found for this flow and tenant. */
+      /** @description Run not found for this flow and tenant. A deleted flow cannot be run or changed, so it is not found. */
       404: {
         headers: {
           [name: string]: unknown;
@@ -57611,7 +57644,7 @@ export interface operations {
           "application/json": components["schemas"]["GeneralError"];
         };
       };
-      /** @description Run not found for this flow and tenant. */
+      /** @description Run not found for this flow and tenant. A deleted flow cannot be run or changed, so it is not found. */
       404: {
         headers: {
           [name: string]: unknown;
@@ -57753,7 +57786,7 @@ export interface operations {
           "application/json": components["schemas"]["GeneralError"];
         };
       };
-      /** @description The source flow or run is unavailable in tenant scope. */
+      /** @description The source flow or run is unavailable in tenant scope. A deleted flow cannot be run or changed, so it is not found. */
       404: {
         headers: {
           [name: string]: unknown;
@@ -58024,7 +58057,7 @@ export interface operations {
           "application/json": components["schemas"]["GeneralError"];
         };
       };
-      /** @description Run or checkpoint not found for this flow and tenant. */
+      /** @description Run or checkpoint not found for this flow and tenant. A deleted flow cannot be run or changed, so it is not found. */
       404: {
         headers: {
           [name: string]: unknown;
@@ -58184,7 +58217,7 @@ export interface operations {
           "application/json": components["schemas"]["GeneralError"];
         };
       };
-      /** @description Run or checkpoint not found for this flow and tenant. */
+      /** @description Run or checkpoint not found for this flow and tenant. A deleted flow cannot be run or changed, so it is not found. */
       404: {
         headers: {
           [name: string]: unknown;
@@ -58317,7 +58350,7 @@ export interface operations {
           "application/json": components["schemas"]["GeneralError"];
         };
       };
-      /** @description Run or checkpoint not found for this flow and tenant. */
+      /** @description Run or checkpoint not found for this flow and tenant. A deleted flow cannot be run or changed, so it is not found. */
       404: {
         headers: {
           [name: string]: unknown;
@@ -58559,7 +58592,7 @@ export interface operations {
           "application/json": components["schemas"]["GeneralError"];
         };
       };
-      /** @description Run or checkpoint not found for this flow and tenant. */
+      /** @description Run or checkpoint not found for this flow and tenant. A deleted flow cannot be run or changed, so it is not found. */
       404: {
         headers: {
           [name: string]: unknown;
@@ -58719,7 +58752,7 @@ export interface operations {
           "application/json": components["schemas"]["GeneralError"];
         };
       };
-      /** @description Run or checkpoint not found for this flow and tenant. */
+      /** @description Run or checkpoint not found for this flow and tenant. A deleted flow cannot be run or changed, so it is not found. */
       404: {
         headers: {
           [name: string]: unknown;
@@ -58960,7 +58993,7 @@ export interface operations {
           "application/json": components["schemas"]["GeneralError"];
         };
       };
-      /** @description Run or step result not found for this flow and tenant. */
+      /** @description Run or step result not found for this flow and tenant. A deleted flow cannot be run or changed, so it is not found. */
       404: {
         headers: {
           [name: string]: unknown;
@@ -59104,7 +59137,7 @@ export interface operations {
           "application/json": components["schemas"]["GeneralError"];
         };
       };
-      /** @description The source flow, run or transcript is unavailable in tenant scope. */
+      /** @description The source flow, run or transcript is unavailable in tenant scope. A deleted flow cannot be run or changed, so it is not found. */
       404: {
         headers: {
           [name: string]: unknown;
@@ -59506,7 +59539,7 @@ export interface operations {
           "application/json": components["schemas"]["GeneralError"];
         };
       };
-      /** @description Flow not found, or runtime file is not owned by the caller or was not uploaded for this Flow. */
+      /** @description Flow not found, or runtime file is not owned by the caller or was not uploaded for this Flow. A deleted flow cannot be run or changed, so it is not found. */
       404: {
         headers: {
           [name: string]: unknown;
@@ -59846,7 +59879,7 @@ export interface operations {
           "application/json": components["schemas"]["GeneralError"];
         };
       };
-      /** @description Flow not found in tenant scope. */
+      /** @description Flow not found in tenant scope. A deleted flow cannot be run or changed, so it is not found. */
       404: {
         headers: {
           [name: string]: unknown;

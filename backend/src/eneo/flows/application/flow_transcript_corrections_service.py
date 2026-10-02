@@ -66,11 +66,13 @@ class FlowTranscriptCorrectionsService:
         *,
         flow_id: UUID,
         run_id: UUID,
+        history: bool = False,
     ) -> list[FlowTranscriptCorrectionsView]:
         run = await self.access_policy.load_run(
             run_id=run_id,
             flow_id=flow_id,
             access_kind="content",
+            history=history,
         )
         correction_sets = await self.transcript_corrections_repo.list_for_run(
             run_id=run.id,
@@ -93,6 +95,7 @@ class FlowTranscriptCorrectionsService:
                     run_id=run.id,
                     step_id=step_result.step_id,
                     attempt_no=step_result.current_attempt_no,
+                    history=history,
                 )
                 if step_result.current_attempt_no is not None
                 else None

@@ -14,7 +14,10 @@ from eneo.authentication.endpoint_access import (
     endpoint_access,
 )
 from eneo.flows.api import flow_access_context
-from eneo.flows.api.flow_api_common import error_response
+from eneo.flows.api.flow_api_common import (
+    RETIRED_FLOW_HISTORY_READ_CLAUSE,
+    error_response,
+)
 from eneo.flows.application.flow_run_evidence_service import (
     RUN_VIEW_MAX_LOADED_SECTION_LOGICAL_BYTES,
 )
@@ -103,6 +106,7 @@ TranscriptSourcePage = Annotated[
         "is included only at start_segment_index=0. Component omissions describe "
         "production evidence, not the current availability of word timings. "
         "Content authorization and a committed access audit are required."
+        f" {RETIRED_FLOW_HISTORY_READ_CLAUSE}"
     ),
     responses={
         200: {
@@ -170,12 +174,17 @@ async def get_flow_run_transcript_source(
                 flow_id=flow_id,
                 required_access=FlowApiAction.VIEW,
                 allow_service_key_principals=True,
+                history=True,
             )
             run = await container.flow_run_service().get_run(
-                run_id=run_id, flow_id=flow_id, access_kind="content"
+                run_id=run_id, flow_id=flow_id, access_kind="content", history=True
             )
             state = await container.flow_transcript_source_service().get_for_attempt(
-                flow_id=flow_id, run_id=run_id, step_id=step_id, attempt_no=attempt_no
+                flow_id=flow_id,
+                run_id=run_id,
+                step_id=step_id,
+                attempt_no=attempt_no,
+                history=True,
             )
             identity = TranscriptSourcePageIdentity(
                 run_id=run.id, step_id=step_id, attempt_no=attempt_no

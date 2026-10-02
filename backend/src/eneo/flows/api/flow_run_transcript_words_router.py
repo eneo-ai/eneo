@@ -14,6 +14,7 @@ from eneo.authentication.endpoint_access import (
 from eneo.flows.api import flow_access_context
 from eneo.flows.api.flow_api_common import (
     FLOW_RUN_FORBIDDEN_DESCRIPTION,
+    RETIRED_FLOW_HISTORY_READ_CLAUSE,
     error_response,
 )
 from eneo.flows.api.flow_models import (
@@ -97,7 +98,7 @@ def _present_transcript_words(
     status_code=status.HTTP_200_OK,
     operation_id="get_flow_run_transcript_words",
     summary="Get flow run transcript word timings",
-    description=_FLOW_RUN_TRANSCRIPT_WORDS_DESCRIPTION,
+    description=f"{_FLOW_RUN_TRANSCRIPT_WORDS_DESCRIPTION.rstrip()}\n\n{RETIRED_FLOW_HISTORY_READ_CLAUSE}",
     responses={
         403: error_response(
             description=FLOW_RUN_FORBIDDEN_DESCRIPTION,
@@ -151,14 +152,16 @@ async def get_flow_run_transcript_words(
                 flow_id=id,
                 required_access=FlowApiAction.VIEW,
                 allow_service_key_principals=True,
+                history=True,
             )
             run = await container.flow_run_service().get_run(
-                run_id=run_id, flow_id=id, access_kind="content"
+                run_id=run_id, flow_id=id, access_kind="content", history=True
             )
             view = await container.flow_transcript_words_service().get_for_step(
                 flow_id=id,
                 run_id=run_id,
                 step_id=step_id,
+                history=True,
             )
             response = _present_transcript_words(view)
             user = container.user()

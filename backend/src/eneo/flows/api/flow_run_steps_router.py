@@ -19,6 +19,7 @@ from eneo.files.file_models import FileMetadata, SignedURLRequest, SignedURLResp
 from eneo.files.signed_urls import build_signed_download_response
 from eneo.flows.api import flow_access_context
 from eneo.flows.api.flow_api_common import (
+    RETIRED_FLOW_HISTORY_READ_CLAUSE,
     error_response,
 )
 from eneo.flows.api.flow_assembler import FlowAssembler
@@ -140,7 +141,7 @@ def _raise_run_file_access_audit_unavailable(
     status_code=status.HTTP_200_OK,
     operation_id="list_flow_run_steps",
     summary="List flow run step outputs",
-    description=_FLOW_RUN_STEPS_DESCRIPTION,
+    description=f"{_FLOW_RUN_STEPS_DESCRIPTION.rstrip()}\n\n{RETIRED_FLOW_HISTORY_READ_CLAUSE}",
     responses={
         403: error_response(
             description=_FLOW_RUNTIME_FORBIDDEN_DESCRIPTION,
@@ -198,22 +199,26 @@ async def list_flow_run_steps(
                 flow_id=id,
                 required_access=FlowApiAction.VIEW,
                 allow_service_key_principals=True,
+                history=True,
             )
             run_service = container.flow_run_service()
             run = await run_service.get_run(
                 run_id=run_id,
                 flow_id=id,
                 access_kind="content",
+                history=True,
             )
             step_result_views = await run_service.list_step_results_with_files(
                 run_id=run_id,
                 flow_id=id,
+                history=True,
             )
             assembler = FlowAssembler()
             transcript_sources = await container.flow_transcript_source_service().get_references_for_step_results(
                 flow_id=id,
                 run_id=run_id,
                 step_results=[view.step_result for view in step_result_views],
+                history=True,
             )
             single_recording_steps = read_single_recording_steps(run.input_payload_json)
             response = [
@@ -268,6 +273,9 @@ through this runtime endpoint.
 
 Service-key principals may use this endpoint for published-flow runtime topology and for
 their own run snapshots. Authoring still requires a user principal.
+
+With `run_id`, also available for a deleted (retired) flow, read-only; its run history
+follows the flow's retention rule. Without `run_id`, a deleted flow is not found.
     """,
     responses={
         400: error_response(
@@ -326,11 +334,13 @@ async def get_flow_graph(
             flow_id=id,
             required_access=FlowApiAction.VIEW,
             allow_service_key_principals=True,
+            history=True,
         )
         flow_run_service = container.flow_run_service()
         versioned_view = await flow_run_service.get_run_versioned_view(
             flow_id=id,
             run_id=run_id,
+            history=True,
         )
         return build_graph_response(
             versioned_view.published_definition.steps,
@@ -368,7 +378,7 @@ async def get_flow_graph(
     status_code=status.HTTP_200_OK,
     operation_id="generate_flow_run_artifact_signed_url",
     summary="Generate signed URL for a flow run artifact",
-    description=_FLOW_RUN_ARTIFACT_DESCRIPTION,
+    description=f"{_FLOW_RUN_ARTIFACT_DESCRIPTION.rstrip()}\n\n{RETIRED_FLOW_HISTORY_READ_CLAUSE}",
     responses={
         403: error_response(
             description=_FLOW_RUNTIME_FORBIDDEN_DESCRIPTION,
@@ -440,11 +450,13 @@ async def generate_flow_run_artifact_signed_url(
                 flow_id=id,
                 required_access=FlowApiAction.VIEW,
                 allow_service_key_principals=True,
+                history=True,
             )
             file = await container.flow_run_evidence_service().get_run_artifact_file(
                 run_id=run_id,
                 flow_id=id,
                 file_id=file_id,
+                history=True,
             )
             audit_tenant_id = container.user().tenant_id
             await _log_required_run_file_access(
@@ -503,7 +515,7 @@ Audio downloads honour HTTP Range requests, so the URL can be used directly as a
     status_code=status.HTTP_200_OK,
     operation_id="generate_flow_run_input_file_signed_url",
     summary="Generate signed URL for a flow run input file",
-    description=_FLOW_RUN_INPUT_FILE_DESCRIPTION,
+    description=f"{_FLOW_RUN_INPUT_FILE_DESCRIPTION.rstrip()}\n\n{RETIRED_FLOW_HISTORY_READ_CLAUSE}",
     responses={
         403: error_response(
             description=_FLOW_RUNTIME_FORBIDDEN_DESCRIPTION,
@@ -573,11 +585,13 @@ async def generate_flow_run_input_file_signed_url(
                 flow_id=id,
                 required_access=FlowApiAction.VIEW,
                 allow_service_key_principals=True,
+                history=True,
             )
             file = await container.flow_run_evidence_service().get_run_input_file(
                 run_id=run_id,
                 flow_id=id,
                 file_id=file_id,
+                history=True,
             )
             audit_tenant_id = container.user().tenant_id
             await _log_required_run_file_access(

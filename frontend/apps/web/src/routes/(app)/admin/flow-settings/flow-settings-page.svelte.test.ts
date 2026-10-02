@@ -369,6 +369,57 @@ describe("flow settings page — mapped restore lifecycle", () => {
     confirmSpy.mockRestore();
   });
 
+  test("marks a deleted Flow and says what choosing it means", async () => {
+    const offPolicy = (scope: "space" | "flow", scopeId: string) => ({
+      scope,
+      scope_id: scopeId,
+      local_policy: null,
+      inherited_policy: null,
+      effective: {
+        state: "off",
+        mode: null,
+        effective_days: null,
+        source: "none",
+        contributors: { organization: null, space: null, flow: null }
+      }
+    });
+    getSpaceFlowRunRetentionPolicy.mockResolvedValue(offPolicy("space", "space-1"));
+    getFlowRunRetentionPolicy.mockResolvedValue(offPolicy("flow", "flow-old"));
+    listFlowRunRetentionFlowTargets.mockResolvedValue({
+      items: [
+        { id: "flow-live", space_id: "space-1", name: "Aktivt flöde", retired: false },
+        { id: "flow-old", space_id: "space-1", name: "Gammalt flöde", retired: true }
+      ],
+      count: 2,
+      has_more: false
+    });
+    render(FlowSettingsPage, pageProps());
+
+    await page.getByRole("combobox", { name: "Yta" }).click();
+    await page.getByRole("option", { name: "Inköp" }).click();
+    await page.getByRole("combobox", { name: "Flöde" }).click();
+
+    await expect.element(page.getByRole("option", { name: "Gammalt flöde Raderat" })).toBeVisible();
+    await expect.element(page.getByRole("option", { name: "Aktivt flöde" })).toBeVisible();
+    await expect
+      .element(page.getByRole("option", { name: "Aktivt flöde" }).getByText("Raderat"))
+      .not.toBeInTheDocument();
+    await expect
+      .element(page.getByText("Flödet är raderat och kan inte längre köras."))
+      .not.toBeInTheDocument();
+
+    await page.getByRole("option", { name: "Gammalt flöde Raderat" }).click();
+
+    await expect
+      .element(
+        page.getByText(
+          "Flödet är raderat och kan inte längre köras. Historiken går att läsa och följer flödets gallringsregel."
+        )
+      )
+      .toBeVisible();
+    expect(getFlowRunRetentionPolicy).toHaveBeenCalledExactlyOnceWith({ flowId: "flow-old" });
+  });
+
   test("loads Space and Flow targets incrementally", async () => {
     const initial = pageData();
     listFlowRunRetentionSpaceTargets.mockResolvedValueOnce({

@@ -183,6 +183,13 @@ class FlowRunRetentionFlowTarget(BaseModel):
     id: UUID = Field(description="Flow available for retention administration.")
     space_id: UUID = Field(description="Space that owns the Flow.")
     name: str = Field(description="Current Flow name.")
+    retired: bool = Field(
+        description=(
+            "True when the Flow is deleted. A deleted Flow is listed only while it "
+            "still has run history, which its retention rule governs; it can no "
+            "longer run."
+        )
+    )
 
 
 class FlowRunRetentionFlowTargetPage(BaseModel):
@@ -196,6 +203,7 @@ class FlowRunRetentionFlowTargetPage(BaseModel):
                         "id": "00000000-0000-0000-0000-000000000301",
                         "space_id": "00000000-0000-0000-0000-000000000201",
                         "name": "Supplier assessment",
+                        "retired": False,
                     }
                 ],
                 "count": 1,

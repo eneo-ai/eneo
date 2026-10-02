@@ -29,6 +29,8 @@ from eneo.flows.api.flow_api_common import (
     FLOW_RUN_COMMIT_BEFORE_RESPONSE_CLAUSE,
     FLOW_RUN_FORBIDDEN_DESCRIPTION,
     FLOW_RUN_SERVICE_KEY_REVIEW_CLAUSE,
+    RETIRED_FLOW_HISTORY_READ_CLAUSE,
+    RETIRED_FLOW_MUTATION_NOT_FOUND_CLAUSE,
     audit_actor_kwargs,
     commit_flow_runtime_write_before_response,
     error_response,
@@ -104,6 +106,7 @@ router = APIRouter()
         "the correction set that was folded in. The first page's baseline is "
         "revision 1, the step's original output. Reading history is an audited "
         "evidence view; the same authorization as the run's evidence applies."
+        f" {RETIRED_FLOW_HISTORY_READ_CLAUSE}"
     ),
     responses={
         403: error_response(
@@ -160,9 +163,10 @@ async def list_flow_run_review_checkpoint_edits(
                 flow_id=id,
                 required_access=FlowApiAction.VIEW,
                 allow_service_key_principals=True,
+                history=True,
             )
             run = await container.flow_run_service().get_run(
-                run_id=run_id, flow_id=id, access_kind="content"
+                run_id=run_id, flow_id=id, access_kind="content", history=True
             )
             service = container.flow_run_evidence_service()
             page = await service.list_review_checkpoint_edits(
@@ -170,6 +174,7 @@ async def list_flow_run_review_checkpoint_edits(
                 checkpoint_id=checkpoint_id,
                 after_revision=after_revision,
                 limit=limit,
+                history=True,
             )
             user = container.user()
             presenter = FlowServicePrincipalActorPresenter(
@@ -639,7 +644,7 @@ Service-key principals may resume approved checkpoints only for runs they own (k
     status_code=status.HTTP_200_OK,
     operation_id="get_active_flow_run_review_checkpoint",
     summary="Get active flow run review checkpoint",
-    description=_FLOW_RUN_REVIEW_ACTIVE_DESCRIPTION,
+    description=f"{_FLOW_RUN_REVIEW_ACTIVE_DESCRIPTION.rstrip()}\n\n{RETIRED_FLOW_HISTORY_READ_CLAUSE}",
     responses={
         403: error_response(
             description=FLOW_RUN_FORBIDDEN_DESCRIPTION,
@@ -690,15 +695,18 @@ async def get_active_flow_run_review_checkpoint(
                 flow_id=id,
                 required_access=FlowApiAction.VIEW,
                 allow_service_key_principals=True,
+                history=True,
             )
             run = await container.flow_run_service().get_run(
                 run_id=run_id,
                 flow_id=id,
                 access_kind="content",
+                history=True,
             )
             checkpoint = await container.flow_run_review_checkpoint_service().get_active_review_checkpoint(
                 flow_id=id,
                 run_id=run_id,
+                history=True,
             )
             response = (
                 None
@@ -778,7 +786,7 @@ async def get_active_flow_run_review_checkpoint(
             context={"auth_layer": "tenant_role"},
         ),
         404: error_response(
-            description="Run or checkpoint not found for this flow and tenant.",
+            description=f"Run or checkpoint not found for this flow and tenant. {RETIRED_FLOW_MUTATION_NOT_FOUND_CLAUSE}",
             message="Review checkpoint not found.",
             eneo_error_code=ErrorCodes.NOT_FOUND,
             code=FlowApiErrorCode.REVIEW_CHECKPOINT_NOT_FOUND.value,
@@ -862,7 +870,7 @@ async def edit_flow_run_review_checkpoint(
             context={"auth_layer": "tenant_role"},
         ),
         404: error_response(
-            description="Run or checkpoint not found for this flow and tenant.",
+            description=f"Run or checkpoint not found for this flow and tenant. {RETIRED_FLOW_MUTATION_NOT_FOUND_CLAUSE}",
             message="Review checkpoint not found.",
             eneo_error_code=ErrorCodes.NOT_FOUND,
             code=FlowApiErrorCode.REVIEW_CHECKPOINT_NOT_FOUND.value,
@@ -951,7 +959,7 @@ async def approve_flow_run_review_checkpoint(
             context={"auth_layer": "tenant_role"},
         ),
         404: error_response(
-            description="Run or checkpoint not found for this flow and tenant.",
+            description=f"Run or checkpoint not found for this flow and tenant. {RETIRED_FLOW_MUTATION_NOT_FOUND_CLAUSE}",
             message="Review checkpoint not found.",
             eneo_error_code=ErrorCodes.NOT_FOUND,
             code=FlowApiErrorCode.REVIEW_CHECKPOINT_NOT_FOUND.value,
@@ -1038,7 +1046,7 @@ async def reject_flow_run_review_checkpoint(
             context={"auth_layer": "tenant_role"},
         ),
         404: error_response(
-            description="Run or checkpoint not found for this flow and tenant.",
+            description=f"Run or checkpoint not found for this flow and tenant. {RETIRED_FLOW_MUTATION_NOT_FOUND_CLAUSE}",
             message="Review checkpoint not found.",
             eneo_error_code=ErrorCodes.NOT_FOUND,
             code=FlowApiErrorCode.REVIEW_CHECKPOINT_NOT_FOUND.value,
@@ -1142,7 +1150,7 @@ async def resume_flow_run_review_checkpoint(
             context={"auth_layer": "tenant_role"},
         ),
         404: error_response(
-            description="Run or checkpoint not found for this flow and tenant.",
+            description=f"Run or checkpoint not found for this flow and tenant. {RETIRED_FLOW_MUTATION_NOT_FOUND_CLAUSE}",
             message="Review checkpoint not found.",
             eneo_error_code=ErrorCodes.NOT_FOUND,
             code=FlowApiErrorCode.REVIEW_CHECKPOINT_NOT_FOUND.value,

@@ -116,12 +116,27 @@ class FlowRunRetentionPolicyRepository:
         )
         if target_space_id is None:
             raise NotFoundException("Space not found.")
+        # A deleted flow stays administrable while it keeps run history that
+        # retention governs; one without runs has nothing left to govern.
         rows = (
             await self.session.execute(
-                sa.select(Flows.id, Flows.space_id, Flows.name)
+                sa.select(
+                    Flows.id,
+                    Flows.space_id,
+                    Flows.name,
+                    Flows.deleted_at.is_not(None).label("retired"),
+                )
                 .where(Flows.tenant_id == tenant_id)
                 .where(Flows.space_id == space_id)
-                .where(Flows.deleted_at.is_(None))
+                .where(
+                    sa.or_(
+                        Flows.deleted_at.is_(None),
+                        sa.exists().where(
+                            FlowRuns.flow_id == Flows.id,
+                            FlowRuns.tenant_id == Flows.tenant_id,
+                        ),
+                    )
+                )
                 .order_by(sa.func.lower(Flows.name), Flows.id)
                 .offset(offset)
                 .limit(limit + 1)
@@ -133,6 +148,7 @@ class FlowRunRetentionPolicyRepository:
                     id=row.id,
                     space_id=row.space_id,
                     name=row.name,
+                    retired=row.retired,
                 )
                 for row in rows[:limit]
             ],
@@ -201,7 +217,6 @@ class FlowRunRetentionPolicyRepository:
                 .join(Tenants, Tenants.id == Flows.tenant_id)
                 .where(Flows.id == flow_id)
                 .where(Flows.tenant_id == tenant_id)
-                .where(Flows.deleted_at.is_(None))
             )
         ).one_or_none()
         if row is None:
@@ -277,7 +292,6 @@ class FlowRunRetentionPolicyRepository:
                 sa.update(Flows)
                 .where(Flows.id == flow_id)
                 .where(Flows.tenant_id == tenant_id)
-                .where(Flows.deleted_at.is_(None))
                 .values(**self._policy_values(policy))
             )
         return FlowRunRetentionPolicyChange(
@@ -432,7 +446,6 @@ class FlowRunRetentionPolicyRepository:
             sa.select(Flows.id)
             .where(Flows.id == flow_id)
             .where(Flows.tenant_id == tenant_id)
-            .where(Flows.deleted_at.is_(None))
             .with_for_update()
         )
         if found is None:

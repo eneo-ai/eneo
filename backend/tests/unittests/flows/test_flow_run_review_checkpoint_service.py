@@ -271,6 +271,7 @@ async def test_get_active_review_checkpoint_preserves_multiple_active_conflict(u
         run_id=run.id,
         flow_id=flow_id,
         access_kind="content",
+        history=False,
     )
     checkpoint_repo.get_active_review_checkpoint.assert_awaited_once_with(
         run_id=run.id,

@@ -68,6 +68,7 @@ from tests.unittests.flows.test_flow_router import (
     _request,
     _run,
     _service_key,
+    _wire_flow_gate,
 )
 
 
@@ -110,6 +111,7 @@ async def test_list_flows_rejects_user_without_flow_roles():
     container = MagicMock()
     flow_service = AsyncMock()
     container.flow_service.return_value = flow_service
+    _wire_flow_gate(container)
     _enable_space_access(container, user_permissions=[])
 
     with pytest.raises(UnauthorizedException) as exc_info:
@@ -128,6 +130,7 @@ async def test_create_flow_run_rejects_user_without_run_permission():
     flow_service = AsyncMock()
     flow_run_service = AsyncMock()
     container.flow_service.return_value = flow_service
+    _wire_flow_gate(container)
     container.flow_run_service.return_value = flow_run_service
     _enable_space_access(container, user_permissions=[Permission.FLOWS_VIEW])
 
@@ -156,6 +159,7 @@ async def test_create_flow_run_rejects_scope_mismatch(monkeypatch):
     flow_service.get_flow.return_value = _flow(flow_id)
     container.flow_run_service.return_value = run_service
     container.flow_service.return_value = flow_service
+    _wire_flow_gate(container)
     container.user.return_value = SimpleNamespace(
         id=uuid4(),
         tenant_id=uuid4(),
@@ -246,6 +250,7 @@ async def test_list_flow_runs_viewer_cannot_read_unpublished_flow(monkeypatch):
     flow_service = AsyncMock()
     flow_service.get_flow.return_value = flow
     container.flow_service.return_value = flow_service
+    _wire_flow_gate(container)
 
     monkeypatch.setattr(
         flow_access_context_module,
@@ -312,6 +317,7 @@ async def test_flow_run_control_endpoints_reject_scope_mismatch(monkeypatch):
     flow_service = AsyncMock()
     flow_service.get_flow.return_value = _flow(flow_id)
     container.flow_service.return_value = flow_service
+    _wire_flow_gate(container)
     container.flow_execution_backend.return_value = MagicMock()
     container.user.return_value = SimpleNamespace(
         id=uuid4(),
@@ -387,6 +393,7 @@ async def test_flow_runtime_endpoints_reject_scope_mismatch(monkeypatch):
     flow_service = AsyncMock()
     flow_service.get_flow.return_value = _flow(flow_id)
     container.flow_service.return_value = flow_service
+    _wire_flow_gate(container)
     container.user.return_value = SimpleNamespace(
         id=uuid4(),
         tenant_id=uuid4(),
@@ -439,6 +446,7 @@ async def test_get_flow_rejects_non_member():
     flow_service = AsyncMock()
     flow_service.get_flow.return_value = flow
     container.flow_service.return_value = flow_service
+    _wire_flow_gate(container)
     _enable_space_access(container, can_read=False)
 
     with pytest.raises(UnauthorizedException) as exc_info:
@@ -456,6 +464,7 @@ async def test_get_flow_viewer_cannot_read_unpublished():
     flow_service = AsyncMock()
     flow_service.get_flow.return_value = flow
     container.flow_service.return_value = flow_service
+    _wire_flow_gate(container)
 
     # can_read_flow(flow) returns False for unpublished flows for viewers
     actor = _enable_space_access(container, can_read=True)
@@ -475,6 +484,7 @@ async def test_update_flow_rejects_viewer():
     flow_service = AsyncMock()
     flow_service.get_flow.return_value = flow
     container.flow_service.return_value = flow_service
+    _wire_flow_gate(container)
     _enable_space_access(container, can_edit=False)
 
     from eneo.flows.api.flow_models import FlowUpdateRequest
@@ -500,6 +510,7 @@ async def test_update_flow_rejects_same_space_admin_for_other_members_draft():
     flow_service = AsyncMock()
     flow_service.get_flow.return_value = flow
     container.flow_service.return_value = flow_service
+    _wire_flow_gate(container)
     actor = _enable_space_access(container, can_edit=True)
     actor.get_current_role.return_value = SpaceRole.ADMIN
     container.user.return_value = SimpleNamespace(
@@ -530,6 +541,7 @@ async def test_delete_flow_rejects_viewer():
     flow_service = AsyncMock()
     flow_service.get_flow.return_value = flow
     container.flow_service.return_value = flow_service
+    _wire_flow_gate(container)
     container.user.return_value = SimpleNamespace(id=uuid4(), tenant_id=uuid4())
     _enable_space_access(container, can_delete=False)
 
@@ -550,6 +562,7 @@ async def test_delete_flow_rejects_same_space_admin_for_other_members_draft():
     flow_service = AsyncMock()
     flow_service.get_flow.return_value = flow
     container.flow_service.return_value = flow_service
+    _wire_flow_gate(container)
     actor = _enable_space_access(container, can_delete=True)
     actor.get_current_role.return_value = SpaceRole.ADMIN
     container.user.return_value = SimpleNamespace(
@@ -576,6 +589,7 @@ async def test_publish_flow_rejects_editor_in_personal_space():
     flow_service = AsyncMock()
     flow_service.get_flow.return_value = flow
     container.flow_service.return_value = flow_service
+    _wire_flow_gate(container)
     _enable_space_access(container, can_publish=False)
 
     with pytest.raises(UnauthorizedException) as exc_info:
@@ -595,6 +609,7 @@ async def test_publish_flow_rejects_same_space_admin_for_other_members_draft():
     flow_service = AsyncMock()
     flow_service.get_flow.return_value = flow
     container.flow_service.return_value = flow_service
+    _wire_flow_gate(container)
     actor = _enable_space_access(container, can_publish=True)
     actor.get_current_role.return_value = SpaceRole.ADMIN
     container.user.return_value = SimpleNamespace(
@@ -621,6 +636,7 @@ async def test_unpublish_flow_rejects_without_publish_permission():
     flow_service = AsyncMock()
     flow_service.get_flow.return_value = flow
     container.flow_service.return_value = flow_service
+    _wire_flow_gate(container)
     _enable_space_access(container, can_edit=True, can_delete=True, can_publish=False)
 
     with pytest.raises(UnauthorizedException) as exc_info:
@@ -656,6 +672,7 @@ async def test_definition_endpoints_reject_scope_mismatch(
     flow_service = AsyncMock()
     flow_service.get_flow.return_value = flow
     container.flow_service.return_value = flow_service
+    _wire_flow_gate(container)
     container.user.return_value = SimpleNamespace(
         id=uuid4(),
         tenant_id=uuid4(),
@@ -743,6 +760,7 @@ async def test_get_published_flow_runtime_hides_unpublished_flow(monkeypatch):
     flow_service = AsyncMock()
     flow_service.get_flow.return_value = flow
     container.flow_service.return_value = flow_service
+    _wire_flow_gate(container)
     _enable_space_access(container, can_read=True, user_permissions=[Permission.FLOWS])
 
     monkeypatch.setattr(
@@ -770,6 +788,7 @@ async def test_get_published_flow_runtime_hides_unpublished_flow_before_read_den
     flow_service = AsyncMock()
     flow_service.get_flow.return_value = flow
     container.flow_service.return_value = flow_service
+    _wire_flow_gate(container)
     actor = _enable_space_access(
         container,
         can_read=False,
@@ -803,6 +822,7 @@ async def test_get_published_flow_runtime_hides_unpublished_flow_for_service_key
     flow_service = AsyncMock()
     flow_service.get_flow.return_value = flow
     container.flow_service.return_value = flow_service
+    _wire_flow_gate(container)
     container.user.return_value = SimpleNamespace(
         id=uuid4(),
         tenant_id=uuid4(),
@@ -915,6 +935,7 @@ async def test_enforce_flow_scope_rejects_non_member_on_consumer_endpoint(monkey
     flow_service = AsyncMock()
     flow_service.get_flow.return_value = flow
     container.flow_service.return_value = flow_service
+    _wire_flow_gate(container)
     _enable_space_access(container, can_read=False)
 
     monkeypatch.setattr(
@@ -944,6 +965,7 @@ async def test_create_flow_run_rejects_without_tenant_run_permission(monkeypatch
     flow_service = AsyncMock()
     flow_service.get_flow.return_value = flow
     container.flow_service.return_value = flow_service
+    _wire_flow_gate(container)
     container.flow_run_service.return_value = AsyncMock()
     container.user.return_value = SimpleNamespace(
         id=uuid4(),
@@ -985,6 +1007,7 @@ async def test_tenant_scoped_user_api_key_loads_space_membership_check(monkeypat
     flow_service = AsyncMock()
     flow_service.get_flow.return_value = flow
     container.flow_service.return_value = flow_service
+    _wire_flow_gate(container)
     container.user.return_value = SimpleNamespace(
         id=uuid4(),
         tenant_id=uuid4(),
@@ -1029,6 +1052,7 @@ async def test_space_scoped_api_key_rejects_wrong_space(monkeypatch):
     flow_service = AsyncMock()
     flow_service.get_flow.return_value = flow
     container.flow_service.return_value = flow_service
+    _wire_flow_gate(container)
     container.user.return_value = SimpleNamespace(
         id=uuid4(),
         tenant_id=uuid4(),
@@ -1068,6 +1092,7 @@ async def test_space_scoped_api_key_matching_space_succeeds(monkeypatch):
     flow_service = AsyncMock()
     flow_service.get_flow.return_value = flow
     container.flow_service.return_value = flow_service
+    _wire_flow_gate(container)
     container.user.return_value = SimpleNamespace(
         id=uuid4(),
         tenant_id=uuid4(),

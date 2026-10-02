@@ -34,6 +34,7 @@ from eneo.flows.domain.flow_run_retention_policy import (
     FlowRunRetentionOff,
 )
 from eneo.flows.enums import FlowRunReviewCheckpointState
+from eneo.flows.flow_evidence_policy import FlowHistoryAccessContext
 from eneo.flows.flow_review_policy import FlowStepReviewMode
 from eneo.flows.flow_run_step_result_file import FlowRunStepResultFile
 from eneo.main.exceptions import (
@@ -282,6 +283,32 @@ def _evidence_export_payload(
     }
 
 
+def _wire_flow_gate(container) -> None:
+    """Answer the flow gate's narrow authorization row from the flow the test's
+    flow service holds, so a test sets up one flow for both reads."""
+
+    async def history_row(*, flow_id, tenant_id, include_retired):
+        _ = (tenant_id, include_retired)
+        get_flow = container.flow_service.return_value.get_flow
+        flow = (
+            await get_flow(flow_id)
+            if get_flow.side_effect is not None
+            else get_flow.return_value
+        )
+        return FlowHistoryAccessContext(
+            flow_id=flow.id,
+            space_id=flow.space_id,
+            published=flow.published,
+            retired=False,
+            sensitive=False,
+            classification_level=0,
+        )
+
+    container.flow_repo.return_value.get_history_access_context = AsyncMock(
+        side_effect=history_row
+    )
+
+
 def _enable_space_access(
     container,
     *,
@@ -310,6 +337,7 @@ def _enable_space_access(
     actor_manager = MagicMock()
     actor_manager.get_space_actor_from_space.return_value = actor
     container.actor_manager.return_value = actor_manager
+    _wire_flow_gate(container)
     user = getattr(container.user, "return_value", None)
     if user is not None:
         user.permissions = list(

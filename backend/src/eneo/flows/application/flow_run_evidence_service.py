@@ -209,11 +209,13 @@ class FlowRunEvidenceService:
         run_id: UUID,
         flow_id: UUID | None = None,
         access_kind: FlowRunAccessKind = "evidence_view",
+        history: bool = False,
     ) -> FlowRun:
         return await self.access_policy.load_run(
             run_id=run_id,
             flow_id=flow_id,
             access_kind=access_kind,
+            history=history,
         )
 
     async def get_run_artifact_file(
@@ -222,11 +224,13 @@ class FlowRunEvidenceService:
         run_id: UUID,
         flow_id: UUID,
         file_id: UUID,
+        history: bool = False,
     ) -> FileMetadata:
         run = await self.access_policy.load_run(
             run_id=run_id,
             flow_id=flow_id,
             access_kind="artifact",
+            history=history,
         )
         result_file = await self.flow_run_repo.get_result_file(
             run_id=run.id,
@@ -256,6 +260,7 @@ class FlowRunEvidenceService:
         run_id: UUID,
         flow_id: UUID,
         file_id: UUID,
+        history: bool = False,
     ) -> FileMetadata:
         """A file the run received as step input, for whoever may see the run's
         artifacts: reviewing a transcript means hearing the audio behind it,
@@ -264,6 +269,7 @@ class FlowRunEvidenceService:
             run_id=run_id,
             flow_id=flow_id,
             access_kind="artifact",
+            history=history,
         )
         attached = await self.flow_run_repo.is_step_input_file(
             run_id=run.id,
@@ -295,12 +301,13 @@ class FlowRunEvidenceService:
         return file
 
     async def get_redacted_evidence_bundle(
-        self, *, run_id: UUID, run: FlowRun | None = None
+        self, *, run_id: UUID, run: FlowRun | None = None, history: bool = False
     ) -> RedactedEvidenceBundle:
         return await self._get_redacted_evidence_bundle(
             run_id=run_id,
             access_kind="evidence_view",
             run=run,
+            history=history,
         )
 
     async def list_review_checkpoint_edits(
@@ -310,8 +317,11 @@ class FlowRunEvidenceService:
         checkpoint_id: UUID,
         after_revision: int | None,
         limit: int,
+        history: bool = False,
     ) -> FlowRunReviewCheckpointEditPagePublic:
-        await self.access_policy.ensure_can_access_run(run, access_kind="content")
+        await self.access_policy.ensure_can_access_run(
+            run, access_kind="content", history=history
+        )
         (
             baseline_row,
             obstructing,
@@ -373,8 +383,11 @@ class FlowRunEvidenceService:
         step_id: UUID,
         after_revision: int | None,
         limit: int,
+        history: bool = False,
     ) -> FlowTranscriptCorrectionRevisionPagePublic:
-        await self.access_policy.ensure_can_access_run(run, access_kind="content")
+        await self.access_policy.ensure_can_access_run(
+            run, access_kind="content", history=history
+        )
         baseline = FlowTranscriptCorrectionRevisionBaselinePublic(
             revision=0,
             occurrences_json=[],
@@ -490,6 +503,7 @@ class FlowRunEvidenceService:
         after_event_id: UUID | None = None,
         attempt_id: UUID | None = None,
         run: FlowRun | None = None,
+        history: bool = False,
     ) -> ProviderCallEvidencePage:
         resolved_run = (
             run
@@ -498,6 +512,7 @@ class FlowRunEvidenceService:
                 run_id=run_id,
                 flow_id=flow_id,
                 access_kind="evidence_view",
+                history=history,
             )
         )
         if run is not None:
@@ -506,6 +521,7 @@ class FlowRunEvidenceService:
             await self.access_policy.ensure_can_access_run(
                 resolved_run,
                 access_kind="evidence_view",
+                history=history,
             )
         try:
             return await self.provider_call_repo.list_evidence_page(
@@ -528,6 +544,7 @@ class FlowRunEvidenceService:
         detail: str = "redacted",
         run: FlowRun | None = None,
         export_reason: str = "support_debug",
+        history: bool = False,
     ) -> FlowPersistedJsonObject:
         actor = evidence_export_actor_from_principal(FlowPrincipal.from_user(self.user))
         if detail == "raw":
@@ -536,6 +553,7 @@ class FlowRunEvidenceService:
                 access_kind="evidence_export_raw",
                 run=run,
                 provider_call_limit=PROVIDER_CALL_EXPORT_MAX_EVENTS + 1,
+                history=history,
             )
             self._enforce_provider_call_export_limit(bundle.provider_calls)
             return render_evidence_json_export(
@@ -551,6 +569,7 @@ class FlowRunEvidenceService:
             access_kind="evidence_export_redacted",
             run=run,
             provider_call_limit=PROVIDER_CALL_EXPORT_MAX_EVENTS + 1,
+            history=history,
         )
         self._enforce_provider_call_export_limit(bundle.provider_calls)
         return render_evidence_json_export(
@@ -569,12 +588,14 @@ class FlowRunEvidenceService:
         access_kind: FlowRunAccessKind,
         run: FlowRun | None = None,
         provider_call_limit: int = EMBEDDED_PROVIDER_CALL_LIMIT,
+        history: bool = False,
     ) -> RedactedEvidenceBundle:
         bundle = await self._get_evidence_bundle(
             run_id=run_id,
             access_kind=access_kind,
             run=run,
             provider_call_limit=provider_call_limit,
+            history=history,
         )
         return redact_evidence_bundle(bundle)
 
@@ -585,6 +606,7 @@ class FlowRunEvidenceService:
         access_kind: FlowRunAccessKind,
         run: FlowRun | None = None,
         provider_call_limit: int = EMBEDDED_PROVIDER_CALL_LIMIT,
+        history: bool = False,
     ) -> EvidenceBundle:
         resolved_run = (
             run
@@ -592,6 +614,7 @@ class FlowRunEvidenceService:
             else await self.access_policy.load_run(
                 run_id=run_id,
                 access_kind=access_kind,
+                history=history,
             )
         )
         if run is not None:
@@ -601,6 +624,7 @@ class FlowRunEvidenceService:
             await self.access_policy.ensure_can_access_run(
                 resolved_run,
                 access_kind=access_kind,
+                history=history,
             )
         if access_kind != "evidence_view":
             await self._refuse_export_rows_before_size_measurement(
@@ -808,6 +832,7 @@ class FlowRunEvidenceService:
             disclosure=await self.access_policy.passage_disclosure_for_run(
                 resolved_run,
                 access_kind=access_kind,
+                history=history,
             ),
         )
         # A run's attempt count is unbounded, so an interactive view caps the

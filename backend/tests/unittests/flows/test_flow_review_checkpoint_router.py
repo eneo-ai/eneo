@@ -199,6 +199,7 @@ async def test_active_review_checkpoint_includes_current_citation_summary(monkey
         run_id=ctx.run.id,
         flow_id=ctx.flow_id,
         access_kind="content",
+        history=True,
     )
     audit_event = container.audit_service.return_value.log.await_args.kwargs
     assert audit_event["action"] is ActionType.FLOW_EVIDENCE_VIEWED

@@ -120,10 +120,15 @@ class FlowTranscriptSourceService:
         return rows
 
     async def get_references_for_step_results(
-        self, *, flow_id: UUID, run_id: UUID, step_results: Sequence[FlowStepResult]
+        self,
+        *,
+        flow_id: UUID,
+        run_id: UUID,
+        step_results: Sequence[FlowStepResult],
+        history: bool = False,
     ) -> dict[UUID, TranscriptSourceReference]:
         await self.access_policy.load_run(
-            run_id=run_id, flow_id=flow_id, access_kind="content"
+            run_id=run_id, flow_id=flow_id, access_kind="content", history=history
         )
         projections = await self.transcript_source_repo.get_references_for_attempts(
             run_id=run_id,
@@ -155,10 +160,16 @@ class FlowTranscriptSourceService:
         return references
 
     async def _load_attempt(
-        self, *, flow_id: UUID, run_id: UUID, step_id: UUID, attempt_no: int
+        self,
+        *,
+        flow_id: UUID,
+        run_id: UUID,
+        step_id: UUID,
+        attempt_no: int,
+        history: bool,
     ) -> FlowStepAttempt:
         run = await self.access_policy.load_run(
-            run_id=run_id, flow_id=flow_id, access_kind="content"
+            run_id=run_id, flow_id=flow_id, access_kind="content", history=history
         )
         attempt = await self.flow_run_repo.get_step_attempt(
             run_id=run.id,
@@ -171,20 +182,40 @@ class FlowTranscriptSourceService:
         return attempt
 
     async def get_reference_for_attempt(
-        self, *, flow_id: UUID, run_id: UUID, step_id: UUID, attempt_no: int
+        self,
+        *,
+        flow_id: UUID,
+        run_id: UUID,
+        step_id: UUID,
+        attempt_no: int,
+        history: bool = False,
     ) -> TranscriptSourceReference | None:
         attempt = await self._load_attempt(
-            flow_id=flow_id, run_id=run_id, step_id=step_id, attempt_no=attempt_no
+            flow_id=flow_id,
+            run_id=run_id,
+            step_id=step_id,
+            attempt_no=attempt_no,
+            history=history,
         )
         return await resolve_transcript_source_reference(
             attempt=attempt, transcript_source_repo=self.transcript_source_repo
         )
 
     async def get_for_attempt(
-        self, *, flow_id: UUID, run_id: UUID, step_id: UUID, attempt_no: int
+        self,
+        *,
+        flow_id: UUID,
+        run_id: UUID,
+        step_id: UUID,
+        attempt_no: int,
+        history: bool = False,
     ) -> TranscriptSourceState:
         attempt = await self._load_attempt(
-            flow_id=flow_id, run_id=run_id, step_id=step_id, attempt_no=attempt_no
+            flow_id=flow_id,
+            run_id=run_id,
+            step_id=step_id,
+            attempt_no=attempt_no,
+            history=history,
         )
         reference = _attempt_reference(attempt)
         if reference is None:

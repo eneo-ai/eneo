@@ -3,10 +3,12 @@
   import ChevronsUpDown from "@lucide/svelte/icons/chevrons-up-down";
   import * as Command from "$lib/components/ui/command/index.js";
   import * as Popover from "$lib/components/ui/popover/index.js";
+  import { Badge } from "$lib/components/ui/badge/index.js";
   import { Button } from "$lib/components/ui/button/index.js";
   import { m } from "$lib/paraglide/messages";
 
-  type Target = { id: string; name: string };
+  // `retired`: a deleted Flow still listed because it keeps run history.
+  type Target = { id: string; name: string; retired?: boolean };
 
   let {
     id,
@@ -37,7 +39,8 @@
   let open = $state(false);
   let filter = $state("");
 
-  const selectedName = $derived(items.find((i) => i.id === value)?.name ?? null);
+  const selected = $derived(items.find((i) => i.id === value) ?? null);
+  const selectedName = $derived(selected?.name ?? null);
 
   // The endpoint pages by offset and takes no search term, so filtering can
   // only cover what has been fetched. Say so rather than let an admin conclude
@@ -59,8 +62,13 @@
         aria-expanded={open}
         class="w-full justify-between font-normal"
       >
-        <span class="truncate" class:text-muted={!selectedName}>
-          {selectedName ?? placeholder}
+        <span class="flex min-w-0 items-center gap-2">
+          <span class="truncate" class:text-muted={!selectedName}>
+            {selectedName ?? placeholder}
+          </span>
+          {#if selected?.retired}
+            <Badge variant="outline">{m.flow_run_retention_target_retired()}</Badge>
+          {/if}
         </span>
         <ChevronsUpDown class="text-muted size-4 shrink-0" aria-hidden="true" />
       </Button>
@@ -84,6 +92,11 @@
               aria-hidden="true"
             />
             <span class="truncate">{item.name}</span>
+            {#if item.retired}
+              <Badge variant="outline" class="ml-auto">
+                {m.flow_run_retention_target_retired()}
+              </Badge>
+            {/if}
           </Command.Item>
         {/each}
         {#if hasMore}

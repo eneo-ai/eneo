@@ -556,6 +556,7 @@ async def test_admin_discovers_non_member_spaces_and_flows_for_retention(
                 "id": str(flow_id),
                 "space_id": str(space_id),
                 "name": flows_response.json()["items"][0]["name"],
+                "retired": False,
             }
         ],
         "count": 1,
@@ -587,6 +588,95 @@ async def test_admin_discovers_non_member_spaces_and_flows_for_retention(
         headers=admin_headers,
     )
     assert personal_flow_targets.status_code == 404, personal_flow_targets.text
+
+
+async def test_deleted_flow_with_history_stays_under_retention_administration(
+    client,
+    admin_token,
+    published_flow_ids,
+    db_container,
+    admin_user,
+) -> None:
+    space_id, flow_id = published_flow_ids
+    headers = {"Authorization": f"Bearer {admin_token}"}
+    root_path = "/api/v1/settings/flow-run-retention-policy"
+    old = datetime.now(timezone.utc) - timedelta(days=3)
+    async with db_container() as container:
+        session = container.session()
+        run = FlowRuns(
+            flow_id=flow_id,
+            flow_version=1,
+            principal_type="user",
+            principal_user_id=admin_user.id,
+            tenant_id=admin_user.tenant_id,
+            trace_id=uuid4(),
+            status="completed",
+            started_at=old,
+            finished_at=old,
+            created_at=old,
+            updated_at=old,
+        )
+        session.add(run)
+        without_runs = Flows(
+            name=f"Deleted Flow without runs {uuid4()}",
+            tenant_id=admin_user.tenant_id,
+            space_id=space_id,
+            created_by_user_id=admin_user.id,
+            owner_user_id=admin_user.id,
+            deleted_at=datetime.now(timezone.utc),
+        )
+        session.add(without_runs)
+        await session.flush()
+        run_id = run.id
+        await session.execute(
+            sa.update(Flows)
+            .where(Flows.id == flow_id)
+            .values(deleted_at=datetime.now(timezone.utc))
+        )
+
+    targets = await client.get(
+        f"{root_path}/targets/spaces/{space_id}/flows", headers=headers
+    )
+    assert targets.status_code == 200, targets.text
+    assert [(item["id"], item["retired"]) for item in targets.json()["items"]] == [
+        (str(flow_id), True)
+    ]
+
+    flow_path = f"{root_path}/flows/{flow_id}"
+    current = await client.get(flow_path, headers=headers)
+    assert current.status_code == 200, current.text
+    assert current.json()["local_policy"] is None
+    replaced = await client.put(
+        flow_path,
+        json={"policy": {"mode": "review_required", "days": 1}},
+        headers=headers,
+    )
+    assert replaced.status_code == 200, replaced.text
+    assert replaced.json()["local_policy"] == {"mode": "review_required", "days": 1}
+
+    queue = await client.get(f"{flow_path}/review-queue", headers=headers)
+    assert queue.status_code == 200, queue.text
+    assert [item["run_id"] for item in queue.json()["items"]] == [str(run_id)]
+
+    preserved = await client.put(
+        flow_path, json={"policy": {"mode": "preserve", "days": 1}}, headers=headers
+    )
+    assert preserved.status_code == 200, preserved.text
+    preview = await client.post(f"{flow_path}/purge", json={}, headers=headers)
+    assert preview.status_code == 200, preview.text
+    assert preview.json()["candidate_count"] == 1
+    purged = await client.post(
+        f"{flow_path}/purge", json={"dry_run": False}, headers=headers
+    )
+    assert purged.status_code == 200, purged.text
+    assert purged.json()["purged_run_ids"] == [str(run_id)]
+
+    # With its history gone, the deleted Flow leaves the target list.
+    emptied = await client.get(
+        f"{root_path}/targets/spaces/{space_id}/flows", headers=headers
+    )
+    assert emptied.status_code == 200, emptied.text
+    assert emptied.json()["items"] == []
 
 
 async def test_review_required_run_is_listed_but_never_selected_for_purge(

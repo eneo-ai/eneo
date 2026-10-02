@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Any, Literal, NoReturn, Protocol, TypeGuard, get_args
+from typing import TYPE_CHECKING, Literal, NoReturn, Protocol, TypeGuard, get_args
 from uuid import UUID
 
 from eneo.flows.domain.flow import FlowRun, FlowRunStatusSnapshot
@@ -13,8 +13,8 @@ from eneo.flows.flow_access_policy import (
 from eneo.flows.flow_api_error_code import FlowApiErrorCode
 from eneo.flows.flow_evidence_policy import (
     EvidenceCapabilityLevel,
-    FlowEvidenceAccessContext,
     FlowEvidencePolicy,
+    FlowHistoryAccessContext,
     classification_level_for_space,
     resolve_flow_evidence_policy,
     resolve_service_key_evidence_capability,
@@ -41,6 +41,8 @@ FlowRunAccessKind = Literal[
     "evidence_export_raw",
 ]
 _FLOW_RUN_ACCESS_KINDS = set(get_args(FlowRunAccessKind))
+# History reads never mutate; any mutation needs a live flow.
+_MUTATING_ACCESS_KINDS: frozenset[FlowRunAccessKind] = frozenset({"cancel"})
 FlowRunSpaceRole = Literal["admin", "owner"]
 
 
@@ -70,10 +72,9 @@ class FlowRunAccessPolicy:
         # One authorization pass asks the same questions about the same flow
         # several times. The policy is request-scoped, so each lookup is
         # answered once instead of once per question.
-        self._flow_by_id: dict[UUID, object] = {}
         self._space_access_by_flow_id: dict[UUID, tuple["SpaceActor | None", int]] = {}
-        self._evidence_access_context_by_flow_id: dict[
-            UUID, FlowEvidenceAccessContext
+        self._flow_context_by_mode: dict[
+            tuple[UUID, bool], FlowHistoryAccessContext
         ] = {}
 
     def is_human_tenant_admin(self) -> bool:
@@ -91,6 +92,7 @@ class FlowRunAccessPolicy:
         run_id: UUID,
         flow_id: UUID | None = None,
         access_kind: FlowRunAccessKind = "status",
+        history: bool = False,
     ) -> FlowRun:
         try:
             run = await self.flow_run_repo.get(
@@ -100,7 +102,7 @@ class FlowRunAccessPolicy:
             )
         except FlowRunNotFoundError as exc:
             raise NotFoundException("Flow run not found.") from exc
-        await self.ensure_can_access_run(run, access_kind=access_kind)
+        await self.ensure_can_access_run(run, access_kind=access_kind, history=history)
         return run
 
     async def load_run_status(
@@ -108,6 +110,7 @@ class FlowRunAccessPolicy:
         *,
         run_id: UUID,
         flow_id: UUID | None = None,
+        history: bool = False,
     ) -> FlowRunStatusSnapshot:
         try:
             run = await self.flow_run_repo.get_status(
@@ -117,46 +120,47 @@ class FlowRunAccessPolicy:
             )
         except FlowRunNotFoundError as exc:
             raise NotFoundException("Flow run not found.") from exc
-        await self.ensure_can_access_run(run, access_kind="status")
+        await self.ensure_can_access_run(run, access_kind="status", history=history)
         return run
 
-    async def _load_evidence_access_context(
-        self, *, flow_id: UUID
-    ) -> FlowEvidenceAccessContext:
-        cached = self._evidence_access_context_by_flow_id.get(flow_id)
+    async def _load_flow_context(
+        self, *, flow_id: UUID, history: bool
+    ) -> FlowHistoryAccessContext:
+        """The flow's authorization row; a retired flow only in history mode."""
+        key = (flow_id, history)
+        cached = self._flow_context_by_mode.get(key)
         if cached is None:
-            cached = await self.flow_repo.get_evidence_access_context(
-                flow_id=flow_id, tenant_id=self.user.tenant_id
+            cached = await self.flow_repo.get_history_access_context(
+                flow_id=flow_id,
+                tenant_id=self.user.tenant_id,
+                include_retired=history,
             )
-            self._evidence_access_context_by_flow_id[flow_id] = cached
-        return cached
-
-    async def _load_flow(self, *, flow_id: UUID) -> Any:
-        cached = self._flow_by_id.get(flow_id)
-        if cached is None:
-            cached = await self.flow_repo.get(
-                flow_id=flow_id, tenant_id=self.user.tenant_id
-            )
-            self._flow_by_id[flow_id] = cached
+            self._flow_context_by_mode[key] = cached
         return cached
 
     async def load_space_access(
-        self, *, flow_id: UUID
+        self, *, flow_id: UUID, history: bool = False
     ) -> tuple["SpaceActor | None", int]:
         if self.space_service is None or self.actor_manager is None:
             return None, 0
+        # Resolved before the cache so a live read of a retired flow is refused
+        # even after a history read cached its space.
+        context = await self._load_flow_context(flow_id=flow_id, history=history)
         cached_access = self._space_access_by_flow_id.get(flow_id)
         if cached_access is not None:
             return cached_access
-        flow = await self._load_flow(flow_id=flow_id)
-        space = await self.space_service.get_space(flow.space_id)
+        space = await self.space_service.get_space(context.space_id)
         actor = self.actor_manager.get_space_actor_from_space(space)
         access = (actor, classification_level_for_space(space))
         self._space_access_by_flow_id[flow_id] = access
         return access
 
-    async def space_role(self, *, flow_id: UUID) -> FlowRunSpaceRole | None:
-        actor, _classification_level = await self.load_space_access(flow_id=flow_id)
+    async def space_role(
+        self, *, flow_id: UUID, history: bool = False
+    ) -> FlowRunSpaceRole | None:
+        actor, _classification_level = await self.load_space_access(
+            flow_id=flow_id, history=history
+        )
         return self._space_role_from_actor(actor)
 
     @staticmethod
@@ -169,21 +173,33 @@ class FlowRunAccessPolicy:
             return "admin" if role_value == "admin" else "owner"
         return None
 
-    async def can_list_all_runs_in_flow(self, *, flow_id: UUID) -> bool:
-        return await self.space_role(flow_id=flow_id) in {"admin", "owner"}
+    async def can_list_all_runs_in_flow(
+        self, *, flow_id: UUID, history: bool = False
+    ) -> bool:
+        return await self.space_role(flow_id=flow_id, history=history) in {
+            "admin",
+            "owner",
+        }
 
     async def ensure_can_access_run(
         self,
         run: FlowRunStatusSnapshot,
         *,
         access_kind: FlowRunAccessKind,
+        history: bool = False,
     ) -> None:
         if not self._is_known_access_kind(access_kind):
             self.deny_run_access(auth_layer="flow_run_access_kind")
+        if history and access_kind in _MUTATING_ACCESS_KINDS:
+            # A mutation of a retired flow's run answers like the retired flow:
+            # not found, whatever the caller asked for.
+            raise NotFoundException("Flow not found.")
         if run.tenant_id != self.user.tenant_id:
             self.deny_run_access(auth_layer="tenant_isolation")
         if access_kind in {"evidence_export_redacted", "evidence_export_raw"}:
-            await self._ensure_sensitive_flow_export_allowed(flow_id=run.flow_id)
+            await self._ensure_sensitive_flow_export_allowed(
+                flow_id=run.flow_id, history=history
+            )
         principal = self.principal()
         if principal.is_service_key:
             if not principal.matches_run(run):
@@ -196,7 +212,7 @@ class FlowRunAccessPolicy:
             )
             policy = self._evidence_policy()
             _actor, classification_level = await self.load_space_access(
-                flow_id=run.flow_id
+                flow_id=run.flow_id, history=history
             )
             if access_kind in {"status", "cancel", "content", "artifact"}:
                 return
@@ -233,7 +249,9 @@ class FlowRunAccessPolicy:
         if self.is_human_tenant_admin():
             return
 
-        actor, classification_level = await self.load_space_access(flow_id=run.flow_id)
+        actor, classification_level = await self.load_space_access(
+            flow_id=run.flow_id, history=history
+        )
         role_value = self._space_role_from_actor(actor)
         policy = self._evidence_policy()
 
@@ -294,6 +312,7 @@ class FlowRunAccessPolicy:
         run: FlowRunStatusSnapshot,
         *,
         access_kind: FlowRunAccessKind,
+        history: bool = False,
     ) -> PassageDisclosure:
         """Whether this reader may see verbatim retrieved passage text.
 
@@ -306,7 +325,7 @@ class FlowRunAccessPolicy:
         # reader, so they are read directly rather than through the space
         # service, whose membership check a tenant admin is not subject to.
         # A tenant admin bypasses authorization, never the data's classification.
-        context = await self._load_evidence_access_context(flow_id=run.flow_id)
+        context = await self._load_flow_context(flow_id=run.flow_id, history=history)
         if not context.sensitive and not context.classified:
             return "text_disclosed"
         # A raw export has already cleared the sensitive-flow and classification
@@ -318,11 +337,13 @@ class FlowRunAccessPolicy:
             return "text_withheld_sensitive_flow"
         return "text_withheld_classified_space"
 
-    async def _ensure_sensitive_flow_export_allowed(self, *, flow_id: UUID) -> None:
+    async def _ensure_sensitive_flow_export_allowed(
+        self, *, flow_id: UUID, history: bool
+    ) -> None:
         # The access context resolves sensitivity fail-closed: metadata that
         # cannot be parsed counts as sensitive instead of raising and taking
         # the whole export path down with it.
-        context = await self._load_evidence_access_context(flow_id=flow_id)
+        context = await self._load_flow_context(flow_id=flow_id, history=history)
         if (
             context.sensitive
             and not self._evidence_policy().allow_sensitive_flow_exports
