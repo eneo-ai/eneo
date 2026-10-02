@@ -399,6 +399,11 @@ async def test_attempt_token_fences_claim_renewal_and_terminalization(
             )
             is True
         )
+        website_record = await session.get(WebsitesTable, website.id)
+        assert website_record is not None
+        website_record.consecutive_failures = 3
+        retry_at = datetime.now(timezone.utc) + timedelta(hours=4)
+        website_record.next_retry_at = retry_at
         assert (
             await repo.finish_attempt(
                 uuid4(),
@@ -412,9 +417,12 @@ async def test_attempt_token_fences_claim_renewal_and_terminalization(
                 attempt_id,
                 outcome=CrawlOutcome.SUCCEEDED,
                 lease_owner="different-worker",
+                counts_as_scheduled_run=False,
             )
             is False
         )
+        assert website_record.consecutive_failures == 3
+        assert website_record.next_retry_at == retry_at
         with pytest.raises(
             ValueError,
             match="Non-clean crawl outcomes require a failure code",
@@ -438,9 +446,12 @@ async def test_attempt_token_fences_claim_renewal_and_terminalization(
                 attempt_id,
                 outcome=CrawlOutcome.SUCCEEDED,
                 lease_owner="crawler-1",
+                counts_as_scheduled_run=True,
             )
             is True
         )
+        assert website_record.consecutive_failures == 0
+        assert website_record.next_retry_at is None
         attempt = await session.get(CrawlAttempts, attempt_id)
         assert attempt is not None
         attempt.dispatch_payload = {"schema_version": 1}

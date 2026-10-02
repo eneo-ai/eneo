@@ -14,6 +14,7 @@ from eneo.websites.domain.crawl_run_repo import (
     WebsiteCrawlActiveError,
     WebsiteCrawlCleanupPendingError,
 )
+from eneo.websites.domain.http_auth_credentials import HttpAuthDestinationError
 from eneo.websites.domain.website import UpdateInterval, Website
 
 if TYPE_CHECKING:
@@ -142,15 +143,18 @@ class WebsiteCRUDService:
 
         website = space.get_website(website_id=id)
 
-        website.update(
-            name=name,
-            url=url,
-            download_files=download_files,
-            crawl_type=crawl_type,
-            update_interval=update_interval,
-            http_auth_username=http_auth_username,
-            http_auth_password=http_auth_password,
-        )
+        try:
+            website.update(
+                name=name,
+                url=url,
+                download_files=download_files,
+                crawl_type=crawl_type,
+                update_interval=update_interval,
+                http_auth_username=http_auth_username,
+                http_auth_password=http_auth_password,
+            )
+        except HttpAuthDestinationError as exc:
+            raise BadRequestException(str(exc)) from exc
 
         await self.space_repo.update(space=space)
 
