@@ -1,4 +1,11 @@
 import type { StatusTone } from "@/components/composites/status-label";
+import {
+  crawlRunState,
+  isActiveCrawlRun,
+  isCompletedWithMissingResources,
+  isMinorPartial,
+  type CrawlRunState
+} from "./crawl-run-state";
 import type { CrawlRun, Website } from "./knowledge";
 
 /** A status for a status-dot cell: tone, translation key and optional fix link. */
@@ -12,12 +19,16 @@ export type KnowledgeStatus = {
 
 /** A crawl that can still change the website's indexed content. */
 export function isActiveCrawl(crawl: CrawlRun | null | undefined): boolean {
-  return crawl?.status === "queued" || crawl?.status === "in progress";
+  return crawl ? isActiveCrawlRun(crawl) : false;
 }
 
 const SKIPPED_PREFIX = "skipped duplicate crawl";
 
-/** A failed crawl that only stood aside for an identical crawl already running. */
+/**
+ * A run from before the crawler rewrite that only stood aside for an
+ * identical crawl already running (the rewrite returns the active run
+ * instead of recording a second one).
+ */
 export function isSkippedCrawl(crawl: CrawlRun | null | undefined): boolean {
   return (
     crawl?.status === "failed" &&
@@ -25,50 +36,116 @@ export function isSkippedCrawl(crawl: CrawlRun | null | undefined): boolean {
   );
 }
 
-/** Finished, but some pages or files could not be read. */
-export function crawlHasWarnings(crawl: CrawlRun): boolean {
-  return (
-    crawl.status === "complete" && ((crawl.pages_failed ?? 0) > 0 || (crawl.files_failed ?? 0) > 0)
-  );
+/**
+ * How a run's state reads: the states that are over and fine (`done`), that
+ * ended with something to look at (`warning`), that failed (`error`), that
+ * are still going (`active`) or that were stopped (`stopped`).
+ */
+function statusGroup(
+  crawl: CrawlRun,
+  state: CrawlRunState
+): "done" | "notes" | "warning" | "error" | "active" | "stopped" {
+  switch (state) {
+    case "queued":
+    case "running":
+    case "finalizing":
+    case "stopping":
+      return "active";
+    case "succeeded":
+    case "unchanged":
+      return "done";
+    case "partial":
+      return isCompletedWithMissingResources(crawl)
+        ? "done"
+        : isMinorPartial(crawl)
+          ? "notes"
+          : "warning";
+    case "empty":
+      return "warning";
+    case "cancelled":
+      return "stopped";
+    case "failed":
+    case "interrupted":
+    case "unknown":
+      return "error";
+  }
 }
+
+const ACTIVE_KEYS: Partial<Record<CrawlRunState, { labelKey: string; isPulsing?: boolean }>> = {
+  queued: { labelKey: "queued" },
+  running: { labelKey: "in_progress", isPulsing: true },
+  finalizing: { labelKey: "crawl_status_finalizing", isPulsing: true },
+  stopping: { labelKey: "crawl_status_stopping", isPulsing: true }
+};
 
 /** State of one crawl run, for the website's crawl history. */
 export function crawlRunStatus(crawl: CrawlRun): KnowledgeStatus {
-  if (isSkippedCrawl(crawl)) return { tone: "neutral", labelKey: "crawl_skipped" };
-  switch (crawl.status) {
-    case "queued":
-      return { tone: "accent", labelKey: "queued" };
-    case "in progress":
-      return { tone: "accent", labelKey: "in_progress", isPulsing: true };
-    case "complete":
-      return crawlHasWarnings(crawl)
-        ? { tone: "warning", labelKey: "crawl_completed_with_warnings" }
-        : { tone: "success", labelKey: "complete" };
-    default:
-      return { tone: "error", labelKey: "failed" };
+  const state = crawlRunState(crawl);
+  switch (statusGroup(crawl, state)) {
+    case "active":
+      return { tone: "accent", ...ACTIVE_KEYS[state]! };
+    case "done":
+      return {
+        tone: "success",
+        labelKey: state === "unchanged" ? "crawl_status_unchanged" : "crawl_status_succeeded"
+      };
+    case "notes":
+      return { tone: "success", labelKey: "crawl_completed_with_notes" };
+    case "warning":
+      return {
+        tone: "warning",
+        labelKey: state === "empty" ? "crawl_status_empty" : "crawl_completed_with_warnings"
+      };
+    case "stopped":
+      return {
+        tone: "neutral",
+        labelKey: isSkippedCrawl(crawl) ? "crawl_skipped" : "crawl_status_cancelled"
+      };
+    case "error":
+      return {
+        tone: "error",
+        labelKey:
+          state === "interrupted"
+            ? "crawl_status_interrupted"
+            : state === "unknown"
+              ? "crawl_status_unknown"
+              : "failed"
+      };
   }
 }
 
 /**
  * Latest-crawl state of a website, shared by the space overview and the
  * websites tab so both say the same thing. The crawl API has no progress
- * figure, so an in-progress crawl has no percentage. With `detailHref`, a
- * failed crawl links to the website page, where it can be run again.
+ * figure, so a running crawl has no percentage. With `detailHref`, a failed
+ * crawl links to the website page, where it can be run again.
  */
 export function websiteStatus(website: Website, detailHref?: string): KnowledgeStatus {
   const crawl = website.latest_crawl;
   if (!crawl) return { tone: "neutral", labelKey: "website_not_yet_crawled" };
-  if (isSkippedCrawl(crawl)) return { tone: "neutral", labelKey: "sync_skipped" };
-  switch (crawl.status) {
-    case "queued":
-      return { tone: "accent", labelKey: "queued" };
-    case "in progress":
-      return { tone: "accent", labelKey: "space_status_syncing", isPulsing: true };
-    case "complete":
-      return crawlHasWarnings(crawl)
-        ? { tone: "warning", labelKey: "synced_with_warnings" }
-        : { tone: "success", labelKey: "space_status_indexed" };
-    default:
+  const state = crawlRunState(crawl);
+  switch (statusGroup(crawl, state)) {
+    case "active":
+      return {
+        tone: "accent",
+        ...ACTIVE_KEYS[state]!,
+        ...(state === "running" ? { labelKey: "space_status_syncing" } : {})
+      };
+    case "done":
+      return { tone: "success", labelKey: "space_status_indexed" };
+    case "notes":
+      return { tone: "success", labelKey: "crawl_completed_with_notes" };
+    case "warning":
+      return {
+        tone: "warning",
+        labelKey: state === "empty" ? "crawl_status_empty" : "synced_with_warnings"
+      };
+    case "stopped":
+      return {
+        tone: "neutral",
+        labelKey: isSkippedCrawl(crawl) ? "sync_skipped" : "crawl_status_cancelled"
+      };
+    case "error":
       return {
         tone: "error",
         labelKey: "space_status_sync_error",
@@ -79,7 +156,7 @@ export function websiteStatus(website: Website, detailHref?: string): KnowledgeS
 
 /**
  * Sort rank of a status, problems first: failed, warnings, running, queued,
- * never crawled or skipped, done. Derived from the status itself, so a table
+ * never crawled or stopped, done. Derived from the status itself, so a table
  * sorts by exactly what its status column says.
  */
 export function statusRank(status: KnowledgeStatus): number {
@@ -98,13 +175,13 @@ export function statusRank(status: KnowledgeStatus): number {
 }
 
 /**
- * When the website was last synced: the latest crawl's finish time if that
- * crawl completed. A running, queued, failed or skipped crawl says nothing
- * about the last successful sync (the API only returns the latest crawl).
+ * When the website's content was last indexed: the end of the latest run
+ * that succeeded, found nothing changed, found nothing, or completed partly.
+ * A later active, failed or stopped run does not replace it (the API keeps
+ * `last_indexed_at` for exactly this).
  */
 export function websiteSyncedAt(website: Website): string | null {
-  const crawl = website.latest_crawl;
-  return crawl?.status === "complete" ? (crawl.finished_at ?? null) : null;
+  return website.last_indexed_at ?? null;
 }
 
 /** A sync older than this is flagged as stale, as in the Svelte app. */

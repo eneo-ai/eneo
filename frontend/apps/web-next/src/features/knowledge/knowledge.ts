@@ -1,11 +1,14 @@
-import { queryOptions } from "@tanstack/react-query";
+import { infiniteQueryOptions, queryOptions } from "@tanstack/react-query";
 import type { EneoClient } from "@/lib/api/browser";
 import { unwrap } from "@/lib/api/errors";
 import type { Schema } from "@/lib/api/models";
+import { cursorPagination } from "@/lib/api/pagination";
 
 export type Collection = Schema<"CollectionPublic">;
 export type Website = Schema<"WebsitePublic">;
 export type CrawlRun = NonNullable<Website["latest_crawl"]>;
+export type CrawlFailure = Schema<"CrawlResourceFailurePublic">;
+export type CrawlFailurePage = Schema<"CrawlFailurePagePublic">;
 export type InfoBlob = Schema<"InfoBlobPublicNoText">;
 export type EmbeddingModel = Schema<"EmbeddingModelPublic">;
 export type IntegrationKnowledge = Schema<"IntegrationKnowledgePublic">;
@@ -43,16 +46,79 @@ export function websiteQueryOptions(api: EneoClient, websiteId: string) {
   });
 }
 
-export function websiteCrawlRunsQueryOptions(api: EneoClient, websiteId: string) {
+/** Rows per page of a website's crawl history and indexed content (apps/web's PAGINATION.PAGE_SIZE). */
+export const WEBSITE_PAGE_SIZE = 100;
+
+/** The website's latest run alone: cheap enough to poll for its state. */
+export function websiteLatestRunQueryOptions(api: EneoClient, websiteId: string) {
   return queryOptions({
-    queryKey: ["websites", websiteId, "crawl-runs"],
-    queryFn: async (): Promise<CrawlRun[]> => {
-      const page = await unwrap(
-        api.GET("/api/v1/websites/{id}/runs/", { params: { path: { id: websiteId } } })
-      );
-      // Newest first; the backend returns runs in creation order.
-      return [...page.items].reverse();
-    }
+    queryKey: ["websites", websiteId, "crawl-runs", "latest"],
+    queryFn: async (): Promise<CrawlRun | null> =>
+      (await unwrap(
+        api.GET("/api/v1/websites/{id}/runs/latest/", { params: { path: { id: websiteId } } })
+      )) ?? null
+  });
+}
+
+/** The website's crawl history, newest first, a page at a time. */
+export function websiteCrawlRunsQueryOptions(api: EneoClient, websiteId: string) {
+  return infiniteQueryOptions({
+    ...cursorPagination,
+    queryKey: ["websites", websiteId, "crawl-runs", "pages"],
+    queryFn: ({ pageParam }) =>
+      unwrap(
+        api.GET("/api/v1/websites/{id}/runs/", {
+          params: {
+            path: { id: websiteId },
+            query: { limit: WEBSITE_PAGE_SIZE, cursor: pageParam }
+          }
+        })
+      )
+  });
+}
+
+/** What the website has indexed, a page at a time. */
+export function websiteBlobPagesQueryOptions(api: EneoClient, websiteId: string) {
+  return infiniteQueryOptions({
+    ...cursorPagination,
+    queryKey: ["websites", websiteId, "info-blobs", "pages"],
+    queryFn: ({ pageParam }) =>
+      unwrap(
+        api.GET("/api/v1/websites/{id}/info-blobs/page/", {
+          params: {
+            path: { id: websiteId },
+            query: { limit: WEBSITE_PAGE_SIZE, cursor: pageParam }
+          }
+        })
+      )
+  });
+}
+
+/** Failed addresses per page of the failures endpoint. */
+export const CRAWL_FAILURES_PAGE_SIZE = 100;
+
+/**
+ * A run's recorded page and file failures (optionally one kind), oldest
+ * first, a page at a time. The admin crawler page reads the same shape from
+ * its own endpoint, so it passes its own options to the details dialog.
+ */
+export function crawlFailuresQueryOptions(
+  api: EneoClient,
+  runId: string,
+  kind: CrawlFailure["kind"] | null
+) {
+  return infiniteQueryOptions({
+    ...cursorPagination,
+    queryKey: ["crawl-runs", runId, "failures", kind],
+    queryFn: ({ pageParam }): Promise<CrawlFailurePage> =>
+      unwrap(
+        api.GET("/api/v1/crawl-runs/{id}/failures/", {
+          params: {
+            path: { id: runId },
+            query: { limit: CRAWL_FAILURES_PAGE_SIZE, cursor: pageParam, kind }
+          }
+        })
+      )
   });
 }
 

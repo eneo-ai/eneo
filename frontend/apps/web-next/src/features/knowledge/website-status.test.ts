@@ -25,20 +25,25 @@ const t = (key: string, values: Record<string, string | number> = {}) =>
     .join(",")})`;
 
 describe("websiteSyncedAt", () => {
-  it("is when the latest crawl completed, and unknown while one runs or after a failure", () => {
-    expect(websiteSyncedAt(website({ finished_at: "2026-09-10T09:00:00Z" }))).toBe(
-      "2026-09-10T09:00:00Z"
-    );
-    expect(websiteSyncedAt(website({ status: "in progress", finished_at: null }))).toBeNull();
-    expect(websiteSyncedAt(website({ status: "queued", finished_at: null }))).toBeNull();
-    expect(websiteSyncedAt(website({ status: "failed" }))).toBeNull();
-    expect(websiteSyncedAt(website(null))).toBeNull();
+  it("is the API's last indexed time, which a later running or failed run does not replace", () => {
+    expect(
+      websiteSyncedAt(
+        website(
+          { status: "failed", finished_at: null },
+          { last_indexed_at: "2026-09-10T09:00:00Z" }
+        )
+      )
+    ).toBe("2026-09-10T09:00:00Z");
+    expect(
+      websiteSyncedAt(website({ status: "in progress" }, { last_indexed_at: null }))
+    ).toBeNull();
+    expect(websiteSyncedAt(website(null, { last_indexed_at: null }))).toBeNull();
   });
 
   it("sorts websites that never synced first when sorting by last sync", () => {
     const compare = websiteComparators((a, b) => a.localeCompare(b)).synced;
-    const synced = website({ finished_at: "2026-09-10T09:00:00Z" }, { id: "synced" });
-    const running = website({ status: "in progress", finished_at: null }, { id: "running" });
+    const synced = website({}, { id: "synced", last_indexed_at: "2026-09-10T09:00:00Z" });
+    const running = website({ status: "in progress" }, { id: "running", last_indexed_at: null });
     expect([synced, running].sort(compare).map((item) => item.id)).toEqual(["running", "synced"]);
   });
 });

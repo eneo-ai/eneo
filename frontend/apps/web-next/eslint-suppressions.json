@@ -67,11 +67,6 @@
       "count": 1
     }
   },
-  "src/features/knowledge/website-dialog.tsx": {
-    "eneo/no-literal-accessible-name": {
-      "count": 2
-    }
-  },
   "src/features/services/editor/service-editor.tsx": {
     "eneo/no-literal-accessible-name": {
       "count": 1

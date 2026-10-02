@@ -5,6 +5,7 @@ import {
   ChartColumn,
   Cpu,
   Database,
+  Globe,
   History,
   KeyRound,
   LayoutTemplate,
@@ -56,7 +57,8 @@ export function adminNavGroups({
       items: [
         { href: "/admin", icon: Building2, labelKey: "organisation" },
         { href: "/admin/insights", icon: ChartColumn, labelKey: "insights" },
-        { href: "/admin/usage", icon: Activity, labelKey: "usage" }
+        { href: "/admin/usage", icon: Activity, labelKey: "usage" },
+        { href: "/admin/crawler", icon: Globe, labelKey: "admin_crawler_title" }
       ]
     },
     {

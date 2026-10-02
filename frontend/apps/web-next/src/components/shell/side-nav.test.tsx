@@ -384,6 +384,7 @@ describe("DesktopSideNav (admin)", () => {
       "/admin",
       "/admin/insights",
       "/admin/usage",
+      "/admin/crawler",
       "/admin/personal-assistant",
       "/admin/prompt-library",
       "/admin/security-classifications",

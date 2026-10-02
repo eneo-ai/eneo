@@ -48,6 +48,7 @@ vi.mock("@/lib/api/browser", () => ({
 vi.mock("sonner", () => ({
   toast: {
     success: (message: string) => state.toasts.push({ kind: "success", message }),
+    info: (message: string) => state.toasts.push({ kind: "info", message }),
     error: (message: string, options?: { description?: string }) =>
       state.toasts.push({ kind: "error", message, description: options?.description })
   }
@@ -164,9 +165,9 @@ describe("KnowledgePage", () => {
     );
 
     const table = screen.getByRole("table", { name: "Webbplatser" });
-    // The same words as on the space overview.
+    // The run's own state, as on the website page and the admin crawler page.
     expect(within(table).getByText("Inte indexerad ännu")).toBeTruthy();
-    expect(within(table).getByText("Synkfel")).toBeTruthy();
+    expect(within(table).getByText("Misslyckades")).toBeTruthy();
     expect(within(table).getAllByRole("link", { name: /Gå till webbplats/ })).toHaveLength(2);
     await expectNoAxeViolations(container);
   });
@@ -176,7 +177,7 @@ describe("KnowledgePage", () => {
       latest_crawl: { ...(makeWebsite().latest_crawl as object), status: "in progress" }
     });
     show(makeSpace({ websites: [running] }), "websites");
-    expect(screen.getByText("Synkroniseras")).toBeTruthy();
+    expect(screen.getByText("Pågår")).toBeTruthy();
 
     state.space = makeSpace({
       websites: [
@@ -185,7 +186,7 @@ describe("KnowledgePage", () => {
         })
       ]
     });
-    expect(await screen.findByText("Indexerad", undefined, { timeout: 5_000 })).toBeTruthy();
+    expect(await screen.findByText("Klar", undefined, { timeout: 5_000 })).toBeTruthy();
   });
 
   it("selects websites for a bulk sync", () => {
@@ -346,10 +347,88 @@ describe("KnowledgePage", () => {
     );
     await waitFor(() =>
       expect(state.toasts).toEqual([
-        { kind: "error", message: "0 köade, 1 misslyckades", description: "Tidsgränsen överskreds" }
+        {
+          kind: "error",
+          message:
+            "De valda synkroniseringarna kunde inte startas. Kontrollera statusen och försök igen.",
+          description: undefined
+        }
       ])
     );
-    expect(screen.getByRole("button", { name: "Anslut webbplats" })).toBeTruthy();
+    // The website that could not be synced stays selected, for a retry.
+    expect(screen.getByRole("button", { name: "Synkronisera valda (1)" })).toBeTruthy();
+  });
+
+  it("stops every active crawl from the toolbar after a confirmation", async () => {
+    const running = (id: string, name: string) =>
+      makeWebsite({
+        id,
+        name,
+        latest_crawl: {
+          ...(makeWebsite().latest_crawl as object),
+          id: `run-${id}`,
+          status: "in progress",
+          phase: "running",
+          outcome: null
+        }
+      });
+    show(
+      makeSpace({ websites: [running("w1", "Intranätet"), makeWebsite({ id: "w2" })] }),
+      "websites"
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "Stoppa alla aktiva (1)" }));
+    const dialog = await screen.findByRole("alertdialog", {
+      name: "Stoppa aktiva synkroniseringar? (1)"
+    });
+    state.bulkResult = {
+      total: 1,
+      stopped: 1,
+      not_running: 0,
+      failed: 0,
+      crawl_runs: [],
+      errors: []
+    };
+    fireEvent.click(within(dialog).getByRole("button", { name: "Stoppa" }));
+
+    await waitFor(() =>
+      expect(state.posted).toEqual([
+        { path: "/api/v1/websites/bulk/stop/", body: { website_ids: ["w1"] } }
+      ])
+    );
+    await waitFor(() =>
+      expect(state.toasts).toEqual([{ kind: "success", message: "Skickade stoppbegäranden: 1." }])
+    );
+  });
+
+  it("removes selected websites through the bulk endpoint and keeps the ones that wait for the crawler", async () => {
+    show(
+      makeSpace({ websites: [makeWebsite(), makeWebsite({ id: "w2", name: "Intranätet" })] }),
+      "websites"
+    );
+    fireEvent.click(screen.getByRole("checkbox", { name: "Markera alla rader" }));
+    fireEvent.click(screen.getByRole("button", { name: "Ta bort valda (2)" }));
+    const dialog = await screen.findByRole("alertdialog", { name: "Ta bort webbplatskällor? (2)" });
+    state.bulkResult = {
+      total: 2,
+      deleted: 1,
+      not_found: 0,
+      failed: 1,
+      errors: [{ website_id: "w2", error: "crawl_stop_requested" }]
+    };
+    fireEvent.click(within(dialog).getByRole("button", { name: "Ta bort källor" }));
+
+    await waitFor(() =>
+      expect(state.posted).toEqual([
+        { path: "/api/v1/websites/bulk/delete/", body: { website_ids: ["website-1", "w2"] } }
+      ])
+    );
+    await waitFor(() => expect(state.toasts.map((toast) => toast.kind)).toEqual(["info"]));
+    expect(state.toasts[0]!.message).toMatch(/^Vissa källor togs bort\./);
+    // The website the crawler still has to stop stays selected.
+    await waitFor(() =>
+      expect(screen.getByRole("button", { name: "Ta bort valda (1)" })).toBeTruthy()
+    );
   });
 
   it("shows why crawls failed, what failed and when the next crawl runs", () => {
@@ -365,7 +444,7 @@ describe("KnowledgePage", () => {
           makeWebsite({
             id: "failed",
             name: "Trasig",
-            latest_crawl: crawl({ status: "failed", result_location: "Tidsgränsen överskreds" })
+            latest_crawl: crawl({ status: "failed", failure_code: "timed_out" })
           }),
           makeWebsite({
             id: "warnings",
@@ -377,6 +456,7 @@ describe("KnowledgePage", () => {
             id: "stale",
             name: "Gammal",
             update_interval: "never",
+            last_indexed_at: daysAgo(12),
             latest_crawl: crawl({ finished_at: daysAgo(12) })
           }),
           makeWebsite({ id: "new", name: "Ny", latest_crawl: null })
@@ -387,12 +467,18 @@ describe("KnowledgePage", () => {
 
     const row = (name: string) => screen.getByRole("link", { name }).closest("tr")!;
     const cells = (name: string) => within(row(name)).getAllByRole("cell");
-    // Status (visible detail, no tooltip), then Senast synkad, then Automatiska uppdateringar.
-    expect(cells("Trasig")[3]!.textContent).toBe("SynkfelTidsgränsen överskreds");
-    expect(cells("Trasig")[4]!.textContent).toBe("—");
-    expect(cells("Varningar")[3]!.textContent).toBe(
-      "Synkroniserad med varningar1 sida misslyckades"
+    // Status (visible detail, no tooltip), then Senast indexerad, then Automatiska uppdateringar.
+    expect(cells("Trasig")[3]!.textContent).toBe(
+      "MisslyckadesWebbplatsen svarade inte inom tidsgränsen. Försök igen senare.Visa detaljer"
     );
+    expect(cells("Trasig")[4]!.textContent).toBe("—");
+    // The failed pages link to the run's details.
+    expect(cells("Varningar")[3]!.textContent).toBe("Delvis klarKunde inte indexeras:Sidor: 1");
+    expect(
+      within(cells("Varningar")[3]!).getByRole("button", {
+        name: "Visa sidor som inte kunde indexeras (1)"
+      })
+    ).toBeTruthy();
     expect(cells("Varningar")[5]!.textContent).toMatch(/^Varje dagNästa indexering: \d/);
     expect(cells("Gammal")[4]!.textContent).toMatch(/Över 10 dagar sedan$/);
     expect(cells("Gammal")[5]!.textContent).toBe("Aldrig");

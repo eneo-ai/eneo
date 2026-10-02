@@ -3,13 +3,34 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { cleanup, fireEvent, screen, within } from "@testing-library/react";
 import { NextIntlClientProvider } from "next-intl";
 import { renderToString } from "react-dom/server";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { AstryxProvider } from "@/components/providers/astryx-provider";
 import messages from "@/lib/i18n/messages/sv.json";
 import { expectNoAxeViolations } from "@/test/axe";
 import { renderInApp } from "@/test/render";
 import { CrawlRunsTable } from "./crawl-runs";
 import type { CrawlRun } from "./knowledge";
+
+const failuresPage = vi.hoisted(() => ({
+  items: [
+    { id: "f1", url: "https://example.com/saknas", reason: "http_404", kind: "page" },
+    { id: "f2", url: "https://example.com/tom", reason: "EMPTY_CONTENT", kind: "page" }
+  ],
+  total_count: 2,
+  next_cursor: null,
+  details_available: true,
+  run: null as unknown
+}));
+
+vi.mock("@/lib/api/browser", () => ({
+  browserApi: {
+    GET: (path: string) =>
+      Promise.resolve({
+        data: path === "/api/v1/crawl-runs/{id}/failures/" ? failuresPage : null,
+        response: new Response("{}")
+      })
+  }
+}));
 
 afterEach(cleanup);
 
@@ -23,6 +44,7 @@ function run(overrides: Partial<CrawlRun> & Pick<CrawlRun, "id">): CrawlRun {
     pages_failed: 0,
     files_failed: 0,
     result_location: null,
+    origin: "manual",
     ...overrides
   } as CrawlRun;
 }
@@ -52,7 +74,7 @@ describe("CrawlRunsTable", () => {
 
     // Named like the website page's tab it fills.
     expect(screen.getByRole("table", { name: "Indexeringar" })).toBeTruthy();
-    expect(statusColumn()).toEqual(["Delvis klar", "MisslyckadesTimeout", "Slutförd"]);
+    expect(statusColumn()).toEqual(["Delvis klar", "Misslyckades", "Klar"]);
     expect(
       screen.getByRole("button", { name: "Sortera efter Startad, sorterat fallande" })
     ).toBeTruthy();
@@ -62,28 +84,37 @@ describe("CrawlRunsTable", () => {
     await expectNoAxeViolations(container);
   });
 
-  it("counts pages and files with plural forms and shows why they failed", () => {
-    renderInApp(
-      <CrawlRunsTable
-        runs={[
-          run({
-            id: "one",
-            pages_crawled: 4,
-            files_downloaded: 1,
-            pages_failed: 1,
-            failure_summary: { EMPTY_CONTENT: 1 }
-          })
-        ]}
-      />
-    );
+  it("counts what succeeded and opens the failed pages in the run's details", async () => {
+    const partial = run({
+      id: "one",
+      pages_crawled: 4,
+      files_downloaded: 1,
+      pages_unchanged: 2,
+      pages_failed: 1,
+      failure_summary: { http_404: 1 }
+    });
+    failuresPage.run = partial;
+    renderInApp(<CrawlRunsTable runs={[partial]} />);
     const results = within(screen.getByRole("table")).getAllByRole("row")[1]!;
     const cell = within(results).getAllByRole("cell")[2]!;
-    expect(within(cell).getByText("Indexerade 4 sidor och 1 fil")).toBeTruthy();
-    expect(within(cell).getByText("3 sidor och 1 fil lyckades")).toBeTruthy();
-    expect(within(cell).getByText("1 sida misslyckades")).toBeTruthy();
-    // The breakdown is text, reachable without a pointer (no title tooltip).
-    expect(within(cell).getByText("Inget textinnehåll: 1")).toBeTruthy();
+    expect(within(cell).getByText("4 sidor och 1 filer lyckades")).toBeTruthy();
+    expect(within(cell).getByText("2 sidor oförändrade")).toBeTruthy();
     expect(cell.querySelector("[title]")).toBeNull();
+
+    // The failed count is a link to the run's failed addresses of that kind.
+    fireEvent.click(
+      within(cell).getByRole("button", { name: "Visa sidor som inte kunde indexeras (1)" })
+    );
+    const dialog = await screen.findByRole("dialog");
+    expect(within(dialog).getByRole("radio", { name: "Sidor" }).getAttribute("aria-checked")).toBe(
+      "true"
+    );
+    const list = await within(dialog).findByRole("list", { name: "Misslyckade adresser" });
+    expect(within(list).getByText("Adressen hittades inte (404)")).toBeTruthy();
+    expect(within(list).getByRole("link", { name: /example\.com\/saknas/ })).toBeTruthy();
+    // The reasons across the run, with what to do, behind a disclosure.
+    fireEvent.click(within(dialog).getByRole("button", { name: "Felorsaker i hela körningen" }));
+    expect(within(dialog).getByText(/Öppna länken och kontrollera/)).toBeTruthy();
   });
 
   it("renders dates only after hydration, in the viewer's time zone", () => {
@@ -128,12 +159,12 @@ describe("CrawlRunsTable", () => {
     renderInApp(<CrawlRunsTable runs={RUNS} />);
 
     fireEvent.click(screen.getByRole("button", { name: "Sortera efter Status" }));
-    expect(statusColumn()[0]).toBe("MisslyckadesTimeout");
+    expect(statusColumn()[0]).toBe("Misslyckades");
 
     fireEvent.change(screen.getByRole("textbox", { name: "Filtrera indexeringar" }), {
       target: { value: "timeout" }
     });
-    expect(statusColumn()).toEqual(["MisslyckadesTimeout"]);
+    expect(statusColumn()).toEqual(["Misslyckades"]);
 
     fireEvent.change(screen.getByRole("textbox", { name: "Filtrera indexeringar" }), {
       target: { value: "saknas" }

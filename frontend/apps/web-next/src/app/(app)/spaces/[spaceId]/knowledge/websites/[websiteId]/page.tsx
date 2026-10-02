@@ -7,8 +7,9 @@ import { eneoApi } from "@/lib/api/server";
 import { env } from "@/lib/env";
 import {
   formatWebsiteName,
-  websiteBlobsQueryOptions,
+  websiteBlobPagesQueryOptions,
   websiteCrawlRunsQueryOptions,
+  websiteLatestRunQueryOptions,
   websiteQueryOptions
 } from "@/features/knowledge/knowledge";
 import { spacePageTitle } from "@/features/spaces/page-title";
@@ -39,8 +40,9 @@ export default async function WebsitePage({
   try {
     await Promise.all([
       queryClient.query(websiteQueryOptions(api, websiteId)),
-      queryClient.query(websiteCrawlRunsQueryOptions(api, websiteId)),
-      queryClient.query(websiteBlobsQueryOptions(api, websiteId))
+      queryClient.query(websiteLatestRunQueryOptions(api, websiteId)),
+      queryClient.infiniteQuery(websiteCrawlRunsQueryOptions(api, websiteId)),
+      queryClient.infiniteQuery(websiteBlobPagesQueryOptions(api, websiteId))
     ]);
   } catch (error) {
     if (error instanceof EneoApiError && error.status === 404) notFound();

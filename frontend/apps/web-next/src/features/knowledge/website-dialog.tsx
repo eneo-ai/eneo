@@ -47,6 +47,16 @@ import type { Website } from "./knowledge";
 type CrawlType = Website["crawl_type"];
 type UpdateInterval = Website["update_interval"];
 
+/** A complete http(s) address, which is what the crawler can fetch (apps/web's websiteForm.ts). */
+export function isSupportedWebsiteUrl(value: string): boolean {
+  try {
+    const url = new URL(value);
+    return url.protocol === "http:" || url.protocol === "https:";
+  } catch {
+    return false;
+  }
+}
+
 type ExistingWebsite = {
   space_name: string;
   last_crawled_at: string | null;
@@ -228,7 +238,11 @@ export function WebsiteDialog({
     httpAuthPassword.length > 0 || httpAuthPasswordConfirmation.length > 0;
   const httpAuthNeedsNewCredentials =
     httpAuthEnabled && (!website?.requires_http_auth || httpAuthPasswordTouched);
-  const urlProblem = url.trim() ? null : t("required_field");
+  const urlProblem = !url.trim()
+    ? t("required_field")
+    : isSupportedWebsiteUrl(url.trim())
+      ? null
+      : t("website_url_invalid");
   const httpAuthUsernameProblem =
     httpAuthNeedsNewCredentials && !httpAuthUsername.trim() ? t("required_field") : null;
   const httpAuthPasswordProblem = httpAuthNeedsNewCredentials
@@ -312,14 +326,16 @@ export function WebsiteDialog({
                 value={url}
                 placeholder={
                   crawlType === "sitemap"
-                    ? "https://example.com/sitemap.xml"
-                    : "https://example.com"
+                    ? t("website_sitemap_url_placeholder")
+                    : t("website_url_placeholder")
                 }
                 onChange={(event) => setUrl(event.target.value)}
               />
               <FieldProblem id="website-url" problem={shown(urlProblem)} />
               <p className="text-muted-foreground text-sm">
-                {crawlType === "sitemap" ? t("full_url_sitemap") : t("url_description")}
+                {crawlType === "sitemap"
+                  ? t("website_sitemap_crawl_description")
+                  : t("website_basic_crawl_description")}
               </p>
             </div>
             <div className="flex flex-col gap-2">
@@ -334,7 +350,14 @@ export function WebsiteDialog({
             </div>
 
             <div className="flex items-center justify-between gap-4">
-              <Label htmlFor="website-http-auth">{t("requires_http_auth")}</Label>
+              <div className="flex flex-col gap-1">
+                <Label htmlFor="website-http-auth">{t("requires_http_auth")}</Label>
+                <p className="text-muted-foreground text-sm">
+                  {website?.requires_http_auth
+                    ? t("website_http_auth_replace_description")
+                    : t("website_http_auth_description")}
+                </p>
+              </div>
               <Switch
                 id="website-http-auth"
                 checked={httpAuthEnabled}
@@ -408,6 +431,9 @@ export function WebsiteDialog({
                     <SelectItem value="sitemap">{t("sitemap_based_crawl")}</SelectItem>
                   </SelectContent>
                 </Select>
+                <p className="text-muted-foreground text-sm">
+                  {t("website_crawl_type_description")}
+                </p>
               </div>
               <div className="flex flex-1 flex-col gap-2">
                 <Label htmlFor="website-update-interval">{t("automatic_updates")}</Label>
@@ -425,16 +451,22 @@ export function WebsiteDialog({
                     <SelectItem value="weekly">{t("every_week")}</SelectItem>
                   </SelectContent>
                 </Select>
+                <p className="text-muted-foreground text-sm">
+                  {t("website_automatic_updates_description")}
+                </p>
               </div>
             </div>
 
             <div className="flex items-center justify-between gap-4">
-              <Label
-                htmlFor="website-download-files"
-                className={crawlType === "sitemap" ? "opacity-50" : ""}
-              >
-                {t("download_analyse_files")}
-              </Label>
+              <div className="flex flex-col gap-1">
+                <Label htmlFor="website-download-files">{t("download_analyse_files")}</Label>
+                {/* Text, not a faded label, says why the switch is off for a sitemap. */}
+                <p className="text-muted-foreground text-sm">
+                  {crawlType === "sitemap"
+                    ? t("option_only_basic_crawls")
+                    : t("website_download_files_description")}
+                </p>
+              </div>
               <Switch
                 id="website-download-files"
                 disabled={crawlType === "sitemap"}

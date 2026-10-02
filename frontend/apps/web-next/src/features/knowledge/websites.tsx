@@ -18,7 +18,7 @@ import {
 import { Table } from "@/components/astryx/table";
 import { VisuallyHidden } from "@astryxdesign/core/VisuallyHidden";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { FolderInput, Globe, Pencil, RefreshCw, SearchX, Trash2 } from "lucide-react";
+import { FolderInput, Globe, Pencil, RefreshCw, SearchX, Square, Trash2 } from "lucide-react";
 import { useTranslations } from "next-intl";
 import { useId, useMemo, useState, type Dispatch, type SetStateAction } from "react";
 import { ConfirmDialogControlled } from "@/components/composites/confirm-dialog";
@@ -36,7 +36,7 @@ import { useRemovalMutation } from "@/features/spaces/removal";
 import { spaceQueryOptions } from "@/features/spaces/space";
 import { SpaceTableFrame } from "@/features/spaces/table-frame";
 import { useSpace } from "@/features/spaces/use-space";
-import { embeddingModelsInUse, formatWebsiteName, type Website } from "./knowledge";
+import { embeddingModelsInUse, formatWebsiteName, type CrawlRun, type Website } from "./knowledge";
 import { WEBSITE_DEFAULT_SORT, websiteComparators, type WebsiteSortKey } from "./knowledge-sort";
 import { MoveResourceDialog } from "./move-dialog";
 import { NoCreatePermissionInfo } from "./no-create-permission-info";
@@ -44,46 +44,48 @@ import { filterWebsites } from "./table-controls";
 import { KnowledgeLabel, KnowledgeNameCell, KnowledgeTableControls } from "./table-controls-ui";
 import { WebsiteDialog } from "./website-dialog";
 import {
-  crawlFailuresText,
-  isActiveCrawl,
-  isSkippedCrawl,
-  nextCrawlAt,
-  STALE_SYNC_DAYS,
-  websiteStatus,
-  websiteSyncedAt
-} from "./website-status";
+  bulkDeletionWaitsForCrawlerCleanup,
+  bulkFailureWebsiteIds,
+  deleteWebsiteBatches,
+  runWebsiteBatches,
+  stopWebsiteBatches,
+  type BulkDeleteSummary,
+  type BulkStopSummary
+} from "./bulk-website-actions";
+import { CrawlRunDetailsDialog } from "./crawl-run-details";
+import { canRequestCrawlStop, type CrawlFailureKind } from "./crawl-run-state";
+import { CrawlFailureActions, CrawlRunStatusLabel } from "./crawl-run-ui";
+import { isActiveCrawl, nextCrawlAt, STALE_SYNC_DAYS, websiteSyncedAt } from "./website-status";
 
 const ACTIVE_CRAWL_REFRESH_MS = 2_000;
 const IDLE_WEBSITE_REFRESH_MS = 30_000;
 
-/** The latest crawl's state, with why it was skipped or failed, or what failed. */
-function WebsiteStatusCell({ website }: { website: Website }) {
+/** Which run's failures to show, and of which kind. */
+type FailureSelection = { run: CrawlRun; kind: CrawlFailureKind | null };
+
+/** The latest run's state, with links to what failed in it. */
+function WebsiteStatusCell({
+  website,
+  onShowFailures
+}: {
+  website: Website;
+  onShowFailures: (selection: FailureSelection) => void;
+}) {
   const t = useTranslations();
-  const status = websiteStatus(website);
-  const crawl = website.latest_crawl;
-
-  let detail: string | undefined;
-  if (isSkippedCrawl(crawl)) {
-    detail = t("crawl_skipped_duplicate");
-  } else if (status.tone === "warning" && crawl) {
-    detail = crawlFailuresText(t, crawl);
-  } else if (status.tone === "error") {
-    detail = crawl?.result_location ?? undefined;
-  }
-
+  const run = website.latest_crawl;
+  if (!run) return <KnowledgeLabel tone="neutral" label={t("website_not_yet_crawled")} />;
   return (
-    <KnowledgeLabel
-      tone={status.tone}
-      label={t(status.labelKey)}
-      detail={detail}
-      isPulsing={status.isPulsing}
-    />
+    <span className="flex flex-col items-start gap-1">
+      <CrawlRunStatusLabel run={run} />
+      <CrawlFailureActions run={run} onSelect={(kind) => onShowFailures({ run, kind })} />
+    </span>
   );
 }
 
 /**
- * When the latest crawl completed; a sync older than ten days is flagged.
- * The age depends on the viewer's clock, so it is judged after hydration.
+ * When the website's content was last indexed; older than ten days is
+ * flagged. The age depends on the viewer's clock, so it is judged after
+ * hydration.
  */
 function WebsiteSyncedCell({ website }: { website: Website }) {
   const t = useTranslations();
@@ -127,6 +129,27 @@ function WebsiteIntervalLabel({ website }: { website: Website }) {
   return <KnowledgeLabel tone={item.tone} label={t(item.key)} detail={detail} />;
 }
 
+/**
+ * Why a single website could not be removed, as the Svelte app says it: the
+ * crawler stops its run or finishes cleaning up first, or it was already gone.
+ */
+function deleteOutcomeToast(
+  result: BulkDeleteSummary,
+  t: (key: string, values?: Record<string, string | number>) => string
+) {
+  if (result.deleted === 1) {
+    toast.success(t("websites_removed", { count: 1 }));
+  } else if (result.errors.some((error) => error.error === "crawl_stop_requested")) {
+    toast.info(t("website_remove_stopping"));
+  } else if (result.errors.some((error) => error.error === "crawl_cleanup_pending")) {
+    toast.info(t("website_remove_cleanup_pending"));
+  } else if (result.notFound === 1) {
+    toast.info(t("websites_already_removed"));
+  } else {
+    toast.error(t("bulk_website_remove_failed"));
+  }
+}
+
 /** Row menu for a website: edit, move to another space, delete. */
 export function WebsiteActions({ website }: { website: Website }) {
   const t = useTranslations();
@@ -139,11 +162,20 @@ export function WebsiteActions({ website }: { website: Website }) {
   const canDelete = website.permissions?.includes("delete") ?? false;
   const invalidate = () => queryClient.invalidateQueries({ queryKey: ["spaces", routeId] });
 
+  // The bulk endpoint also removes one website, and says when the crawler
+  // has to stop its run first (the website then stays until removed again).
   const deleteWebsite = useRemovalMutation({
     mutationFn: () =>
-      unwrap(browserApi.DELETE("/api/v1/websites/{id}/", { params: { path: { id: website.id } } })),
+      deleteWebsiteBatches([website.id], (websiteIds) =>
+        unwrap(
+          browserApi.POST("/api/v1/websites/bulk/delete/", { body: { website_ids: websiteIds } })
+        )
+      ),
     refresh: invalidate,
-    onRemoved: () => setShowDelete(false)
+    onRemoved: (result) => {
+      deleteOutcomeToast(result, t);
+      setShowDelete(false);
+    }
   });
 
   const moveWebsite = useRemovalMutation({
@@ -203,9 +235,9 @@ export function WebsiteActions({ website }: { website: Website }) {
       <ConfirmDialogControlled
         open={showDelete}
         onOpenChange={setShowDelete}
-        title={t("delete_crawl")}
-        description={`${t("confirm_delete_crawl_start")} ${websiteDisplay}${t("confirm_delete_crawl_end")}`}
-        confirmLabel={deleteWebsite.isPending ? t("deleting") : t("delete")}
+        title={t("remove_website_title")}
+        description={`${t("remove_website_description")} ${websiteDisplay}`}
+        confirmLabel={deleteWebsite.isPending ? t("deleting") : t("remove_website_confirm")}
         pending={deleteWebsite.isPending}
         onConfirm={() => deleteWebsite.mutate()}
       />
@@ -236,6 +268,8 @@ function WebsitesTable({
 }) {
   const t = useTranslations();
   const { routeId } = useSpace();
+  const [failures, setFailures] = useState<FailureSelection | null>(null);
+  const [detailsOpen, setDetailsOpen] = useState(false);
   const sortPlugin = useTableSortable<Website, WebsiteSortKey>(sortConfig);
   const { selectionConfig } = useTableSelectionState<Website>({
     data: websites,
@@ -279,11 +313,19 @@ function WebsitesTable({
       header: t("status"),
       width: proportional(1),
       sortable: true,
-      renderCell: (website) => <WebsiteStatusCell website={website} />
+      renderCell: (website) => (
+        <WebsiteStatusCell
+          website={website}
+          onShowFailures={(selection) => {
+            setFailures(selection);
+            setDetailsOpen(true);
+          }}
+        />
+      )
     },
     {
       key: "synced",
-      header: t("space_synced_column"),
+      header: t("website_last_indexed"),
       width: proportional(1),
       sortable: true,
       renderCell: (website) => <WebsiteSyncedCell website={website} />
@@ -305,17 +347,27 @@ function WebsitesTable({
   ];
 
   return (
-    <SpaceTableFrame>
-      <Table
-        data={websites}
-        columns={columns}
-        idKey="id"
-        aria-labelledby={labelledBy}
-        plugins={
-          selectable ? { sort: sortPlugin, selection: selectionPlugin } : { sort: sortPlugin }
-        }
-      />
-    </SpaceTableFrame>
+    <>
+      <SpaceTableFrame>
+        <Table
+          data={websites}
+          columns={columns}
+          idKey="id"
+          aria-labelledby={labelledBy}
+          plugins={
+            selectable ? { sort: sortPlugin, selection: selectionPlugin } : { sort: sortPlugin }
+          }
+        />
+      </SpaceTableFrame>
+      {failures ? (
+        <CrawlRunDetailsDialog
+          run={failures.run}
+          initialKind={failures.kind}
+          isOpen={detailsOpen}
+          onOpenChange={setDetailsOpen}
+        />
+      ) : null}
+    </>
   );
 }
 
@@ -366,28 +418,103 @@ export function WebsitesTab({ canCreate, labelledBy }: { canCreate: boolean; lab
     space.embedding_models.length > 1 ||
     models.some((model) => !model.inSpace);
 
+  const stoppableIds = websites
+    .filter((website) => website.latest_crawl && canRequestCrawlStop(website.latest_crawl))
+    .map((website) => website.id);
+  const selectedStoppableIds = stoppableIds.filter((id) => selected.has(id));
+  const selectedDeletableIds = visibleWebsites
+    .filter((website) => selected.has(website.id) && website.permissions?.includes("delete"))
+    .map((website) => website.id);
+  const [stopTargets, setStopTargets] = useState<string[] | null>(null);
+  const [deleteTargets, setDeleteTargets] = useState<string[] | null>(null);
+  const refreshWebsites = () => queryClient.invalidateQueries({ queryKey: ["spaces", routeId] });
+
+  // A selection is sent in batches (bulk-website-actions.ts); the websites
+  // that could not be acted on stay selected, so the user can retry them.
   const bulkRecrawl = useMutation({
     mutationFn: (websiteIds: string[]) =>
-      unwrap(browserApi.POST("/api/v1/websites/bulk/run/", { body: { website_ids: websiteIds } })),
+      runWebsiteBatches(websiteIds, (ids) =>
+        unwrap(browserApi.POST("/api/v1/websites/bulk/run/", { body: { website_ids: ids } }))
+      ),
     onSuccess: (result) => {
       if (result.failed > 0) {
-        const details = result.errors
-          .map((entry) => entry.error)
-          .filter(Boolean)
-          .join(", ");
         toast.error(
-          t("websites_bulk_recrawl_failed", { queued: result.queued, failed: result.failed }),
-          { description: details || undefined }
+          result.queued > 0
+            ? t("bulk_crawl_partial", { queued: result.queued, failed: result.failed })
+            : t("bulk_crawl_failed")
         );
+        setSelected(new Set(bulkFailureWebsiteIds(result.errors)));
       } else {
-        toast.success(t("websites_bulk_recrawl_queued", { count: result.queued }));
+        toast.success(t("bulk_crawl_started", { count: result.queued, total: result.total }));
+        setSelected(new Set());
       }
-      setSelected(new Set());
       trackJob();
-      void queryClient.invalidateQueries({ queryKey: ["spaces", routeId] });
+      void refreshWebsites();
     },
     onError: (error) => toastApiError(error, t)
   });
+
+  const bulkStop = useMutation({
+    mutationFn: (websiteIds: string[]) =>
+      stopWebsiteBatches(websiteIds, (ids) =>
+        unwrap(browserApi.POST("/api/v1/websites/bulk/stop/", { body: { website_ids: ids } }))
+      ),
+    onSuccess: (result: BulkStopSummary) => {
+      if (result.failed > 0) {
+        toast.error(
+          result.stopped > 0
+            ? t("crawls_stop_partial", { stopped: result.stopped, failed: result.failed })
+            : t("bulk_crawl_stop_failed")
+        );
+        setSelected(new Set(bulkFailureWebsiteIds(result.errors)));
+      } else {
+        if (result.stopped > 0)
+          toast.success(t("crawls_stop_requested", { count: result.stopped }));
+        setSelected(new Set());
+      }
+      setStopTargets(null);
+      void refreshWebsites();
+    },
+    onError: (error) => toastApiError(error, t)
+  });
+
+  const bulkDelete = useRemovalMutation({
+    mutationFn: (websiteIds: string[]) =>
+      deleteWebsiteBatches(websiteIds, (ids) =>
+        unwrap(browserApi.POST("/api/v1/websites/bulk/delete/", { body: { website_ids: ids } }))
+      ),
+    refresh: refreshWebsites,
+    onRemoved: (result, websiteIds) => {
+      if (result.failed > 0) {
+        if (bulkDeletionWaitsForCrawlerCleanup(result.errors)) {
+          const cleanupPending = result.errors.some(
+            (error) => error.error === "crawl_cleanup_pending"
+          );
+          toast.info(
+            cleanupPending
+              ? t("websites_remove_cleanup_pending")
+              : result.deleted > 0
+                ? t("websites_remove_partial_stopping")
+                : t("websites_remove_stopping")
+          );
+        } else {
+          toast.error(
+            result.deleted > 0
+              ? t("websites_remove_partial", { deleted: result.deleted, failed: result.failed })
+              : t("bulk_website_remove_failed")
+          );
+        }
+        const failedIds = bulkFailureWebsiteIds(result.errors);
+        setSelected(new Set(failedIds.length > 0 ? failedIds : websiteIds));
+      } else {
+        if (result.deleted > 0) toast.success(t("websites_removed", { count: result.deleted }));
+        else toast.info(t("websites_already_removed"));
+        setSelected(new Set());
+      }
+      setDeleteTargets(null);
+    }
+  });
+  const bulkPending = bulkRecrawl.isPending || bulkStop.isPending || bulkDelete.isPending;
 
   const connectButton = (
     <AstryxButton
@@ -422,26 +549,94 @@ export function WebsitesTab({ canCreate, labelledBy }: { canCreate: boolean; lab
     );
   }
 
+  // Busy buttons stay enabled so they keep focus; a second press is ignored.
+  const stopButton = (ids: string[], labelKey: "stop_selected_crawls" | "stop_all_crawls") => (
+    <AstryxButton
+      label={bulkStop.isPending ? t("stopping_crawls") : t(labelKey, { count: ids.length })}
+      icon={<Square aria-hidden="true" />}
+      isLoading={bulkStop.isPending}
+      isInterruptible
+      onClick={() => {
+        if (!bulkPending) setStopTargets(ids);
+      }}
+    />
+  );
   const action = (
     <>
-      {canCreate && selectedIds.length > 0 ? (
-        <AstryxButton
-          label={
-            bulkRecrawl.isPending ? t("syncing") : t("sync_selected", { count: selectedIds.length })
-          }
-          variant="primary"
-          icon={<RefreshCw aria-hidden="true" />}
-          // Busy, it stays enabled so it keeps focus; a second press is ignored.
-          isLoading={bulkRecrawl.isPending}
-          isInterruptible
-          onClick={() => {
-            if (!bulkRecrawl.isPending) bulkRecrawl.mutate(selectedIds);
-          }}
-        />
-      ) : null}
-      {canCreate && selectedIds.length === 0 ? connectButton : null}
+      {selectedIds.length > 0 ? (
+        <>
+          {canCreate && selectedStoppableIds.length > 0
+            ? stopButton(selectedStoppableIds, "stop_selected_crawls")
+            : null}
+          {selectedDeletableIds.length > 0 ? (
+            <AstryxButton
+              variant="destructive"
+              label={
+                bulkDelete.isPending
+                  ? t("removing_websites")
+                  : t("remove_selected_websites", { count: selectedDeletableIds.length })
+              }
+              icon={<Trash2 aria-hidden="true" />}
+              isLoading={bulkDelete.isPending}
+              isInterruptible
+              onClick={() => {
+                if (!bulkPending) setDeleteTargets(selectedDeletableIds);
+              }}
+            />
+          ) : null}
+          {canCreate ? (
+            <AstryxButton
+              label={
+                bulkRecrawl.isPending
+                  ? t("syncing")
+                  : t("sync_selected", { count: selectedIds.length })
+              }
+              variant="primary"
+              icon={<RefreshCw aria-hidden="true" />}
+              isLoading={bulkRecrawl.isPending}
+              isInterruptible
+              onClick={() => {
+                if (!bulkPending) bulkRecrawl.mutate(selectedIds);
+              }}
+            />
+          ) : null}
+        </>
+      ) : (
+        <>
+          {canCreate && stoppableIds.length > 0
+            ? stopButton(stoppableIds, "stop_all_crawls")
+            : null}
+          {canCreate ? connectButton : null}
+        </>
+      )}
       {!canCreate ? <NoCreatePermissionInfo resourceType={t("resource_websites")} /> : null}
       {createDialog}
+      <ConfirmDialogControlled
+        open={stopTargets !== null}
+        onOpenChange={(open) => {
+          if (!open) setStopTargets(null);
+        }}
+        title={t("stop_crawls_title", { count: stopTargets?.length ?? 0 })}
+        description={t("stop_crawls_description")}
+        confirmLabel={bulkStop.isPending ? t("stopping_crawls") : t("stop_crawl")}
+        pending={bulkStop.isPending}
+        onConfirm={() => {
+          if (stopTargets) bulkStop.mutate(stopTargets);
+        }}
+      />
+      <ConfirmDialogControlled
+        open={deleteTargets !== null}
+        onOpenChange={(open) => {
+          if (!open) setDeleteTargets(null);
+        }}
+        title={t("remove_websites_title", { count: deleteTargets?.length ?? 0 })}
+        description={t("remove_websites_description")}
+        confirmLabel={bulkDelete.isPending ? t("removing_websites") : t("remove_websites_confirm")}
+        pending={bulkDelete.isPending}
+        onConfirm={() => {
+          if (deleteTargets) bulkDelete.mutate(deleteTargets);
+        }}
+      />
     </>
   );
 

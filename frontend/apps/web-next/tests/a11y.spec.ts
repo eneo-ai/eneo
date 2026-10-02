@@ -459,6 +459,14 @@ for (const colorScheme of ["light", "dark"] as const) {
       });
     });
 
+    test("admin crawler", async ({ page }) => {
+      await scan(page, "/admin/crawler", async () => {
+        await expect(page.getByRole("heading", { level: 1, name: /^Crawler$/ })).toBeVisible();
+        await expect(page.getByRole("group", { name: /schemaläggare|scheduler/i })).toBeVisible();
+        await expect(page.getByRole("tab", { name: /^(schema|schedule)$/i })).toBeVisible();
+      });
+    });
+
     test("account", async ({ page }) => {
       await scan(page, "/account", async () => {
         await expect(page.getByText(/byt lösenord/i).first()).toBeVisible();
