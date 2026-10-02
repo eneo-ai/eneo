@@ -4,45 +4,29 @@ import { Button } from "@astryxdesign/core/Button";
 import { useAnnounce } from "@astryxdesign/core/hooks";
 import { TextArea } from "@astryxdesign/core/TextArea";
 import { useMutation, useQuery } from "@tanstack/react-query";
-import { SendHorizontal, ThumbsDown, ThumbsUp } from "lucide-react";
+import { History, SendHorizontal, ThumbsDown, ThumbsUp } from "lucide-react";
 import { useTranslations } from "next-intl";
 import { useEffect, useRef, useState } from "react";
 import { flushSync } from "react-dom";
 import { LoadingState } from "@/components/composites/loading-state";
+import { ListError, QueryStateBoundary } from "@/components/composites/query-state";
 import { browserApi } from "@/lib/api/browser";
 import { unwrap } from "@/lib/api/errors";
 import type { ChatPartner } from "@/lib/chat/types";
+import { ExploreConversationsDialog } from "@/features/insights/explore-conversations-dialog";
+import {
+  DEFAULT_INSIGHT_DAYS,
+  insightPartnerQuery,
+  insightRangeOfDays,
+  insightRangeParams,
+  type InsightRange
+} from "@/features/insights/insights-range";
+import { InsightsRangePicker } from "@/features/insights/insights-range-picker";
 
 type InsightPartner = Extract<ChatPartner["type"], "assistant" | "group-chat">;
 
-const INSIGHT_DAYS = 30;
 /** How long to wait for an asynchronous insight job, polled once a second. */
 const MAX_POLLS = 120;
-
-function partnerQuery(partner: ChatPartner): {
-  assistant_id?: string;
-  group_chat_id?: string;
-} {
-  if (partner.type === "assistant") return { assistant_id: partner.id };
-  if (partner.type === "group-chat") return { group_chat_id: partner.id };
-  return {};
-}
-
-function dateOnly(date: Date): string {
-  return date.toISOString().slice(0, 10);
-}
-
-function insightRange() {
-  const end = new Date();
-  const start = new Date(end);
-  start.setDate(start.getDate() - INSIGHT_DAYS);
-  return {
-    startTime: start.toISOString(),
-    endTime: end.toISOString(),
-    fromDate: dateOnly(start),
-    toDate: dateOnly(end)
-  };
-}
 
 function stringField(value: unknown, key: string): string | null {
   if (typeof value !== "object" || value === null) return null;
@@ -93,39 +77,54 @@ async function resolveInsightAnswer(response: unknown, signal: AbortSignal): Pro
   throw new Error("Timed out");
 }
 
+function Stat({ label, value }: { label: React.ReactNode; value: number }) {
+  return (
+    <div className="border-ax-border rounded-ax-container border p-4">
+      <dt className="text-ax-text-secondary inline-flex items-center gap-1.5 text-sm">{label}</dt>
+      <dd className="mt-1 text-3xl font-semibold tabular-nums">{value}</dd>
+    </div>
+  );
+}
+
 /**
- * Insikter for an assistant or group chat: the last 30 days' conversation and
- * question counts, how the answers were rated, and a question about those
- * conversations. The answer is announced when it is ready (it can take a
- * while: the backend may run it as a job); leaving the view stops waiting for
- * it.
+ * Insikter for an assistant or group chat: a period (the last 30 days to
+ * begin with), its conversation and question counts and how the answers
+ * were rated, the conversations themselves behind "Utforska konversationer",
+ * and a question about those conversations. The answer is announced when it
+ * is ready (it can take a while: the backend may run it as a job); leaving
+ * the view stops waiting for it.
  */
 export function InsightsPanel({ partner }: { partner: ChatPartner & { type: InsightPartner } }) {
   const t = useTranslations();
   const announce = useAnnounce();
+  const [range, setRange] = useState<InsightRange>(() => insightRangeOfDays(DEFAULT_INSIGHT_DAYS));
+  const [exploring, setExploring] = useState(false);
   const [question, setQuestion] = useState("");
   const [asked, setAsked] = useState(false);
   const questionRef = useRef<HTMLTextAreaElement>(null);
   const questionProblem = asked && !question.trim() ? t("required_field") : null;
   const [answer, setAnswer] = useState("");
-  const range = insightRange();
-  const query = partnerQuery(partner);
+  const params = insightRangeParams(range);
+  const query = insightPartnerQuery(partner);
   const request = useRef<AbortController | null>(null);
 
   // Stop polling a job when the view goes away.
   useEffect(() => () => request.current?.abort(), []);
 
   const stats = useQuery({
-    queryKey: ["conversation-insights", "stats", partner.type, partner.id, range.fromDate],
+    queryKey: [
+      "conversation-insights",
+      "stats",
+      partner.type,
+      partner.id,
+      params.fromDate,
+      params.toDate
+    ],
     queryFn: ({ signal }) =>
       unwrap(
         browserApi.GET("/api/v1/analysis/conversation-insights/", {
           params: {
-            query: {
-              start_time: range.startTime,
-              end_time: range.endTime,
-              ...query
-            }
+            query: { start_time: params.startTime, end_time: params.endTime, ...query }
           },
           signal
         })
@@ -141,8 +140,8 @@ export function InsightsPanel({ partner }: { partner: ChatPartner & { type: Insi
         browserApi.POST("/api/v1/analysis/conversation-insights/", {
           params: {
             query: {
-              from_date: range.fromDate,
-              to_date: range.toDate,
+              from_date: params.fromDate,
+              to_date: params.toDate,
               processing_mode: "auto",
               ...query
             }
@@ -166,44 +165,55 @@ export function InsightsPanel({ partner }: { partner: ChatPartner & { type: Insi
 
   return (
     <div className="mx-auto flex w-full max-w-[712px] flex-1 flex-col gap-5 overflow-y-auto px-4 py-6">
-      {stats.isPending ? (
-        <LoadingState rows={2} />
-      ) : stats.isError ? (
-        <p className="text-ax-error text-sm">{t("request_failed")}</p>
-      ) : (
-        <dl className="grid gap-3 sm:grid-cols-2">
-          <div className="border-ax-border rounded-ax-container border p-4">
-            <dt className="text-ax-text-secondary text-sm">{t("total_conversations")}</dt>
-            <dd className="mt-1 text-3xl font-semibold tabular-nums">
-              {stats.data.total_conversations}
-            </dd>
-          </div>
-          <div className="border-ax-border rounded-ax-container border p-4">
-            <dt className="text-ax-text-secondary text-sm">{t("total_questions")}</dt>
-            <dd className="mt-1 text-3xl font-semibold tabular-nums">
-              {stats.data.total_questions}
-            </dd>
-          </div>
-          {/* Ratings of single answers; a rating of a whole conversation is not counted. */}
-          <div className="border-ax-border rounded-ax-container border p-4">
-            <dt className="text-ax-text-secondary inline-flex items-center gap-1.5 text-sm">
-              <ThumbsUp aria-hidden="true" className="text-ax-success size-4" />
-              {t("feedback_good_answers")}
-            </dt>
-            <dd className="mt-1 text-3xl font-semibold tabular-nums">
-              {stats.data.feedback.positive}
-            </dd>
-          </div>
-          <div className="border-ax-border rounded-ax-container border p-4">
-            <dt className="text-ax-text-secondary inline-flex items-center gap-1.5 text-sm">
-              <ThumbsDown aria-hidden="true" className="text-ax-error size-4" />
-              {t("feedback_bad_answers")}
-            </dt>
-            <dd className="mt-1 text-3xl font-semibold tabular-nums">
-              {stats.data.feedback.negative}
-            </dd>
-          </div>
-        </dl>
+      <InsightsRangePicker value={range} onChange={setRange} />
+
+      <QueryStateBoundary query={stats} rows={2}>
+        {(data) => (
+          <dl className="grid gap-3 sm:grid-cols-2">
+            <Stat label={t("total_conversations")} value={data.total_conversations} />
+            <Stat label={t("total_questions")} value={data.total_questions} />
+            {/* Ratings of single answers; a rating of a whole conversation is not counted. */}
+            <Stat
+              label={
+                <>
+                  <ThumbsUp aria-hidden="true" className="text-ax-success size-4" />
+                  {t("feedback_good_answers")}
+                </>
+              }
+              value={data.feedback.positive}
+            />
+            <Stat
+              label={
+                <>
+                  <ThumbsDown aria-hidden="true" className="text-ax-error size-4" />
+                  {t("feedback_bad_answers")}
+                </>
+              }
+              value={data.feedback.negative}
+            />
+          </dl>
+        )}
+      </QueryStateBoundary>
+
+      <div className="border-ax-border rounded-ax-container flex flex-wrap items-center justify-between gap-3 border p-4">
+        <div className="min-w-0 flex-1">
+          <p className="text-sm font-medium">{t("explore_conversations")}</p>
+          <p className="text-ax-text-secondary text-sm">{t("view_all_conversations_users_had")}</p>
+        </div>
+        <Button
+          label={t("explore_conversations")}
+          variant="secondary"
+          icon={<History className="size-4" aria-hidden="true" />}
+          onClick={() => setExploring(true)}
+        />
+      </div>
+      {exploring && (
+        <ExploreConversationsDialog
+          partner={partner}
+          range={range}
+          isOpen={exploring}
+          onOpenChange={setExploring}
+        />
       )}
 
       <form
@@ -245,7 +255,12 @@ export function InsightsPanel({ partner }: { partner: ChatPartner & { type: Insi
       {ask.isPending ? (
         <LoadingState variant="text" rows={3} label={t("chat_insights_generating")} />
       ) : ask.isError ? (
-        <p className="text-ax-error text-sm">{t("request_failed")}</p>
+        <ListError
+          error={ask.error}
+          onRetry={() => {
+            if (ask.variables) ask.mutate(ask.variables);
+          }}
+        />
       ) : answer ? (
         <div className="bg-ax-sunken border-ax-border rounded-ax-container border p-4">
           <p className="text-sm font-medium">{t("answer")}</p>

@@ -203,3 +203,29 @@ describe("ChatMessage", () => {
     await expectNoAxeViolations(container);
   });
 });
+
+describe("ChatMessage debug action", () => {
+  it("offers Felsök in the answer's menu only to viewers who may debug", () => {
+    const onActivityToggle = vi.fn();
+    const { rerender } = renderMessages(
+      <ChatMessage message={answer} assistant={assistant} onActivityToggle={onActivityToggle} />
+    );
+    fireEvent.click(screen.getByRole("button", { name: "Fler åtgärder" }));
+    expect(screen.queryByRole("menuitem", { name: "Felsök" })).toBeNull();
+    fireEvent.keyDown(document.activeElement ?? document.body, { key: "Escape" });
+
+    rerender(
+      <ChatMessage
+        message={answer}
+        assistant={assistant}
+        onActivityToggle={onActivityToggle}
+        canDebug
+      />
+    );
+    const more = screen.getByRole("button", { name: "Fler åtgärder" });
+    fireEvent.click(more);
+    fireEvent.click(screen.getByRole("menuitem", { name: "Felsök" }));
+    // Opens the panel's Felsök tab; the panel returns focus to the menu button.
+    expect(onActivityToggle).toHaveBeenCalledWith(more, { tab: "debug" });
+  });
+});

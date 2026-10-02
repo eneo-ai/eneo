@@ -4,7 +4,7 @@ import { useState } from "react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { ChatPartner, EneoUIMessage } from "@/lib/chat/types";
 import { expectNoAxeViolations } from "@/test/axe";
-import { renderInApp } from "@/test/render";
+import { renderInApp, testAppContext } from "@/test/render";
 import { ChatView, type ActivityState } from "./chat-view";
 
 const spies = vi.hoisted(() => ({ announce: vi.fn(), toastError: vi.fn() }));
@@ -327,5 +327,83 @@ describe("ChatView answer feedback", () => {
     );
     await waitFor(() => expect(screen.getByRole("log")).toBeTruthy());
     await expectNoAxeViolations(container);
+  });
+});
+
+describe("ChatView debug", () => {
+  const detailPath = "/api/v1/conversations/{session_id}/";
+  const diagnosticsPath = "/api/v1/conversations/{session_id}/messages/{message_id}/diagnostics/";
+
+  /** Answers the Felsök tab's requests for the saved conversation. */
+  function serveDebug() {
+    const original = api.GET.getMockImplementation()!;
+    const serve = async (path: string, ...rest: unknown[]) => {
+      if (path === detailPath) {
+        return {
+          data: {
+            id: "session-1",
+            name: "Samtal",
+            messages: [
+              {
+                id: "m1",
+                question: "Vad gäller?",
+                answer: "Direktupphandlingsgränsen är 700 000 kr.",
+                references: [],
+                files: [],
+                generated_files: [],
+                tools: { assistants: [] },
+                num_tokens_question: 10,
+                num_tokens_answer: 20
+              }
+            ]
+          },
+          response: new Response()
+        };
+      }
+      if (path === diagnosticsPath) {
+        return {
+          data: { session_id: "session-1", message_id: "m1", skill_activation: null },
+          response: new Response()
+        };
+      }
+      return (original as unknown as (...args: unknown[]) => Promise<unknown>)(path, ...rest);
+    };
+    api.GET.mockImplementation(serve as unknown as typeof original);
+    return () => api.GET.mockImplementation(original);
+  }
+
+  it("opens the answer's Felsök tab for a viewer with assistant_debug", async () => {
+    const restore = serveDebug();
+    try {
+      renderInApp(<Harness partner={assistant} messages={history} sessionId="session-1" />, {
+        appContext: testAppContext({ permissions: ["assistant_debug"] })
+      });
+      fireEvent.click(screen.getByRole("button", { name: "Fler åtgärder" }));
+      fireEvent.click(await screen.findByRole("menuitem", { name: "Felsök" }));
+
+      const panel = await screen.findByRole("complementary", { name: "Aktivitet för svaret" });
+      expect(within(panel).getByRole("tab", { name: "Felsök" }).getAttribute("aria-selected")).toBe(
+        "true"
+      );
+      expect(await within(panel).findByText("Meddelande 1 av 1")).toBeTruthy();
+      expect(api.GET).toHaveBeenCalledWith(diagnosticsPath, expect.anything());
+    } finally {
+      restore();
+    }
+  });
+
+  it("keeps Felsök away from viewers without the permission and from unsaved conversations", async () => {
+    renderInApp(<Harness partner={assistant} messages={history} sessionId="session-1" />);
+    fireEvent.click(screen.getByRole("button", { name: "Fler åtgärder" }));
+    await screen.findByRole("menuitem", { name: "Kopiera som markdown" });
+    expect(screen.queryByRole("menuitem", { name: "Felsök" })).toBeNull();
+    cleanup();
+
+    renderInApp(<Harness partner={assistant} messages={history} sessionId={null} />, {
+      appContext: testAppContext({ permissions: ["assistant_debug"] })
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Fler åtgärder" }));
+    await screen.findByRole("menuitem", { name: "Kopiera som markdown" });
+    expect(screen.queryByRole("menuitem", { name: "Felsök" })).toBeNull();
   });
 });

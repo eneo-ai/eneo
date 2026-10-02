@@ -19,7 +19,14 @@ import { ChatPage } from "@/features/chat/chat-page";
 import { partnerCompletionModel } from "@/features/chat/partner-model";
 import { chatPartnerSwitcherItems } from "@/features/chat/partner-switcher";
 import { partnerKnowledge } from "@/features/chat/partner-knowledge";
+import { trackPartnerUpdate } from "@/features/chat/partner-updates";
+import { reasoningEffortOptions } from "@/features/chat/reasoning-effort";
+import { ReasoningEffortSelector } from "@/features/chat/reasoning-selector";
 import { useSpace } from "@/features/spaces/use-space";
+
+/** The composer's compact (ghost) trigger look, shared by the model and reasoning pickers. */
+const COMPOSER_PICKER_CLASS =
+  "text-ax-text-secondary hover:text-ax-text rounded-ax-element h-8 border-0 px-2 text-[13px] font-semibold pointer-coarse:h-11";
 
 /**
  * Default-assistant completion model switcher (personal chat only). Switching
@@ -38,12 +45,14 @@ function ModelSwitcher() {
 
   const update = useMutation({
     mutationFn: (modelId: string) =>
-      unwrap(
-        // RB-5(b): assistants use POST-as-update.
-        browserApi.POST("/api/v1/assistants/{id}/", {
-          params: { path: { id: assistant!.id } },
-          body: { completion_model: { id: modelId } }
-        })
+      trackPartnerUpdate(
+        unwrap(
+          // RB-5(b): assistants use POST-as-update.
+          browserApi.POST("/api/v1/assistants/{id}/", {
+            params: { path: { id: assistant!.id } },
+            body: { completion_model: { id: modelId } }
+          })
+        )
       ),
     onSuccess: () => queryClient.invalidateQueries({ queryKey: ["spaces", routeId] }),
     onError: (error) => toastApiError(error, t)
@@ -79,8 +88,68 @@ function ModelSwitcher() {
       locked={lockedModel}
       size="sm"
       showPricing={tenant.show_model_pricing}
-      className="text-ax-text-secondary hover:text-ax-text rounded-ax-element h-8 border-0 px-2 text-[13px] font-semibold pointer-coarse:h-11"
+      className={COMPOSER_PICKER_CLASS}
     />
+  );
+}
+
+/**
+ * Reasoning-effort switcher beside the model picker (personal chat only),
+ * for models that offer a choice of level and when the governance policy
+ * lets users change it. The pick is saved on the personal space's default
+ * assistant as `completion_model_kwargs.reasoning_effort` (null = the
+ * organisation default), exactly as the Svelte app does; the backend reads
+ * it from the stored assistant when it answers, so nothing travels with the
+ * question itself.
+ */
+function ReasoningSwitcher() {
+  const t = useTranslations();
+  const { space, routeId } = useSpace();
+  const queryClient = useQueryClient();
+  const assistant = space.default_assistant;
+  const config = assistant?.effective_config ?? null;
+
+  const update = useMutation({
+    mutationFn: (effort: string | null) =>
+      trackPartnerUpdate(
+        unwrap(
+          browserApi.POST("/api/v1/assistants/{id}/", {
+            params: { path: { id: assistant!.id } },
+            body: { completion_model_kwargs: { reasoning_effort: effort } }
+          })
+        )
+      ),
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: ["spaces", routeId] }),
+    onError: (error) => toastApiError(error, t)
+  });
+
+  if (!assistant || !config?.reasoning_effort_user_configurable) return null;
+  const effectiveId =
+    selectEffectiveModelId(assistant.completion_model?.id, config) ??
+    assistant.completion_model?.id;
+  const options = reasoningEffortOptions(
+    space.completion_models.find((model) => model.id === effectiveId)
+  );
+  if (options.length === 0) return null;
+
+  return (
+    <ReasoningEffortSelector
+      options={options}
+      stored={assistant.completion_model_kwargs?.reasoning_effort ?? null}
+      policyDefault={config.default_reasoning_effort ?? null}
+      onSelect={(effort) => update.mutateAsync(effort)}
+      className={COMPOSER_PICKER_CLASS}
+    />
+  );
+}
+
+/** The personal assistant's composer pickers: model, then reasoning effort when the model offers it. */
+function ComposerPickers() {
+  return (
+    <span className="flex min-w-0 items-center gap-0.5">
+      <ModelSwitcher />
+      <ReasoningSwitcher />
+    </span>
   );
 }
 
@@ -224,7 +293,7 @@ export function SpaceChat() {
         activeType: partner.type,
         activeId: partner.id
       })}
-      modelSelector={partner.type === "default-assistant" ? <ModelSwitcher /> : undefined}
+      modelSelector={partner.type === "default-assistant" ? <ComposerPickers /> : undefined}
       editHref={editHref}
       buildSessionUrl={(nextSessionId) => {
         const params = new URLSearchParams(query);

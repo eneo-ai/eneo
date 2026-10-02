@@ -38,6 +38,7 @@ import { ChatMessage, PendingAnswer, type ActivityRequest } from "./chat-message
 import { Composer } from "./composer";
 import { ContextUsageBar } from "./context-usage-bar";
 import { ChatMcpServers, mcpConversationOptions } from "./mcp-controls";
+import { awaitPartnerUpdates, hasPendingPartnerUpdates } from "./partner-updates";
 import { historyQueryKey } from "./session-actions";
 import { StartState } from "./start-state";
 import { releasePreviews, useAttachments, type Attachment } from "./use-attachments";
@@ -149,9 +150,11 @@ export function ChatView({
   onActivityChange: (next: ActivityState | null) => void;
 }) {
   const t = useTranslations();
-  const { featureFlags } = useAppContext();
+  const { featureFlags, can } = useAppContext();
   const queryClient = useQueryClient();
   const attachments = useAttachments(partner);
+  // The Felsök tab reads a saved turn's diagnostics; group chats have none.
+  const debugAvailable = can("assistant_debug") && partner.type !== "group-chat";
   const isDesktop = useMediaQuery("(min-width: 1024px)");
   // Astryx's shared polite live region (mounted empty, cleared after a moment):
   // only "Svaret är klart", errors and tool approvals go there, never tokens.
@@ -429,7 +432,11 @@ export function ChatView({
     };
 
     timings.markSent();
-    void sendMessage({ text, metadata: { files, createdAt: isoNow() } }, { body });
+    const send = () => sendMessage({ text, metadata: { files, createdAt: isoNow() } }, { body });
+    // A model or reasoning switch made in the composer is saved on the
+    // assistant; the backend answers with what is stored, so that save lands first.
+    if (hasPendingPartnerUpdates()) void awaitPartnerUpdates().then(send);
+    else void send();
     // A retry leaves the composer alone unless it holds the retried question.
     setInput((current) => (resendFiles && current.trim() !== text ? current : ""));
     setMentionId(NO_MENTION);
@@ -661,6 +668,7 @@ export function ChatView({
                   onActivityToggle={(trigger, request) =>
                     toggleActivity(message.id, trigger, request)
                   }
+                  canDebug={debugAvailable && sessionId !== null}
                 />
               );
             })}
@@ -678,6 +686,15 @@ export function ChatView({
             tab={activity.tab}
             onTabChange={(tab) => onActivityChange({ ...activity, tab, source: null })}
             focusSource={activity.source}
+            debug={
+              debugAvailable && sessionId !== null
+                ? {
+                    sessionId,
+                    onSelectTurn: (messageId) =>
+                      onActivityChange({ messageId, tab: "debug", source: null })
+                  }
+                : null
+            }
             onClose={closeActivity}
           />
         )}

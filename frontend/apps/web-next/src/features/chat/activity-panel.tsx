@@ -6,13 +6,15 @@ import { Tab, TabList } from "@astryxdesign/core/TabList";
 import { X } from "lucide-react";
 import { useLocale, useTranslations } from "next-intl";
 import { useEffect, useId, useRef, type Ref } from "react";
+import { cn } from "@/lib/utils";
 import type { Activity } from "./activity";
 import { SourceList } from "./activity-sources";
 import { StepList } from "./activity-steps";
 import type { TurnDurations } from "./activity-timings";
+import { DebugTabPanel, type DebugTabConfig } from "./debug-panel";
 import { formatSeconds } from "./format";
 
-export type ActivityTab = "steps" | "sources";
+export type ActivityTab = "steps" | "sources" | "debug";
 
 export const ACTIVITY_PANEL_ID = "chat-activity-panel";
 
@@ -25,6 +27,7 @@ function PanelBody({
   tab,
   onTabChange,
   focusSource,
+  debug,
   onClose,
   tabListRef
 }: {
@@ -37,6 +40,7 @@ function PanelBody({
   tab: ActivityTab;
   onTabChange: (tab: ActivityTab) => void;
   focusSource: number | null;
+  debug: DebugTabConfig | null;
   onClose: () => void;
   tabListRef?: Ref<HTMLDivElement>;
 }) {
@@ -44,6 +48,7 @@ function PanelBody({
   const locale = useLocale();
   const stepsPanelId = `${ACTIVITY_PANEL_ID}-steps`;
   const sourcesPanelId = `${ACTIVITY_PANEL_ID}-sources`;
+  const debugPanelId = `${ACTIVITY_PANEL_ID}-debug`;
   const steps = activity.steps.length;
 
   return (
@@ -52,7 +57,9 @@ function PanelBody({
         <div ref={tabListRef}>
           <TabList
             value={tab}
-            onChange={(value) => onTabChange(value === "sources" ? "sources" : "steps")}
+            onChange={(value) =>
+              onTabChange(value === "sources" ? "sources" : value === "debug" ? "debug" : "steps")
+            }
             role="tablist"
             size="sm"
             aria-label={t("chat_activity_label")}
@@ -68,6 +75,7 @@ function PanelBody({
                 </span>
               }
             />
+            {debug && <Tab value="debug" label={t("chat_debug_action")} panelId={debugPanelId} />}
           </TabList>
         </div>
         <IconButton
@@ -103,6 +111,22 @@ function PanelBody({
           focusIndex={tab === "sources" ? focusSource : null}
         />
       </div>
+      {/* Mounted only while shown: its queries run the first time the tab opens. */}
+      {debug && tab === "debug" && (
+        <div
+          id={debugPanelId}
+          role="tabpanel"
+          aria-label={t("chat_debug_action")}
+          tabIndex={0}
+          className="focus-visible:outline-ring min-h-0 flex-1 overflow-y-auto px-4 pt-3 pb-4 focus-visible:outline-2 focus-visible:-outline-offset-2"
+        >
+          <DebugTabPanel
+            messageId={messageId}
+            sessionId={debug.sessionId}
+            onSelectTurn={debug.onSelectTurn}
+          />
+        </div>
+      )}
 
       <div className="border-ax-border text-ax-text-secondary flex shrink-0 justify-between gap-2 border-t px-4 py-3 text-xs">
         <span>
@@ -130,6 +154,8 @@ export type ActivityPanelProps = {
   onTabChange: (tab: ActivityTab) => void;
   /** 0-based source to focus (opened from an inline citation). */
   focusSource: number | null;
+  /** The Felsök tab (users with `assistant_debug`, saved conversations only). */
+  debug?: DebugTabConfig | null;
   onClose: () => void;
   /** Inline side panel (≥1024px) or a modal bottom sheet (smaller screens). */
   variant: "side" | "sheet";
@@ -137,17 +163,21 @@ export type ActivityPanelProps = {
 
 /**
  * The Aktivitet panel: steps (timeline with tool calls, sources read,
- * approvals, durations when known) and numbered sources. Side panel on wide
- * screens, bottom sheet on tablets and phones. Focus moves into it when it
- * opens; Escape and the close button close it (the caller returns focus to
- * the pill that opened it).
+ * approvals, durations when known), numbered sources and, for users who may
+ * debug assistants, the Felsök tab with the saved turn's diagnostics. Side
+ * panel on wide screens, bottom sheet on tablets and phones. Focus moves into
+ * it when it opens; Escape and the close button close it (the caller returns
+ * focus to the pill that opened it).
  */
-export function ActivityPanel({ variant, onClose, ...props }: ActivityPanelProps) {
+export function ActivityPanel({ variant, onClose, debug = null, ...rest }: ActivityPanelProps) {
   const t = useTranslations();
   const titleId = useId();
   const asideRef = useRef<HTMLElement>(null);
   const tabListRef = useRef<HTMLDivElement>(null);
   const focusedFor = useRef<string | null>(null);
+  // A debug tab asked for without the right (or for an unsaved conversation)
+  // shows the steps instead.
+  const props = { ...rest, debug, tab: rest.tab === "debug" && !debug ? "steps" : rest.tab };
   const { focusSource, tab, messageId } = props;
 
   // Side panel: move focus in once per opened answer (the sheet's dialog does
@@ -192,7 +222,11 @@ export function ActivityPanel({ variant, onClose, ...props }: ActivityPanelProps
       ref={asideRef}
       id={ACTIVITY_PANEL_ID}
       aria-labelledby={titleId}
-      className="bg-ax-sunken border-ax-border flex w-[340px] shrink-0 flex-col border-s"
+      // The diagnostics carry ids, routes and token tables: a wider panel on that tab.
+      className={cn(
+        "bg-ax-sunken border-ax-border flex shrink-0 flex-col border-s",
+        tab === "debug" ? "w-[420px]" : "w-[340px]"
+      )}
     >
       <h2 id={titleId} className="sr-only">
         {t("chat_activity_panel_label")}

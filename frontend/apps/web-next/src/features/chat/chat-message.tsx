@@ -171,12 +171,15 @@ function AnswerActions({
   text,
   hasActivity,
   onShowActivity,
+  onDebug,
   feedback,
   timestamp
 }: {
   text: string;
   hasActivity: boolean;
   onShowActivity: (trigger: HTMLElement) => void;
+  /** Opens the answer's Felsök tab (users with `assistant_debug`). */
+  onDebug: ((trigger: HTMLElement) => void) | null;
   feedback: AnswerFeedback | null;
   timestamp: string | null;
 }) {
@@ -202,20 +205,18 @@ function AnswerActions({
   );
 
   const iconClass = "pointer-coarse:size-11";
+  // The panel returns focus to the menu button that opened it.
+  const openPanel = (open: (trigger: HTMLElement) => void) => {
+    const trigger = moreRef.current?.querySelector("button");
+    if (trigger) open(trigger);
+  };
   const moreItems = [
     { label: t("copy_as_markdown"), onClick: () => void copy("markdown") },
     { label: t("copy_as_richtext"), onClick: () => void copy("richtext") },
     ...(hasActivity
-      ? [
-          {
-            label: t("chat_show_activity"),
-            onClick: () => {
-              const trigger = moreRef.current?.querySelector("button");
-              if (trigger) onShowActivity(trigger);
-            }
-          }
-        ]
-      : [])
+      ? [{ label: t("chat_show_activity"), onClick: () => openPanel(onShowActivity) }]
+      : []),
+    ...(onDebug ? [{ label: t("chat_debug_action"), onClick: () => openPanel(onDebug) }] : [])
   ];
 
   return (
@@ -284,7 +285,8 @@ function AssistantMessage({
   durations,
   activityExpanded,
   onActivityToggle,
-  feedback
+  feedback,
+  canDebug
 }: {
   message: EneoUIMessage;
   assistant: AssistantIdentity;
@@ -296,6 +298,7 @@ function AssistantMessage({
   activityExpanded: boolean;
   onActivityToggle?: (trigger: HTMLElement, request?: ActivityRequest) => void;
   feedback: AnswerFeedback | null;
+  canDebug: boolean;
 }) {
   const text = messageText(message);
   const answering =
@@ -388,6 +391,11 @@ function AssistantMessage({
             text={text}
             hasActivity={activity.hasActivity}
             onShowActivity={(trigger) => onActivityToggle?.(trigger, { tab: "steps" })}
+            onDebug={
+              canDebug && onActivityToggle
+                ? (trigger) => onActivityToggle(trigger, { tab: "debug" })
+                : null
+            }
             feedback={feedback}
             timestamp={message.metadata?.createdAt ?? durations?.finishedAt ?? null}
           />
@@ -415,7 +423,8 @@ export function ChatMessage({
   durations = null,
   activityExpanded = false,
   onActivityToggle,
-  feedback = null
+  feedback = null,
+  canDebug = false
 }: {
   message: EneoUIMessage;
   assistant: AssistantIdentity;
@@ -428,6 +437,8 @@ export function ChatMessage({
   onActivityToggle?: (trigger: HTMLElement, request?: ActivityRequest) => void;
   /** A finished answer of a saved conversation: its rating control. */
   feedback?: AnswerFeedback | null;
+  /** The viewer may debug assistants and the answer is saved: a "Felsök" action. */
+  canDebug?: boolean;
 }) {
   if (message.role === "user") return <UserMessage message={message} />;
   return (
@@ -442,6 +453,7 @@ export function ChatMessage({
       activityExpanded={activityExpanded}
       onActivityToggle={onActivityToggle}
       feedback={feedback}
+      canDebug={canDebug}
     />
   );
 }
