@@ -26,6 +26,7 @@ from eneo.completion_models.infrastructure.adapters.tenant_model_adapter import 
 )
 from eneo.files.model_file_references import file_handle
 from eneo.main.exceptions import OpenAIException
+from eneo.mcp_apps.domain.mcp_app_view import McpAppViewInfo
 from eneo.mcp_servers.infrastructure.tool_approval import (
     ToolApprovalDecision,
     ToolApprovalWaitResult,
@@ -1694,6 +1695,173 @@ async def test_forced_final_drops_ignored_tool_calls_without_pending_events():
     # Text streamed by the final response is preserved and the turn stops.
     assert "partial answer" in "".join(c.text for c in completions if c.text)
     assert any(c.stop for c in completions)
+
+
+class _AppViewMCPProxy(_FakeMCPProxy):
+    """Proxy whose called tool declares an MCP App view."""
+
+    def __init__(self, info):
+        super().__init__()
+        self.app_view_info = info
+        self.fetch_calls: list[str] = []
+
+    async def approved_app_view(self, prefixed_tool_name):
+        self.fetch_calls.append(prefixed_tool_name)
+        return self.app_view_info
+
+
+class _ErrorResultAppViewProxy(_AppViewMCPProxy):
+    async def call_tools_parallel(self, proxy_calls):
+        self.calls.append(proxy_calls)
+        return [
+            {"content": [{"type": "text", "text": "boom"}], "is_error": True}
+            for _ in proxy_calls
+        ]
+
+
+def _app_view_info():
+    return McpAppViewInfo(
+        view_id=uuid4(),
+        mcp_server_id=uuid4(),
+        uri="ui://weather/dashboard",
+        mime_type="text/html;profile=mcp-app",
+        ui_meta={"prefersBorder": True},
+    )
+
+
+class _StructuredResultMixin:
+    async def call_tools_parallel(self, proxy_calls):
+        self.calls.append(proxy_calls)  # type: ignore[attr-defined]
+        return [
+            {
+                "content": [{"type": "text", "text": "12 degrees"}],
+                "is_error": False,
+                "structured_content": {"temperature": 12},
+            }
+            for _ in proxy_calls
+        ]
+
+
+class _StructuredAppViewProxy(_StructuredResultMixin, _AppViewMCPProxy):
+    pass
+
+
+class _StructuredPlainProxy(_StructuredResultMixin, _FakeMCPProxy):
+    pass
+
+
+async def _executed_tool_call(mcp_proxy):
+    adapter = _make_adapter()
+    follow_up_stream = _AsyncChunkStream([_text_chunk("done", finish_reason="stop")])
+    stream = _AsyncChunkStream(
+        [_tool_call_chunk()],
+        eneo_context={
+            "mcp_proxy": mcp_proxy,
+            "messages": [],
+            "kwargs": {},
+            "has_tools": True,
+        },
+    )
+    with patch(
+        "eneo.completion_models.infrastructure.adapters.tenant_model_adapter._acompletion_call",
+        AsyncMock(return_value=follow_up_stream),
+    ):
+        completions = await _collect(
+            adapter,
+            stream,
+            require_tool_approval=False,
+            approval_manager=None,
+            approval_context=None,
+            pending_approval_ids=set(),
+        )
+    executed = [
+        call
+        for completion in completions
+        for call in completion.tool_calls_metadata or []
+        if call.result is not None
+    ]
+    assert len(executed) == 1
+    return executed[0]
+
+
+async def test_structured_content_is_kept_for_a_call_with_a_view():
+    call = await _executed_tool_call(_StructuredAppViewProxy(_app_view_info()))
+
+    assert call.structured_content == {"temperature": 12}
+
+
+async def test_structured_content_is_dropped_for_a_call_without_a_view():
+    call = await _executed_tool_call(_StructuredPlainProxy())
+
+    assert call.structured_content is None
+
+
+@pytest.mark.asyncio
+async def test_iterate_stream_error_result_skips_app_view_fetch():
+    adapter = _make_adapter()
+    mcp_proxy = _ErrorResultAppViewProxy(_app_view_info())
+    follow_up_stream = _AsyncChunkStream([_text_chunk("done", finish_reason="stop")])
+    mocked_acompletion = AsyncMock(return_value=follow_up_stream)
+
+    stream = _AsyncChunkStream(
+        [_tool_call_chunk()],
+        eneo_context={
+            "mcp_proxy": mcp_proxy,
+            "messages": [],
+            "kwargs": {},
+            "has_tools": True,
+        },
+    )
+
+    with patch(
+        "eneo.completion_models.infrastructure.adapters.tenant_model_adapter._acompletion_call",
+        mocked_acompletion,
+    ):
+        completions = await _collect(
+            adapter,
+            stream,
+            require_tool_approval=False,
+            approval_manager=None,
+            approval_context=None,
+            pending_approval_ids=set(),
+        )
+
+    assert mcp_proxy.fetch_calls == []
+    assert [c for c in completions if c.mcp_tool_references] == []
+
+
+@pytest.mark.asyncio
+async def test_iterate_stream_proxy_without_approved_app_view_is_harmless():
+    adapter = _make_adapter()
+    mcp_proxy = _FakeMCPProxy()
+    follow_up_stream = _AsyncChunkStream([_text_chunk("done", finish_reason="stop")])
+    mocked_acompletion = AsyncMock(return_value=follow_up_stream)
+
+    stream = _AsyncChunkStream(
+        [_tool_call_chunk()],
+        eneo_context={
+            "mcp_proxy": mcp_proxy,
+            "messages": [],
+            "kwargs": {},
+            "has_tools": True,
+        },
+    )
+
+    with patch(
+        "eneo.completion_models.infrastructure.adapters.tenant_model_adapter._acompletion_call",
+        mocked_acompletion,
+    ):
+        completions = await _collect(
+            adapter,
+            stream,
+            require_tool_approval=False,
+            approval_manager=None,
+            approval_context=None,
+            pending_approval_ids=set(),
+        )
+
+    assert any(c.stop for c in completions)
+    assert [c for c in completions if c.mcp_tool_references] == []
 
 
 @pytest.mark.asyncio

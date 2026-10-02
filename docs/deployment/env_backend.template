@@ -441,6 +441,12 @@ EXPORT_MAX_AGE_HOURS=24
 # here. Tabular analysis also needs signed file links the runtime can reach:
 # FILE_REFERENCE_BASE_URL=http://backend:8000
 
+# Optional interactive tool views (MCP Apps, see MCP_APPS.md). Views are served
+# from a second hostname that reaches the backend; it must differ from the
+# address users open Eneo on.
+# MCP_APPS_ENABLED=true
+# MCP_APP_CONTENT_BASE_URL=https://views.your-domain.com
+
 # ============================================================================
 # FEATURE FLAGS
 # ============================================================================

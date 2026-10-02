@@ -19,6 +19,19 @@
           }
         },
         {
+          "id": "intermediate-query-tables",
+          "type": "improved",
+          "area": "chat",
+          "title": {
+            "en": "Keep intermediate tables out of chart answers",
+            "sv": "Visa diagram utan onödiga mellantabeller"
+          },
+          "body": {
+            "en": "When you ask for a chart, the assistant can prepare its data without displaying a separate table for each calculation. Tables remain available when you ask to see or explore the figures.",
+            "sv": "När du ber om ett diagram kan assistenten förbereda underlaget utan att visa en separat tabell för varje beräkning. Tabeller finns kvar när du vill se eller utforska siffrorna."
+          }
+        },
+        {
           "id": "charts-in-documents",
           "type": "new",
           "area": "chat",

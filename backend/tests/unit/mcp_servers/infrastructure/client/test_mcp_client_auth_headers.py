@@ -53,6 +53,7 @@ class TestAuthHeaderConstruction:
                 "tool_runtime_url": "http://tool-runtime:8080",
                 "tool_runtime_token": "runtime-secret",
                 "file_reference_base_url": "http://backend:8000/",
+                "mcp_apps_enabled": False,
             }
         )
         monkeypatch.setattr(client_module, "get_settings", lambda: settings)
@@ -78,6 +79,27 @@ class TestAuthHeaderConstruction:
 
         assert "X-Eneo-File-Origin" not in headers
 
+    async def test_bundled_server_is_told_when_tool_views_are_shown(self, monkeypatch):
+        base = {
+            "tool_runtime_url": "http://tool-runtime:8080",
+            "tool_runtime_token": "runtime-secret",
+            "mcp_apps_enabled": True,
+        }
+        server = _make_server()
+        server.http_url = "http://tool-runtime:8080/mcp/file-analysis"
+        server.http_auth_type = "bundled"
+
+        async def headers_with(**settings):
+            configured = get_settings().model_copy(update={**base, **settings})
+            monkeypatch.setattr(client_module, "get_settings", lambda: configured)
+            return await MCPClient(server, None)._build_auth_headers()
+
+        shown = await headers_with(mcp_app_content_base_url="http://content.test")
+        assert shown["X-Eneo-Tool-Views"] == "shown"
+        # Views enabled but with nowhere to serve them from are not shown.
+        unserved = await headers_with(mcp_app_content_base_url=None)
+        assert "X-Eneo-Tool-Views" not in unserved
+
 
 async def test_existing_bundled_registration_forwards_only_opaque_identity(monkeypatch):
     settings = get_settings().model_copy(
@@ -85,6 +107,7 @@ async def test_existing_bundled_registration_forwards_only_opaque_identity(monke
             "tool_runtime_url": "http://tool-runtime:3010",
             "tool_runtime_token": "runtime-secret",
             "file_reference_base_url": "http://backend:8000",
+            "mcp_apps_enabled": False,
         }
     )
     monkeypatch.setattr(client_module, "get_settings", lambda: settings)

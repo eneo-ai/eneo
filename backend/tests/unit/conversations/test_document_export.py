@@ -290,6 +290,7 @@ async def test_discovery_is_format_specific_and_never_calls_renderer():
         {"is_enabled_by_default": False},
         {"removed_from_remote": True},
         {"requires_approval": True, "description": None, "input_schema": None},
+        {"meta": {"ui": {"visibility": ["app"]}}},
     ],
 )
 async def test_real_proxy_catalogue_excludes_non_callable_export_tools(overrides):

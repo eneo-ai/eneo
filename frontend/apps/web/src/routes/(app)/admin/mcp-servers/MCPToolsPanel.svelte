@@ -15,6 +15,8 @@
   import { untrack } from "svelte";
   import type { Eneo, components } from "@eneo/eneo-js";
   import { builtinToolCatalogLabels } from "$lib/features/chat/internalToolLabels";
+  import { formatBytes } from "$lib/core/formatting/formatBytes";
+  import { SvelteMap } from "svelte/reactivity";
 
   type MCPTool = components["schemas"]["MCPServerToolPublic"];
 
@@ -93,6 +95,49 @@
   function toolDescription(tool: MCPTool): string | null {
     return builtinToolCatalogLabels(server, tool.name)?.description ?? tool.description ?? null;
   }
+
+  /**
+   * The interactive view (MCP App) awaiting approval with a tool, if its
+   * pending definition brings a view the approved one does not have.
+   */
+  function pendingView(tool: MCPTool): { uri: string; isNew: boolean } | null {
+    const pending = tool.pending_ui_resource_sha256;
+    if (!pending || pending === tool.ui_resource_sha256 || tool.removed_from_remote) return null;
+    const ui = (tool.pending_meta ?? tool.meta)?.ui as { resourceUri?: unknown } | undefined;
+    const uri = typeof ui?.resourceUri === "string" ? ui.resourceUri : "";
+    return { uri, isNew: !tool.ui_resource_sha256 };
+  }
+
+  // What each view awaiting approval may do, so approving it is an informed
+  // choice. Loaded when the tool is listed for review; "unknown" when the
+  // facts could not be read.
+  type ViewFacts = components["schemas"]["MCPToolViewPublic"];
+  const viewFacts = new SvelteMap<string, ViewFacts | "unknown">();
+
+  async function loadViewFacts(tool: MCPTool) {
+    const key = `${tool.id}:${tool.pending_ui_resource_sha256}`;
+    if (viewFacts.has(key)) return;
+    viewFacts.set(key, "unknown");
+    try {
+      viewFacts.set(
+        key,
+        await eneoClient.mcpServers.getToolView({ mcp_server_id: mcpServerId, tool_id: tool.id })
+      );
+    } catch {
+      // Stays "unknown": the review then lists no facts.
+    }
+  }
+
+  function factsOf(tool: MCPTool): ViewFacts | null {
+    const facts = viewFacts.get(`${tool.id}:${tool.pending_ui_resource_sha256}`);
+    return facts && facts !== "unknown" ? facts : null;
+  }
+
+  $effect(() => {
+    for (const tool of tools) {
+      if (tool.requires_approval && pendingView(tool)) void loadViewFacts(tool);
+    }
+  });
 
   // Derived: tools needing review
   let pendingTools = $derived(tools.filter((t) => t.requires_approval));
@@ -381,6 +426,13 @@
           <div class="divide-dimmer divide-y">
             {#each tools as tool (tool.id)}
               {#if tool.requires_approval}
+                {@const view = pendingView(tool)}
+                {@const facts = view ? factsOf(tool) : null}
+                {@const descriptionChanged =
+                  !!tool.pending_description && tool.pending_description !== tool.description}
+                {@const schemaChanged =
+                  !!tool.pending_input_schema &&
+                  JSON.stringify(tool.pending_input_schema) !== JSON.stringify(tool.input_schema)}
                 <!-- Tool requiring approval -->
                 <div
                   class="border-l-2 border-l-amber-500 bg-amber-500/5 px-3 py-2.5"
@@ -399,7 +451,7 @@
                             <Trash2 class="h-2.5 w-2.5" />
                             {m.removed_from_server()}
                           </span>
-                        {:else if tool.pending_description || tool.pending_input_schema}
+                        {:else if descriptionChanged || schemaChanged || !view}
                           <span
                             class="inline-flex shrink-0 items-center gap-1 rounded-full bg-amber-500/10 px-1.5 py-0.5 text-[10px] font-medium text-amber-600"
                           >
@@ -410,7 +462,7 @@
                       </div>
 
                       <!-- Show diff for description changes -->
-                      {#if tool.pending_description && !tool.removed_from_remote}
+                      {#if descriptionChanged && !tool.removed_from_remote}
                         <div class="mt-2 space-y-1.5">
                           {#if tool.description}
                             <div class="bg-secondary/50 rounded px-2.5 py-1.5">
@@ -437,6 +489,64 @@
                         <p class="text-muted mt-1 text-xs leading-snug line-through">
                           {tool.description}
                         </p>
+                      {:else if tool.description}
+                        <!-- Only the view is new: the description stands as it is. -->
+                        <p class="text-muted mt-1 text-xs leading-snug">{tool.description}</p>
+                      {/if}
+
+                      <!-- Approving the tool also approves the view it brings -->
+                      {#if view}
+                        <div class="mt-2 border-caution bg-caution rounded border px-2.5 py-1.5">
+                          <span
+                            class="mb-0.5 block text-[10px] font-medium tracking-wider text-warning-stronger uppercase"
+                            >{view.isNew ? m.mcp_tool_view_new() : m.mcp_tool_view_changed()}</span
+                          >
+                          {#if view.uri}
+                            <p
+                              class="font-mono text-xs leading-snug break-all text-warning-stronger"
+                            >
+                              {view.uri}
+                            </p>
+                          {/if}
+                          <p class="mt-1 text-xs leading-snug text-warning-stronger">
+                            {m.mcp_tool_view_explanation()}
+                          </p>
+                          {#if facts}
+                            <ul
+                              class="mt-1 list-disc pl-4 text-xs leading-snug text-warning-stronger"
+                            >
+                              <li>
+                                {m.mcp_tool_view_size({ size: formatBytes(facts.size_bytes) })}
+                              </li>
+                              <li>
+                                {#if facts.connect_domains.length > 0}
+                                  {m.mcp_tool_view_connects()}
+                                  <span class="font-mono break-all"
+                                    >{facts.connect_domains.join(", ")}</span
+                                  >
+                                {:else}
+                                  {m.mcp_tool_view_no_network()}
+                                {/if}
+                              </li>
+                              {#if facts.resource_domains.length > 0}
+                                <li>
+                                  {m.mcp_tool_view_loads_from()}
+                                  <span class="font-mono break-all"
+                                    >{facts.resource_domains.join(", ")}</span
+                                  >
+                                </li>
+                              {/if}
+                              {#if facts.frame_domains.length > 0}
+                                <li>
+                                  {m.mcp_tool_view_embeds()}
+                                  <span class="font-mono break-all"
+                                    >{facts.frame_domains.join(", ")}</span
+                                  >
+                                </li>
+                              {/if}
+                            </ul>
+                          {/if}
+                        </div>
                       {/if}
                     </div>
 

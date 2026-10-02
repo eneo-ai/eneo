@@ -400,6 +400,24 @@ export class ChatService {
    */
   composerSuggestion = $state<string | null>(null);
 
+  /**
+   * Run a tool for the interactive view of an earlier tool call. The tool
+   * runs on the view's own server; the result is for the view and does not
+   * become part of the conversation.
+   */
+  async callToolFromView(params: {
+    toolCallId: string;
+    viewId: string;
+    name: string;
+    arguments: Record<string, unknown>;
+  }) {
+    const sessionId = this.currentConversation.id;
+    if (!sessionId) {
+      throw new Error("Cannot call a tool without an active conversation");
+    }
+    return this.#eneo.conversations.callToolFromView({ sessionId, ...params });
+  }
+
   #seedLockedFromHistory() {
     const messages = this.currentConversation?.messages;
     if (!messages?.length) {

@@ -24,6 +24,11 @@ It has four endpoints:
   interactively through an MCP App, with PNG output on request or when app
   views are unavailable. It provides **Charts** (`charts`, "Diagram" in Swedish).
 
+For how the runtime relates to Skills, Function providers, native documents
+and interactive views, see the
+[architecture overview](../../frontend/apps/docs-site/src/content/docs/architecture.mdx#skills-functions-tools-and-views).
+[MCP_APPS.md](MCP_APPS.md) owns view deployment and host permissions.
+
 ## Chaining tools without copying data
 
 Large data moves between tools as Eneo files, never through the model:
@@ -66,12 +71,50 @@ checked again when exporting, and a compatible schema does not guarantee
 that a remote provider will render successfully. The returned resource must
 have the requested MIME type and pass Eneo's generated-file validation.
 
-## Provider view resources
+## The table view
 
-The runtime ships self-contained MCP Apps table and chart resources for
-compatible hosts. Eneo's runtime integration displays tool results as text,
-images and downloadable files. Charts fall back to PNG when the caller does
-not advertise app-view support.
+`query_table` brings an interactive view (an MCP App, see
+[MCP_APPS.md](MCP_APPS.md)): where Eneo shows tool views, the rows a query
+returned appear as a table under the answer. The user can sort, filter and
+copy them, open the table beside the conversation, and read on past the first
+500 rows; reading on and sorting a longer result run the same query again
+through `query_table`, a page at a time. The view takes no room for a single
+row, a query plan, a failed query or a result exported as a file.
+
+Users can ask naturally: "Show me the rows in this file", "Show orders from
+last month", or "Summarise sales by region". The tool descriptions direct the
+assistant to inspect the file and query the requested data with export off.
+It does not need the user to mention tools or interactive tables. Browsing
+queries leave pagination to the host; an explicit sample or top-N request may
+limit the result. Download requests and files needed by chart or spreadsheet
+tools still use export. The result tells the assistant when a table is shown,
+so it can avoid duplicating rows without claiming a view exists on clients
+where apps are unavailable.
+
+The view is one self-contained HTML page served by the runtime with the tool.
+It loads nothing from the network. Eneo stores it and keeps it current on its
+own; there is nothing to sync or approve. Eneo tells the runtime when views
+are shown (`X-Eneo-Tool-Views`), and the tool then tells the model that the
+user sees the rows, so the answer describes them instead of repeating them.
+Without `MCP_APPS_ENABLED` and a content origin nothing changes: the tool
+returns its rows as before.
+
+## The chart view
+
+`create_chart` brings a self-contained MCP App built with the official `App`
+SDK and Apache ECharts. It receives a validated chart specification through
+`structuredContent`, renders SVG in the browser and offers hover values,
+series/slice controls, x-axis zoom (except pie), a data table and a larger view.
+The host uses the official `AppBridge`; there is no separate chart protocol.
+No network access, browser permissions, remote assets or raw HTML tooltips are
+requested. Only controlled options are derived from the validated data.
+
+The tool defaults to `format: auto`. When Eneo sends `X-Eneo-Tool-Views: shown`,
+it resolves data in the sandbox child and returns chart data instead of
+rasterizing an image. `format: png`, `include_svg: true` or a host without app
+support keeps the existing SVG/resvg image path. Interactive data is bounded
+at 200 KiB, below Eneo's 256 KiB structured-result limit; oversized data returns
+`CHART_DATA_TOO_LARGE` and asks the model to aggregate, filter or use PNG.
 
 ### Enabling the Charts function after upgrading
 

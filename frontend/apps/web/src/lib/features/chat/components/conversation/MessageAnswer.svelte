@@ -7,7 +7,8 @@
   import MessageEneoInfoBlob from "./MessageEneoInfoBlob.svelte";
   import MessageDocumentLink from "./MessageDocumentLink.svelte";
   import McpImageAttachments from "./McpImageAttachments.svelte";
-  import { isChartDocumentAsset } from "../../toolFileInputs";
+  import { isChartDocumentAsset } from "../../mcp-apps/mcpApps";
+  import McpAppFrames from "../../mcp-apps/McpAppFrames.svelte";
   import ReasoningTrace from "./ReasoningTrace.svelte";
   import InternalToolStep from "./InternalToolStep.svelte";
   import SkillActivationStep from "./SkillActivationStep.svelte";
@@ -631,6 +632,8 @@
 </div>
 
 <McpImageAttachments />
+
+<McpAppFrames />
 
 {#each message.generated_files.filter((file) => !documentAssetIds.has(file.id)) as file (file.id)}
   <!-- An empty mimetype is the placeholder of an image still being generated. -->

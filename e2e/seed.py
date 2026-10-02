@@ -59,7 +59,7 @@ async def main() -> None:
             CompletionModels(
                 name=MODEL_NAME,
                 nickname="E2E Mock",
-                max_input_tokens=8192,
+                max_input_tokens=32768,
                 max_output_tokens=2048,
                 family="openai",
                 stability="stable",
@@ -67,7 +67,7 @@ async def main() -> None:
                 org="OpenAI",
                 vision=False,
                 reasoning=False,
-                supports_tool_calling=False,
+                supports_tool_calling=True,
                 base_url=MOCK_ENDPOINT,
                 litellm_model_name=MODEL_NAME,
                 tenant_id=tenant_id,

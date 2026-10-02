@@ -545,6 +545,14 @@ const ACTION_MESSAGES = {
     name: m.audit_action_mcp_server_tool_disabled,
     description: m.audit_action_mcp_server_tool_disabled_description
   },
+  mcp_app_view_link_created: {
+    name: m.audit_action_mcp_app_view_link_created,
+    description: m.audit_action_mcp_app_view_link_created_description
+  },
+  mcp_app_tool_called: {
+    name: m.audit_action_mcp_app_tool_called,
+    description: m.audit_action_mcp_app_tool_called_description
+  },
   retention_policy_applied: {
     name: m.audit_action_retention_policy_applied,
     description: m.audit_action_retention_policy_applied_description
