@@ -29,6 +29,13 @@ export function chatCapabilities(
   });
 }
 
+/** The capability as the composer shows it when the model cannot call tools. */
+export function withoutToolCalling(capability: ChatCapability): ChatCapability {
+  return capability.available
+    ? { ...capability, available: false, reason: "model_no_tool_calling" }
+    : capability;
+}
+
 export function defaultDisabledCapabilities(partner: ChatPartner): Capability[] {
   return partner.effectiveConfig?.default_disabled_capabilities ?? [];
 }

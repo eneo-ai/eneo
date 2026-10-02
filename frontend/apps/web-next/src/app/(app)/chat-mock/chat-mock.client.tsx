@@ -24,7 +24,12 @@ const PARTNER: ChatPartner = {
   spaceName: "Upphandling",
   securityClassification: "Klass 2 · Intern",
   description: "Hjälper dig att granska upphandlingar mot LOU.",
-  completionModel: { id: "m", name: "Claude Haiku 4.5", token_limit: 200_000 },
+  completionModel: {
+    id: "m",
+    name: "Claude Haiku 4.5",
+    token_limit: 200_000,
+    supports_tool_calling: true
+  },
   knowledge: [
     { id: "kb-policy", name: "Upphandlingspolicy", kind: "collection" },
     { id: "kb-lou", name: "LOU-vägledning", kind: "website" }

@@ -1,5 +1,10 @@
 import { describe, expect, it } from "vitest";
-import { capabilityBlockReason, toggleCapability } from "./capabilities";
+import {
+  capabilityBlockReason,
+  modelSupportsToolCalling,
+  readinessKey,
+  toggleCapability
+} from "./capabilities";
 
 describe("capability selection", () => {
   it("keeps other functions when one is toggled", () => {
@@ -36,7 +41,7 @@ describe("capability selection", () => {
         available: true,
         modelSupportsTools: false
       })
-    ).toBe("model_unsupported");
+    ).toBe("model_no_tool_calling");
     expect(
       capabilityBlockReason({
         enabled: false,
@@ -45,5 +50,14 @@ describe("capability selection", () => {
         modelSupportsTools: true
       })
     ).toBe("no_active_provider");
+  });
+
+  it("treats only an explicit tool-calling flag as support, like the backend", () => {
+    expect(modelSupportsToolCalling({ supports_tool_calling: true })).toBe(true);
+    expect(modelSupportsToolCalling({ supports_tool_calling: false })).toBe(false);
+    expect(modelSupportsToolCalling({ supports_tool_calling: null })).toBe(false);
+    expect(modelSupportsToolCalling({})).toBe(false);
+    expect(modelSupportsToolCalling(null)).toBe(false);
+    expect(readinessKey("model_no_tool_calling")).toBe("tools_readiness_model_no_tool_calling");
   });
 });

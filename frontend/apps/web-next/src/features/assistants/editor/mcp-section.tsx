@@ -1,6 +1,6 @@
 "use client";
 
-import { ChevronRight } from "lucide-react";
+import { ChevronRight, LockKeyhole } from "lucide-react";
 import { useTranslations } from "next-intl";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { SettingsGroup, SettingsRow } from "@/components/composites/settings-rows";
@@ -8,8 +8,9 @@ import { useAutosave } from "@/components/composites/use-autosave";
 import { Button } from "@/components/ui/button";
 import { Label } from "@/components/ui/label";
 import { Switch } from "@/components/ui/switch";
+import { modelSupportsToolCalling, readinessKey } from "@/features/capabilities/capabilities";
 import { useSpace } from "@/features/spaces/use-space";
-import { isMcpEnforced, lockedAssistantModel, policyMcpServers } from "./effective-config";
+import { assistantToolModel, isMcpEnforced, policyMcpServers } from "./effective-config";
 import {
   assistantMcpServersFromApi,
   availableAssistantMcpServers,
@@ -53,13 +54,11 @@ export function McpSection({ assistant }: { assistant: Assistant }) {
   const [selected, setSelected] = useState<Set<string>>(new Set(savedIds));
   const [toolSettings, setToolSettings] = useState<AssistantMcpToolSetting[]>(savedToolSettings);
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
-  const lockedModel = lockedAssistantModel(space.completion_models, assistant.effective_config);
-  const selectedModel = lockedModel
-    ? (space.completion_models.find((model) => model.id === lockedModel.id) ?? null)
-    : (space.completion_models.find((model) => model.id === assistant.completion_model?.id) ??
-      assistant.completion_model ??
-      null);
-  const modelSupportsTools = selectedModel?.supports_tool_calling !== false;
+  // A picked model without tool calling never receives any server: rows stay
+  // saved but read as unavailable, and only already-selected ones can be
+  // switched off. No model picked is a separate state and does not block.
+  const toolModel = assistantToolModel(space.completion_models, assistant);
+  const modelBlocksTools = toolModel !== null && !modelSupportsToolCalling(toolModel);
 
   // Adopt server changes (e.g. our own save landing) unless the user diverged.
   const savedKey = JSON.stringify([sortedKey(savedIds), sortedToolKey(savedToolSettings)]);
@@ -129,7 +128,7 @@ export function McpSection({ assistant }: { assistant: Assistant }) {
     <SettingsGroup title={t("mcp_servers")} description={t("mcp_servers_description")}>
       <SettingsRow>
         <div className="flex flex-col gap-2">
-          {!modelSupportsTools && (
+          {modelBlocksTools && (
             <p className="border-warning/30 bg-warning/10 text-warning rounded-md border px-3 py-2 text-sm">
               <span className="font-semibold">{t("warning")}:</span>{" "}
               {t("model_does_not_support_tools")}
@@ -178,6 +177,13 @@ export function McpSection({ assistant }: { assistant: Assistant }) {
                   selected={selected.has(server.id)}
                   expanded={expanded.has(server.id)}
                   disabled={disabledByKnowledge}
+                  unavailableReason={
+                    server.is_enabled === false
+                      ? "server_disabled"
+                      : modelBlocksTools
+                        ? "model_no_tool_calling"
+                        : null
+                  }
                   toolSettings={toolSettings}
                   onToggleServer={() => toggleServer(server)}
                   onToggleExpanded={() =>
@@ -208,11 +214,18 @@ export function McpSection({ assistant }: { assistant: Assistant }) {
   );
 }
 
+/**
+ * One server row. An unavailable server (deactivated by an administrator, or
+ * blocked because the model cannot call tools) carries a pill and the reason;
+ * it cannot be switched on, but a saved selection can still be switched off
+ * so the configuration survives a model change.
+ */
 function McpServerRow({
   server,
   selected,
   expanded,
   disabled,
+  unavailableReason,
   toolSettings,
   onToggleServer,
   onToggleExpanded,
@@ -223,6 +236,7 @@ function McpServerRow({
   selected: boolean;
   expanded: boolean;
   disabled: boolean;
+  unavailableReason: "server_disabled" | "model_no_tool_calling" | null;
   toolSettings: AssistantMcpToolSetting[];
   onToggleServer: () => void;
   onToggleExpanded: () => void;
@@ -231,8 +245,11 @@ function McpServerRow({
 }) {
   const t = useTranslations();
   const tools = server.tools ?? [];
-  const hasTools = selected && tools.length > 0;
+  const unavailable = unavailableReason !== null;
+  const hasTools = selected && !unavailable && tools.length > 0;
   const enabledToolCount = enabledMcpToolCount(server, toolSettings);
+  const pillClass =
+    "bg-ax-warning-muted text-ax-warning inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-xs font-medium";
 
   return (
     <div className="border-border overflow-hidden rounded-lg border">
@@ -258,6 +275,16 @@ function McpServerRow({
           <span className="flex min-w-0 flex-col gap-0.5">
             <span className="flex items-center gap-2">
               <span className="font-medium">{server.name}</span>
+              {unavailableReason === "server_disabled" ? (
+                <span className={pillClass}>{t("disabled")}</span>
+              ) : (
+                unavailable && (
+                  <span className={pillClass}>
+                    <LockKeyhole aria-hidden="true" className="size-3" />
+                    {t("not_available")}
+                  </span>
+                )
+              )}
               {hasTools && (
                 <span className="bg-secondary text-muted-foreground rounded px-1.5 py-0.5 text-[10px] font-medium tabular-nums">
                   <span>{enabledToolCount}</span>
@@ -266,13 +293,23 @@ function McpServerRow({
                 </span>
               )}
             </span>
-            {server.description && (
-              <span className="text-muted-foreground line-clamp-1 text-xs">
-                {server.description}
+            {unavailable ? (
+              <span className="text-muted-foreground text-xs">
+                {t(readinessKey(unavailableReason))}
               </span>
+            ) : (
+              server.description && (
+                <span className="text-muted-foreground line-clamp-1 text-xs">
+                  {server.description}
+                </span>
+              )
             )}
           </span>
-          <Switch checked={selected} disabled={disabled} onCheckedChange={onToggleServer} />
+          <Switch
+            checked={selected}
+            disabled={disabled || (unavailable && !selected)}
+            onCheckedChange={onToggleServer}
+          />
         </Label>
       </div>
 

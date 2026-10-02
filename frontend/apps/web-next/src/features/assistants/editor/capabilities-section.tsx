@@ -8,10 +8,12 @@ import { Switch } from "@/components/ui/switch";
 import {
   CAPABILITIES,
   capabilityBlockReason,
+  modelSupportsToolCalling,
   readinessKey,
   toggleCapability
 } from "@/features/capabilities/capabilities";
 import { useSpace } from "@/features/spaces/use-space";
+import { assistantToolModel } from "./effective-config";
 import { useUpdateAssistant, type Assistant } from "./use-assistant";
 
 export function CapabilitiesSection({ assistant }: { assistant: Assistant }) {
@@ -24,6 +26,11 @@ export function CapabilitiesSection({ assistant }: { assistant: Assistant }) {
     ? (assistant.effective_config?.enabled_capabilities ?? [])
     : (assistant.enabled_capabilities ?? []);
   const editable = assistant.permissions?.includes("edit") ?? false;
+  // A picked model without tool calling never receives a capability: it reads
+  // as unavailable, and only an already-enabled one can be switched off. No
+  // model picked is a separate state and does not block.
+  const toolModel = assistantToolModel(space.completion_models ?? [], assistant);
+  const modelBlocksTools = toolModel !== null && !modelSupportsToolCalling(toolModel);
 
   return (
     <SettingsGroup
@@ -40,7 +47,7 @@ export function CapabilitiesSection({ assistant }: { assistant: Assistant }) {
           enabled,
           spaceEnabled: offered,
           available: availability?.available === true,
-          modelSupportsTools: assistant.completion_model?.supports_tool_calling !== false
+          modelSupportsTools: !modelBlocksTools
         });
         const hint = blocked
           ? t(

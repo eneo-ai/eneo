@@ -55,6 +55,21 @@ describe("AuditTable", () => {
     await expectNoAxeViolations(document.body);
   });
 
+  it("labels the crawler's probe, run and stop actions", () => {
+    renderInApp(
+      <AuditTable
+        logs={[
+          { ...log, id: "log-2", action: "website_crawl_probed", entity_type: "website" },
+          { ...log, id: "log-3", action: "website_crawl_requested", entity_type: "website" },
+          { ...log, id: "log-4", action: "website_crawl_stop_requested", entity_type: "website" }
+        ]}
+      />
+    );
+    expect(screen.getByText("Crawleranslutning testad")).toBeTruthy();
+    expect(screen.getByText("Körning begärd")).toBeTruthy();
+    expect(screen.getByText("Stopp av körning begärt")).toBeTruthy();
+  });
+
   it("copies the metadata JSON and says so", async () => {
     writeText.mockResolvedValue();
     openDetails();

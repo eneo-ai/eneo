@@ -6,6 +6,7 @@ import {
   chatPartnerMcpServers,
   defaultDisabledMcpServerIds,
   mcpConversationOptions,
+  mcpServerUnavailableReason,
   pruneDisabledMcpServerIds
 } from "./mcp-controls";
 
@@ -99,6 +100,16 @@ describe("MCP chat controls", () => {
 
     expect([...disabled]).toEqual(["a"]);
     expect(activeMcpServerCount(servers, disabled)).toBe(1);
+  });
+
+  it("counts no server as active when the model cannot call tools", () => {
+    const servers = [server("a"), { ...server("b"), is_enabled: false }];
+    expect(mcpServerUnavailableReason(servers[0]!, true)).toBeNull();
+    expect(mcpServerUnavailableReason(servers[0]!, false)).toBe("model_no_tool_calling");
+    // An administrator's deactivation is the more specific reason.
+    expect(mcpServerUnavailableReason(servers[1]!, false)).toBe("server_disabled");
+    expect(activeMcpServerCount(servers, new Set())).toBe(1);
+    expect(activeMcpServerCount(servers, new Set(), false)).toBe(0);
   });
 
   it("builds conversation MCP request options from auto-accept and disabled servers", () => {

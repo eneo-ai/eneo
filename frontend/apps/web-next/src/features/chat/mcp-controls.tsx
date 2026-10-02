@@ -6,13 +6,27 @@ import { Switch } from "@/components/astryx/switch";
 import { Plug, ShieldCheck } from "lucide-react";
 import { useTranslations } from "next-intl";
 import { useState } from "react";
+import { readinessKey } from "@/features/capabilities/capabilities";
 import type { Schema } from "@/lib/api/models";
 import type { ChatPartner, ConversationBody } from "@/lib/chat/types";
 
 export type McpServerSummary = Pick<
   Schema<"MCPServerPublicDict">,
   "id" | "name" | "description" | "icon_url"
->;
+> & { is_enabled?: boolean };
+
+/**
+ * Why a server cannot be used in this conversation, or null. An administrator
+ * deactivating it is the more specific reason; otherwise a model without tool
+ * calling makes every server unavailable, since the backend attaches none.
+ */
+export function mcpServerUnavailableReason(
+  server: McpServerSummary,
+  modelSupportsTools: boolean
+): "server_disabled" | "model_no_tool_calling" | null {
+  if (server.is_enabled === false) return "server_disabled";
+  return modelSupportsTools ? null : "model_no_tool_calling";
+}
 
 export function chatPartnerMcpServers(partner: ChatPartner): McpServerSummary[] {
   if (partner.effectiveConfig?.mcp_enforced) {
@@ -35,11 +49,17 @@ export function pruneDisabledMcpServerIds(
   return new Set([...disabledServerIds].filter((id) => validIds.has(id)));
 }
 
+/** Servers that will be called: switched on and available (an unavailable server is off regardless). */
 export function activeMcpServerCount(
   servers: McpServerSummary[],
-  disabledServerIds: Set<string>
+  disabledServerIds: Set<string>,
+  modelSupportsTools = true
 ): number {
-  return servers.filter((server) => !disabledServerIds.has(server.id)).length;
+  return servers.filter(
+    (server) =>
+      !disabledServerIds.has(server.id) &&
+      mcpServerUnavailableReason(server, modelSupportsTools) === null
+  ).length;
 }
 
 export function mcpConversationOptions({
@@ -66,24 +86,30 @@ export function mcpConversationOptions({
 /**
  * The composer's Verktyg pill: a popover with a switch per MCP server (and
  * all on / all off), plus whether tools run without asking for approval.
+ * When the partner's model cannot call tools, the backend attaches nothing:
+ * every row is then rendered unavailable and the run-automatically choice is
+ * hidden, since there is no tool call for it to govern.
  */
 export function ChatMcpServers({
   servers,
   disabledServerIds,
   autoAcceptTools,
+  modelSupportsTools = true,
   onDisabledServerIdsChange,
   onAutoAcceptToolsChange
 }: {
   servers: McpServerSummary[];
   disabledServerIds: Set<string>;
   autoAcceptTools: boolean;
+  /** Whether the partner's model can call tools at all; false renders every row unavailable. */
+  modelSupportsTools?: boolean;
   onDisabledServerIdsChange: (next: Set<string>) => void;
   onAutoAcceptToolsChange: (next: boolean) => void;
 }) {
   const t = useTranslations();
   const [open, setOpen] = useState(false);
   const total = servers.length;
-  const activeCount = activeMcpServerCount(servers, disabledServerIds);
+  const activeCount = activeMcpServerCount(servers, disabledServerIds, modelSupportsTools);
   const activeLabel = t("mcp_servers_active_count", { active: activeCount, total });
 
   function setServer(id: string, enabled: boolean) {
@@ -93,9 +119,11 @@ export function ChatMcpServers({
     onDisabledServerIdsChange(next);
   }
 
+  // All-on / all-off only sweeps the servers that can be used.
   function setAll(enabled: boolean) {
     const next = new Set(disabledServerIds);
     for (const server of servers) {
+      if (mcpServerUnavailableReason(server, modelSupportsTools) !== null) continue;
       if (enabled) next.delete(server.id);
       else next.add(server.id);
     }
@@ -119,7 +147,7 @@ export function ChatMcpServers({
             <p className="text-sm font-semibold">{t("mcp_servers")}</p>
             <div className="text-ax-text-secondary flex items-center justify-between gap-2 text-xs">
               <span>{activeLabel}</span>
-              {total > 1 && (
+              {total > 1 && modelSupportsTools && (
                 // Never disabled: a button that disables itself when pressed
                 // would drop keyboard focus. Pressing it again changes nothing.
                 <span className="flex items-center gap-1">
@@ -138,57 +166,70 @@ export function ChatMcpServers({
                 </span>
               )}
             </div>
+            {!modelSupportsTools && (
+              <p className="text-ax-warning text-xs">{t(readinessKey("model_no_tool_calling"))}</p>
+            )}
           </div>
 
           <ul aria-label={t("mcp_servers")} className="flex max-h-64 flex-col overflow-y-auto py-1">
-            {servers.map((server) => (
-              <li key={server.id} className="flex items-center gap-2.5 py-1.5">
-                <span
-                  aria-hidden="true"
-                  className="bg-ax-muted text-ax-text-secondary rounded-ax-inner flex size-7 shrink-0 items-center justify-center overflow-hidden text-xs font-semibold"
-                >
-                  {server.icon_url ? (
-                    // Backend-served MCP icon URL.
-                    // eslint-disable-next-line @next/next/no-img-element
-                    <img src={server.icon_url} alt="" className="size-full object-cover" />
-                  ) : (
-                    server.name.charAt(0).toUpperCase()
-                  )}
-                </span>
-                <div className="min-w-0 flex-1">
-                  <Switch
-                    label={server.name}
-                    description={server.description ?? undefined}
-                    labelPosition="start"
-                    labelSpacing="spread"
-                    size="sm"
-                    value={!disabledServerIds.has(server.id)}
-                    onChange={(value) => setServer(server.id, value)}
-                  />
-                </div>
-              </li>
-            ))}
+            {servers.map((server) => {
+              const reason = mcpServerUnavailableReason(server, modelSupportsTools);
+              return (
+                <li key={server.id} className="flex items-center gap-2.5 py-1.5">
+                  <span
+                    aria-hidden="true"
+                    className="bg-ax-muted text-ax-text-secondary rounded-ax-inner flex size-7 shrink-0 items-center justify-center overflow-hidden text-xs font-semibold"
+                  >
+                    {server.icon_url ? (
+                      // Backend-served MCP icon URL.
+                      // eslint-disable-next-line @next/next/no-img-element
+                      <img src={server.icon_url} alt="" className="size-full object-cover" />
+                    ) : (
+                      server.name.charAt(0).toUpperCase()
+                    )}
+                  </span>
+                  <div className="min-w-0 flex-1">
+                    {/* An unavailable server is off whatever the switch says: the
+                        backend never calls it. The reason replaces the description. */}
+                    <Switch
+                      label={server.name}
+                      description={
+                        reason ? t(readinessKey(reason)) : (server.description ?? undefined)
+                      }
+                      labelPosition="start"
+                      labelSpacing="spread"
+                      size="sm"
+                      value={reason === null && !disabledServerIds.has(server.id)}
+                      isDisabled={reason !== null}
+                      onChange={(value) => setServer(server.id, value)}
+                    />
+                  </div>
+                </li>
+              );
+            })}
           </ul>
 
-          <div className="border-ax-border flex items-start gap-2.5 border-t pt-2">
-            <ShieldCheck
-              aria-hidden="true"
-              className="text-ax-text-secondary mt-0.5 size-5 shrink-0"
-            />
-            <div className="min-w-0 flex-1">
-              <Switch
-                label={t("mcp_run_tools_automatically")}
-                description={
-                  autoAcceptTools ? t("auto_accept_tools_on") : t("auto_accept_tools_off")
-                }
-                labelPosition="start"
-                labelSpacing="spread"
-                size="sm"
-                value={autoAcceptTools}
-                onChange={onAutoAcceptToolsChange}
+          {modelSupportsTools && (
+            <div className="border-ax-border flex items-start gap-2.5 border-t pt-2">
+              <ShieldCheck
+                aria-hidden="true"
+                className="text-ax-text-secondary mt-0.5 size-5 shrink-0"
               />
+              <div className="min-w-0 flex-1">
+                <Switch
+                  label={t("mcp_run_tools_automatically")}
+                  description={
+                    autoAcceptTools ? t("auto_accept_tools_on") : t("auto_accept_tools_off")
+                  }
+                  labelPosition="start"
+                  labelSpacing="spread"
+                  size="sm"
+                  value={autoAcceptTools}
+                  onChange={onAutoAcceptToolsChange}
+                />
+              </div>
             </div>
-          </div>
+          )}
         </div>
       }
     >

@@ -62,7 +62,13 @@ describe("JobIndicator", () => {
       ],
       jobs: [
         job({ id: "j1", name: "Riktlinjer.pdf", status: "in progress" }),
-        job({ id: "j2", name: "Trasig.pdf", status: "failed", result_location: "Tom fil" })
+        job({
+          id: "j2",
+          name: "Trasig.pdf",
+          status: "failed",
+          failure_code: "encrypted",
+          result_location: "PDF is encrypted: worker trace"
+        })
       ]
     };
     renderInApp(<JobIndicator />);
@@ -75,7 +81,80 @@ describe("JobIndicator", () => {
     expect(failure.getAttribute("aria-expanded")).toBe("false");
     fireEvent.click(failure);
     expect(failure.getAttribute("aria-expanded")).toBe("true");
-    expect(within(panel).getByText("Tom fil")).toBeTruthy();
+    // The typed code's guidance, never the worker's own text.
+    expect(within(panel).getByText(/lösenordsskyddad/)).toBeTruthy();
+    expect(within(panel).queryByText(/worker trace/)).toBeNull();
+    await expectNoAxeViolations(document.body);
+  });
+
+  it("shows the localized typed reason for an unreachable crawl", async () => {
+    jobs.state = {
+      runningCount: 0,
+      uploads: [],
+      jobs: [
+        job({
+          name: "offline.example",
+          task: "crawl",
+          status: "failed",
+          failure_code: "remote_unreachable",
+          result_location: "The crawl exceeded its configured time limit"
+        })
+      ]
+    };
+    renderInApp(<JobIndicator />);
+    fireEvent.click(screen.getByRole("button", { name: "Aviseringar" }));
+    const panel = await screen.findByRole("dialog", { name: "Aviseringar och jobb" });
+    fireEvent.click(within(panel).getByRole("button", { name: /offline\.example/ }));
+
+    expect(within(panel).getByText("Misslyckades")).toBeTruthy();
+    expect(within(panel).getByText(/Webbplatsen kunde inte nås/)).toBeTruthy();
+    expect(within(panel).queryByText(/configured time limit/)).toBeNull();
+  });
+
+  it("presents an intentional crawl cancellation as stopped instead of failed", async () => {
+    jobs.state = {
+      runningCount: 0,
+      uploads: [],
+      jobs: [
+        job({
+          name: "intranet.example",
+          task: "crawl",
+          status: "failed",
+          failure_code: "cancelled",
+          result_location: "The crawl was stopped by a user"
+        })
+      ]
+    };
+    renderInApp(<JobIndicator />);
+    fireEvent.click(screen.getByRole("button", { name: "Aviseringar" }));
+    const panel = await screen.findByRole("dialog", { name: "Aviseringar och jobb" });
+
+    expect(within(panel).getByText("Stoppad")).toBeTruthy();
+    expect(within(panel).queryByText("Misslyckades")).toBeNull();
+    expect(within(panel).queryByRole("button", { name: /intranet\.example/ })).toBeNull();
+  });
+
+  it("shows the reason when a crawl completes with partial results", async () => {
+    jobs.state = {
+      runningCount: 0,
+      uploads: [],
+      jobs: [
+        job({
+          name: "partial.example",
+          task: "crawl",
+          status: "complete",
+          failure_code: "remote_unreachable"
+        })
+      ]
+    };
+    renderInApp(<JobIndicator />);
+    fireEvent.click(screen.getByRole("button", { name: "Aviseringar" }));
+    const panel = await screen.findByRole("dialog", { name: "Aviseringar och jobb" });
+    fireEvent.click(within(panel).getByRole("button", { name: /partial\.example/ }));
+
+    expect(within(panel).getByText("Delvis klar")).toBeTruthy();
+    expect(within(panel).getByText(/Webbplatsen kunde inte nås/)).toBeTruthy();
+    expect(within(panel).queryByText("Klar")).toBeNull();
     await expectNoAxeViolations(document.body);
   });
 

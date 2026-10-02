@@ -16,25 +16,10 @@ import {
   retryPartnerQuery
 } from "@/features/chat/chat-partner-state";
 import { ChatPage } from "@/features/chat/chat-page";
+import { partnerCompletionModel } from "@/features/chat/partner-model";
 import { chatPartnerSwitcherItems } from "@/features/chat/partner-switcher";
 import { partnerKnowledge } from "@/features/chat/partner-knowledge";
 import { useSpace } from "@/features/spaces/use-space";
-
-function toModelInfo(
-  model:
-    | { id: string; name: string; max_input_tokens: number; vision: boolean; reasoning: boolean }
-    | null
-    | undefined
-) {
-  if (!model) return null;
-  return {
-    id: model.id,
-    name: model.name,
-    token_limit: model.max_input_tokens,
-    vision: model.vision,
-    reasoning: model.reasoning
-  };
-}
 
 /**
  * Default-assistant completion model switcher (personal chat only). Switching
@@ -178,7 +163,7 @@ export function SpaceChat() {
       enabledCapabilities: assistant.enabled_capabilities,
       availableCapabilities: assistant.available_capabilities,
       effectiveConfig: assistant.effective_config ?? null,
-      completionModel: toModelInfo(assistant.completion_model)
+      completionModel: partnerCompletionModel(assistant, space.completion_models)
     };
   } else if (type === "default-assistant" || !partnerId) {
     const assistant = space.default_assistant;
@@ -196,7 +181,7 @@ export function SpaceChat() {
         enabledCapabilities: assistant.enabled_capabilities,
         availableCapabilities: assistant.available_capabilities,
         effectiveConfig: assistant.effective_config ?? null,
-        completionModel: toModelInfo(assistant.completion_model)
+        completionModel: partnerCompletionModel(assistant, space.completion_models)
       };
     }
   }

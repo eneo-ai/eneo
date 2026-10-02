@@ -42,10 +42,23 @@ export function eneoToolMetadata(part: ToolLike): Record<string, unknown> {
   return {};
 }
 
+/**
+ * Whether a tool call ran on Eneo's own server of that name. The backend
+ * stamps `is_internal` from the server the call was routed to, so an external
+ * server an admin named "files", "knowledge" or "skills" does not borrow the
+ * built-in labels. Rows persisted before the flag existed carry none and fall
+ * back to the name.
+ */
+function isOwnServer(isInternal: unknown): boolean {
+  return isInternal !== false;
+}
+
 function metadata(part: ToolLike): {
   serverName: string;
   title: string | null;
   purpose: string | null;
+  /** The server is one of Eneo's own, judging by the backend's flag (or the name when it carries none). */
+  ownServer: boolean;
 } {
   const values = eneoToolMetadata(part);
   const server = "server_name" in values ? values.server_name : null;
@@ -54,7 +67,8 @@ function metadata(part: ToolLike): {
   return {
     serverName: typeof server === "string" ? server : "",
     title: typeof title === "string" ? title : null,
-    purpose: typeof purpose === "string" ? purpose : null
+    purpose: typeof purpose === "string" ? purpose : null,
+    ownServer: isOwnServer(values.is_internal)
   };
 }
 
@@ -71,8 +85,10 @@ function searchQuery(args: Record<string, unknown>): string | null {
   return query ? (query.length > 60 ? `${query.slice(0, 60)}…` : query) : null;
 }
 
+/** Whether a tool call is a Skill activation step rather than a call to a server named "skills". */
 export function isSkillCall(part: ToolLike): boolean {
-  return metadata(part).serverName === "skills";
+  const { serverName, ownServer } = metadata(part);
+  return serverName === "skills" && ownServer;
 }
 
 export function skillName(part: ToolLike): string {
@@ -81,15 +97,15 @@ export function skillName(part: ToolLike): string {
 
 /** Human-facing names for Eneo tools and capability calls; external MCP titles stay intact. */
 export function toolPresentation(part: ToolLike, t: Translate, done: boolean) {
-  const { serverName, title, purpose } = metadata(part);
+  const { serverName, title, purpose, ownServer } = metadata(part);
   const args = argumentsOf(part);
   const query = searchQuery(args);
-  if (serverName === "skills") {
+  if (isSkillCall(part)) {
     return { label: t("tool_activate_skill", { name: skillName(part) }), server: t("skills") };
   }
 
   const suffix = done ? "_done" : "";
-  if (serverName === "knowledge") {
+  if (ownServer && serverName === "knowledge") {
     const key: Record<string, string> = {
       search_knowledge: query
         ? `tool_search_knowledge_query${suffix}`
@@ -101,7 +117,7 @@ export function toolPresentation(part: ToolLike, t: Translate, done: boolean) {
     const label = key[part.toolName];
     if (label) return { label: t(label, query ? { query } : undefined), server: t("knowledge") };
   }
-  if (serverName === "files" && part.toolName === "read_file") {
+  if (ownServer && serverName === "files" && part.toolName === "read_file") {
     return { label: t(`tool_read_file${suffix}`), server: t("internal_files_server") };
   }
   if (purpose === "web_search") {
@@ -114,12 +130,13 @@ export function toolPresentation(part: ToolLike, t: Translate, done: boolean) {
       provider: serverName && serverName !== "web_search" ? serverName : null
     };
   }
-  if (purpose === "image_generation" || serverName === "image_generation") {
+  if (purpose === "image_generation" || (ownServer && serverName === "image_generation")) {
     const editing = Array.isArray(args.reference_images) && args.reference_images.length > 0;
     return {
       label: t(`tool_${editing ? "edit" : "generate"}_image${suffix}`),
       server: t("image_generation"),
-      provider: serverName && serverName !== "image_generation" ? serverName : null
+      // An external provider's own name stays visible; Eneo's built-in one does not.
+      provider: serverName && !(ownServer && serverName === "image_generation") ? serverName : null
     };
   }
   return {

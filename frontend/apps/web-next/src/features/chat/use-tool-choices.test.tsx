@@ -75,6 +75,40 @@ describe("useToolChoices", () => {
     ]);
   });
 
+  it("marks every function unavailable when the model cannot call tools", () => {
+    const noTools: ChatPartner = {
+      ...personal,
+      completionModel: { id: "m", name: "Basmodell", supports_tool_calling: false }
+    };
+    const { result } = renderChoices(noTools);
+    expect(result.current.modelSupportsTools).toBe(false);
+    expect(result.current.capabilities).toEqual([
+      { purpose: "web_search", available: false, reason: "model_no_tool_calling" },
+      { purpose: "image_generation", available: false, reason: "model_no_tool_calling" }
+    ]);
+
+    const withTools: ChatPartner = {
+      ...personal,
+      completionModel: { id: "m", name: "Modell", supports_tool_calling: true }
+    };
+    expect(renderChoices(withTools).result.current.modelSupportsTools).toBe(true);
+  });
+
+  it("keeps a more specific reason over the model's missing tool calling", () => {
+    const partner: ChatPartner = {
+      ...personal,
+      availableCapabilities: [
+        { purpose: "web_search", available: false, reason: "no_active_provider" },
+        { purpose: "image_generation", available: true, reason: null }
+      ],
+      completionModel: { id: "m", name: "Basmodell" }
+    };
+    expect(renderChoices(partner).result.current.capabilities.map((c) => c.reason)).toEqual([
+      "no_active_provider",
+      "model_no_tool_calling"
+    ]);
+  });
+
   it("keeps the auto-approve choice across conversations", () => {
     const first = renderChoices(personal);
     expect(first.result.current.autoAcceptTools).toBe(true);

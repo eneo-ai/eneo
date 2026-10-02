@@ -10,7 +10,9 @@ vi.mock("./use-assistant", () => ({
   useUpdateAssistant: () => useMutation({ mutationFn: (body: unknown) => update(body) })
 }));
 vi.mock("@/features/spaces/use-space", () => ({
-  useSpace: () => ({ space: { enabled_capabilities: ["web_search", "image_generation"] } })
+  useSpace: () => ({
+    space: { enabled_capabilities: ["web_search", "image_generation"], completion_models: [] }
+  })
 }));
 vi.mock("@/components/composites/use-autosave", () => ({
   useAutosave: () => (operation: () => Promise<unknown>) => operation()
@@ -33,7 +35,11 @@ function show(value: Assistant) {
   );
 }
 
-const assistant = (enabled: ("web_search" | "image_generation")[], available: boolean) =>
+const assistant = (
+  enabled: ("web_search" | "image_generation")[],
+  available: boolean,
+  supportsToolCalling = true
+) =>
   ({
     id: "assistant",
     permissions: ["edit"],
@@ -42,7 +48,7 @@ const assistant = (enabled: ("web_search" | "image_generation")[], available: bo
       { purpose: "web_search", available },
       { purpose: "image_generation", available }
     ],
-    completion_model: { supports_tool_calling: true }
+    completion_model: { id: "model", supports_tool_calling: supportsToolCalling }
   }) as Assistant;
 
 describe("assistant capabilities", () => {
@@ -64,6 +70,16 @@ describe("assistant capabilities", () => {
     expect(image.hasAttribute("disabled")).toBe(true);
     fireEvent.click(web);
     await waitFor(() => expect(update).toHaveBeenCalledWith({ enabled_capabilities: [] }));
+  });
+
+  it("blocks newly enabling a function with a model that cannot call tools", () => {
+    show(assistant(["web_search"], true, false));
+    // The saved function can still be switched off; the other cannot be switched on.
+    expect(screen.getByRole("switch", { name: "web_search" }).hasAttribute("disabled")).toBe(false);
+    const image = screen.getByRole("switch", { name: "image_generation" });
+    expect(image.hasAttribute("disabled")).toBe(true);
+    expect(screen.getByText("tools_readiness_model_no_tool_calling")).toBeTruthy();
+    expect(screen.queryByText("model_does_not_support_tools")).toBeNull();
   });
 
   it("keeps focus on a switch while it saves, and ignores a toggle meanwhile", async () => {

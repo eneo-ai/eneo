@@ -498,6 +498,7 @@ export function ChatView({
         servers={toolChoices.mcpServers}
         disabledServerIds={toolChoices.disabledMcpServerIds}
         autoAcceptTools={toolChoices.autoAcceptTools}
+        modelSupportsTools={toolChoices.modelSupportsTools}
         onDisabledServerIdsChange={toolChoices.setDisabledMcpServerIds}
         onAutoAcceptToolsChange={toolChoices.setAutoAcceptTools}
       />

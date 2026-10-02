@@ -12,6 +12,8 @@ export type AssistantMcpServer = {
   id: string;
   name: string;
   description?: string | null;
+  /** False when an administrator has deactivated the server. */
+  is_enabled?: boolean;
   tools?: AssistantMcpTool[];
 };
 
@@ -24,6 +26,7 @@ export type AssistantMcpServerApi = {
   id: string;
   name: string;
   description?: string | null;
+  is_enabled?: boolean;
   tools?: unknown[];
 };
 
@@ -59,6 +62,7 @@ export function assistantMcpServersFromApi(servers: AssistantMcpServerApi[]): As
     id: server.id,
     name: server.name,
     description: server.description,
+    is_enabled: server.is_enabled,
     tools: (server.tools ?? []).flatMap((tool) => {
       const parsed = apiTool(tool);
       return parsed ? [parsed] : [];

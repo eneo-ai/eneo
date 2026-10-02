@@ -23,7 +23,13 @@ const servers: McpServerSummary[] = [
   { id: "diarium", name: "Diarium", description: null, icon_url: null }
 ];
 
-function McpHarness({ onDisabled = vi.fn() }: { onDisabled?: (ids: Set<string>) => void }) {
+function McpHarness({
+  onDisabled = vi.fn(),
+  modelSupportsTools
+}: {
+  onDisabled?: (ids: Set<string>) => void;
+  modelSupportsTools?: boolean;
+}) {
   const [disabled, setDisabled] = useState<Set<string>>(new Set(["diarium"]));
   const [autoAccept, setAutoAccept] = useState(false);
   return (
@@ -31,6 +37,7 @@ function McpHarness({ onDisabled = vi.fn() }: { onDisabled?: (ids: Set<string>) 
       servers={servers}
       disabledServerIds={disabled}
       autoAcceptTools={autoAccept}
+      modelSupportsTools={modelSupportsTools}
       onDisabledServerIdsChange={(next) => {
         onDisabled(next);
         setDisabled(next);
@@ -63,6 +70,25 @@ describe("ChatMcpServers", () => {
     expect(auto.getAttribute("aria-describedby")).toBeTruthy();
     fireEvent.click(auto);
     expect(within(popover).getByText("Verktyg körs automatiskt utan godkännande")).toBeTruthy();
+    await expectNoAxeViolations(popover);
+  });
+
+  it("renders every tool unavailable when the model cannot call tools", async () => {
+    renderInChat(<McpHarness modelSupportsTools={false} />);
+    fireEvent.click(screen.getByRole("button", { name: "Verktyg: 0 av 2 aktiva" }));
+    const popover = await screen.findByRole("dialog", { name: "MCP-servrar" });
+
+    for (const name of ["LOU-register", "Diarium"]) {
+      const row = within(popover).getByRole("switch", { name });
+      expect(row.hasAttribute("disabled") || row.getAttribute("aria-disabled") === "true").toBe(
+        true
+      );
+      expect((row as HTMLInputElement).checked).toBe(false);
+    }
+    // The header notice plus one description per row.
+    expect(within(popover).getAllByText("Modellen stödjer inte verktygsanrop.")).toHaveLength(3);
+    expect(within(popover).queryByRole("button", { name: "Alla av" })).toBeNull();
+    expect(within(popover).queryByRole("switch", { name: "Kör verktyg automatiskt" })).toBeNull();
     await expectNoAxeViolations(popover);
   });
 });

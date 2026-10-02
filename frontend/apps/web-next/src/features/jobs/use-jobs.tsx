@@ -167,28 +167,30 @@ export function JobsProvider({ children }: { children: React.ReactNode }) {
         : SLOW_POLL_MS
   });
 
-  // Detect active → complete transitions (or jobs aging out of the window)
-  // and refresh the data they produced.
+  // Detect active → terminal transitions (or jobs aging out of the window)
+  // and refresh the data they produced. A failed crawl counts too: its
+  // partial results and its outcome are part of the knowledge it touched.
   const previousJobs = useRef<Map<string, Job>>(new Map());
   useEffect(() => {
     const next = new Map(jobs.map((job) => [job.id, job]));
     const previous = previousJobs.current;
     previousJobs.current = next;
 
-    let completed = false;
+    let finished = false;
     const announcements: string[] = [];
     for (const job of next.values()) {
       const old = previous.get(job.id);
       if (old === undefined || !isJobActive(old)) continue;
       const name = job.name ?? job.id;
       if (job.status === "complete") {
-        completed = true;
+        finished = true;
         announcements.push(t("job_completed_announcement", { name }));
       } else if (job.status === "failed") {
+        finished = true;
         announcements.push(t("job_failed_announcement", { name }));
       }
     }
-    if (completed || next.size < previous.size) {
+    if (finished || next.size < previous.size) {
       for (const queryKey of JOB_INVALIDATION_KEYS) {
         void queryClient.invalidateQueries({ queryKey });
       }

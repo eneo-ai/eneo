@@ -2,9 +2,13 @@
 
 import { useCallback, useEffect, useMemo, useState, useSyncExternalStore } from "react";
 import { useAppContext } from "@/components/providers/app-context";
-import type { Capability } from "@/features/capabilities/capabilities";
+import { modelSupportsToolCalling, type Capability } from "@/features/capabilities/capabilities";
 import type { ChatPartner } from "@/lib/chat/types";
-import { chatCapabilities, defaultDisabledCapabilities } from "./chat-capabilities";
+import {
+  chatCapabilities,
+  defaultDisabledCapabilities,
+  withoutToolCalling
+} from "./chat-capabilities";
 import {
   chatPartnerMcpServers,
   defaultDisabledMcpServerIds,
@@ -37,10 +41,16 @@ function autoAcceptToolsPreference(): boolean {
  */
 export function useToolChoices(partner: ChatPartner) {
   const { featureFlags, tenant, user, can } = useAppContext();
+  // A model without tool calling never receives any tool: the backend drops
+  // MCP servers, capabilities and loopback tools alike. Every tool row then
+  // reads as unavailable for that reason, unless a more specific one applies.
+  // A partner without a model cannot answer at all, so it is not gated here.
+  const modelSupportsTools =
+    partner.completionModel == null || modelSupportsToolCalling(partner.completionModel);
   const allCapabilities = useMemo(() => chatCapabilities(partner, can), [partner, can]);
-  const capabilities = allCapabilities.filter(
-    (capability) => capability.purpose !== "web_search" || featureFlags.showWebSearch
-  );
+  const capabilities = allCapabilities
+    .filter((capability) => capability.purpose !== "web_search" || featureFlags.showWebSearch)
+    .map((capability) => (modelSupportsTools ? capability : withoutToolCalling(capability)));
   const mcpServers = useMemo(() => chatPartnerMcpServers(partner), [partner]);
   const preferenceIds = useMemo(
     () => [
@@ -150,6 +160,8 @@ export function useToolChoices(partner: ChatPartner) {
   }, [autoAcceptTools]);
 
   return {
+    /** False when the partner's model cannot call tools: every tool is unavailable. */
+    modelSupportsTools,
     /** Capabilities offered in the composer (web search only when the deployment shows it). */
     capabilities,
     disabledCapabilities,

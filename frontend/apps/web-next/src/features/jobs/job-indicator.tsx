@@ -9,6 +9,7 @@ import { Bell, BellDot, ChevronDown } from "lucide-react";
 import { useTranslations } from "next-intl";
 import { useId, useState } from "react";
 import { cn } from "@/lib/utils";
+import { isCancelledCrawl, isCrawlWithWarnings, jobFailureMessage } from "./job-failure-message";
 import { isJobActive, useJobActivity, type Job, type Upload } from "./use-jobs";
 
 /** Job task → i18n key for the panel section heading. */
@@ -31,7 +32,19 @@ const ROW_CLASSES =
  */
 const NAME_CLASSES = "min-w-0 pe-4 wrap-anywhere";
 
-function ExpandableErrorRow({ label, message }: { label: string; message: string }) {
+/**
+ * A failed row whose explanation unfolds on press. `warning` is a crawl that
+ * completed with partial results: done with notes rather than failed.
+ */
+function ExpandableErrorRow({
+  label,
+  message,
+  warning = false
+}: {
+  label: string;
+  message: string;
+  warning?: boolean;
+}) {
   const t = useTranslations();
   const [expanded, setExpanded] = useState(false);
   const messageId = useId();
@@ -45,8 +58,13 @@ function ExpandableErrorRow({ label, message }: { label: string; message: string
         aria-controls={messageId}
       >
         <span className={NAME_CLASSES}>{label}</span>
-        <span className="text-ax-error flex min-w-fit items-center gap-1 font-medium">
-          {t("failed")}
+        <span
+          className={cn(
+            "flex min-w-fit items-center gap-1 font-medium",
+            warning ? "text-ax-warning" : "text-ax-error"
+          )}
+        >
+          {warning ? t("crawl_completed_with_warnings") : t("failed")}
           <ChevronDown
             aria-hidden="true"
             className={cn("size-4 transition-transform", expanded && "rotate-180")}
@@ -102,14 +120,20 @@ function UploadRow({ upload }: { upload: Upload }) {
 function JobRow({ job }: { job: Job }) {
   const t = useTranslations();
   const label = job.name ?? job.id;
-  if (job.status === "failed" && job.result_location) {
-    return <ExpandableErrorRow label={label} message={job.result_location} />;
+  const message = jobFailureMessage(t, job);
+  const warning = isCrawlWithWarnings(job);
+  if ((job.status === "failed" || warning) && message) {
+    return <ExpandableErrorRow label={label} message={message} warning={warning} />;
   }
   return (
     <div className={ROW_CLASSES}>
       <span className={NAME_CLASSES}>{label}</span>
       {isJobActive(job) ? (
         <Spinner size="sm" aria-label={t("in_progress")} />
+      ) : isCancelledCrawl(job) ? (
+        <span className="text-ax-text-secondary min-w-fit font-medium">
+          {t("crawl_status_cancelled")}
+        </span>
       ) : job.status === "failed" ? (
         <span className="text-ax-error min-w-fit font-medium">{t("failed")}</span>
       ) : (

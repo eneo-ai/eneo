@@ -11,6 +11,7 @@ import {
 } from "@/features/chat/chat-partner-state";
 import { ChatPage } from "@/features/chat/chat-page";
 import { partnerKnowledge } from "@/features/chat/partner-knowledge";
+import { partnerCompletionModel } from "@/features/chat/partner-model";
 
 export function DashboardChat({
   assistantId,
@@ -48,15 +49,7 @@ export function DashboardChat({
     enabledCapabilities: assistant.enabled_capabilities,
     availableCapabilities: assistant.available_capabilities,
     effectiveConfig: assistant.effective_config ?? null,
-    completionModel: assistant.completion_model
-      ? {
-          id: assistant.completion_model.id,
-          name: assistant.completion_model.name,
-          token_limit: assistant.completion_model.max_input_tokens,
-          vision: assistant.completion_model.vision,
-          reasoning: assistant.completion_model.reasoning
-        }
-      : null
+    completionModel: partnerCompletionModel(assistant)
   };
 
   return (

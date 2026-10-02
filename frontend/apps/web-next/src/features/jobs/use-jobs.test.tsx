@@ -93,6 +93,31 @@ it("checks quickly after a new job is tracked even if the first fetch is still e
   expect(await screen.findByRole("button", { name: "Aviseringar, 1 pågår" })).toBeTruthy();
 });
 
+it("refreshes knowledge when a crawl fails, as its partial results have landed", async () => {
+  vi.useFakeTimers({ toFake: ["setInterval", "clearInterval"] });
+  api.items = [{ ...job, task: "crawl", name: "Devize" }];
+  const { queryClient } = renderInApp(
+    <JobsProvider>
+      <JobIndicator />
+    </JobsProvider>
+  );
+  await screen.findByRole("button", { name: "Aviseringar, 1 pågår" });
+  const invalidate = vi.spyOn(queryClient, "invalidateQueries");
+
+  api.items = [
+    {
+      ...job,
+      task: "crawl",
+      name: "Devize",
+      status: "failed",
+      failure_code: "tenant_quota_exceeded"
+    }
+  ];
+  await act(() => vi.advanceTimersByTimeAsync(2_000));
+  await screen.findByRole("button", { name: "Aviseringar" });
+  expect(invalidate).toHaveBeenCalledWith({ queryKey: ["websites"] });
+});
+
 it("checks active jobs every two seconds until they finish", async () => {
   vi.useFakeTimers({ toFake: ["setInterval", "clearInterval"] });
   api.items = [{ ...job, task: "crawl", name: "Devize" }];

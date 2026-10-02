@@ -43,6 +43,26 @@ export function lockedAssistantModel<Model extends ModelRef>(
   return models.find((model) => model.id === config.locked_model?.id) ?? config.locked_model;
 }
 
+type ToolModelRef = ModelRef & { supports_tool_calling?: boolean | null };
+
+/**
+ * The model whose tool-calling support gates the tool pickers: a policy-locked
+ * model overrides the assistant's pick at ask time, the space catalog entry
+ * carries the capability flags, and the stored sparse model is the fallback
+ * when the model is no longer offered in the space. Null when no model is
+ * picked at all, which the editor treats as a separate state.
+ */
+export function assistantToolModel<Model extends ToolModelRef>(
+  models: Model[],
+  assistant: { completion_model?: ToolModelRef | null; effective_config?: AssistantEffectiveConfig }
+): ToolModelRef | null {
+  const locked = lockedAssistantModel(models, assistant.effective_config);
+  const pickedId = locked?.id ?? assistant.completion_model?.id;
+  return (
+    models.find((model) => model.id === pickedId) ?? locked ?? assistant.completion_model ?? null
+  );
+}
+
 export function policyMcpServers(config: AssistantEffectiveConfig): McpServerRef[] {
   return isMcpEnforced(config) ? (config?.available_mcp_servers ?? []) : [];
 }
