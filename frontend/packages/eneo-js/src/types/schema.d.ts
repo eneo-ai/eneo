@@ -3374,6 +3374,26 @@ export interface paths {
     patch?: never;
     trace?: never;
   };
+  "/api/v1/jobs/events/": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /**
+     * Job Events
+     * @description Stream the current user's job updates as server-sent events. Each `job` event carries the job as GET /jobs/ returns it, sent whenever its status changes; the connection stays open until the client closes it.
+     */
+    get: operations["job_events_api_v1_jobs_events__get"];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
   "/api/v1/jobs/{id}/": {
     parameters: {
       query?: never;
@@ -35353,6 +35373,102 @@ export interface operations {
         };
         content: {
           "application/json": components["schemas"]["PaginatedResponse_JobPublic_"];
+        };
+      };
+    };
+  };
+  job_events_api_v1_jobs_events__get: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": unknown;
+          "text/event-stream": {
+            /** Created At */
+            created_at?: string | null;
+            /** Updated At */
+            updated_at?: string | null;
+            /**
+             * Id
+             * Format: uuid
+             */
+            id: string;
+            /** Name */
+            name?: string | null;
+            status: components["schemas"]["Status"];
+            task: components["schemas"]["Task"];
+            /** Result Location */
+            result_location?: string | null;
+            /** Finished At */
+            finished_at?: string | null;
+            failure_code?: components["schemas"]["JobFailureCode"] | null;
+            $defs: {
+              /**
+               * JobFailureCode
+               * @enum {string}
+               */
+              JobFailureCode:
+                | "extraction_failed"
+                | "no_extractable_text"
+                | "encrypted"
+                | "corrupt"
+                | "unsupported_format"
+                | "processing_failed"
+                | "cancelled"
+                | "processing_interrupted"
+                | "invalid_job_payload"
+                | "quota_exceeded"
+                | "tenant_quota_exceeded"
+                | "user_quota_exceeded"
+                | "storage_limit_exceeded"
+                | "storage_unavailable"
+                | "storage_verification_failed"
+                | "knowledge_source_conflict"
+                | "dispatch_failed"
+                | "invalid_dispatch"
+                | "worker_interrupted"
+                | "lease_expired"
+                | "remote_unreachable"
+                | "remote_blocked"
+                | "timed_out"
+                | "resources_missing"
+                | "page_limit_reached"
+                | "content_skipped";
+              /**
+               * Status
+               * @enum {string}
+               */
+              Status: "in progress" | "queued" | "complete" | "failed" | "not found";
+              /**
+               * Task
+               * @enum {string}
+               */
+              Task:
+                | "upload_info_blob"
+                | "transcription"
+                | "crawl"
+                | "embed_group"
+                | "crawl_all_websites"
+                | "run_app"
+                | "pull_confluence_content"
+                | "pull_sharepoint_content"
+                | "sync_sharepoint_delta"
+                | "update_model_usage_stats"
+                | "analyze_conversation_insights"
+                | "export_audit_logs"
+                | "log_audit_event";
+            };
+          };
         };
       };
     };
