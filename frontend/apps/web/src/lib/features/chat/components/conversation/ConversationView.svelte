@@ -25,7 +25,7 @@
   import { chatCapabilityAvailable } from "../../chatCapabilities";
   import type { PanelContents } from "$lib/features/file-preview/panelContents";
   import { getAppContext } from "$lib/core/AppContext";
-  import { onDestroy, untrack, type Snippet } from "svelte";
+  import { untrack, type Snippet } from "svelte";
   import { followConversationScroll } from "../../followConversationScroll";
   import { m } from "$lib/paraglide/messages";
 
