@@ -9,7 +9,9 @@ import { useEffect, useState } from "react";
 import { flushSync } from "react-dom";
 import { ConfirmDialogControlled } from "@/components/composites/confirm-dialog";
 import { FieldProblem, fieldProblemProps } from "@/components/composites/field-problem";
+import { LoadingState } from "@/components/composites/loading-state";
 import { PageHeader } from "@/components/composites/page-header";
+import { QueryStateBoundary } from "@/components/composites/query-state";
 import { SettingsGroup } from "@/components/composites/settings-rows";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
@@ -72,23 +74,19 @@ export function AdminSkillsPage() {
     <div className="mx-auto flex w-full max-w-5xl flex-col gap-6 pb-16">
       <PageHeader title={t("admin_skills_title")} tour="admin-skills" />
       <p className="text-muted-foreground max-w-3xl text-sm">{t("admin_skills_subtitle")}</p>
-      {policy.isPending || projections.isPending ? (
-        <p role="status" className="text-muted-foreground text-sm">
-          {t("loading")}
-        </p>
-      ) : policy.isError ? (
-        <Alert variant="destructive" role="alert">
-          <CircleAlert className="size-4" />
-          <AlertTitle>{t("request_failed")}</AlertTitle>
-          <AlertDescription>
-            <Button variant="outline" size="sm" onClick={() => void policy.refetch()}>
-              {t("retry")}
-            </Button>
-          </AlertDescription>
-        </Alert>
-      ) : (
-        <PolicyEditor initialPolicy={policy.data} initialProjections={projections.data ?? null} />
-      )}
+      {/* The model projection is optional: the editor says so when it is missing. */}
+      <QueryStateBoundary query={policy} rows={4}>
+        {(initialPolicy) =>
+          projections.isPending ? (
+            <LoadingState rows={4} />
+          ) : (
+            <PolicyEditor
+              initialPolicy={initialPolicy}
+              initialProjections={projections.data ?? null}
+            />
+          )
+        }
+      </QueryStateBoundary>
       <SettingsGroup
         id="skill-catalogue"
         title={t("admin_skills_catalogue_title")}

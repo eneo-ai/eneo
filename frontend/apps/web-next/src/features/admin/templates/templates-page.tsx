@@ -41,7 +41,8 @@ import {
   deletedAppTemplatesQueryOptions,
   deletedAssistantTemplatesQueryOptions,
   rollbackAppTemplate,
-  rollbackAssistantTemplate
+  rollbackAssistantTemplate,
+  templateCategoryLabel
 } from "@/features/admin/templates/templates";
 import { TemplateEditorDialog } from "./template-editor-dialog";
 
@@ -152,7 +153,7 @@ function TemplateRow({
         </span>
       </TableCell>
       <TableCell>
-        <Badge variant="secondary">{template.category}</Badge>
+        <Badge variant="secondary">{templateCategoryLabel(template.category, t)}</Badge>
       </TableCell>
       <TableCell className="text-muted-foreground text-sm">
         {template.completion_model_name ?? "—"}

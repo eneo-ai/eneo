@@ -108,16 +108,21 @@ const details = () => ({
 
 const state = vi.hoisted(() => ({
   requests: [] as { path: string; query: Record<string, unknown> | undefined }[],
-  posted: [] as string[]
+  posted: [] as string[],
+  /** Replaces the overview response; `null` leaves the request pending. */
+  overview: undefined as (() => unknown) | null | undefined
 }));
 
 vi.mock("@/lib/api/browser", () => ({
   browserApi: {
     GET: (path: string, options?: { params?: { query?: Record<string, unknown> } }) => {
       state.requests.push({ path, query: options?.params?.query });
+      if (path === "/api/v1/admin/crawler/" && state.overview === null) {
+        return new Promise(() => {});
+      }
       const data =
         path === "/api/v1/admin/crawler/"
-          ? overview()
+          ? (state.overview ?? overview)()
           : path === "/api/v1/admin/crawler/websites/"
             ? schedule()
             : path === "/api/v1/admin/crawler/runs/{id}/"
@@ -151,6 +156,7 @@ afterEach(() => {
   cleanup();
   state.requests = [];
   state.posted = [];
+  state.overview = undefined;
 });
 
 const show = () =>
@@ -160,6 +166,40 @@ const lastOverviewQuery = () =>
   state.requests.filter((request) => request.path === "/api/v1/admin/crawler/").at(-1)?.query;
 
 describe("CrawlerPage", () => {
+  it("shows skeletons, never dashes, while the overview loads", () => {
+    state.overview = null;
+    show();
+    // Astryx controls carry their own (idle) live regions; the skeleton is the busy one.
+    expect(
+      screen.getAllByRole("status").some((region) => region.getAttribute("aria-busy") === "true")
+    ).toBe(true);
+    expect(screen.queryByText("—")).toBeNull();
+    expect(screen.queryByRole("group", { name: "Idag" })).toBeNull();
+  });
+
+  it("replaces the day cards with an empty state that leads to the websites when nothing has run", async () => {
+    state.overview = () => ({
+      ...overview(),
+      summary: { ongoing: 0, queued: 0, issues: 0 },
+      calendar: {
+        time_zone: "Europe/Stockholm",
+        today: { date: "2026-09-25", completed: 0, partial: 0, failed: 0, cancelled: 0 },
+        yesterday: { date: "2026-09-24", completed: 0, partial: 0, failed: 0, cancelled: 0 }
+      },
+      items: []
+    });
+    const { container } = show();
+
+    expect(await screen.findByRole("heading", { name: "Inga körningar ännu" })).toBeTruthy();
+    expect(screen.getByRole("link", { name: "Gå till webbplatser" }).getAttribute("href")).toBe(
+      "/spaces/organization/knowledge?tab=websites"
+    );
+    expect(screen.queryByRole("group", { name: "Idag" })).toBeNull();
+    expect(screen.queryByRole("group", { name: "Igår" })).toBeNull();
+    expect(screen.queryByText("—")).toBeNull();
+    await expectNoAxeViolations(container);
+  });
+
   it("shows the summary, the scheduler's health, the day cards and the runs", async () => {
     const { container } = show();
 

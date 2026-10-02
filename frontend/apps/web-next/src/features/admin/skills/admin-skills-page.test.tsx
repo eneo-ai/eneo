@@ -49,6 +49,20 @@ function show() {
 }
 
 describe("admin skill runtime policy", () => {
+  it("shows skeleton rows while loading and the shared error state with a retry", async () => {
+    get.mockImplementationOnce(() => Promise.reject(new Error("boom")));
+    show();
+    expect(screen.getByRole("status").getAttribute("aria-busy")).toBe("true");
+
+    const alert = await screen.findByRole("alert");
+    expect(alert.textContent).toContain("query_error_title");
+
+    fireEvent.click(within(alert).getByRole("button", { name: "retry" }));
+    expect(
+      await screen.findByRole("switch", { name: "skills_runtime_policy_selective_title" })
+    ).toBeTruthy();
+  });
+
   it("saves all four fields and refreshes the model projection", async () => {
     show();
     const toggle = await screen.findByRole("switch", {

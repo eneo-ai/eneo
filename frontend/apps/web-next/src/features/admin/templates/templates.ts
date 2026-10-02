@@ -91,3 +91,29 @@ export function rollbackAppTemplate(api: EneoClient, templateId: string) {
     })
   );
 }
+
+/**
+ * The predefined template categories (the Svelte app's TemplateCategories)
+ * are stored as English slugs; admins can also type their own. Known slugs
+ * get their translated name, anything else is shown as typed.
+ */
+const TEMPLATE_CATEGORY_KEYS = {
+  communication: "template_category_communication",
+  "q&a": "template_category_qa",
+  advice: "template_category_advice",
+  misc: "template_category_misc",
+  transcription: "template_category_transcription"
+} as const;
+
+export type TemplateCategoryKey =
+  (typeof TEMPLATE_CATEGORY_KEYS)[keyof typeof TEMPLATE_CATEGORY_KEYS];
+
+export function templateCategoryLabel(
+  category: string,
+  t: (key: TemplateCategoryKey) => string
+): string {
+  const key = (TEMPLATE_CATEGORY_KEYS as Record<string, TemplateCategoryKey | undefined>)[
+    category.trim().toLowerCase()
+  ];
+  return key ? t(key) : category;
+}

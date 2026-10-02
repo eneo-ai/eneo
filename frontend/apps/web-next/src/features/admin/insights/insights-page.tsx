@@ -6,9 +6,10 @@ import dynamic from "next/dynamic";
 import Link from "next/link";
 import { useTranslations } from "next-intl";
 import { useMemo, useState } from "react";
+import { LoadingState } from "@/components/composites/loading-state";
 import { PageHeader } from "@/components/composites/page-header";
+import { QueryStateBoundary } from "@/components/composites/query-state";
 import { Card } from "@/components/ui/card";
-import { Skeleton } from "@/components/ui/skeleton";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { browserApi } from "@/lib/api/browser";
@@ -26,10 +27,11 @@ import {
 
 const NUMBER = new Intl.NumberFormat("sv-SE");
 const PRESET_DAYS = [7, 30, 90] as const;
+const CHART_HEIGHT = 320;
 const UsageAreaChart = dynamic(
   () => import("./usage-area-chart").then((module) => module.UsageAreaChart),
   {
-    loading: () => <Skeleton className="h-[320px] w-full" />,
+    loading: () => <LoadingState rows={1} height={CHART_HEIGHT} />,
     ssr: false
   }
 );
@@ -59,10 +61,12 @@ function Stat({ label, value }: { label: string; value: string }) {
 }
 
 function UsageChart({ range }: { range: InsightsRange }) {
-  const { data, isPending } = useQuery(insightAggregatedQueryOptions(browserApi, range));
-  if (isPending) return <Skeleton className="h-[320px] w-full" />;
-  if (!data) return null;
-  return <UsageAreaChart data={data} />;
+  const query = useQuery(insightAggregatedQueryOptions(browserApi, range));
+  return (
+    <QueryStateBoundary query={query} rows={1} height={CHART_HEIGHT}>
+      {(data) => <UsageAreaChart data={data} />}
+    </QueryStateBoundary>
+  );
 }
 
 function Delta({ current, prior }: { current: number; prior?: number }) {
@@ -90,11 +94,12 @@ function presetLabel(days: (typeof PRESET_DAYS)[number], t: (key: string) => str
 
 function ActivityCards({ range, compare }: { range: InsightsRange; compare: boolean }) {
   const t = useTranslations();
-  const { data } = useQuery(insightActivityQueryOptions(browserApi, range));
+  const { data, isPending } = useQuery(insightActivityQueryOptions(browserApi, range));
   const prior = useQuery({
     ...insightActivityQueryOptions(browserApi, priorRange(range)),
     enabled: compare
   });
+  if (isPending) return <LoadingState rows={1} height={96} />;
   if (!data) return null;
   const priorData = compare ? prior.data : undefined;
 
@@ -137,13 +142,27 @@ function AssistantActivityList({ range }: { range: InsightsRange }) {
     [assistants.data]
   );
 
-  if (metadata.isPending || assistants.isPending) return <Skeleton className="h-48 w-full" />;
-  if (metadata.isError || assistants.isError) {
-    return <p className="text-destructive text-sm">{t("request_failed")}</p>;
-  }
-  if (rows.length === 0)
-    return <p className="text-muted-foreground text-sm">{t("no_usage_data")}</p>;
+  return (
+    <QueryStateBoundary queries={[metadata, assistants]} rows={3} height={56}>
+      {() =>
+        rows.length === 0 ? (
+          <p className="text-muted-foreground text-sm">{t("no_usage_data")}</p>
+        ) : (
+          <AssistantActivityRows rows={rows} assistantNames={assistantNames} />
+        )
+      }
+    </QueryStateBoundary>
+  );
+}
 
+function AssistantActivityRows({
+  rows,
+  assistantNames
+}: {
+  rows: ReturnType<typeof assistantActivityRows>;
+  assistantNames: Map<string, string>;
+}) {
+  const t = useTranslations();
   return (
     <Card className="overflow-hidden p-0">
       <div className="divide-y">

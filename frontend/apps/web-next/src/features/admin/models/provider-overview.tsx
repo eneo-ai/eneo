@@ -21,9 +21,10 @@ import {
   type SecurityClassification
 } from "@/features/admin/security-classifications/security-classifications";
 import { browserApi } from "@/lib/api/browser";
+import { modelDisplayName } from "@/lib/models/model-display-name";
 import { modelProvidersQueryOptions, providerCapabilitiesQueryOptions } from "./model-providers";
 import { useModelTypeLabel } from "./model-type-label";
-import { type ModelsPresentation, modelLabel } from "./models";
+import type { ModelsPresentation } from "./models";
 import { ProviderCard, providerCardId } from "./provider-card";
 import { useProviderNotices } from "./provider-notices";
 import {
@@ -72,7 +73,7 @@ function AttentionBanner({
   const deprecatedTitle = t("admin_models_deprecated_title", { count: deprecated.length });
   const deprecatedDescription = t("admin_models_deprecated_description", {
     models: format.list(
-      deprecated.map(({ model }) => modelLabel(model)),
+      deprecated.map(({ model }) => modelDisplayName(model)),
       { type: "conjunction" }
     )
   });

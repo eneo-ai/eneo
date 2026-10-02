@@ -16,7 +16,8 @@ import {
 } from "@/components/ui/table";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { browserApi } from "@/lib/api/browser";
-import { type AdminModel, modelLabel, modelUsageDetailsQueryOptions } from "./models";
+import { modelDisplayName } from "@/lib/models/model-display-name";
+import { type AdminModel, modelUsageDetailsQueryOptions } from "./models";
 
 /** Labels for the entity types the usage endpoint returns; an unknown one shows as sent. */
 const ENTITY_TYPE_KEYS = new Map([
@@ -45,7 +46,7 @@ export function ModelDetailDialog({
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="max-h-[90vh] overflow-y-auto sm:max-w-2xl">
         <DialogHeader>
-          <DialogTitle>{modelLabel(model)}</DialogTitle>
+          <DialogTitle>{modelDisplayName(model)}</DialogTitle>
         </DialogHeader>
         <Tabs defaultValue="info">
           <TabsList>

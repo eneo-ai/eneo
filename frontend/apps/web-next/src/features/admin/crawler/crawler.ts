@@ -10,6 +10,7 @@ import { CRAWL_FAILURES_PAGE_SIZE, type CrawlFailure } from "@/features/knowledg
  * for administrators, without access to the indexed content.
  */
 
+export type CrawlerOverview = Schema<"AdminCrawlerOverview">;
 export type CrawlerItem = Schema<"AdminCrawlerItem">;
 export type CrawlerDetails = Schema<"AdminCrawlerDetails">;
 export type CrawlerSchedulerHealth = Schema<"AdminCrawlerSchedulerHealth">;

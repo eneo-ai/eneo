@@ -145,7 +145,7 @@ describe("AdminUsersPage", () => {
 
     expect(screen.getByRole("heading", { level: 1, name: "Användare" })).toBeTruthy();
     // The breadcrumb names the section as the admin navigation does.
-    expect(screen.getByText("Användare och åtkomst")).toBeTruthy();
+    expect(screen.getByText("Organisation")).toBeTruthy();
     expect(screen.getByRole("textbox", { name: "Sök användare på e-post" })).toBeTruthy();
     expect(screen.getByText("2 användare")).toBeTruthy();
     await expectNoAxeViolations(document.body);

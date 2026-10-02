@@ -1,18 +1,19 @@
 import {
   Activity,
   Blocks,
-  Building2,
   ChartColumn,
   Cpu,
   Database,
   Globe,
   History,
   KeyRound,
+  LayoutDashboard,
   LayoutTemplate,
   Library,
   LifeBuoy,
   Plug,
   Server,
+  Settings,
   Shield,
   SlidersHorizontal,
   User,
@@ -31,17 +32,19 @@ export type AdminNavItem = {
 
 export type AdminNavGroup = {
   /** Stable id, also the React key. */
-  id: "overview" | "governance" | "configuration" | "access";
+  id: "overview" | "governance" | "connections" | "organisation";
   labelKey: string;
   items: AdminNavItem[];
 };
 
 /**
- * The administration navigation, grouped as in the approved design
- * (Översikt · Styrning · Konfiguration · Användare och åtkomst). Every admin
- * route of the former admin sidebar is here, with the same gating: templates
- * only when the tenant uses templates, modules only with the modules
- * permission. The admin layout still redirects non-admins.
+ * The administration navigation in four groups (UX review B6):
+ * Översikt (what is going on), Styrning (what the organisation allows),
+ * Anslutningar (what Eneo talks to) and Organisation (who and what it
+ * manages). Every admin route is here, with the same gating as before:
+ * templates only when the tenant uses templates, modules only with the
+ * modules permission. No group exceeds seven items, so none needs to
+ * collapse. The admin layout still redirects non-admins.
  */
 export function adminNavGroups({
   usingTemplates,
@@ -55,10 +58,9 @@ export function adminNavGroups({
       id: "overview",
       labelKey: "admin_section_overview",
       items: [
-        { href: "/admin", icon: Building2, labelKey: "organisation" },
+        { href: "/admin", icon: LayoutDashboard, labelKey: "overview" },
         { href: "/admin/insights", icon: ChartColumn, labelKey: "insights" },
-        { href: "/admin/usage", icon: Activity, labelKey: "usage" },
-        { href: "/admin/crawler", icon: Globe, labelKey: "admin_crawler_title" }
+        { href: "/admin/usage", icon: Activity, labelKey: "usage" }
       ]
     },
     {
@@ -67,6 +69,7 @@ export function adminNavGroups({
       items: [
         { href: "/admin/personal-assistant", icon: User, labelKey: "governance_title" },
         { href: "/admin/prompt-library", icon: Library, labelKey: "governance_tab_prompts" },
+        { href: "/admin/skills", icon: SlidersHorizontal, labelKey: "admin_skills_nav_label" },
         {
           href: "/admin/security-classifications",
           icon: Shield,
@@ -76,10 +79,26 @@ export function adminNavGroups({
       ]
     },
     {
-      id: "configuration",
-      labelKey: "admin_section_configuration",
+      id: "connections",
+      labelKey: "admin_section_connections",
       items: [
         { href: "/admin/models", icon: Cpu, labelKey: "models" },
+        { href: "/admin/mcp-servers", icon: Server, labelKey: "mcp_servers" },
+        { href: "/admin/integrations", icon: Plug, labelKey: "integrations" },
+        ...(canManageModules
+          ? [{ href: "/admin/modules", icon: Blocks, labelKey: "module_admin_title" }]
+          : []),
+        // Capability providers (tool providers), so they stay with the connections.
+        { href: "/admin/tools", icon: Wrench, labelKey: "tools" },
+        { href: "/admin/api-keys", icon: KeyRound, labelKey: "api_keys" }
+      ]
+    },
+    {
+      id: "organisation",
+      labelKey: "admin_section_organisation",
+      items: [
+        { href: "/admin/users", icon: Users, labelKey: "users" },
+        { href: "/admin/roles", icon: UserCheck, labelKey: "roles" },
         ...(usingTemplates
           ? [{ href: "/admin/templates", icon: LayoutTemplate, labelKey: "templates" }]
           : []),
@@ -88,23 +107,9 @@ export function adminNavGroups({
           icon: LifeBuoy,
           labelKey: "admin_help_assistants_nav_label"
         },
-        { href: "/admin/mcp-servers", icon: Server, labelKey: "mcp_servers" },
-        { href: "/admin/tools", icon: Wrench, labelKey: "tools" },
-        ...(canManageModules
-          ? [{ href: "/admin/modules", icon: Blocks, labelKey: "module_admin_title" }]
-          : []),
-        { href: "/admin/integrations", icon: Plug, labelKey: "integrations" },
         { href: "/admin/storage", icon: Database, labelKey: "storage_settings_nav" },
-        { href: "/admin/skills", icon: SlidersHorizontal, labelKey: "admin_skills_nav_label" }
-      ]
-    },
-    {
-      id: "access",
-      labelKey: "admin_section_access",
-      items: [
-        { href: "/admin/users", icon: Users, labelKey: "users" },
-        { href: "/admin/roles", icon: UserCheck, labelKey: "roles" },
-        { href: "/admin/api-keys", icon: KeyRound, labelKey: "api_keys" }
+        { href: "/admin/crawler", icon: Globe, labelKey: "admin_crawler_title" },
+        { href: "/admin/settings", icon: Settings, labelKey: "settings" }
       ]
     }
   ];

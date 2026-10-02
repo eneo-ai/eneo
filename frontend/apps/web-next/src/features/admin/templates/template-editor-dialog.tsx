@@ -30,6 +30,7 @@ import { browserApi } from "@/lib/api/browser";
 import { toastApiError } from "@/lib/api/toast";
 import { toast } from "@/lib/toast";
 import { adminModelsQueryOptions } from "@/features/admin/models/models";
+import { modelDisplayName } from "@/lib/models/model-display-name";
 import type { ModelKwargs } from "@/features/assistants/editor/model-kwargs";
 import {
   APP_KEY,
@@ -240,7 +241,7 @@ export function TemplateEditorDialog({
                 <SelectItem value={NO_MODEL}>{t("none")}</SelectItem>
                 {(models?.completion_models ?? []).map((model) => (
                   <SelectItem key={model.id} value={model.id}>
-                    {model.nickname ?? model.name}
+                    {modelDisplayName(model)}
                   </SelectItem>
                 ))}
               </SelectContent>

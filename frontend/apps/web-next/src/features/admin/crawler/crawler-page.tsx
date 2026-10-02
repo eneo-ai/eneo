@@ -10,26 +10,24 @@ import { Tab, TabList } from "@astryxdesign/core/TabList";
 import { TextInput } from "@/components/astryx/text-input";
 import { ToggleButton, ToggleButtonGroup } from "@astryxdesign/core/ToggleButton";
 import { keepPreviousData, useQuery } from "@tanstack/react-query";
-import { ArrowRight, RefreshCw } from "lucide-react";
+import { ArrowRight, Globe, RefreshCw } from "lucide-react";
 import { useLocale, useTranslations } from "next-intl";
 import { useId, useState } from "react";
 import { ClientTime, useClientTimeText } from "@/components/composites/client-time";
 import { EmptyState } from "@/components/composites/empty-state";
 import { LoadingState } from "@/components/composites/loading-state";
 import { PageHeader } from "@/components/composites/page-header";
+import { ListError } from "@/components/composites/query-state";
 import { browserApi } from "@/lib/api/browser";
 import { crawlRunState, crawlRunStateLabelKey } from "@/features/knowledge/crawl-run-state";
-import {
-  CrawlLoadError,
-  CrawlRunCounts,
-  CrawlRunStatusLabel
-} from "@/features/knowledge/crawl-run-ui";
+import { CrawlRunCounts, CrawlRunStatusLabel } from "@/features/knowledge/crawl-run-ui";
 import { CrawlDetailsDialog } from "./crawl-details-dialog";
 import {
   CRAWLER_PAGE_SIZE,
   crawlerOverviewQueryOptions,
   crawlerScheduleQueryOptions,
   type CrawlerItem,
+  type CrawlerOverview,
   type CrawlerPeriod,
   type CrawlerStatusFilter,
   type CrawlerView,
@@ -125,6 +123,20 @@ const DEFAULT_FILTERS: Filters = {
   sort: "next_due"
 };
 
+type Overview = CrawlerOverview;
+type DayCounts = Overview["calendar"]["today"];
+const DAY_COUNT_KEYS = ["completed", "partial", "failed", "cancelled"] as const;
+
+/** Whether anything finished today or yesterday: the day cards are shown only then. */
+function hasRecentRuns(calendar: Overview["calendar"]): boolean {
+  return DAYS.some((day) => DAY_COUNT_KEYS.some((key) => calendar[day][key] > 0));
+}
+
+/** Nothing has run, is running or waits: the crawler has not been used yet. */
+function isIdle(data: Overview): boolean {
+  return !hasRecentRuns(data.calendar) && data.summary.ongoing === 0 && data.summary.queued === 0;
+}
+
 /** When the run started and how long it has run (or took); for a queued run, how long it has waited. */
 function RunTimeCell({ item, asOf }: { item: CrawlerItem; asOf: string }) {
   const t = useTranslations();
@@ -147,6 +159,98 @@ function RunTimeCell({ item, asOf }: { item: CrawlerItem; asOf: string }) {
         {t("admin_crawler_elapsed", elapsedParts(item.started_at, item.run.finished_at ?? asOf))}
       </span>
     </span>
+  );
+}
+
+/**
+ * What finished today and yesterday, by outcome: each count is a toggle that
+ * filters the finished runs on that day and outcome.
+ */
+function DayCards({
+  data,
+  value,
+  onChange,
+  groupId
+}: {
+  data: Overview;
+  value: string | null;
+  onChange: (day: Day, outcome: CrawlerStatusFilter) => void;
+  groupId: (day: Day) => string;
+}) {
+  const t = useTranslations();
+  const locale = useLocale();
+  const count = (counts: DayCounts, key: (typeof DAY_COUNT_KEYS)[number]) =>
+    counts[key].toLocaleString(locale);
+
+  return (
+    <section className="flex flex-col gap-3" aria-label={t("admin_crawler_completed_view")}>
+      <ToggleButtonGroup
+        label={t("admin_crawler_completed_view")}
+        value={value}
+        onChange={(next) => {
+          if (typeof next !== "string") return;
+          const [day, outcome] = next.split(":") as [Day, CrawlerStatusFilter];
+          onChange(day, outcome);
+        }}
+      >
+        <div className="grid gap-4 lg:grid-cols-2">
+          {DAYS.map((day) => (
+            <Card key={day} padding={3}>
+              <div role="group" aria-labelledby={groupId(day)} className="flex flex-col gap-2">
+                <div className="flex flex-wrap items-baseline justify-between gap-2">
+                  <h2 id={groupId(day)} className="font-semibold">
+                    {t(PERIOD_KEYS[day])}
+                  </h2>
+                  <span className="text-ax-text-secondary text-sm">
+                    <ClientTime value={`${data.calendar[day].date}T00:00:00Z`} format="date_long" />
+                  </span>
+                </div>
+                <div className="grid grid-cols-3 gap-2">
+                  {DAY_OUTCOMES.map((outcome) => (
+                    <ToggleButton
+                      key={outcome.status}
+                      value={`${day}:${outcome.status}`}
+                      label={t("admin_crawler_show_day_status", {
+                        status: statusLabel(t, outcome.status),
+                        day: t(PERIOD_KEYS[day])
+                      })}
+                    >
+                      <span className="flex min-w-0 flex-col items-start gap-1 text-start">
+                        <span className="text-xl font-semibold tabular-nums">
+                          {count(data.calendar[day], outcome.count)}
+                        </span>
+                        <span className="text-ax-text-secondary text-xs leading-5 whitespace-normal">
+                          {statusLabel(t, outcome.status)}
+                        </span>
+                      </span>
+                    </ToggleButton>
+                  ))}
+                </div>
+                <div>
+                  <ToggleButton
+                    size="sm"
+                    value={`${day}:cancelled`}
+                    label={t("admin_crawler_show_day_status", {
+                      status: statusLabel(t, "cancelled"),
+                      day: t(PERIOD_KEYS[day])
+                    })}
+                  >
+                    <span className="text-ax-text-secondary text-xs whitespace-normal">
+                      {t("admin_crawler_cancelled_count", {
+                        count: count(data.calendar[day], "cancelled")
+                      })}
+                    </span>
+                  </ToggleButton>
+                </div>
+              </div>
+            </Card>
+          ))}
+        </div>
+      </ToggleButtonGroup>
+      <p className="text-ax-text-secondary max-w-3xl text-xs leading-5">
+        {t("admin_crawler_calendar_help", { timeZone: data.calendar.time_zone })}
+      </p>
+    </section>
   );
 }
 
@@ -351,110 +455,57 @@ export function CrawlerPage() {
         }
       />
 
-      <div className="flex flex-wrap items-center gap-x-6 gap-y-2 text-sm">
-        <p>
-          {t("admin_crawler_ongoing")}
-          <strong className="ms-2 tabular-nums">{data?.summary.ongoing ?? "—"}</strong>
-        </p>
-        <p>
-          {t("admin_crawler_queued")}
-          <strong className="ms-2 tabular-nums">{data?.summary.queued ?? "—"}</strong>
-        </p>
-        <div className="sm:ms-auto">
-          <Button
-            variant="ghost"
-            size="sm"
-            label={t("admin_crawler_show_issues")}
-            endContent={<ArrowRight aria-hidden="true" />}
-            onClick={showIssues}
-          >
-            {t("admin_crawler_issues")} · {t("admin_crawler_last_day")}{" "}
-            <span className="tabular-nums">{data?.summary.issues ?? "—"}</span>
-          </Button>
-        </div>
-      </div>
-
-      {data ? <SchedulerHealth scheduler={data.scheduler} /> : null}
-
-      <section className="flex flex-col gap-3" aria-label={t("admin_crawler_completed_view")}>
-        <ToggleButtonGroup
-          label={t("admin_crawler_completed_view")}
-          value={dayValue}
-          onChange={(value) => {
-            if (typeof value !== "string") return;
-            const [day, outcome] = value.split(":") as [Day, CrawlerStatusFilter];
-            showDay(day, outcome);
-          }}
-        >
-          <div className="grid gap-4 lg:grid-cols-2">
-            {DAYS.map((day) => (
-              <Card key={day} padding={3}>
-                <div
-                  role="group"
-                  aria-labelledby={`${baseId}-${day}`}
-                  className="flex flex-col gap-2"
-                >
-                  <div className="flex flex-wrap items-baseline justify-between gap-2">
-                    <h2 id={`${baseId}-${day}`} className="font-semibold">
-                      {t(PERIOD_KEYS[day])}
-                    </h2>
-                    {data ? (
-                      <span className="text-ax-text-secondary text-sm">
-                        <ClientTime
-                          value={`${data.calendar[day].date}T00:00:00Z`}
-                          format="date_long"
-                        />
-                      </span>
-                    ) : null}
-                  </div>
-                  <div className="grid grid-cols-3 gap-2">
-                    {DAY_OUTCOMES.map((outcome) => (
-                      <ToggleButton
-                        key={outcome.status}
-                        value={`${day}:${outcome.status}`}
-                        label={t("admin_crawler_show_day_status", {
-                          status: statusLabel(t, outcome.status),
-                          day: t(PERIOD_KEYS[day])
-                        })}
-                        isDisabled={!data}
-                      >
-                        <span className="flex min-w-0 flex-col items-start gap-1 text-start">
-                          <span className="text-xl font-semibold tabular-nums">
-                            {data ? data.calendar[day][outcome.count].toLocaleString(locale) : "—"}
-                          </span>
-                          <span className="text-ax-text-secondary text-xs leading-5 whitespace-normal">
-                            {statusLabel(t, outcome.status)}
-                          </span>
-                        </span>
-                      </ToggleButton>
-                    ))}
-                  </div>
-                  <div>
-                    <ToggleButton
-                      size="sm"
-                      value={`${day}:cancelled`}
-                      label={t("admin_crawler_show_day_status", {
-                        status: statusLabel(t, "cancelled"),
-                        day: t(PERIOD_KEYS[day])
-                      })}
-                      isDisabled={!data}
-                    >
-                      <span className="text-ax-text-secondary text-xs whitespace-normal">
-                        {t("admin_crawler_cancelled_count", {
-                          count: data ? data.calendar[day].cancelled.toLocaleString(locale) : "—"
-                        })}
-                      </span>
-                    </ToggleButton>
-                  </div>
-                </div>
-              </Card>
-            ))}
+      {overview.isPending ? (
+        <LoadingState rows={2} height={56} />
+      ) : data ? (
+        <>
+          <div className="flex flex-wrap items-center gap-x-6 gap-y-2 text-sm">
+            <p>
+              {t("admin_crawler_ongoing")}
+              <strong className="ms-2 tabular-nums">{data.summary.ongoing}</strong>
+            </p>
+            <p>
+              {t("admin_crawler_queued")}
+              <strong className="ms-2 tabular-nums">{data.summary.queued}</strong>
+            </p>
+            <div className="sm:ms-auto">
+              <Button
+                variant="ghost"
+                size="sm"
+                label={t("admin_crawler_show_issues")}
+                endContent={<ArrowRight aria-hidden="true" />}
+                onClick={showIssues}
+              >
+                {t("admin_crawler_issues")} · {t("admin_crawler_last_day")}{" "}
+                <span className="tabular-nums">{data.summary.issues}</span>
+              </Button>
+            </div>
           </div>
-        </ToggleButtonGroup>
-        <p className="text-ax-text-secondary max-w-3xl text-xs leading-5">
-          {t("admin_crawler_calendar_help", { timeZone: data?.calendar.time_zone ?? timeZone })}
-        </p>
-      </section>
+
+          <SchedulerHealth scheduler={data.scheduler} />
+
+          {hasRecentRuns(data.calendar) ? (
+            <DayCards
+              data={data}
+              value={dayValue}
+              onChange={showDay}
+              groupId={(day) => `${baseId}-${day}`}
+            />
+          ) : isIdle(data) ? (
+            <EmptyState
+              icon={<Globe />}
+              title={t("admin_crawler_no_runs_title")}
+              description={t("admin_crawler_no_runs_description")}
+              actions={
+                <Button
+                  href="/spaces/organization/knowledge?tab=websites"
+                  label={t("admin_crawler_go_to_websites")}
+                />
+              }
+            />
+          ) : null}
+        </>
+      ) : null}
 
       <div className="flex flex-col gap-4">
         <TabList
@@ -566,9 +617,10 @@ export function CrawlerPage() {
           </form>
 
           {rows.isError ? (
-            <CrawlLoadError
-              message={data ? t("admin_crawler_refresh_error") : t("admin_crawler_error")}
-              loading={rows.isFetching}
+            <ListError
+              error={rows.error}
+              title={data ? t("admin_crawler_refresh_error") : t("admin_crawler_error")}
+              isRetrying={rows.isFetching}
               onRetry={() => void rows.refetch()}
             />
           ) : null}

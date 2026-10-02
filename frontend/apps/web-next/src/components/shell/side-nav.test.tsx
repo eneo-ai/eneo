@@ -372,42 +372,81 @@ describe("DesktopSideNav (admin)", () => {
     const { container } = renderNav({ variant: "admin", permissions: ["admin"] });
     const navigation = screen.getByRole("navigation", { name: "Administration" });
 
-    expect(within(navigation).getByRole("link", { name: "Tillbaka till Eneo" })).toBeTruthy();
-    for (const name of ["Översikt", "Styrning", "Konfiguration", "Användare och åtkomst"]) {
-      expect(within(navigation).getByRole("group", { name })).toBeTruthy();
+    // Four groups in this order, each with its pages in the design's order.
+    const groupNames = ["Översikt", "Styrning", "Anslutningar", "Organisation"];
+    const groups = groupNames.map((name) => within(navigation).getByRole("group", { name }));
+    for (const [index, group] of groups.entries()) {
+      const next = groups[index + 1];
+      if (next)
+        expect(group.compareDocumentPosition(next) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
     }
-
-    const hrefs = within(navigation)
-      .getAllByRole("link")
-      .map((link) => link.getAttribute("href"));
-    for (const href of [
-      "/admin",
-      "/admin/insights",
-      "/admin/usage",
-      "/admin/crawler",
+    // "Tillbaka till Eneo" comes first, before any admin page.
+    const back = within(navigation).getByRole("link", { name: "Tillbaka till Eneo" });
+    expect(
+      back.compareDocumentPosition(groups[0]!) & Node.DOCUMENT_POSITION_FOLLOWING
+    ).toBeTruthy();
+    const links = within(navigation).getAllByRole("link");
+    const hrefsIn = (name: string) =>
+      within(within(navigation).getByRole("group", { name }))
+        .getAllByRole("link")
+        .map((link) => link.getAttribute("href"));
+    expect(hrefsIn("Översikt")).toEqual(["/admin", "/admin/insights", "/admin/usage"]);
+    expect(hrefsIn("Styrning")).toEqual([
       "/admin/personal-assistant",
       "/admin/prompt-library",
-      "/admin/security-classifications",
-      "/admin/audit-logs",
-      "/admin/models",
-      "/admin/help-assistants",
-      "/admin/mcp-servers",
-      "/admin/tools",
-      "/admin/integrations",
-      "/admin/storage",
       "/admin/skills",
+      "/admin/security-classifications",
+      "/admin/audit-logs"
+    ]);
+    expect(hrefsIn("Anslutningar")).toEqual([
+      "/admin/models",
+      "/admin/mcp-servers",
+      "/admin/integrations",
+      "/admin/tools",
+      "/admin/api-keys"
+    ]);
+    expect(hrefsIn("Organisation")).toEqual([
       "/admin/users",
       "/admin/roles",
-      "/admin/api-keys"
-    ]) {
-      expect(hrefs).toContain(href);
-    }
+      "/admin/help-assistants",
+      "/admin/storage",
+      "/admin/crawler",
+      "/admin/settings"
+    ]);
+    expect(within(navigation).getByRole("link", { name: "Översikt" }).getAttribute("href")).toBe(
+      "/admin"
+    );
+    expect(within(navigation).getByRole("link", { name: "Inställningar" })).toBeTruthy();
+
     // Gated: templates (tenant setting) and modules (permission).
+    const hrefs = links.map((link) => link.getAttribute("href"));
     expect(hrefs).not.toContain("/admin/templates");
     expect(hrefs).not.toContain("/admin/modules");
     expect(screen.getByRole("link", { name: "Modeller" }).getAttribute("aria-current")).toBe(
       "page"
     );
     await expectNoAxeViolations(container);
+  });
+
+  it("keeps the gated pages in their groups and no group above seven items", () => {
+    setRoute("/admin");
+    renderInApp(<DesktopSideNav variant="admin" navId="side-nav" />, {
+      queryClient: seededClient(),
+      appContext: testAppContext({
+        permissions: ["admin", "modules"],
+        settings: { using_templates: true }
+      })
+    });
+    const navigation = screen.getByRole("navigation", { name: "Administration" });
+    const connections = within(navigation).getByRole("group", { name: "Anslutningar" });
+    const organisation = within(navigation).getByRole("group", { name: "Organisation" });
+    expect(within(connections).getByRole("link", { name: "Moduler" })).toBeTruthy();
+    expect(within(organisation).getByRole("link", { name: "Mallar" })).toBeTruthy();
+    for (const name of ["Översikt", "Styrning", "Anslutningar", "Organisation"]) {
+      const group = within(navigation).getByRole("group", { name });
+      expect(within(group).getAllByRole("link").length).toBeLessThanOrEqual(7);
+    }
+    // Only the landing is current on /admin.
+    expect(currentLinks()).toEqual([within(navigation).getByRole("link", { name: "Översikt" })]);
   });
 });

@@ -1,4 +1,5 @@
 import type { RecentConversation } from "@/lib/api/conversations";
+import { displayPartnerName } from "@/lib/chat/partner-name";
 
 type Translate = (key: string, values?: Record<string, string>) => string;
 
@@ -17,5 +18,8 @@ export function conversationContext(
     : space.organization
       ? t("organization")
       : space.name;
-  return t("recent_partner_in_space", { partner: partner.name, space: spaceName });
+  return t("recent_partner_in_space", {
+    partner: displayPartnerName({ ...partner, personalSpace: space.personal }, t),
+    space: spaceName
+  });
 }

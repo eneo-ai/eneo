@@ -26,7 +26,7 @@ import { flushSync } from "react-dom";
 import { FieldProblem, fieldProblemProps } from "@/components/composites/field-problem";
 import { ConfirmDialogControlled } from "@/components/composites/confirm-dialog";
 import { PageHeader } from "@/components/composites/page-header";
-import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
+import { QueryStateBoundary } from "@/components/composites/query-state";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
@@ -303,49 +303,30 @@ export function RolesPage() {
           />
         </div>
       </div>
-      {failed ? (
-        <Alert variant="destructive" role="alert">
-          <AlertTitle>{t("request_failed")}</AlertTitle>
-          <AlertDescription>
-            <Button
-              variant="outline"
-              size="sm"
-              onClick={() => {
-                void rolesQuery.refetch();
-                void permissionsQuery.refetch();
-                void templatesQuery.refetch();
-              }}
-            >
-              {t("retry")}
-            </Button>
-          </AlertDescription>
-        </Alert>
-      ) : loading ? (
-        <p role="status" className="text-muted-foreground text-sm">
-          {t("loading")}
-        </p>
-      ) : (
-        <div className="divide-y rounded-xl border" role="list" aria-label={t("roles")}>
-          {visible.length === 0 ? (
-            <p className="p-5 text-sm" role="status">
-              {t("roles_no_match", { query })}
-            </p>
-          ) : (
-            visible.map((role) => (
-              <RoleRow
-                key={role.id}
-                role={role}
-                groups={groups}
-                isDefault={role.id === defaultRoleId}
-                labelFor={permissionLabel}
-                groupLabel={groupLabel}
-                onEdit={() => openEditor({ kind: "update", role })}
-                onAction={(kind) => setPending({ kind, role })}
-              />
-            ))
-          )}
-        </div>
-      )}
+      <QueryStateBoundary queries={[rolesQuery, permissionsQuery, templatesQuery]} rows={4}>
+        {() => (
+          <div className="divide-y rounded-xl border" role="list" aria-label={t("roles")}>
+            {visible.length === 0 ? (
+              <p className="p-5 text-sm" role="status">
+                {t("roles_no_match", { query })}
+              </p>
+            ) : (
+              visible.map((role) => (
+                <RoleRow
+                  key={role.id}
+                  role={role}
+                  groups={groups}
+                  isDefault={role.id === defaultRoleId}
+                  labelFor={permissionLabel}
+                  groupLabel={groupLabel}
+                  onEdit={() => openEditor({ kind: "update", role })}
+                  onAction={(kind) => setPending({ kind, role })}
+                />
+              ))
+            )}
+          </div>
+        )}
+      </QueryStateBoundary>
 
       <Dialog
         open={editor !== null}

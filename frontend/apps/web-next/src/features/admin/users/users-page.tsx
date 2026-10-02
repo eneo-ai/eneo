@@ -152,7 +152,7 @@ export function AdminUsersPage() {
         description={t("admin_users_description")}
         breadcrumbs={[
           { label: t("admin_breadcrumb_root"), href: "/admin" },
-          { label: t("admin_section_access") }
+          { label: t("admin_section_organisation") }
         ]}
         tour="admin-users"
         actions={

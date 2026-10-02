@@ -27,6 +27,7 @@ import {
 import { browserApi } from "@/lib/api/browser";
 import { toastApiError } from "@/lib/api/toast";
 import { toast } from "@/lib/toast";
+import { modelDisplayName } from "@/lib/models/model-display-name";
 import {
   type AdminModel,
   MODEL_MIGRATION_HISTORY_KEY,
@@ -36,7 +37,6 @@ import {
   isMigrationSecurityBlockerCode,
   migrationWarningLabel,
   migrateModelUsage,
-  modelLabel,
   modelUsageQueryOptions,
   validateMigrationQueryOptions
 } from "./models";
@@ -205,7 +205,7 @@ export function MigrateModelDialog({
       <DialogContent className="sm:max-w-md">
         <DialogHeader>
           <DialogTitle>{t("migrate_model")}</DialogTitle>
-          <DialogDescription>{modelLabel(model)}</DialogDescription>
+          <DialogDescription>{modelDisplayName(model)}</DialogDescription>
         </DialogHeader>
         <div className="flex flex-col gap-4">
           {usage.data && <ImpactSummary data={usage.data} kind={kind} />}
@@ -235,7 +235,7 @@ export function MigrateModelDialog({
               <SelectContent>
                 {targets.map((target) => (
                   <SelectItem key={target.id} value={target.id}>
-                    {modelLabel(target)}
+                    {modelDisplayName(target)}
                   </SelectItem>
                 ))}
               </SelectContent>

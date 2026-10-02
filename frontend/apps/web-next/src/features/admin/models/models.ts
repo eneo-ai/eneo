@@ -315,10 +315,6 @@ export function adminModelsQueryOptions(api: EneoClient) {
   });
 }
 
-export function modelLabel(model: { name: string; nickname?: string | null }): string {
-  return model.nickname || model.name;
-}
-
 export function isMigrationSecurityBlockerCode(code: string | undefined): boolean {
   return code?.startsWith("security_classification_insufficient") ?? false;
 }

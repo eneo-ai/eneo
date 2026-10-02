@@ -6,6 +6,7 @@ import { ProviderLogo } from "@/components/ai-elements/provider-logo";
 import { Label } from "@/components/ui/label";
 import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
 import { Switch } from "@/components/ui/switch";
+import { modelDisplayName, modelTechnicalId } from "@/lib/models/model-display-name";
 import { PolicySection } from "./policy-section";
 import type { PolicyDraft } from "./use-policy-draft";
 
@@ -121,7 +122,8 @@ export function ModelRestrictionSection({ draft }: { draft: PolicyDraft }) {
                         const includedViaProvider = isProviderSelected;
                         const effectivelySelected =
                           includedViaProvider || (modelSelections[model.id]?.selected ?? false);
-                        const modelName = model.nickname ?? model.name;
+                        const modelName = modelDisplayName(model);
+                        const technicalId = modelTechnicalId(model);
                         return (
                           <tr
                             key={model.id}
@@ -142,6 +144,11 @@ export function ModelRestrictionSection({ draft }: { draft: PolicyDraft }) {
                               {includedViaProvider && (
                                 <span className="text-muted-foreground ml-1.5 text-xs">
                                   {t("governance_via_provider")}
+                                </span>
+                              )}
+                              {technicalId && (
+                                <span className="text-muted-foreground block font-mono text-xs break-all">
+                                  {technicalId}
                                 </span>
                               )}
                             </td>

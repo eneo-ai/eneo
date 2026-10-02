@@ -4,12 +4,15 @@ import { useSuspenseQuery } from "@tanstack/react-query";
 import { useTranslations } from "next-intl";
 import { PageHeader } from "@/components/composites/page-header";
 import { browserApi } from "@/lib/api/browser";
-import { unwrap } from "@/lib/api/errors";
 import { SkillBindingsEditor } from "@/features/skills/skill-bindings-section";
 import { adminModelsQueryOptions } from "@/features/admin/models/models";
 import { mcpServersQueryOptions } from "@/features/admin/mcp/mcp";
 import { promptLibraryQueryOptions } from "@/features/admin/prompt-library/prompt-library";
-import { governancePolicyQueryOptions, modelProvidersQueryOptions } from "./governance";
+import {
+  governancePolicyQueryOptions,
+  modelProvidersQueryOptions,
+  skillRuntimePolicyQueryOptions
+} from "./governance";
 import { FilePolicySection } from "./file-policy-section";
 import { McpRestrictionSection } from "./mcp-restriction-section";
 import { ModelRestrictionSection } from "./model-restriction-section";
@@ -31,10 +34,7 @@ export function GovernancePolicyPage() {
   const { data: providers } = useSuspenseQuery(modelProvidersQueryOptions(browserApi));
   const { data: servers } = useSuspenseQuery(mcpServersQueryOptions(browserApi));
   const { data: prompts } = useSuspenseQuery(promptLibraryQueryOptions(browserApi));
-  const { data: skillRuntimePolicy } = useSuspenseQuery({
-    queryKey: ["skill-runtime-policy"],
-    queryFn: () => unwrap(browserApi.GET("/api/v1/settings/skills/runtime-policy"))
-  });
+  const { data: skillRuntimePolicy } = useSuspenseQuery(skillRuntimePolicyQueryOptions(browserApi));
 
   const draft = usePolicyDraft({
     policy,

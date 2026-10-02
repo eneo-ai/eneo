@@ -6,8 +6,8 @@ import { useSearchParams } from "next/navigation";
 import { useTranslations } from "next-intl";
 import { useEffect, useRef, useState } from "react";
 import { EmptyState } from "@/components/composites/empty-state";
-import { LoadingState } from "@/components/composites/loading-state";
 import { PageHeader } from "@/components/composites/page-header";
+import { QueryStateBoundary } from "@/components/composites/query-state";
 import { Button } from "@/components/ui/button";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { browserApi } from "@/lib/api/browser";
@@ -20,7 +20,6 @@ import { AuditTable } from "./audit-table";
 import { auditFiltersSearchParams, parseAuditFilters } from "./audit-url-filters";
 import { ExportDialog } from "./export-dialog";
 import { JustificationForm } from "./justification-form";
-import { RetentionPanel } from "./retention-panel";
 
 const SEARCH_DEBOUNCE_MS = 300;
 
@@ -51,10 +50,11 @@ function LogsTab() {
     if (nextUrl !== currentUrl) window.history.replaceState(null, "", nextUrl);
   }, [filters]);
 
-  const { data, error, isPending, isPlaceholderData } = useQuery({
+  const logsQuery = useQuery({
     ...auditLogsQueryOptions(browserApi, filters),
     placeholderData: keepPreviousData
   });
+  const { data, error, isPlaceholderData } = logsQuery;
 
   // 401 = no active access session; show the justification gate instead.
   if (error instanceof EneoApiError && error.status === 401) {
@@ -65,7 +65,6 @@ function LogsTab() {
     setFilters((current) => ({ ...current, ...next, page: next.page ?? 1 }));
   }
 
-  const logs = data?.logs ?? [];
   const totalPages = data?.total_pages ?? 1;
 
   // While the next page loads, the pressed button stays enabled so it keeps
@@ -87,8 +86,6 @@ function LogsTab() {
         </Button>
       </div>
 
-      <RetentionPanel />
-
       <AuditFilterBar
         filters={{ ...filters, search: searchInput }}
         onChange={({ search, ...rest }) => {
@@ -105,13 +102,15 @@ function LogsTab() {
       />
 
       <div className={cn(isPlaceholderData && "opacity-60 transition-opacity")}>
-        {isPending ? (
-          <LoadingState rows={5} />
-        ) : logs.length === 0 ? (
-          <EmptyState title={t("audit_no_logs_found")} />
-        ) : (
-          <AuditTable logs={logs} />
-        )}
+        <QueryStateBoundary query={logsQuery} rows={5}>
+          {(page) =>
+            page.logs.length === 0 ? (
+              <EmptyState title={t("audit_no_logs_found")} />
+            ) : (
+              <AuditTable logs={page.logs} />
+            )
+          }
+        </QueryStateBoundary>
       </div>
 
       {totalPages > 1 && (

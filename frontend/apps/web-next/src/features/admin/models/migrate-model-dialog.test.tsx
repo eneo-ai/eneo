@@ -74,7 +74,7 @@ it("shows a missing target, then an unconfirmed override, at its field on Migrat
   expect(problemOf(target)).toBe("Välj en modell att migrera till.");
 
   fireEvent.keyDown(target, { key: "Enter" });
-  fireEvent.click(await screen.findByRole("option", { name: "gpt-5" }));
+  fireEvent.click(await screen.findByRole("option", { name: "GPT-5" }));
   const override = await within(dialog).findByRole("checkbox", {
     name: /vill tvinga igenom den/
   });

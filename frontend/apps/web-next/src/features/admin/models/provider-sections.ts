@@ -3,9 +3,10 @@ import {
   formatCostPerMinute,
   getDeprecationStatus
 } from "@/features/ai-models/format-model-stats";
+import { modelDisplayName } from "@/lib/models/model-display-name";
 import { type KeyExpiry, keyExpiry } from "./key-expiry";
 import { isApiKeyRequired, type ModelProvider, type ProviderCapabilities } from "./model-providers";
-import { type AdminModel, type ModelKind, type ModelsPresentation, modelLabel } from "./models";
+import type { AdminModel, ModelKind, ModelsPresentation } from "./models";
 
 export type KindedModel = { model: AdminModel; kind: ModelKind };
 
@@ -130,7 +131,7 @@ function matchesSecurity(model: AdminModel, security: string): boolean {
 }
 
 function matchesSearch(model: AdminModel, query: string): boolean {
-  return `${modelLabel(model)} ${model.name}`.toLowerCase().includes(query);
+  return `${modelDisplayName(model)} ${model.name}`.toLowerCase().includes(query);
 }
 
 function sectionModels(

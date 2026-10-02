@@ -33,6 +33,7 @@ import { EneoApiError, getErrorMessage, unwrap } from "@/lib/api/errors";
 import { toastApiError } from "@/lib/api/toast";
 import { toast } from "@/lib/toast";
 import { cn } from "@/lib/utils";
+import { modelDisplayName, modelTechnicalId } from "@/lib/models/model-display-name";
 import { EditModelDialog } from "./edit-model-dialog";
 import { MigrateModelDialog } from "./migrate-model-dialog";
 import { useModelTypeLabel } from "./model-type-label";
@@ -42,7 +43,6 @@ import {
   deleteTenantModel,
   type MigratableModelKind,
   MODELS_KEY,
-  modelLabel,
   type ModelKind
 } from "./models";
 import { modelLifecycle, modelPrice } from "./provider-sections";
@@ -178,7 +178,7 @@ export function ModelRow({
   const [showDelete, setShowDelete] = useState(false);
   const canViewDetail = kind === "completion" || kind === "transcription";
 
-  const label = modelLabel(model);
+  const label = modelDisplayName(model);
   // Each returns the refetch, so a mutation stays pending until the list has
   // the new state. One mutation per control, so a pending write on one never
   // resets another's optimistic state.
@@ -218,7 +218,7 @@ export function ModelRow({
   });
 
   // The technical id under the display name, unless the name already is the id.
-  const technicalId = model.name !== label ? model.name : null;
+  const technicalId = modelTechnicalId(model);
   const locked = model.is_locked ?? false;
   const readonly = "readonly" in model && model.readonly === true;
   const isDefault = hasDefault(model) && model.is_org_default === true;

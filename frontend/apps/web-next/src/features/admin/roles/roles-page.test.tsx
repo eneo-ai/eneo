@@ -74,6 +74,18 @@ function openActions(row: HTMLElement) {
 }
 
 describe("role administration", () => {
+  it("shows skeleton rows while loading and the shared error state with a retry", async () => {
+    get.mockImplementationOnce(() => Promise.reject(new Error("boom")));
+    show();
+    expect(screen.getByRole("status").getAttribute("aria-busy")).toBe("true");
+
+    const alert = await screen.findByRole("alert");
+    expect(alert.textContent).toContain("query_error_title");
+    expect(screen.queryByRole("list", { name: "roles" })).toBeNull();
+
+    fireEvent.click(within(alert).getByRole("button", { name: "retry" }));
+    expect(await screen.findByRole("list", { name: "roles" })).toBeTruthy();
+  });
   it("shows the default role and searches the permissions granted by a role", async () => {
     show();
     expect(await screen.findByText("Everyone")).toBeTruthy();

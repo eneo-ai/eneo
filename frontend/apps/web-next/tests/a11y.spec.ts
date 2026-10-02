@@ -437,7 +437,24 @@ for (const colorScheme of ["light", "dark"] as const) {
 
     test("admin overview", async ({ page }) => {
       await scan(page, "/admin", async () => {
-        await expect(page.getByRole("heading", { level: 1, name: /^Organisation$/ })).toBeVisible();
+        await expect(
+          page.getByRole("heading", { level: 1, name: /^(Översikt|Overview)$/ })
+        ).toBeVisible();
+        // The cards have loaded: each is a region named by its heading, with its page's link.
+        const users = page.getByRole("region", { name: /^(Aktiva användare|Active users)$/ });
+        await expect(users).toBeVisible();
+        await expect(
+          users.getByRole("link", { name: /^(Visa användare|View users)$/ })
+        ).toBeVisible();
+        await expect(page.getByRole("region", { name: /^Crawler$/ })).toBeVisible();
+      });
+    });
+
+    test("admin settings", async ({ page }) => {
+      await scan(page, "/admin/settings", async () => {
+        await expect(
+          page.getByRole("heading", { level: 1, name: /^(Inställningar|Settings)$/ })
+        ).toBeVisible();
         await expect(page.getByRole("switch").first()).toBeVisible();
       });
     });

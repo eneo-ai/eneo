@@ -5,6 +5,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Download } from "lucide-react";
 import { useTranslations } from "next-intl";
 import { useEffect, useState } from "react";
+import { ListError } from "@/components/composites/query-state";
 import { Button } from "@/components/ui/button";
 import {
   Dialog,
@@ -66,7 +67,9 @@ export function ExportDialog({
   const {
     data: status,
     error: statusError,
-    isError: statusIsError
+    isError: statusIsError,
+    isFetching: statusIsFetching,
+    refetch: refetchStatus
   } = useQuery({
     queryKey: ["audit-export", jobId],
     enabled: jobId !== null,
@@ -142,8 +145,19 @@ export function ExportDialog({
 
         {jobId ? (
           <div className="flex flex-col gap-3">
-            {!statusIsError && <Progress value={status?.progress ?? 0} />}
-            <p className="text-muted-foreground text-sm">{statusMessage}</p>
+            {statusIsError && !expired ? (
+              <ListError
+                error={statusError}
+                title={t("audit_export_status_error")}
+                isRetrying={statusIsFetching}
+                onRetry={() => void refetchStatus()}
+              />
+            ) : (
+              <>
+                {!statusIsError && <Progress value={status?.progress ?? 0} />}
+                <p className="text-muted-foreground text-sm">{statusMessage}</p>
+              </>
+            )}
           </div>
         ) : (
           <div className="flex flex-col gap-3">

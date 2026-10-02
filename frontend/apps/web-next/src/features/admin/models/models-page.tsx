@@ -71,7 +71,7 @@ export function ModelsPage() {
         description={t("admin_models_description")}
         breadcrumbs={[
           { label: t("admin_breadcrumb_root"), href: "/admin" },
-          { label: t("admin_section_configuration") }
+          { label: t("admin_section_connections") }
         ]}
         tour="admin-models"
         actions={

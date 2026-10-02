@@ -1,25 +1,24 @@
 "use client";
 
-import { useQuery } from "@tanstack/react-query";
-import { Check, ListFilter, User, X } from "lucide-react";
-import { useTranslations } from "next-intl";
-import { useMemo, useState } from "react";
-import { Badge } from "@/components/ui/badge";
-import { Button } from "@/components/ui/button";
+import { BottomSheet } from "@astryxdesign/core/BottomSheet";
+import { Button } from "@astryxdesign/core/Button";
 import {
-  Command,
-  CommandEmpty,
-  CommandGroup,
-  CommandInput,
-  CommandItem,
-  CommandList
-} from "@/components/ui/command";
-import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
-import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
+  DateRangeInput,
+  type DateRange,
+  type DateRangePreset
+} from "@astryxdesign/core/DateRangeInput";
+import { useMediaQuery } from "@astryxdesign/core/hooks";
+import { MultiSelector, type MultiSelectorOptionType } from "@astryxdesign/core/MultiSelector";
+import { Popover } from "@astryxdesign/core/Popover";
+import { Token } from "@astryxdesign/core/Token";
+import { Typeahead, type SearchableItem, type SearchSource } from "@astryxdesign/core/Typeahead";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { ListFilter, User, X } from "lucide-react";
+import { useLocale, useTranslations } from "next-intl";
+import { useMemo, useState } from "react";
+import { TextInput } from "@/components/astryx/text-input";
 import { browserApi } from "@/lib/api/browser";
-import { cn } from "@/lib/utils";
-import { adminUsersQueryOptions } from "@/features/admin/users/users";
+import { adminUsersQueryOptions, MIN_SEARCH_LENGTH } from "@/features/admin/users/users";
 import {
   actionLabel,
   auditActionConfigQueryOptions,
@@ -29,80 +28,110 @@ import {
   type CategoryType
 } from "./audit";
 
-/** Actor-by-user filter: search users and pin the per-user (GDPR) log view. */
-function UserFilter({
+type IsoDate = DateRange["start"];
+type Translate = ReturnType<typeof useTranslations>;
+type OnChange = (next: Partial<AuditFilters>) => void;
+
+const PRESET_DAYS = [
+  { days: 7, key: "audit_last_7_days" },
+  { days: 30, key: "audit_last_30_days" },
+  { days: 90, key: "audit_last_90_days" }
+] as const;
+
+/** A local calendar date as YYYY-MM-DD. */
+function isoDate(date: Date): IsoDate {
+  const month = String(date.getMonth() + 1).padStart(2, "0");
+  const day = String(date.getDate()).padStart(2, "0");
+  return `${date.getFullYear()}-${month}-${day}` as IsoDate;
+}
+
+function isIsoDate(value: string | undefined): value is IsoDate {
+  return value !== undefined && /^\d{4}-\d{2}-\d{2}$/.test(value);
+}
+
+function daysAgo(days: number): Date {
+  const date = new Date();
+  date.setDate(date.getDate() - days);
+  return date;
+}
+
+/** "25 sep. 2026" for a YYYY-MM-DD string; noon UTC so no time zone moves the day. */
+function formatDate(date: string, locale: string): string {
+  return new Intl.DateTimeFormat(locale, {
+    day: "numeric",
+    month: "short",
+    year: "numeric"
+  }).format(new Date(`${date}T12:00:00Z`));
+}
+
+/** The filters the "Filter" button counts: user, each action and the period (search is visible). */
+export function activeFilterCount(filters: AuditFilters): number {
+  return (
+    (filters.userId ? 1 : 0) +
+    filters.actions.length +
+    (filters.from_date || filters.to_date ? 1 : 0)
+  );
+}
+
+const CLEARED: Partial<AuditFilters> = {
+  actions: [],
+  from_date: undefined,
+  to_date: undefined,
+  search: "",
+  userId: undefined,
+  userLabel: undefined
+};
+
+/** Actor-by-user filter: finds a user by email and pins the per-user (GDPR) log view. */
+function UserField({
   userId,
   userLabel,
   onChange
 }: {
   userId?: string;
   userLabel?: string;
-  onChange: (next: Partial<AuditFilters>) => void;
+  onChange: OnChange;
 }) {
   const t = useTranslations();
-  const [open, setOpen] = useState(false);
-  const [search, setSearch] = useState("");
-  const { data } = useQuery({
-    ...adminUsersQueryOptions(browserApi, {
-      page: 1,
-      stateFilter: "active",
-      search: search.trim()
+  const queryClient = useQueryClient();
+  const source = useMemo<SearchSource<SearchableItem>>(
+    () => ({
+      search: async (query) => {
+        const search = query.trim();
+        if (search.length < MIN_SEARCH_LENGTH) return [];
+        const page = await queryClient.query(
+          adminUsersQueryOptions(browserApi, { page: 1, stateFilter: "active", search })
+        );
+        return page.items.map((member) => ({ id: member.id, label: member.email }));
+      },
+      bootstrap: () => []
     }),
-    enabled: open
-  });
-  const users = data?.items ?? [];
-
-  if (userId) {
-    return (
-      <Badge variant="secondary" className="h-9 gap-1 px-3 text-sm">
-        <User className="size-3.5" />
-        {userLabel}
-        <button
-          type="button"
-          aria-label={t("audit_clear_user_filter")}
-          onClick={() => onChange({ userId: undefined, userLabel: undefined })}
-        >
-          <X className="size-3" />
-        </button>
-      </Badge>
-    );
-  }
+    [queryClient]
+  );
 
   return (
-    <Popover open={open} onOpenChange={setOpen}>
-      <PopoverTrigger asChild>
-        <Button variant="outline" className="justify-start gap-2">
-          <User className="size-4" />
-          {t("audit_user_filter")}
-        </Button>
-      </PopoverTrigger>
-      <PopoverContent className="w-80 p-0" align="start">
-        <Command shouldFilter={false}>
-          <CommandInput placeholder={t("search")} value={search} onValueChange={setSearch} />
-          <CommandList>
-            <CommandEmpty>{t("no_results")}</CommandEmpty>
-            <CommandGroup>
-              {users.map((member) => (
-                <CommandItem
-                  key={member.id}
-                  value={member.id}
-                  onSelect={() => {
-                    onChange({ userId: member.id, userLabel: member.email });
-                    setOpen(false);
-                  }}
-                >
-                  {member.email}
-                </CommandItem>
-              ))}
-            </CommandGroup>
-          </CommandList>
-        </Command>
-      </PopoverContent>
-    </Popover>
+    <Typeahead
+      label={t("user")}
+      description={t("audit_user_search_hint", { count: MIN_SEARCH_LENGTH })}
+      placeholder={t("audit_search_placeholder_user")}
+      searchSource={source}
+      value={userId ? { id: userId, label: userLabel ?? userId } : null}
+      onChange={(item) =>
+        onChange(
+          item
+            ? // The per-user endpoint takes only a date range: the other filters go.
+              { userId: item.id, userLabel: item.label, actions: [], search: "" }
+            : { userId: undefined, userLabel: undefined }
+        )
+      }
+      minQueryLength={MIN_SEARCH_LENGTH}
+      emptySearchResultsText={t("audit_user_search_empty")}
+      width="100%"
+    />
   );
 }
 
-function ActionMultiSelect({
+function ActionField({
   selected,
   onChange
 }: {
@@ -112,171 +141,234 @@ function ActionMultiSelect({
   const t = useTranslations();
   const { data: actions = [] } = useQuery(auditActionConfigQueryOptions(browserApi));
 
-  const grouped = useMemo(() => {
-    const map = new Map<CategoryType, ActionType[]>();
+  const options = useMemo<MultiSelectorOptionType[]>(() => {
+    const byCategory = new Map<CategoryType, ActionType[]>();
     for (const config of actions) {
-      const list = map.get(config.category) ?? [];
+      const list = byCategory.get(config.category) ?? [];
       list.push(config.action);
-      map.set(config.category, list);
+      byCategory.set(config.category, list);
     }
-    return [...map.entries()];
-  }, [actions]);
-
-  const selectedSet = new Set(selected);
-
-  function toggle(action: ActionType) {
-    onChange(
-      selectedSet.has(action) ? selected.filter((item) => item !== action) : [...selected, action]
-    );
-  }
+    return [...byCategory.entries()].map(([category, categoryActions]) => ({
+      type: "section",
+      title: categoryLabel(t, category),
+      options: categoryActions.map((action) => ({ value: action, label: actionLabel(t, action) }))
+    }));
+  }, [actions, t]);
 
   return (
-    <Popover>
-      <PopoverTrigger asChild>
-        <Button variant="outline" className="justify-start gap-2">
-          <ListFilter className="size-4" />
-          {selected.length === 0
-            ? t("audit_all_actions")
-            : t("audit_actions_selected", { count: selected.length })}
-        </Button>
-      </PopoverTrigger>
-      <PopoverContent className="w-80 p-0" align="start">
-        <Command>
-          <CommandInput placeholder={t("search")} />
-          <CommandList>
-            <CommandEmpty>{t("no_results")}</CommandEmpty>
-            {grouped.map(([category, categoryActions]) => (
-              <CommandGroup key={category} heading={categoryLabel(t, category)}>
-                {categoryActions.map((action) => (
-                  <CommandItem
-                    key={action}
-                    value={`${actionLabel(t, action)} ${action}`}
-                    onSelect={() => toggle(action)}
-                  >
-                    <Check
-                      className={cn(
-                        "size-4",
-                        selectedSet.has(action) ? "opacity-100" : "opacity-0"
-                      )}
-                    />
-                    {actionLabel(t, action)}
-                  </CommandItem>
-                ))}
-              </CommandGroup>
-            ))}
-          </CommandList>
-        </Command>
-      </PopoverContent>
-    </Popover>
+    <MultiSelector
+      label={t("action")}
+      options={options}
+      value={selected}
+      onChange={(values) => onChange(values as ActionType[])}
+      placeholder={t("audit_all_actions")}
+      triggerDisplay="count"
+      hasSearch
+      searchPlaceholder={t("search")}
+      emptySearchText={t("no_results")}
+      presentation="popover"
+      width="100%"
+    />
   );
 }
 
-/** Audit log filter bar: actions, date range, free-text search. */
+function PeriodField({ from, to, onChange }: { from?: string; to?: string; onChange: OnChange }) {
+  const t = useTranslations();
+  const presets = useMemo<DateRangePreset[]>(
+    () =>
+      PRESET_DAYS.map(({ days, key }) => ({
+        label: t(key),
+        getRange: () => ({ start: isoDate(daysAgo(days)), end: isoDate(new Date()) })
+      })),
+    [t]
+  );
+  const value: DateRange | null =
+    isIsoDate(from) && isIsoDate(to) ? { start: from, end: to } : null;
+
+  return (
+    <DateRangeInput
+      label={t("audit_period_label")}
+      placeholder={t("audit_period_placeholder")}
+      value={value}
+      onChange={(next) => onChange({ from_date: next?.start, to_date: next?.end })}
+      presets={presets}
+      numberOfMonths={1}
+      weekStartsOn="mon"
+      width="100%"
+    />
+  );
+}
+
+/** The fields behind the "Filter" button; each change applies at once. */
+function AuditFilterFields({
+  filters,
+  onChange,
+  onDone
+}: {
+  filters: AuditFilters;
+  onChange: OnChange;
+  onDone: () => void;
+}) {
+  const t = useTranslations();
+  return (
+    <div className="flex flex-col gap-4">
+      <p className="text-ax-text-secondary text-sm">{t("audit_filters_description")}</p>
+      <UserField userId={filters.userId} userLabel={filters.userLabel} onChange={onChange} />
+      {!filters.userId && (
+        <ActionField selected={filters.actions} onChange={(actions) => onChange({ actions })} />
+      )}
+      <PeriodField from={filters.from_date} to={filters.to_date} onChange={onChange} />
+      <div className="flex justify-end">
+        <Button variant="primary" label={t("done")} onClick={onDone} />
+      </div>
+    </div>
+  );
+}
+
+/** The "Filter" button: a popover beside it on wide screens, a bottom sheet on phones. */
+function FilterButton({ filters, onChange }: { filters: AuditFilters; onChange: OnChange }) {
+  const t = useTranslations();
+  const [open, setOpen] = useState(false);
+  const wide = useMediaQuery("(min-width: 768px)");
+  const count = activeFilterCount(filters);
+  const label = count > 0 ? t("audit_filters_button_count", { count }) : t("audit_filters_button");
+  const fields = (
+    <AuditFilterFields filters={filters} onChange={onChange} onDone={() => setOpen(false)} />
+  );
+
+  if (wide) {
+    return (
+      <Popover
+        isOpen={open}
+        onOpenChange={setOpen}
+        placement="below"
+        alignment="end"
+        width={360}
+        label={t("audit_filters_button")}
+        closeButtonLabel={t("close")}
+        // Mounted only while open: closed, Astryx keeps the popover element in
+        // the DOM, and the fields' empty listboxes would be scanned as visible.
+        content={open ? <div className="p-1">{fields}</div> : null}
+      >
+        {/* Popover attaches the click and aria-expanded to the button inside. */}
+        <Button label={label} icon={<ListFilter aria-hidden="true" />} />
+      </Popover>
+    );
+  }
+  return (
+    <>
+      <Button
+        label={label}
+        icon={<ListFilter aria-hidden="true" />}
+        aria-haspopup="dialog"
+        aria-expanded={open}
+        onClick={() => setOpen(true)}
+      />
+      <BottomSheet
+        isOpen={open}
+        onOpenChange={setOpen}
+        label={t("audit_filters_button")}
+        height="tall"
+      >
+        <div className="p-4">{fields}</div>
+      </BottomSheet>
+    </>
+  );
+}
+
+type Chip = { key: string; label: string; icon?: React.ReactNode; remove: Partial<AuditFilters> };
+
+function chipsFor(filters: AuditFilters, t: Translate, locale: string): Chip[] {
+  const chips: Chip[] = [];
+  if (filters.userId) {
+    chips.push({
+      key: "user",
+      label: filters.userLabel ?? filters.userId,
+      icon: <User aria-hidden="true" className="size-3.5" />,
+      remove: { userId: undefined, userLabel: undefined }
+    });
+  } else {
+    for (const action of filters.actions) {
+      chips.push({
+        key: `action:${action}`,
+        label: actionLabel(t, action),
+        remove: { actions: filters.actions.filter((item) => item !== action) }
+      });
+    }
+  }
+  const { from_date: from, to_date: to } = filters;
+  if (from || to) {
+    chips.push({
+      key: "period",
+      label:
+        from && to
+          ? `${formatDate(from, locale)} – ${formatDate(to, locale)}`
+          : from
+            ? t("audit_period_from", { date: formatDate(from, locale) })
+            : t("audit_period_to", { date: formatDate(to!, locale) }),
+      remove: { from_date: undefined, to_date: undefined }
+    });
+  }
+  return chips;
+}
+
+/**
+ * Audit log filters: the search as the primary field, a "Filter" button that
+ * opens user, action and period, and the active filters as removable chips.
+ */
 export function AuditFilterBar({
   filters,
   onChange
 }: {
   filters: AuditFilters;
-  onChange: (next: Partial<AuditFilters>) => void;
+  onChange: OnChange;
 }) {
   const t = useTranslations();
+  const locale = useLocale();
   const filteringByUser = Boolean(filters.userId);
-  const hasFilters =
-    filters.actions.length > 0 ||
-    filters.from_date ||
-    filters.to_date ||
-    filters.search ||
-    filteringByUser;
+  const chips = chipsFor(filters, t, locale);
+  const hasFilters = chips.length > 0 || filters.search !== "";
 
   return (
     <div className="flex flex-col gap-3">
       <div className="flex flex-wrap items-end gap-3">
-        <div className="flex flex-col gap-1">
-          <Label className="text-xs">{t("audit_user_filter")}</Label>
-          <UserFilter userId={filters.userId} userLabel={filters.userLabel} onChange={onChange} />
-        </div>
-        {!filteringByUser && (
-          <div className="flex flex-col gap-1">
-            <Label className="text-xs">{t("action")}</Label>
-            <ActionMultiSelect
-              selected={filters.actions}
-              onChange={(actions) => onChange({ actions })}
-            />
-          </div>
-        )}
-        <div className="flex flex-col gap-1">
-          <Label htmlFor="audit-from" className="text-xs">
-            {t("from")}
-          </Label>
-          <Input
-            id="audit-from"
-            type="date"
-            className="w-40"
-            value={filters.from_date ?? ""}
-            onChange={(event) => onChange({ from_date: event.target.value || undefined })}
+        <div className="min-w-56 flex-1">
+          {/* The per-user endpoint has no free text: the field says why it waits. */}
+          <TextInput
+            label={t("search")}
+            placeholder={t("audit_search_placeholder_entity")}
+            value={filters.search}
+            onChange={(value) => onChange({ search: value })}
+            isDisabled={filteringByUser}
+            disabledMessage={filteringByUser ? t("audit_filtering_by_user") : undefined}
+            hasClear
+            width="100%"
           />
         </div>
-        <div className="flex flex-col gap-1">
-          <Label htmlFor="audit-to" className="text-xs">
-            {t("to")}
-          </Label>
-          <Input
-            id="audit-to"
-            type="date"
-            className="w-40"
-            value={filters.to_date ?? ""}
-            onChange={(event) => onChange({ to_date: event.target.value || undefined })}
-          />
-        </div>
-        {!filteringByUser && (
-          <div className="flex flex-1 flex-col gap-1">
-            <Label htmlFor="audit-search" className="text-xs">
-              {t("search")}
-            </Label>
-            <Input
-              id="audit-search"
-              value={filters.search}
-              placeholder={t("search")}
-              onChange={(event) => onChange({ search: event.target.value })}
-            />
-          </div>
-        )}
+        <FilterButton filters={filters} onChange={onChange} />
         {hasFilters && (
           <Button
             variant="ghost"
-            onClick={() =>
-              onChange({
-                actions: [],
-                from_date: undefined,
-                to_date: undefined,
-                search: "",
-                userId: undefined,
-                userLabel: undefined
-              })
-            }
-          >
-            <X className="size-4" /> {t("clear")}
-          </Button>
+            label={t("audit_filters_clear")}
+            icon={<X aria-hidden="true" />}
+            onClick={() => onChange(CLEARED)}
+          />
         )}
       </div>
 
-      {!filteringByUser && filters.actions.length > 0 && (
-        <div className="flex flex-wrap gap-1">
-          {filters.actions.map((action) => (
-            <Badge key={action} variant="secondary" className="gap-1">
-              {actionLabel(t, action)}
-              <button
-                type="button"
-                aria-label={t("remove")}
-                onClick={() =>
-                  onChange({ actions: filters.actions.filter((item) => item !== action) })
-                }
-              >
-                <X className="size-3" />
-              </button>
-            </Badge>
+      {chips.length > 0 && (
+        <ul className="flex flex-wrap gap-2" aria-label={t("audit_filters_button")}>
+          {chips.map((chip) => (
+            <li key={chip.key}>
+              <Token
+                label={chip.label}
+                icon={chip.icon}
+                size="sm"
+                onRemove={() => onChange(chip.remove)}
+              />
+            </li>
           ))}
-        </div>
+        </ul>
       )}
     </div>
   );

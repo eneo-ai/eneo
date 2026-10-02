@@ -15,17 +15,14 @@ import { useId, useState } from "react";
 import { ClientTime, useClientTimeText } from "@/components/composites/client-time";
 import { ConfirmDialogControlled } from "@/components/composites/confirm-dialog";
 import { LoadingState } from "@/components/composites/loading-state";
+import { ListError } from "@/components/composites/query-state";
 import { browserApi } from "@/lib/api/browser";
 import { getErrorMessage, unwrap } from "@/lib/api/errors";
 import { formatBytes } from "@/lib/format";
 import { toastApiError } from "@/lib/api/toast";
 import { CrawlRunDetailsContent } from "@/features/knowledge/crawl-run-details";
 import { canRequestCrawlStop, isActiveCrawlRun } from "@/features/knowledge/crawl-run-state";
-import {
-  CrawlLoadError,
-  CrawlRunCounts,
-  CrawlRunStatusLabel
-} from "@/features/knowledge/crawl-run-ui";
+import { CrawlRunCounts, CrawlRunStatusLabel } from "@/features/knowledge/crawl-run-ui";
 import type { CrawlRun } from "@/features/knowledge/knowledge";
 import {
   crawlerDetailsQueryOptions,
@@ -127,9 +124,10 @@ function HistoryTab({
         </Button>
       </div>
       {history.isError ? (
-        <CrawlLoadError
-          message={t("admin_crawler_history_error")}
-          loading={history.isFetching}
+        <ListError
+          error={history.error}
+          title={t("admin_crawler_history_error")}
+          isRetrying={history.isFetching}
           onRetry={() => void history.refetch()}
         />
       ) : history.isPending ? (
@@ -188,9 +186,10 @@ function MatchesTab({
         </Button>
       </div>
       {matches.isError ? (
-        <CrawlLoadError
-          message={t("admin_crawler_matches_error")}
-          loading={matches.isFetching}
+        <ListError
+          error={matches.error}
+          title={t("admin_crawler_matches_error")}
+          isRetrying={matches.isFetching}
           onRetry={() => void matches.refetch()}
         />
       ) : matches.isPending ? (
@@ -453,9 +452,10 @@ export function CrawlDetailsDialog({
           content={
             <LayoutContent>
               {details.isError ? (
-                <CrawlLoadError
-                  message={t("admin_crawler_details_error")}
-                  loading={details.isFetching}
+                <ListError
+                  error={details.error}
+                  title={t("admin_crawler_details_error")}
+                  isRetrying={details.isFetching}
                   onRetry={() => void details.refetch()}
                 />
               ) : !data ? (

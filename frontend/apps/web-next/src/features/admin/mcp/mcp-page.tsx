@@ -343,10 +343,11 @@ export function McpServersPage() {
             <StatTile label={t("mcp_stat_servers")} value={servers.length} />
             <StatTile label={t("mcp_stat_enabled")} value={totals.enabled} />
             <StatTile label={t("mcp_stat_tools")} value={totals.tools} />
+            {/* Warning colour only while something waits; at zero the tile is neutral. */}
             <StatTile
               label={t("mcp_stat_pending")}
               value={totals.pending}
-              tone="warning"
+              tone={totals.pending > 0 ? "warning" : "default"}
               active={filter === "attention"}
               onClick={
                 totals.pending > 0
