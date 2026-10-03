@@ -60,12 +60,16 @@ printf '%s\n' \
     "    platform: $platform" \
     >"$work_directory/smoke.override.yml"
 
+# Compose parses every service even though this smoke only starts object-content.
+# Use a fixture tag for the Eneo images, which are never pulled or started here.
+ENEO_VERSION="seaweedfs-smoke"
 ENEO_SEAWEEDFS_IMAGE="$image_ref"
 OBJECT_CONTENT_ACCESS_KEY_ID="eneo-reference-smoke"
 OBJECT_CONTENT_SECRET_ACCESS_KEY="reference-smoke-only-7f9b1c4a"
 OBJECT_CONTENT_BUCKET="eneo-reference-smoke"
 OBJECT_CONTENT_DEPLOYMENT_ID="1fdc7506-960a-4fcb-9768-26cc73f95e36"
 printf '%s\n' \
+    "ENEO_VERSION=$ENEO_VERSION" \
     "ENEO_SEAWEEDFS_IMAGE=$ENEO_SEAWEEDFS_IMAGE" \
     "OBJECT_CONTENT_ENDPOINT_URL=http://object-content:8333" \
     "OBJECT_CONTENT_REGION=local" \
