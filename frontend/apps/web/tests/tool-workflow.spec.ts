@@ -2,6 +2,12 @@ import { expect, test } from "@playwright/test";
 import { readFile } from "node:fs/promises";
 import { askChatQuestion, backendFetch, expectOk, uniqueName } from "./helpers";
 
+type WorkflowMessage = { generated_files?: { id: string; mimetype: string }[] };
+type WorkflowConversation = {
+  messages?: WorkflowMessage[];
+  questions?: WorkflowMessage[];
+};
+
 test("workbook tools produce a report, preserve revisions, and recheck export support", async ({
   page,
   request
@@ -19,9 +25,10 @@ test("workbook tools produce a report, preserve revisions, and recheck export su
     return res.json();
   };
   const providers = [];
-  const catalog = await api("/mcp-servers/bundled/");
+  const catalog: { items: { tool: string; mcp_server_id?: string | null }[] } =
+    await api("/mcp-servers/bundled/");
   for (const name of ["file-analysis", "file-creation", "charts"]) {
-    const existing = catalog.items.find((item: any) => item.tool === name)?.mcp_server_id;
+    const existing = catalog.items.find((item) => item.tool === name)?.mcp_server_id;
     if (existing) {
       await api(`/mcp-servers/${existing}/activate/`, {});
       providers.push({ id: existing });
@@ -95,12 +102,12 @@ test("workbook tools produce a report, preserve revisions, and recheck export su
 
   const sessions = await api(`/assistants/${assistant.id}/sessions/`);
   const sessionId = sessions.items[0].id;
-  const session = await api(`/conversations/${sessionId}/`);
-  const messages = session.messages ?? session.questions;
+  const session: WorkflowConversation = await api(`/conversations/${sessionId}/`);
+  const messages = session.messages ?? session.questions ?? [];
   const document = messages
-    .flatMap((q: any) => q.generated_files ?? [])
-    .find((f: any) => f.mimetype === "text/markdown");
-  expect(document).toBeTruthy();
+    .flatMap((q) => q.generated_files ?? [])
+    .find((f) => f.mimetype === "text/markdown");
+  if (!document) throw new Error("Expected the workflow to generate a Markdown document");
   const exportPath = `/conversations/${sessionId}/documents/${document.id}/export/`;
   expect((await api(exportPath)).docx.available).toBe(true);
   for (const format of ["docx", "pdf"]) {
@@ -124,11 +131,11 @@ test("workbook tools produce a report, preserve revisions, and recheck export su
   await expect(page.getByText("Draft wording.", { exact: true })).toBeVisible();
   await page.getByRole("button", { name: /^(Next version|Nästa version)$/ }).click();
   await expect(page.getByText("Revised wording.", { exact: true })).toBeVisible();
-  const revised = await api(`/conversations/${sessionId}/`);
-  const revisedMessages = revised.messages ?? revised.questions;
+  const revised: WorkflowConversation = await api(`/conversations/${sessionId}/`);
+  const revisedMessages = revised.messages ?? revised.questions ?? [];
   const documents = revisedMessages
-    .flatMap((q: any) => q.generated_files ?? [])
-    .filter((f: any) => f.mimetype === "text/markdown");
+    .flatMap((q) => q.generated_files ?? [])
+    .filter((f) => f.mimetype === "text/markdown");
   expect(documents.length).toBe(2);
   await page.goto(
     `/spaces/personal/chat/?type=assistant&id=${assistant.id}&tab=chat&session_id=${sessionId}`

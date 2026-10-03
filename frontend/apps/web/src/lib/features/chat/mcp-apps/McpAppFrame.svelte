@@ -75,7 +75,7 @@
   let sized = false;
   let frame = $state<HTMLIFrameElement | null>(null);
   let bridge = $state.raw<McpAppBridge | null>(null);
-  // SDK sizes describe the app viewport; Tailwind uses border-box sizing.
+  // SDK sizes describe the app viewport; Tailwind includes borders in the declared size.
   const frameBorder = $derived(frameHeight > 0 && call.view.ui.prefersBorder !== false ? 2 : 0);
   const frameStyle = $derived(
     movedToPane
