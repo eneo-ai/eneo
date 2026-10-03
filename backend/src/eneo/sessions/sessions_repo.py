@@ -10,7 +10,6 @@ from eneo.database.database import AsyncSession
 from eneo.database.repositories.base import BaseRepositoryDelegate
 from eneo.database.tables.api_keys_v2_table import ApiKeysV2
 from eneo.database.tables.assistant_table import Assistants
-from eneo.database.tables.files_table import Files
 from eneo.database.tables.help_assistant_runs_table import HelpAssistantRuns
 from eneo.database.tables.info_blobs_table import InfoBlobs
 from eneo.database.tables.questions_table import (
@@ -22,6 +21,10 @@ from eneo.database.tables.sessions_table import Sessions
 from eneo.database.tables.users_table import Users
 from eneo.files.file_content_loader import FileContentLoader
 from eneo.info_blobs.info_blob_repo import InfoBlobRepository
+from eneo.questions.generated_files import (
+    delete_unreferenced_files,
+    generated_file_ids,
+)
 from eneo.questions.question_file_projection import attach_question_files
 from eneo.sessions.session import (
     SessionAdd,
@@ -597,22 +600,7 @@ class SessionRepository:
         nothing else references it. Uploads are left alone; the user manages
         those.
         """
-        generated_file_ids = list(
-            await self.session.scalars(
-                sa.select(QuestionsFiles.file_id)
-                .join(Questions, Questions.id == QuestionsFiles.question_id)
-                .where(Questions.session_id == id, QuestionsFiles.type == "assistant")
-            )
-        )
+        generated = await generated_file_ids(self.session, Questions.session_id == id)
         deleted = await self.delegate.delete(id)
-        if generated_file_ids:
-            still_referenced = sa.select(QuestionsFiles.file_id).where(
-                QuestionsFiles.file_id.in_(generated_file_ids)
-            )
-            await self.session.execute(
-                sa.delete(Files).where(
-                    Files.id.in_(generated_file_ids),
-                    Files.id.not_in(still_referenced),
-                )
-            )
+        await delete_unreferenced_files(self.session, generated)
         return await self._hydrate_optional(deleted)

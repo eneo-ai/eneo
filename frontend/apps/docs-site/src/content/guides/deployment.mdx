@@ -94,7 +94,7 @@ Before running `docker compose up`:
 - set `PUBLIC_ORIGIN` in the backend and frontend files;
 - have at least one AI provider API key ready for **Admin → Models**;
 - create the `proxy_tier` network;
-- pin released Eneo images instead of mutable `latest` tags;
+- download the complete `release.env` and `release.json` bundle from the selected release;
 - leave the optional object-store block commented unless you have chosen and
   prepared that storage path.
 
@@ -102,29 +102,29 @@ Before running `docker compose up`:
 ### Get deployment files
 
 ```bash
-# Option A: Clone the repository
-git clone https://github.com/eneo-ai/eneo.git
-cd eneo/docs/deployment/
-
-# Option B: Download files directly
 mkdir eneo-deployment && cd eneo-deployment
-curl -O https://raw.githubusercontent.com/eneo-ai/eneo/develop/docs/deployment/docker-compose.yml
-curl -O https://raw.githubusercontent.com/eneo-ai/eneo/develop/docs/deployment/docker-compose.object-content.yml
-curl -O https://raw.githubusercontent.com/eneo-ai/eneo/develop/docs/deployment/env_backend.template
-curl -O https://raw.githubusercontent.com/eneo-ai/eneo/develop/docs/deployment/env_frontend.template
-curl -O https://raw.githubusercontent.com/eneo-ai/eneo/develop/docs/deployment/env_db.template
-curl -O https://raw.githubusercontent.com/eneo-ai/eneo/develop/docs/deployment/.env.template
+# Download release.json and release.env from the selected GitHub release into this directory.
+# Use its exact source revision for the deployment files too.
+ENEO_SOURCE_REVISION=$(python3 -c 'import json; print(json.load(open("release.json"))["revision"])')
+curl -fLO "https://raw.githubusercontent.com/eneo-ai/eneo/$ENEO_SOURCE_REVISION/docs/deployment/docker-compose.yml"
+curl -fLO "https://raw.githubusercontent.com/eneo-ai/eneo/$ENEO_SOURCE_REVISION/docs/deployment/docker-compose.object-content.yml"
+curl -fLO "https://raw.githubusercontent.com/eneo-ai/eneo/$ENEO_SOURCE_REVISION/docs/deployment/env_backend.template"
+curl -fLO "https://raw.githubusercontent.com/eneo-ai/eneo/$ENEO_SOURCE_REVISION/docs/deployment/env_frontend.template"
+curl -fLO "https://raw.githubusercontent.com/eneo-ai/eneo/$ENEO_SOURCE_REVISION/docs/deployment/env_db.template"
+curl -fLO "https://raw.githubusercontent.com/eneo-ai/eneo/$ENEO_SOURCE_REVISION/docs/deployment/.env.template"
+curl -fLO "https://raw.githubusercontent.com/eneo-ai/eneo/$ENEO_SOURCE_REVISION/docs/deployment/setup.py"
+curl -fLO "https://raw.githubusercontent.com/eneo-ai/eneo/$ENEO_SOURCE_REVISION/docs/deployment/docker-compose.without-tools.yml"
 
 # Only if you plan to run optional modules (see "Optional modules" below)
-curl -O https://raw.githubusercontent.com/eneo-ai/eneo/develop/docs/deployment/docker-compose.modules.yml
-curl -O https://raw.githubusercontent.com/eneo-ai/eneo/develop/docs/deployment/env_modules.template
-curl -O https://raw.githubusercontent.com/eneo-ai/eneo/develop/docs/deployment/env_module_ttt.template
+curl -fLO "https://raw.githubusercontent.com/eneo-ai/eneo/$ENEO_SOURCE_REVISION/docs/deployment/docker-compose.modules.yml"
+curl -fLO "https://raw.githubusercontent.com/eneo-ai/eneo/$ENEO_SOURCE_REVISION/docs/deployment/env_modules.template"
+curl -fLO "https://raw.githubusercontent.com/eneo-ai/eneo/$ENEO_SOURCE_REVISION/docs/deployment/env_module_ttt.template"
 ```
 
 <Callout type="info">
-  The `develop` branch carries the deployment files for the next release. If
-  you run a released version, take the files from that release's tag or branch
-  instead so the templates match the images you deploy.
+  Deployment templates must match the bundle's source revision. The same rule
+  applies when cloning the repository: check out the revision recorded in
+  `release.json` before copying the deployment files.
 </Callout>
 
 ### Create environment files
@@ -134,6 +134,7 @@ cp env_backend.template env_backend.env
 cp env_frontend.template env_frontend.env
 cp env_db.template env_db.env
 cp .env.template .env
+python3 setup.py
 chmod 600 .env env_backend.env env_frontend.env env_db.env
 ```
 
@@ -197,7 +198,7 @@ external compatible endpoint, follow
 docker network create proxy_tier
 
 # Start all services
-docker compose up -d
+docker compose --env-file .env --env-file release.env up -d
 
 # Check status
 docker compose ps
@@ -239,7 +240,7 @@ PostgreSQL and Redis are only attached to `data_net`. They are not reachable fro
 
 <Callout type="warning">
   **Existing installations:** Older deployment files put every service on
-  `proxy_tier`. Running `docker compose up -d` with the current template
+  `proxy_tier`. Running `docker compose --env-file .env --env-file release.env up -d` with the current template
   recreates containers with the new network membership while keeping PostgreSQL
   and Redis volumes intact. External backup jobs or admin tools that connected
   to `db:5432` or `redis:6379` over `proxy_tier` must run through `docker exec`
@@ -299,7 +300,7 @@ value and a comment.
     REDIS_PASSWORD=<output of: openssl rand -hex 32>
     ```
 
-    Apply the change with `docker compose up -d`. Redis and the backend services
+    Apply the change with `docker compose --env-file .env --env-file release.env up -d`. Redis and the backend services
     restart together; queued jobs and other Redis data stay in the volume. While
     the password is set, run Redis commands with
     `docker compose exec redis sh -c 'REDISCLI_AUTH="$REDIS_PASSWORD" redis-cli ping'`.
@@ -526,12 +527,18 @@ same endpoint.
 The download endpoint accepts no session cookie or API key. The signed token
 is the only credential: it names the file and tenant, is signed with
 `URL_SIGNING_KEY`, and expires after `FILE_REFERENCE_URL_EXPIRY_SECONDS`
-(default one hour). Anyone holding an unexpired link can download the file.
-Treat every MCP server that receives file links as a recipient of the file
-contents, and enable such servers only where that data flow is acceptable.
+(default 15 minutes, at most one hour). Anyone holding an unexpired link can
+download the file. Treat every MCP server that receives file links as a
+recipient of the file contents, and enable such servers only where that data
+flow is acceptable.
 
-Two controls limit the exposure of a link:
+Three controls limit the exposure of a link:
 
+- A tool call may only carry links to the files of its own conversation: the
+  attachments and generated files Eneo minted links for in that request. A
+  link to any other file in the arguments, even a valid one pasted in by a
+  user or returned by another tool, stops the call before the MCP server is
+  contacted.
 - Every redemption is audited as `file_original_downloaded` under **File
   operations**, with the caller's address and user agent, next to the
   `file_original_download_link_created` entry written when the link was
@@ -964,41 +971,36 @@ docker compose logs --tail=100 backend worker
 
 ## Maintenance
 
-### Version Pinning (Recommended)
+### One version for the application
 
-<Callout type="warning">
-  **Production deployments should pin to specific version tags** instead of
-  using `latest`. This gives you control over when updates are applied and makes
-  rollbacks straightforward.
-</Callout>
+The standard stack includes the isolated tools runtime. Frontend, backend and
+runtime share one version and source revision; workers use the backend image.
+Download `release.env` and `release.json` from the selected release. The bundle
+pins all application images by digest and is published only after the combined
+image checks pass.
 
-The example `docker-compose.yml` uses `:latest` tags for simplicity, but for production you should pin versions:
+Run `python3 setup.py` to generate the missing runtime credential without
+changing existing settings or printing secrets. Use both environment files:
 
-```yaml
-# Default (not recommended for production)
-frontend:
-  image: ghcr.io/eneo-ai/eneo-frontend:latest
-
-# Production (pin to specific version)
-frontend:
-  image: ghcr.io/eneo-ai/eneo-frontend:2.2.0
-backend:
-  image: ghcr.io/eneo-ai/eneo-backend:2.2.0
-worker:
-  image: ghcr.io/eneo-ai/eneo-backend:2.2.0
-db-init:
-  image: ghcr.io/eneo-ai/eneo-backend:2.2.0
+```bash
+docker compose --env-file .env --env-file release.env up -d
 ```
 
-**Find available versions:**
+Use the same environment-file arguments for later Compose commands. Without a
+bundle, `python3 setup.py --version X.Y.Z` selects one explicit version.
+There are no default application `latest` tags.
 
-- GitHub Releases: https://github.com/eneo-ai/eneo/releases
-- Container Registry: https://github.com/orgs/eneo-ai/packages
+For upgrades, replace the complete bundle together. For rollback, restore the
+previous bundle and observe the release's database rollback requirements.
+Do not independently update the tools image. Remove old runtime image pins and
+the optional runtime overlay/profile; the old overlay is a compatibility shim
+for one release. Existing capability settings and external providers are kept.
 
-<Callout type="info">
-  **Always run the latest released version** to get bug fixes and security
-  patches. Check the release notes before upgrading.
-</Callout>
+The **Admin > Tools** status panel reports connectivity, credentials, version,
+confinement and file-origin issues. A version mismatch warns while calls remain
+allowed. Installing the runtime does not enable capabilities. To omit it, add
+`-f docker-compose.yml -f docker-compose.without-tools.yml`; stop any existing
+runtime container first. Ordinary chat and backend readiness remain independent.
 
 ### Backups
 
@@ -1042,9 +1044,9 @@ checksum and skew-recovery checks.
 ### Updating Eneo
 
 <Steps>
-### Update version tags (if pinned)
+### Select a complete release bundle
 
-Edit `docker-compose.yml` and update the image tags, for example `ghcr.io/eneo-ai/eneo-backend:2.1.1` → `ghcr.io/eneo-ai/eneo-backend:2.2.0`. Eneo image tags have no `v` prefix.
+Replace `release.env` and `release.json` together with the new release bundle. Keep the old bundle for rollback. Application image tags have no `v` prefix.
 
 ### Rename environment variables that are no longer read
 
@@ -1098,9 +1100,9 @@ For PostgreSQL-inline content or an external endpoint:
 
 ```bash
 docker compose stop backend worker
-docker compose pull
+docker compose --env-file .env --env-file release.env pull
 docker compose run --rm db-init
-docker compose up -d
+docker compose --env-file .env --env-file release.env up -d
 docker compose ps
 ```
 

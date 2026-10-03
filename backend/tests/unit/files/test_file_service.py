@@ -45,7 +45,17 @@ async def test_generated_image_is_read_back_inside_the_write_transaction(monkeyp
     async def get_file_by_id(requested):
         seen.append(state["in_transaction"])
         assert requested == file_id
-        return SimpleNamespace(model_dump=lambda: {"id": file_id})
+        return SimpleNamespace(
+            file_type=FileType.IMAGE, model_dump=lambda: {"id": file_id}
+        )
+
+    async def get_content_references(file_ids):
+        seen.append(state["in_transaction"])
+        assert file_ids == [file_id]
+        return [_reference("generated_artifact")]
+
+    service.repo.get_content_references = get_content_references
+    service._object_content = SimpleNamespace(object_store_configured=False)
 
     monkeypatch.setattr(
         service, "_persist_prepared_file", AsyncMock(return_value=file_id)
@@ -57,9 +67,44 @@ async def test_generated_image_is_read_back_inside_the_write_transaction(monkeyp
         b"img", name="a.png", mimetype="image/png"
     )
 
-    assert seen == [True]
+    assert seen == [True, True]
     assert saved.id == file_id and saved.blob == b"img"
+    # The stored artifact is the image's original, so the file can be handed
+    # to another tool by reference in the same answer.
+    assert saved.original_available is True
     assert state["in_transaction"] is False
+
+
+@pytest.mark.parametrize(
+    ("file_type", "stored", "available"),
+    [
+        (FileType.TEXT, ["original", "extracted_text"], True),
+        (FileType.TEXT, ["extracted_text"], False),
+    ],
+)
+async def test_generated_document_advertises_its_stored_original(
+    monkeypatch, file_type, stored, available
+):
+    service, _ = _service_with_explicit_transactions()
+    file_id = uuid4()
+    monkeypatch.setattr(
+        service,
+        "get_file_by_id",
+        AsyncMock(
+            return_value=SimpleNamespace(
+                file_type=file_type, model_dump=lambda: {"id": file_id}
+            )
+        ),
+    )
+    service.repo.get_content_references = AsyncMock(
+        return_value=[_reference(variant) for variant in stored]
+    )
+    service._object_content = SimpleNamespace(object_store_configured=False)
+    monkeypatch.setattr(module, "File", lambda **fields: SimpleNamespace(**fields))
+
+    saved = await service._generated_file(file_id, b"csv")
+
+    assert saved.original_available is available
 
 
 def _reference(variant):

@@ -6166,6 +6166,46 @@ export interface paths {
     patch?: never;
     trace?: never;
   };
+  "/api/v1/mcp-servers/bundled/": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /**
+     * Get Bundled Tools
+     * @description List the bundled tool runtime's servers and whether they are added.
+     */
+    get: operations["get_bundled_tools_api_v1_mcp_servers_bundled__get"];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/v1/mcp-servers/bundled/{tool}/": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    /**
+     * Create Bundled Mcp Server
+     * @description Add a server of the bundled tool runtime to this tenant (admin only). Its URL and credential come from the deployment; its tools are then reviewed and enabled like any other server's.
+     */
+    post: operations["create_bundled_mcp_server_api_v1_mcp_servers_bundled__tool___post"];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
   "/api/v1/mcp-servers/{id}/": {
     parameters: {
       query?: never;
@@ -10249,7 +10289,9 @@ export interface components {
     /** AskAssistant */
     AskAssistant: {
       /** Disabled Capabilities */
-      disabled_capabilities?: ("web_search" | "image_generation")[];
+      disabled_capabilities?: (
+        "web_search" | "image_generation" | "file_analysis" | "file_creation" | "charts"
+      )[];
       /** Disabled Mcp Server Ids */
       disabled_mcp_server_ids?: string[];
       /** Question */
@@ -10342,6 +10384,8 @@ export interface components {
       mimetype: string;
       /** Size */
       size: number;
+      /** Original Size */
+      original_size?: number | null;
       /** Transcription */
       transcription?: string | null;
       /** Token Count */
@@ -10373,7 +10417,8 @@ export interface components {
        */
       logging_enabled?: boolean | null;
       /** Enabled Capabilities */
-      enabled_capabilities?: ("web_search" | "image_generation")[] | null;
+      enabled_capabilities?:
+        ("web_search" | "image_generation" | "file_analysis" | "file_creation" | "charts")[] | null;
       /**
        * Space Id
        * Format: uuid
@@ -10555,7 +10600,9 @@ export interface components {
        */
       id: string;
       /** Enabled Capabilities */
-      enabled_capabilities?: ("web_search" | "image_generation")[];
+      enabled_capabilities?: (
+        "web_search" | "image_generation" | "file_analysis" | "file_creation" | "charts"
+      )[];
       /** Available Capabilities */
       available_capabilities?: components["schemas"]["CapabilityAvailability"][];
       /** Name */
@@ -11242,6 +11289,36 @@ export interface components {
       /** Errors */
       errors: components["schemas"]["WebsiteBulkActionError"][];
     };
+    /** BundledServerCreate */
+    BundledServerCreate: {
+      /**
+       * Activate
+       * @default false
+       */
+      activate?: boolean;
+    };
+    /** BundledToolList */
+    BundledToolList: {
+      /** Items */
+      items: components["schemas"]["BundledToolPublic"][];
+      runtime?: components["schemas"]["RuntimeStatus"] | null;
+      /** Count */
+      readonly count: number;
+    };
+    /**
+     * BundledToolPublic
+     * @description A server the bundled tool runtime offers to this tenant.
+     */
+    BundledToolPublic: {
+      /** Tool */
+      tool: string;
+      /** Purpose */
+      purpose: string;
+      /** Available */
+      available: boolean;
+      /** Mcp Server Id */
+      mcp_server_id?: string | null;
+    };
     /**
      * CallbackRequest
      * @description OIDC callback with authorization code.
@@ -11276,7 +11353,7 @@ export interface components {
        * Purpose
        * @enum {string}
        */
-      purpose: "web_search" | "image_generation";
+      purpose: "web_search" | "image_generation" | "file_analysis" | "file_creation" | "charts";
       /** Available */
       available: boolean;
       /** Reason */
@@ -11950,7 +12027,9 @@ export interface components {
        */
       disabled_mcp_server_ids?: string[];
       /** Disabled Capabilities */
-      disabled_capabilities?: ("web_search" | "image_generation")[];
+      disabled_capabilities?: (
+        "web_search" | "image_generation" | "file_analysis" | "file_creation" | "charts"
+      )[];
     };
     /** Counts */
     Counts: {
@@ -12366,7 +12445,8 @@ export interface components {
       /** Name */
       name: string;
       /** Enabled Capabilities */
-      enabled_capabilities?: ("web_search" | "image_generation")[] | null;
+      enabled_capabilities?:
+        ("web_search" | "image_generation" | "file_analysis" | "file_creation" | "charts")[] | null;
       from_template?: components["schemas"]["TemplateCreate"] | null;
     };
     /** CreateSpaceGroupsRequest */
@@ -12686,7 +12766,9 @@ export interface components {
        */
       id: string;
       /** Enabled Capabilities */
-      enabled_capabilities?: ("web_search" | "image_generation")[];
+      enabled_capabilities?: (
+        "web_search" | "image_generation" | "file_analysis" | "file_creation" | "charts"
+      )[];
       /** Available Capabilities */
       available_capabilities?: components["schemas"]["CapabilityAvailability"][];
       /** Name */
@@ -12897,9 +12979,13 @@ export interface components {
       /** Available Capabilities */
       available_capabilities?: components["schemas"]["CapabilityAvailability"][];
       /** Enabled Capabilities */
-      enabled_capabilities?: ("web_search" | "image_generation")[];
+      enabled_capabilities?: (
+        "web_search" | "image_generation" | "file_analysis" | "file_creation" | "charts"
+      )[];
       /** Default Disabled Capabilities */
-      default_disabled_capabilities?: ("web_search" | "image_generation")[];
+      default_disabled_capabilities?: (
+        "web_search" | "image_generation" | "file_analysis" | "file_creation" | "charts"
+      )[];
       /** Models Enforced */
       models_enforced: boolean;
       /** Available Models */
@@ -13669,6 +13755,8 @@ export interface components {
       mimetype: string;
       /** Size */
       size: number;
+      /** Original Size */
+      original_size?: number | null;
       /** Transcription */
       transcription?: string | null;
       /** Token Count */
@@ -14778,7 +14866,13 @@ export interface components {
        * @default general
        * @enum {string}
        */
-      purpose?: "general" | "web_search" | "image_generation";
+      purpose?:
+        | "general"
+        | "web_search"
+        | "image_generation"
+        | "file_analysis"
+        | "file_creation"
+        | "charts";
       /** Description */
       description?: string | null;
       /** Http Auth Config Schema */
@@ -14862,7 +14956,13 @@ export interface components {
        * @default general
        * @enum {string}
        */
-      purpose?: "general" | "web_search" | "image_generation";
+      purpose?:
+        | "general"
+        | "web_search"
+        | "image_generation"
+        | "file_analysis"
+        | "file_creation"
+        | "charts";
       /** Image Model Id */
       image_model_id?: string | null;
       image_model?: components["schemas"]["MCPServerBackingModelPublic"] | null;
@@ -14985,7 +15085,13 @@ export interface components {
        * @default general
        * @enum {string}
        */
-      purpose?: "general" | "web_search" | "image_generation";
+      purpose?:
+        | "general"
+        | "web_search"
+        | "image_generation"
+        | "file_analysis"
+        | "file_creation"
+        | "charts";
       /** Image Model Id */
       image_model_id?: string | null;
       image_model?: components["schemas"]["MCPServerBackingModelPublic"] | null;
@@ -15190,7 +15296,16 @@ export interface components {
       /** Http Auth Type */
       http_auth_type?: ("none" | "bearer" | "api_key_header" | "internal") | null;
       /** Purpose */
-      purpose?: ("general" | "web_search" | "image_generation") | null;
+      purpose?:
+        | (
+            | "general"
+            | "web_search"
+            | "image_generation"
+            | "file_analysis"
+            | "file_creation"
+            | "charts"
+          )
+        | null;
       /** Description */
       description?: string | null;
       /** Http Auth Config Schema */
@@ -17147,7 +17262,8 @@ export interface components {
        */
       logging_enabled?: boolean | null;
       /** Enabled Capabilities */
-      enabled_capabilities?: ("web_search" | "image_generation")[] | null;
+      enabled_capabilities?:
+        ("web_search" | "image_generation" | "file_analysis" | "file_creation" | "charts")[] | null;
       /** Space Id */
       space_id?: string | null;
       prompt?: components["schemas"]["PromptCreate"] | null;
@@ -17319,7 +17435,8 @@ export interface components {
     /** PartialUpdateSpaceRequest */
     PartialUpdateSpaceRequest: {
       /** Enabled Capabilities */
-      enabled_capabilities?: ("web_search" | "image_generation")[] | null;
+      enabled_capabilities?:
+        ("web_search" | "image_generation" | "file_analysis" | "file_creation" | "charts")[] | null;
       /** Name */
       name?: string | null;
       /** Description */
@@ -17470,7 +17587,10 @@ export interface components {
       | "modules"
       | "assistant_debug"
       | "web_search"
-      | "image_generation";
+      | "image_generation"
+      | "file_analysis"
+      | "file_creation"
+      | "charts";
     /** PermissionPublic */
     PermissionPublic: {
       name: components["schemas"]["Permission"];
@@ -17515,7 +17635,7 @@ export interface components {
        * Purpose
        * @enum {string}
        */
-      purpose: "web_search" | "image_generation";
+      purpose: "web_search" | "image_generation" | "file_analysis" | "file_creation" | "charts";
       /**
        * Is Default Enabled
        * @default true
@@ -18257,6 +18377,61 @@ export interface components {
        * @default []
        */
       files?: components["schemas"]["ModelId"][];
+    };
+    /** RuntimeStatus */
+    RuntimeStatus: {
+      /**
+       * Configured
+       * @default false
+       */
+      configured?: boolean;
+      /**
+       * State
+       * @default not_configured
+       * @enum {string}
+       */
+      state?: "not_configured" | "ready" | "unreachable" | "unauthorized" | "unverified";
+      /** Expected Version */
+      expected_version: string;
+      /**
+       * Expected Revision
+       * @default unknown
+       */
+      expected_revision?: string;
+      /** Version */
+      version?: string | null;
+      /** Revision */
+      revision?: string | null;
+      /** Warnings */
+      warnings?: (
+        | "version_mismatch"
+        | "revision_mismatch"
+        | "unverified"
+        | "confinement_unavailable"
+        | "file_origin_unreachable"
+        | "file_origin_not_allowed"
+        | "file_origin_unknown"
+      )[];
+      /** Files Confined */
+      files_confined?: boolean | null;
+      /** Tcp Confined */
+      tcp_confined?: boolean | null;
+      /**
+       * File Origin
+       * @default unknown
+       * @enum {string}
+       */
+      file_origin?: "reachable" | "unreachable" | "not_allowed" | "unknown";
+      /**
+       * Active
+       * @default 0
+       */
+      active?: number;
+      /**
+       * Queued
+       * @default 0
+       */
+      queued?: number;
     };
     /**
      * ScheduleState
@@ -19785,7 +19960,9 @@ export interface components {
       /** Data Retention Days */
       data_retention_days?: number | null;
       /** Enabled Capabilities */
-      enabled_capabilities?: ("web_search" | "image_generation")[];
+      enabled_capabilities?: (
+        "web_search" | "image_generation" | "file_analysis" | "file_creation" | "charts"
+      )[];
       /** Available Capabilities */
       available_capabilities?: components["schemas"]["CapabilityAvailability"][];
       /** Embedding Models */
@@ -21043,6 +21220,8 @@ export interface components {
       purpose?: string | null;
       /** Is Internal */
       is_internal?: boolean | null;
+      /** Is Bundled */
+      is_bundled?: boolean | null;
       /** Meta */
       meta?: {
         [key: string]: unknown;
@@ -21367,7 +21546,9 @@ export interface components {
     /** UpdateSpaceDryRunResponse */
     UpdateSpaceDryRunResponse: {
       /** Capabilities */
-      capabilities?: ("web_search" | "image_generation")[];
+      capabilities?: (
+        "web_search" | "image_generation" | "file_analysis" | "file_creation" | "charts"
+      )[];
       /** Assistants */
       assistants: components["schemas"]["AssistantSparse"][];
       /** Group Chats */
@@ -22619,6 +22800,25 @@ export interface components {
       mcp_tool_references?: components["schemas"]["McpToolReferencePublic"][];
     };
     /**
+     * SSEToolCallDelta
+     * @description The next piece of a pending tool call's arguments, as raw JSON text.
+     *
+     *     Sent while the model writes the call, so a client can show what it will
+     *     do (the text of a document) before it runs. Signed reference tokens are
+     *     redacted. The complete arguments follow in the call's `tool_call` event.
+     */
+    SSEToolCallDelta: {
+      /**
+       * Session Id
+       * Format: uuid
+       */
+      session_id: string;
+      /** Tool Call Id */
+      tool_call_id: string;
+      /** Arguments Delta */
+      arguments_delta: string;
+    };
+    /**
      * SSEToolApprovalRequired
      * @description Event emitted when MCP tools require user approval before execution.
      */
@@ -22705,6 +22905,11 @@ export interface components {
       session_id: string;
       /** Generated Files */
       generated_files: components["schemas"]["FilePublic"][];
+      /**
+       * Tool Call Id
+       * @default null
+       */
+      tool_call_id?: string | null;
     };
     /** SSEFirstChunk */
     SSEFirstChunk: {
@@ -27474,6 +27679,8 @@ export interface operations {
                 mimetype: string;
                 /** Size */
                 size: number;
+                /** Original Size */
+                original_size?: number | null;
                 /** Transcription */
                 transcription?: string | null;
                 /** Token Count */
@@ -27890,6 +28097,8 @@ export interface operations {
                 mimetype: string;
                 /** Size */
                 size: number;
+                /** Original Size */
+                original_size?: number | null;
                 /** Transcription */
                 transcription?: string | null;
                 /** Token Count */
@@ -28914,6 +29123,8 @@ export interface operations {
                     purpose?: string | null;
                     /** Is Internal */
                     is_internal?: boolean | null;
+                    /** Is Bundled */
+                    is_bundled?: boolean | null;
                     /** Meta */
                     meta?: {
                       [key: string]: unknown;
@@ -28975,6 +29186,8 @@ export interface operations {
                     purpose?: string | null;
                     /** Is Internal */
                     is_internal?: boolean | null;
+                    /** Is Bundled */
+                    is_bundled?: boolean | null;
                     /** Meta */
                     meta?: {
                       [key: string]: unknown;
@@ -29036,6 +29249,8 @@ export interface operations {
                     purpose?: string | null;
                     /** Is Internal */
                     is_internal?: boolean | null;
+                    /** Is Bundled */
+                    is_bundled?: boolean | null;
                     /** Meta */
                     meta?: {
                       [key: string]: unknown;
@@ -29053,6 +29268,8 @@ export interface operations {
                 session_id: string;
                 /** Generated Files */
                 generated_files: components["schemas"]["FilePublic"][];
+                /** Tool Call Id */
+                tool_call_id?: string | null;
                 $defs: {
                   /** FilePublic */
                   FilePublic: {
@@ -29071,6 +29288,8 @@ export interface operations {
                     mimetype: string;
                     /** Size */
                     size: number;
+                    /** Original Size */
+                    original_size?: number | null;
                     /** Transcription */
                     transcription?: string | null;
                     /** Token Count */
@@ -29227,6 +29446,8 @@ export interface operations {
                     mimetype: string;
                     /** Size */
                     size: number;
+                    /** Original Size */
+                    original_size?: number | null;
                     /** Transcription */
                     transcription?: string | null;
                     /** Token Count */
@@ -38281,6 +38502,7 @@ export interface operations {
       };
       header?: {
         range?: string | null;
+        "if-none-match"?: string | null;
       };
       path: {
         id: string;
@@ -38298,6 +38520,13 @@ export interface operations {
       };
       /** @description Successfully downloaded part of the original audio */
       206: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content?: never;
+      };
+      /** @description Access revalidated; original content is unchanged */
+      304: {
         headers: {
           [name: string]: unknown;
         };
@@ -43169,7 +43398,16 @@ export interface operations {
     parameters: {
       query?: {
         tags?: string[] | null;
-        purpose?: ("general" | "web_search" | "image_generation") | null;
+        purpose?:
+          | (
+              | "general"
+              | "web_search"
+              | "image_generation"
+              | "file_analysis"
+              | "file_creation"
+              | "charts"
+            )
+          | null;
       };
       header?: never;
       path?: never;
@@ -43269,7 +43507,16 @@ export interface operations {
   get_tenant_mcp_settings_api_v1_mcp_servers_settings__get: {
     parameters: {
       query?: {
-        purpose?: ("general" | "web_search" | "image_generation") | null;
+        purpose?:
+          | (
+              | "general"
+              | "web_search"
+              | "image_generation"
+              | "file_analysis"
+              | "file_creation"
+              | "charts"
+            )
+          | null;
       };
       header?: never;
       path?: never;
@@ -43512,6 +43759,106 @@ export interface operations {
       };
       /** @description Not Found */
       404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  get_bundled_tools_api_v1_mcp_servers_bundled__get: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["BundledToolList"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+    };
+  };
+  create_bundled_mcp_server_api_v1_mcp_servers_bundled__tool___post: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        tool: string;
+      };
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["BundledServerCreate"];
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["MCPServerCreateResponse"];
+        };
+      };
+      /** @description Bad Request */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Not Found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Conflict */
+      409: {
         headers: {
           [name: string]: unknown;
         };

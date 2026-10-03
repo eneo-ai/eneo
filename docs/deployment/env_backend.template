@@ -435,6 +435,12 @@ EXPORT_MAX_AGE_HOURS=24
 # runs on a different port or behind an internal service URL.
 # INTERNAL_MCP_BASE_URL=http://localhost:8000
 
+# Optional bundled tool runtime (docker-compose.tool-runtime.yml, see
+# TOOL_RUNTIME.md). The overlay sets TOOL_RUNTIME_URL and TOOL_RUNTIME_TOKEN
+# for the backend and worker from TOOL_RUNTIME_TOKEN in .env; do not set them
+# here. Tabular analysis also needs signed file links the runtime can reach:
+# FILE_REFERENCE_BASE_URL=http://backend:8000
+
 # ============================================================================
 # FEATURE FLAGS
 # ============================================================================

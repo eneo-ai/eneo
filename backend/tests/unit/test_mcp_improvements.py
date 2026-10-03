@@ -25,6 +25,7 @@ from mcp import types as mcp_types
 from pydantic import ValidationError
 from starlette.responses import JSONResponse, StreamingResponse
 
+from eneo.files.model_file_references import FILE_HANDLE_INSTRUCTION
 from eneo.main.exceptions import (
     BadRequestException,
     MCPAuthenticationError,
@@ -795,7 +796,7 @@ class TestMCPProxySessionToolCollision:
             # The registered tool should be from server1
             tools = proxy.get_tools_for_llm()
             assert len(tools) == 1
-            assert tools[0]["function"]["description"] == "First server's list"
+            assert tools[0]["function"]["description"] == FILE_HANDLE_INSTRUCTION + "\n\n" + "First server's list"
 
             # Warning should have been logged
             mock_logger.warning.assert_called()
@@ -842,7 +843,7 @@ class TestMCPProxySessionToolCollision:
 
             # First one wins
             tools = proxy.get_tools_for_llm()
-            assert tools[0]["function"]["description"] == "Dot version"
+            assert tools[0]["function"]["description"] == FILE_HANDLE_INSTRUCTION + "\n\n" + "Dot version"
 
             # Warning logged
             mock_logger.warning.assert_called()
@@ -872,19 +873,19 @@ class TestMCPProxySessionToolDisplayName:
         [tool] = self._proxy("Ladda upp filer").get_tools_for_llm()
 
         assert tool["function"]["name"] == "files__ingest_urls"
-        assert tool["function"]["description"] == (
+        assert tool["function"]["description"] == FILE_HANDLE_INSTRUCTION + "\n\n" + (
             'Display name: "Ladda upp filer".\nFetch files from HTTPS links.'
         )
 
     def test_description_is_untouched_without_a_title(self):
         [tool] = self._proxy(None).get_tools_for_llm()
 
-        assert tool["function"]["description"] == "Fetch files from HTTPS links."
+        assert tool["function"]["description"] == FILE_HANDLE_INSTRUCTION + "\n\n" + "Fetch files from HTTPS links."
 
     def test_title_equal_to_the_tool_name_adds_nothing(self):
         [tool] = self._proxy("ingest_urls").get_tools_for_llm()
 
-        assert tool["function"]["description"] == "Fetch files from HTTPS links."
+        assert tool["function"]["description"] == FILE_HANDLE_INSTRUCTION + "\n\n" + "Fetch files from HTTPS links."
 
 
 # =============================================================================

@@ -78,3 +78,7 @@ Page paths are relative to `frontend/apps/docs-site/src/content/`. Code paths ar
 | `.github/workflows/export-roadmap.yml`, `.github/workflows/add-to-project.yml`, `.github/workflows/pr-labels.yml`, `.github/scripts/**`, `scripts/export_github_roadmap.mjs`, `.github/ISSUE_TEMPLATE/**`, `AGENTS.md` | `contributing/project-roadmap.mdx`  |
 | `docs/CONTRIBUTING.md`, `docs/DEPLOYMENT_WORKFLOW.md`, `docs/CODE_QUALITY.md`                                                                                                                                          | `contributing/index.mdx`            |
 | `frontend/apps/docs-site/**` (the site itself)                                                                                                                                                                         | `frontend/apps/docs-site/README.md` |
+
+Bundled tool runtime, diagnostics, scheduling and release bundles are documented in
+`docs/builtin-tool-servers.mdx`, `guides/capabilities.mdx`, `guides/deployment.mdx`
+and repository `docs/deployment/TOOL_RUNTIME.md`.

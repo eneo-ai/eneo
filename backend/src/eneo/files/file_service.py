@@ -1,10 +1,12 @@
+import io
 from collections import defaultdict
 from collections.abc import AsyncGenerator, Awaitable, Callable
 from contextlib import AsyncExitStack, asynccontextmanager
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from uuid import UUID
 
 from fastapi import UploadFile
+from starlette.datastructures import Headers
 
 from eneo.files.file_content_loader import FileContentLoader
 from eneo.files.file_models import (
@@ -42,6 +44,8 @@ from eneo.files.file_repo import (
     select_primary_file_content,
 )
 from eneo.files.file_usage import FileUsageRepository
+from eneo.files.generated_documents import validate_generated_document
+from eneo.main.config import get_settings
 from eneo.main.exceptions import (
     BadRequestException,
     NotFoundException,
@@ -452,13 +456,58 @@ class FileService:
         # once the write block closes, so a read after it would fail.
         async with self._write_transaction():
             file_id = await self._persist_prepared_file(prepared)
-            info = await self.get_file_by_id(file_id)
+            return await self._generated_file(file_id, image_data)
+
+    async def _generated_file(self, file_id: UUID, data: bytes) -> File:
+        """The File for content a tool produced and this service just stored.
+
+        ``original_available`` is read from what was stored, by the loader's
+        rule. The completion layer mints a reference URL only for a file that
+        carries it, and that URL is how a later tool in the same answer is
+        handed the file. Call inside the write transaction.
+        """
+        info = await self.get_file_by_id(file_id)
+        references = await self.repo.get_content_references([file_id])
+        original = readable_original_reference(
+            info.file_type,
+            references,
+            object_store_configured=self._object_content.object_store_configured,
+        )
         return File(
             **info.model_dump(),
-            blob=image_data,
+            blob=data,
             text=None,
             transcription=None,
+            original_available=original is not None,
         )
+
+    async def save_generated_document(
+        self, data: bytes, name: str, mimetype: str
+    ) -> File:
+        """Persist a tool-generated document (DOCX, XLSX, PDF) as a File.
+
+        The bytes must pass the format checks in ``generated_documents``
+        (raises ``GeneratedDocumentRejected``). The document is then prepared
+        exactly like an uploaded one, so it keeps its exact original (signed
+        references and downloads work) and gains extracted text; page images
+        are not derived. Like generated images it is stored inline.
+        """
+        self._authenticated_user()
+        validate_generated_document(data, mimetype)
+        upload = UploadFile(
+            file=io.BytesIO(data),
+            filename=name,
+            headers=Headers({"content-type": mimetype}),
+        )
+        async with self.protocol.prepare_upload(
+            upload,
+            max_size=get_settings().mcp_tool_file_max_bytes,
+        ) as prepared:
+            async with self._write_transaction():
+                file_id = await self._persist_prepared_file(
+                    replace(prepared, derivatives=())
+                )
+                return await self._generated_file(file_id, data)
 
     async def _persist_prepared_file(
         self,

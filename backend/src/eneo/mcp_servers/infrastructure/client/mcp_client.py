@@ -6,6 +6,7 @@ from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
 from types import TracebackType
 from typing import Any, AsyncContextManager, Callable, Optional, cast
+from urllib.parse import urlsplit
 
 import httpx
 from anyio.streams.memory import MemoryObjectReceiveStream, MemoryObjectSendStream
@@ -22,10 +23,16 @@ from mcp.types import (
     ToolListChangedNotification,
 )
 
+from eneo.files.file_reference import file_reference_base_url
 from eneo.main.config import get_settings
 from eneo.main.exceptions import MCPAuthenticationError, MCPClientError
 from eneo.main.logging import get_logger
-from eneo.mcp_servers.domain.entities.mcp_server import MCPServer, is_builtin_provider
+from eneo.mcp_servers.domain.entities.mcp_server import (
+    MCPServer,
+    bundled_tool_name,
+    is_builtin_provider,
+    is_bundled_server,
+)
 
 logger = get_logger(__name__)
 
@@ -43,6 +50,12 @@ MCP_DELETE_RESPONSE_MAX_BYTES = 64 * 1024
 RESOURCE_TEXT_MAX_BYTES = 8 * 1024
 RESOURCE_META_MAX_BYTES = 16 * 1024
 MCP_SSE_READ_TIMEOUT_SECONDS = 300.0
+
+
+def _origin(url: str) -> str:
+    """Scheme, host and port of ``url`` (no path, no trailing slash)."""
+    parts = urlsplit(url)
+    return f"{parts.scheme}://{parts.netloc}"
 
 
 def transport_read_timeout(tool_call_timeout: float) -> float:
@@ -604,6 +617,19 @@ def loopback_endpoint(name: str) -> str:
     return f"{base}/internal-mcp/{name}/mcp"
 
 
+def bundled_endpoint(tool: str) -> str | None:
+    """URL of ``tool`` in the bundled tool runtime, if one is configured."""
+    settings = get_settings()
+    if not settings.tool_runtime_url or not settings.tool_runtime_token:
+        return None
+    return f"{settings.tool_runtime_url.rstrip('/')}/mcp/{tool}"
+
+
+def _bundled_endpoint_of(mcp_server: MCPServer) -> str | None:
+    tool = bundled_tool_name(mcp_server.http_url)
+    return bundled_endpoint(tool) if tool else None
+
+
 def endpoint_url(mcp_server: MCPServer) -> str:
     """URL to connect to for ``mcp_server``.
 
@@ -612,9 +638,16 @@ def endpoint_url(mcp_server: MCPServer) -> str:
     The URL stored on its row is the value from the last time the row was
     saved: it goes stale when the setting changes, and the scoped token minted
     for a built-in provider must only ever reach Eneo itself.
+
+    A bundled server likewise follows ``TOOL_RUNTIME_URL`` as it is configured
+    now; its stored URL only names the runtime tool it serves. While the
+    runtime is not configured the stored URL is returned for display, and
+    connecting is refused (see ``_build_auth_headers``).
     """
     if is_builtin_provider(mcp_server.http_auth_type):
         return loopback_endpoint(mcp_server.purpose)
+    if is_bundled_server(mcp_server.http_auth_type):
+        return _bundled_endpoint_of(mcp_server) or mcp_server.http_url
     return mcp_server.http_url
 
 
@@ -639,8 +672,8 @@ class MCPClient:
             auth_credentials: Authentication credentials from tenant settings
             timeout: Connection timeout in seconds (defaults to 30s)
             identity_headers: Acting user/tenant X-Eneo-* headers. Sent on every
-                request ONLY when this server has ``forward_identity=True`` —
-                identity is PII egress, opted into per server.
+                request for bundled servers (opaque IDs only). External servers
+                require ``forward_identity=True`` for identity egress.
             on_tools_list_changed: Fired (best-effort) when the server pushes a
                 ``notifications/tools/list_changed``. Progressive-discovery
                 servers emit this after a tool like ``load_tools`` activates new
@@ -703,6 +736,24 @@ class MCPClient:
             token = self.auth_credentials.get("token")
             if token:
                 headers["Authorization"] = f"Bearer {token}"
+        elif is_bundled_server(self.mcp_server.http_auth_type):
+            # The bundled tool runtime shares one deployment secret with the
+            # backend; it is read from settings on every connect so rotating
+            # it needs only a redeploy of both sides. The secret is sent only
+            # to the runtime as the deployment configures it now, never to
+            # whatever URL the row still carries.
+            if self.endpoint_url != _bundled_endpoint_of(self.mcp_server):
+                raise MCPClientError(
+                    "The bundled tool runtime is not configured for this deployment"
+                )
+            settings = get_settings()
+            headers["Authorization"] = f"Bearer {settings.tool_runtime_token}"
+            # Where Eneo's signed file links point. The runtime fetches files
+            # only from this origin, so a model-supplied URL can never steer it
+            # elsewhere, and the deployment configures the origin once.
+            base_url = file_reference_base_url(settings)
+            if base_url:
+                headers["X-Eneo-File-Origin"] = _origin(base_url)
         elif self.mcp_server.http_auth_type == "api_key_header":
             # Admin-chosen header (e.g. X-Api-Key). The name is validated at
             # configuration time against HTTP token syntax and a deny-list of
@@ -715,7 +766,17 @@ class MCPClient:
         # Forward acting user/tenant identity only when this server opted in.
         # Added after the bearer token; the builder never emits Authorization,
         # so this cannot clobber it.
-        if getattr(self.mcp_server, "forward_identity", False):
+        if is_bundled_server(self.mcp_server.http_auth_type):
+            # Bundled execution needs opaque IDs for cache isolation and scheduling,
+            # including registrations made before identity forwarding was enabled.
+            headers.update(
+                {
+                    key: value
+                    for key, value in self.identity_headers.items()
+                    if key.lower() in ("x-eneo-user-id", "x-eneo-tenant-id")
+                }
+            )
+        elif getattr(self.mcp_server, "forward_identity", False):
             headers.update(self.identity_headers)
 
         return headers
@@ -984,6 +1045,11 @@ class MCPClient:
                             ),
                             "mime_type": getattr(resource, "mimeType", None),
                             "meta": _truncate_meta(raw_meta, RESOURCE_META_MAX_BYTES),
+                            # Base64 bytes of a binary resource. The proxy
+                            # admits it as a generated file (document and
+                            # spreadsheet providers) or strips it; it never
+                            # reaches the model.
+                            "blob": getattr(resource, "blob", None),
                         }
                     )
                 elif content_item.type == "resource_link":

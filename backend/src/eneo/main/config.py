@@ -230,6 +230,7 @@ class Settings(BaseSettings):
     )
 
     app_version: str = _set_app_version()
+    app_revision: str = "unknown"
 
     # Environment setting (development, staging, production)
     # Controls error detail exposure in API responses
@@ -305,6 +306,12 @@ class Settings(BaseSettings):
     # Image content blocks admitted from a single tool result; the rest are
     # dropped with a notice so one call cannot flood the file store.
     mcp_tool_image_max_count: int = 4
+    # Generated documents (DOCX, PDF, XLSX) a document or spreadsheet provider
+    # returns as embedded binary resources: largest accepted file and how many
+    # one tool result may carry. Larger or further ones are dropped with a
+    # notice to the model.
+    mcp_tool_file_max_bytes: int = 20 * 1024 * 1024
+    mcp_tool_file_max_count: int = 4
     mcp_circuit_breaker_failure_threshold: int = 5
     mcp_circuit_breaker_cooldown_seconds: int = 60
 
@@ -476,8 +483,9 @@ class Settings(BaseSettings):
     # Signed file references (original-download URLs surfaced to the LLM so it
     # can hand them to URL-accepting MCP tools).
     # Expiry of the minted URL; clamped to the original-download token maximum
-    # (1 hour) at mint time.
-    file_reference_url_expiry_seconds: int = 3600
+    # (1 hour) at mint time. Links are minted again on every request, so one
+    # only has to outlast its own turn, tool-approval wait included.
+    file_reference_url_expiry_seconds: int = 900
     # Base URL used to build the signed download links handed to MCP tools.
     # Defaults to public_origin, but a remote tool (server-to-server) often needs
     # a different, internally-reachable host than the browser-facing origin (e.g.
@@ -490,6 +498,13 @@ class Settings(BaseSettings):
     # /internal-mcp) during a completion. Must be reachable from within the
     # backend process/container. Dev default is the local server.
     internal_mcp_base_url: str = "http://localhost:8123"
+
+    # Optional bundled tool runtime (tool-runtime/ in this repository): an
+    # isolated container that serves Eneo-maintained MCP tools. When the URL
+    # is set, Admin > Tools offers to add its servers; the token is the shared
+    # bearer both sides are configured with and is never stored in the DB.
+    tool_runtime_url: Optional[str] = None
+    tool_runtime_token: Optional[str] = None
 
     # Relevance floor (cosine similarity, -1..1) for inject-mode knowledge
     # retrieval: chunks scoring below it are dropped instead of injected.
@@ -884,6 +899,20 @@ class Settings(BaseSettings):
             logging.error(
                 "MCP_TOOL_IMAGE_MAX_COUNT must be greater than zero. Current value: %s",
                 self.mcp_tool_image_max_count,
+            )
+            sys.exit(1)
+
+        if self.mcp_tool_file_max_bytes <= 0:
+            logging.error(
+                "MCP_TOOL_FILE_MAX_BYTES must be greater than zero. Current value: %s",
+                self.mcp_tool_file_max_bytes,
+            )
+            sys.exit(1)
+
+        if self.mcp_tool_file_max_count <= 0:
+            logging.error(
+                "MCP_TOOL_FILE_MAX_COUNT must be greater than zero. Current value: %s",
+                self.mcp_tool_file_max_count,
             )
             sys.exit(1)
 

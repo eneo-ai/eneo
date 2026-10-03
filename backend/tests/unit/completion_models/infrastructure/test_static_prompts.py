@@ -22,7 +22,16 @@ def test_reads_are_conditional_on_the_message_needing_the_content():
 
 def test_readability_and_tool_arbitration_rules_are_kept():
     instruction = ATTACHED_FILE_REFERENCES_INSTRUCTION
-    assert "never judge from the url whether a file is readable" in instruction
+    assert (
+        "never judge from the file_ref whether a file is readable"
+        in instruction.lower()
+    )
     assert "never ask the user to re-upload" in instruction
-    assert "accepts every reference url" in instruction
+    assert "accepts every file_ref" in instruction
     assert '"kind": "image"' in instruction
+
+
+def test_file_handles_are_passed_unchanged_without_constructing_urls():
+    instruction = ATTACHED_FILE_REFERENCES_INSTRUCTION
+    assert "pass file_ref unchanged" in instruction
+    assert "Never construct, copy or repair download URLs or tokens" in instruction

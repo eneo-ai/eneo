@@ -7,7 +7,9 @@ from pydantic import (
     BaseModel,
     ConfigDict,
     Field,
+    SerializerFunctionWrapHandler,
     field_validator,
+    model_serializer,
     model_validator,
 )
 
@@ -15,6 +17,7 @@ from eneo.ai_models.completion_models.completion_model import CompletionModel
 from eneo.authentication.signed_urls import redact_reference_tokens
 from eneo.files.file_models import File, FileMetadata, FilePublic
 from eneo.info_blobs.info_blob import InfoBlobInDB, InfoBlobPublicNoText
+from eneo.libs.json_text import escape_null_characters
 from eneo.logging.logging import (
     LoggingDetails,
     LoggingDetailsInDB,
@@ -105,6 +108,12 @@ class ToolCallInfo(BaseModel):
         """
         return redact_reference_tokens(value)
 
+    @model_serializer(mode="wrap")
+    def _storage_safe_record(self, handler: SerializerFunctionWrapHandler):
+        # Failed/pending calls must remain persistable too. Do not mutate the
+        # arguments: execution rejects invalid text and lets the model retry.
+        return escape_null_characters(handler(self))
+
     # The prefixed tool identifier the LLM sees when calling (e.g.
     # `server__tool`). Needed for replay so the tool_use name matches the
     # currently-registered tools. `tool_name` above is the unprefixed/display
@@ -122,6 +131,9 @@ class ToolCallInfo(BaseModel):
     # on rows persisted before this field existed; clients then fall back to
     # the server name.
     is_internal: Optional[bool] = None
+    # Whether the call ran on a server built into Eneo (the bundled tool
+    # runtime). None on rows persisted before this field existed.
+    is_bundled: Optional[bool] = None
     # The tool result's MCP `_meta`, as sent by the server (size-capped by the
     # client). Model-backed tools report their own usage here under the
     # OpenTelemetry GenAI attribute names, e.g. `gen_ai.usage.input_tokens`,

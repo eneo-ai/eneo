@@ -1,11 +1,14 @@
-# Capabilities (web search, image generation)
+# Capabilities
 
 **Status:** provider-independent capability configuration
 **Audience:** Tenant administrators configuring providers, operators tuning limits, developers extending the capability set
 
-Capabilities are functions an assistant can use: **Webbsökning** and
-**Bildgenerering**. Image generation can run through a configured image model
-or an external MCP server; web search uses an external server.
+Capabilities are functions an assistant can use: **Webbsökning**
+(`web_search`), **Bildgenerering** (`image_generation`), **Fråga fil**
+(`file_analysis`) and **Skapa fil** (`file_creation`). Image generation can
+run through a configured image model or an external MCP server; web search
+uses an external server; file analysis and file creation run in the bundled
+tool runtime or an external MCP server.
 
 ## 1. Configuration and navigation
 
@@ -40,7 +43,8 @@ activation action identifies the default that will be replaced.
 ## 2. Saved intent and provider lifecycle
 
 Spaces and assistants store enabled_capabilities, a list of purposes
-(web_search, image_generation). Governance policies store purposes with
+(web_search, image_generation, file_analysis, file_creation). Governance
+policies store purposes with
 is_default_enabled. These rows reference their owner, never a provider.
 They remain intact when a provider is switched, disabled or deleted—even
 when the last provider disappears. A replacement restores availability.
@@ -75,22 +79,35 @@ Activation, audiences and permissions work exactly as for external providers, an
 
 The backend must be able to reach its own loopback URL (`INTERNAL_MCP_BASE_URL`, the same requirement as the knowledge and files servers).
 
+### Bundled tool runtime providers
+
+File analysis and file creation can be served by the bundled tool runtime
+(`tool-runtime/`, operator guide `docs/deployment/TOOL_RUNTIME.md`). A function
+card offers it as **Inbyggd i Eneo**: **Slå på** (or the Add source menu)
+creates the source through `POST /api/v1/mcp-servers/bundled/{tool}/`,
+activating it when the function has no active default. The row has `http_auth_type = "bundled"`: its URL comes
+from `TOOL_RUNTIME_URL` and its bearer from `TOOL_RUNTIME_TOKEN` at connect
+time, and the connection fields are read-only. Everything else (audiences,
+permissions, classification, tool approval, replacement) works as for external
+providers. The runtime's compute and charts endpoints are added as ordinary
+general servers from the MCP servers tab.
+
 ## 3. Ask-time resolution
 
 For each capability an assistant requests, the provider is attached only when all of these hold:
 
-- the user's role grants the capability permission (`web_search` or `image_generation`; roles can be edited under **Admin → Roles**);
+- the user's role grants the capability permission (the purpose name, for example `web_search` or `file_analysis`; roles can be edited under **Admin → Roles**);
 - a provider serves the user: a group-targeted provider covering one of their groups, else the tenant default;
 - the provider has at least one enabled, approved tool;
 - for a built-in provider, its image model is enabled, not deprecated or deleted, and its model provider is active;
 - the provider's security classification (for a built-in provider, its image model's) meets the space's classification;
 - the completion model supports tool calling.
 
-Otherwise the capability is silently unavailable for that turn. Service API keys can use web search but not image generation: a generated image is stored as a file owned by a user, and a service key has no user.
+Otherwise the capability is silently unavailable for that turn. Service API keys can use web search only: generated images and files are stored as files owned by a user, a service key has no user, and file analysis is not in the service-key permission set.
 
 Conversation requests carry purpose-based disabled_capabilities; ordinary server opt-outs remain in disabled_mcp_server_ids. The chat toolbar persists purpose keys, so an opt-out survives a provider switch.
 
-## 4. Generated images
+## 4. Generated files
 
 An MCP `image` content block returned by any tool becomes a generated file shown in the chat. Before persistence the proxy applies these guards:
 
@@ -113,19 +130,43 @@ A user can attach an image and ask for a variation or edit, and a follow-up turn
 - External image servers fetch the bytes through the signed download endpoint, so `FILE_REFERENCE_BASE_URL` must be reachable from the external server. A failed call carrying a reference URL tells the model the URL is valid, so it reports that the tool cannot reach the file rather than asking for a re-upload.
 - Image attachments are offered in the chat whenever image generation is available, even without a vision model.
 
-Known limitation: an image generated earlier in the same turn cannot be edited in that turn, because the file is persisted after the tool result reaches the model. Follow-ups work from the next turn on.
+In a streaming chat, a file generated earlier in the turn is saved before its tool result reaches the model, and the result carries a fresh `Reference url for Image N` or `File N` line (minted and audited by the streaming wrapper, never persisted). An image can therefore be edited, and a document or export passed to another tool, in the same turn. Non-streaming requests persist files after the model finishes; there the reference arrives on the next turn.
+
+Stored tool-call arguments keep reference URLs with the token redacted. Replay swaps each redacted link for a freshly minted URL of the same file, so a model copying its own earlier call sends a working link.
+
+### Documents, spreadsheets and exports
+
+A binary embedded resource (`resource` with `blob`) becomes a generated file only when the producing server's purpose delivers that type (`GENERATED_FILE_TYPES_BY_PURPOSE`):
+
+| Purpose | Types |
+|---------|-------|
+| `file_creation` | DOCX, PDF, XLSX |
+| `file_analysis` | CSV |
+
+Every other blob is stripped by the proxy, so the resource stays an ordinary result and bytes never reach the model, which sees `[File N (name) ...]`. `files/generated_documents.py` then checks the bytes: OOXML packages are bounded (entries, expansion ratio) and must not contain macros, embedded objects, unsafe paths or non-hyperlink external relationships; PDFs must be complete and contain no JavaScript, launch actions, embedded files, rich media or XFA; CSV must be UTF-8 without NUL bytes. Accepted documents are prepared like uploads (exact original plus extracted text), linked to the question and the tool call, and shown as download chips. A refused document is logged and skipped. Limits: `MCP_TOOL_FILE_MAX_BYTES` (20 MiB) and `MCP_TOOL_FILE_MAX_COUNT` (4) per tool result.
+
+Generated files that were saved before an answer failed or was aborted are still linked to the question, so they stay visible and are deleted with the conversation.
 
 ## 5. Extending the capability set
 
-Adding a capability requires updating the backend `CapabilityPurpose` type and `CAPABILITY_PURPOSES` list, adding the matching permission and frontend `capabilities.ts` descriptor with its messages, and migrating the association-table purpose constraints and existing role permissions. All admin, space, assistant and chat surfaces render from those lists.
+Adding a capability requires:
 
-Whether a capability should be served by a built-in loopback server at all, and which attachment pattern it should use, is covered in the docs site page **Built-in Tool Servers** (`frontend/apps/docs-site/src/content/docs/builtin-tool-servers.mdx`). The rule in short: a loopback tool is a pure function of the request, the tenant database and at most one outbound provider call, finishing inside a tool-call timeout; anything with a runtime footprint (engine, process, storage, heavy dependency) is an external MCP server that receives the signed reference URL.
+- backend: the `CapabilityPurpose` type and `CAPABILITY_PURPOSES` list, `MCPServerPurpose`, the matching `Permission` and its description in `permissions_mapper.py`, the predefined roles in `predefined_roles.yml`, and the purpose CHECK constraints in `capabilities_table.py`;
+- a migration that replaces the three purpose constraints and grants the permission to the roles it should reach (the recent ones grant only the predefined User, AI Configurator and Owner roles);
+- frontend: the `capabilities.ts` descriptor, `CAPABILITY_STEPS` in `internalToolLabels.ts`, `permission-labels.ts`, `permission-groups.ts` and the Paraglide messages; the JSDoc unions in `packages/eneo-js/src/endpoints/*.js`, and a regenerated `schema.d.ts`;
+- for a capability that delivers files, its types in `GENERATED_FILE_TYPES_BY_PURPOSE`;
+- for a bundled provider, an entry in `BUNDLED_TOOLS` naming its purpose and whether it needs forwarded identity.
+
+All admin, space, assistant and chat surfaces render from those lists.
+
+Whether a capability should be served by a built-in loopback server at all, and which attachment pattern it should use, is covered in the docs site page **Built-in Tool Servers** (`frontend/apps/docs-site/src/content/docs/builtin-tool-servers.mdx`). The rule in short: a loopback tool is a pure function of the request, the tenant database and at most one outbound provider call, finishing inside a tool-call timeout; anything with a runtime footprint (engine, process, storage, heavy dependency) runs outside the backend, as an Eneo-bundled isolated provider in the tool runtime or an independently operated MCP server, and receives the signed reference URL.
 
 
 ## 6. Deployment and client changes
 
-Ship migration **202609041000**, backend, frontend and the bundled JavaScript
-client together. The migration backfills active and inactive capability
+Ship migrations **202609041000** and **202610011000** (`file_analysis`,
+`file_creation`), backend,
+frontend and the bundled JavaScript client together. The migration backfills active and inactive capability
 attachments, collapses duplicate purposes, preserves a policy default as on
 when any duplicate was on, and removes obsolete provider attachments and
 capability tool overrides. Ordinary MCP associations and tool settings remain.

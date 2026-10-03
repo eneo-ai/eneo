@@ -148,7 +148,7 @@
         {/snippet}
       </AttachmentPreview>
       <span class="text-secondary line-clamp-1 text-right text-sm">
-        {formatFileType(file.mimetype)} · {formatBytes(file.size)}
+        {formatFileType(file.mimetype)} · {formatBytes(file.original_size ?? file.size)}
       </span>
     </div>
 

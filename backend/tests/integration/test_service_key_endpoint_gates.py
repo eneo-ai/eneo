@@ -349,6 +349,7 @@ _CREATION_ENDPOINTS: list[tuple[str, str, dict | None]] = [
     ("POST", f"/api/v1/groups/{_STUB_ID}/info-blobs/", {"info_blobs": []}),
     ("POST", "/api/v1/roles/", {"name": "x", "permissions": []}),
     ("POST", "/api/v1/mcp-servers/", {"name": "x", "url": "https://example.com"}),
+    ("POST", "/api/v1/mcp-servers/bundled/compute/", {}),
     (
         "POST",
         "/api/v1/help-assistants/runs/",
