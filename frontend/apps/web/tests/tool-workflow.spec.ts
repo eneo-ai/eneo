@@ -159,7 +159,17 @@ test("workbook tools produce a report, preserve revisions, and recheck export su
   // A Skill cannot restore a Function removed from this Assistant.
   await api(`/assistants/${assistant.id}/`, { enabled_capabilities: ["file_creation"] });
   await page.reload();
+  // Reload finishes before the saved conversation has loaded. Wait for its
+  // history so the capability check continues with the original workbook.
+  await expect(
+    conversation.getByText("E2E workflow revision complete.", { exact: true })
+  ).toBeVisible();
+  const nextQuestion = page.waitForRequest(
+    (request) =>
+      request.method() === "POST" && new URL(request.url()).pathname === "/api/v1/conversations/"
+  );
   await askChatQuestion(page, "E2E_WORKFLOW_REPORT: analyse the workbook again.");
+  expect((await nextQuestion).postDataJSON().session_id).toBe(sessionId);
   await expect(
     conversation.getByText("E2E workflow unavailable: inspect_table", { exact: true })
   ).toBeVisible({ timeout: 30_000 });
