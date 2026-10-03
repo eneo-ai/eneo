@@ -46,12 +46,14 @@ ATTACHED_FILE_REFERENCES_INSTRUCTION = (
     "Entries introduced as attached to this assistant by its author are standing "
     "material available on every turn, not something the user just uploaded. "
     "Open a referenced file only when answering the user's message requires its "
-    "content. An attachment alone is not a request to read or summarize it. "
+    "content. An attachment alone is not a request to read, summarize or ingest it. "
     "If the message does not ask about it, acknowledge it and ask what the user "
-    "wants done. Never ask the user to re-upload a file listed in a reference entry. "
+    "wants done with it. Never judge from the file_ref whether a file is readable, "
+    "and never ask the user to re-upload a file listed in a reference entry. "
     "Prefer a tool suited to the file and task. When no specific tool fits or a "
     'chosen tool fails, read_file ("Read attached file"), when available, accepts '
-    "the same file_ref in its url input. Images should go to image tools, not read_file."
+    'every file_ref in its url input. Entries with "kind": "image" are images; '
+    "pass their file_ref to image tools, not read_file."
 )
 
 
