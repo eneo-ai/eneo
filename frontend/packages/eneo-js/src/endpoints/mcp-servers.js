@@ -373,6 +373,25 @@ export function initMCPServers(client) {
     },
 
     /**
+     * What a tool's interactive view (MCP App) may do: its size, the hosts it
+     * may reach and the permissions it asks for (admin only). Describes the
+     * view awaiting approval when there is one, otherwise the approved view.
+     * @param {Object} params
+     * @param {string} params.mcp_server_id The MCP server ID
+     * @param {string} params.tool_id The tool ID
+     * @throws {EneoError}
+     * */
+    getToolView: async ({ mcp_server_id, tool_id }) => {
+      const res = await client.fetch("/api/v1/mcp-servers/{id}/tools/{tool_id}/view/", {
+        method: "get",
+        params: {
+          path: { id: mcp_server_id, tool_id }
+        }
+      });
+      return res;
+    },
+
+    /**
      * Manually refresh/sync tools for an MCP server (admin only).
      * @param {Object} params
      * @param {string} params.mcp_server_id The MCP server ID

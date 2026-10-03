@@ -51,6 +51,15 @@ services:
       timeout: 3s
       retries: 40
 
+  e2e-tool-runtime:
+    image: eneo-e2e-tools:workflow
+    build:
+      context: ./tool-runtime
+    environment:
+      TOOL_RUNTIME_TOKEN: e2e-tool-runtime-token-not-a-secret
+      TOOL_RUNTIME_FILE_ORIGINS: http://e2e-backend:8000
+    networks: [e2e]
+
   e2e-backend:
     build:
       context: ./backend
@@ -62,6 +71,8 @@ services:
         condition: service_healthy
       e2e-mock-model:
         condition: service_healthy
+      e2e-tool-runtime:
+        condition: service_healthy
     environment:
       # Connections to the isolated services.
       POSTGRES_USER: postgres
@@ -70,10 +81,18 @@ services:
       POSTGRES_PORT: "5432"
       POSTGRES_DB: eneo_test
       REDIS_HOST: e2e-redis
+      TOOL_RUNTIME_URL: http://e2e-tool-runtime:3010
+      TOOL_RUNTIME_TOKEN: e2e-tool-runtime-token-not-a-secret
+      FILE_REFERENCE_BASE_URL: http://e2e-backend:8000
+      MCP_APPS_ENABLED: "true"
+      MCP_APP_CONTENT_BASE_URL: ${E2E_APP_CONTENT_ORIGIN:-http://127.0.0.1:8124}
+      PUBLIC_ORIGIN: http://localhost:4173
       REDIS_PORT: "6379"
       # No encryption → seeded provider credentials are plaintext (no real keys).
       ENCRYPTION_KEY: ""
       TENANT_CREDENTIALS_ENABLED: "false"
+      FEDERATION_ENABLED: "false"
+      FEDERATION_PER_TENANT_ENABLED: "false"
       OPENAI_API_KEY: test-openai-key
       ANTHROPIC_API_KEY: test-anthropic-key
       AZURE_API_KEY: test-azure-key

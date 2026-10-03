@@ -124,6 +124,62 @@ that the larger catalog is intentional.
 
 ---
 
+## Tool attempts in chat
+
+An assistant may adjust its input and try again after a tool call fails. If a
+later call to the same tool on the same server succeeds within the reply, the
+earlier failed call appears as a muted **Previous attempt** (**Tidigare försök**)
+in the activity list. It no longer adds a red failure icon to the grouped
+summary. Expand the attempt to inspect its original parameters and error.
+
+This describes the sequence of calls, not a guarantee that every requested
+operation succeeded. Failures without a later success, interrupted calls and
+rejected approvals keep their failure or rejection indicators. The same
+presentation applies when reopening chat history.
+
+## Interactive tool views
+
+When MCP Apps are enabled, a tool can show an interactive table, chart or form
+under its answer. An administrator approves the view's HTML and requested
+network policy with the tool. Updated or removed view metadata takes effect
+when the pending change is approved.
+
+Views run in an isolated browser frame and use the official MCP Apps SDK to
+communicate with Eneo. An external view asks for permission for each tool call,
+showing the tool name and arguments. The model's automatic-tool setting does
+not grant external views ongoing permission. Every call also rechecks the
+originating tool's current approval and the exact view version.
+
+With the built-in **Ask a file** capability, users can ask "Show me the rows
+in this file" or "Show orders from last month". The assistant's tool descriptions
+make in-chat results the default for browsing; users do not need to name a
+tool or request an interactive table. Asking for a downloadable CSV or Excel
+file still uses file generation.
+
+Users can expand a view beside the conversation and return it inline without
+losing filters or loaded rows. Views cannot navigate to another page or embed
+nested frames; opening a link requires the user's confirmation. Self-contained
+views are preferred: scripts loaded from an approved external resource origin
+can change independently of the stored HTML.
+
+Built-in app views ship as Eneo code. Their catalog and view definitions are
+kept current automatically, and their tool calls follow the user's
+automatic-tool preference. External apps require administrator approval and
+individual consent for each app-initiated tool call.
+
+Apps share the side panel with Eneo's native document workspace and file
+previews. The native workspace handles drafts, assistant-driven edits,
+versions and exports independently of the app feature flag. See
+[Tools, files and views](/guides/capabilities#tools-files-and-views) for the
+complete spreadsheet-to-report workflow and current editing limitations.
+
+Deployment requires `MCP_APPS_ENABLED=true`, a separate
+`MCP_APP_CONTENT_BASE_URL`, and `PUBLIC_ORIGIN`. For configuration and supported
+extension features, see the repository's
+[interactive tool view deployment guide](https://github.com/eneo-ai/eneo/blob/develop/docs/deployment/MCP_APPS.md).
+
+---
+
 ## Tools and Tool Discovery
 
 Each MCP server exposes a set of tools. When you first add a server, its tools are discovered automatically. After that, you can re-discover tools by clicking **Sync Tools**.
