@@ -5,8 +5,10 @@
   import { m } from "$lib/paraglide/messages";
   import { formatBytes } from "$lib/core/formatting/formatBytes";
   import { pickFileIcon } from "$lib/core/formatting/pickFileIcon";
+  import { getFilePreview } from "$lib/features/file-preview/FilePreview.svelte";
 
   const attachmentUrlService = getAttachmentUrlService();
+  const preview = getFilePreview();
   const { current } = getMessageContext();
 
   const allFiles = $derived.by(() =>
@@ -22,7 +24,10 @@
         extension,
         mimetype: file.mimetype,
         // The uploaded file's size; `size` counts the extracted text of a document.
-        size: file.original_size ?? file.size
+        size: file.original_size ?? file.size,
+        // A file with a renderer opens in the conversation's preview panel.
+        previewable: preview?.canPreview(file) ?? false,
+        source: file
       };
     })
   );
@@ -45,6 +50,21 @@
   const showOverflowButton = $derived(!isExpanded && documents.length > COLLAPSE_THRESHOLD);
 </script>
 
+{#snippet description(file: (typeof documents)[number])}
+  {@const Icon = pickFileIcon(file.mimetype)}
+  <span
+    class="bg-accent-dimmer text-accent-stronger flex size-8 flex-shrink-0 items-center justify-center rounded-md"
+  >
+    <Icon class="size-4" aria-hidden="true" />
+  </span>
+  <span class="flex min-w-0 flex-1 flex-col leading-tight">
+    <span class="text-default truncate text-sm font-medium">{file.name}</span>
+    <span class="text-tertiary truncate text-[11px] tabular-nums">
+      {file.extension}{file.size > 0 ? ` · ${formatBytes(file.size)}` : ""}
+    </span>
+  </span>
+{/snippet}
+
 {#if allFiles.length > 0}
   <div class="flex w-full flex-col items-end gap-2">
     {#if images.length > 0}
@@ -60,23 +80,28 @@
     {#if documents.length > 0}
       <div class="grid w-full max-w-[42rem] grid-cols-1 gap-2 sm:grid-cols-2">
         {#each visibleDocuments as file (file.id)}
-          {@const Icon = pickFileIcon(file.mimetype)}
-          <div
-            class="group border-default bg-primary flex h-11 min-w-0 items-center gap-2 rounded-lg border py-1.5 pr-2 pl-1.5 shadow-sm"
-            title={file.name}
-          >
-            <div
-              class="bg-accent-dimmer text-accent-stronger flex size-8 flex-shrink-0 items-center justify-center rounded-md"
+          {#if file.previewable}
+            {@const previewing = preview?.isOpen(file) ?? false}
+            <button
+              type="button"
+              aria-label={m.file_preview_open({ name: file.name })}
+              aria-expanded={previewing}
+              onclick={(event) => preview?.toggle(file.source, event.currentTarget)}
+              class="bg-primary hover:bg-secondary focus-visible:ring-accent-default flex h-11 min-w-0 items-center gap-2 rounded-lg border py-1.5 pr-2 pl-1.5 text-left shadow-sm transition-colors focus-visible:ring-2 focus-visible:outline-none {previewing
+                ? 'border-accent-default'
+                : 'border-default hover:border-stronger'}"
+              title={file.name}
             >
-              <Icon class="size-4" aria-hidden="true" />
+              {@render description(file)}
+            </button>
+          {:else}
+            <div
+              class="border-default bg-primary flex h-11 min-w-0 items-center gap-2 rounded-lg border py-1.5 pr-2 pl-1.5 shadow-sm"
+              title={file.name}
+            >
+              {@render description(file)}
             </div>
-            <div class="flex min-w-0 flex-1 flex-col leading-tight">
-              <span class="text-default truncate text-sm font-medium">{file.name}</span>
-              <span class="text-tertiary truncate text-[11px] tabular-nums">
-                {file.extension}{file.size > 0 ? ` · ${formatBytes(file.size)}` : ""}
-              </span>
-            </div>
-          </div>
+          {/if}
         {/each}
 
         {#if showOverflowButton}

@@ -82,3 +82,4 @@ Page paths are relative to `frontend/apps/docs-site/src/content/`. Code paths ar
 Bundled tool runtime, diagnostics, scheduling and release bundles are documented in
 `docs/builtin-tool-servers.mdx`, `guides/capabilities.mdx`, `guides/deployment.mdx`
 and repository `docs/deployment/TOOL_RUNTIME.md`.
+Native file previews, revisions, selection references and document exports are documented in `guides/capabilities.mdx`.

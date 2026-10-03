@@ -588,3 +588,23 @@ settings. Add its built-in provider under **Admin > Tools > Functions > Charts**
 It produces bar, line, pie and scatter images from inline values or a CSV/Excel
 source. The file-creation provider also accepts existing PNG/JPEG images in Word
 and PDF reports. Existing providers and role grants are preserved on upgrade.
+
+## Native document workspace
+
+Documents and supported attachments open beside the conversation. The panel
+shows a document's text or spreadsheet rows while it is being created and keeps
+the previous version visible until its replacement is ready. Use its title to
+switch between created documents and uploaded files.
+
+Ask the assistant to revise a document or quote a passage to change. Each
+revision is a saved file, and the panel's version controls reopen earlier files.
+Select spreadsheet cells or rows and choose **Ask about selection** to include
+their original coordinates in your next message. Sorting the preview does not
+change those source coordinates.
+
+The Export menu downloads Markdown directly, or renders the selected document
+as Word or PDF through the assistant's current file-creation provider. Export
+availability is checked per format against the provider's current tool schema.
+Exports do not require another model response and are not saved as revisions.
+Formulas are not recalculated; workbook previews use saved results and explain
+missing values. These native features work without an MCP Apps content origin.

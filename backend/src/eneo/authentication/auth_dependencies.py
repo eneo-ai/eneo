@@ -227,6 +227,8 @@ CONVERSATIONS_READ_OVERRIDES: frozenset[str] = frozenset(
     {
         "chat",
         "leave_feedback",
+        # Reads a document of the conversation in another format; stores nothing.
+        "export_conversation_document",
     }
 )
 
