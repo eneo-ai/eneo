@@ -35,6 +35,14 @@ from eneo.flows.principal import FlowPrincipal
 logger = logging.getLogger(__name__)
 
 
+_SYSTEM_ENDED_SOURCES = frozenset(
+    {
+        FlowRunLifecycleSource.ABANDONMENT_RECONCILER,
+        FlowRunLifecycleSource.FLOW_DELETED,
+    }
+)
+
+
 class FlowRunTerminalizationInvariantError(RuntimeError):
     pass
 
@@ -252,19 +260,14 @@ class FlowRunTerminalizer:
                 error_message=effective_error_message,
             )
 
-        checkpoint_principal = (
-            None
-            if abandonment is not None
-            else self._principal_or_none_from_run(
-                run=terminal_run,
-                principal=principal,
-            )
+        acting_principal = self._acting_principal(
+            run=terminal_run, principal=principal, source=source
         )
         await self.flow_run_review_checkpoint_repo.cancel_active_review_checkpoint_for_terminal_run(
             tenant_id=tenant_id,
             flow_run_id=run_id,
             run_revision=terminal_run.revision,
-            principal=checkpoint_principal,
+            principal=acting_principal,
             error_code=effective_error_code,
             error_message=effective_error_message,
         )
@@ -273,11 +276,7 @@ class FlowRunTerminalizer:
         outbox_id = await self.audit_outbox_repo.insert_terminal_audit_outbox(
             run=terminal_run,
             action=action,
-            principal=self._audit_principal(
-                run=terminal_run,
-                principal=principal,
-                source=source,
-            ),
+            principal=acting_principal,
             source=source,
             target_status=target_status,
             error_code=effective_error_code,
@@ -322,10 +321,15 @@ class FlowRunTerminalizer:
             return None
 
     @staticmethod
-    def _audit_principal(
+    def _acting_principal(
         *, run: FlowRun, principal: FlowPrincipal | None, source: FlowRunLifecycleSource
     ) -> FlowPrincipal | None:
-        if source == FlowRunLifecycleSource.ABANDONMENT_RECONCILER:
+        """Who ended the run, for the review checkpoint and the audit outbox.
+
+        None is the system: the run and its review are recorded without a
+        decider when nobody acting for the run ended it.
+        """
+        if source in _SYSTEM_ENDED_SOURCES:
             return None
         resolved = FlowRunTerminalizer._principal_or_none_from_run(
             run=run,

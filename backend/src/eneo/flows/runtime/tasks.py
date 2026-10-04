@@ -77,6 +77,7 @@ from eneo.main.logging import get_logger
 from eneo.main.request_context import clear_request_context, set_request_context
 from eneo.object_content.deployment_policy import load_upload_admission_snapshot
 from eneo.object_content.runtime import object_content_runtime
+from eneo.tasks.routing import FLOW_DRAIN_RETIRED_RUNS_TASK
 from eneo.users.user_repo import UsersRepository
 
 if TYPE_CHECKING:
@@ -751,6 +752,56 @@ async def _reconcile_expired_review_checkpoints_all_tenants(
     return {"status": "ok", "reconciled": reconciled}
 
 
+async def _drain_retired_flow_runs(*, limit: int = 100) -> dict[str, int | str]:
+    """Cancel the queued, running and awaiting-review runs of deleted flows.
+
+    Deleting a flow does not wait for its runs; this sweep ends the oldest
+    `limit` of them, one run per transaction. A run that reached a terminal
+    state first is left as it is. A run that cannot be cancelled is rolled
+    back and logged, the sweep goes on, and the task then fails so the failure
+    is visible.
+    """
+    error = FlowRunError.from_source(
+        FlowRunLifecycleSource.FLOW_DELETED,
+        code=FlowApiErrorCode.FLOW_DELETED,
+        message="Flow was deleted before the run finished.",
+    )
+    cancelled = 0
+    failed = 0
+    async with sessionmanager.session() as session:
+        enable_autobegin_for_flow_task_session(session)
+        container = Container(session=providers.Object(session))
+        terminalizer = container.flow_run_terminalizer()
+        async with session.begin():
+            runs = await container.flow_run_repo().list_active_runs_of_deleted_flows(
+                limit=limit
+            )
+        for run_id, tenant_id in runs:
+            try:
+                async with session.begin():
+                    result = await terminalizer.terminalize_run(
+                        run_id=run_id,
+                        tenant_id=tenant_id,
+                        target_status=FlowRunStatus.CANCELLED,
+                        source=FlowRunLifecycleSource.FLOW_DELETED,
+                        error=error,
+                        cancelled_at=datetime.now(timezone.utc),
+                    )
+            except Exception:
+                failed += 1
+                logger.exception(
+                    "Retired-flow run drain could not cancel a run",
+                    extra={"run_id": str(run_id)},
+                )
+                continue
+            cancelled += int(result.did_transition)
+    if failed:
+        raise RuntimeError(
+            f"{FLOW_DRAIN_RETIRED_RUNS_TASK} could not cancel {failed} run(s)"
+        )
+    return {"status": "ok", "cancelled": cancelled}
+
+
 async def _redispatch_stale_queued_runs_all_tenants(
     *, limit: int = 100
 ) -> dict[str, int | str]:
@@ -868,6 +919,10 @@ async def reconcile_stale_running_runs() -> dict[str, int | str]:
 
 async def reconcile_expired_review_checkpoints() -> dict[str, int | str]:
     return await _reconcile_expired_review_checkpoints_all_tenants()
+
+
+async def drain_retired_flow_runs() -> dict[str, int | str]:
+    return await _drain_retired_flow_runs()
 
 
 async def redispatch_stale_queued_runs() -> dict[str, int | str]:

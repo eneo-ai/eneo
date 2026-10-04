@@ -108,6 +108,7 @@ from eneo.flows.runtime.step_execution_runtime import (
 from eneo.flows.runtime.step_input_resolution import resolve_input_source_text
 from eneo.main.exceptions import (
     BadRequestException,
+    NotFoundException,
     OpenAIException,
     ProviderCapabilityRejectedException,
     ProviderRejectedRequestException,
@@ -4773,6 +4774,64 @@ async def test_execute_rejects_later_mcp_assistant_before_any_step_effect(user):
     executor._execute_step.assert_not_awaited()
     insert_pending_delivery.assert_not_awaited()
     executor.flow_run_terminalizer.terminalize_run.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_execute_cancels_as_flow_deleted_when_the_flow_is_gone_at_assistant_load(
+    user,
+):
+    # The delete commits after the claim gate read the flow as active.
+    executor, _, flow_run_repo, flow_version_repo = _build_executor(user)
+    queued_run = _run(status=FlowRunStatus.QUEUED, user=user)
+    assistant = _default_snapshot_assistant(uuid4())
+    snapshot = build_assistant_execution_snapshot(assistant=assistant)
+    flow_run_repo.get = AsyncMock(
+        return_value=queued_run.model_copy(update={"status": FlowRunStatus.RUNNING})
+    )
+    flow_run_repo.mark_running_if_claimable = AsyncMock(return_value=True)
+    flow_run_repo.claim_step_result = AsyncMock()
+    flow_version_repo.get = AsyncMock(
+        return_value=_published_flow_version(
+            flow_id=queued_run.flow_id,
+            version=queued_run.flow_version,
+            tenant_id=user.tenant_id,
+            definition_checksum=None,
+            definition_json={
+                "steps": [
+                    {
+                        "step_id": str(uuid4()),
+                        "step_order": 1,
+                        "assistant_id": str(assistant.id),
+                        "input_source": "flow_input",
+                        "output_mode": "pass_through",
+                        "assistant_snapshot": snapshot,
+                    }
+                ]
+            },
+            created_at=datetime.now(timezone.utc),
+            updated_at=datetime.now(timezone.utc),
+        )
+    )
+    executor._flow_is_active = AsyncMock(return_value=True)
+    executor.flow_repo.get = AsyncMock(side_effect=NotFoundException("Flow not found."))
+    executor._execute_step = AsyncMock()
+
+    result = await executor.execute(
+        run_id=queued_run.id,
+        flow_id=queued_run.flow_id,
+        tenant_id=user.tenant_id,
+        run_revision=queued_run.revision,
+        dispatch_task_id="task-1",
+        retry_count=0,
+    )
+
+    assert result == {"status": "cancelled", "reason": "flow_deleted"}
+    flow_run_repo.claim_step_result.assert_not_awaited()
+    executor._execute_step.assert_not_awaited()
+    terminalized = executor.flow_run_terminalizer.terminalize_run.await_args.kwargs
+    assert terminalized["target_status"] is FlowRunStatus.CANCELLED
+    assert terminalized["source"] is FlowRunLifecycleSource.FLOW_DELETED
+    assert terminalized["error"].code is FlowApiErrorCode.FLOW_DELETED
 
 
 def _security_assistant(

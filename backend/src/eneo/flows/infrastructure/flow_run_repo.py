@@ -19,6 +19,7 @@ from eneo.database.tables.flow_tables import (
     FlowRuns,
     FlowRunStepInputFiles,
     FlowRunStepResultFiles,
+    Flows,
     FlowStepAttemptResolvedInputs,
     FlowStepAttempts,
     FlowStepResults,
@@ -74,6 +75,7 @@ from eneo.flows.enums import (
     ACTIVE_FLOW_RUN_STATUSES,
     ACTIVE_FLOW_STEP_RESULT_STATUS_VALUES,
     CANCELLABLE_FLOW_RUN_STATUSES,
+    NON_TERMINAL_FLOW_RUN_STATUS_VALUES,
     OPEN_FLOW_STEP_ATTEMPT_STATUS_VALUES,
     TERMINAL_FLOW_RUN_STATUSES,
     FlowRunPurpose,
@@ -872,6 +874,20 @@ class FlowRunRepository:
             .where(FlowRuns.status.in_(self._ACTIVE_STATUSES))
         )
         return int(count or 0)
+
+    async def list_active_runs_of_deleted_flows(
+        self, *, limit: int
+    ) -> list[tuple[UUID, UUID]]:
+        """(run id, tenant id) of non-terminal runs whose flow is deleted, oldest first."""
+        rows = await self.session.execute(
+            sa.select(FlowRuns.id, FlowRuns.tenant_id)
+            .join(Flows, Flows.id == FlowRuns.flow_id)
+            .where(Flows.deleted_at.is_not(None))
+            .where(FlowRuns.status.in_(NON_TERMINAL_FLOW_RUN_STATUS_VALUES))
+            .order_by(FlowRuns.created_at, FlowRuns.id)
+            .limit(limit)
+        )
+        return [(run_id, tenant_id) for run_id, tenant_id in rows]
 
     async def acquire_tenant_run_creation_lock(self, *, tenant_id: UUID) -> None:
         await self.session.execute(

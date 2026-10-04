@@ -1037,7 +1037,9 @@ class FlowRepository:
     async def delete(self, flow_id: UUID, tenant_id: UUID) -> frozenset[UUID]:
         """Soft-delete the flow; return the flow-managed assistants to delete.
 
-        A flow with runs keeps its steps and assistants, so it returns none.
+        The UPDATE takes the flow row lock `_lock_flow_row` takes (FOR NO KEY
+        UPDATE), so delete serializes with publish and run admission. A flow
+        with runs keeps its steps and assistants, so it returns none.
         """
         stmt = (
             sa.update(Flows)

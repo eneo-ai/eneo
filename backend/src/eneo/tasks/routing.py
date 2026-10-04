@@ -9,6 +9,7 @@ FLOW_EXECUTE_TASK = "flows.execute"
 FLOW_RECONCILE_RUNNING_TASK = "flows.reconcile_running"
 FLOW_RECONCILE_REVIEW_EXPIRY_TASK = "flows.reconcile_review_expiry"
 FLOW_REDISPATCH_STALE_QUEUED_TASK = "flows.redispatch_stale_queued"
+FLOW_DRAIN_RETIRED_RUNS_TASK = "flows.drain_retired_runs"
 FLOW_DELIVER_AUDIT_OUTBOX_TASK = "flows.deliver_audit_outbox"
 FLOW_DELIVER_WEBHOOK_OUTBOX_TASK = "flows.deliver_webhook_outbox"
 
@@ -18,6 +19,7 @@ TASK_CAPACITY_BY_NAME: dict[str, TaskCapacityClass] = {
     FLOW_RECONCILE_RUNNING_TASK: TaskCapacityClass.MAINTENANCE,
     FLOW_RECONCILE_REVIEW_EXPIRY_TASK: TaskCapacityClass.MAINTENANCE,
     FLOW_REDISPATCH_STALE_QUEUED_TASK: TaskCapacityClass.MAINTENANCE,
+    FLOW_DRAIN_RETIRED_RUNS_TASK: TaskCapacityClass.MAINTENANCE,
     FLOW_DELIVER_AUDIT_OUTBOX_TASK: TaskCapacityClass.MAINTENANCE,
     FLOW_DELIVER_WEBHOOK_OUTBOX_TASK: TaskCapacityClass.MAINTENANCE,
 }

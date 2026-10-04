@@ -18,6 +18,7 @@ from eneo.flows.flow_run_dispatch_request import (
     flow_run_dispatch_task_kwargs,
 )
 from eneo.flows.runtime.platform_execution_backend import PlatformFlowExecutionBackend
+from eneo.main.config import get_settings
 from eneo.main.exceptions import NotReadyException
 from eneo.tasks.arq_adapter import ArqTaskEnqueuer
 from eneo.tasks.contracts import (
@@ -26,7 +27,12 @@ from eneo.tasks.contracts import (
     TaskEnqueueResult,
     TaskEnqueueStatus,
 )
-from eneo.tasks.routing import FLOW_EXECUTE_TASK, task_queue_routing
+from eneo.tasks.routing import (
+    FLOW_DRAIN_RETIRED_RUNS_TASK,
+    FLOW_EXECUTE_TASK,
+    TASK_CAPACITY_BY_NAME,
+    task_queue_routing,
+)
 from eneo.worker.platform_tasks import (
     PlatformExecutionWorkerSettings,
     PlatformMaintenanceWorkerSettings,
@@ -163,12 +169,25 @@ def test_platform_workers_isolate_execution_from_maintenance_capacity() -> None:
     ] == [FLOW_EXECUTE_TASK]
     assert PlatformExecutionWorkerSettings.cron_jobs == []
     assert PlatformMaintenanceWorkerSettings.functions == []
-    assert len(PlatformMaintenanceWorkerSettings.cron_jobs) == 5
+    assert len(PlatformMaintenanceWorkerSettings.cron_jobs) == 6
     assert PlatformExecutionWorkerSettings.queue_name != (
         PlatformMaintenanceWorkerSettings.queue_name
     )
     assert PlatformExecutionWorkerSettings.max_jobs > 0
     assert PlatformMaintenanceWorkerSettings.max_jobs > 0
+
+
+def test_retired_run_drain_runs_at_the_configured_cadence() -> None:
+    [drain] = [
+        job
+        for job in PlatformMaintenanceWorkerSettings.cron_jobs
+        if job.name == FLOW_DRAIN_RETIRED_RUNS_TASK
+    ]
+    interval = get_settings().flow_retired_run_drain_interval_seconds
+    assert drain.second == set(range(0, 60, interval))
+    assert TASK_CAPACITY_BY_NAME[FLOW_DRAIN_RETIRED_RUNS_TASK] is (
+        TaskCapacityClass.MAINTENANCE
+    )
 
 
 def test_flow_layers_are_transport_neutral_and_celery_is_not_a_dependency() -> None:

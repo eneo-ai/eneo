@@ -352,6 +352,14 @@ class FlowService:
             )
         return persisted
 
+    async def lock_live_flow(self, flow_id: UUID) -> None:
+        """Take the flow row lock that delete, publish and run creation take,
+        held until the transaction ends. Raises NotFound when the flow is
+        deleted, so a write made under it cannot reference a deleted flow."""
+        await self.flow_repo.lock_publication_pointer(
+            flow_id=flow_id, tenant_id=self.user.tenant_id
+        )
+
     async def delete_flow(self, flow_id: UUID) -> None:
         await self.assistant_service.delete_flow_managed_assistants(
             flow_id=flow_id,

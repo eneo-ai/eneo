@@ -305,6 +305,10 @@ _PROVIDER_RESPONSE_RECEIVED_DISCLOSURE = (
 )
 
 
+class _FlowDeletedDuringRun(Exception):
+    """The run's flow was deleted after the run's last flow-deleted check."""
+
+
 def _group_attempt_resolved_inputs(
     *edge_groups: Iterable[FlowResolvedInputEdge],
 ) -> FlowResolvedInputEdgeGrouping:
@@ -738,23 +742,11 @@ class FlowRunExecutor:
             return {"status": "skipped", "reason": f"run_{run.status.value}"}
 
         if not await self._flow_is_active(flow_id=flow_id, tenant_id=tenant_id):
-            reason = "Flow was deleted before execution started."
-            await self._terminalize_run(
+            return await self._cancel_run_of_deleted_flow(
                 run_id=run_id,
                 tenant_id=tenant_id,
-                target_status=FlowRunStatus.CANCELLED,
-                source=FlowRunLifecycleSource.FLOW_DELETED,
-                error=FlowRunError.from_source(
-                    FlowRunLifecycleSource.FLOW_DELETED,
-                    code=FlowApiErrorCode.FLOW_DELETED,
-                    message=reason,
-                ),
+                message="Flow was deleted before execution started.",
             )
-            await self._commit()
-            return {
-                "status": "cancelled",
-                "reason": FlowApiErrorCode.FLOW_DELETED.value,
-            }
 
         version = await self.flow_version_repo.get(
             flow_id=run.flow_id,
@@ -885,6 +877,12 @@ class FlowRunExecutor:
                 state=state,
                 run_id=run_id,
             )
+        except _FlowDeletedDuringRun:
+            return await self._cancel_run_of_deleted_flow(
+                run_id=run_id,
+                tenant_id=tenant_id,
+                message="Flow was deleted during execution.",
+            )
         except BadRequestException as exc:
             source = FlowRunLifecycleSource.ASSISTANT_SNAPSHOT_DRIFT
             run_error = self._run_error_from_bad_request(
@@ -956,23 +954,12 @@ class FlowRunExecutor:
                     "reason": "unknown",
                 }
             if preclaim_decision.action == "cancel_flow_deleted":
-                await self._terminalize_run(
+                return await self._cancel_run_of_deleted_flow(
                     run_id=run_id,
                     tenant_id=tenant_id,
-                    target_status=FlowRunStatus.CANCELLED,
-                    source=FlowRunLifecycleSource.FLOW_DELETED,
-                    error=FlowRunError.from_source(
-                        FlowRunLifecycleSource.FLOW_DELETED,
-                        code=FlowApiErrorCode.FLOW_DELETED,
-                        message=preclaim_decision.run_error_message
-                        or "Flow was deleted during execution.",
-                    ),
+                    message=preclaim_decision.run_error_message
+                    or "Flow was deleted during execution.",
                 )
-                await self._commit()
-                return preclaim_decision.result or {
-                    "status": "cancelled",
-                    "reason": FlowApiErrorCode.FLOW_DELETED.value,
-                }
 
             claimed = await self.flow_run_repo.claim_step_result(
                 run_id=run_id,
@@ -2714,9 +2701,13 @@ class FlowRunExecutor:
         if state is None or state.flow_id is None:
             raise FlowRuntimeInvariantError("Frozen assistants require run context.")
         if state.flow_space is None:
-            flow = await self.flow_repo.get(
-                flow_id=state.flow_id, tenant_id=self.runtime_actor.tenant_id
-            )
+            try:
+                flow = await self.flow_repo.get(
+                    flow_id=state.flow_id, tenant_id=self.runtime_actor.tenant_id
+                )
+            except NotFoundException as exc:
+                # The run row cascades with its flow row, so the flow is deleted.
+                raise _FlowDeletedDuringRun() from exc
             space = await self.space_repo.get_execution_space(flow.space_id)
             if space.tenant_id != self.runtime_actor.tenant_id:
                 raise NotFoundException()
@@ -3118,6 +3109,23 @@ class FlowRunExecutor:
             step_order=step_order,
             details=FlowRunErrorDetails.from_bad_request_context(context),
         )
+
+    async def _cancel_run_of_deleted_flow(
+        self, *, run_id: UUID, tenant_id: UUID, message: str
+    ) -> dict[str, Any]:
+        await self._terminalize_run(
+            run_id=run_id,
+            tenant_id=tenant_id,
+            target_status=FlowRunStatus.CANCELLED,
+            source=FlowRunLifecycleSource.FLOW_DELETED,
+            error=FlowRunError.from_source(
+                FlowRunLifecycleSource.FLOW_DELETED,
+                code=FlowApiErrorCode.FLOW_DELETED,
+                message=message,
+            ),
+        )
+        await self._commit()
+        return {"status": "cancelled", "reason": FlowApiErrorCode.FLOW_DELETED.value}
 
     async def _terminalize_run(
         self,

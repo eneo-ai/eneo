@@ -12,6 +12,7 @@ from eneo.flows.runtime.execution_heartbeat import execution_heartbeats
 from eneo.flows.runtime.tasks import (
     deliver_flow_audit_outbox,
     deliver_flow_webhook_outbox,
+    drain_retired_flow_runs,
     execute_flow_run_task,
     reconcile_expired_review_checkpoints,
     reconcile_stale_running_runs,
@@ -22,6 +23,7 @@ from eneo.main.container.container import Container
 from eneo.tasks.routing import (
     FLOW_DELIVER_AUDIT_OUTBOX_TASK,
     FLOW_DELIVER_WEBHOOK_OUTBOX_TASK,
+    FLOW_DRAIN_RETIRED_RUNS_TASK,
     FLOW_EXECUTE_TASK,
     FLOW_RECONCILE_REVIEW_EXPIRY_TASK,
     FLOW_RECONCILE_RUNNING_TASK,
@@ -83,6 +85,17 @@ async def reconcile_review_expiry(*, container: Container) -> dict[str, int | st
 async def redispatch_stale_queued(*, container: Container) -> dict[str, int | str]:
     del container
     return await redispatch_stale_queued_runs()
+
+
+@maintenance_worker.cron_job(
+    manages_own_session=True,
+    name=FLOW_DRAIN_RETIRED_RUNS_TASK,
+    second=set(range(0, 60, get_settings().flow_retired_run_drain_interval_seconds)),
+    keep_result=60,
+)
+async def drain_retired_runs(*, container: Container) -> dict[str, int | str]:
+    del container
+    return await drain_retired_flow_runs()
 
 
 @maintenance_worker.cron_job(

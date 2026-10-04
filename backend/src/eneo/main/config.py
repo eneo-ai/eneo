@@ -365,6 +365,9 @@ class Settings(BaseSettings):
     task_maintenance_max_jobs: int = 2
     task_execution_timeout_seconds: int = 28800
     task_maintenance_timeout_seconds: int = 120
+    # Seconds between sweeps that cancel the runs of deleted flows; a divisor of
+    # 60, since the sweep runs at fixed seconds of every minute.
+    flow_retired_run_drain_interval_seconds: int = 60
     flow_max_inline_text_bytes: int = 8 * 1024 * 1024
     flow_pdf_max_pages: int = Field(default=2000, gt=0)
     flow_pdf_max_extracted_bytes: int = Field(default=128 * 1024 * 1024, gt=0)
@@ -962,6 +965,15 @@ class Settings(BaseSettings):
             logging.error(
                 "TASK_MAINTENANCE_TIMEOUT_SECONDS must be greater than zero. Current value: %s",
                 self.task_maintenance_timeout_seconds,
+            )
+            sys.exit(1)
+
+        drain_interval = self.flow_retired_run_drain_interval_seconds
+        if not 0 < drain_interval <= 60 or 60 % drain_interval:
+            logging.error(
+                "FLOW_RETIRED_RUN_DRAIN_INTERVAL_SECONDS must divide 60. "
+                "Current value: %s",
+                drain_interval,
             )
             sys.exit(1)
 

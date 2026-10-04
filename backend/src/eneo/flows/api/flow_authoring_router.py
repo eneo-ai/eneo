@@ -593,7 +593,9 @@ async def update_flow(
     description=(
         "Soft-delete a flow definition so it is no longer available for editing or "
         "execution. The deletion and its audit record are committed together: a "
-        "flow is never deleted without its audit row. "
+        "flow is never deleted without its audit row. The request does not wait "
+        "for the flow's runs: a background sweep cancels its queued, running and "
+        "awaiting-review runs with the error code `flow_deleted`. "
         f"{_FLOW_DRAFT_OWNERSHIP_DESCRIPTION}"
     ),
     responses={

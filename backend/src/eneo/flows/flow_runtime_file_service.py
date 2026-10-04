@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import logging
 from dataclasses import dataclass
+from typing import Protocol
 from uuid import UUID
 
 import magic
@@ -170,6 +171,10 @@ def _policy_from_runtime_spec(
     )
 
 
+class FlowRuntimeUploadFlowSource(FlowRuntimeFlowSource, Protocol):
+    async def lock_live_flow(self, flow_id: UUID) -> None: ...
+
+
 def _ensure_shared_write_session(
     *,
     session: AsyncSession,
@@ -191,7 +196,7 @@ class FlowRuntimeFileService:
         *,
         user: UserInDB,
         session: AsyncSession,
-        flow_service: FlowRuntimeFlowSource,
+        flow_service: FlowRuntimeUploadFlowSource,
         file_service: FileService,
         runtime_upload_repo: FlowRuntimeUploadRepository,
         settings_service: FlowRuntimeSettingsSource,
@@ -308,6 +313,9 @@ class FlowRuntimeFileService:
         )
 
         async def bind_and_audit(file: FileInfo, audio_seconds: float | None) -> None:
+            # A flow deleted since the policy read refuses the bind; the
+            # raised NotFound rolls back the file rows with it.
+            await self.flow_service.lock_live_flow(flow_id)
             await self.runtime_upload_repo.create(
                 file_id=file.id,
                 flow_id=flow_id,

@@ -4653,7 +4653,7 @@ export interface paths {
     post?: never;
     /**
      * Delete Flow
-     * @description Soft-delete a flow definition so it is no longer available for editing or execution. The deletion and its audit record are committed together: a flow is never deleted without its audit row. Draft ownership stays with the draft owner in the current backend policy. Space admins can manage shared space resources, but overriding another member's draft still requires the draft owner, a space owner, or a tenant admin.
+     * @description Soft-delete a flow definition so it is no longer available for editing or execution. The deletion and its audit record are committed together: a flow is never deleted without its audit row. The request does not wait for the flow's runs: a background sweep cancels its queued, running and awaiting-review runs with the error code `flow_deleted`. Draft ownership stays with the draft owner in the current backend policy. Space admins can manage shared space resources, but overriding another member's draft still requires the draft owner, a space owner, or a tenant admin.
      */
     delete: operations["delete_flow"];
     options?: never;
