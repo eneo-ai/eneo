@@ -197,6 +197,8 @@ CATEGORY_MAPPINGS = {
     ActionType.HELP_ASSISTANT_UNINSTALLED.value: "admin_actions",
     # System Actions
     ActionType.RETENTION_POLICY_APPLIED.value: "system_actions",
+    ActionType.GALLRING_APPLIED.value: "system_actions",
+    ActionType.GALLRING_SKIPPED.value: "system_actions",
     ActionType.ENCRYPTION_KEY_ROTATED.value: "system_actions",
     ActionType.SYSTEM_MAINTENANCE.value: "system_actions",
     # Audit Access

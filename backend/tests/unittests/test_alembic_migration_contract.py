@@ -588,3 +588,20 @@ def test_flow_version_reference_backfill_refuses_offline_and_never_stamps():
     emitted = output.getvalue().lower()
     assert "update alembic_version" not in emitted
     assert "insert into alembic_version" not in emitted
+
+
+def test_gallring_tables_revision_emits_static_ddl_offline():
+    backend = Path(__file__).parents[2]
+    config = Config(str(backend / "alembic.ini"))
+    config.set_main_option("script_location", str(backend / "alembic"))
+    config.set_main_option("sqlalchemy.url", "postgresql://offline@localhost/offline")
+    output = io.StringIO()
+    config.output_buffer = output
+
+    command.upgrade(config, "202610041000:202610041200", sql=True)
+
+    emitted = output.getvalue()
+    for table in ("gallring_job_runs", "gallring_receipts", "gallring_receipt_items"):
+        assert f"CREATE TABLE {table}" in emitted
+    assert emitted.count("COMMIT;") == 1  # one transaction: atomic, re-runnable
+    assert "UPDATE alembic_version SET version_num='202610041200'" in emitted

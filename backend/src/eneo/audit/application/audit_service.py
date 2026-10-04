@@ -149,6 +149,7 @@ class AuditService:
         user_agent: Optional[str] = None,
         request_id: Optional[UUID] = None,
         error_message: Optional[str] = None,
+        audit_id: Optional[UUID] = None,
     ) -> Optional[AuditLog]:
         """
         Create an audit log entry.
@@ -167,6 +168,8 @@ class AuditService:
             user_agent: Client user agent
             request_id: Request correlation ID
             error_message: Error details if outcome is failure
+            audit_id: Deterministic id for a replayable event; a second write
+                with the same id returns the stored entry instead of a duplicate.
 
         Returns:
             Created audit log (or None if action is disabled)
@@ -201,7 +204,7 @@ class AuditService:
         )
 
         audit_log = AuditLog(
-            id=uuid4(),
+            id=audit_id or uuid4(),
             tenant_id=tenant_id,
             actor_id=actor_id,
             actor_api_key_id=actor_api_key_id,
@@ -219,6 +222,8 @@ class AuditService:
             error_message=error_message,
         )
 
+        if audit_id is not None:
+            return await self.repository.create_if_absent(audit_log)
         return await self.repository.create(audit_log)
 
     async def get_logs(

@@ -3270,7 +3270,7 @@ export interface paths {
     };
     /**
      * Get per-action audit configuration
-     * @description Retrieve all 188 actions with their enabled status for the modal UI.
+     * @description Retrieve all 190 actions with their enabled status for the modal UI.
      */
     get: operations["get_action_config_api_v1_audit_config_actions_get"];
     put?: never;
@@ -12093,6 +12093,8 @@ export interface components {
       | "scim_token_created"
       | "scim_token_revoked"
       | "retention_policy_applied"
+      | "gallring_applied"
+      | "gallring_skipped"
       | "encryption_key_rotated"
       | "system_maintenance"
       | "audit_session_created"

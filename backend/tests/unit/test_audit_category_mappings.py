@@ -184,6 +184,8 @@ class TestCategoryMappings:
         """Verify system action types are correctly mapped."""
         system_actions = [
             ActionType.RETENTION_POLICY_APPLIED,
+            ActionType.GALLRING_APPLIED,
+            ActionType.GALLRING_SKIPPED,
             ActionType.ENCRYPTION_KEY_ROTATED,
             ActionType.SYSTEM_MAINTENANCE,
             ActionType.FLOW_RUN_HISTORY_PURGED,

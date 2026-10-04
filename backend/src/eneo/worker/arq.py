@@ -6,6 +6,9 @@ from eneo.crawler.python_engine import cleanup_orphaned_crawl_directories
 from eneo.data_retention.infrastructure.data_retention_worker import (
     worker as data_retention_worker,
 )
+from eneo.data_retention.infrastructure.gallring_worker import (
+    worker as gallring_worker,
+)
 from eneo.embedding_models.infrastructure.embedding_model_cleanup_worker import (
     worker as embedding_model_cleanup_worker,
 )
@@ -32,6 +35,7 @@ worker.include_subworker(sub_worker)
 worker.include_subworker(app_worker)
 worker.include_subworker(integration_worker)
 worker.include_subworker(data_retention_worker)
+worker.include_subworker(gallring_worker)
 worker.include_subworker(sharepoint_subscription_worker)
 worker.include_subworker(model_cleanup_worker)
 worker.include_subworker(transcription_model_cleanup_worker)

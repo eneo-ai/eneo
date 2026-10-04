@@ -208,6 +208,9 @@ class ActionType(str, Enum):
 
     # System Actions
     RETENTION_POLICY_APPLIED = "retention_policy_applied"
+    # Scheduled deletion (gallring): one committed batch, and a suppressed run.
+    GALLRING_APPLIED = "gallring_applied"
+    GALLRING_SKIPPED = "gallring_skipped"
     ENCRYPTION_KEY_ROTATED = "encryption_key_rotated"
     SYSTEM_MAINTENANCE = "system_maintenance"
 
