@@ -7,6 +7,7 @@ from eneo.audit.application.audit_metadata import AuditMetadata
 from eneo.audit.domain.action_types import ActionType
 from eneo.audit.domain.actor_types import ActorType
 from eneo.audit.domain.entity_types import EntityType
+from eneo.authentication.api_key_scope_revoker import ApiKeyScopeRevoker
 from eneo.authentication.api_key_v2_repo import ApiKeysV2Repository
 from eneo.authentication.auth_models import (
     ApiKeyState,
@@ -23,6 +24,9 @@ if TYPE_CHECKING:
 
 logger = get_logger(__name__)
 
+# Keys one daily run revokes at most; authentication already refuses the rest.
+FLOW_MANAGED_ASSISTANT_KEY_SWEEP_LIMIT = 500
+
 
 class ApiKeyMaintenanceService:
     def __init__(
@@ -35,6 +39,7 @@ class ApiKeyMaintenanceService:
         self.api_key_repo = api_key_repo
         self.tenant_repo = tenant_repo
         self.audit_service = audit_service
+        self.revoker = ApiKeyScopeRevoker(api_key_repo, audit_service, user=None)
 
     async def run_daily_maintenance(self) -> dict[str, object]:
         now = datetime.now(timezone.utc)
@@ -50,6 +55,37 @@ class ApiKeyMaintenanceService:
             "rotation_revoked": rotated_revoked,
             "errors": errors,
         }
+
+    async def revoke_flow_managed_assistant_keys(self) -> dict[str, object]:
+        """Revoke keys scoped to a flow-managed assistant, which authentication
+        already refuses. Each key commits together with its audit row or not at
+        all, so an interrupted run leaves the rest to the next one."""
+        errors: list[dict[str, str]] = []
+        keys = await self.api_key_repo.list_unrevoked_flow_managed_assistant_keys(
+            limit=FLOW_MANAGED_ASSISTANT_KEY_SWEEP_LIMIT
+        )
+        revoked = 0
+        for key in keys:
+            try:
+                async with self.api_key_repo.session.begin_nested():
+                    revoked += await self.revoker.revoke_as_system(
+                        [key],
+                        reason_code=ApiKeyStateReasonCode.POLICY_VIOLATION,
+                        reason_text="Flow-managed assistants cannot be API key scopes.",
+                    )
+            except Exception as exc:
+                errors.append(
+                    {
+                        "key_id": str(key.id),
+                        "tenant_id": str(key.tenant_id),
+                        "error": str(exc),
+                    }
+                )
+                logger.exception(
+                    "Failed to revoke API key of a flow-managed assistant",
+                    extra={"api_key_id": str(key.id), "tenant_id": str(key.tenant_id)},
+                )
+        return {"flow_managed_assistant_revoked": revoked, "errors": errors}
 
     async def _expire_due_keys(
         self, *, now: datetime, errors: list[dict[str, str]]

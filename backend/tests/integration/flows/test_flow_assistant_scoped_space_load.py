@@ -1,5 +1,6 @@
 """A space load builds its visible assistants and only the hidden ones it
-names, without changing what a save writes or which API keys get a role.
+names, without changing what a save writes or which API keys get a role,
+except that a flow-managed assistant never grants an API key one.
 
 A save writes the assistants it holds and deletes only the ones the request
 removed. The one write that reaches every other assistant of the space is
@@ -142,6 +143,21 @@ async def _hidden_and_visible(client, db_container, admin_user, *, hidden: int):
     return space_id, hidden_ids, visible.id, default_id
 
 
+async def _ordinary_hidden(db_container, *, space_id: UUID, count: int) -> list[UUID]:
+    """Hidden user-origin assistants: hidden, but not flow-managed."""
+    ids = []
+    async with db_container() as container:
+        for index in range(count):
+            assistant, _ = await container.assistant_service().create_assistant(
+                name=f"dold-{index}", space_id=space_id
+            )
+            ids.append(assistant.id)
+        await container.session().execute(
+            sa.update(Assistants).where(Assistants.id.in_(ids)).values(hidden=True)
+        )
+    return ids
+
+
 def _key_role(space, scope_id: UUID) -> SpaceRole | None:
     key = SimpleNamespace(
         tenant_id=space.tenant_id,
@@ -183,15 +199,18 @@ async def test_assistant_scoped_key_roles_are_those_of_a_load_of_every_hidden_as
     client, db_container, admin_user, patch_auth_service_jwt
 ):
     _ = patch_auth_service_jwt
-    _, (target, other), visible, _ = await _hidden_and_visible(
+    space_id, (target, other), visible, _ = await _hidden_and_visible(
         client, db_container, admin_user, hidden=2
     )
+    (plain,) = await _ordinary_hidden(db_container, space_id=space_id, count=1)
 
     async with db_container() as container:
         space = await container.space_repo().get_space_by_assistant(target)
 
-    assert _key_role(space, target) == SpaceRole.EDITOR
-    assert _key_role(space, other) == SpaceRole.EDITOR
+    # target and other are flow-managed: never a key scope.
+    assert _key_role(space, target) is None
+    assert _key_role(space, other) is None
+    assert _key_role(space, plain) == SpaceRole.EDITOR
     assert _key_role(space, visible) == SpaceRole.EDITOR
     assert _key_role(space, uuid4()) is None
 
@@ -437,24 +456,37 @@ async def _invalid_on_build(db_container, assistant_id: UUID) -> None:
 
 @pytest.mark.asyncio
 @pytest.mark.integration
-@pytest.mark.parametrize("load", ["by_other_hidden", "by_default"])
+@pytest.mark.parametrize(
+    "load", ["by_self", "by_other_hidden", "by_default", "get_space"]
+)
 async def test_a_credential_scoped_to_a_hidden_assistant_gets_the_role_a_full_load_gives(
     client, db_container, admin_user, patch_auth_service_jwt, load: str
 ):
+    """An ordinary hidden assistant keeps its key role on every load that
+    builds or counts hidden assistants; a flow-managed one never grants one."""
     _ = patch_auth_service_jwt
-    _, (target, valid, invalid), _, default_id = await _hidden_and_visible(
-        client, db_container, admin_user, hidden=3
+    space_id, (target, flow_managed), _, default_id = await _hidden_and_visible(
+        client, db_container, admin_user, hidden=2
     )
+    valid, invalid = await _ordinary_hidden(db_container, space_id=space_id, count=2)
     await _invalid_on_build(db_container, invalid)
 
     roles: dict[UUID, SpaceRole | None] = {}
-    for scope_id in (valid, invalid):
+    for scope_id in (valid, invalid, flow_managed):
         key = SimpleNamespace(scope_type=ApiKeyScopeType.ASSISTANT, scope_id=scope_id)
         caller = admin_user.model_copy(update={"active_api_key": key})
         async with db_container(user=caller) as container:
-            space = await container.space_repo().get_space_by_assistant(
-                target if load == "by_other_hidden" else default_id
-            )
+            space_repo = container.space_repo()
+            if load == "get_space":
+                space = await space_repo.one(space_id)
+            else:
+                space = await space_repo.get_space_by_assistant(
+                    {"by_self": scope_id, "by_other_hidden": target}.get(
+                        load, default_id
+                    )
+                )
         roles[scope_id] = _key_role(space, scope_id)
 
-    assert roles == {valid: SpaceRole.EDITOR, invalid: None}
+    # get_space never builds hidden assistants, as before.
+    expected = None if load == "get_space" else SpaceRole.EDITOR
+    assert roles == {valid: expected, invalid: None, flow_managed: None}

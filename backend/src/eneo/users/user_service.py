@@ -970,6 +970,7 @@ class UserService:
         )
 
         policy_service = ApiKeyPolicyService(
+            api_key_repo=self.api_key_v2_repo,
             space_service=self.space_service,
             user=None,
         )

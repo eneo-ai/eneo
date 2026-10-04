@@ -9,6 +9,7 @@ from uuid import UUID
 from eneo.allowed_origins.origin_matching import origin_matches_pattern
 from eneo.authentication.api_key_request_context import resolve_client_ip
 from eneo.authentication.api_key_resolver import ApiKeyValidationError
+from eneo.authentication.api_key_v2_repo import ApiKeysV2Repository
 from eneo.authentication.auth_models import (
     FLOW_RESOURCE_PERMISSION_FIELDS,
     PK_FORBIDDEN_RESOURCE_FIELDS,
@@ -148,10 +149,12 @@ def _validate_scope_resource_permissions(
 class ApiKeyPolicyService:
     def __init__(
         self,
+        api_key_repo: ApiKeysV2Repository,
         space_service: "SpaceService | None" = None,
         user: "UserInDB | None" = None,
     ):
         super().__init__()
+        self.api_key_repo = api_key_repo
         self.space_service = space_service
         self.user = user
         self.settings = get_settings()
@@ -269,9 +272,31 @@ class ApiKeyPolicyService:
         await self._validate_expiration(request.expires_at)
         await self._validate_rate_limit(request.rate_limit)
 
-        return await self.ensure_creator_authorized(
+        space = await self.ensure_creator_authorized(
             scope_type=request.scope_type, scope_id=request.scope_id
         )
+        await self.refuse_flow_managed_assistant_scope(
+            scope_type=request.scope_type, scope_id=request.scope_id, status_code=400
+        )
+        return space
+
+    async def refuse_flow_managed_assistant_scope(
+        self,
+        *,
+        scope_type: ApiKeyScopeType,
+        scope_id: UUID | None,
+        status_code: int,
+    ) -> None:
+        """A flow-managed assistant is internal step configuration, never a
+        credential scope: no key is created, rotated or accepted for one."""
+        if scope_type != ApiKeyScopeType.ASSISTANT or scope_id is None:
+            return
+        if await self.api_key_repo.scope_is_flow_managed_assistant(scope_id):
+            raise ApiKeyValidationError(
+                status_code=status_code,
+                code="flow_managed_assistant",
+                message="Flow-managed assistants cannot be API key scopes.",
+            )
 
     async def ensure_creator_authorized(
         self,
@@ -495,6 +520,9 @@ class ApiKeyPolicyService:
                 code="invalid_api_key",
                 message=f"API key is {effective_state.value}.",
             )
+        await self.refuse_flow_managed_assistant_scope(
+            scope_type=key.scope_type, scope_id=key.scope_id, status_code=403
+        )
 
     async def enforce_guardrails(
         self,

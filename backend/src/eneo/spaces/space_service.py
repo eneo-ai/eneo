@@ -727,12 +727,11 @@ class SpaceService:
                 extra={"space_id": str(space.id)},
             )
 
-        for assistant in space.assistants:
-            assert assistant.id is not None
+        for assistant_id in await self.repo.assistant_ids(space.id):
             try:
                 await self.api_key_scope_revoker.revoke_scope(
                     scope_type=ApiKeyScopeType.ASSISTANT,
-                    scope_id=assistant.id,
+                    scope_id=assistant_id,
                     reason_code=ApiKeyStateReasonCode.SCOPE_REMOVED,
                     reason_text="Space deleted",
                 )
@@ -741,7 +740,7 @@ class SpaceService:
                     "Failed to revoke API keys for assistant in deleted space",
                     extra={
                         "space_id": str(space.id),
-                        "assistant_id": str(assistant.id),
+                        "assistant_id": str(assistant_id),
                     },
                 )
 
@@ -817,11 +816,6 @@ class SpaceService:
 
         # Revoke all API keys the removed user owns for this space and its resources
         if self.api_key_scope_revoker is not None:
-            assistant_ids: list[UUID] = []
-            for assistant in space.assistants:
-                assert assistant.id is not None
-                assistant_ids.append(assistant.id)
-
             app_ids: list[UUID] = []
             for app in space.apps:
                 assert app.id is not None
@@ -830,7 +824,7 @@ class SpaceService:
                 tenant_id=self.user.tenant_id,
                 owner_user_id=user_id,
                 space_id=id,
-                assistant_ids=assistant_ids,
+                assistant_ids=await self.repo.assistant_ids(id),
                 app_ids=app_ids,
                 reason_code=ApiKeyStateReasonCode.SCOPE_REMOVED,
                 reason_text=f"User removed from space {space.name}",

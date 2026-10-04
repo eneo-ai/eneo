@@ -6,6 +6,7 @@ from uuid import UUID
 
 from eneo.audit.application.audit_metadata import AuditMetadata
 from eneo.audit.domain.action_types import ActionType
+from eneo.audit.domain.actor_types import ActorType
 from eneo.audit.domain.entity_types import EntityType
 from eneo.authentication.api_key_v2_repo import ApiKeysV2Repository
 from eneo.authentication.auth_models import (
@@ -60,21 +61,33 @@ class ApiKeyScopeRevoker:
             keys, reason_code=reason_code, reason_text=reason_text
         )
 
+    async def revoke_as_system(
+        self,
+        keys: list[ApiKeyV2InDB],
+        *,
+        reason_code: ApiKeyStateReasonCode,
+        reason_text: str,
+    ) -> int:
+        """Revoke keys for a rule rather than a person, audited as the system."""
+        return await self._revoke_keys(
+            keys, reason_code=reason_code, reason_text=reason_text, system=True
+        )
+
     async def _revoke_keys(
         self,
         keys: list[ApiKeyV2InDB],
         *,
         reason_code: ApiKeyStateReasonCode,
         reason_text: str | None = None,
-        actor: "UserInDB | None" = None,
+        system: bool = False,
     ) -> int:
         """Revoke a list of keys with audit logging. Shared helper.
 
         The audit rows are written in the caller's transaction, so a
         revocation that rolls back leaves no audit behind.
         """
-        actor = actor or self.user
-        if actor is None:
+        actor = self.user
+        if actor is None and not system:
             return 0
 
         now = datetime.now(timezone.utc)
@@ -82,18 +95,35 @@ class ApiKeyScopeRevoker:
         for key in keys:
             if key.revoked_at is not None:
                 continue
-            updated = await self.api_key_repo.update(
+            updated_key = await self.api_key_repo.revoke_unrevoked(
                 key_id=key.id,
                 tenant_id=key.tenant_id,
-                state=ApiKeyState.REVOKED.value,
                 revoked_at=now,
                 revoked_reason_code=reason_code.value,
                 revoked_reason_text=reason_text,
             )
-            updated_key = updated or key
+            if updated_key is None:
+                continue
             revoked += 1
 
-            if self.audit_service is not None:
+            if self.audit_service is not None and system:
+                # A rule revoking a key is audited whatever the tenant's
+                # audit settings.
+                await self.audit_service.log(
+                    required=True,
+                    tenant_id=updated_key.tenant_id,
+                    actor_type=ActorType.SYSTEM,
+                    action=ActionType.API_KEY_REVOKED,
+                    entity_type=EntityType.API_KEY,
+                    entity_id=updated_key.id,
+                    description=f"Revoked API key '{updated_key.name}'",
+                    metadata=AuditMetadata.system_action(
+                        description=reason_text or "API key revoked",
+                        target=updated_key,
+                        extra={"reason_code": reason_code.value},
+                    ),
+                )
+            elif self.audit_service is not None and actor is not None:
                 await self.audit_service.log(
                     tenant_id=actor.tenant_id,
                     user=actor,

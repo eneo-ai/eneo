@@ -1,4 +1,5 @@
 from types import SimpleNamespace
+from unittest.mock import AsyncMock, MagicMock
 from uuid import uuid4
 
 import pytest
@@ -23,6 +24,9 @@ class DummySpaceService:
 
 def _service(*, user: object | None = None) -> ApiKeyPolicyService:
     return ApiKeyPolicyService(
+        api_key_repo=MagicMock(
+            scope_is_flow_managed_assistant=AsyncMock(return_value=False)
+        ),
         space_service=DummySpaceService(),
         user=user,
     )

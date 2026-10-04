@@ -252,7 +252,7 @@ export interface paths {
     put?: never;
     /**
      * Reactivate tenant API key
-     * @description Reactivate a suspended API key.
+     * @description Reactivate a suspended API key. Keys cannot be scoped to flow-managed (internal) step assistants.
      */
     post: operations["reactivate_api_key_admin_api_v1_admin_api_keys__id__reactivate_post"];
     delete?: never;
@@ -292,7 +292,7 @@ export interface paths {
     put?: never;
     /**
      * Rotate tenant API key
-     * @description Rotate an API key and return the new one-time secret.
+     * @description Rotate an API key and return the new one-time secret. Keys cannot be scoped to flow-managed (internal) step assistants.
      */
     post: operations["rotate_api_key_admin_api_v1_admin_api_keys__id__rotate_post"];
     delete?: never;
@@ -2605,7 +2605,7 @@ export interface paths {
     put?: never;
     /**
      * Create API key
-     * @description Create a v2 API key with scoped permission, guardrails, and optional rate limits.
+     * @description Create a v2 API key with scoped permission, guardrails, and optional rate limits. Keys cannot be scoped to flow-managed (internal) step assistants.
      */
     post: operations["create_api_key_api_v1_api_keys_post"];
     delete?: never;
@@ -2802,7 +2802,7 @@ export interface paths {
     put?: never;
     /**
      * Reactivate API key
-     * @description Reactivate a previously suspended API key.
+     * @description Reactivate a previously suspended API key. Keys cannot be scoped to flow-managed (internal) step assistants.
      */
     post: operations["reactivate_api_key_api_v1_api_keys__id__reactivate_post"];
     delete?: never;
@@ -2842,7 +2842,7 @@ export interface paths {
     put?: never;
     /**
      * Rotate API key
-     * @description Rotate an API key, issuing a new secret and starting the grace overlap window.
+     * @description Rotate an API key, issuing a new secret and starting the grace overlap window. Keys cannot be scoped to flow-managed (internal) step assistants.
      */
     post: operations["rotate_api_key_api_v1_api_keys__id__rotate_post"];
     delete?: never;
@@ -39314,7 +39314,7 @@ export interface operations {
           "application/json": components["schemas"]["GeneralError"];
         };
       };
-      /** @description Forbidden */
+      /** @description `flow_managed_assistant`: Reactivating a key scoped to a flow-managed (internal) step assistant is refused; other errors use the same shape. */
       403: {
         headers: {
           [name: string]: unknown;
@@ -39521,7 +39521,7 @@ export interface operations {
           "application/json": components["schemas"]["GeneralError"];
         };
       };
-      /** @description Forbidden */
+      /** @description `flow_managed_assistant`: Rotating a key scoped to a flow-managed (internal) step assistant is refused; other errors use the same shape. */
       403: {
         headers: {
           [name: string]: unknown;
@@ -46528,7 +46528,7 @@ export interface operations {
           "application/json": components["schemas"]["ApiKeyCreatedResponse"];
         };
       };
-      /** @description Bad Request */
+      /** @description `flow_managed_assistant`: Creating a key scoped to a flow-managed (internal) step assistant is refused; other errors use the same shape. */
       400: {
         headers: {
           [name: string]: unknown;
@@ -47434,7 +47434,7 @@ export interface operations {
           "application/json": components["schemas"]["GeneralError"];
         };
       };
-      /** @description Forbidden */
+      /** @description `flow_managed_assistant`: Reactivating a key scoped to a flow-managed (internal) step assistant is refused; other errors use the same shape. */
       403: {
         headers: {
           [name: string]: unknown;
@@ -47639,7 +47639,7 @@ export interface operations {
           "application/json": components["schemas"]["GeneralError"];
         };
       };
-      /** @description Forbidden */
+      /** @description `flow_managed_assistant`: Rotating a key scoped to a flow-managed (internal) step assistant is refused; other errors use the same shape. */
       403: {
         headers: {
           [name: string]: unknown;

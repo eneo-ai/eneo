@@ -1,6 +1,6 @@
 from datetime import datetime, timedelta, timezone
 from types import SimpleNamespace
-from unittest.mock import AsyncMock
+from unittest.mock import AsyncMock, MagicMock
 from uuid import uuid4
 
 import pytest
@@ -40,6 +40,9 @@ def _service_with_user(patterns: list[str], *, permissions: list[object] | None 
         tenant=tenant, permissions=permissions or [], tenant_id=uuid4()
     )
     return ApiKeyPolicyService(
+        api_key_repo=MagicMock(
+            scope_is_flow_managed_assistant=AsyncMock(return_value=False)
+        ),
         space_service=DummySpaceService(),
         user=user,
     )

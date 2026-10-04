@@ -141,6 +141,7 @@ def _service(file_service=None):
         org_space_assistant_role_repo=AsyncMock(),
         help_assistant_assignment_history_repo=AsyncMock(),
         skill_service=skill_service,
+        api_key_scope_revoker=AsyncMock(),
     )
     service.repo.project_completion_file_metadata_for_validation.side_effect = (
         lambda *, assistants, **_kwargs: {

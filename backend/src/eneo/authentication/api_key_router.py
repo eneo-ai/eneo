@@ -20,10 +20,12 @@ from eneo.authentication.api_key_lifecycle import ApiKeyLifecycleService
 from eneo.authentication.api_key_policy import ApiKeyPolicyService
 from eneo.authentication.api_key_resolver import ApiKeyValidationError
 from eneo.authentication.api_key_router_helpers import (
+    FLOW_MANAGED_ASSISTANT_SCOPE_NOTE,
     api_key_cursor_for,
     build_api_key_usage_page,
     build_api_key_usage_summary,
     error_responses,
+    flow_managed_assistant_refusal,
     paginate_keys,
     raise_api_key_http_error,
 )
@@ -959,13 +961,17 @@ async def get_api_key_usage(
     status_code=status.HTTP_201_CREATED,
     tags=["API Keys"],
     summary="Create API key",
-    description="Create a v2 API key with scoped permission, guardrails, and optional rate limits.",
+    description=(
+        "Create a v2 API key with scoped permission, guardrails, and optional "
+        f"rate limits. {FLOW_MANAGED_ASSISTANT_SCOPE_NOTE}"
+    ),
     responses={
         201: {
             "description": "API key created successfully. Secret is shown once.",
             "content": {"application/json": {"example": _API_KEY_CREATED_EXAMPLE}},
         },
         **error_responses([400, 401, 403, 429]),
+        **flow_managed_assistant_refusal(400, "Creating"),
     },
 )
 @endpoint_access(
@@ -1282,13 +1288,17 @@ async def revoke_api_key(
     response_model=ApiKeyCreatedResponse,
     tags=["API Keys"],
     summary="Rotate API key",
-    description="Rotate an API key, issuing a new secret and starting the grace overlap window.",
+    description=(
+        "Rotate an API key, issuing a new secret and starting the grace overlap "
+        f"window. {FLOW_MANAGED_ASSISTANT_SCOPE_NOTE}"
+    ),
     responses={
         200: {
             "description": "Rotated API key and one-time secret.",
             "content": {"application/json": {"example": _API_KEY_CREATED_EXAMPLE}},
         },
         **error_responses([400, 401, 403, 404, 429]),
+        **flow_managed_assistant_refusal(403, "Rotating"),
     },
 )
 @endpoint_access(
@@ -1440,13 +1450,17 @@ async def suspend_api_key(
     response_model=ApiKeyV2,
     tags=["API Keys"],
     summary="Reactivate API key",
-    description="Reactivate a previously suspended API key.",
+    description=(
+        "Reactivate a previously suspended API key. "
+        f"{FLOW_MANAGED_ASSISTANT_SCOPE_NOTE}"
+    ),
     responses={
         200: {
             "description": "Reactivated API key.",
             "content": {"application/json": {"example": _API_KEY_EXAMPLE}},
         },
         **error_responses([400, 401, 403, 404, 429]),
+        **flow_managed_assistant_refusal(403, "Reactivating"),
     },
 )
 @endpoint_access(

@@ -94,6 +94,7 @@ def _service_with_effective_config(effective_config_service: AsyncMock):
         org_space_assistant_role_repo=_not_helper_role_repo(),
         help_assistant_assignment_history_repo=_not_helper_history_repo(),
         skill_service=_empty_skill_service(),
+        api_key_scope_revoker=AsyncMock(),
         effective_config_service=effective_config_service,
     )
 
@@ -224,6 +225,7 @@ async def test_ask_uses_effective_model_for_session_metadata_and_response():
         org_space_assistant_role_repo=_not_helper_role_repo(),
         help_assistant_assignment_history_repo=_not_helper_history_repo(),
         skill_service=_empty_skill_service(),
+        api_key_scope_revoker=AsyncMock(),
         effective_config_service=effective_config_service,
     )
     service._handle_response = AsyncMock(return_value="answer")  # type: ignore[method-assign]
@@ -328,6 +330,7 @@ async def test_ask_rejects_empty_model_policy_before_creating_history():
         org_space_assistant_role_repo=_not_helper_role_repo(),
         help_assistant_assignment_history_repo=_not_helper_history_repo(),
         skill_service=_empty_skill_service(),
+        api_key_scope_revoker=AsyncMock(),
         effective_config_service=effective_config_service,
     )
 
@@ -419,6 +422,7 @@ async def test_ask_grants_policy_mcp_servers_to_personal_assistant():
         org_space_assistant_role_repo=_not_helper_role_repo(),
         help_assistant_assignment_history_repo=_not_helper_history_repo(),
         skill_service=_empty_skill_service(),
+        api_key_scope_revoker=AsyncMock(),
         effective_config_service=effective_config_service,
     )
     service._handle_response = AsyncMock(return_value="answer")  # type: ignore[method-assign]
@@ -530,6 +534,7 @@ async def test_ask_applies_governed_file_policy_to_personal_assistant(
         org_space_assistant_role_repo=_not_helper_role_repo(),
         help_assistant_assignment_history_repo=_not_helper_history_repo(),
         skill_service=_empty_skill_service(),
+        api_key_scope_revoker=AsyncMock(),
         effective_config_service=effective_config_service,
     )
     service._handle_response = AsyncMock(return_value="answer")  # type: ignore[method-assign]
@@ -614,6 +619,7 @@ async def test_ask_respects_disabled_mcp_server_ids():
         org_space_assistant_role_repo=_not_helper_role_repo(),
         help_assistant_assignment_history_repo=_not_helper_history_repo(),
         skill_service=_empty_skill_service(),
+        api_key_scope_revoker=AsyncMock(),
         effective_config_service=effective_config_service,
     )
     service._handle_response = AsyncMock(return_value="answer")  # type: ignore[method-assign]
@@ -1605,6 +1611,7 @@ async def test_ask_checks_space_with_policy_default_when_assistant_has_no_model(
         org_space_assistant_role_repo=_not_helper_role_repo(),
         help_assistant_assignment_history_repo=_not_helper_history_repo(),
         skill_service=_empty_skill_service(),
+        api_key_scope_revoker=AsyncMock(),
         effective_config_service=effective_config_service,
     )
     service._handle_response = AsyncMock(return_value="answer")  # type: ignore[method-assign]

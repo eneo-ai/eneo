@@ -14,7 +14,7 @@ from sqlalchemy.sql.dml import ReturningInsert, ReturningUpdate
 
 from eneo.actors.actors.space_actor import SpaceAccessFacts, SpaceRoleFact
 from eneo.ai_models.completion_models.completion_model import ModelKwargs
-from eneo.assistants.assistant import Assistant
+from eneo.assistants.assistant import Assistant, AssistantOrigin
 from eneo.authentication.auth_models import ApiKeyScopeType
 from eneo.collections.domain.collection import Collection
 from eneo.database.database import AsyncSession
@@ -1616,9 +1616,20 @@ class SpaceRepository:
             .where(Assistants.space_id == space_id)
             .where(Assistants.hidden.is_(True))
             .where(Assistants.is_default.is_(False))
+            .where(Assistants.origin != AssistantOrigin.FLOW_MANAGED.value)
             .where(Assistants.id.not_in(loaded))
         )
         return frozenset(rows.all())
+
+    async def assistant_ids(self, space_id: UUID) -> list[UUID]:
+        """Every assistant of the space, hidden ones included, which a space
+        load does not build: what revoking the space's keys must cover."""
+        rows = await self.session.scalars(
+            sa.select(Assistants.id)
+            .where(Assistants.space_id == space_id)
+            .order_by(Assistants.created_at, Assistants.id)
+        )
+        return list(rows.all())
 
     async def _get_from_query(
         self,
@@ -2640,9 +2651,9 @@ async def read_space_access_facts(
 
     Reads plain rows, never the Space entity: a session that already holds the
     space (members loaded) would otherwise answer from what it loaded before.
-    A key scoped to a hidden (flow-managed) assistant is not a key of the
-    space's assistants, exactly as ``Space.assistants`` decides for
-    ``SpaceActor``. Group roles count only through the caller's current
+    A key scoped to a hidden assistant is not a key of the space's
+    assistants, exactly as ``Space.assistants`` decides for ``SpaceActor``,
+    and one scoped to a flow-managed assistant never is. Group roles count only through the caller's current
     memberships, not the group list loaded with the principal, so a removed
     membership is not a role.
     """
@@ -2712,6 +2723,7 @@ async def _caller_space_access_facts(
             Assistants.space_id == space_id,
             Assistants.id == key.scope_id,
             Assistants.is_default.is_(False),
+            Assistants.origin != AssistantOrigin.FLOW_MANAGED.value,
         )
         if not include_hidden_assistants:
             assistant_query = assistant_query.where(Assistants.hidden.is_(False))

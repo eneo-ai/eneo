@@ -646,16 +646,15 @@ async def test_a_failure_after_one_revocation_leaves_no_revocation_audit(
         scope_type="assistant",
         scope_id=spare_id,
     )
-    update_key = ApiKeysV2Repository.update
+    revoke_key = ApiKeysV2Repository.revoke_unrevoked
     revocations = 0
 
     async def fail_the_second_revocation(self, **kwargs):
         nonlocal revocations
-        if kwargs.get("state") == ApiKeyState.REVOKED.value:
-            revocations += 1
-            if revocations == 2:
-                raise RuntimeError("API key revocation failed")
-        return await update_key(self, **kwargs)
+        revocations += 1
+        if revocations == 2:
+            raise RuntimeError("API key revocation failed")
+        return await revoke_key(self, **kwargs)
 
     queued: list[ActionType] = []
     log_async = AuditService.log_async
@@ -664,7 +663,9 @@ async def test_a_failure_after_one_revocation_leaves_no_revocation_audit(
         queued.append(kwargs["action"])
         return await log_async(self, **kwargs)
 
-    monkeypatch.setattr(ApiKeysV2Repository, "update", fail_the_second_revocation)
+    monkeypatch.setattr(
+        ApiKeysV2Repository, "revoke_unrevoked", fail_the_second_revocation
+    )
     monkeypatch.setattr(AuditService, "log_async", record_queued_audit)
 
     async with AsyncClient(

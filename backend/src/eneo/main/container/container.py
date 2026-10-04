@@ -1256,6 +1256,7 @@ class Container(containers.DeclarativeContainer):
     )
     api_key_policy_service = providers.Factory(
         ApiKeyPolicyService,
+        api_key_repo=api_key_v2_repo,
         space_service=space_service,
         user=user,
     )
@@ -1275,7 +1276,6 @@ class Container(containers.DeclarativeContainer):
         api_key_repo=api_key_v2_repo,
         tenant_repo=tenant_repo,
         audit_service=audit_service,
-        data_retention_service=data_retention_service,
     )
     storage_service = providers.Factory(StorageInfoService, repo=storage_repo)
     job_service = providers.Factory(

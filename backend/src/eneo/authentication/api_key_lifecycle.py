@@ -701,6 +701,9 @@ class ApiKeyLifecycleService:
             if not skip_manage_authorization:
                 await self.policy_service.ensure_manage_authorized(key=key)
                 await self.policy_service.ensure_ownership_authorized(key=key)
+            await self.policy_service.refuse_flow_managed_assistant_scope(
+                scope_type=key.scope_type, scope_id=key.scope_id, status_code=403
+            )
         except ApiKeyValidationError as exc:
             await self._log_lifecycle_failure(
                 action=ActionType.API_KEY_REACTIVATED,

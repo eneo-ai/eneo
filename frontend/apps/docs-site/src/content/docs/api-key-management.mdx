@@ -129,6 +129,8 @@ otherwise            → ACTIVE
 
 Only `ACTIVE` keys proceed. Revoked, expired, rotation-grace-expired, and suspended keys return `401` with `code: "invalid_api_key"` during API-key authentication.
 
+A key that is otherwise active but scoped to a flow-managed assistant (see [Scope Types](#scope-types)) returns `403` with `code: "flow_managed_assistant"`. The refusal runs with the guardrail checks, after ownership resolution and before rate limiting and the route's scope, permission and role checks. A key that is not active returns `401 invalid_api_key` first.
+
 ### 4. Guardrail Checks
 
 - **IP validation** (`sk_` keys): If `allowed_ips` is configured, the client IP must match at least one CIDR block
@@ -192,6 +194,8 @@ Scopes define the boundary of what a key can access, from broadest to narrowest:
 | `space`     | Single space and its contents          | Space UUID     |
 | `assistant` | Single assistant and its conversations | Assistant UUID |
 | `app`       | Single app and its runs                | App UUID       |
+
+A flow-managed assistant (the internal assistant a Flow creates for one of its steps) is never a key scope. Creating a key for one returns `400 flow_managed_assistant`, rotating, reactivating or authenticating with an otherwise active or suspended one returns `403 flow_managed_assistant` (a revoked or expired key still returns `401 invalid_api_key` when used), and the daily API key maintenance job revokes any such key that still exists (reason `policy_violation`, audited as the system even when the tenant has turned that audit action off). Keys scoped to other hidden assistants keep their access. Deleting a space or removing a member also revokes keys scoped to the space's hidden assistants.
 
 Files are user-owned rather than space-owned. A scoped user key can access the file API when its `files` resource permission allows it, but file reads and deletes are still constrained to files owned by that key's user.
 
@@ -324,7 +328,7 @@ Tenant administrators can configure API key policies that apply to all keys in t
 | `revocation_cascade_enabled` | false   | Reserved for delegated-key cascade support                              |
 | `require_expiration`         | false   | All new keys must have an expiry date                                   |
 | `max_expiration_days`        | null    | Maximum days until expiry (null = unlimited)                            |
-| `auto_expire_unused_days`    | null    | Mark keys unused for N days as `EXPIRED` (audited as `API_KEY_EXPIRED`) |
+| `auto_expire_unused_days`    | null    | Mark keys unused for N days as `EXPIRED` (audited as `API_KEY_EXPIRED`). Not applied yet: the daily maintenance job runs only the flow-managed key revocation |
 | `max_rate_limit_override`    | null    | Absolute ceiling on per-key rate limits                                 |
 | `rotation_grace_hours`       | 24      | Grace period for old keys during rotation                               |
 

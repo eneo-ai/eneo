@@ -118,6 +118,7 @@ def setup_fixture():
         org_space_assistant_role_repo=role_repo_mock,
         help_assistant_assignment_history_repo=history_repo_mock,
         skill_service=AsyncMock(),
+        api_key_scope_revoker=AsyncMock(),
     )
 
     # Attachment fit validation needs a real model + token counts; it is

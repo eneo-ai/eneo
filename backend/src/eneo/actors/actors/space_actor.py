@@ -5,6 +5,7 @@ from types import MappingProxyType
 from typing import TYPE_CHECKING, Protocol, runtime_checkable
 from uuid import UUID
 
+from eneo.assistants.assistant import AssistantOrigin
 from eneo.authentication.auth_models import is_service_api_key
 from eneo.main.models import ResourcePermission
 from eneo.roles.permissions import Permission, has_permission
@@ -78,7 +79,12 @@ class SpaceAccessFacts:
                 if space.default_assistant is not None
                 else None
             ),
-            assistant_ids=frozenset(assistant.id for assistant in space.assistants)
+            # A flow-managed assistant is never an API key scope.
+            assistant_ids=frozenset(
+                assistant.id
+                for assistant in space.assistants
+                if assistant.origin != AssistantOrigin.FLOW_MANAGED
+            )
             | space.unloaded_hidden_assistant_ids,
             app_ids=frozenset(app.id for app in space.apps if app.id is not None),
         )

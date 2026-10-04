@@ -378,7 +378,7 @@ class AssistantService:
         help_assistant_assignment_history_repo: HelpAssistantAssignmentHistoryRepo,
         auth_service: AuthService,
         skill_service: "SkillService",
-        api_key_scope_revoker: ApiKeyScopeRevoker | None = None,
+        api_key_scope_revoker: ApiKeyScopeRevoker,
         effective_config_service: "EffectiveConfigService | None" = None,
     ):
         super().__init__()
@@ -2248,8 +2248,6 @@ class AssistantService:
                     )
 
     async def _revoke_assistant_api_keys(self, assistant_id: UUID) -> None:
-        if self.api_key_scope_revoker is None:
-            return
         await self.api_key_scope_revoker.revoke_scope(
             scope_type=ApiKeyScopeType.ASSISTANT,
             scope_id=assistant_id,

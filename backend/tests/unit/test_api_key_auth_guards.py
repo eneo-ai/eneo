@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from types import SimpleNamespace
 from typing import Any
-from unittest.mock import AsyncMock
+from unittest.mock import AsyncMock, MagicMock
 from uuid import uuid4
 
 import pytest
@@ -430,6 +430,9 @@ class TestPolicyMaxRateLimit:
         tenant = SimpleNamespace(api_key_policy={"max_rate_limit_override": 100})
         user = SimpleNamespace(tenant=tenant, permissions=[])
         service = ApiKeyPolicyService(
+            api_key_repo=MagicMock(
+                scope_is_flow_managed_assistant=AsyncMock(return_value=False)
+            ),
             space_service=SimpleNamespace(),
             user=user,
         )

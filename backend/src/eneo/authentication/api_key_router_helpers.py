@@ -148,6 +148,27 @@ def error_responses(codes: list[int]) -> dict[int | str, dict[str, Any]]:
     )
 
 
+FLOW_MANAGED_ASSISTANT_SCOPE_NOTE = (
+    "Keys cannot be scoped to flow-managed (internal) step assistants."
+)
+
+
+def flow_managed_assistant_refusal(
+    status_code: int, action: str
+) -> dict[int | str, dict[str, Any]]:
+    """The documented response when ``action`` names a flow-managed assistant."""
+    return {
+        status_code: {
+            "model": GeneralError,
+            "description": (
+                f"`flow_managed_assistant`: {action} a key scoped to a "
+                "flow-managed (internal) step assistant is refused; other "
+                "errors use the same shape."
+            ),
+        }
+    }
+
+
 def paginate_keys(
     keys: list[ApiKeyV2InDB],
     *,

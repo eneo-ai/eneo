@@ -9,6 +9,7 @@ import sqlalchemy as sa
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.sql import Select
 
+from eneo.assistants.assistant import AssistantOrigin
 from eneo.authentication.auth_models import (
     PERMISSION_LEVEL_ORDER,
     ApiKeyListCursor,
@@ -20,9 +21,17 @@ from eneo.authentication.auth_models import (
     ServicePrincipalState,
 )
 from eneo.database.tables.api_keys_v2_table import ApiKeysV2
+from eneo.database.tables.assistant_table import Assistants
 from eneo.database.tables.service_principals_table import ServicePrincipals
 from eneo.database.tables.tenant_table import Tenants
 from eneo.database.tables.users_table import Users
+
+
+def _flow_managed_assistant_ids() -> Select[tuple[UUID]]:
+    """A flow-managed assistant is internal step configuration, never a key scope."""
+    return sa.select(Assistants.id).where(
+        Assistants.origin == AssistantOrigin.FLOW_MANAGED.value
+    )
 
 
 class ApiKeysV2Repository:
@@ -523,6 +532,21 @@ class ApiKeysV2Repository:
 
         return ApiKeyV2InDB.model_validate(record)
 
+    async def revoke_unrevoked(
+        self, *, key_id: UUID, tenant_id: UUID, **values: object
+    ) -> Optional[ApiKeyV2InDB]:
+        """Revoke the key unless it already is: None when no row changed, so a
+        concurrent revocation keeps its own reason, time and audit row."""
+        record = await self.session.scalar(
+            sa.update(self.table)
+            .where(self.table.id == key_id)
+            .where(self.table.tenant_id == tenant_id)
+            .where(self.table.revoked_at.is_(None))
+            .values(state=ApiKeyState.REVOKED.value, **values)
+            .returning(self.table)
+        )
+        return None if record is None else ApiKeyV2InDB.model_validate(record)
+
     async def delete(self, *, key_id: UUID, tenant_id: UUID) -> bool:
         query = (
             sa.delete(self.table)
@@ -673,6 +697,32 @@ class ApiKeysV2Repository:
             .where(self.table.expires_at <= now)
             .where(self.table.revoked_at.is_(None))
             .where(self.table.state != ApiKeyState.EXPIRED.value)
+        )
+        records = await self.session.scalars(query)
+        return [ApiKeyV2InDB.model_validate(record) for record in records]
+
+    async def scope_is_flow_managed_assistant(self, assistant_id: UUID) -> bool:
+        return bool(
+            await self.session.scalar(
+                sa.select(
+                    _flow_managed_assistant_ids()
+                    .where(Assistants.id == assistant_id)
+                    .exists()
+                )
+            )
+        )
+
+    async def list_unrevoked_flow_managed_assistant_keys(
+        self, *, limit: int
+    ) -> list[ApiKeyV2InDB]:
+        query = (
+            sa.select(self.table)
+            .where(self.table.scope_type == ApiKeyScopeType.ASSISTANT.value)
+            .where(self.table.scope_id.in_(_flow_managed_assistant_ids()))
+            .where(self.table.revoked_at.is_(None))
+            .where(self.table.state != ApiKeyState.REVOKED.value)
+            .order_by(self.table.created_at, self.table.id)
+            .limit(limit)
         )
         records = await self.session.scalars(query)
         return [ApiKeyV2InDB.model_validate(record) for record in records]
