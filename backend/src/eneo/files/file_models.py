@@ -57,6 +57,8 @@ class FileUsageKind(StrEnum):
     ASSISTANT_ATTACHMENT = "assistant_attachment"
     APP_ATTACHMENT = "app_attachment"
     APP_RUN_INPUT = "app_run_input"
+    FLOW_VERSION = "flow_version"
+    FLOW_TEMPLATE_ASSET = "flow_template_asset"
 
 
 class FileUsageSummary(BaseModel):
@@ -64,11 +66,19 @@ class FileUsageSummary(BaseModel):
     count: int
 
 
+class FileFlowVersionHolder(BaseModel):
+    flow_id: UUID
+    version: int
+
+
 class FileDeletionPreview(BaseModel):
     file_id: UUID
     can_delete: bool
     affected_file_count: int
     blockers: list[FileUsageSummary]
+    # At most ten of the published flow versions that name the file (the
+    # `flow_version` blocker count is the full number).
+    flow_versions: list[FileFlowVersionHolder] = []
 
 
 class FileInUseError(Exception):
@@ -77,11 +87,19 @@ class FileInUseError(Exception):
     def __init__(self, preview: FileDeletionPreview) -> None:
         self.preview = preview
         self.details = preview.model_dump(mode="json")
-        super().__init__(
+        message = (
             "File is still in use and cannot be deleted. "
             "See details.blockers for the remaining references; "
             "retry only after those references have been removed."
         )
+        if preview.flow_versions:
+            message += (
+                " A file is protected while a flow version that names it exists; "
+                "unpublishing and run-history purge do not release it, and no "
+                "automatic version cleanup exists yet. details.flow_versions "
+                "lists the flows and version numbers."
+            )
+        super().__init__(message)
 
 
 class FileOriginalNotFoundError(Exception):

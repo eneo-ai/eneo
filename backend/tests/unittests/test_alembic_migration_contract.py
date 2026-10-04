@@ -11,6 +11,8 @@ from unittest.mock import MagicMock, call
 import pytest
 import sqlalchemy as sa
 
+from alembic import command
+from alembic.config import Config
 from alembic.migration import MigrationContext
 from alembic.operations import Operations
 from eneo.database.tables.flow_tables import (
@@ -569,3 +571,20 @@ def test_upload_default_migration_preserves_policy_on_downgrade(
             assert dict(row) == upgraded
     finally:
         engine.dispose()
+
+
+def test_flow_version_reference_backfill_refuses_offline_and_never_stamps():
+    backend = Path(__file__).parents[2]
+    config = Config(str(backend / "alembic.ini"))
+    config.set_main_option("script_location", str(backend / "alembic"))
+    config.set_main_option("sqlalchemy.url", "postgresql://offline@localhost/offline")
+    output = io.StringIO()
+    config.output_buffer = output
+
+    with pytest.raises(RuntimeError, match="must run online"):
+        command.upgrade(config, "202609291100:202610021015", sql=True)
+
+    # Nothing marks the revision as applied, so an online upgrade still runs it.
+    emitted = output.getvalue().lower()
+    assert "update alembic_version" not in emitted
+    assert "insert into alembic_version" not in emitted

@@ -177,12 +177,28 @@ async def get_file(
     "/{id}/",
     status_code=204,
     response_class=Response,
-    description="Delete a file owned by the current user.",
+    description=(
+        "Delete a file owned by the current user. A file used by a chat, "
+        "Assistant, App, App run, flow template or published flow version "
+        "cannot be deleted until no retained use references it. A file is "
+        "protected while a flow version that names it exists; unpublishing "
+        "and run-history purge do not release it, and no automatic version "
+        "cleanup exists yet."
+    ),
     responses={
         204: {
             "description": "File deleted successfully. No response body is returned."
         },
-        **responses.get_responses([403, 404, 409]),
+        **responses.get_responses([403, 404]),
+        409: {
+            "model": GeneralError,
+            "description": (
+                "The file is still used (error code `file_in_use`); "
+                "`details.blockers` lists the uses, including `flow_version` "
+                "(with `details.flow_versions` naming at most ten flows and "
+                "version numbers) and `flow_template_asset`."
+            ),
+        },
     },
 )
 @endpoint_access(
@@ -236,7 +252,7 @@ async def delete_file(
     responses=responses.get_responses([403, 404]),
     description=(
         "Preview whether deleting this File would remove active chat, Assistant, "
-        "App, or App-run attachments."
+        "App, or App-run attachments, or a file a published flow version uses."
     ),
 )
 @endpoint_access(

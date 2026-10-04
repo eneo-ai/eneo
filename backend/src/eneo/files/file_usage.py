@@ -15,8 +15,14 @@ from sqlalchemy.sql.selectable import Select
 from eneo.database.tables.app_table import AppRunsFiles, AppsFiles
 from eneo.database.tables.assistant_table import AssistantsFiles
 from eneo.database.tables.files_table import Files
+from eneo.database.tables.flow_tables import (
+    FlowTemplateAssets,
+    FlowVersionFileReferences,
+)
 from eneo.database.tables.questions_table import QuestionsFiles
-from eneo.files.file_models import FileUsageKind
+from eneo.files.file_models import FileFlowVersionHolder, FileUsageKind
+
+FLOW_VERSION_HOLDER_LIMIT = 10
 
 
 class FileFamilyTenantMismatchError(RuntimeError):
@@ -141,6 +147,16 @@ class FileUsageRepository:
                 AppRunsFiles.file_id,
                 file_ids_parameter,
             ),
+            self._usage_select(
+                FileUsageKind.FLOW_VERSION,
+                FlowVersionFileReferences.file_id,
+                file_ids_parameter,
+            ),
+            self._usage_select(
+                FileUsageKind.FLOW_TEMPLATE_ASSET,
+                FlowTemplateAssets.file_id,
+                file_ids_parameter,
+            ),
         ).subquery("file_product_usage")
         rows = (
             await self._session.execute(
@@ -159,6 +175,25 @@ class FileUsageRepository:
                 count=row.usage_count,
             )
             for row in rows
+        ]
+
+    async def list_flow_version_holders(
+        self, file_ids: list[UUID]
+    ) -> list[FileFlowVersionHolder]:
+        rows = await self._session.execute(
+            sa.select(
+                FlowVersionFileReferences.flow_id, FlowVersionFileReferences.version
+            )
+            .where(FlowVersionFileReferences.file_id.in_(file_ids))
+            .distinct()
+            .order_by(
+                FlowVersionFileReferences.flow_id, FlowVersionFileReferences.version
+            )
+            .limit(FLOW_VERSION_HOLDER_LIMIT)
+        )
+        return [
+            FileFlowVersionHolder(flow_id=flow_id, version=version)
+            for flow_id, version in rows.all()
         ]
 
     @staticmethod

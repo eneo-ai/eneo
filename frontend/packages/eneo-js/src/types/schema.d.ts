@@ -4078,7 +4078,7 @@ export interface paths {
     post?: never;
     /**
      * Delete File
-     * @description Delete a file owned by the current user.
+     * @description Delete a file owned by the current user. A file used by a chat, Assistant, App, App run, flow template or published flow version cannot be deleted until no retained use references it. A file is protected while a flow version that names it exists; unpublishing and run-history purge do not release it, and no automatic version cleanup exists yet.
      */
     delete: operations["delete_file_api_v1_files__id___delete"];
     options?: never;
@@ -4095,7 +4095,7 @@ export interface paths {
     };
     /**
      * Get File Deletion Preview
-     * @description Preview whether deleting this File would remove active chat, Assistant, App, or App-run attachments.
+     * @description Preview whether deleting this File would remove active chat, Assistant, App, or App-run attachments, or a file a published flow version uses.
      */
     get: operations["get_file_deletion_preview_api_v1_files__id__deletion_preview__get"];
     put?: never;
@@ -17556,6 +17556,21 @@ export interface components {
        * Format: uuid
        */
       file_id: string;
+      /**
+       * Flow Versions
+       * @default []
+       */
+      flow_versions?: components["schemas"]["FileFlowVersionHolder"][];
+    };
+    /** FileFlowVersionHolder */
+    FileFlowVersionHolder: {
+      /**
+       * Flow Id
+       * Format: uuid
+       */
+      flow_id: string;
+      /** Version */
+      version: number;
     };
     /** FilePolicyInput */
     FilePolicyInput: {
@@ -17621,7 +17636,13 @@ export interface components {
      * FileUsageKind
      * @enum {string}
      */
-    FileUsageKind: "chat_attachment" | "assistant_attachment" | "app_attachment" | "app_run_input";
+    FileUsageKind:
+      | "chat_attachment"
+      | "assistant_attachment"
+      | "app_attachment"
+      | "app_run_input"
+      | "flow_version"
+      | "flow_template_asset";
     /** FileUsageSummary */
     FileUsageSummary: {
       /** Count */
@@ -53096,7 +53117,7 @@ export interface operations {
           "application/json": components["schemas"]["GeneralError"];
         };
       };
-      /** @description Conflict */
+      /** @description The file is still used (error code `file_in_use`); `details.blockers` lists the uses, including `flow_version` (with `details.flow_versions` naming at most ten flows and version numbers) and `flow_template_asset`. */
       409: {
         headers: {
           [name: string]: unknown;

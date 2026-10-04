@@ -11,6 +11,10 @@ from eneo.database.repositories.base import BaseRepositoryDelegate
 from eneo.database.tables.api_keys_v2_table import ApiKeysV2
 from eneo.database.tables.assistant_table import Assistants
 from eneo.database.tables.files_table import Files
+from eneo.database.tables.flow_tables import (
+    FlowTemplateAssets,
+    FlowVersionFileReferences,
+)
 from eneo.database.tables.help_assistant_runs_table import HelpAssistantRuns
 from eneo.database.tables.info_blobs_table import InfoBlobs
 from eneo.database.tables.questions_table import (
@@ -606,12 +610,33 @@ class SessionRepository:
         )
         deleted = await self.delegate.delete(id)
         if generated_file_ids:
-            still_referenced = sa.select(QuestionsFiles.file_id).where(
-                QuestionsFiles.file_id.in_(generated_file_ids)
+            # Lock the candidates first, in id order (as FileService.delete_file
+            # does), and only then read the references in a separate statement:
+            # a publisher that holds a file's lock with an uncommitted version
+            # reference makes this wait, and the statement below then sees the
+            # committed reference. A flow version or template asset that names
+            # the file keeps it (their references are RESTRICT).
+            locked_file_ids = list(
+                await self.session.scalars(
+                    sa.select(Files.id)
+                    .where(Files.id.in_(generated_file_ids))
+                    .order_by(Files.id)
+                    .with_for_update(of=Files)
+                )
+            )
+            still_referenced = sa.union(
+                *(
+                    sa.select(column).where(column.in_(locked_file_ids))
+                    for column in (
+                        QuestionsFiles.file_id,
+                        FlowVersionFileReferences.file_id,
+                        FlowTemplateAssets.file_id,
+                    )
+                )
             )
             await self.session.execute(
                 sa.delete(Files).where(
-                    Files.id.in_(generated_file_ids),
+                    Files.id.in_(locked_file_ids),
                     Files.id.not_in(still_referenced),
                 )
             )

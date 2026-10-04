@@ -158,6 +158,7 @@ def scan_published_template_references(
 
     asset_ids: set[UUID] = set()
     file_ids: set[UUID] = set()
+    unreadable = False
     raw_steps = definition_json.get("steps")
     if not isinstance(raw_steps, list):
         return PublishedTemplateReferenceScan(
@@ -183,14 +184,9 @@ def scan_published_template_references(
                 "template_file_id",
             )
         )
-        if unreadable_asset_reference or unreadable_file_reference:
-            return PublishedTemplateReferenceScan(
-                template_asset_ids=frozenset(asset_ids),
-                template_file_ids=frozenset(file_ids),
-                undetermined_reason=(
-                    PublishedTemplateReferenceUndeterminedReason.UNREADABLE_REFERENCE
-                ),
-            )
+        unreadable = (
+            unreadable or unreadable_asset_reference or unreadable_file_reference
+        )
         if template_asset_id is not None:
             asset_ids.add(template_asset_id)
         if template_file_id is not None:
@@ -199,6 +195,58 @@ def scan_published_template_references(
     return PublishedTemplateReferenceScan(
         template_asset_ids=frozenset(asset_ids),
         template_file_ids=frozenset(file_ids),
+        undetermined_reason=(
+            PublishedTemplateReferenceUndeterminedReason.UNREADABLE_REFERENCE
+            if unreadable
+            else None
+        ),
+    )
+
+
+@dataclass(frozen=True, slots=True)
+class PublishedFileReferences:
+    """The files one published snapshot needs, as the snapshot names them.
+
+    ``template_asset_ids`` name a flow template asset, whose file is resolved
+    by the asset row; ``file_ids`` name a file directly.
+    """
+
+    file_ids: frozenset[UUID]
+    template_asset_ids: frozenset[UUID]
+
+
+def published_file_references(
+    definition_json: Mapping[str, object],
+) -> PublishedFileReferences:
+    """Every file id a persisted flow definition references: the template
+    ids of each step's ``output_config`` and the attachments frozen into each
+    step's ``assistant_snapshot``. The one owner of this reading; unreadable
+    values and unknown schemas name nothing."""
+    template = scan_published_template_references(definition_json)
+    file_ids = set(template.template_file_ids)
+    raw_steps = definition_json.get("steps")
+    if definition_json.get(
+        "schema_version"
+    ) == FLOW_DEFINITION_SCHEMA_VERSION and isinstance(raw_steps, list):
+        for raw_step in cast(list[object], raw_steps):
+            snapshot = (
+                raw_step.get("assistant_snapshot")
+                if _is_json_object(raw_step)
+                else None
+            )
+            raw_attachments = (
+                snapshot.get("attachments") if _is_json_object(snapshot) else None
+            )
+            if not isinstance(raw_attachments, list):
+                continue
+            for attachment in cast(list[object], raw_attachments):
+                if _is_json_object(attachment) and (
+                    attached := _normalized_uuid(attachment.get("file_id"))
+                ):
+                    file_ids.add(attached)
+    return PublishedFileReferences(
+        file_ids=frozenset(file_ids),
+        template_asset_ids=template.template_asset_ids,
     )
 
 

@@ -740,6 +740,11 @@ class FileService:
             can_delete=not blockers,
             affected_file_count=len(family_ids),
             blockers=blockers,
+            flow_versions=(
+                await self._usage.list_flow_version_holders(family_ids)
+                if FileUsageKind.FLOW_VERSION in usage
+                else []
+            ),
         )
 
     async def get_file_content(

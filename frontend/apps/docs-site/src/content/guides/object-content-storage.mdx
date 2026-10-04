@@ -788,9 +788,15 @@ storage**. Changing the target for new writes never starts a fleet migration.
 ### Why can I not delete an uploaded File?
 
 `DELETE /api/v1/files/{file_id}/` returns `409` with `code: "file_in_use"`
-while a chat, Assistant, App, or App run still references the File or one of
-its generated files. This is a usage conflict; granting more permissions or
-retrying the same request does not resolve it.
+while a chat, Assistant, App, App run, flow template, or published flow version
+still references the File or one of its generated files. A published flow
+version names the DOCX template and the assistant attachments it was published
+with. The File is protected while a flow version that names it exists;
+unpublishing the flow and run-history purge do not release it, and no
+automatic version cleanup exists yet. For a flow version,
+`details.flow_versions` lists up to ten flow IDs with their version numbers.
+This is a usage conflict; granting more permissions or retrying the same
+request does not resolve it.
 
 The response's `details.blockers` lists the remaining uses and their counts.
 For example, `{"kind": "chat_attachment", "count": 1}` means one chat-message

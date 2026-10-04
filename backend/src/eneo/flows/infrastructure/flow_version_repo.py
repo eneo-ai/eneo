@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import logging
 from collections.abc import Collection, Sequence
 from dataclasses import dataclass
 from datetime import datetime
@@ -9,7 +10,9 @@ import sqlalchemy as sa
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from eneo.database.tables.files_table import Files
 from eneo.database.tables.flow_tables import (
+    FlowTemplateAssets,
     FlowVersionFileReferences,
     FlowVersions,
 )
@@ -18,9 +21,12 @@ from eneo.flows.published_definition import (
     PublishedTemplateReferenceScan,
     merge_published_template_reference_scans,
     published_definition_checksum,
+    published_file_references,
     scan_published_template_references,
 )
 from eneo.main.exceptions import NotFoundException
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass(frozen=True, slots=True)
@@ -122,12 +128,78 @@ class FlowVersionRepository:
         version_in_db = await self.session.scalar(stmt)
         if version_in_db is None:
             raise NotFoundException("Could not create flow version.")
+        unresolved = await self.record_file_references(
+            flow_id=flow_id,
+            version=version,
+            tenant_id=tenant_id,
+            definition_json=definition_json,
+        )
+        if unresolved:
+            logger.info(
+                "Flow version names ids that resolve to no file; nothing retained.",
+                extra={
+                    "flow_id": str(flow_id),
+                    "version": version,
+                    "unresolved_ids": unresolved,
+                },
+            )
         return FlowVersion.model_validate(version_in_db)
+
+    async def record_file_references(
+        self,
+        *,
+        flow_id: UUID,
+        version: int,
+        tenant_id: UUID,
+        definition_json: FlowPersistedJsonObject,
+    ) -> int:
+        """Retain the files a snapshot names, in the snapshot's transaction.
+
+        Returns how many named ids resolve to no file (a deleted file or an
+        id of another flow or tenant), which have nothing to retain. Files are
+        kept for as long as the version exists.
+        """
+        references = published_file_references(definition_json)
+        named = len(references.file_ids) + len(references.template_asset_ids)
+        if not named:
+            return 0
+        direct = sa.select(Files.id, Files.id).where(
+            Files.tenant_id == tenant_id, Files.id.in_(references.file_ids)
+        )
+        through_asset = sa.select(
+            FlowTemplateAssets.id, FlowTemplateAssets.file_id
+        ).where(
+            FlowTemplateAssets.flow_id == flow_id,
+            FlowTemplateAssets.tenant_id == tenant_id,
+            FlowTemplateAssets.id.in_(references.template_asset_ids),
+        )
+        resolved = (
+            await self.session.execute(sa.union_all(direct, through_asset))
+        ).all()
+        # Take the shared lock the reference's foreign key takes before
+        # inserting (publishers do not block each other): a concurrent delete
+        # either finishes first (the file is skipped here) or waits for this
+        # transaction and then sees the reference (409).
+        locked = set(
+            await self.session.scalars(
+                sa.select(Files.id)
+                .where(
+                    Files.tenant_id == tenant_id,
+                    Files.id.in_({file_id for _, file_id in resolved}),
+                )
+                .with_for_update(read=True, key_share=True, of=Files)
+            )
+        )
+        resolved = [row for row in resolved if row[1] in locked]
+        await self.add_file_references(
+            flow_id, version, tenant_id, {file_id for _, file_id in resolved}
+        )
+        return named - len({named_id for named_id, _ in resolved})
 
     async def add_file_references(
         self, flow_id: UUID, version: int, tenant_id: UUID, file_ids: Collection[UUID]
     ) -> None:
-        """Retain snapshot files idempotently; snapshot writers do not call this yet."""
+        """Retain snapshot files idempotently."""
         if not file_ids:
             return
         await self.session.execute(

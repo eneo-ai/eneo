@@ -399,8 +399,11 @@ class FlowVersions(BaseCrossReference):
 class FlowVersionFileReferences(BaseWithTableName):
     """Protect frozen snapshot files. FlowVersionRepository owns these links.
 
-    Snapshot creation does not populate them yet; only explicit repository calls
-    write links. Immutability of the reference set is an application contract.
+    Snapshot creation records them in the snapshot's transaction, and a
+    migration backfilled earlier versions. A file is protected while a flow
+    version that names it exists; unpublishing and run-history purge do not
+    release it, and no automatic version cleanup exists yet. Immutability of the reference set is an
+    application contract.
     """
 
     flow_id: Mapped[UUID] = mapped_column(primary_key=True)
