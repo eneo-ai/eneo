@@ -1028,6 +1028,83 @@ async def test_rules_and_holds_need_their_own_retention_permission(
         ] == [(365, 30), (30, 365)]
 
 
+async def test_the_upload_window_is_a_retention_decision(
+    client, admin_user, db_container, user_factory, patch_auth_service_jwt
+):
+    path = "/api/v1/settings/flow-retention-policy"
+    plain_admin, manager = [
+        await _token_with_permissions(db_container, admin_user, user_factory, perms)
+        for perms in (["admin"], ["admin", "retention_manage"])
+    ]
+
+    def bearer(token: str) -> dict[str, str]:
+        return {"Authorization": f"Bearer {token}"}
+
+    async def window(body: dict, token: str):
+        return await client.patch(path, json=body, headers=bearer(token))
+
+    refused = await window({"flow_runtime_upload_abandonment_days": 10}, plain_admin)
+    assert refused.status_code == 403, refused.text
+    assert refused.json()["code"] == "retention_permission_required"
+    # A reason without a window change is refused, not recorded.
+    reason_only = await window({"reason": "Recordings audit"}, manager)
+    assert reason_only.status_code == 400, reason_only.text
+    assert reason_only.json()["code"] == "flow_settings_invalid_payload"
+    # The debug evidence window stays an admin setting.
+    debug = await window({"run_debug_evidence_days": 14}, plain_admin)
+    assert debug.status_code == 200, debug.text
+    # Shorter than the 30-day default: deletion comes earlier, no reason needed.
+    shorter = await window({"flow_runtime_upload_abandonment_days": 10}, manager)
+    assert shorter.status_code == 200, shorter.text
+    longer = await window({"flow_runtime_upload_abandonment_days": 60}, manager)
+    assert longer.status_code == 400, longer.text
+    assert longer.json()["code"] == "flow_retention_reason_required"
+    unset = await window({"flow_runtime_upload_abandonment_days": None}, manager)
+    assert unset.json()["code"] == "flow_retention_reason_required"  # 10 -> 30
+    reasoned = await window(
+        {"flow_runtime_upload_abandonment_days": 60, "reason": "Recordings audit"},
+        manager,
+    )
+    assert reasoned.status_code == 200, reasoned.text
+    async with db_container() as container:
+        key = await mint_v2_api_key(
+            container.api_key_v2_repo(),
+            tenant_id=admin_user.tenant_id,
+            user_id=admin_user.id,
+        )
+    by_key = await client.patch(
+        path,
+        json={"flow_runtime_upload_abandonment_days": 5},
+        headers={"X-API-Key": key.key},
+    )
+    assert by_key.status_code == 403, by_key.text
+    assert by_key.json()["code"] == "retention_person_required"
+
+    async with db_container() as container:
+        session = container.session()
+        days = await session.scalar(
+            sa.select(Tenants.flow_runtime_upload_abandonment_days).where(
+                Tenants.id == admin_user.tenant_id
+            )
+        )
+        changes = (
+            await session.scalars(
+                sa.select(AuditLog.log_metadata)
+                .where(
+                    AuditLog.action == "flow_run_retention_policy_changed",
+                    AuditLog.log_metadata["setting"].astext
+                    == "runtime_upload_window_days",
+                )
+                .order_by(AuditLog.timestamp)
+            )
+        ).all()
+    assert days == 60
+    assert [
+        (change["previous_value"], change["new_value"], change["reason"])
+        for change in changes
+    ] == [(None, 10, None), (10, 60, "Recordings audit")]
+
+
 async def test_an_api_key_never_changes_or_stops_retention(
     client, admin_user, db_container, history
 ):
@@ -1281,7 +1358,9 @@ async def test_an_older_debug_window_save_keeps_a_newer_upload_window_save(
 
     async with db_container() as uploading:
         await uploading.settings_service().update_flow_retention_policy(
-            FlowRetentionPolicyUpdate(flow_runtime_upload_abandonment_days=30)
+            FlowRetentionPolicyUpdate(
+                flow_runtime_upload_abandonment_days=30, reason="Recordings audit"
+            )
         )
         saving = asyncio.create_task(save_debug_window_only())
         try:

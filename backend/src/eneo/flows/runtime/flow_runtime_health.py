@@ -8,6 +8,10 @@ import sqlalchemy as sa
 from pydantic import BaseModel, Field
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from eneo.data_retention.domain.gallring import GALLRING_CADENCE
+from eneo.data_retention.infrastructure.gallring_job_run_repo import (
+    GallringJobRunRepository,
+)
 from eneo.database.tables.flow_tables import (
     FlowOutboxDeliveryStatus,
     FlowRetentionHolds,
@@ -74,6 +78,8 @@ class FlowRuntimeHealthFlag(str, Enum):
     WEBHOOK_OUTBOX_EXPIRED_CLAIMS = "WEBHOOK_OUTBOX_EXPIRED_CLAIMS"
     WEBHOOK_OUTBOX_DEAD_LETTERS = "WEBHOOK_OUTBOX_DEAD_LETTERS"
     GALLRING_HOLD_REVIEW_OVERDUE = "GALLRING_HOLD_REVIEW_OVERDUE"
+    GALLRING_JOB_STALE = "GALLRING_JOB_STALE"
+    GALLRING_DISABLED = "GALLRING_DISABLED"
 
 
 class FlowRuntimeProbeFailure(str, Enum):
@@ -90,6 +96,11 @@ class FlowRuntimeHealthPolicy:
     terminal_integrity_lookback: timedelta
     audit_outbox_backlog_grace_seconds: int
     webhook_outbox_backlog_grace_seconds: int
+    # Enabled gallring tasks; each must complete within twice its cadence.
+    gallring_tasks: tuple[str, ...] = ()
+    gallring_stale_after: timedelta = 2 * GALLRING_CADENCE
+    # Tasks the deployment's emergency switch turns off; never a silent stop.
+    gallring_disabled_tasks: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True, slots=True)
@@ -126,6 +137,7 @@ class FlowRuntimeHealthSnapshot:
     oldest_webhook_outbox_dead_lettered_at: datetime | None = None
     retention_hold_review_overdue_count: int = 0
     oldest_retention_hold_review_by: datetime | None = None
+    stale_gallring_tasks: tuple[str, ...] = ()
 
 
 class FlowRuntimeProbe(BaseModel):
@@ -231,6 +243,26 @@ class FlowRuntimeRetentionHoldSummary(BaseModel):
     )
 
 
+class FlowRuntimeGallringSummary(BaseModel):
+    stale_tasks: list[str] = Field(
+        default_factory=list[str],
+        description=(
+            "Enabled gallring tasks (for example flows.housekeeping) whose last "
+            "completed execution is older than twice the daily cadence, or that "
+            "started but never completed within it. Any entry raises "
+            "GALLRING_JOB_STALE (UNHEALTHY). A task that never ran is not listed."
+        ),
+    )
+    disabled_tasks: list[str] = Field(
+        default_factory=list[str],
+        description=(
+            "Gallring tasks turned off by the deployment's emergency switch. Each "
+            "suppressed nightly run is audited; any entry raises GALLRING_DISABLED "
+            "(UNHEALTHY)."
+        ),
+    )
+
+
 class FlowRuntimeHealthThresholds(BaseModel):
     stale_queued_after_seconds: int
     stale_running_after_seconds: int
@@ -263,11 +295,17 @@ class FlowRuntimeHealthResponse(BaseModel):
     retention_holds: FlowRuntimeRetentionHoldSummary = Field(
         default_factory=FlowRuntimeRetentionHoldSummary
     )
+    gallring: FlowRuntimeGallringSummary = Field(
+        default_factory=FlowRuntimeGallringSummary
+    )
     thresholds: FlowRuntimeHealthThresholds
 
 
 def build_flow_runtime_health_policy(
-    *, task_timeout_seconds: int
+    *,
+    task_timeout_seconds: int,
+    gallring_tasks: tuple[str, ...] = (),
+    gallring_disabled_tasks: tuple[str, ...] = (),
 ) -> FlowRuntimeHealthPolicy:
     return FlowRuntimeHealthPolicy(
         stale_queued_after_seconds=FLOW_QUEUED_REDISPATCH_AFTER_SECONDS,
@@ -283,6 +321,8 @@ def build_flow_runtime_health_policy(
         terminal_integrity_lookback=timedelta(hours=TERMINAL_INTEGRITY_LOOKBACK_HOURS),
         audit_outbox_backlog_grace_seconds=FLOW_AUDIT_OUTBOX_BACKLOG_GRACE_SECONDS,
         webhook_outbox_backlog_grace_seconds=FLOW_WEBHOOK_DELIVERY_CLAIM_TTL_SECONDS,
+        gallring_tasks=gallring_tasks,
+        gallring_disabled_tasks=gallring_disabled_tasks,
     )
 
 
@@ -349,6 +389,11 @@ async def load_flow_runtime_health_snapshot(
     hold_review_overdue = await _load_retention_hold_review_overdue_summary(
         session=session
     )
+    stale_gallring_tasks = await _load_stale_gallring_tasks(
+        session=session,
+        tasks=policy.gallring_tasks,
+        stale_before=now - policy.gallring_stale_after,
+    )
 
     return FlowRuntimeHealthSnapshot(
         database_observed_at=database_now,
@@ -401,6 +446,7 @@ async def load_flow_runtime_health_snapshot(
         oldest_webhook_outbox_dead_lettered_at=(webhook_outbox.oldest_dead_lettered_at),
         retention_hold_review_overdue_count=hold_review_overdue.count,
         oldest_retention_hold_review_by=hold_review_overdue.oldest_anchor_at,
+        stale_gallring_tasks=stale_gallring_tasks,
     )
 
 
@@ -526,6 +572,10 @@ def classify_flow_runtime_health(
         retention_holds=FlowRuntimeRetentionHoldSummary(
             review_overdue_count=snapshot.retention_hold_review_overdue_count,
             oldest_review_overdue_age_seconds=hold_review_overdue_age,
+        ),
+        gallring=FlowRuntimeGallringSummary(
+            stale_tasks=list(snapshot.stale_gallring_tasks),
+            disabled_tasks=list(policy.gallring_disabled_tasks),
         ),
         thresholds=FlowRuntimeHealthThresholds(
             stale_queued_after_seconds=policy.stale_queued_after_seconds,
@@ -986,6 +1036,10 @@ def _flow_runtime_health_flags(
         flags.append(FlowRuntimeHealthFlag.WEBHOOK_OUTBOX_DEAD_LETTERS)
     if snapshot.retention_hold_review_overdue_count > 0:
         flags.append(FlowRuntimeHealthFlag.GALLRING_HOLD_REVIEW_OVERDUE)
+    if snapshot.stale_gallring_tasks:
+        flags.append(FlowRuntimeHealthFlag.GALLRING_JOB_STALE)
+    if policy.gallring_disabled_tasks:
+        flags.append(FlowRuntimeHealthFlag.GALLRING_DISABLED)
     return flags
 
 
@@ -1004,6 +1058,8 @@ def _flow_runtime_health_status(
         FlowRuntimeHealthFlag.TERMINAL_RUNS_WITH_ACTIVE_STEP_RESULTS,
         FlowRuntimeHealthFlag.AUDIT_OUTBOX_DEAD_LETTERS,
         FlowRuntimeHealthFlag.WEBHOOK_OUTBOX_DEAD_LETTERS,
+        FlowRuntimeHealthFlag.GALLRING_JOB_STALE,
+        FlowRuntimeHealthFlag.GALLRING_DISABLED,
     }
     if any(flag in unhealthy_flags for flag in status_flags):
         return FlowRuntimeHealthStatus.UNHEALTHY
@@ -1018,9 +1074,24 @@ def _flow_runtime_status_reason(*, status: FlowRuntimeHealthStatus) -> str:
     return {
         FlowRuntimeHealthStatus.HEALTHY: "Flow runtime DB and platform worker signals are healthy.",
         FlowRuntimeHealthStatus.DEGRADED: "Flow runtime has recoverable stale run, review checkpoint or outbox signals, or a legal hold whose review date has passed.",
-        FlowRuntimeHealthStatus.UNHEALTHY: "Flow runtime has a missing platform worker, accepted dispatch exhaustion, reconciliation lag, terminal-run integrity issue, or outbox dead letter.",
+        FlowRuntimeHealthStatus.UNHEALTHY: "Flow runtime has a missing platform worker, accepted dispatch exhaustion, reconciliation lag, terminal-run integrity issue, outbox dead letter, or a stale or disabled gallring job.",
         FlowRuntimeHealthStatus.UNKNOWN: "Flow runtime DB signals could not be read.",
     }[status]
+
+
+async def _load_stale_gallring_tasks(
+    *, session: AsyncSession, tasks: tuple[str, ...], stale_before: datetime
+) -> tuple[str, ...]:
+    """Tasks whose latest completion (or, never completed, first start) is too old."""
+    job_runs = GallringJobRunRepository(session)
+    stale: list[str] = []
+    for task in tasks:
+        anchor = await job_runs.last_completed_at(task)
+        if anchor is None:
+            anchor = await job_runs.first_started_at(task)
+        if anchor is not None and anchor < stale_before:
+            stale.append(task)
+    return tuple(stale)
 
 
 def _age_seconds(now: datetime, timestamp: datetime | None) -> int | None:

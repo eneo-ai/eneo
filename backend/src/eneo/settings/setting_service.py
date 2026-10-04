@@ -12,6 +12,10 @@ from eneo.completion_models.domain.skill_context import skill_context_token_allo
 from eneo.data_retention.infrastructure.data_retention_service import (
     DataRetentionService,
 )
+from eneo.data_retention.infrastructure.gallring_lock import (
+    GallringSubject,
+    acquire_exclusive,
+)
 from eneo.files.docx_template_validation import (
     MAX_TEMPLATE_ARCHIVE_ENTRIES,
     MAX_TEMPLATE_UNCOMPRESSED_BYTES,
@@ -23,6 +27,7 @@ from eneo.flows.ai_builder.ai_builder_settings import (
     resolve_ai_builder_budget_policy,
 )
 from eneo.flows.ai_builder.planning_state import PLANNING_STATE_PAYLOAD_CAP_BYTES
+from eneo.flows.application.flow_retention_authz import require_retention_manage
 from eneo.flows.domain.mapped_execution_policy import (
     FlowMappedExecutionPolicy,
     apply_flow_mapped_execution_policy_patch,
@@ -58,6 +63,7 @@ from eneo.flows.flow_input_limits import (
     resolve_flow_input_limits,
 )
 from eneo.flows.flow_retention_policy import (
+    DEFAULT_FLOW_RUNTIME_UPLOAD_ABANDONMENT_DAYS,
     apply_flow_retention_policy_patch,
     resolve_flow_retention_policy,
 )
@@ -124,6 +130,12 @@ if TYPE_CHECKING:
 logger = get_logger(__name__)
 
 FLOW_SETTINGS_INVALID_PAYLOAD_CODE = "flow_settings_invalid_payload"
+FLOW_RETENTION_REASON_REQUIRED_CODE = "flow_retention_reason_required"
+
+
+def _upload_window_days(days: int | None) -> int:
+    """The window that applies: the tenant's days, or the default when unset."""
+    return DEFAULT_FLOW_RUNTIME_UPLOAD_ABANDONMENT_DAYS if days is None else days
 
 
 _UPLOAD_ABANDONMENT_DAYS_COLUMN = "flow_runtime_upload_abandonment_days"
@@ -1125,6 +1137,19 @@ class SettingService:
             "flow_runtime_upload_abandonment_days" in payload.model_fields_set
         )
         debug_supplied = "run_debug_evidence_days" in payload.model_fields_set
+        if "reason" in payload.model_fields_set and not upload_supplied:
+            raise BadRequestException(
+                "A reason belongs to a change of the upload window.",
+                code=FLOW_SETTINGS_INVALID_PAYLOAD_CODE,
+            )
+        if upload_supplied:
+            # The upload window decides when gallring deletes: a retention
+            # decision by a signed-in person with retention_manage, serialized
+            # with open deletions before the tenant row is locked.
+            require_retention_manage(self.user)
+            await acquire_exclusive(
+                self.tenant_repo.session, GallringSubject.FLOW_HISTORY
+            )
 
         def transform(current: dict[str, Any] | None) -> dict[str, Any]:
             if not debug_supplied:
@@ -1169,6 +1194,12 @@ class SettingService:
         )
         previous = _flow_retention_policy_public(change.before, old_upload_days)
         updated = _flow_retention_policy_public(change.after, new_upload_days)
+        if upload_supplied and old_upload_days != new_upload_days:
+            await self._audit_upload_window_change(
+                old_days=old_upload_days,
+                new_days=new_upload_days,
+                reason=payload.reason,
+            )
         await self.audit_service.log(
             tenant_id=self.user.tenant_id,
             user=self.user,
@@ -1182,6 +1213,40 @@ class SettingService:
             },
         )
         return updated
+
+    async def _audit_upload_window_change(
+        self, *, old_days: int | None, new_days: int | None, reason: str | None
+    ) -> None:
+        """The required record of a window change, from the locked before-value.
+
+        A longer window postpones deletion, so it needs a reason; the exception
+        rolls the change back with the request.
+        """
+        longer = _upload_window_days(new_days) > _upload_window_days(old_days)
+        if longer and reason is None:
+            raise BadRequestException(
+                "Give a reason for keeping unused uploads and live transcripts longer.",
+                code=FLOW_RETENTION_REASON_REQUIRED_CODE,
+            )
+        await self.audit_service.log(
+            tenant_id=self.user.tenant_id,
+            user=self.user,
+            action=ActionType.FLOW_RUN_RETENTION_POLICY_CHANGED,
+            entity_type=EntityType.TENANT_SETTINGS,
+            entity_id=self.user.tenant_id,
+            description=(
+                "Changed how long unused Flow uploads and live transcripts are kept."
+            ),
+            metadata={
+                "scope": "organization",
+                "scope_id": str(self.user.tenant_id),
+                "setting": "runtime_upload_window_days",
+                "previous_value": old_days,
+                "new_value": new_days,
+                "reason": reason,
+            },
+            required=True,
+        )
 
     async def get_available_completion_models(self) -> list[CompletionModelPublic]:
         return await self.ai_models_service.get_completion_models()

@@ -53,7 +53,7 @@ export interface paths {
     };
     /**
      * Flow Runtime Health
-     * @description Return super-key-protected Flow runtime readiness signals derived from persisted run, review, data-integrity, audit-outbox, webhook-outbox, and platform task worker readiness.
+     * @description Return super-key-protected Flow runtime readiness signals derived from persisted run, review, data-integrity, audit-outbox, webhook-outbox, gallring job, and platform task worker readiness. GALLRING_JOB_STALE (UNHEALTHY) means an enabled nightly gallring task has not completed within twice its daily cadence; GALLRING_DISABLED (UNHEALTHY) means the deployment's emergency switch turned a gallring task off.
      */
     get: operations["flow_runtime_health_api_healthz_flows_get"];
     put?: never;
@@ -7867,7 +7867,7 @@ export interface paths {
     };
     /**
      * Get flow retention policy
-     * @description Return the independent eligibility windows for stored Flow debug evidence and abandoned runtime uploads. Flow run-history retention is configured through the dedicated hierarchical policy endpoints. Reading this endpoint never previews, deletes, or redacts Flow data.
+     * @description Return the eligibility window for stored Flow debug evidence and the keep window for runtime uploads never attached to a run (and unbound live transcripts), which the nightly gallring job deletes after it; null means the 30-day default. Flow run-history retention is configured through the dedicated hierarchical policy endpoints. Reading this endpoint never previews, deletes, or redacts Flow data.
      */
     get: operations["get_flow_retention_policy"];
     put?: never;
@@ -7877,7 +7877,7 @@ export interface paths {
     head?: never;
     /**
      * Update flow retention policy
-     * @description Update the independent eligibility windows for stored Flow debug evidence and abandoned runtime uploads. Omitted fields are unchanged and null removes the tenant input. Saving these values never deletes or redacts Flow data.
+     * @description Update the eligibility window for stored Flow debug evidence and the keep window for runtime uploads never attached to a run. Omitted fields are unchanged and null removes the tenant input (uploads then use the 30-day default). Saving these values never deletes or redacts Flow data; the nightly gallring job applies the upload window. The upload window is a retention decision: changing it also needs retention_manage in a signed-in session (`retention_permission_required`, `retention_person_required`), a longer window needs a reason (`flow_retention_reason_required`), and a change writes the required audit action flow_run_retention_policy_changed with the previous and new value and the reason in the same transaction. It waits for an open history deletion to finish.
      */
     patch: operations["update_flow_retention_policy"];
     trace?: never;
@@ -20300,7 +20300,7 @@ export interface components {
     FlowRetentionPolicyPublic: {
       /**
        * Flow Runtime Upload Abandonment Days
-       * @description Tenant purge eligibility window for Flow runtime uploads that were never bound to a run input. Null means no tenant window; saving a value never removes uploads.
+       * @description Days a Flow runtime upload that was never bound to a run input (and an unbound live transcript) is kept before the nightly gallring job deletes it, counted from creation; a new value applies to existing items too. Null means the 30-day default. Saving a value deletes nothing by itself. Changing it needs retention_manage in a signed-in session (no API key), and a longer window needs a reason.
        */
       flow_runtime_upload_abandonment_days: number | null;
       /**
@@ -20319,9 +20319,14 @@ export interface components {
     FlowRetentionPolicyUpdate: {
       /**
        * Flow Runtime Upload Abandonment Days
-       * @description Tenant purge eligibility window for Flow runtime uploads that were never bound to a run input. Null means no tenant window; saving a value never removes uploads.
+       * @description Days a Flow runtime upload that was never bound to a run input (and an unbound live transcript) is kept before the nightly gallring job deletes it, counted from creation; a new value applies to existing items too. Null means the 30-day default. Saving a value deletes nothing by itself. Changing it needs retention_manage in a signed-in session (no API key), and a longer window needs a reason.
        */
       flow_runtime_upload_abandonment_days?: number | null;
+      /**
+       * Reason
+       * @description Why the change keeps unused uploads and unbound live transcripts longer (1-512 characters). Required, with code flow_retention_reason_required, when the upload window becomes longer (null counts as the 30-day default); recorded in the required audit event.
+       */
+      reason?: string | null;
       /**
        * Run Debug Evidence Days
        * @description Tenant purge eligibility window for stored Flow debug evidence. Null means no tenant window; saving a value never redacts evidence.
@@ -25010,6 +25015,19 @@ export interface components {
        */
       terminal_runs_with_open_attempts_count?: number;
     };
+    /** FlowRuntimeGallringSummary */
+    FlowRuntimeGallringSummary: {
+      /**
+       * Disabled Tasks
+       * @description Gallring tasks turned off by the deployment's emergency switch. Each suppressed nightly run is audited; any entry raises GALLRING_DISABLED (UNHEALTHY).
+       */
+      disabled_tasks?: string[];
+      /**
+       * Stale Tasks
+       * @description Enabled gallring tasks (for example flows.housekeeping) whose last completed execution is older than twice the daily cadence, or that started but never completed within it. Any entry raises GALLRING_JOB_STALE (UNHEALTHY). A task that never ran is not listed.
+       */
+      stale_tasks?: string[];
+    };
     /**
      * FlowRuntimeHealthFlag
      * @enum {string}
@@ -25030,11 +25048,14 @@ export interface components {
       | "WEBHOOK_OUTBOX_DELIVERY_BACKLOG"
       | "WEBHOOK_OUTBOX_EXPIRED_CLAIMS"
       | "WEBHOOK_OUTBOX_DEAD_LETTERS"
-      | "GALLRING_HOLD_REVIEW_OVERDUE";
+      | "GALLRING_HOLD_REVIEW_OVERDUE"
+      | "GALLRING_JOB_STALE"
+      | "GALLRING_DISABLED";
     /** FlowRuntimeHealthResponse */
     FlowRuntimeHealthResponse: {
       audit_outbox?: components["schemas"]["FlowRuntimeAuditOutboxSummary"];
       data_integrity?: components["schemas"]["FlowRuntimeDataIntegrity"];
+      gallring?: components["schemas"]["FlowRuntimeGallringSummary"];
       probe: components["schemas"]["FlowRuntimeProbe"];
       /**
        * Response Timestamp Utc
@@ -67375,6 +67396,22 @@ export interface operations {
            *       "code": "insufficient_tenant_permission",
            *       "eneo_error_code": 9001,
            *       "message": "Insufficient permissions."
+           *     }
+           */
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Another retention change or history deletion held the retention lock too long (`flow_retention_lock_busy`). Nothing changed; retry. */
+      409: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          /**
+           * @example {
+           *       "code": "flow_retention_lock_busy",
+           *       "eneo_error_code": 9057,
+           *       "message": "Flow history retention is busy with another change or deletion."
            *     }
            */
           "application/json": components["schemas"]["GeneralError"];

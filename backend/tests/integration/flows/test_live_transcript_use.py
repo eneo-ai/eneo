@@ -70,10 +70,6 @@ async def live_recording(client, flow_process_auth_headers, db_container, monkey
             segments=[{"text": "Live text.", "start": 0.0, "end": 1.0}],
             received_audio_seconds=1.0,
         )
-        row = await LiveTranscriptRepository(container.session()).get(
-            transcript_id, tenant_id=user.tenant_id
-        )
-        row.expires_at = datetime.now(timezone.utc) + timedelta(days=1)
     return SimpleNamespace(
         flow=flow,
         headers=headers,
@@ -102,7 +98,8 @@ async def _cleanup(case):
     async with sessionmanager.session() as session, session.begin():
         return await LiveTranscriptRepository(session).delete_expired_unbound(
             tenant_id=case.user.tenant_id,
-            now=datetime.now(timezone.utc) + timedelta(days=2),
+            # Past the 30-day default window counted from creation.
+            now=datetime.now(timezone.utc) + timedelta(days=31),
             limit=10,
             dry_run=False,
             flow_id=UUID(case.flow.flow_id),

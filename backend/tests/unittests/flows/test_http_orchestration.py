@@ -349,7 +349,7 @@ async def test_deliver_webhook_timeout_maps_to_delivery_error_and_audits() -> No
 
 
 @pytest.mark.asyncio
-async def test_deliver_webhook_redacts_transport_error_before_audit() -> None:
+async def test_deliver_webhook_audits_a_code_not_the_transport_error() -> None:
     step = _Step(
         step_order=44,
         step_id="step-44",
@@ -382,10 +382,11 @@ async def test_deliver_webhook_redacts_transport_error_before_audit() -> None:
 
     assert "user:pass" not in str(exc.value)
     assert "secret-value" not in str(exc.value)
-    audit_error = deps.audit_http_outbound.await_args.kwargs["error_message"]
-    assert "user:pass" not in audit_error
-    assert "secret-value" not in audit_error
-    assert "token=%5BREDACTED%5D" in audit_error
+    # The audit gets a code, never the transport error text.
+    audit_kwargs = deps.audit_http_outbound.await_args.kwargs
+    assert audit_kwargs["error_code"] == "typed_io_http_connection_error"
+    assert "user:pass" not in repr(audit_kwargs)
+    assert "secret-value" not in repr(audit_kwargs)
 
 
 @pytest.mark.parametrize("status_code", [408, 429, 400, 422, 503])

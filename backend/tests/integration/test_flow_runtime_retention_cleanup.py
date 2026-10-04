@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import inspect
+import itertools
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from hashlib import sha256
@@ -11,6 +12,7 @@ from sqlalchemy import delete, func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from eneo.audit.infrastructure.audit_log_repo_impl import AuditLogRepositoryImpl
+from eneo.data_retention.application.gallring_runner import GallringBatch
 from eneo.data_retention.infrastructure import (
     data_retention_worker,
 )
@@ -48,15 +50,14 @@ from eneo.database.tables.object_content_table import (
 from eneo.database.tables.spaces_table import Spaces
 from eneo.database.tables.tenant_table import Tenants
 from eneo.files.file_models import FileContentVariant, FileType
-from eneo.files.file_repo import FileRepository
 from eneo.flows.ai_builder.ai_builder_domain_models import SessionStatus, TargetKind
+from eneo.flows.application.flow_housekeeping_task import FlowHousekeepingTask
 from eneo.flows.application.flow_run_audit_outbox_delivery import (
     FlowRunAuditOutboxDeliveryService,
 )
 from eneo.flows.application.flow_webhook_delivery_policy import (
     FLOW_WEBHOOK_MAX_ATTEMPTS,
 )
-from eneo.flows.domain.flow import FlowPersistedJsonObject
 from eneo.flows.enums import (
     FlowRunReviewCheckpointState,
     FlowRunStatus,
@@ -709,21 +710,22 @@ async def test_live_transcript_admin_purge_obeys_scope_expiry_and_bound_rows(
     )
     row = await repo.get(transcript_id, tenant_id=test_tenant.id)
     assert row is not None
-    assert row.expires_at == row.created_at + timedelta(days=2)
-    row.expires_at = now - timedelta(microseconds=1)
+    # The current 2-day window counts from creation.
+    window = timedelta(days=2)
+    row.created_at = now - window - timedelta(microseconds=1)
     ids = [transcript_id]
-    for expiry, bound in [
+    for created_at, bound in [
+        (now - window, False),
+        (now - window + timedelta(microseconds=1), False),
+        (now - window, True),
         (now, False),
-        (now + timedelta(microseconds=1), False),
-        (now, True),
-        (None, False),
     ]:
         row_id = await repo.create(
             grant, text="Text", segments=None, received_audio_seconds=0.1
         )
         row = await repo.get(row_id, tenant_id=test_tenant.id)
         assert row is not None
-        row.expires_at = expiry
+        row.created_at = created_at
         row.bound_file_id = fixture.file.id if bound else None
         ids.append(row_id)
     await async_session.flush()
@@ -756,26 +758,6 @@ async def test_live_transcript_admin_purge_obeys_scope_expiry_and_bound_rows(
     )
     remaining = set(await async_session.scalars(select(FlowLiveTranscripts.id)))
     assert remaining == set(ids[2:])
-
-
-async def _add_flow_version_definition(
-    async_session: AsyncSession,
-    *,
-    flow: Flows,
-    tenant_id: UUID,
-    version: int,
-    definition_json: FlowPersistedJsonObject,
-) -> None:
-    async_session.add(
-        FlowVersions(
-            flow_id=flow.id,
-            version=version,
-            tenant_id=tenant_id,
-            definition_checksum=f"checksum-{uuid4()}",
-            definition_json=definition_json,
-        )
-    )
-    await async_session.flush()
 
 
 async def _add_younger_flow_runtime_result_file_reference(
@@ -1071,6 +1053,34 @@ async def _flow_runtime_upload_exists(
     )
 
 
+async def _housekeep(session: AsyncSession) -> dict[str, int]:
+    """Run flows.housekeeping inside the test's transaction, without the runner."""
+    totals: dict[str, int] = {}
+    for step in FlowHousekeepingTask(session).steps():
+        cursor = None
+        for batch_seq in itertools.count(1):
+            result = await step.run(
+                GallringBatch(
+                    job_run_id=uuid4(),
+                    batch_seq=batch_seq,
+                    rows=100,
+                    files=100,
+                    cursor=cursor,
+                )
+            )
+            cursor = result.cursor
+            counts = {f"blocked.{key}": value for key, value in result.blocked.items()}
+            for effect in result.effects:
+                for key, value in effect.counts.items():
+                    counts[key] = counts.get(key, 0) + value
+            for key, value in counts.items():
+                name = f"{step.name}.{key}"
+                totals[name] = totals.get(name, 0) + value
+            if result.exhausted or not (result.rows or result.files):
+                break
+    return totals
+
+
 async def _flush_and_clear_identity_map(async_session: AsyncSession) -> None:
     await async_session.flush()
     async_session.expunge_all()
@@ -1271,153 +1281,6 @@ async def test_scheduled_cleanup_preserves_builder_sessions_without_builder_poli
 
 
 @pytest.mark.asyncio
-async def test_purge_soft_deleted_flow_template_assets_reclaims_unpinned_blob(
-    async_session: AsyncSession,
-    test_tenant,
-    admin_user,
-    flow_retention_space: Spaces,
-    flow_retention_service: DataRetentionService,
-):
-    fixture = await _create_flow_template_asset_fixture(
-        async_session,
-        tenant=test_tenant,
-        user=admin_user,
-        space=flow_retention_space,
-        deleted=True,
-    )
-
-    counts = await flow_retention_service.purge_soft_deleted_flow_template_assets(
-        limit=10,
-    )
-    await _flush_and_clear_identity_map(async_session)
-
-    assert counts.flow_template_assets_purged == 1
-    assert counts.flow_template_asset_files_deleted == 1
-    assert counts.flow_template_assets_skipped_published_reference == 0
-    assert counts.flow_template_assets_skipped_undetermined_reference == 0
-    assert (
-        await async_session.get(FlowTemplateAssets, fixture.template_asset.id) is None
-    )
-    assert await async_session.get(Files, fixture.template_file.id) is None
-
-
-@pytest.mark.asyncio
-async def test_purge_soft_deleted_flow_template_assets_keeps_active_asset_blob(
-    async_session: AsyncSession,
-    test_tenant,
-    admin_user,
-    flow_retention_space: Spaces,
-    flow_retention_service: DataRetentionService,
-):
-    fixture = await _create_flow_template_asset_fixture(
-        async_session,
-        tenant=test_tenant,
-        user=admin_user,
-        space=flow_retention_space,
-        deleted=False,
-    )
-
-    counts = await flow_retention_service.purge_soft_deleted_flow_template_assets(
-        limit=10,
-    )
-    await _flush_and_clear_identity_map(async_session)
-
-    assert counts.flow_template_assets_purged == 0
-    assert counts.flow_template_asset_files_deleted == 0
-    assert await async_session.get(FlowTemplateAssets, fixture.template_asset.id)
-    assert await async_session.get(Files, fixture.template_file.id)
-
-
-@pytest.mark.asyncio
-async def test_purge_soft_deleted_flow_template_assets_keeps_non_current_version_pin(
-    async_session: AsyncSession,
-    test_tenant,
-    admin_user,
-    flow_retention_space: Spaces,
-    flow_retention_service: DataRetentionService,
-):
-    fixture = await _create_flow_template_asset_fixture(
-        async_session,
-        tenant=test_tenant,
-        user=admin_user,
-        space=flow_retention_space,
-        deleted=True,
-    )
-    await _add_flow_version_definition(
-        async_session,
-        flow=fixture.flow,
-        tenant_id=test_tenant.id,
-        version=1,
-        definition_json={
-            "schema_version": 1,
-            "steps": [
-                {
-                    "output_config": {
-                        "template_asset_id": str(fixture.template_asset.id),
-                        "template_file_id": str(fixture.template_file.id),
-                    }
-                }
-            ],
-        },
-    )
-    await _add_flow_version_definition(
-        async_session,
-        flow=fixture.flow,
-        tenant_id=test_tenant.id,
-        version=2,
-        definition_json={"schema_version": 1, "steps": []},
-    )
-
-    counts = await flow_retention_service.purge_soft_deleted_flow_template_assets(
-        limit=10,
-    )
-    await _flush_and_clear_identity_map(async_session)
-
-    assert counts.flow_template_assets_purged == 0
-    assert counts.flow_template_asset_files_deleted == 0
-    assert counts.flow_template_assets_skipped_published_reference == 1
-    assert counts.flow_template_assets_skipped_undetermined_reference == 0
-    assert await async_session.get(FlowTemplateAssets, fixture.template_asset.id)
-    assert await async_session.get(Files, fixture.template_file.id)
-
-
-@pytest.mark.asyncio
-async def test_purge_soft_deleted_flow_template_assets_counts_unknown_schema_skip(
-    async_session: AsyncSession,
-    test_tenant,
-    admin_user,
-    flow_retention_space: Spaces,
-    flow_retention_service: DataRetentionService,
-):
-    fixture = await _create_flow_template_asset_fixture(
-        async_session,
-        tenant=test_tenant,
-        user=admin_user,
-        space=flow_retention_space,
-        deleted=True,
-    )
-    await _add_flow_version_definition(
-        async_session,
-        flow=fixture.flow,
-        tenant_id=test_tenant.id,
-        version=1,
-        definition_json={"schema_version": 2, "future_steps": []},
-    )
-
-    counts = await flow_retention_service.purge_soft_deleted_flow_template_assets(
-        limit=10,
-    )
-    await _flush_and_clear_identity_map(async_session)
-
-    assert counts.flow_template_assets_purged == 0
-    assert counts.flow_template_asset_files_deleted == 0
-    assert counts.flow_template_assets_skipped_published_reference == 0
-    assert counts.flow_template_assets_skipped_undetermined_reference == 1
-    assert await async_session.get(FlowTemplateAssets, fixture.template_asset.id)
-    assert await async_session.get(Files, fixture.template_file.id)
-
-
-@pytest.mark.asyncio
 async def test_flow_run_history_purge_preserves_canonical_audit(
     async_session: AsyncSession,
     test_tenant,
@@ -1523,7 +1386,7 @@ async def test_flow_run_history_purge_preserves_canonical_audit(
 
 
 @pytest.mark.asyncio
-async def test_abandoned_upload_purge_reclaims_only_past_horizon_uploads(
+async def test_housekeeping_reclaims_only_past_horizon_uploads(
     async_session: AsyncSession,
     test_tenant,
     admin_user,
@@ -1556,11 +1419,9 @@ async def test_abandoned_upload_purge_reclaims_only_past_horizon_uploads(
         .values(flow_runtime_upload_abandonment_days=None)
     )
     await async_session.flush()
-    disabled_counts = await flow_retention_service.purge_abandoned_flow_runtime_uploads(
-        now=now,
-        limit=10,
-    )
-    assert disabled_counts.flow_runtime_source_bindings_deleted == 0
+    # Unset, the 30-day default applies: neither upload is that old.
+    default_counts = await _housekeep(async_session)
+    assert "abandoned_uploads.families_completed" not in default_counts
 
     await async_session.execute(
         update(Tenants)
@@ -1569,98 +1430,19 @@ async def test_abandoned_upload_purge_reclaims_only_past_horizon_uploads(
     )
     await async_session.flush()
 
-    counts = await flow_retention_service.purge_abandoned_flow_runtime_uploads(
-        now=now,
-        limit=10,
-    )
+    counts = await _housekeep(async_session)
     await _flush_and_clear_identity_map(async_session)
 
-    assert counts.flow_runtime_source_candidates == 1
-    assert counts.flow_runtime_source_candidate_bytes == 321
-    assert counts.flow_runtime_source_bindings_deleted == 1
-    assert counts.flow_runtime_source_files_deleted == 1
-    assert counts.flow_runtime_source_bytes_deleted == 321
+    assert counts["abandoned_uploads.families_completed"] == 1
+    assert counts["abandoned_uploads.files_deleted"] == 1
     assert await async_session.get(Files, abandoned_file_id) is None
     assert await async_session.get(Files, retained_file_id) is not None
 
-    repeated_counts = await flow_retention_service.purge_abandoned_flow_runtime_uploads(
-        now=now,
-        limit=10,
-    )
+    repeated_counts = await _housekeep(async_session)
     await _flush_and_clear_identity_map(async_session)
 
-    assert repeated_counts == FlowRunHistoryPurgeCounts()
+    assert "abandoned_uploads.files_deleted" not in repeated_counts
     assert await async_session.get(Files, retained_file_id) is not None
-
-
-@pytest.mark.asyncio
-async def test_abandoned_runtime_upload_purge_reports_primary_not_total_variant_bytes(
-    async_session: AsyncSession,
-    test_tenant,
-    admin_user,
-    flow_retention_space: Spaces,
-) -> None:
-    now = datetime.now(timezone.utc)
-    fixture = await _create_unbound_runtime_upload_fixture(
-        async_session,
-        tenant=test_tenant,
-        user=admin_user,
-        space=flow_retention_space,
-        uploaded_at=now - timedelta(days=2),
-        size=321,
-    )
-    primary_content_id = await async_session.scalar(
-        select(FileContentReferences.content_id).where(
-            FileContentReferences.file_id == fixture.file.id
-        )
-    )
-    assert primary_content_id is not None
-    secondary_content = await _create_durable_content(
-        async_session,
-        tenant_id=test_tenant.id,
-        user_id=admin_user.id,
-        mimetype="text/plain",
-        payload=b"s" * 1024,
-        created_at=fixture.file.created_at,
-    )
-    async_session.add(
-        FileContentReferences(
-            file_id=fixture.file.id,
-            content_id=secondary_content.id,
-            variant=FileContentVariant.ORIGINAL.value,
-            ordinal=0,
-        )
-    )
-    await async_session.execute(
-        update(Tenants)
-        .where(Tenants.id == test_tenant.id)
-        .values(flow_runtime_upload_abandonment_days=1)
-    )
-    await async_session.flush()
-    [file_info] = await FileRepository(async_session).get_infos_by_ids(
-        [fixture.file.id]
-    )
-    assert file_info.size == 321
-
-    counts = await FlowRunHistoryPurgeRepository(
-        async_session
-    ).purge_abandoned_runtime_uploads(now=now, limit=10)
-    await _flush_and_clear_identity_map(async_session)
-
-    assert counts.flow_runtime_source_candidates == 1
-    assert counts.flow_runtime_source_candidate_bytes == file_info.size
-    assert counts.flow_runtime_source_bindings_deleted == 1
-    assert counts.flow_runtime_source_files_deleted == 1
-    assert counts.flow_runtime_source_bytes_deleted == file_info.size
-    assert await async_session.get(Files, fixture.file.id) is None
-    primary_content = await async_session.get(ObjectContents, primary_content_id)
-    assert primary_content is not None
-    assert primary_content.state == ContentState.DELETE_PENDING.value
-    assert primary_content.reference_count == 0
-    secondary = await async_session.get(ObjectContents, secondary_content.id)
-    assert secondary is not None
-    assert secondary.state == ContentState.DELETE_PENDING.value
-    assert secondary.reference_count == 0
 
 
 @pytest.mark.asyncio
@@ -2904,7 +2686,7 @@ async def test_debug_evidence_does_not_reuse_flow_run_history_policy(
 
 
 @pytest.mark.asyncio
-async def test_delete_old_delivered_flow_audit_outbox_rows_follows_audit_log_lifetime(
+async def test_housekeeping_deletes_delivered_outbox_rows_after_their_audit_log(
     async_session: AsyncSession,
     test_tenant,
     admin_user,
@@ -2919,7 +2701,8 @@ async def test_delete_old_delivered_flow_audit_outbox_rows_follows_audit_log_lif
             user=admin_user,
             space=flow_retention_space,
             assistant=flow_retention_assistant,
-            days_old=3,
+            # Delivered past the 365-day default audit retention.
+            days_old=400,
         )
         return await _add_flow_audit_outbox_row(
             async_session,
@@ -2946,74 +2729,25 @@ async def test_delete_old_delivered_flow_audit_outbox_rows_follows_audit_log_lif
         with_audit_log=False,
     )
 
-    deleted = await flow_retention_service.delete_old_delivered_flow_audit_outbox_rows()
+    deleted = await _housekeep(async_session)
     await async_session.flush()
 
-    assert deleted == 1
+    assert deleted["audit_outbox.outbox_rows_deleted"] == 1
     assert await async_session.get(FlowRunAuditOutbox, orphaned_delivered_id) is None
     assert await async_session.get(FlowRunAuditOutbox, delivered_with_audit_id)
     assert await async_session.get(FlowRunAuditOutbox, pending_id)
     assert await async_session.get(FlowRunAuditOutbox, dead_lettered_id)
 
-    second_deleted = (
-        await flow_retention_service.delete_old_delivered_flow_audit_outbox_rows()
-    )
-    assert second_deleted == 0
+    second_deleted = await _housekeep(async_session)
+    assert "audit_outbox.outbox_rows_deleted" not in second_deleted
 
     await async_session.execute(
         delete(AuditLogTable).where(AuditLogTable.id == delivered_with_audit_id)
     )
-    deleted_after_audit_retention = (
-        await flow_retention_service.delete_old_delivered_flow_audit_outbox_rows()
-    )
+    deleted_after_audit_retention = await _housekeep(async_session)
     await async_session.flush()
 
-    assert deleted_after_audit_retention == 1
+    assert deleted_after_audit_retention["audit_outbox.outbox_rows_deleted"] == 1
     assert await async_session.get(FlowRunAuditOutbox, delivered_with_audit_id) is None
     assert await async_session.get(FlowRunAuditOutbox, pending_id)
     assert await async_session.get(FlowRunAuditOutbox, dead_lettered_id)
-
-
-@pytest.mark.asyncio
-async def test_delete_old_delivered_flow_audit_outbox_rows_uses_retention_batches(
-    monkeypatch: pytest.MonkeyPatch,
-    async_session: AsyncSession,
-    test_tenant,
-    admin_user,
-    flow_retention_space: Spaces,
-    flow_retention_assistant: Assistants,
-    flow_retention_service: DataRetentionService,
-):
-    monkeypatch.setattr(
-        "eneo.data_retention.infrastructure.data_retention_service.RETENTION_BATCH_SIZE",
-        2,
-    )
-    outbox_ids = []
-    for _ in range(3):
-        fixture = await _create_flow_runtime_fixture(
-            async_session,
-            tenant=test_tenant,
-            user=admin_user,
-            space=flow_retention_space,
-            assistant=flow_retention_assistant,
-            days_old=3,
-        )
-        outbox_ids.append(
-            await _add_flow_audit_outbox_row(
-                async_session,
-                run=fixture.run,
-                user_id=admin_user.id,
-                delivery_status=FlowOutboxDeliveryStatus.DELIVERED.value,
-                with_audit_log=False,
-            )
-        )
-
-    deleted = await flow_retention_service.delete_old_delivered_flow_audit_outbox_rows()
-    remaining = await async_session.scalar(
-        select(func.count())
-        .select_from(FlowRunAuditOutbox)
-        .where(FlowRunAuditOutbox.id.in_(outbox_ids))
-    )
-
-    assert deleted == 3
-    assert remaining == 0

@@ -226,9 +226,7 @@ async def test_flow_audit_outbox_delivery_creates_audit_log_and_marks_delivered(
     assert outbox_state.delivered_at is not None
     assert audit_state.description == "Flow run completed by executor_completed."
     assert audit_state.log_metadata["flow_run_id"] == str(run_id)
-    assert audit_state.log_metadata["outbox_description"] == (
-        "flow_run_completed:executor_completed"
-    )
+    assert "outbox_description" not in audit_state.log_metadata
 
 
 @pytest.mark.asyncio

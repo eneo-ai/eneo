@@ -298,7 +298,7 @@ PATCH requests distinguish omission from null: omit a field to preserve it, or s
 - `run_debug_evidence_days`
 - `flow_runtime_upload_abandonment_days`
 
-The inputs are nullable integers in the range `1..2555`. `flow_runtime_upload_abandonment_days` sets eligibility for runtime uploads that were never attached to a run input. Debug-evidence eligibility remains independently configured. Saving either value does not delete or redact Flow data, and the shared scheduled retention worker does not mutate Flow-owned data.
+The inputs are nullable integers in the range `1..2555`. `flow_runtime_upload_abandonment_days` is how many days a runtime upload never attached to a run input (and a live transcript never bound to a run) is kept before the nightly Flow gallring job deletes it, counted from creation; a new value applies to existing items too, and `null` means the 30-day default. Debug-evidence eligibility remains independently configured. Saving either value deletes nothing by itself; see [Nightly Flow gallring](/guides/data-retention#nightly-flow-gallring).
 
 Run and step history uses dedicated hierarchical endpoints:
 

@@ -79,11 +79,18 @@ async def test_audit_http_outbound_logs_sanitized_metadata() -> None:
     assert kwargs["actor_api_key_id"] is None
     extra = kwargs["metadata"]["extra"]
     assert extra["url_host"] == "https://example.org"
-    assert extra["url_path"] == "/hook"
     assert extra["status_code"] == 204
     assert extra["duration_ms"] == 123.46
-    assert extra["step_description"] == "Webhook step"
     assert kwargs["error_message"] is None
+    # Host only: the path, the step's own description and credentials can carry
+    # user content and stay out of the audit log.
+    assert (
+        kwargs["description"]
+        == "Flow HTTP webhook_delivery POST to https://example.org"
+    )
+    logged = repr(kwargs)
+    for content in ("/hook", "Webhook step", "secret", "token"):
+        assert content not in logged
 
 
 @pytest.mark.asyncio
@@ -128,7 +135,7 @@ async def test_audit_http_outbound_never_breaks_flow_on_logger_failure() -> None
         method="POST",
         call_type="webhook_delivery",
         outcome=Outcome.FAILURE,
-        error_message="failed",
+        error_code="typed_io_http_timeout",
         deps=deps,
     )
 
@@ -153,19 +160,20 @@ async def test_audit_http_outbound_handles_url_without_hostname() -> None:
         method="GET",
         call_type="http_input",
         outcome=Outcome.FAILURE,
-        error_message="network error",
+        error_code="typed_io_http_connection_error",
         deps=deps,
     )
 
     kwargs = audit_service.log_async.await_args.kwargs
     extra = kwargs["metadata"]["extra"]
     assert extra["url_host"] == ""
-    assert extra["url_path"] == "/relative/path"
-    assert kwargs["error_message"] == "network error"
+    assert extra["error_code"] == "typed_io_http_connection_error"
+    assert kwargs["error_message"] == "typed_io_http_connection_error"
+    assert "/relative/path" not in repr(kwargs)
 
 
 @pytest.mark.asyncio
-async def test_audit_http_outbound_uses_step_label_when_description_missing() -> None:
+async def test_audit_http_outbound_omits_missing_duration() -> None:
     audit_service = SimpleNamespace(log_async=AsyncMock())
     deps = HttpAuditDeps(
         audit_service=audit_service,
@@ -188,5 +196,4 @@ async def test_audit_http_outbound_uses_step_label_when_description_missing() ->
 
     kwargs = audit_service.log_async.await_args.kwargs
     extra = kwargs["metadata"]["extra"]
-    assert "step_description" not in extra
     assert "duration_ms" not in extra

@@ -20,6 +20,10 @@ from eneo.authentication.endpoint_access import (
     endpoint_access,
     require_endpoint_access,
 )
+from eneo.data_retention.infrastructure.gallring_tasks import (
+    disabled_gallring_tasks,
+    enabled_gallring_tasks,
+)
 from eneo.flow_packages.api.flow_package_models import (
     FLOW_PACKAGE_OMITTED_MCP_ASSISTANT_COUNT_HEADER,
 )
@@ -814,8 +818,11 @@ def get_application():
         dependencies=[Security(authenticate_super_api_key)],
         description=(
             "Return super-key-protected Flow runtime readiness signals derived from "
-            "persisted run, review, data-integrity, audit-outbox, webhook-outbox, and "
-            "platform task worker readiness."
+            "persisted run, review, data-integrity, audit-outbox, webhook-outbox, "
+            "gallring job, and platform task worker readiness. GALLRING_JOB_STALE "
+            "(UNHEALTHY) means an enabled nightly gallring task has not completed "
+            "within twice its daily cadence; GALLRING_DISABLED (UNHEALTHY) means the "
+            "deployment's emergency switch turned a gallring task off."
         ),
         responses={
             200: {
@@ -837,7 +844,9 @@ def get_application():
 
         settings = get_settings()
         policy = build_flow_runtime_health_policy(
-            task_timeout_seconds=settings.task_execution_timeout_seconds
+            task_timeout_seconds=settings.task_execution_timeout_seconds,
+            gallring_tasks=enabled_gallring_tasks(settings),
+            gallring_disabled_tasks=disabled_gallring_tasks(settings),
         )
         worker_readiness = await load_task_worker_readiness(timeout_seconds=1.0)
         query_started_at = time.perf_counter()

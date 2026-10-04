@@ -22,6 +22,19 @@ The global feature toggle (`audit_logging_enabled`) and per-tenant category/acti
 overrides apply only to configurable events. Required Flow events deliberately
 bypass those controls.
 
+A required event may also carry a deterministic id (`log(audit_id=...)`): writing
+the same id again returns the stored entry instead of a duplicate. The nightly
+Flow gallring job uses it for its `gallring_applied` event per committed
+batch and Organization, written in the deleting transaction (ids and counts only;
+see [Data retention and deletion](/guides/data-retention#nightly-flow-gallring)).
+These Flow events no longer record content: the runtime upload event (no file
+name), the HTTP step events (host only, no URL path, step description or error
+text; a typed error code instead), and the delivered audit outbox events (no
+review payload digests, and an error code instead of the run's error text).
+Other Flow events are unchanged; for example, deleting or downloading a template
+still names the template file in its description. Older rows keep what they
+recorded until audit retention removes them.
+
 Audit-log retention is enforced separately by its scheduled purge job. Exports are
 generated through `AuditExportService`.
 

@@ -212,7 +212,7 @@ async def resolve_http_input_source_text(
             method=method,
             call_type="http_input",
             outcome=Outcome.FAILURE,
-            error_message=str(exc),
+            error_code=exc.code,
             duration_ms=duration_ms,
         )
         raise
@@ -226,7 +226,7 @@ async def resolve_http_input_source_text(
             method=method,
             call_type="http_input",
             outcome=Outcome.FAILURE,
-            error_message=err_msg,
+            error_code=FlowApiErrorCode.TYPED_IO_HTTP_TIMEOUT.value,
             duration_ms=duration_ms,
         )
         raise TypedIOValidationException(
@@ -243,7 +243,7 @@ async def resolve_http_input_source_text(
             method=method,
             call_type="http_input",
             outcome=Outcome.FAILURE,
-            error_message=err_msg,
+            error_code=FlowApiErrorCode.TYPED_IO_HTTP_CONNECTION_ERROR.value,
             duration_ms=duration_ms,
         )
         raise TypedIOValidationException(
@@ -261,7 +261,7 @@ async def resolve_http_input_source_text(
             method=method,
             call_type="http_input",
             outcome=Outcome.FAILURE,
-            error_message=err_msg,
+            error_code=FlowApiErrorCode.TYPED_IO_HTTP_NON_SUCCESS.value,
             status_code=response.status_code,
             duration_ms=duration_ms,
         )
@@ -289,7 +289,7 @@ async def resolve_http_input_source_text(
                 method=method,
                 call_type="http_input",
                 outcome=Outcome.FAILURE,
-                error_message=err_msg,
+                error_code=FlowApiErrorCode.TYPED_IO_HTTP_MALFORMED_RESPONSE.value,
                 status_code=response.status_code,
                 duration_ms=duration_ms,
             )
@@ -420,7 +420,7 @@ async def deliver_webhook(
             method="POST",
             call_type="webhook_delivery",
             outcome=Outcome.FAILURE,
-            error_message=err_msg,
+            error_code=exc.code,
             duration_ms=duration_ms,
         )
         raise BadRequestException(err_msg, code=exc.code) from exc
@@ -434,7 +434,7 @@ async def deliver_webhook(
             method="POST",
             call_type="webhook_delivery",
             outcome=Outcome.FAILURE,
-            error_message=err_msg,
+            error_code=FlowApiErrorCode.TYPED_IO_HTTP_TIMEOUT.value,
             duration_ms=duration_ms,
         )
         raise WebhookDeliveryError(err_msg) from exc
@@ -448,7 +448,7 @@ async def deliver_webhook(
             method="POST",
             call_type="webhook_delivery",
             outcome=Outcome.FAILURE,
-            error_message=err_msg,
+            error_code=FlowApiErrorCode.TYPED_IO_HTTP_CONNECTION_ERROR.value,
             duration_ms=duration_ms,
         )
         raise WebhookDeliveryError(err_msg) from exc
@@ -463,7 +463,7 @@ async def deliver_webhook(
             method="POST",
             call_type="webhook_delivery",
             outcome=Outcome.FAILURE,
-            error_message=err_msg,
+            error_code=FlowApiErrorCode.TYPED_IO_HTTP_NON_SUCCESS.value,
             status_code=response.status_code,
             duration_ms=duration_ms,
         )

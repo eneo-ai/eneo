@@ -1326,7 +1326,16 @@ def test_openapi_flow_retention_policy_is_default_off_and_strictly_bounded(
     assert set(update_properties) == {
         "run_debug_evidence_days",
         "flow_runtime_upload_abandonment_days",
+        "reason",
     }
+    # A longer upload window names why (1-512 characters, never a default).
+    reason = next(
+        option
+        for option in update_properties["reason"]["anyOf"]
+        if option.get("type") == "string"
+    )
+    assert (reason["minLength"], reason["maxLength"]) == (1, 512)
+    assert "default" not in update_properties["reason"]
     assert set(public_schema["required"]) == set(public_properties)
     assert update_schema.get("additionalProperties") is False
     assert update_schema.get("required", []) == []
@@ -1403,11 +1412,13 @@ def test_openapi_flow_retention_descriptions_require_explicit_admin_purge(
     schemas = openapi_spec["components"]["schemas"]
     for schema_name in ("FlowRetentionPolicyPublic", "FlowRetentionPolicyUpdate"):
         properties = schemas[schema_name]["properties"]
-        for field_name in (
-            "run_debug_evidence_days",
-            "flow_runtime_upload_abandonment_days",
-        ):
-            assert "purge eligibility" in properties[field_name]["description"].lower()
+        debug = properties["run_debug_evidence_days"]["description"].lower()
+        assert "purge eligibility" in debug
+        # Unused uploads are staging data: the nightly gallring job deletes them
+        # after the window, and an unset window means the 30-day default.
+        uploads = properties["flow_runtime_upload_abandonment_days"]["description"]
+        assert "nightly gallring job deletes it" in uploads.lower()
+        assert "30-day default" in uploads.lower()
 
     projection_descriptions = [
         schemas[schema_name]["properties"]["run_history_retention"]["description"]

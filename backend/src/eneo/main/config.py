@@ -361,10 +361,15 @@ class Settings(BaseSettings):
     # runs daily at this time, one execution at a time, within these budgets.
     gallring_cron_hour: int = Field(default=3, ge=0, le=23)
     gallring_cron_minute: int = Field(default=30, ge=0, le=59)
+    gallring_flows_housekeeping_enabled: bool = True
     gallring_max_rows_per_run: int = Field(default=50_000, gt=0)
     gallring_max_files_per_run: int = Field(default=10_000, gt=0)
     gallring_max_seconds_per_run: int = Field(default=1800, gt=0)
     gallring_chunk_rows: int = Field(default=500, gt=0, le=2000)
+    gallring_family_gather_seconds: float = Field(default=1.0, gt=0)
+    # One file family is reclaimed in one transaction; a family needing more
+    # rows than this is paused instead. At most one execution's budget.
+    gallring_max_family_rows: int = Field(default=5000, gt=0, le=100_000)
     gallring_chunk_statement_timeout_ms: int = Field(default=30_000, gt=0)
     gallring_chunk_lock_timeout_ms: int = Field(default=2_000, gt=0)
     # A running execution whose heartbeat is older than this may be taken over.
@@ -731,6 +736,18 @@ class Settings(BaseSettings):
         if isinstance(v, str) and v.strip().lower() in {"", "none", "null"}:
             return None
         return v
+
+    @model_validator(mode="after")
+    def validate_gallring_family_cap(self):
+        """A family within the cap must always fit one execution's whole budget."""
+        if self.gallring_max_family_rows > min(
+            self.gallring_max_rows_per_run, self.gallring_max_files_per_run
+        ):
+            raise ValueError(
+                "GALLRING_MAX_FAMILY_ROWS must not exceed GALLRING_MAX_ROWS_PER_RUN "
+                "or GALLRING_MAX_FILES_PER_RUN."
+            )
+        return self
 
     @model_validator(mode="after")
     def resolve_deprecated_federation_flag(self):

@@ -28,9 +28,6 @@ class RuntimeAuditStep(Protocol):
     @property
     def step_id(self) -> Any: ...
 
-    @property
-    def user_description(self) -> str | None: ...
-
 
 @dataclass(frozen=True)
 class HttpAuditDeps:
@@ -47,7 +44,7 @@ async def audit_http_outbound(
     method: str,
     call_type: str,
     outcome: Outcome,
-    error_message: str | None = None,
+    error_code: str | None = None,
     status_code: int | None = None,
     duration_ms: float | None = None,
     deps: HttpAuditDeps,
@@ -55,20 +52,20 @@ async def audit_http_outbound(
     if deps.audit_service is None:
         return
     try:
+        # Ids, host, codes and sizes only: the URL path, the step's own
+        # description and error texts can carry user content.
         parts = urlsplit(url)
         safe_url_host = f"{parts.scheme}://{parts.hostname}" if parts.hostname else ""
-        safe_url_path = parts.path or "/"
         extra: dict[str, Any] = {
             "call_type": call_type,
             "http_method": method,
             "url_host": safe_url_host,
-            "url_path": safe_url_path,
             "flow_id": str(run.flow_id),
             "step_order": step.step_order,
             "step_id": str(step.step_id),
         }
-        if step.user_description:
-            extra["step_description"] = step.user_description
+        if error_code is not None:
+            extra["error_code"] = error_code
         if status_code is not None:
             extra["status_code"] = status_code
         if duration_ms is not None:
@@ -82,10 +79,14 @@ async def audit_http_outbound(
             action=ActionType.FLOW_HTTP_OUTBOUND_CALL,
             entity_type=EntityType.FLOW_RUN,
             entity_id=run.id,
-            description=f"Flow HTTP {call_type} {method} to {safe_url_host}{safe_url_path}",
+            description=f"Flow HTTP {call_type} {method} to {safe_url_host}",
             metadata=deps.actor.audit_metadata(target=run, extra=extra),
             outcome=outcome,
-            error_message=error_message,
+            error_message=(
+                error_code or f"{call_type}_failed"
+                if outcome == Outcome.FAILURE
+                else None
+            ),
         )
     except Exception:
         deps.logger.warning(

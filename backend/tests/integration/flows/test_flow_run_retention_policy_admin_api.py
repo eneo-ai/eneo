@@ -32,7 +32,8 @@ async def test_transcript_only_purge_reports_preview_and_audited_deletions(
     ids = []
     async with db_container() as container:
         session = container.session()
-        for days in (-4, -3, -2, 1):
+        # The current 30-day window counts from creation: three past it, one not.
+        for age in (40, 35, 32, 1):
             row = FlowLiveTranscripts(
                 tenant_id=admin_user.tenant_id,
                 user_id=admin_user.id,
@@ -44,7 +45,7 @@ async def test_transcript_only_purge_reports_preview_and_audited_deletions(
                 text="Private transcript text",
                 segments=None,
                 received_audio_seconds=1,
-                expires_at=now + timedelta(days=days),
+                created_at=now - timedelta(days=age),
             )
             session.add(row)
             await session.flush()

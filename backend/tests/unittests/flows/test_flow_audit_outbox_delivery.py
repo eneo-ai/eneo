@@ -135,10 +135,7 @@ def test_completed_run_outbox_builds_human_audit_log_description() -> None:
         "target_status": "completed",
         "review_checkpoint_id": None,
         "checkpoint_revision": None,
-        "payload_sha256_before": None,
-        "payload_sha256_after": None,
         "error_code": None,
-        "outbox_description": "flow_run_completed:executor_completed",
     }
 
 
@@ -150,18 +147,14 @@ def test_completed_run_outbox_builds_human_audit_log_description() -> None:
         ActionType.FLOW_RUN_REVIEW_CHECKPOINT_OPENED,
     ],
 )
-def test_review_audit_metadata_preserves_payload_digests(action) -> None:
-    changed = action != ActionType.FLOW_RUN_REVIEW_CHECKPOINT_OPENED
-    before = "a" * 64 if changed else None
-    after = "b" * 64 if changed else None
+def test_review_audit_metadata_omits_payload_digests(action) -> None:
     row = replace(
         _outbox_row(action=action.value),
-        payload_sha256_before=before,
-        payload_sha256_after=after,
+        payload_sha256_before="a" * 64,
+        payload_sha256_after="b" * 64,
     )
     metadata = build_audit_log_from_outbox(row).metadata
-    assert metadata["payload_sha256_before"] == before
-    assert metadata["payload_sha256_after"] == after
+    assert "a" * 64 not in repr(metadata) and "b" * 64 not in repr(metadata)
 
 
 def test_failed_run_outbox_uses_non_empty_error_message_fallback() -> None:
@@ -181,9 +174,10 @@ def test_failed_run_outbox_uses_non_empty_error_message_fallback() -> None:
 @pytest.mark.parametrize(
     ("error_message", "error_code", "expected_error_message"),
     [
-        ("explicit failure", "flow_task_failure", "explicit failure"),
-        (" ", "flow_task_failure", "flow_task_failure"),
-        (None, None, "flow_run_failed:task_timeout"),
+        # The run's error text can quote user content; the audit keeps the code.
+        ("Customer Anna's file failed", "flow_task_failure", "flow_task_failure"),
+        ("Customer Anna's file failed", None, "flow_run_failed:task_timeout"),
+        (None, " ", "flow_run_failed:task_timeout"),
     ],
 )
 def test_failed_run_outbox_error_message_fallback_order(
@@ -202,6 +196,7 @@ def test_failed_run_outbox_error_message_fallback_order(
     audit_log = build_audit_log_from_outbox(row)
 
     assert audit_log.error_message == expected_error_message
+    assert "Anna" not in repr(audit_log.metadata)
 
 
 def test_audit_outbox_delivery_error_sanitizes_secrets_before_persistence() -> None:

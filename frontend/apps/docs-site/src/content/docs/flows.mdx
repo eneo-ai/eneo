@@ -754,9 +754,9 @@ Flow retention settings define eligibility, not authorization to delete:
 
 - Run-history policy resolves the first complete `{mode, days}` pair in Flow → Space → Organization order. `days` accepts `1..2555`; `mode` is `preserve` or `review_required`; no policy means there is no age threshold.
 - A Space or Flow either inherits its complete parent policy or replaces the complete pair. Parent values are defaults, not maximums, so one Flow can retain history longer than its Space.
-- Tenant `flow_settings.retention_policy.run_debug_evidence_days` independently defines when debug evidence can become eligible, and `flow_runtime_upload_abandonment_days` does the same for unbound runtime uploads.
+- Tenant `flow_settings.retention_policy.run_debug_evidence_days` independently defines when debug evidence can become eligible. `flow_runtime_upload_abandonment_days` (30 days when unset) is how long unbound runtime uploads and unbound live transcripts are kept before the nightly Flow gallring job deletes them; changing it needs `retention_manage` in a signed-in session, and a longer window needs a reason.
 - `review_required` exposes matching terminal runs through a bounded, read-only queue that omits inputs and outputs. Reading it has no side effects.
-- Saving any policy never deletes, approves, schedules, or redacts Flow data. The daily shared retention worker does not mutate Flow-owned data.
+- Saving any policy never deletes, approves, schedules, or redacts Flow data. The nightly Flow gallring job deletes only staging and waste data (unbound uploads and transcripts, delivered audit outbox mirrors), never run history; see [Data retention and deletion](/guides/data-retention#nightly-flow-gallring).
 - The current settings surface has no Flow run-history purge action. A future purge must preview the exact scope, require confirmation and a reason, execute in bounded tenant-scoped batches, respect audit/webhook blockers, and leave an immutable audit receipt.
 
 Eligible Flow data remains stored until that separate purge workflow exists and an administrator explicitly completes it.

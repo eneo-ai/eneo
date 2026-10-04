@@ -15,13 +15,10 @@ from eneo.data_retention.infrastructure.gallring_lock import (
 from eneo.database.affected_rows import affected_row_count
 from eneo.database.tables.app_table import AppRuns, Apps
 from eneo.database.tables.assistant_table import Assistants
-from eneo.database.tables.audit_log_table import AuditLog as AuditLogTable
 from eneo.database.tables.audit_retention_policy_table import AuditRetentionPolicy
 from eneo.database.tables.flow_tables import (
     BuilderClientErrors,
-    FlowOutboxDeliveryStatus,
     FlowProviderCalls,
-    FlowRunAuditOutbox,
     FlowRuns,
     Flows,
     FlowStepAttemptResolvedInputs,
@@ -38,10 +35,8 @@ from eneo.flows.enums import TERMINAL_FLOW_RUN_STATUS_VALUES
 from eneo.flows.flow_retention_policy import resolve_flow_retention_policy
 from eneo.flows.infrastructure.flow_retention_hold_repo import flow_run_held_predicate
 from eneo.flows.infrastructure.flow_run_history_purge_repo import (
-    FlowRunHistoryPurgeCounts,
     FlowRunHistoryPurgeRepository,
     FlowRunHistoryPurgeResult,
-    FlowTemplateAssetPurgeCounts,
     flow_run_undelivered_audit_exists,
     flow_run_unresolved_webhook_exists,
 )
@@ -103,55 +98,6 @@ class DataRetentionService:
     def __init__(self, session: AsyncSession) -> None:
         super().__init__()
         self.session = session
-
-    async def delete_old_delivered_flow_audit_outbox_rows(self) -> int:
-        audit_log_exists = (
-            sa.select(sa.literal(1))
-            .select_from(AuditLogTable)
-            .where(AuditLogTable.id == FlowRunAuditOutbox.id)
-            .exists()
-        )
-        base_subquery = sa.select(FlowRunAuditOutbox.id).where(
-            sa.and_(
-                FlowRunAuditOutbox.delivery_status
-                == FlowOutboxDeliveryStatus.DELIVERED.value,
-                sa.not_(audit_log_exists),
-            )
-        )
-
-        total_deleted = 0
-        while True:
-            batch_subquery = base_subquery.order_by(FlowRunAuditOutbox.id).limit(
-                RETENTION_BATCH_SIZE
-            )
-            # Audit logs own delivered audit lifetime; the outbox mirror is
-            # removed only after audit retention deletes the matching audit row.
-            result = await self.session.execute(
-                sa.delete(FlowRunAuditOutbox).where(
-                    FlowRunAuditOutbox.id.in_(batch_subquery)
-                )
-            )
-            batch_deleted = affected_row_count(result)
-            if batch_deleted == 0:
-                break
-            total_deleted += batch_deleted
-            logger.debug(
-                "Deleted batch of %s delivered Flow audit outbox rows "
-                "whose audit logs were already deleted by retention (total: %s)",
-                batch_deleted,
-                total_deleted,
-            )
-
-        if total_deleted > 0:
-            logger.info(
-                "Deleted %s delivered Flow audit outbox rows whose audit logs "
-                "were already deleted by retention",
-                total_deleted,
-            )
-        else:
-            logger.debug("No delivered Flow audit outbox rows ready for cleanup")
-
-        return total_deleted
 
     def _build_effective_retention_days(
         self,
@@ -430,31 +376,6 @@ class DataRetentionService:
 
         result = await self.session.execute(query)
         return result.scalar() or 0
-
-    async def purge_abandoned_flow_runtime_uploads(
-        self,
-        *,
-        now: datetime,
-        limit: int,
-    ) -> FlowRunHistoryPurgeCounts:
-        """Reclaim runtime uploads never bound to a run, past their horizon.
-
-        The tenant's abandonment horizon and its byte-accurate impact preview are
-        operator-facing settings, so this step has to run wherever flow retention
-        actually runs.
-        """
-        return await FlowRunHistoryPurgeRepository(
-            self.session
-        ).purge_abandoned_runtime_uploads(now=now, limit=limit)
-
-    async def purge_soft_deleted_flow_template_assets(
-        self,
-        *,
-        limit: int,
-    ) -> FlowTemplateAssetPurgeCounts:
-        return await FlowRunHistoryPurgeRepository(
-            self.session
-        ).purge_soft_deleted_template_assets(limit=limit)
 
     async def purge_old_flow_run_history_batch(
         self, *, now: datetime, limit: int

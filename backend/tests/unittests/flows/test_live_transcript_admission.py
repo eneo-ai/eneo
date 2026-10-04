@@ -1,4 +1,4 @@
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timezone
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock
 from uuid import uuid4
@@ -90,11 +90,22 @@ def admission(user):
         text="Live text.",
         segments=None,
         received_audio_seconds=42,
-        expires_at=datetime.now(timezone.utc) + timedelta(days=1),
+        created_at=datetime.now(timezone.utc),
         bound_file_id=None,
     )
-    run_repo.session.scalar.return_value = row
+    # The repository loads the row, then asks the database whether it is older
+    # than the tenant's current window; `expired` stands in for that answer.
+    state = SimpleNamespace(expired=False)
+
+    async def scalar(statement, *args, **kwargs):
+        descriptions = getattr(statement, "column_descriptions", [{}])
+        if descriptions and descriptions[0].get("entity") is FlowLiveTranscripts:
+            return row
+        return state.expired
+
+    run_repo.session.scalar = AsyncMock(side_effect=scalar)
     return SimpleNamespace(
+        state=state,
         flow=flow,
         step=step,
         files=files,
@@ -141,21 +152,17 @@ def test_run_request_accepts_a_live_transcript_uuid():
         "flow_version",
         "step_id",
         "model_id",
-        "expires_at",
+        "expired",
     ],
 )
 async def test_foreign_or_expired_live_transcript_refuses_without_binding(
     admission, field
 ):
     case = admission
-    value = (
-        2
-        if field == "flow_version"
-        else datetime.now(timezone.utc) - timedelta(seconds=1)
-        if field == "expires_at"
-        else uuid4()
-    )
-    setattr(case.row, field, value)
+    if field == "expired":
+        case.state.expired = True  # older than the tenant's current window
+    else:
+        setattr(case.row, field, 2 if field == "flow_version" else uuid4())
     with pytest.raises(NotFoundException) as error:
         await _submit(case)
     assert error.value.code == "flow_run_live_transcript_not_found"
@@ -197,7 +204,7 @@ async def test_an_expired_transcript_already_bound_to_this_file_is_accepted(admi
     # A retry re-admits the run's own binding; expiry refuses only a first binding.
     case = admission
     case.row.bound_file_id = case.files[0].id
-    case.row.expires_at = datetime.now(timezone.utc) - timedelta(days=1)
+    case.state.expired = True
     await _submit(case)
     assert case.row.bound_file_id == case.files[0].id
     case.repo.create.assert_awaited_once()

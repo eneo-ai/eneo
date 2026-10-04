@@ -632,6 +632,13 @@ class FlowLiveTranscripts(BasePublic):
             "id",
             postgresql_where=sa.text("bound_file_id IS NULL"),
         ),
+        # Gallring housekeeping: unbound transcripts past the current window.
+        Index(
+            "ix_flow_live_transcripts_unbound_created",
+            "created_at",
+            "id",
+            postgresql_where=sa.text("bound_file_id IS NULL"),
+        ),
     )
 
 
@@ -2181,6 +2188,13 @@ class FlowRunAuditOutbox(BasePublic):
             "ix_flow_run_audit_outbox_dead_lettered",
             "dead_lettered_at",
             postgresql_where=sa.text("delivery_status = 'dead_lettered'"),
+        ),
+        # Gallring housekeeping: delivered mirrors past the audit retention.
+        Index(
+            "ix_flow_run_audit_outbox_delivered",
+            "delivered_at",
+            "id",
+            postgresql_where=sa.text("delivery_status = 'delivered'"),
         ),
     )
 

@@ -6,6 +6,7 @@ from typing import Any
 from uuid import UUID
 
 import sqlalchemy as sa
+from sqlalchemy.dialects.postgresql import UUID as PG_UUID
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from eneo.database.tables.flow_tables import FlowRetentionHolds, FlowRuns, Flows
@@ -66,6 +67,20 @@ def flow_run_held_predicate(
         )
         .exists()
     )
+
+
+# Data that belongs to no run: a typed NULL run never equals a run hold's run
+# (IS NULL would match every Flow hold of every Flow).
+_NO_RUN = sa.cast(sa.null(), PG_UUID(as_uuid=True))
+
+
+def flow_runless_data_held_predicate(
+    *, flow_id: sa.ColumnElement[UUID] | Any
+) -> sa.Exists:
+    """flow_run_held_predicate for data of the Flow that belongs to no run (an
+    unused upload or live transcript, a gallring receipt): only a Flow hold
+    covers it."""
+    return flow_run_held_predicate(run_id=_NO_RUN, flow_id=flow_id)
 
 
 def flow_has_active_hold(flow_id: sa.ColumnElement[UUID] | Any) -> sa.Exists:

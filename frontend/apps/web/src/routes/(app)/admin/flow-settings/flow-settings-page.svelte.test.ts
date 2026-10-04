@@ -18,6 +18,7 @@ const placeFlowRetentionHold = vi.hoisted(() => vi.fn());
 const releaseFlowRetentionHold = vi.hoisted(() => vi.fn());
 const updateFlowInputLimits = vi.hoisted(() => vi.fn());
 const updateFlowRuntimePolicy = vi.hoisted(() => vi.fn());
+const updateFlowRetentionPolicy = vi.hoisted(() => vi.fn());
 const toastSuccess = vi.hoisted(() => vi.fn());
 const toastErrorFn = vi.hoisted(() => vi.fn());
 const toastErrorMock = vi.hoisted(() => vi.fn());
@@ -27,6 +28,7 @@ vi.mock("$lib/core/Eneo", () => ({
     settings: {
       updateFlowInputLimits,
       updateFlowRuntimePolicy,
+      updateFlowRetentionPolicy,
       updateMappedExecutionPolicy,
       updateAIBuilderBudgetSettings,
       getFlowRetentionPolicy,
@@ -639,6 +641,48 @@ describe("flow settings page — mapped restore lifecycle", () => {
     await expect
       .element(page.getByRole("button", { name: "Spara policy för organisationen" }))
       .toBeVisible();
+  });
+
+  test("a longer upload window asks why before it saves, and sends the reason", async () => {
+    updateFlowRetentionPolicy.mockResolvedValue({
+      ...pageData().flowRetentionPolicy,
+      flow_runtime_upload_abandonment_days: 60
+    });
+    render(FlowSettingsPage, pageProps());
+
+    await page.getByRole("switch", { name: "Ange när oanvända uppladdningar raderas" }).click();
+    const days = page.getByRole("textbox", { name: "Oanvända uppladdningar: Raderas efter" });
+    // The 30-day default itself is not longer: no reason is asked for.
+    await expect.element(days).toHaveValue("30");
+    expect(page.getByRole("textbox", { name: "Varför ska de sparas längre?" }).query()).toBeNull();
+
+    await days.fill("60");
+    const reason = page.getByRole("textbox", { name: "Varför ska de sparas längre?" });
+    await expect.element(reason).toBeVisible();
+    await expect.element(page.getByRole("button", { name: "Spara ändringar" })).toBeDisabled();
+
+    await reason.fill("Granskning av inspelningar 2026");
+    await page.getByRole("button", { name: "Spara ändringar" }).click();
+    expect(updateFlowRetentionPolicy).toHaveBeenCalledWith({
+      flow_runtime_upload_abandonment_days: 60,
+      reason: "Granskning av inspelningar 2026"
+    });
+  });
+
+  test("the upload window is read only without permission to manage retention", async () => {
+    const data = pageData();
+    render(FlowSettingsPage, {
+      data: { ...data, access: { ...data.access, retentionManage: false } } as never
+    });
+
+    await expect
+      .element(
+        page.getByText("Bara den som får hantera gallring kan ändra fönstret.", { exact: false })
+      )
+      .toBeVisible();
+    expect(
+      page.getByRole("switch", { name: "Ange när oanvända uppladdningar raderas" }).query()
+    ).toBeNull();
   });
 
   test("uses task-oriented names for every settings tab", async () => {

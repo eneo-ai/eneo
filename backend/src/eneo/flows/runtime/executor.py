@@ -3004,7 +3004,7 @@ class FlowRunExecutor:
         method: str,
         call_type: str,
         outcome: Outcome,
-        error_message: str | None = None,
+        error_code: str | None = None,
         status_code: int | None = None,
         duration_ms: float | None = None,
     ) -> None:
@@ -3020,7 +3020,7 @@ class FlowRunExecutor:
             method=method,
             call_type=call_type,
             outcome=outcome,
-            error_message=error_message,
+            error_code=error_code,
             status_code=status_code,
             duration_ms=duration_ms,
             deps=deps,

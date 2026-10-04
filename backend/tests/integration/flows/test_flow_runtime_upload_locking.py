@@ -10,6 +10,7 @@ from sqlalchemy.exc import DBAPIError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from eneo.authentication.principal_types import PrincipalType
+from eneo.data_retention.application.gallring_runner import GallringBatch
 from eneo.database.database import sessionmanager
 from eneo.database.tables.files_table import Files
 from eneo.database.tables.flow_tables import (
@@ -25,10 +26,10 @@ from eneo.database.tables.object_content_table import (
 )
 from eneo.database.tables.tenant_table import Tenants
 from eneo.files.file_models import FileContentVariant, FileType
+from eneo.flows.application.flow_housekeeping_task import FlowHousekeepingTask
 from eneo.flows.enums import FlowRunStatus
 from eneo.flows.flow_runtime_upload_repo import FlowRuntimeUploadRepository
 from eneo.flows.infrastructure.flow_run_history_purge_repo import (
-    FlowRunHistoryPurgeCounts,
     FlowRunHistoryPurgeRepository,
     FlowRunHistoryPurgeResult,
 )
@@ -218,18 +219,25 @@ async def _purge_run(run_id: UUID) -> FlowRunHistoryPurgeResult:
 
 async def _sweep_abandoned_runtime_uploads(
     *, lock_timeout: str | None = None
-) -> FlowRunHistoryPurgeCounts:
+) -> dict[str, int]:
+    """One flows.housekeeping uploads batch; its counts and blocked counts."""
     async with sessionmanager.session() as session, session.begin():
         if lock_timeout is not None:
             if lock_timeout != "100ms":
                 raise ValueError("Unsupported test lock timeout.")
             await session.execute(sa.text("SET LOCAL lock_timeout = '100ms'"))
-        return await FlowRunHistoryPurgeRepository(
-            session
-        ).purge_abandoned_runtime_uploads(
-            now=datetime.now(timezone.utc),
-            limit=10,
+        [uploads] = [
+            step
+            for step in FlowHousekeepingTask(session).steps()
+            if step.name == "abandoned_uploads"
+        ]
+        result = await uploads.run(
+            GallringBatch(job_run_id=uuid4(), batch_seq=1, rows=10, files=10)
         )
+        counts = dict(result.blocked)
+        for effect in result.effects:
+            counts.update(effect.counts)
+        return counts
 
 
 async def _make_runtime_upload_abandoned(upload: _RuntimeUpload) -> None:
@@ -561,16 +569,14 @@ async def test_runtime_upload_bind_during_abandonment_sweep_survives(
                 fixture=fixture,
             )
 
+            # The binder's locks defer the upload; nothing is released.
             skipped_counts = await _sweep_abandoned_runtime_uploads()
-            assert skipped_counts.flow_runtime_source_candidates == 0
-            assert skipped_counts.flow_runtime_source_bindings_deleted == 0
-            assert skipped_counts.flow_runtime_source_files_deleted == 0
+            assert skipped_counts == {"lock_deferred": 1}
 
+    # Once bound to a run the upload is no longer abandoned.
     repeated_counts = await _sweep_abandoned_runtime_uploads()
 
-    assert repeated_counts.flow_runtime_source_candidates == 0
-    assert repeated_counts.flow_runtime_source_bindings_deleted == 0
-    assert repeated_counts.flow_runtime_source_files_deleted == 0
+    assert repeated_counts == {}
     assert await _runtime_source_rows_exist(fixture=fixture) == (True, True)
     async with sessionmanager.session() as session, session.begin():
         assert await session.get(FlowRuns, retained_run_id) is not None
@@ -604,9 +610,7 @@ async def test_abandonment_sweep_skips_file_locked_for_deletion(
             skipped_counts = await _sweep_abandoned_runtime_uploads(
                 lock_timeout="100ms"
             )
-            assert skipped_counts.flow_runtime_source_candidates == 0
-            assert skipped_counts.flow_runtime_source_bindings_deleted == 0
-            assert skipped_counts.flow_runtime_source_files_deleted == 0
+            assert skipped_counts == {"lock_deferred": 1}
 
             await deletion_session.execute(
                 sa.delete(Files).where(Files.id == upload.file_id)
@@ -623,7 +627,7 @@ async def test_abandonment_sweep_skips_file_locked_for_deletion(
 
 @pytest.mark.asyncio
 @pytest.mark.integration
-async def test_abandonment_sweep_reports_file_bytes_while_shared_content_remains(
+async def test_abandonment_sweep_keeps_content_another_file_shares(
     db_container,
     completion_model_factory,
     space_factory,
@@ -663,11 +667,14 @@ async def test_abandonment_sweep_reports_file_bytes_while_shared_content_remains
 
     counts = await _sweep_abandoned_runtime_uploads()
 
-    assert counts.flow_runtime_source_candidates == 1
-    assert counts.flow_runtime_source_candidate_bytes == len(_RUNTIME_UPLOAD_PAYLOAD)
-    assert counts.flow_runtime_source_bindings_deleted == 1
-    assert counts.flow_runtime_source_files_deleted == 1
-    assert counts.flow_runtime_source_bytes_deleted == len(_RUNTIME_UPLOAD_PAYLOAD)
+    assert counts == {
+        "manifest_items": 1,
+        "members_checked": 1,
+        "anchors_released": 1,
+        "files_deleted": 1,
+        "references_released": 1,
+        "families_completed": 1,
+    }
     async with sessionmanager.session() as session, session.begin():
         assert await session.get(Files, upload.file_id) is None
         assert await session.get(Files, retained_file_id) is not None

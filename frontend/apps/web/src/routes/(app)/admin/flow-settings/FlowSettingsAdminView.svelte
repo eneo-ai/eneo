@@ -9,6 +9,8 @@
   import { Button } from "$lib/components/ui/button/index.js";
   import * as Card from "$lib/components/ui/card/index.js";
   import * as Collapsible from "$lib/components/ui/collapsible/index.js";
+  import * as Field from "$lib/components/ui/field/index.js";
+  import { Textarea } from "$lib/components/ui/textarea/index.js";
   import { Page, Settings } from "$lib/components/layout";
   import {
     NumberField,
@@ -55,12 +57,17 @@
   let runRetentionDirty = $state(false);
 
   // --- Gallring ---
+  const UPLOAD_WINDOW_DEFAULT_DAYS = 30;
   const uploadCleanup = new ToggleNumberField({
     initial: initial.flowRetentionPolicy.flow_runtime_upload_abandonment_days,
     min: 1,
     max: FLOW_RETENTION_MAX_DAYS,
-    suggestion: 30
+    suggestion: UPLOAD_WINDOW_DEFAULT_DAYS
   });
+  // The window decides when gallring deletes: the server lets only people who
+  // manage retention change it, and asks why when it gets longer.
+  const canChangeUploadWindow = initial.access.retentionManage;
+  let uploadWindowReason = $state("");
 
   // --- Uppladdningar & körning ---
   const fileMaxSize = new NumberField({
@@ -201,6 +208,13 @@
   ]);
 
   const retentionDirty = $derived(uploadCleanup.dirty);
+  const uploadWindowLonger = $derived(
+    uploadCleanup.dirty &&
+      uploadCleanup.value !== undefined &&
+      (uploadCleanup.value ?? UPLOAD_WINDOW_DEFAULT_DAYS) >
+        (policy.flow_runtime_upload_abandonment_days ?? UPLOAD_WINDOW_DEFAULT_DAYS)
+  );
+  const uploadReasonMissing = $derived(uploadWindowLonger && uploadWindowReason.trim() === "");
 
   const timeoutOrderError = $derived(
     defaultStepTimeout.value != null &&
@@ -211,7 +225,10 @@
   );
 
   const blocked = $derived(
-    form.invalid || timeoutOrderError !== null || (runCapacity === 0 && maxConcurrentRuns.dirty)
+    form.invalid ||
+      timeoutOrderError !== null ||
+      uploadReasonMissing ||
+      (runCapacity === 0 && maxConcurrentRuns.dirty)
   );
 
   const uploadStatus = $derived.by(() => {
@@ -385,9 +402,11 @@
   async function persist(patches: Patches) {
     if (patches.retention) {
       policy = await eneo.settings.updateFlowRetentionPolicy({
-        flow_runtime_upload_abandonment_days: uploadCleanup.value ?? null
+        flow_runtime_upload_abandonment_days: uploadCleanup.value ?? null,
+        ...(uploadWindowLonger ? { reason: uploadWindowReason.trim() } : {})
       });
       uploadCleanup.commit(policy.flow_runtime_upload_abandonment_days);
+      uploadWindowReason = "";
     }
 
     const updated = await saveFlowAdminSettings(eneo.settings, patches.rest);
@@ -548,16 +567,37 @@
               </span>
             {/if}
           </div>
-          <Settings.ToggleNumberRow
-            title={m.flow_retention_upload_title()}
-            description={m.flow_retention_upload_description()}
-            toggleLabel={m.flow_retention_upload_window_enable()}
-            valueLabel={m.flow_retention_eligibility_after_label()}
-            unit={m.flow_retention_days_suffix()}
-            offStatus={m.flow_retention_upload_window_off_status()}
-            info={m.flow_retention_upload_anchor_description()}
-            field={uploadCleanup}
-          />
+          {#if canChangeUploadWindow}
+            <Settings.ToggleNumberRow
+              title={m.flow_retention_upload_title()}
+              description={m.flow_retention_upload_description()}
+              toggleLabel={m.flow_retention_upload_window_enable()}
+              valueLabel={m.flow_retention_upload_deleted_after_label()}
+              unit={m.flow_retention_days_suffix()}
+              offStatus={m.flow_retention_upload_window_off_status()}
+              info={m.flow_retention_upload_anchor_description()}
+              field={uploadCleanup}
+            />
+            {#if uploadWindowLonger}
+              <Field.Field class="mx-4 max-w-xl lg:mx-0.5" data-invalid={uploadReasonMissing}>
+                <Field.Label for="upload-window-reason">
+                  {m.flow_retention_upload_reason_label()}
+                </Field.Label>
+                <Textarea
+                  id="upload-window-reason"
+                  bind:value={uploadWindowReason}
+                  maxlength={512}
+                  rows={2}
+                  aria-invalid={uploadReasonMissing}
+                />
+                <Field.Description>{m.flow_retention_upload_reason_hint()}</Field.Description>
+              </Field.Field>
+            {/if}
+          {:else}
+            <p class="text-secondary mx-4 text-sm lg:mx-0.5">
+              {m.flow_retention_upload_needs_manage()}
+            </p>
+          {/if}
         </Settings.Group>
       </Settings.Page>
     </Page.Tab>

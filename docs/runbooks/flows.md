@@ -100,6 +100,8 @@ Any positive count triggers a flag unless an age condition is stated.
 | `WEBHOOK_OUTBOX_EXPIRED_CLAIMS` | Any pending webhook claim has reached `claim_expires_at`. | Verify the former worker no longer owns the effect, then allow bounded reclaim. |
 | `WEBHOOK_OUTBOX_DEAD_LETTERS` | Any webhook delivery exhausted its five-attempt budget. | Preserve the row and inspect its sanitized failure and destination contract. |
 | `GALLRING_HOLD_REVIEW_OVERDUE` | An active legal hold on Flow run history has passed its review date (DEGRADED; the hold still stops deletion). | Have a holder of `retention_holds` review it in Admin > Flow settings > Retention: extend the review date with a reason, or release the hold with a reason. |
+| `GALLRING_JOB_STALE` | An enabled gallring task (`gallring.stale_tasks`) has not completed (succeeded or partial) within two days, or started but never completed within two days. | Check the general worker and its `run_gallring` cron; read the task's latest `gallring_job_runs` row (`outcome`, `error_code`) and fix the failing chunk. |
+| `GALLRING_DISABLED` | The deployment's emergency switch turned a gallring task off (`gallring.disabled_tasks`); every suppressed nightly run is audited as skipped. | Re-enable `GALLRING_FLOWS_HOUSEKEEPING_ENABLED` as soon as the emergency is over; the switch is not a pause. |
 
 A stale running run with a pending or claimed webhook delivery may still have an
 external effect in progress. Do not terminalize it manually. Let the bounded

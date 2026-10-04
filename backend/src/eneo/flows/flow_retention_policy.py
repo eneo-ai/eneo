@@ -27,6 +27,11 @@ RETENTION_POLICY_BUSINESS_FIELDS: Final[frozenset[str]] = frozenset(
         FLOW_RETENTION_POLICY_HOLD_MAX_REVIEW_DAYS_KEY,
     }
 )
+# Staging data never attached to a run (runtime uploads, unbound live
+# transcripts) is kept this long when the tenant has not set its own window.
+DEFAULT_FLOW_RUNTIME_UPLOAD_ABANDONMENT_DAYS: Final[int] = 30
+
+
 DELETED_RETENTION_POLICY_FIELDS: Final[frozenset[str]] = frozenset(
     {
         "source_audio_days",

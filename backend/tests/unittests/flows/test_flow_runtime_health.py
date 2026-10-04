@@ -408,3 +408,46 @@ def test_a_legal_hold_past_its_review_date_degrades_health_without_ending() -> N
     assert response.status_flags == [FlowRuntimeHealthFlag.GALLRING_HOLD_REVIEW_OVERDUE]
     assert response.retention_holds.review_overdue_count == 2
     assert response.retention_holds.oldest_review_overdue_age_seconds == 3600
+
+
+def test_a_stale_gallring_task_makes_flow_runtime_unhealthy() -> None:
+    now = datetime(2026, 10, 4, 12, 0, tzinfo=timezone.utc)
+    policy = build_flow_runtime_health_policy(
+        task_timeout_seconds=14400, gallring_tasks=("flows.housekeeping",)
+    )
+
+    response = classify_flow_runtime_health(
+        snapshot=FlowRuntimeHealthSnapshot(
+            database_observed_at=now, stale_gallring_tasks=("flows.housekeeping",)
+        ),
+        now=now,
+        policy=policy,
+        probe=FlowRuntimeProbe(
+            db_query_ok=True, execution_worker_ready=True, maintenance_worker_ready=True
+        ),
+    )
+
+    assert response.status_flags == [FlowRuntimeHealthFlag.GALLRING_JOB_STALE]
+    assert response.status == FlowRuntimeHealthStatus.UNHEALTHY
+    assert response.gallring.stale_tasks == ["flows.housekeeping"]
+    assert policy.gallring_stale_after == timedelta(days=2)
+
+
+def test_a_task_off_by_the_emergency_switch_is_never_silent() -> None:
+    now = datetime(2026, 10, 4, 12, 0, tzinfo=timezone.utc)
+    policy = build_flow_runtime_health_policy(
+        task_timeout_seconds=14400, gallring_disabled_tasks=("flows.housekeeping",)
+    )
+
+    response = classify_flow_runtime_health(
+        snapshot=FlowRuntimeHealthSnapshot(database_observed_at=now),
+        now=now,
+        policy=policy,
+        probe=FlowRuntimeProbe(
+            db_query_ok=True, execution_worker_ready=True, maintenance_worker_ready=True
+        ),
+    )
+
+    assert response.status_flags == [FlowRuntimeHealthFlag.GALLRING_DISABLED]
+    assert response.status == FlowRuntimeHealthStatus.UNHEALTHY
+    assert response.gallring.disabled_tasks == ["flows.housekeeping"]

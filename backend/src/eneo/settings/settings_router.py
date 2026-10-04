@@ -869,8 +869,10 @@ async def update_flow_evidence_policy(
     operation_id="get_flow_retention_policy",
     summary="Get flow retention policy",
     description=(
-        "Return the independent eligibility windows for stored Flow debug evidence "
-        "and abandoned runtime uploads. Flow run-history retention is configured "
+        "Return the eligibility window for stored Flow debug evidence and the keep "
+        "window for runtime uploads never attached to a run (and unbound live "
+        "transcripts), which the nightly gallring job deletes after it; null means "
+        "the 30-day default. Flow run-history retention is configured "
         "through the dedicated hierarchical policy endpoints. Reading this endpoint "
         "never previews, deletes, or redacts Flow data."
     ),
@@ -894,9 +896,18 @@ async def get_flow_retention_policy(
     operation_id="update_flow_retention_policy",
     summary="Update flow retention policy",
     description=(
-        "Update the independent eligibility windows for stored Flow debug evidence "
-        "and abandoned runtime uploads. Omitted fields are unchanged and null removes "
-        "the tenant input. Saving these values never deletes or redacts Flow data."
+        "Update the eligibility window for stored Flow debug evidence and the keep "
+        "window for runtime uploads never attached to a run. Omitted fields are "
+        "unchanged and null removes the tenant input (uploads then use the 30-day "
+        "default). Saving these values never deletes or redacts Flow data; the "
+        "nightly gallring job applies the upload window. The upload window is a "
+        "retention decision: changing it also needs retention_manage in a "
+        f"signed-in session (`{RETENTION_PERMISSION_REQUIRED_CODE}`, "
+        f"`{RETENTION_PERSON_REQUIRED_CODE}`), a longer window needs a reason "
+        "(`flow_retention_reason_required`), and a change writes the required "
+        "audit action flow_run_retention_policy_changed with the previous and new "
+        "value and the reason in the same transaction. It waits for an open "
+        "history deletion to finish."
     ),
     responses={
         400: _flow_settings_invalid_payload_response(
@@ -904,6 +915,7 @@ async def get_flow_retention_policy(
             "At least one flow retention policy field must be provided.",
         ),
         403: _flow_settings_admin_forbidden_response(),
+        409: _flow_retention_lock_busy_response(),
     },
 )
 @endpoint_access(

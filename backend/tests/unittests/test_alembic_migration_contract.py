@@ -605,3 +605,23 @@ def test_gallring_tables_revision_emits_static_ddl_offline():
         assert f"CREATE TABLE {table}" in emitted
     assert emitted.count("COMMIT;") == 1  # one transaction: atomic, re-runnable
     assert "UPDATE alembic_version SET version_num='202610041200'" in emitted
+
+
+def test_housekeeping_index_revision_emits_static_concurrent_ddl_offline():
+    backend = Path(__file__).parents[2]
+    config = Config(str(backend / "alembic.ini"))
+    config.set_main_option("script_location", str(backend / "alembic"))
+    config.set_main_option("sqlalchemy.url", "postgresql://offline@localhost/offline")
+    output = io.StringIO()
+    config.output_buffer = output
+
+    command.upgrade(config, "202610041200:202610041300", sql=True)
+
+    emitted = output.getvalue()
+    for name in (
+        "ix_flow_live_transcripts_unbound_created",
+        "ix_flow_run_audit_outbox_delivered",
+    ):
+        assert f"CREATE INDEX CONCURRENTLY IF NOT EXISTS {name}" in emitted
+    assert "pg_index" not in emitted  # no catalog read offline
+    assert "UPDATE alembic_version SET version_num='202610041300'" in emitted

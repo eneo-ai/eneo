@@ -354,10 +354,8 @@ def _audit_metadata(row: FlowRunAuditOutboxDeliveryRow) -> dict[str, Any]:
             else None
         ),
         "checkpoint_revision": row.checkpoint_revision,
-        "payload_sha256_before": row.payload_sha256_before,
-        "payload_sha256_after": row.payload_sha256_after,
+        # No payload digests: a hash of a review payload confirms a guessed text.
         "error_code": row.error_code,
-        "outbox_description": row.description,
     }
     # Rows written before the snapshot existed carry none; nothing is looked up.
     if row.actor_snapshot is not None:
@@ -366,11 +364,8 @@ def _audit_metadata(row: FlowRunAuditOutboxDeliveryRow) -> dict[str, Any]:
 
 
 def _failure_error_message(row: FlowRunAuditOutboxDeliveryRow) -> str:
-    return (
-        _non_empty(row.error_message)
-        or _non_empty(row.error_code)
-        or f"{row.action}:{row.source}"
-    )
+    # The run's error text can quote user content; the audit keeps the code only.
+    return _non_empty(row.error_code) or f"{row.action}:{row.source}"
 
 
 def _non_empty(value: str | None) -> str | None:

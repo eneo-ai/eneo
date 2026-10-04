@@ -10,6 +10,7 @@ from pydantic.json_schema import SkipJsonSchema
 from eneo.ai_models.completion_models.completion_model import CompletionModelPublic
 from eneo.ai_models.embedding_models.embedding_model import EmbeddingModelPublicLegacy
 from eneo.data_retention.constants import MAX_RETENTION_DAYS, MIN_RETENTION_DAYS
+from eneo.flows.domain.flow_retention_hold import FlowRetentionHoldReason
 from eneo.flows.domain.flow_run_retention_policy import (
     FlowRunRetentionPolicy,
     FlowRunRetentionScope,
@@ -818,9 +819,12 @@ FLOW_DEBUG_EVIDENCE_ELIGIBILITY_DESCRIPTION = (
     "no tenant window; saving a value never redacts evidence."
 )
 FLOW_RUNTIME_UPLOAD_ELIGIBILITY_DESCRIPTION = (
-    "Tenant purge eligibility window for Flow runtime uploads that were never "
-    "bound to a run input. Null means no tenant window; saving a value never "
-    "removes uploads."
+    "Days a Flow runtime upload that was never bound to a run input (and an "
+    "unbound live transcript) is kept before the nightly gallring job deletes it, "
+    "counted from creation; a new value applies to existing items too. Null means "
+    "the 30-day default. Saving a value deletes nothing by itself. Changing it "
+    "needs retention_manage in a signed-in session (no API key), and a longer "
+    "window needs a reason."
 )
 
 
@@ -876,6 +880,17 @@ class FlowRetentionPolicyUpdate(BaseModel):
         ge=MIN_RETENTION_DAYS,
         le=MAX_RETENTION_DAYS,
         description=FLOW_RUNTIME_UPLOAD_ELIGIBILITY_DESCRIPTION,
+        json_schema_extra=_strip_json_schema_default,
+    )
+    reason: FlowRetentionHoldReason | None = Field(
+        default=None,
+        description=(
+            "Why the change keeps unused uploads and unbound live transcripts "
+            "longer (1-512 characters). Required, with code "
+            "flow_retention_reason_required, when the upload window becomes longer "
+            "(null counts as the 30-day default); recorded in the required audit "
+            "event."
+        ),
         json_schema_extra=_strip_json_schema_default,
     )
 

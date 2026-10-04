@@ -1,18 +1,35 @@
 """Durable live transcripts; each socket write owns one short transaction."""
 
+from collections.abc import Collection
 from dataclasses import dataclass
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timezone
 from uuid import UUID
 
 import sqlalchemy as sa
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from eneo.data_retention.domain.gallring import GallringKeyset
+from eneo.data_retention.infrastructure.gallring_sql import (
+    deployment_tenant_id,
+    uuid_in,
+)
 from eneo.database.database import sessionmanager
 from eneo.database.tables.flow_tables import FlowLiveTranscripts, Flows
-from eneo.database.tables.tenant_table import Tenants
 from eneo.flows.flow_api_error_code import FlowApiErrorCode
+from eneo.flows.infrastructure.flow_abandonment_window import abandonment_cutoff
+from eneo.flows.infrastructure.flow_retention_hold_repo import (
+    flow_runless_data_held_predicate,
+)
 from eneo.flows.runtime.live_transcription.tickets import LiveTranscriptionGrant
 from eneo.main.exceptions import ConflictException, NotFoundException
+
+
+@dataclass(frozen=True, slots=True)
+class ExpiredLiveTranscript:
+    id: UUID
+    tenant_id: UUID
+    flow_id: UUID
+    created_at: datetime
 
 
 @dataclass(frozen=True, slots=True)
@@ -44,6 +61,21 @@ class LiveTranscriptScope:
             and row.step_id == self.step_id
             and row.model_id == self.model_id
         )
+
+
+def _held() -> sa.Exists:
+    """An unbound transcript belongs to no run: only a Flow hold covers it."""
+    return flow_runless_data_held_predicate(flow_id=FlowLiveTranscripts.flow_id)
+
+
+def _expired_unbound(
+    now: datetime, tenant_id: UUID | sa.ColumnElement[UUID]
+) -> tuple[sa.ColumnElement[bool], ...]:
+    """Never bound to a run and older than the tenant's current window."""
+    return (
+        FlowLiveTranscripts.bound_file_id.is_(None),
+        FlowLiveTranscripts.created_at <= abandonment_cutoff(now, tenant_id),
+    )
 
 
 class LiveTranscriptRepository:
@@ -87,7 +119,13 @@ class LiveTranscriptRepository:
                 "Live transcript is already bound to another file.",
                 code=FlowApiErrorCode.RUN_LIVE_TRANSCRIPT_ALREADY_BOUND.value,
             )
-        if row.expires_at is not None and row.expires_at <= datetime.now(timezone.utc):
+        expired = await self.session.scalar(
+            sa.select(
+                sa.literal(row.created_at)
+                <= abandonment_cutoff(datetime.now(timezone.utc), scope.tenant_id)
+            )
+        )
+        if expired:
             raise not_found
         row.bound_file_id = file_id
         await self.session.flush()
@@ -102,13 +140,6 @@ class LiveTranscriptRepository:
     ) -> UUID:
         if grant.recording_id is None:
             raise ValueError("A live transcript requires a recording identity.")
-        days = (
-            await self.session.execute(
-                sa.select(Tenants.flow_runtime_upload_abandonment_days).where(
-                    Tenants.id == grant.tenant_id
-                )
-            )
-        ).scalar_one()
         now = datetime.now(timezone.utc)
         statement = (
             sa.insert(FlowLiveTranscripts)
@@ -124,7 +155,6 @@ class LiveTranscriptRepository:
                 segments=segments,
                 received_audio_seconds=received_audio_seconds,
                 created_at=now,
-                expires_at=now + timedelta(days=days) if days is not None else None,
             )
             .returning(FlowLiveTranscripts.id)
         )
@@ -151,10 +181,10 @@ class LiveTranscriptRepository:
             )
             .where(
                 FlowLiveTranscripts.tenant_id == tenant_id,
-                FlowLiveTranscripts.bound_file_id.is_(None),
-                FlowLiveTranscripts.expires_at <= now,
+                *_expired_unbound(now, tenant_id),
+                sa.not_(_held()),
             )
-            .order_by(FlowLiveTranscripts.expires_at, FlowLiveTranscripts.id)
+            .order_by(FlowLiveTranscripts.created_at, FlowLiveTranscripts.id)
             .limit(limit)
         )
         if space_id is not None:
@@ -171,9 +201,10 @@ class LiveTranscriptRepository:
             purged_ids = await self.session.scalars(
                 sa.delete(FlowLiveTranscripts)
                 .where(
-                    FlowLiveTranscripts.id.in_(ids),
+                    uuid_in(FlowLiveTranscripts.id, ids),
                     FlowLiveTranscripts.tenant_id == tenant_id,
                     FlowLiveTranscripts.bound_file_id.is_(None),
+                    sa.not_(_held()),
                 )
                 .returning(FlowLiveTranscripts.id)
             )
@@ -181,6 +212,60 @@ class LiveTranscriptRepository:
         return LiveTranscriptPurgeCounts(
             candidate_count=len(ids), purged_count=purged_count
         )
+
+    async def expired_unbound_page(
+        self, *, now: datetime, after: GallringKeyset | None, limit: int
+    ) -> list[ExpiredLiveTranscript]:
+        """Scheduled gallring: the next expired unbound transcripts, locked.
+
+        The deployment's current window gives one literal cutoff on the
+        (created_at, id) index of unbound rows; rows another transaction holds
+        are skipped.
+        """
+        stmt = (
+            sa.select(
+                FlowLiveTranscripts.id,
+                FlowLiveTranscripts.tenant_id,
+                FlowLiveTranscripts.flow_id,
+                FlowLiveTranscripts.created_at,
+            )
+            .where(*_expired_unbound(now, deployment_tenant_id()))
+            .order_by(FlowLiveTranscripts.created_at, FlowLiveTranscripts.id)
+            .limit(limit)
+            .with_for_update(of=FlowLiveTranscripts, skip_locked=True)
+        )
+        if after is not None:
+            stmt = stmt.where(
+                sa.tuple_(FlowLiveTranscripts.created_at, FlowLiveTranscripts.id)
+                > sa.tuple_(sa.literal(after.at), sa.literal(after.id))
+            )
+        return [
+            ExpiredLiveTranscript(
+                id=transcript_id,
+                tenant_id=tenant_id,
+                flow_id=flow_id,
+                created_at=created_at,
+            )
+            for transcript_id, tenant_id, flow_id, created_at in (
+                await self.session.execute(stmt)
+            ).tuples()
+        ]
+
+    async def delete_expired_unbound_ids(
+        self, ids: Collection[UUID], *, now: datetime
+    ) -> list[tuple[UUID, UUID]]:
+        """Delete these transcripts if still expired and unbound: (id, tenant id)."""
+        if not ids:
+            return []
+        rows = await self.session.execute(
+            sa.delete(FlowLiveTranscripts)
+            .where(
+                uuid_in(FlowLiveTranscripts.id, ids),
+                *_expired_unbound(now, deployment_tenant_id()),
+            )
+            .returning(FlowLiveTranscripts.id, FlowLiveTranscripts.tenant_id)
+        )
+        return list(rows.tuples())
 
 
 async def persist_live_transcript(

@@ -975,6 +975,9 @@ async def test_runtime_upload_audit_is_attributed_and_atomic(
             "upload_purpose": "flow_runtime_step_input",
         }
         assert "audited runtime input" not in repr(successful_audit.log_metadata)
+        # The file name is user content: ids, sizes and types only.
+        assert successful_filename not in successful_audit.description
+        assert successful_filename not in repr(successful_audit.log_metadata)
 
     filename = f"audit-failure-{uuid4().hex}.txt"
     original_create = AuditLogRepositoryImpl.create

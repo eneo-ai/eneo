@@ -190,6 +190,13 @@ def _ensure_shared_write_session(
     )
 
 
+@dataclass(frozen=True, slots=True)
+class _FileIdentity:
+    """An audit target that carries the file id and no name."""
+
+    id: UUID
+
+
 class FlowRuntimeFileService:
     def __init__(
         self,
@@ -330,12 +337,11 @@ class FlowRuntimeFileService:
                 action=ActionType.FILE_UPLOADED,
                 entity_type=EntityType.FILE,
                 entity_id=file.id,
-                description=(
-                    f"Uploaded runtime input file '{file.name}' for flow step {step_id}"
-                ),
+                # Ids, sizes and types only: the file name is user content.
+                description=f"Uploaded runtime input file for flow step {step_id}",
                 metadata=AuditMetadata.standard(
                     actor=self.user,
-                    target=file,
+                    target=_FileIdentity(id=file.id),
                     extra={
                         "flow_id": str(flow_id),
                         "step_id": str(step_id),

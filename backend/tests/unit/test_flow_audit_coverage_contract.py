@@ -644,7 +644,7 @@ FLOW_INTERNAL_AUDIT_CONTRACTS: dict[str, FlowAuditContract] = {
             "call_type",
             "http_method",
             "url_host",
-            "url_path",
+            "error_code",
             "status_code",
             "duration_ms",
         ),
