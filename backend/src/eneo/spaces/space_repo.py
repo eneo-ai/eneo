@@ -101,7 +101,10 @@ from eneo.spaces.api.space_models import SpaceGroupMember, SpaceMember
 from eneo.spaces.space import ModelKind, Space
 from eneo.spaces.space_applications_projection import SpaceApplicationsProjection
 from eneo.spaces.space_factory import SpaceFactory
-from eneo.spaces.space_flow_delete_blockers import space_has_flow_delete_blockers
+from eneo.spaces.space_flow_delete_blockers import (
+    space_has_active_legal_hold,
+    space_has_flow_delete_blockers,
+)
 from eneo.spaces.utils.space_utils import effective_space_ids_for
 from eneo.user_groups.user_group import UserGroupState
 from eneo.users.user import UserSparse
@@ -2046,6 +2049,9 @@ class SpaceRepository:
 
     async def has_flow_delete_blockers(self, space_id: UUID) -> bool:
         return await space_has_flow_delete_blockers(self.session, space_id)
+
+    async def has_active_legal_hold(self, space_id: UUID) -> bool:
+        return await space_has_active_legal_hold(self.session, space_id)
 
     async def query(self, **filters: object) -> None:
         raise NotImplementedError()

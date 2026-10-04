@@ -190,6 +190,12 @@ class FlowRunRetentionFlowTarget(BaseModel):
             "longer run."
         )
     )
+    held: bool = Field(
+        description=(
+            "True while the Flow or any of its runs has an active legal hold: that "
+            "history is not deleted, whatever the retention policy says."
+        )
+    )
 
 
 class FlowRunRetentionFlowTargetPage(BaseModel):
@@ -204,6 +210,7 @@ class FlowRunRetentionFlowTargetPage(BaseModel):
                         "space_id": "00000000-0000-0000-0000-000000000201",
                         "name": "Supplier assessment",
                         "retired": False,
+                        "held": False,
                     }
                 ],
                 "count": 1,

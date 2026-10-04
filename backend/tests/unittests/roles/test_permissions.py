@@ -276,6 +276,8 @@ class TestPermissionSemantics:
             "flows_ai_builder",
             "flows_ai_builder_review",
             "flows_trace",
+            "retention_manage",
+            "retention_holds",
             "storage",
             "assistant_debug",
             "modules",

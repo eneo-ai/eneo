@@ -204,6 +204,10 @@ FLOW_ROUTE_AUDIT_CONTRACTS: dict[str, FlowAuditContract] = {
             "list_flow_run_retention_flow_targets": (
                 "flow_run_retention_policy_router.list_flow_targets"
             ),
+            "list_flow_retention_holds": "FlowRetentionHoldService.list_holds",
+            "get_flow_retention_hold_review_limit": (
+                "FlowRunRetentionPolicyService.get_hold_review_limit"
+            ),
         }.items()
     },
     **{
@@ -267,6 +271,46 @@ FLOW_ROUTE_AUDIT_CONTRACTS: dict[str, FlowAuditContract] = {
             "purge_flow_run_history",
         )
     },
+    "place_flow_retention_hold": _required_transaction(
+        ActionType.FLOW_RETENTION_HOLD_PLACED,
+        owner="FlowRetentionHoldService",
+        metadata_keys=(
+            "hold_ids",
+            "flow_id",
+            "scope",
+            "run_ids",
+            "reason",
+            "review_by",
+            "ends_at",
+        ),
+        idempotency="one event per placement; a retried request places another hold",
+    ),
+    "replace_flow_retention_hold_review_limit": _required_transaction(
+        ActionType.FLOW_RUN_RETENTION_POLICY_CHANGED,
+        owner="FlowRunRetentionPolicyService",
+        metadata_keys=("scope", "scope_id", "setting", "previous_value", "new_value"),
+        idempotency="an unchanged limit emits no event",
+    ),
+    "extend_flow_retention_hold_review": _required_transaction(
+        ActionType.FLOW_RETENTION_HOLD_REVIEW_EXTENDED,
+        owner="FlowRetentionHoldService",
+        metadata_keys=(
+            "hold_id",
+            "flow_id",
+            "scope",
+            "flow_run_id",
+            "previous_review_by",
+            "review_by",
+            "reason",
+        ),
+        idempotency="a repeat with the same date is refused as not later; no event",
+    ),
+    "release_flow_retention_hold": _required_transaction(
+        ActionType.FLOW_RETENTION_HOLD_RELEASED,
+        owner="FlowRetentionHoldService",
+        metadata_keys=("hold_id", "flow_id", "scope", "flow_run_id", "release_reason"),
+        idempotency="a hold releases once; a second release is refused with no event",
+    ),
     "create_flow": _configurable(
         ActionType.FLOW_CREATED,
         owner="flow_authoring_router.create_flow",

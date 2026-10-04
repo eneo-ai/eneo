@@ -206,3 +206,39 @@ def test_validate_flow_retention_policy_object_rejects_unsupported_version(
         validate_flow_retention_policy_object(
             {"version": version, "run_debug_evidence_days": 3}
         )
+
+
+def test_the_hold_review_limit_defaults_to_365_days_until_set() -> None:
+    assert resolve_flow_retention_policy(None).effective_hold_max_review_days() == 365
+    stored = apply_flow_retention_policy_patch(None, hold_max_review_days=30)
+    assert stored["retention_policy"]["hold_max_review_days"] == 30
+    assert resolve_flow_retention_policy(stored).effective_hold_max_review_days() == 30
+    cleared = apply_flow_retention_policy_patch(
+        stored, remove_keys={"hold_max_review_days"}
+    )
+    assert "retention_policy" not in cleared
+    assert (
+        resolve_flow_retention_policy(cleared).effective_hold_max_review_days() == 365
+    )
+
+
+def test_setting_one_retention_value_keeps_the_other() -> None:
+    stored = apply_flow_retention_policy_patch(None, run_debug_evidence_days=14)
+    stored = apply_flow_retention_policy_patch(stored, hold_max_review_days=90)
+    policy = resolve_flow_retention_policy(stored)
+    assert (policy.run_debug_evidence_days, policy.hold_max_review_days) == (14, 90)
+
+
+@pytest.mark.parametrize("value", [None, 0, 2556, True, 7.5, "30", [30], {}])
+def test_an_unreadable_hold_review_limit_falls_back_to_the_default(
+    value: object,
+) -> None:
+    policy = resolve_flow_retention_policy(
+        {"retention_policy": {"hold_max_review_days": value}}
+    )
+    assert policy.effective_hold_max_review_days() == 365
+
+
+def test_writing_an_out_of_range_hold_review_limit_is_refused() -> None:
+    with pytest.raises(ValueError):
+        apply_flow_retention_policy_patch(None, hold_max_review_days=0)

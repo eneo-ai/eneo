@@ -25,6 +25,7 @@ from eneo.database.tables.flow_tables import (
     BuilderSessions,
     FlowLiveTranscripts,
     FlowOutboxDeliveryStatus,
+    FlowRetentionHolds,
     FlowRunAuditOutbox,
     FlowRunReviewCheckpoints,
     FlowRuns,
@@ -2766,6 +2767,56 @@ async def test_debug_evidence_redaction_precedes_later_flow_purge(
     assert refreshed_attempt.provenance_json is None
     assert refreshed_attempt.input_payload_json is None
     assert refreshed_attempt.output_payload_json is None
+
+
+@pytest.mark.asyncio
+async def test_debug_evidence_redaction_skips_a_run_under_a_legal_hold(
+    async_session: AsyncSession,
+    test_tenant,
+    admin_user,
+    flow_retention_space: Spaces,
+    flow_retention_assistant: Assistants,
+    flow_retention_service: DataRetentionService,
+):
+    fixtures = [
+        await _create_flow_runtime_fixture(
+            async_session,
+            tenant=test_tenant,
+            user=admin_user,
+            space=flow_retention_space,
+            assistant=flow_retention_assistant,
+            days_old=10,
+            flow_retention_days=30,
+            flow_settings={"retention_policy": {"run_debug_evidence_days": 7}},
+        )
+        for _ in range(2)
+    ]
+    held, free = fixtures
+    now = datetime.now(timezone.utc)
+    async_session.add(
+        FlowRetentionHolds(
+            tenant_id=test_tenant.id,
+            flow_id=held.flow.id,
+            flow_run_id=held.run.id,
+            reason="Pending disclosure request",
+            review_by=now + timedelta(days=30),
+            created_by_actor={"type": "user", "id": str(admin_user.id)},
+        )
+    )
+    await async_session.flush()
+
+    counts = await flow_retention_service.redact_old_flow_debug_evidence(now=now)
+    await _flush_and_clear_identity_map(async_session)
+
+    assert counts.debug_step_results == 1
+    held_result = await async_session.get(FlowStepResults, held.step_result.id)
+    held_attempt = await async_session.get(FlowStepAttempts, held.step_attempt.id)
+    free_result = await async_session.get(FlowStepResults, free.step_result.id)
+    assert held_result is not None and held_attempt is not None
+    assert held_result.input_payload_json is not None
+    assert held_result.effective_prompt is not None
+    assert held_attempt.provenance_json is not None
+    assert free_result is not None and free_result.input_payload_json is None
 
 
 @pytest.mark.asyncio

@@ -169,6 +169,7 @@ async def test_admin_explicit_purge_defaults_to_preview_and_audits_deletion(
             "undelivered_audit": 0,
             "unresolved_webhook": 0,
             "review_required": 0,
+            "legal_hold": 0,
             "counted_runs": 1,
             "complete": True,
         },
@@ -557,6 +558,7 @@ async def test_admin_discovers_non_member_spaces_and_flows_for_retention(
                 "space_id": str(space_id),
                 "name": flows_response.json()["items"][0]["name"],
                 "retired": False,
+                "held": False,
             }
         ],
         "count": 1,
@@ -1099,6 +1101,7 @@ async def test_purge_is_scoped_bounded_and_reports_blocked_runs(
         "undelivered_audit": 1,
         "unresolved_webhook": 1,
         "review_required": 0 if scope == "flow" else 1,
+        "legal_hold": 0,
         "counted_runs": {"organization": 7, "space": 6, "flow": 4}[scope],
         "complete": True,
     }
@@ -1316,6 +1319,7 @@ async def test_purge_diagnostics_count_only_the_window_and_report_completeness(
         "undelivered_audit": 1,
         "unresolved_webhook": 1,
         "review_required": 1,
+        "legal_hold": 0,
         "counted_runs": 500,
         "complete": not extra_review_run,
     }

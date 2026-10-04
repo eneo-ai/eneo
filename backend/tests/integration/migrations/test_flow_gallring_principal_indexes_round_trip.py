@@ -124,6 +124,9 @@ def _index_drift(engine: sa.Engine) -> dict[str, str]:
     inspector = sa.inspect(engine)
     drift: dict[str, str] = {}
     for table in _flow_owned_tables():
+        # A table a later revision adds is checked by that revision's own test.
+        if not inspector.has_table(table.name):
+            continue
         reflected = {
             index["name"]: index for index in inspector.get_indexes(table.name)
         }

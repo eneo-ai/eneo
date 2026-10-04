@@ -1,3 +1,4 @@
+import copy
 from types import SimpleNamespace
 from unittest.mock import MagicMock
 
@@ -37,6 +38,7 @@ from eneo.settings.settings import (
     SettingsPublic,
     SettingsUpsert,
 )
+from eneo.tenants.tenant_repo import FlowSettingsChange
 from tests.fixtures import TEST_USER, TEST_UUID
 
 TEST_SETTINGS = SettingsPublic()
@@ -124,6 +126,23 @@ class MockTenantRepo:
             update=update.model_dump(exclude_unset=True, exclude={"id"})
         )
         return self.tenant
+
+    async def update_flow_settings(
+        self, tenant_id, transform, *, extra_values=None, read_columns=()
+    ):
+        # Same contract as TenantRepository.update_flow_settings: only the
+        # named columns are written; old values come from the read it replaces.
+        tenant = await self.get(tenant_id)
+        values = dict(extra_values or {})
+        names = list(dict.fromkeys([*read_columns, *values]))
+        before = tenant.flow_settings
+        after = transform(copy.deepcopy(before))
+        self.tenant = tenant.model_copy(update={"flow_settings": after, **values})
+        return FlowSettingsChange(
+            before=before,
+            after=after,
+            columns_before={name: getattr(tenant, name) for name in names},
+        )
 
 
 class MockAuditService:

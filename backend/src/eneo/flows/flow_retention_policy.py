@@ -11,14 +11,21 @@ FLOW_RETENTION_POLICY_STORAGE_VERSION: Final[int] = 1
 FLOW_RETENTION_POLICY_RUN_DEBUG_EVIDENCE_DAYS_KEY: Final[str] = (
     "run_debug_evidence_days"
 )
+FLOW_RETENTION_POLICY_HOLD_MAX_REVIEW_DAYS_KEY: Final[str] = "hold_max_review_days"
+# A legal hold must name a review date at most this many days ahead.
+DEFAULT_FLOW_RETENTION_HOLD_MAX_REVIEW_DAYS: Final[int] = 365
 RETENTION_POLICY_FIELDS: Final[frozenset[str]] = frozenset(
     {
         FLOW_RETENTION_POLICY_STORAGE_VERSION_KEY,
         FLOW_RETENTION_POLICY_RUN_DEBUG_EVIDENCE_DAYS_KEY,
+        FLOW_RETENTION_POLICY_HOLD_MAX_REVIEW_DAYS_KEY,
     }
 )
 RETENTION_POLICY_BUSINESS_FIELDS: Final[frozenset[str]] = frozenset(
-    {FLOW_RETENTION_POLICY_RUN_DEBUG_EVIDENCE_DAYS_KEY}
+    {
+        FLOW_RETENTION_POLICY_RUN_DEBUG_EVIDENCE_DAYS_KEY,
+        FLOW_RETENTION_POLICY_HOLD_MAX_REVIEW_DAYS_KEY,
+    }
 )
 DELETED_RETENTION_POLICY_FIELDS: Final[frozenset[str]] = frozenset(
     {
@@ -31,9 +38,15 @@ DELETED_RETENTION_POLICY_FIELDS: Final[frozenset[str]] = frozenset(
 @dataclass(frozen=True)
 class FlowRetentionPolicy:
     run_debug_evidence_days: int | None = None
+    hold_max_review_days: int | None = None
 
     def debug_evidence_days(self) -> int | None:
         return self.run_debug_evidence_days
+
+    def effective_hold_max_review_days(self) -> int:
+        if self.hold_max_review_days is None:
+            return DEFAULT_FLOW_RETENTION_HOLD_MAX_REVIEW_DAYS
+        return self.hold_max_review_days
 
 
 def resolve_flow_retention_policy(
@@ -43,6 +56,9 @@ def resolve_flow_retention_policy(
     return FlowRetentionPolicy(
         run_debug_evidence_days=_retention_days_or_none(
             retention_policy_dict.get(FLOW_RETENTION_POLICY_RUN_DEBUG_EVIDENCE_DAYS_KEY)
+        ),
+        hold_max_review_days=_retention_days_or_none(
+            retention_policy_dict.get(FLOW_RETENTION_POLICY_HOLD_MAX_REVIEW_DAYS_KEY)
         ),
     )
 
@@ -94,6 +110,7 @@ def apply_flow_retention_policy_patch(
     current_flow_settings: dict[str, Any] | None,
     *,
     run_debug_evidence_days: int | None = None,
+    hold_max_review_days: int | None = None,
     remove_keys: set[str] | None = None,
 ) -> dict[str, Any]:
     next_settings = normalize_flow_retention_policy_settings(current_flow_settings)
@@ -105,6 +122,7 @@ def apply_flow_retention_policy_patch(
     )
     updates = {
         FLOW_RETENTION_POLICY_RUN_DEBUG_EVIDENCE_DAYS_KEY: run_debug_evidence_days,
+        FLOW_RETENTION_POLICY_HOLD_MAX_REVIEW_DAYS_KEY: hold_max_review_days,
     }
     for key, value in updates.items():
         if value is not None:

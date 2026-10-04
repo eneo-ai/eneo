@@ -9,6 +9,11 @@ from eneo.audit.domain.entity_types import EntityType
 from eneo.data_retention.infrastructure.data_retention_service import (
     DataRetentionService,
 )
+from eneo.flows.application.flow_retention_authz import (
+    require_retention_manage,
+    require_retention_view,
+)
+from eneo.flows.domain.flow_retention_hold import FlowRetentionHoldReviewLimit
 from eneo.flows.domain.flow_run_retention_policy import (
     FlowRunRetentionFlowTargetPage,
     FlowRunRetentionPolicy,
@@ -23,7 +28,6 @@ from eneo.flows.infrastructure.flow_run_retention_policy_repo import (
     FlowRunRetentionPolicyChange,
     FlowRunRetentionPolicyRepository,
 )
-from eneo.roles.permissions import Permission, validate_permissions
 from eneo.settings.settings import (
     FlowRunHistoryPurgeBlockedPublic,
     FlowRunHistoryPurgePublic,
@@ -43,24 +47,23 @@ class FlowRunRetentionPolicyService:
         self.repository = repository
         self.audit_service = audit_service
 
-    @validate_permissions(Permission.ADMIN)
     async def get_organization(self) -> FlowRunRetentionPolicySettings:
+        require_retention_view(self.user)
         return await self.repository.get_organization(tenant_id=self.user.tenant_id)
 
-    @validate_permissions(Permission.ADMIN)
     async def list_space_targets(
         self,
         *,
         limit: int,
         offset: int,
     ) -> FlowRunRetentionSpaceTargetPage:
+        require_retention_view(self.user)
         return await self.repository.list_space_targets(
             tenant_id=self.user.tenant_id,
             limit=limit,
             offset=offset,
         )
 
-    @validate_permissions(Permission.ADMIN)
     async def list_flow_targets(
         self,
         *,
@@ -68,6 +71,7 @@ class FlowRunRetentionPolicyService:
         limit: int,
         offset: int,
     ) -> FlowRunRetentionFlowTargetPage:
+        require_retention_view(self.user)
         return await self.repository.list_flow_targets(
             tenant_id=self.user.tenant_id,
             space_id=space_id,
@@ -75,12 +79,12 @@ class FlowRunRetentionPolicyService:
             offset=offset,
         )
 
-    @validate_permissions(Permission.ADMIN)
     async def replace_organization(
         self,
         *,
         policy: FlowRunRetentionPolicy | None,
     ) -> FlowRunRetentionPolicySettings:
+        require_retention_manage(self.user)
         change = await self.repository.replace_organization(
             tenant_id=self.user.tenant_id,
             policy=policy,
@@ -88,20 +92,20 @@ class FlowRunRetentionPolicyService:
         await self._audit_change(change)
         return change.after
 
-    @validate_permissions(Permission.ADMIN)
     async def get_space(self, *, space_id: UUID) -> FlowRunRetentionPolicySettings:
+        require_retention_view(self.user)
         return await self.repository.get_space(
             tenant_id=self.user.tenant_id,
             space_id=space_id,
         )
 
-    @validate_permissions(Permission.ADMIN)
     async def replace_space(
         self,
         *,
         space_id: UUID,
         policy: FlowRunRetentionPolicy | None,
     ) -> FlowRunRetentionPolicySettings:
+        require_retention_manage(self.user)
         change = await self.repository.replace_space(
             tenant_id=self.user.tenant_id,
             space_id=space_id,
@@ -110,20 +114,20 @@ class FlowRunRetentionPolicyService:
         await self._audit_change(change)
         return change.after
 
-    @validate_permissions(Permission.ADMIN)
     async def get_flow(self, *, flow_id: UUID) -> FlowRunRetentionPolicySettings:
+        require_retention_view(self.user)
         return await self.repository.get_flow(
             tenant_id=self.user.tenant_id,
             flow_id=flow_id,
         )
 
-    @validate_permissions(Permission.ADMIN)
     async def replace_flow(
         self,
         *,
         flow_id: UUID,
         policy: FlowRunRetentionPolicy | None,
     ) -> FlowRunRetentionPolicySettings:
+        require_retention_manage(self.user)
         change = await self.repository.replace_flow(
             tenant_id=self.user.tenant_id,
             flow_id=flow_id,
@@ -132,13 +136,13 @@ class FlowRunRetentionPolicyService:
         await self._audit_change(change)
         return change.after
 
-    @validate_permissions(Permission.ADMIN)
     async def list_organization_review_queue(
         self,
         *,
         limit: int,
         cursor: FlowRunRetentionReviewCursor | None,
     ) -> FlowRunRetentionReviewPage:
+        require_retention_manage(self.user)
         return await self.repository.list_review_queue(
             tenant_id=self.user.tenant_id,
             now=datetime.now(timezone.utc),
@@ -146,7 +150,6 @@ class FlowRunRetentionPolicyService:
             cursor=cursor,
         )
 
-    @validate_permissions(Permission.ADMIN)
     async def list_space_review_queue(
         self,
         *,
@@ -154,6 +157,7 @@ class FlowRunRetentionPolicyService:
         limit: int,
         cursor: FlowRunRetentionReviewCursor | None,
     ) -> FlowRunRetentionReviewPage:
+        require_retention_manage(self.user)
         await self.repository.get_space(
             tenant_id=self.user.tenant_id,
             space_id=space_id,
@@ -166,7 +170,6 @@ class FlowRunRetentionPolicyService:
             space_id=space_id,
         )
 
-    @validate_permissions(Permission.ADMIN)
     async def list_flow_review_queue(
         self,
         *,
@@ -174,6 +177,7 @@ class FlowRunRetentionPolicyService:
         limit: int,
         cursor: FlowRunRetentionReviewCursor | None,
     ) -> FlowRunRetentionReviewPage:
+        require_retention_manage(self.user)
         await self.repository.get_flow(
             tenant_id=self.user.tenant_id,
             flow_id=flow_id,
@@ -186,7 +190,6 @@ class FlowRunRetentionPolicyService:
             flow_id=flow_id,
         )
 
-    @validate_permissions(Permission.ADMIN)
     async def purge_due_history(
         self,
         *,
@@ -195,6 +198,7 @@ class FlowRunRetentionPolicyService:
         space_id: UUID | None = None,
         flow_id: UUID | None = None,
     ) -> FlowRunHistoryPurgePublic:
+        require_retention_manage(self.user)
         if flow_id is not None:
             settings = await self.repository.get_flow(
                 tenant_id=self.user.tenant_id, flow_id=flow_id
@@ -229,6 +233,7 @@ class FlowRunRetentionPolicyService:
                 undelivered_audit=result.blocked.skipped_undelivered_audit,
                 unresolved_webhook=result.blocked.skipped_unresolved_webhook,
                 review_required=result.blocked.skipped_review_required,
+                legal_hold=result.blocked.skipped_legal_hold,
                 counted_runs=result.blocked.counted_runs,
                 complete=result.blocked.complete,
             ),
@@ -280,6 +285,39 @@ class FlowRunRetentionPolicyService:
             },
             required=True,
         )
+
+    async def get_hold_review_limit(self) -> FlowRetentionHoldReviewLimit:
+        require_retention_view(self.user)
+        return await self.repository.get_hold_review_limit(
+            tenant_id=self.user.tenant_id
+        )
+
+    async def replace_hold_review_limit(
+        self, *, days: int | None
+    ) -> FlowRetentionHoldReviewLimit:
+        """The guardrail on legal holds belongs to the people who own the rules."""
+        require_retention_manage(self.user)
+        before, after = await self.repository.replace_hold_review_limit(
+            tenant_id=self.user.tenant_id, days=days
+        )
+        if before != after:
+            await self.audit_service.log(
+                tenant_id=self.user.tenant_id,
+                user=self.user,
+                action=ActionType.FLOW_RUN_RETENTION_POLICY_CHANGED,
+                entity_type=EntityType.TENANT_SETTINGS,
+                entity_id=self.user.tenant_id,
+                description="Changed the review limit for legal holds on Flow run history.",
+                metadata={
+                    "scope": FlowRunRetentionScope.ORGANIZATION.value,
+                    "scope_id": str(self.user.tenant_id),
+                    "setting": "hold_review_limit_days",
+                    "previous_value": before.days,
+                    "new_value": after.days,
+                },
+                required=True,
+            )
+        return after
 
     @staticmethod
     def _audit_policy(

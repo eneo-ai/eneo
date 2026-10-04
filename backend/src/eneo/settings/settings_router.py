@@ -9,7 +9,30 @@ from eneo.authentication.endpoint_access import (
     Authorization,
     endpoint_access,
 )
+from eneo.data_retention.infrastructure.gallring_lock import GallringSubject
 from eneo.files.mime_support import supported_mimes
+from eneo.flows.application.flow_retention_authz import (
+    RETENTION_PERMISSION_REQUIRED_CODE,
+    RETENTION_PERSON_REQUIRED_CODE,
+)
+from eneo.flows.domain.flow_retention_hold import (
+    FLOW_RETENTION_HOLD_ALREADY_RELEASED_CODE,
+    FLOW_RETENTION_HOLD_END_NOT_IN_FUTURE_CODE,
+    FLOW_RETENTION_HOLD_NOT_ACTIVE_CODE,
+    FLOW_RETENTION_HOLD_REVIEW_NOT_LATER_CODE,
+    FLOW_RETENTION_HOLD_REVIEW_OUT_OF_RANGE_CODE,
+    FLOW_RETENTION_HOLD_RUN_NOT_IN_FLOW_CODE,
+    MAX_FLOW_RETENTION_HOLD_PAGE_SIZE,
+    FlowRetentionHold,
+    FlowRetentionHoldCreateRequest,
+    FlowRetentionHoldExtendReviewRequest,
+    FlowRetentionHoldPage,
+    FlowRetentionHoldPlacement,
+    FlowRetentionHoldReleaseRequest,
+    FlowRetentionHoldReviewLimit,
+    FlowRetentionHoldReviewLimitUpdate,
+    FlowRetentionHoldStatusFilter,
+)
 from eneo.flows.domain.flow_run_retention_policy import (
     FlowRunRetentionFlowTargetPage,
     FlowRunRetentionPolicySettings,
@@ -145,6 +168,32 @@ def _flow_settings_admin_forbidden_response() -> dict[str, object]:
     )
 
 
+_RETENTION_ACCESS_REASON = (
+    "Any signed-in caller is admitted; the Flow retention authorization owner "
+    "(flows retention authz) requires retention_manage or retention_holds and "
+    "refuses API keys."
+)
+_RETENTION_PERMISSION_TEXT = {
+    "manage": "retention_manage",
+    "holds": "retention_holds",
+    "view": "retention_manage or retention_holds",
+}
+
+
+def _retention_forbidden_response(kind: str) -> dict[str, object]:
+    return _settings_error_response(
+        description=(
+            f"Caller lacks {_RETENTION_PERMISSION_TEXT[kind]} "
+            f"(`{RETENTION_PERMISSION_REQUIRED_CODE}`), or used an API key: "
+            f"retention is changed or stopped by signed-in people only "
+            f"(`{RETENTION_PERSON_REQUIRED_CODE}`)."
+        ),
+        message=f"Need permission {_RETENTION_PERMISSION_TEXT[kind]}.",
+        eneo_error_code=ErrorCodes.UNAUTHORIZED,
+        code=RETENTION_PERMISSION_REQUIRED_CODE,
+    )
+
+
 def _flow_retention_review_cursor(
     value: str | None,
 ) -> FlowRunRetentionReviewCursor | None:
@@ -174,6 +223,21 @@ def _flow_retention_not_found_response(entity: str) -> dict[str, object]:
         message=f"{entity} not found.",
         eneo_error_code=ErrorCodes.NOT_FOUND,
         code="not_found",
+    )
+
+
+_FLOW_RETENTION_LOCK_BUSY_CODE = GallringSubject.FLOW_HISTORY.busy_code
+
+
+def _flow_retention_lock_busy_response() -> dict[str, object]:
+    return _settings_error_response(
+        description=(
+            "Another retention change or history deletion held the retention lock "
+            f"too long (`{_FLOW_RETENTION_LOCK_BUSY_CODE}`). Nothing changed; retry."
+        ),
+        message="Flow history retention is busy with another change or deletion.",
+        eneo_error_code=ErrorCodes.CONFLICT,
+        code=_FLOW_RETENTION_LOCK_BUSY_CODE,
     )
 
 
@@ -864,12 +928,12 @@ async def update_flow_retention_policy(
         "Return the Organization default and its effective Flow run-history policy. "
         "No configured policy means run history has no age threshold and remains stored."
     ),
-    responses={403: _flow_settings_admin_forbidden_response()},
+    responses={403: _retention_forbidden_response("view")},
 )
 @endpoint_access(
     authentication=Authentication.USER,
-    authorization=Permission.ADMIN,
-    reason=_TENANT_SETTINGS_ADMIN_ACCESS_REASON,
+    authorization=Authorization.AUTHENTICATED,
+    reason=_RETENTION_ACCESS_REASON,
 )
 async def get_organization_flow_run_retention_policy(
     container: Annotated[Container, Depends(get_container(with_user=True))],
@@ -885,14 +949,18 @@ async def get_organization_flow_run_retention_policy(
     description=(
         "Replace the complete Organization policy or clear it. The initial modes "
         "either preserve eligible data for explicit administrator purge or require "
-        "human review; neither mode deletes data automatically."
+        "human review; neither mode deletes data automatically. The change waits "
+        "for an open history deletion to finish."
     ),
-    responses={403: _flow_settings_admin_forbidden_response()},
+    responses={
+        403: _retention_forbidden_response("manage"),
+        409: _flow_retention_lock_busy_response(),
+    },
 )
 @endpoint_access(
     authentication=Authentication.USER,
-    authorization=Permission.ADMIN,
-    reason=_TENANT_SETTINGS_ADMIN_ACCESS_REASON,
+    authorization=Authorization.AUTHENTICATED,
+    reason=_RETENTION_ACCESS_REASON,
 )
 async def replace_organization_flow_run_retention_policy(
     payload: FlowRunRetentionPolicyReplaceRequest,
@@ -900,6 +968,62 @@ async def replace_organization_flow_run_retention_policy(
 ) -> FlowRunRetentionPolicySettings:
     return await container.flow_run_retention_policy_service().replace_organization(
         policy=payload.policy
+    )
+
+
+@settings_admin_router.get(
+    "/flow-run-retention-policy/hold-review-limit",
+    response_model=FlowRetentionHoldReviewLimit,
+    operation_id="get_flow_retention_hold_review_limit",
+    summary="Get the review limit for legal holds",
+    description=(
+        "How far ahead, in days, a legal hold's review date may be set when it is "
+        "placed or its review is moved, and whether the default of 365 days "
+        "applies. Readable with retention_manage or retention_holds; changed with "
+        "retention_manage."
+    ),
+    responses={403: _retention_forbidden_response("view")},
+)
+@endpoint_access(
+    authentication=Authentication.USER,
+    authorization=Authorization.AUTHENTICATED,
+    reason=_RETENTION_ACCESS_REASON,
+)
+async def get_flow_retention_hold_review_limit(
+    container: Annotated[Container, Depends(get_container(with_user=True))],
+) -> FlowRetentionHoldReviewLimit:
+    return await container.flow_run_retention_policy_service().get_hold_review_limit()
+
+
+@settings_admin_router.put(
+    "/flow-run-retention-policy/hold-review-limit",
+    response_model=FlowRetentionHoldReviewLimit,
+    operation_id="replace_flow_retention_hold_review_limit",
+    summary="Replace the review limit for legal holds",
+    description=(
+        "Set how far ahead, in days, a legal hold's review date may be set, or null "
+        "for the default of 365 days. Applies to holds placed or reviewed after the "
+        "change. A change writes the required audit action "
+        "flow_run_retention_policy_changed in the same transaction."
+    ),
+    responses={
+        403: _retention_forbidden_response("manage"),
+        409: _flow_retention_lock_busy_response(),
+    },
+)
+@endpoint_access(
+    authentication=Authentication.USER,
+    authorization=Authorization.AUTHENTICATED,
+    reason=_RETENTION_ACCESS_REASON,
+)
+async def replace_flow_retention_hold_review_limit(
+    payload: FlowRetentionHoldReviewLimitUpdate,
+    container: FlowRetentionMutationContainer,
+) -> FlowRetentionHoldReviewLimit:
+    return (
+        await container.flow_run_retention_policy_service().replace_hold_review_limit(
+            days=payload.days
+        )
     )
 
 
@@ -913,12 +1037,12 @@ async def replace_organization_flow_run_retention_policy(
         "Spaces where the Organization administrator is not a member. The bounded "
         "response contains identifiers and names only."
     ),
-    responses={403: _flow_settings_admin_forbidden_response()},
+    responses={403: _retention_forbidden_response("view")},
 )
 @endpoint_access(
     authentication=Authentication.USER,
-    authorization=Permission.ADMIN,
-    reason=_TENANT_SETTINGS_ADMIN_ACCESS_REASON,
+    authorization=Authorization.AUTHENTICATED,
+    reason=_RETENTION_ACCESS_REASON,
 )
 async def list_flow_run_retention_space_targets(
     container: Annotated[Container, Depends(get_container(with_user=True))],
@@ -944,14 +1068,14 @@ async def list_flow_run_retention_space_targets(
         "flag only."
     ),
     responses={
-        403: _flow_settings_admin_forbidden_response(),
+        403: _retention_forbidden_response("view"),
         404: _flow_retention_not_found_response("Space"),
     },
 )
 @endpoint_access(
     authentication=Authentication.USER,
-    authorization=Permission.ADMIN,
-    reason=_TENANT_SETTINGS_ADMIN_ACCESS_REASON,
+    authorization=Authorization.AUTHENTICATED,
+    reason=_RETENTION_ACCESS_REASON,
 )
 async def list_flow_run_retention_flow_targets(
     space_id: UUID,
@@ -979,14 +1103,14 @@ async def list_flow_run_retention_flow_targets(
         "result before any separate purge action. Reading it never deletes data."
     ),
     responses={
-        403: _flow_settings_admin_forbidden_response(),
+        403: _retention_forbidden_response("view"),
         404: _flow_retention_not_found_response("Space"),
     },
 )
 @endpoint_access(
     authentication=Authentication.USER,
-    authorization=Permission.ADMIN,
-    reason=_TENANT_SETTINGS_ADMIN_ACCESS_REASON,
+    authorization=Authorization.AUTHENTICATED,
+    reason=_RETENTION_ACCESS_REASON,
 )
 async def get_space_flow_run_retention_policy(
     space_id: UUID,
@@ -1006,17 +1130,19 @@ async def get_space_flow_run_retention_policy(
         "Replace the complete Space override or clear it to inherit the Organization "
         "policy. The mode and day count move together, preventing ambiguous mixed "
         "inheritance. This setting controls Flow run history only: it does not change "
-        "conversation or AI Builder retention, and it never schedules deletion."
+        "conversation or AI Builder retention, and it never schedules deletion. "
+        "The change waits for an open history deletion to finish."
     ),
     responses={
-        403: _flow_settings_admin_forbidden_response(),
+        403: _retention_forbidden_response("manage"),
         404: _flow_retention_not_found_response("Space"),
+        409: _flow_retention_lock_busy_response(),
     },
 )
 @endpoint_access(
     authentication=Authentication.USER,
-    authorization=Permission.ADMIN,
-    reason=_TENANT_SETTINGS_ADMIN_ACCESS_REASON,
+    authorization=Authorization.AUTHENTICATED,
+    reason=_RETENTION_ACCESS_REASON,
 )
 async def replace_space_flow_run_retention_policy(
     space_id: UUID,
@@ -1042,14 +1168,14 @@ async def replace_space_flow_run_retention_policy(
         " A deleted Flow is accepted."
     ),
     responses={
-        403: _flow_settings_admin_forbidden_response(),
+        403: _retention_forbidden_response("view"),
         404: _flow_retention_not_found_response("Flow"),
     },
 )
 @endpoint_access(
     authentication=Authentication.USER,
-    authorization=Permission.ADMIN,
-    reason=_TENANT_SETTINGS_ADMIN_ACCESS_REASON,
+    authorization=Authorization.AUTHENTICATED,
+    reason=_RETENTION_ACCESS_REASON,
 )
 async def get_flow_run_retention_policy(
     flow_id: UUID,
@@ -1068,17 +1194,19 @@ async def get_flow_run_retention_policy(
         "retention remains editable after a Flow definition is published because it "
         "does not mutate the published definition. The initial modes require a later "
         "explicit administrator action; saving this policy never schedules deletion."
-        " A deleted Flow is accepted."
+        " A deleted Flow is accepted. The change waits for an open history deletion "
+        "to finish."
     ),
     responses={
-        403: _flow_settings_admin_forbidden_response(),
+        403: _retention_forbidden_response("manage"),
         404: _flow_retention_not_found_response("Flow"),
+        409: _flow_retention_lock_busy_response(),
     },
 )
 @endpoint_access(
     authentication=Authentication.USER,
-    authorization=Permission.ADMIN,
-    reason=_TENANT_SETTINGS_ADMIN_ACCESS_REASON,
+    authorization=Authorization.AUTHENTICATED,
+    reason=_RETENTION_ACCESS_REASON,
 )
 async def replace_flow_run_retention_policy(
     flow_id: UUID,
@@ -1103,14 +1231,18 @@ async def replace_flow_run_retention_policy(
         "to runs and transcripts, with separate candidate and deletion counts. "
         "Dry runs select candidates but delete nothing "
         "and emit no audit event. Real purges require an audit row in the same "
-        "transaction. Review-required runs and unresolved deliveries are excluded."
+        "transaction. Review-required runs, unresolved deliveries and runs under a "
+        "legal hold are excluded."
     ),
-    responses={403: _flow_settings_admin_forbidden_response()},
+    responses={
+        403: _retention_forbidden_response("manage"),
+        409: _flow_retention_lock_busy_response(),
+    },
 )
 @endpoint_access(
     authentication=Authentication.USER,
-    authorization=Permission.ADMIN,
-    reason=_TENANT_SETTINGS_ADMIN_ACCESS_REASON,
+    authorization=Authorization.AUTHENTICATED,
+    reason=_RETENTION_ACCESS_REASON,
 )
 async def purge_organization_flow_run_history(
     payload: FlowRunHistoryPurgeRequest,
@@ -1132,17 +1264,19 @@ async def purge_organization_flow_run_history(
         "Real batches delete due terminal runs under the effective preserve policy "
         "and expired unbound live transcripts in this Space, with a transaction audit. "
         "The limit applies separately to runs and transcripts, with separate counts. "
-        "Review-required runs and unresolved deliveries remain stored."
+        "Review-required runs, unresolved deliveries and runs under a legal hold "
+        "remain stored."
     ),
     responses={
-        403: _flow_settings_admin_forbidden_response(),
+        403: _retention_forbidden_response("manage"),
         404: _flow_retention_not_found_response("Space"),
+        409: _flow_retention_lock_busy_response(),
     },
 )
 @endpoint_access(
     authentication=Authentication.USER,
-    authorization=Permission.ADMIN,
-    reason=_TENANT_SETTINGS_ADMIN_ACCESS_REASON,
+    authorization=Authorization.AUTHENTICATED,
+    reason=_RETENTION_ACCESS_REASON,
 )
 async def purge_space_flow_run_history(
     space_id: UUID,
@@ -1165,18 +1299,20 @@ async def purge_space_flow_run_history(
         "Real batches delete due terminal runs under the effective preserve policy "
         "and expired unbound live transcripts in this Flow, with a transaction audit. "
         "The limit applies separately to runs and transcripts, with separate counts. "
-        "Review-required runs and unresolved deliveries remain stored."
+        "Review-required runs, unresolved deliveries and runs under a legal hold "
+        "remain stored."
         " A deleted Flow is accepted."
     ),
     responses={
-        403: _flow_settings_admin_forbidden_response(),
+        403: _retention_forbidden_response("manage"),
         404: _flow_retention_not_found_response("Flow"),
+        409: _flow_retention_lock_busy_response(),
     },
 )
 @endpoint_access(
     authentication=Authentication.USER,
-    authorization=Permission.ADMIN,
-    reason=_TENANT_SETTINGS_ADMIN_ACCESS_REASON,
+    authorization=Authorization.AUTHENTICATED,
+    reason=_RETENTION_ACCESS_REASON,
 )
 async def purge_flow_run_history(
     flow_id: UUID,
@@ -1185,6 +1321,188 @@ async def purge_flow_run_history(
 ) -> FlowRunHistoryPurgePublic:
     return await container.flow_run_retention_policy_service().purge_due_history(
         flow_id=flow_id, dry_run=payload.dry_run, limit=payload.limit
+    )
+
+
+_FLOW_RETENTION_HOLD_EFFECT = (
+    "Until the hold is released or its end date passes, whatever the "
+    "Organization, Space or Flow policy says, the explicit purge and the "
+    "debug-evidence redaction skip held runs, and the Space cannot be deleted "
+    "(space_contains_legal_hold)."
+)
+
+
+@settings_admin_router.get(
+    "/flow-retention-holds",
+    response_model=FlowRetentionHoldPage,
+    operation_id="list_flow_retention_holds",
+    summary="List legal holds on Flow run history",
+    description=(
+        "List the Organization's legal holds, newest first: active ones by default, "
+        "or all including released and expired ones, optionally for one Flow. Each "
+        "hold names who placed and released it as recorded at that time. "
+        + _FLOW_RETENTION_HOLD_EFFECT
+    ),
+    responses={403: _retention_forbidden_response("view")},
+)
+@endpoint_access(
+    authentication=Authentication.USER,
+    authorization=Authorization.AUTHENTICATED,
+    reason=_RETENTION_ACCESS_REASON,
+)
+async def list_flow_retention_holds(
+    container: Annotated[Container, Depends(get_container(with_user=True))],
+    status: FlowRetentionHoldStatusFilter = Query(
+        default=FlowRetentionHoldStatusFilter.ACTIVE,
+        description="active: holds that stop deletion now; all: every hold.",
+    ),
+    flow_id: UUID | None = Query(default=None, description="Only this Flow's holds."),
+    limit: int = Query(default=50, ge=1, le=MAX_FLOW_RETENTION_HOLD_PAGE_SIZE),
+    offset: int = Query(default=0, ge=0),
+) -> FlowRetentionHoldPage:
+    return await container.flow_retention_hold_service().list_holds(
+        status=status, flow_id=flow_id, limit=limit, offset=offset
+    )
+
+
+@settings_admin_router.post(
+    "/flow-retention-holds",
+    response_model=FlowRetentionHoldPlacement,
+    status_code=201,
+    operation_id="place_flow_retention_hold",
+    summary="Place a legal hold on Flow run history",
+    description=(
+        "Hold a whole Flow (every run, including runs created later) or named runs "
+        "of it, with a reason, a review date and an optional end date. The review "
+        "date never ends the hold: past it, the hold is flagged review overdue "
+        "(also in Flow runtime health) until the review is extended or the hold is "
+        "released. A deleted Flow can be held. "
+        + _FLOW_RETENTION_HOLD_EFFECT
+        + " The hold and its required audit event commit together; the request "
+        "waits for an open history deletion to finish first."
+    ),
+    responses={
+        400: _settings_error_response(
+            description=(
+                f"A named run is not a run of the Flow "
+                f"(`{FLOW_RETENTION_HOLD_RUN_NOT_IN_FLOW_CODE}`), the end date is "
+                f"not in the future (`{FLOW_RETENTION_HOLD_END_NOT_IN_FUTURE_CODE}`), "
+                "or the review date is not in the future or beyond "
+                "flow_retention_hold_max_review_days "
+                f"(`{FLOW_RETENTION_HOLD_REVIEW_OUT_OF_RANGE_CODE}`)."
+            ),
+            message="Every held run must be a run of the chosen Flow.",
+            eneo_error_code=ErrorCodes.BAD_REQUEST,
+            code=FLOW_RETENTION_HOLD_RUN_NOT_IN_FLOW_CODE,
+        ),
+        403: _retention_forbidden_response("holds"),
+        404: _flow_retention_not_found_response("Flow"),
+        409: _flow_retention_lock_busy_response(),
+    },
+)
+@endpoint_access(
+    authentication=Authentication.USER,
+    authorization=Authorization.AUTHENTICATED,
+    reason=_RETENTION_ACCESS_REASON,
+)
+async def place_flow_retention_hold(
+    payload: FlowRetentionHoldCreateRequest,
+    container: FlowRetentionMutationContainer,
+) -> FlowRetentionHoldPlacement:
+    return await container.flow_retention_hold_service().place(payload)
+
+
+@settings_admin_router.post(
+    "/flow-retention-holds/{hold_id}/extend-review",
+    response_model=FlowRetentionHold,
+    operation_id="extend_flow_retention_hold_review",
+    summary="Extend the review date of a legal hold",
+    description=(
+        "Move an active hold's review date later, with a reason. The hold keeps "
+        "stopping deletion either way; the extension writes its required audit "
+        "event (old and new review date, reason) in the same transaction."
+    ),
+    responses={
+        400: _settings_error_response(
+            description=(
+                "The new review date is not later than the current one "
+                f"(`{FLOW_RETENTION_HOLD_REVIEW_NOT_LATER_CODE}`), or not in the "
+                "future and within flow_retention_hold_max_review_days "
+                f"(`{FLOW_RETENTION_HOLD_REVIEW_OUT_OF_RANGE_CODE}`)."
+            ),
+            message="The new review date must be later than the current one.",
+            eneo_error_code=ErrorCodes.BAD_REQUEST,
+            code=FLOW_RETENTION_HOLD_REVIEW_NOT_LATER_CODE,
+        ),
+        403: _retention_forbidden_response("holds"),
+        404: _flow_retention_not_found_response("Legal hold"),
+        409: _settings_error_response(
+            description=(
+                "The hold is released or its end date has passed "
+                f"(`{FLOW_RETENTION_HOLD_NOT_ACTIVE_CODE}`), or another retention "
+                "change or deletion held the retention lock too long "
+                f"(`{_FLOW_RETENTION_LOCK_BUSY_CODE}`)."
+            ),
+            message="Only an active legal hold can have its review extended.",
+            eneo_error_code=ErrorCodes.CONFLICT,
+            code=FLOW_RETENTION_HOLD_NOT_ACTIVE_CODE,
+        ),
+    },
+)
+@endpoint_access(
+    authentication=Authentication.USER,
+    authorization=Authorization.AUTHENTICATED,
+    reason=_RETENTION_ACCESS_REASON,
+)
+async def extend_flow_retention_hold_review(
+    hold_id: UUID,
+    payload: FlowRetentionHoldExtendReviewRequest,
+    container: FlowRetentionMutationContainer,
+) -> FlowRetentionHold:
+    return await container.flow_retention_hold_service().extend_review(
+        hold_id=hold_id, request=payload
+    )
+
+
+@settings_admin_router.post(
+    "/flow-retention-holds/{hold_id}/release",
+    response_model=FlowRetentionHold,
+    operation_id="release_flow_retention_hold",
+    summary="Release a legal hold on Flow run history",
+    description=(
+        "Release one hold with a reason. Only this hold's coverage ends: a run "
+        "another active hold covers stays held. The released hold stays listed "
+        "as part of the record, and the release writes its required audit event "
+        "in the same transaction."
+    ),
+    responses={
+        403: _retention_forbidden_response("holds"),
+        404: _flow_retention_not_found_response("Legal hold"),
+        409: _settings_error_response(
+            description=(
+                "The hold is already released "
+                f"(`{FLOW_RETENTION_HOLD_ALREADY_RELEASED_CODE}`), or another "
+                "retention change or deletion held the retention lock too long "
+                f"(`{_FLOW_RETENTION_LOCK_BUSY_CODE}`)."
+            ),
+            message="This legal hold is already released.",
+            eneo_error_code=ErrorCodes.CONFLICT,
+            code=FLOW_RETENTION_HOLD_ALREADY_RELEASED_CODE,
+        ),
+    },
+)
+@endpoint_access(
+    authentication=Authentication.USER,
+    authorization=Authorization.AUTHENTICATED,
+    reason=_RETENTION_ACCESS_REASON,
+)
+async def release_flow_retention_hold(
+    hold_id: UUID,
+    payload: FlowRetentionHoldReleaseRequest,
+    container: FlowRetentionMutationContainer,
+) -> FlowRetentionHold:
+    return await container.flow_retention_hold_service().release(
+        hold_id=hold_id, reason=payload.reason
     )
 
 
@@ -1201,13 +1519,13 @@ async def purge_flow_run_history(
     ),
     responses={
         400: _flow_retention_invalid_cursor_response(),
-        403: _flow_settings_admin_forbidden_response(),
+        403: _retention_forbidden_response("manage"),
     },
 )
 @endpoint_access(
     authentication=Authentication.USER,
-    authorization=Permission.ADMIN,
-    reason=_TENANT_SETTINGS_ADMIN_ACCESS_REASON,
+    authorization=Authorization.AUTHENTICATED,
+    reason=_RETENTION_ACCESS_REASON,
 )
 async def list_organization_flow_run_retention_review_queue(
     container: Annotated[Container, Depends(get_container(with_user=True))],
@@ -1237,14 +1555,14 @@ async def list_organization_flow_run_retention_review_queue(
     ),
     responses={
         400: _flow_retention_invalid_cursor_response(),
-        403: _flow_settings_admin_forbidden_response(),
+        403: _retention_forbidden_response("manage"),
         404: _flow_retention_not_found_response("Space"),
     },
 )
 @endpoint_access(
     authentication=Authentication.USER,
-    authorization=Permission.ADMIN,
-    reason=_TENANT_SETTINGS_ADMIN_ACCESS_REASON,
+    authorization=Authorization.AUTHENTICATED,
+    reason=_RETENTION_ACCESS_REASON,
 )
 async def list_space_flow_run_retention_review_queue(
     space_id: UUID,
@@ -1277,14 +1595,14 @@ async def list_space_flow_run_retention_review_queue(
     ),
     responses={
         400: _flow_retention_invalid_cursor_response(),
-        403: _flow_settings_admin_forbidden_response(),
+        403: _retention_forbidden_response("manage"),
         404: _flow_retention_not_found_response("Flow"),
     },
 )
 @endpoint_access(
     authentication=Authentication.USER,
-    authorization=Permission.ADMIN,
-    reason=_TENANT_SETTINGS_ADMIN_ACCESS_REASON,
+    authorization=Authorization.AUTHENTICATED,
+    reason=_RETENTION_ACCESS_REASON,
 )
 async def list_flow_run_retention_review_queue(
     flow_id: UUID,

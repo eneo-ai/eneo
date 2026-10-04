@@ -894,11 +894,23 @@ class FlowRunHistoryPurgeBlockedPublic(BaseModel):
     undelivered_audit: int
     unresolved_webhook: int
     review_required: int
+    legal_hold: int = Field(
+        description=(
+            "Due terminal runs that an active legal hold keeps. They are counted "
+            "apart (up to the window size) and take no place in the window below."
+        )
+    )
     counted_runs: int = Field(
-        description="Number of due terminal runs examined in the diagnostic window."
+        description=(
+            "Number of due terminal runs without a legal hold examined in the "
+            "diagnostic window."
+        )
     )
     complete: bool = Field(
-        description="Whether the diagnostic window covers all due terminal runs in scope."
+        description=(
+            "Whether the diagnostic window and the legal-hold count cover all due "
+            "terminal runs in scope."
+        )
     )
 
 
@@ -917,6 +929,7 @@ class FlowRunHistoryPurgePublic(BaseModel):
                     "undelivered_audit": 0,
                     "unresolved_webhook": 0,
                     "review_required": 1,
+                    "legal_hold": 0,
                     "counted_runs": 3,
                     "complete": True,
                 },

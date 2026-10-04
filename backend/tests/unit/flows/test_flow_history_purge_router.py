@@ -68,6 +68,7 @@ async def test_purge_queries_keep_the_terminal_index_predicate(query_kind):
     rows.all.return_value = []
     session.execute.return_value = rows
     session.scalars.return_value = rows
+    session.scalar.return_value = 0  # the bounded legal-hold count
     await DataRetentionService(session).purge_due_flow_run_history_for_tenant(
         tenant_id=uuid4(), now=datetime.now(timezone.utc), limit=2, dry_run=True
     )

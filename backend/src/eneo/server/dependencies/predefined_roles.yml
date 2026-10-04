@@ -52,6 +52,8 @@ roles:
       - flows_ai_builder
       - flows_ai_builder_review
       - flows_trace
+      - retention_manage
+      - retention_holds
       - assistant_debug
       - web_search
       - image_generation

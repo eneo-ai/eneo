@@ -1,4 +1,4 @@
-from collections.abc import Awaitable, Callable
+from collections.abc import Callable, Mapping, Sequence
 from typing import TYPE_CHECKING, Any, cast
 from uuid import UUID
 
@@ -114,7 +114,7 @@ from eneo.skills.domain.skill import (
 )
 from eneo.skills.domain.skill_repo import SkillRepo
 from eneo.tenants.tenant import TenantUpdate
-from eneo.tenants.tenant_repo import TenantRepository
+from eneo.tenants.tenant_repo import FlowSettingsChange, TenantRepository
 from eneo.users.user import UserInDB
 
 if TYPE_CHECKING:
@@ -124,6 +124,114 @@ if TYPE_CHECKING:
 logger = get_logger(__name__)
 
 FLOW_SETTINGS_INVALID_PAYLOAD_CODE = "flow_settings_invalid_payload"
+
+
+_UPLOAD_ABANDONMENT_DAYS_COLUMN = "flow_runtime_upload_abandonment_days"
+
+
+def _flow_runtime_policy_public(policy: FlowRuntimePolicy) -> FlowRuntimePolicyPublic:
+    return FlowRuntimePolicyPublic(
+        default_step_timeout_seconds=policy.default_step_timeout_seconds,
+        max_step_timeout_seconds=policy.max_step_timeout_seconds,
+        hard_ceiling_seconds=policy.hard_ceiling_seconds,
+        max_concurrent_runs=policy.max_concurrent_runs,
+        max_concurrent_runs_override=policy.max_concurrent_runs_override,
+        max_concurrent_runs_capacity=policy.max_concurrent_runs_capacity,
+    )
+
+
+def _mapped_execution_policy_public(
+    tenant_flow_settings: dict[str, Any] | None,
+) -> FlowMappedExecutionPolicyPublic:
+    policy = resolve_flow_mapped_execution_policy(tenant_flow_settings)
+    return FlowMappedExecutionPolicyPublic(
+        version=policy.version,
+        max_provider_calls_per_mapped_step=policy.max_provider_calls_per_mapped_step,
+        max_estimated_input_tokens_per_mapped_step=(
+            policy.max_estimated_input_tokens_per_mapped_step
+        ),
+        max_provider_calls_source=mapped_call_ceiling_source(tenant_flow_settings),
+        deployment_default_max_provider_calls=(
+            get_app_settings().flow_mapped_step_max_provider_calls_default
+        ),
+    )
+
+
+def _rag_evidence_policy_public(
+    flow_settings: dict[str, Any] | None,
+) -> FlowRagEvidencePolicyPublic:
+    policy = resolve_flow_rag_evidence_policy(flow_settings)
+    return FlowRagEvidencePolicyPublic(
+        version=policy.version,
+        max_sources_with_recorded_passages=policy.max_sources_with_recorded_passages,
+        max_recorded_passages_per_source=policy.max_recorded_passages_per_source,
+        max_recorded_passage_bytes=policy.max_recorded_passage_bytes,
+        max_recorded_passage_bytes_per_step=(
+            policy.max_recorded_passage_bytes_per_step
+        ),
+        max_recorded_passage_bytes_per_run_view=(
+            policy.max_recorded_passage_bytes_per_run_view
+        ),
+    )
+
+
+def _ai_builder_budget_public(
+    policy: AIBuilderBudgetPolicy,
+) -> AIBuilderBudgetSettingsPublic:
+    return AIBuilderBudgetSettingsPublic(
+        conversation_safety_buffer_tokens=policy.conversation_safety_buffer_tokens,
+        minimum_conversation_budget_tokens=policy.minimum_conversation_budget_tokens,
+        review_evidence_max_input_tokens=policy.review_evidence_max_input_tokens,
+        review_investigation_evidence_max_tokens=(
+            policy.review_investigation_evidence_max_tokens
+        ),
+        max_attachments=policy.max_attachments,
+        max_message_chars=policy.max_message_chars,
+        max_template_inspection_uncompressed_bytes=(
+            policy.max_template_inspection_uncompressed_bytes
+        ),
+        max_template_placeholders=policy.max_template_placeholders,
+        max_attachments_hard_limit=AI_BUILDER_MAX_ATTACHMENTS_HARD_LIMIT,
+        max_message_chars_hard_limit=AI_BUILDER_MAX_MESSAGE_CHARS_HARD_LIMIT,
+        max_template_inspection_uncompressed_bytes_hard_limit=(
+            AI_BUILDER_TEMPLATE_INSPECTION_HARD_LIMIT_BYTES
+        ),
+        max_template_placeholders_hard_limit=(
+            AI_BUILDER_MAX_TEMPLATE_PLACEHOLDERS_HARD_LIMIT
+        ),
+        review_investigation_evidence_ceiling_tokens=(
+            AI_BUILDER_REVIEW_INVESTIGATION_EVIDENCE_CEILING_TOKENS
+        ),
+        max_template_archive_entries_per_file_hard_limit=MAX_TEMPLATE_ARCHIVE_ENTRIES,
+        max_template_uncompressed_bytes_per_file_hard_limit=(
+            MAX_TEMPLATE_UNCOMPRESSED_BYTES
+        ),
+        max_planning_state_payload_bytes_hard_limit=PLANNING_STATE_PAYLOAD_CAP_BYTES,
+        budget_token_hard_limit=AI_BUILDER_BUDGET_MAX_TOKENS,
+    )
+
+
+def _flow_evidence_policy_public(
+    flow_settings: dict[str, Any] | None,
+) -> FlowEvidencePolicyPublic:
+    policy = resolve_flow_evidence_policy(flow_settings)
+    return FlowEvidencePolicyPublic(
+        allow_sensitive_flow_exports=policy.allow_sensitive_flow_exports,
+        allow_space_admin_raw_export_class3=policy.allow_space_admin_raw_export_class3,
+        allow_run_owner_raw_export_class3=policy.allow_run_owner_raw_export_class3,
+        allow_service_key_raw_export_class3=policy.allow_service_key_raw_export_class3,
+    )
+
+
+def _flow_retention_policy_public(
+    flow_settings: dict[str, Any] | None, upload_abandonment_days: int | None
+) -> FlowRetentionPolicyPublic:
+    return FlowRetentionPolicyPublic(
+        run_debug_evidence_days=resolve_flow_retention_policy(
+            flow_settings
+        ).run_debug_evidence_days,
+        flow_runtime_upload_abandonment_days=upload_abandonment_days,
+    )
 
 
 class SettingService:
@@ -530,28 +638,29 @@ class SettingService:
             return tenant_override
         return await self.tenant_repo.get(self.user.tenant_id)
 
-    async def _persist_flow_settings(self, flow_settings: dict[str, Any]) -> None:
-        normalized_flow_settings = normalize_flow_settings_object(flow_settings)
-        tenant_update = TenantUpdate(
-            id=self.user.tenant_id,
-            flow_settings=normalized_flow_settings,
-        )
-        update_tenant = getattr(self.tenant_repo, "update_tenant", None)
-        if callable(update_tenant):
-            await cast(Callable[[TenantUpdate], Awaitable[Any]], update_tenant)(
-                tenant_update
-            )
-            return
-        tenant = await self._get_tenant_for_flow_settings()
-        next_tenant = tenant.model_copy(
-            update={"flow_settings": normalized_flow_settings}
-        )
-        setattr(self.tenant_repo, "tenant", next_tenant)
+    async def _update_flow_settings(
+        self,
+        transform: Callable[[dict[str, Any] | None], dict[str, Any]],
+        *,
+        extra_values: Mapping[str, Any] | None = None,
+        read_columns: Sequence[str] = (),
+    ) -> FlowSettingsChange:
+        """Change only this setting's keys of tenants.flow_settings.
 
-        async def _get_updated_tenant(_tenant_id: Any) -> Any:
-            return getattr(self.tenant_repo, "tenant")
+        The tenant repository locks the row and reads it fresh, so a concurrent
+        change to another setting's keys is kept. The returned change carries
+        the locked before-values that the audit reports as old.
+        """
 
-        setattr(self.tenant_repo, "get", _get_updated_tenant)
+        def normalized(current: dict[str, Any] | None) -> dict[str, Any]:
+            return normalize_flow_settings_object(transform(current))
+
+        return await self.tenant_repo.update_flow_settings(
+            self.user.tenant_id,
+            normalized,
+            extra_values=extra_values,
+            read_columns=read_columns,
+        )
 
     async def get_flow_input_limits_resolved(self) -> FlowInputLimits:
         tenant = await self._get_tenant_for_flow_settings()
@@ -567,8 +676,14 @@ class SettingService:
 
     @validate_permissions(Permission.ADMIN)
     async def get_flow_input_limits(self) -> FlowInputLimitsPublic:
-        limits = await self.get_flow_input_limits_resolved()
+        tenant = await self._get_tenant_for_flow_settings()
+        return self._flow_input_limits_public(getattr(tenant, "flow_settings", None))
+
+    def _flow_input_limits_public(
+        self, flow_settings: dict[str, Any] | None
+    ) -> FlowInputLimitsPublic:
         admission = self._require_upload_admission()
+        limits = resolve_flow_input_limits(flow_settings, defaults=admission)
         return FlowInputLimitsPublic(
             file_max_size_bytes=limits.file_max_size_bytes,
             audio_max_size_bytes=limits.audio_max_size_bytes,
@@ -632,19 +747,19 @@ class SettingService:
                     "maximum_seconds": ceiling_seconds,
                 },
             )
-        previous = await self.get_flow_input_limits()
         remove_keys = {key for key, value in patch.items() if value is None}
         updated_values = {
             key: value for key, value in patch.items() if value is not None
         }
-        tenant = await self._get_tenant_for_flow_settings()
-        next_flow_settings = apply_flow_input_limits_patch(
-            cast(dict[str, Any] | None, getattr(tenant, "flow_settings", None)),
-            remove_keys=remove_keys,
-            **updated_values,
+        change = await self._update_flow_settings(
+            lambda current: apply_flow_input_limits_patch(
+                current,
+                remove_keys=remove_keys,
+                **updated_values,
+            )
         )
-        await self._persist_flow_settings(next_flow_settings)
-        updated = await self.get_flow_input_limits()
+        previous = self._flow_input_limits_public(change.before)
+        updated = self._flow_input_limits_public(change.after)
         await self.audit_service.log_async(
             tenant_id=self.user.tenant_id,
             user=self.user,
@@ -670,10 +785,9 @@ class SettingService:
         self,
     ) -> FlowDocumentRenderLimitsPublic:
         tenant = await self._get_tenant_for_flow_settings()
-        limits = resolve_flow_document_render_limits(
-            getattr(tenant, "flow_settings", None)
+        return FlowDocumentRenderLimitsPublic.from_domain(
+            resolve_flow_document_render_limits(getattr(tenant, "flow_settings", None))
         )
-        return FlowDocumentRenderLimitsPublic.from_domain(limits)
 
     @validate_permissions(Permission.ADMIN)
     async def update_flow_document_render_limits(
@@ -686,15 +800,19 @@ class SettingService:
                 "At least one flow document render limit field must be provided.",
                 code=FLOW_SETTINGS_INVALID_PAYLOAD_CODE,
             )
-        previous = await self.get_flow_document_render_limits()
-        tenant = await self._get_tenant_for_flow_settings()
-        next_flow_settings = apply_flow_document_render_limits_patch(
-            cast(dict[str, Any] | None, getattr(tenant, "flow_settings", None)),
-            remove_keys={key for key, value in patch.items() if value is None},
-            **{key: value for key, value in patch.items() if value is not None},
+        change = await self._update_flow_settings(
+            lambda current: apply_flow_document_render_limits_patch(
+                current,
+                remove_keys={key for key, value in patch.items() if value is None},
+                **{key: value for key, value in patch.items() if value is not None},
+            )
         )
-        await self._persist_flow_settings(next_flow_settings)
-        updated = await self.get_flow_document_render_limits()
+        previous = FlowDocumentRenderLimitsPublic.from_domain(
+            resolve_flow_document_render_limits(change.before)
+        )
+        updated = FlowDocumentRenderLimitsPublic.from_domain(
+            resolve_flow_document_render_limits(change.after)
+        )
         await self.audit_service.log_async(
             tenant_id=self.user.tenant_id,
             user=self.user,
@@ -721,14 +839,8 @@ class SettingService:
 
     @validate_permissions(Permission.ADMIN)
     async def get_flow_runtime_policy(self) -> FlowRuntimePolicyPublic:
-        policy = await self.get_flow_runtime_policy_resolved()
-        return FlowRuntimePolicyPublic(
-            default_step_timeout_seconds=policy.default_step_timeout_seconds,
-            max_step_timeout_seconds=policy.max_step_timeout_seconds,
-            hard_ceiling_seconds=policy.hard_ceiling_seconds,
-            max_concurrent_runs=policy.max_concurrent_runs,
-            max_concurrent_runs_override=policy.max_concurrent_runs_override,
-            max_concurrent_runs_capacity=policy.max_concurrent_runs_capacity,
+        return _flow_runtime_policy_public(
+            await self.get_flow_runtime_policy_resolved()
         )
 
     @validate_permissions(Permission.ADMIN)
@@ -742,15 +854,17 @@ class SettingService:
                 "At least one flow runtime policy field must be provided.",
                 code=FLOW_SETTINGS_INVALID_PAYLOAD_CODE,
             )
-        previous = await self.get_flow_runtime_policy()
-        tenant = await self._get_tenant_for_flow_settings()
-        next_flow_settings = apply_flow_runtime_policy_patch(
-            cast(dict[str, Any] | None, getattr(tenant, "flow_settings", None)),
-            remove_keys={key for key, value in patch.items() if value is None},
-            **{key: value for key, value in patch.items() if value is not None},
+        change = await self._update_flow_settings(
+            lambda current: apply_flow_runtime_policy_patch(
+                current,
+                remove_keys={key for key, value in patch.items() if value is None},
+                **{key: value for key, value in patch.items() if value is not None},
+            )
         )
-        await self._persist_flow_settings(next_flow_settings)
-        updated = await self.get_flow_runtime_policy()
+        previous = _flow_runtime_policy_public(
+            resolve_flow_runtime_policy(change.before)
+        )
+        updated = _flow_runtime_policy_public(resolve_flow_runtime_policy(change.after))
         await self.audit_service.log_async(
             tenant_id=self.user.tenant_id,
             user=self.user,
@@ -781,22 +895,8 @@ class SettingService:
     @validate_permissions(Permission.ADMIN)
     async def get_mapped_execution_policy(self) -> FlowMappedExecutionPolicyPublic:
         tenant = await self._get_tenant_for_flow_settings()
-        tenant_flow_settings = cast(
-            dict[str, Any] | None, getattr(tenant, "flow_settings", None)
-        )
-        policy = resolve_flow_mapped_execution_policy(tenant_flow_settings)
-        return FlowMappedExecutionPolicyPublic(
-            version=policy.version,
-            max_provider_calls_per_mapped_step=(
-                policy.max_provider_calls_per_mapped_step
-            ),
-            max_estimated_input_tokens_per_mapped_step=(
-                policy.max_estimated_input_tokens_per_mapped_step
-            ),
-            max_provider_calls_source=mapped_call_ceiling_source(tenant_flow_settings),
-            deployment_default_max_provider_calls=(
-                get_app_settings().flow_mapped_step_max_provider_calls_default
-            ),
+        return _mapped_execution_policy_public(
+            cast(dict[str, Any] | None, getattr(tenant, "flow_settings", None))
         )
 
     @validate_permissions(Permission.ADMIN)
@@ -819,8 +919,6 @@ class SettingService:
                 "max_provider_calls_per_mapped_step.",
                 code=FLOW_SETTINGS_INVALID_PAYLOAD_CODE,
             )
-        previous = await self.get_mapped_execution_policy()
-        tenant = await self._get_tenant_for_flow_settings()
         remove_keys = {
             key
             for key, value in patch.items()
@@ -828,20 +926,22 @@ class SettingService:
         }
         if restore_calls_default:
             remove_keys.add("max_provider_calls_per_mapped_step")
-        next_flow_settings = apply_flow_mapped_execution_policy_patch(
-            cast(dict[str, Any] | None, getattr(tenant, "flow_settings", None)),
-            # A null call ceiling is an explicit opt-out that must keep blocking
-            # mapped authoring beneath the deployment default; a null token
-            # ceiling falls back to its absent-key state; the restore action
-            # deletes the stored ceiling so the deployment default applies.
-            disable_max_provider_calls=(
-                patch.get("max_provider_calls_per_mapped_step", ...) is None
-            ),
-            remove_keys=remove_keys,
-            **{key: value for key, value in patch.items() if value is not None},
+        change = await self._update_flow_settings(
+            lambda current: apply_flow_mapped_execution_policy_patch(
+                current,
+                # A null call ceiling is an explicit opt-out that must keep blocking
+                # mapped authoring beneath the deployment default; a null token
+                # ceiling falls back to its absent-key state; the restore action
+                # deletes the stored ceiling so the deployment default applies.
+                disable_max_provider_calls=(
+                    patch.get("max_provider_calls_per_mapped_step", ...) is None
+                ),
+                remove_keys=remove_keys,
+                **{key: value for key, value in patch.items() if value is not None},
+            )
         )
-        await self._persist_flow_settings(next_flow_settings)
-        updated = await self.get_mapped_execution_policy()
+        previous = _mapped_execution_policy_public(change.before)
+        updated = _mapped_execution_policy_public(change.after)
         await self.audit_service.log_async(
             tenant_id=self.user.tenant_id,
             user=self.user,
@@ -875,22 +975,8 @@ class SettingService:
     @validate_permissions(Permission.ADMIN)
     async def get_rag_evidence_policy(self) -> FlowRagEvidencePolicyPublic:
         tenant = await self._get_tenant_for_flow_settings()
-        policy = resolve_flow_rag_evidence_policy(
+        return _rag_evidence_policy_public(
             cast(dict[str, Any] | None, getattr(tenant, "flow_settings", None))
-        )
-        return FlowRagEvidencePolicyPublic(
-            version=policy.version,
-            max_sources_with_recorded_passages=(
-                policy.max_sources_with_recorded_passages
-            ),
-            max_recorded_passages_per_source=policy.max_recorded_passages_per_source,
-            max_recorded_passage_bytes=policy.max_recorded_passage_bytes,
-            max_recorded_passage_bytes_per_step=(
-                policy.max_recorded_passage_bytes_per_step
-            ),
-            max_recorded_passage_bytes_per_run_view=(
-                policy.max_recorded_passage_bytes_per_run_view
-            ),
         )
 
     @validate_permissions(Permission.ADMIN)
@@ -904,15 +990,15 @@ class SettingService:
                 "At least one knowledge evidence policy field must be provided.",
                 code=FLOW_SETTINGS_INVALID_PAYLOAD_CODE,
             )
-        previous = await self.get_rag_evidence_policy()
-        tenant = await self._get_tenant_for_flow_settings()
-        next_flow_settings = apply_flow_rag_evidence_policy_patch(
-            cast(dict[str, Any] | None, getattr(tenant, "flow_settings", None)),
-            remove_keys={key for key, value in patch.items() if value is None},
-            **{key: value for key, value in patch.items() if value is not None},
+        change = await self._update_flow_settings(
+            lambda current: apply_flow_rag_evidence_policy_patch(
+                current,
+                remove_keys={key for key, value in patch.items() if value is None},
+                **{key: value for key, value in patch.items() if value is not None},
+            )
         )
-        await self._persist_flow_settings(next_flow_settings)
-        updated = await self.get_rag_evidence_policy()
+        previous = _rag_evidence_policy_public(change.before)
+        updated = _rag_evidence_policy_public(change.after)
         await self.audit_service.log_async(
             tenant_id=self.user.tenant_id,
             user=self.user,
@@ -932,42 +1018,7 @@ class SettingService:
 
     @validate_permissions(Permission.ADMIN)
     async def get_ai_builder_budget_settings(self) -> AIBuilderBudgetSettingsPublic:
-        policy = await self.get_ai_builder_budget_policy()
-        return AIBuilderBudgetSettingsPublic(
-            conversation_safety_buffer_tokens=policy.conversation_safety_buffer_tokens,
-            minimum_conversation_budget_tokens=policy.minimum_conversation_budget_tokens,
-            review_evidence_max_input_tokens=policy.review_evidence_max_input_tokens,
-            review_investigation_evidence_max_tokens=(
-                policy.review_investigation_evidence_max_tokens
-            ),
-            max_attachments=policy.max_attachments,
-            max_message_chars=policy.max_message_chars,
-            max_template_inspection_uncompressed_bytes=(
-                policy.max_template_inspection_uncompressed_bytes
-            ),
-            max_template_placeholders=policy.max_template_placeholders,
-            max_attachments_hard_limit=AI_BUILDER_MAX_ATTACHMENTS_HARD_LIMIT,
-            max_message_chars_hard_limit=AI_BUILDER_MAX_MESSAGE_CHARS_HARD_LIMIT,
-            max_template_inspection_uncompressed_bytes_hard_limit=(
-                AI_BUILDER_TEMPLATE_INSPECTION_HARD_LIMIT_BYTES
-            ),
-            max_template_placeholders_hard_limit=(
-                AI_BUILDER_MAX_TEMPLATE_PLACEHOLDERS_HARD_LIMIT
-            ),
-            review_investigation_evidence_ceiling_tokens=(
-                AI_BUILDER_REVIEW_INVESTIGATION_EVIDENCE_CEILING_TOKENS
-            ),
-            max_template_archive_entries_per_file_hard_limit=(
-                MAX_TEMPLATE_ARCHIVE_ENTRIES
-            ),
-            max_template_uncompressed_bytes_per_file_hard_limit=(
-                MAX_TEMPLATE_UNCOMPRESSED_BYTES
-            ),
-            max_planning_state_payload_bytes_hard_limit=(
-                PLANNING_STATE_PAYLOAD_CAP_BYTES
-            ),
-            budget_token_hard_limit=AI_BUILDER_BUDGET_MAX_TOKENS,
-        )
+        return _ai_builder_budget_public(await self.get_ai_builder_budget_policy())
 
     async def get_ai_builder_budget_policy(self) -> AIBuilderBudgetPolicy:
         """Resolve effective Builder settings for authenticated tenant services."""
@@ -985,15 +1036,19 @@ class SettingService:
             raise BadRequestException(
                 "At least one AI Builder setting must be provided."
             )
-        previous = await self.get_ai_builder_budget_settings()
-        tenant = await self._get_tenant_for_flow_settings()
-        next_flow_settings = apply_ai_builder_budget_policy_patch(
-            cast(dict[str, Any] | None, getattr(tenant, "flow_settings", None)),
-            **patch,
-            remove_keys={key for key, value in patch.items() if value is None},
+        change = await self._update_flow_settings(
+            lambda current: apply_ai_builder_budget_policy_patch(
+                current,
+                **patch,
+                remove_keys={key for key, value in patch.items() if value is None},
+            )
         )
-        await self._persist_flow_settings(next_flow_settings)
-        updated = await self.get_ai_builder_budget_settings()
+        previous = _ai_builder_budget_public(
+            resolve_ai_builder_budget_policy(change.before)
+        )
+        updated = _ai_builder_budget_public(
+            resolve_ai_builder_budget_policy(change.after)
+        )
         await self.audit_service.log_async(
             tenant_id=self.user.tenant_id,
             user=self.user,
@@ -1017,13 +1072,7 @@ class SettingService:
     @validate_permissions(Permission.ADMIN)
     async def get_flow_evidence_policy(self) -> FlowEvidencePolicyPublic:
         tenant = await self._get_tenant_for_flow_settings()
-        policy = resolve_flow_evidence_policy(getattr(tenant, "flow_settings", None))
-        return FlowEvidencePolicyPublic(
-            allow_sensitive_flow_exports=policy.allow_sensitive_flow_exports,
-            allow_space_admin_raw_export_class3=policy.allow_space_admin_raw_export_class3,
-            allow_run_owner_raw_export_class3=policy.allow_run_owner_raw_export_class3,
-            allow_service_key_raw_export_class3=policy.allow_service_key_raw_export_class3,
-        )
+        return _flow_evidence_policy_public(getattr(tenant, "flow_settings", None))
 
     @validate_permissions(Permission.ADMIN)
     async def update_flow_evidence_policy(
@@ -1036,12 +1085,12 @@ class SettingService:
                 "At least one flow evidence policy field must be provided.",
                 code=FLOW_SETTINGS_INVALID_PAYLOAD_CODE,
             )
-        tenant = await self._get_tenant_for_flow_settings()
-        next_flow_settings = apply_flow_evidence_policy_patch(
-            cast(dict[str, Any] | None, getattr(tenant, "flow_settings", None)),
-            **patch,
+        change = await self._update_flow_settings(
+            lambda current: apply_flow_evidence_policy_patch(
+                current,
+                **patch,
+            )
         )
-        await self._persist_flow_settings(next_flow_settings)
         await self.audit_service.log_async(
             tenant_id=self.user.tenant_id,
             user=self.user,
@@ -1051,17 +1100,14 @@ class SettingService:
             description="Updated flow evidence policy",
             metadata={"setting": "flow_evidence_policy", "changes": patch},
         )
-        return await self.get_flow_evidence_policy()
+        return _flow_evidence_policy_public(change.after)
 
     @validate_permissions(Permission.ADMIN)
     async def get_flow_retention_policy(self) -> FlowRetentionPolicyPublic:
         tenant = await self._get_tenant_for_flow_settings()
-        policy = resolve_flow_retention_policy(getattr(tenant, "flow_settings", None))
-        return FlowRetentionPolicyPublic(
-            run_debug_evidence_days=policy.run_debug_evidence_days,
-            flow_runtime_upload_abandonment_days=getattr(
-                tenant, "flow_runtime_upload_abandonment_days", None
-            ),
+        return _flow_retention_policy_public(
+            getattr(tenant, "flow_settings", None),
+            getattr(tenant, _UPLOAD_ABANDONMENT_DAYS_COLUMN, None),
         )
 
     @validate_permissions(Permission.ADMIN)
@@ -1075,43 +1121,54 @@ class SettingService:
                 "At least one flow retention policy field must be provided.",
                 code=FLOW_SETTINGS_INVALID_PAYLOAD_CODE,
             )
-        tenant = await self._get_tenant_for_flow_settings()
-        current_debug_policy = resolve_flow_retention_policy(
-            getattr(tenant, "flow_settings", None)
+        upload_supplied = (
+            "flow_runtime_upload_abandonment_days" in payload.model_fields_set
         )
-        next_flow_settings = normalize_flow_settings_object(
-            getattr(tenant, "flow_settings", None)
-        )
-        if "run_debug_evidence_days" in payload.model_fields_set:
-            try:
-                next_flow_settings = apply_flow_retention_policy_patch(
-                    next_flow_settings,
-                    run_debug_evidence_days=payload.run_debug_evidence_days,
-                    remove_keys=(
-                        {"run_debug_evidence_days"}
-                        if payload.run_debug_evidence_days is None
-                        else set()
-                    ),
-                )
-            except ValueError as error:
-                raise BadRequestException(
-                    str(error),
-                    code=FLOW_SETTINGS_INVALID_PAYLOAD_CODE,
-                ) from error
+        debug_supplied = "run_debug_evidence_days" in payload.model_fields_set
 
-        old_upload_days = getattr(tenant, "flow_runtime_upload_abandonment_days", None)
+        def transform(current: dict[str, Any] | None) -> dict[str, Any]:
+            if not debug_supplied:
+                return normalize_flow_settings_object(current)
+            return apply_flow_retention_policy_patch(
+                normalize_flow_settings_object(current),
+                run_debug_evidence_days=payload.run_debug_evidence_days,
+                remove_keys=(
+                    {"run_debug_evidence_days"}
+                    if payload.run_debug_evidence_days is None
+                    else set()
+                ),
+            )
+
+        try:
+            # Write only the fields this request supplies; the old values come
+            # from the same locked read, so a concurrent save is neither undone
+            # nor misreported.
+            change = await self._update_flow_settings(
+                transform,
+                extra_values=(
+                    {
+                        "flow_runtime_upload_abandonment_days": (
+                            payload.flow_runtime_upload_abandonment_days
+                        )
+                    }
+                    if upload_supplied
+                    else None
+                ),
+                read_columns=(_UPLOAD_ABANDONMENT_DAYS_COLUMN,),
+            )
+        except ValueError as error:
+            raise BadRequestException(
+                str(error),
+                code=FLOW_SETTINGS_INVALID_PAYLOAD_CODE,
+            ) from error
+        old_upload_days = change.columns_before[_UPLOAD_ABANDONMENT_DAYS_COLUMN]
         new_upload_days = (
             payload.flow_runtime_upload_abandonment_days
-            if "flow_runtime_upload_abandonment_days" in payload.model_fields_set
+            if upload_supplied
             else old_upload_days
         )
-        await self.tenant_repo.update_tenant(
-            TenantUpdate(
-                id=self.user.tenant_id,
-                flow_settings=next_flow_settings,
-                flow_runtime_upload_abandonment_days=new_upload_days,
-            )
-        )
+        previous = _flow_retention_policy_public(change.before, old_upload_days)
+        updated = _flow_retention_policy_public(change.after, new_upload_days)
         await self.audit_service.log(
             tenant_id=self.user.tenant_id,
             user=self.user,
@@ -1120,23 +1177,11 @@ class SettingService:
             entity_id=self.user.tenant_id,
             description="Updated flow retention policy",
             metadata={
-                "old_policy": {
-                    "run_debug_evidence_days": (
-                        current_debug_policy.run_debug_evidence_days
-                    ),
-                    "flow_runtime_upload_abandonment_days": old_upload_days,
-                },
-                "new_policy": {
-                    "run_debug_evidence_days": (
-                        payload.run_debug_evidence_days
-                        if "run_debug_evidence_days" in payload.model_fields_set
-                        else current_debug_policy.run_debug_evidence_days
-                    ),
-                    "flow_runtime_upload_abandonment_days": new_upload_days,
-                },
+                "old_policy": previous.model_dump(),
+                "new_policy": updated.model_dump(),
             },
         )
-        return await self.get_flow_retention_policy()
+        return updated
 
     async def get_available_completion_models(self) -> list[CompletionModelPublic]:
         return await self.ai_models_service.get_completion_models()

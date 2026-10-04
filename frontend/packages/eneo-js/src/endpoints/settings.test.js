@@ -136,6 +136,113 @@ describe("settings flow policy endpoints", () => {
     ]);
   });
 
+  it("reads and replaces the review limit for legal holds", async () => {
+    const fetch = vi.fn(async () => ({ days: 30, is_default: false }));
+    const settings = initSettings({ fetch });
+
+    await settings.getFlowRetentionHoldReviewLimit();
+    await settings.replaceFlowRetentionHoldReviewLimit({ days: 30 });
+
+    expect(fetch.mock.calls).toEqual([
+      ["/api/v1/settings/flow-run-retention-policy/hold-review-limit", { method: "get" }],
+      [
+        "/api/v1/settings/flow-run-retention-policy/hold-review-limit",
+        { method: "put", requestBody: { "application/json": { days: 30 } } }
+      ]
+    ]);
+  });
+
+  it("lists, places, reviews and releases legal holds on Flow run history", async () => {
+    const fetch = vi.fn(async () => ({ items: [], has_more: false }));
+    const settings = initSettings({ fetch });
+
+    await settings.listFlowRetentionHolds();
+    await settings.listFlowRetentionHolds({ status: "all", flowId: "flow-id", limit: 10 });
+    await settings.placeFlowRetentionHold({
+      flowId: "flow-id",
+      reason: "Request",
+      reviewBy: "2027-03-31T21:59:59.999Z"
+    });
+    await settings.placeFlowRetentionHold({
+      flowId: "flow-id",
+      runIds: ["run-id"],
+      reason: "Request",
+      reviewBy: "2027-03-31T21:59:59.999Z",
+      endsAt: "2026-12-31T23:00:00.000Z"
+    });
+    await settings.extendFlowRetentionHoldReview({
+      holdId: "hold-id",
+      reviewBy: "2027-09-30T21:59:59.999Z",
+      reason: "Still open"
+    });
+    await settings.releaseFlowRetentionHold({ holdId: "hold-id", reason: "Answered" });
+
+    expect(fetch.mock.calls).toEqual([
+      [
+        "/api/v1/settings/flow-retention-holds",
+        {
+          method: "get",
+          params: { query: { status: "active", flow_id: undefined, limit: 50, offset: 0 } }
+        }
+      ],
+      [
+        "/api/v1/settings/flow-retention-holds",
+        {
+          method: "get",
+          params: { query: { status: "all", flow_id: "flow-id", limit: 10, offset: 0 } }
+        }
+      ],
+      [
+        "/api/v1/settings/flow-retention-holds",
+        {
+          method: "post",
+          requestBody: {
+            "application/json": {
+              flow_id: "flow-id",
+              run_ids: null,
+              reason: "Request",
+              review_by: "2027-03-31T21:59:59.999Z",
+              ends_at: null
+            }
+          }
+        }
+      ],
+      [
+        "/api/v1/settings/flow-retention-holds",
+        {
+          method: "post",
+          requestBody: {
+            "application/json": {
+              flow_id: "flow-id",
+              run_ids: ["run-id"],
+              reason: "Request",
+              review_by: "2027-03-31T21:59:59.999Z",
+              ends_at: "2026-12-31T23:00:00.000Z"
+            }
+          }
+        }
+      ],
+      [
+        "/api/v1/settings/flow-retention-holds/{hold_id}/extend-review",
+        {
+          method: "post",
+          params: { path: { hold_id: "hold-id" } },
+          requestBody: {
+            "application/json": { review_by: "2027-09-30T21:59:59.999Z", reason: "Still open" }
+          }
+        }
+      ],
+      [
+        "/api/v1/settings/flow-retention-holds/{hold_id}/release",
+        {
+          method: "post",
+          params: { path: { hold_id: "hold-id" } },
+          requestBody: { "application/json": { reason: "Answered" } }
+        }
+      ]
+    ]);
+  });
+
   it("lists Organization-wide Flow retention targets", async () => {
     const fetch = vi.fn(async () => ({ items: [], count: 0, has_more: false }));
     const settings = initSettings({ fetch });

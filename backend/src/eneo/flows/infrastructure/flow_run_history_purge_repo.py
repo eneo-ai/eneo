@@ -13,6 +13,10 @@ from sqlalchemy.dialects import postgresql
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import InstrumentedAttribute, aliased
 
+from eneo.data_retention.infrastructure.gallring_lock import (
+    GallringSubject,
+    acquire_shared,
+)
 from eneo.database.tables.app_table import AppRunsFiles, AppsFiles
 from eneo.database.tables.assistant_table import AssistantsFiles
 from eneo.database.tables.files_table import Files
@@ -34,6 +38,7 @@ from eneo.database.tables.questions_table import QuestionsFiles
 from eneo.database.tables.tenant_table import Tenants
 from eneo.files.file_repo import primary_file_content_size_expression
 from eneo.flows.enums import TERMINAL_FLOW_RUN_STATUS_VALUES
+from eneo.flows.infrastructure.flow_retention_hold_repo import flow_run_held_predicate
 from eneo.flows.infrastructure.flow_version_repo import (
     scan_flow_version_template_references,
 )
@@ -179,6 +184,9 @@ class FlowRunHistoryPurgeRepository:
         ordered_run_ids = list(dict.fromkeys(run_ids))
         if not ordered_run_ids:
             return FlowRunHistoryPurgeResult()
+        # A caller that selected without the lock still deletes only under it;
+        # re-taking it in the same transaction is a no-op.
+        await acquire_shared(self.session, GallringSubject.FLOW_HISTORY)
         bounded_run_ids = await self._candidate_bounded_run_ids(ordered_run_ids)
         unique_run_ids = set(bounded_run_ids)
 
@@ -633,6 +641,13 @@ class FlowRunHistoryPurgeRepository:
             .where(FlowRuns.status.in_(TERMINAL_FLOW_RUN_STATUS_VALUES))
             .where(sa.not_(flow_run_undelivered_audit_exists(FlowRuns.id)))
             .where(sa.not_(flow_run_unresolved_webhook_exists(FlowRuns.id)))
+            .where(
+                sa.not_(
+                    flow_run_held_predicate(
+                        run_id=FlowRuns.id, flow_id=FlowRuns.flow_id
+                    )
+                )
+            )
         )
         return set(result.all())
 

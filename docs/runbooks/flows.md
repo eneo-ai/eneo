@@ -99,6 +99,7 @@ Any positive count triggers a flag unless an age condition is stated.
 | `WEBHOOK_OUTBOX_DELIVERY_BACKLOG` | An unclaimed or sufficiently expired pending webhook delivery remains eligible beyond the 300-second grace. | Restore destination connectivity and maintenance capacity; inspect sanitized diagnosis. |
 | `WEBHOOK_OUTBOX_EXPIRED_CLAIMS` | Any pending webhook claim has reached `claim_expires_at`. | Verify the former worker no longer owns the effect, then allow bounded reclaim. |
 | `WEBHOOK_OUTBOX_DEAD_LETTERS` | Any webhook delivery exhausted its five-attempt budget. | Preserve the row and inspect its sanitized failure and destination contract. |
+| `GALLRING_HOLD_REVIEW_OVERDUE` | An active legal hold on Flow run history has passed its review date (DEGRADED; the hold still stops deletion). | Have a holder of `retention_holds` review it in Admin > Flow settings > Retention: extend the review date with a reason, or release the hold with a reason. |
 
 A stale running run with a pending or claimed webhook delivery may still have an
 external effect in progress. Do not terminalize it manually. Let the bounded

@@ -694,6 +694,13 @@ class SpaceService:
         assert space.id is not None
 
         if await self.repo.has_flow_delete_blockers(space.id):
+            if await self.repo.has_active_legal_hold(space.id):
+                raise ConflictException(
+                    "A legal hold on Flow run history in this Space blocks its "
+                    "deletion. Release the hold first.",
+                    code="space_contains_legal_hold",
+                    context={"space_id": str(space.id)},
+                )
             raise ConflictException(
                 "Space contains Flow history or Flow-owned draft resources. "
                 "Remove draft Flows first; spaces with Flow run history require "

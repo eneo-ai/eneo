@@ -24,6 +24,8 @@ _REVIEWED_JSONB_COLUMNS = frozenset(
     flow_package_imports.import_plan_json
     flow_package_imports.selected_mappings_json
     flow_provider_calls.summarization_input
+    flow_retention_holds.created_by_actor
+    flow_retention_holds.released_by_actor
     flow_run_audit_outbox.actor_snapshot
     flow_run_review_checkpoint_edits.payload_json
     flow_run_review_checkpoints.current_payload_json

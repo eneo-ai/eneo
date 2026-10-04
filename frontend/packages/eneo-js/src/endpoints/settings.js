@@ -370,6 +370,92 @@ export function initSettings(client) {
     },
 
     /**
+     * How far ahead a legal hold's review date may be set.
+     * @throws {EneoError}
+     * @returns {Promise<import('../types/resources').FlowRetentionHoldReviewLimit>}
+     */
+    getFlowRetentionHoldReviewLimit: async () => {
+      return await client.fetch("/api/v1/settings/flow-run-retention-policy/hold-review-limit", {
+        method: "get"
+      });
+    },
+
+    /**
+     * Change the review limit for legal holds (retention_manage), or null for the default.
+     * @param {{days: number | null}} params
+     * @throws {EneoError}
+     * @returns {Promise<import('../types/resources').FlowRetentionHoldReviewLimit>}
+     */
+    replaceFlowRetentionHoldReviewLimit: async ({ days }) => {
+      return await client.fetch("/api/v1/settings/flow-run-retention-policy/hold-review-limit", {
+        method: "put",
+        requestBody: { "application/json": { days } }
+      });
+    },
+
+    /**
+     * List legal holds on Flow run history, newest first.
+     * @param {{status?: "active" | "all", flowId?: string, limit?: number, offset?: number}} [params]
+     * @throws {EneoError}
+     * @returns {Promise<import('../types/resources').FlowRetentionHoldPage>}
+     */
+    listFlowRetentionHolds: async ({ status = "active", flowId, limit = 50, offset = 0 } = {}) => {
+      return await client.fetch("/api/v1/settings/flow-retention-holds", {
+        method: "get",
+        params: { query: { status, flow_id: flowId, limit, offset } }
+      });
+    },
+
+    /**
+     * Hold a whole Flow (omit runIds) or named runs of it, so retention never deletes them.
+     * @param {{flowId: string, runIds?: string[] | null, reason: string, reviewBy: string, endsAt?: string | null}} params
+     * @throws {EneoError}
+     * @returns {Promise<import('../types/resources').FlowRetentionHoldPlacement>}
+     */
+    placeFlowRetentionHold: async ({ flowId, runIds = null, reason, reviewBy, endsAt = null }) => {
+      return await client.fetch("/api/v1/settings/flow-retention-holds", {
+        method: "post",
+        requestBody: {
+          "application/json": {
+            flow_id: flowId,
+            run_ids: runIds,
+            reason,
+            review_by: reviewBy,
+            ends_at: endsAt
+          }
+        }
+      });
+    },
+
+    /**
+     * Move an active hold's review date later, with a reason. The hold keeps stopping deletion.
+     * @param {{holdId: string, reviewBy: string, reason: string}} params
+     * @throws {EneoError}
+     * @returns {Promise<import('../types/resources').FlowRetentionHold>}
+     */
+    extendFlowRetentionHoldReview: async ({ holdId, reviewBy, reason }) => {
+      return await client.fetch("/api/v1/settings/flow-retention-holds/{hold_id}/extend-review", {
+        method: "post",
+        params: { path: { hold_id: holdId } },
+        requestBody: { "application/json": { review_by: reviewBy, reason } }
+      });
+    },
+
+    /**
+     * Release one legal hold; runs another active hold covers stay held.
+     * @param {{holdId: string, reason: string}} params
+     * @throws {EneoError}
+     * @returns {Promise<import('../types/resources').FlowRetentionHold>}
+     */
+    releaseFlowRetentionHold: async ({ holdId, reason }) => {
+      return await client.fetch("/api/v1/settings/flow-retention-holds/{hold_id}/release", {
+        method: "post",
+        params: { path: { hold_id: holdId } },
+        requestBody: { "application/json": { reason } }
+      });
+    },
+
+    /**
      * List Flow runs awaiting retention review across the Organization.
      * @param {{limit?: number, cursor?: string}} [params]
      * @throws {EneoError}

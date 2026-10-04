@@ -37,6 +37,10 @@ class Permission(str, Enum):
     # organisation grants per role, never implied by an older grant.
     FLOWS_AI_BUILDER_REVIEW = "flows_ai_builder_review"
     FLOWS_TRACE = "flows_trace"
+    # Gallring (retention deletion). Explicit per-role grants, never implied by
+    # admin or another grant; one person may hold both (separation of duties).
+    RETENTION_MANAGE = "retention_manage"
+    RETENTION_HOLDS = "retention_holds"
     STORAGE = "storage"
     MODULES = "modules"
     ASSISTANT_DEBUG = "assistant_debug"

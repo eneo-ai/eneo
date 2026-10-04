@@ -107,6 +107,9 @@ from eneo.flows.ai_builder.ai_builder_flow_review import (
 )
 from eneo.flows.ai_builder.ai_builder_repo import AIBuilderRepository
 from eneo.flows.ai_builder.ai_builder_service import AIBuilderService
+from eneo.flows.application.flow_retention_hold_service import (
+    FlowRetentionHoldService,
+)
 from eneo.flows.application.flow_review_expiry_reconciliation import (
     FlowReviewExpiryReconciler,
 )
@@ -141,6 +144,9 @@ from eneo.flows.flow_template_asset_repo import FlowTemplateAssetRepository
 from eneo.flows.flow_template_asset_service import FlowTemplateAssetService
 from eneo.flows.infrastructure.flow_provider_call_repo import (
     FlowProviderCallRepository,
+)
+from eneo.flows.infrastructure.flow_retention_hold_repo import (
+    FlowRetentionHoldRepository,
 )
 from eneo.flows.infrastructure.flow_run_audit_outbox_repo import (
     FlowRunAuditOutboxRepository,
@@ -885,6 +891,10 @@ class Container(containers.DeclarativeContainer):
         FlowRunRetentionPolicyRepository,
         session=session,
     )
+    flow_retention_hold_repo = providers.Factory(
+        FlowRetentionHoldRepository,
+        session=session,
+    )
     flow_version_repo = providers.Factory(
         FlowVersionRepository,
         session=session,
@@ -1049,6 +1059,12 @@ class Container(containers.DeclarativeContainer):
         FlowRunRetentionPolicyService,
         user=user,
         repository=flow_run_retention_policy_repo,
+        audit_service=audit_service,
+    )
+    flow_retention_hold_service = providers.Factory(
+        FlowRetentionHoldService,
+        user=user,
+        repository=flow_retention_hold_repo,
         audit_service=audit_service,
     )
 

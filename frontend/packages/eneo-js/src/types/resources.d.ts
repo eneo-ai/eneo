@@ -169,6 +169,10 @@ export type FlowRunRetentionFlowTargetPage =
   components["schemas"]["FlowRunRetentionFlowTargetPage"];
 export type FlowRunRetentionReviewItem = components["schemas"]["FlowRunRetentionReviewItem"];
 export type FlowRunRetentionReviewPage = components["schemas"]["FlowRunRetentionReviewPage"];
+export type FlowRetentionHold = components["schemas"]["FlowRetentionHold"];
+export type FlowRetentionHoldPage = components["schemas"]["FlowRetentionHoldPage"];
+export type FlowRetentionHoldPlacement = components["schemas"]["FlowRetentionHoldPlacement"];
+export type FlowRetentionHoldReviewLimit = components["schemas"]["FlowRetentionHoldReviewLimit"];
 export type FlowRunStatusCapabilities = components["schemas"]["FlowRunStatusCapabilitiesPublic"];
 export type FlowRunStatusCapability = components["schemas"]["FlowRunStatusCapabilityPublic"];
 // SEAM: tracked in batch-5 journal; delete when schema.d.ts includes FlowDocumentRenderLimitsPublic.

@@ -1,3 +1,6 @@
+import copy
+from collections.abc import Callable, Mapping, Sequence
+from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from typing import TYPE_CHECKING, Any, Optional, cast
 from uuid import UUID
@@ -25,6 +28,75 @@ if TYPE_CHECKING:
     from eneo.settings.encryption_service import EncryptionService
 
 logger = get_logger(__name__)
+
+
+FlowSettingsTransform = Callable[[dict[str, Any] | None], dict[str, Any]]
+
+
+@dataclass(frozen=True)
+class FlowSettingsChange:
+    """One locked change of tenants.flow_settings.
+
+    `before` and `columns_before` come from the same locked read the change
+    replaced, so an audit of the old values never reports a stale snapshot.
+    """
+
+    before: dict[str, Any] | None
+    after: dict[str, Any]
+    columns_before: Mapping[str, Any] = field(default_factory=lambda: dict[str, Any]())
+
+
+async def update_tenant_flow_settings(
+    session: AsyncSession,
+    tenant_id: UUID,
+    transform: FlowSettingsTransform,
+    *,
+    extra_values: Mapping[str, Any] | None = None,
+    read_columns: Sequence[str] = (),
+) -> FlowSettingsChange:
+    """The one writer of tenants.flow_settings.
+
+    Several owners keep their own keys in that JSON document. Each change locks
+    the tenant row, reads the document fresh and lets `transform` change only
+    its own keys, so two concurrent changes to different keys both survive.
+    `extra_values` writes only the tenant columns the caller names; the old
+    values of those columns and of `read_columns` come from the locked read.
+    """
+    values = dict(extra_values or {})
+    column_names = list(dict.fromkeys([*read_columns, *values]))
+    row = (
+        (
+            await session.execute(
+                sa.select(
+                    Tenants.flow_settings,
+                    *(getattr(Tenants, name) for name in column_names),
+                )
+                .where(Tenants.id == tenant_id)
+                .with_for_update()
+            )
+        )
+        .mappings()
+        .one_or_none()
+    )
+    if row is None:
+        raise exceptions.NotFoundException(f"Tenant {tenant_id} not found.")
+    before = cast(dict[str, Any] | None, row["flow_settings"])
+    # A transform may change its argument in place; `before` must stay the read.
+    next_settings = transform(copy.deepcopy(before))
+    await session.execute(
+        sa.update(Tenants)
+        .where(Tenants.id == tenant_id)
+        .values(
+            flow_settings=next_settings,
+            updated_at=datetime.now(timezone.utc),
+            **values,
+        )
+    )
+    return FlowSettingsChange(
+        before=before,
+        after=next_settings,
+        columns_before={name: row[name] for name in column_names},
+    )
 
 
 class TenantRepository:
@@ -174,6 +246,22 @@ class TenantRepository:
 
     async def update_tenant(self, tenant: TenantUpdate) -> TenantInDB:
         return cast(TenantInDB, await self.delegate.update(tenant))
+
+    async def update_flow_settings(
+        self,
+        tenant_id: UUID,
+        transform: FlowSettingsTransform,
+        *,
+        extra_values: Mapping[str, Any] | None = None,
+        read_columns: Sequence[str] = (),
+    ) -> FlowSettingsChange:
+        return await update_tenant_flow_settings(
+            self.session,
+            tenant_id,
+            transform,
+            extra_values=extra_values,
+            read_columns=read_columns,
+        )
 
     async def update_api_key_policy(
         self,

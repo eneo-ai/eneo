@@ -10,6 +10,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from eneo.database.tables.flow_tables import (
     FlowOutboxDeliveryStatus,
+    FlowRetentionHolds,
     FlowRunAuditOutbox,
     FlowRunReviewCheckpoints,
     FlowRuns,
@@ -38,6 +39,9 @@ from eneo.flows.enums import (
 )
 from eneo.flows.flow_review_expiry_policy import (
     FLOW_REVIEW_EXPIRY_UNHEALTHY_AFTER_SECONDS,
+)
+from eneo.flows.infrastructure.flow_retention_hold_repo import (
+    flow_retention_hold_review_overdue,
 )
 from eneo.flows.infrastructure.flow_run_staleness import (
     stale_running_flow_run_predicate,
@@ -69,6 +73,7 @@ class FlowRuntimeHealthFlag(str, Enum):
     WEBHOOK_OUTBOX_DELIVERY_BACKLOG = "WEBHOOK_OUTBOX_DELIVERY_BACKLOG"
     WEBHOOK_OUTBOX_EXPIRED_CLAIMS = "WEBHOOK_OUTBOX_EXPIRED_CLAIMS"
     WEBHOOK_OUTBOX_DEAD_LETTERS = "WEBHOOK_OUTBOX_DEAD_LETTERS"
+    GALLRING_HOLD_REVIEW_OVERDUE = "GALLRING_HOLD_REVIEW_OVERDUE"
 
 
 class FlowRuntimeProbeFailure(str, Enum):
@@ -119,6 +124,8 @@ class FlowRuntimeHealthSnapshot:
     oldest_webhook_outbox_expired_claim_expires_at: datetime | None = None
     webhook_outbox_dead_lettered_count: int = 0
     oldest_webhook_outbox_dead_lettered_at: datetime | None = None
+    retention_hold_review_overdue_count: int = 0
+    oldest_retention_hold_review_by: datetime | None = None
 
 
 class FlowRuntimeProbe(BaseModel):
@@ -209,6 +216,21 @@ class FlowRuntimeWebhookOutboxSummary(BaseModel):
     oldest_dead_lettered_age_seconds: int | None = None
 
 
+class FlowRuntimeRetentionHoldSummary(BaseModel):
+    review_overdue_count: int = Field(
+        default=0,
+        description=(
+            "Active legal holds whose review date has passed. They still stop "
+            "deletion; any positive count raises GALLRING_HOLD_REVIEW_OVERDUE "
+            "(DEGRADED) until each is extended or released."
+        ),
+    )
+    oldest_review_overdue_age_seconds: int | None = Field(
+        default=None,
+        description="Seconds since the oldest overdue review date.",
+    )
+
+
 class FlowRuntimeHealthThresholds(BaseModel):
     stale_queued_after_seconds: int
     stale_running_after_seconds: int
@@ -237,6 +259,9 @@ class FlowRuntimeHealthResponse(BaseModel):
     )
     webhook_outbox: FlowRuntimeWebhookOutboxSummary = Field(
         default_factory=FlowRuntimeWebhookOutboxSummary
+    )
+    retention_holds: FlowRuntimeRetentionHoldSummary = Field(
+        default_factory=FlowRuntimeRetentionHoldSummary
     )
     thresholds: FlowRuntimeHealthThresholds
 
@@ -321,6 +346,9 @@ async def load_flow_runtime_health_snapshot(
         backlog_before=webhook_outbox_backlog_before,
         now=now,
     )
+    hold_review_overdue = await _load_retention_hold_review_overdue_summary(
+        session=session
+    )
 
     return FlowRuntimeHealthSnapshot(
         database_observed_at=database_now,
@@ -371,6 +399,8 @@ async def load_flow_runtime_health_snapshot(
         ),
         webhook_outbox_dead_lettered_count=webhook_outbox.dead_lettered_count,
         oldest_webhook_outbox_dead_lettered_at=(webhook_outbox.oldest_dead_lettered_at),
+        retention_hold_review_overdue_count=hold_review_overdue.count,
+        oldest_retention_hold_review_by=hold_review_overdue.oldest_anchor_at,
     )
 
 
@@ -420,6 +450,9 @@ def classify_flow_runtime_health(
     webhook_dead_letter_age = _age_seconds(
         now,
         snapshot.oldest_webhook_outbox_dead_lettered_at,
+    )
+    hold_review_overdue_age = _age_seconds(
+        now, snapshot.oldest_retention_hold_review_by
     )
     status_flags = _flow_runtime_health_flags(
         snapshot=snapshot,
@@ -489,6 +522,10 @@ def classify_flow_runtime_health(
             oldest_delivery_backlog_age_seconds=webhook_backlog_age,
             oldest_expired_claim_age_seconds=webhook_expired_claim_age,
             oldest_dead_lettered_age_seconds=webhook_dead_letter_age,
+        ),
+        retention_holds=FlowRuntimeRetentionHoldSummary(
+            review_overdue_count=snapshot.retention_hold_review_overdue_count,
+            oldest_review_overdue_age_seconds=hold_review_overdue_age,
         ),
         thresholds=FlowRuntimeHealthThresholds(
             stale_queued_after_seconds=policy.stale_queued_after_seconds,
@@ -724,6 +761,24 @@ async def _load_approved_unresumed_review_checkpoint_summary(
     )
 
 
+async def _load_retention_hold_review_overdue_summary(
+    *,
+    session: AsyncSession,
+) -> _RunSummary:
+    count, oldest_review_by = (
+        await session.execute(
+            sa.select(
+                sa.func.count(FlowRetentionHolds.id),
+                sa.func.min(FlowRetentionHolds.review_by),
+            ).where(flow_retention_hold_review_overdue())
+        )
+    ).one()
+    return _RunSummary(
+        count=int(count or 0),
+        oldest_anchor_at=_normalize_datetime(oldest_review_by),
+    )
+
+
 async def _load_terminal_runs_with_active_step_results_summary(
     *,
     session: AsyncSession,
@@ -929,6 +984,8 @@ def _flow_runtime_health_flags(
         flags.append(FlowRuntimeHealthFlag.WEBHOOK_OUTBOX_EXPIRED_CLAIMS)
     if snapshot.webhook_outbox_dead_lettered_count > 0:
         flags.append(FlowRuntimeHealthFlag.WEBHOOK_OUTBOX_DEAD_LETTERS)
+    if snapshot.retention_hold_review_overdue_count > 0:
+        flags.append(FlowRuntimeHealthFlag.GALLRING_HOLD_REVIEW_OVERDUE)
     return flags
 
 
@@ -960,7 +1017,7 @@ def _flow_runtime_health_status(
 def _flow_runtime_status_reason(*, status: FlowRuntimeHealthStatus) -> str:
     return {
         FlowRuntimeHealthStatus.HEALTHY: "Flow runtime DB and platform worker signals are healthy.",
-        FlowRuntimeHealthStatus.DEGRADED: "Flow runtime has recoverable stale run, review checkpoint, or outbox signals.",
+        FlowRuntimeHealthStatus.DEGRADED: "Flow runtime has recoverable stale run, review checkpoint or outbox signals, or a legal hold whose review date has passed.",
         FlowRuntimeHealthStatus.UNHEALTHY: "Flow runtime has a missing platform worker, accepted dispatch exhaustion, reconciliation lag, terminal-run integrity issue, or outbox dead letter.",
         FlowRuntimeHealthStatus.UNKNOWN: "Flow runtime DB signals could not be read.",
     }[status]

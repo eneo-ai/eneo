@@ -84,6 +84,9 @@ class TestCategoryMappings:
             ActionType.MODULE_REMOVED_FROM_TENANT,
             ActionType.MODULE_CLIENT_CONFIG_UPDATED,
             ActionType.FLOW_RUN_RETENTION_POLICY_CHANGED,
+            ActionType.FLOW_RETENTION_HOLD_PLACED,
+            ActionType.FLOW_RETENTION_HOLD_RELEASED,
+            ActionType.FLOW_RETENTION_HOLD_REVIEW_EXTENDED,
         ]
 
         for action_type in admin_action_types:

@@ -133,6 +133,7 @@ async def test_delete_space_rejects_flow_delete_blockers_before_side_effects(
     )
     service.get_space = AsyncMock(return_value=space)
     service.repo.has_flow_delete_blockers.return_value = True
+    service.repo.has_active_legal_hold.return_value = False
     service.api_key_scope_revoker = AsyncMock()
 
     with pytest.raises(ConflictException) as exc_info:
@@ -228,3 +229,23 @@ async def test_get_spaces_defaults_include_applications_to_false(
     service.repo.get_spaces_for_member.assert_called_once_with(
         include_applications=False
     )
+
+
+async def test_delete_space_names_a_legal_hold_as_the_blocker(
+    service: SpaceService, actor: MagicMock
+):
+    actor.can_delete_space.return_value = True
+    space_id = uuid4()
+    service.get_space = AsyncMock(
+        return_value=MagicMock(id=space_id, icon_id=None, assistants=[], apps=[])
+    )
+    service.repo.has_flow_delete_blockers.return_value = True
+    service.repo.has_active_legal_hold.return_value = True
+    service.api_key_scope_revoker = AsyncMock()
+
+    with pytest.raises(ConflictException) as exc_info:
+        await service.delete_space(space_id)
+
+    assert exc_info.value.code == "space_contains_legal_hold"
+    service.repo.delete.assert_not_awaited()
+    service.api_key_scope_revoker.revoke_scope.assert_not_awaited()

@@ -3270,7 +3270,7 @@ export interface paths {
     };
     /**
      * Get per-action audit configuration
-     * @description Retrieve all 185 actions with their enabled status for the modal UI.
+     * @description Retrieve all 188 actions with their enabled status for the modal UI.
      */
     get: operations["get_action_config_api_v1_audit_config_actions_get"];
     put?: never;
@@ -7794,6 +7794,70 @@ export interface paths {
     patch: operations["update_rag_evidence_policy"];
     trace?: never;
   };
+  "/api/v1/settings/flow-retention-holds": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /**
+     * List legal holds on Flow run history
+     * @description List the Organization's legal holds, newest first: active ones by default, or all including released and expired ones, optionally for one Flow. Each hold names who placed and released it as recorded at that time. Until the hold is released or its end date passes, whatever the Organization, Space or Flow policy says, the explicit purge and the debug-evidence redaction skip held runs, and the Space cannot be deleted (space_contains_legal_hold).
+     */
+    get: operations["list_flow_retention_holds"];
+    put?: never;
+    /**
+     * Place a legal hold on Flow run history
+     * @description Hold a whole Flow (every run, including runs created later) or named runs of it, with a reason, a review date and an optional end date. The review date never ends the hold: past it, the hold is flagged review overdue (also in Flow runtime health) until the review is extended or the hold is released. A deleted Flow can be held. Until the hold is released or its end date passes, whatever the Organization, Space or Flow policy says, the explicit purge and the debug-evidence redaction skip held runs, and the Space cannot be deleted (space_contains_legal_hold). The hold and its required audit event commit together; the request waits for an open history deletion to finish first.
+     */
+    post: operations["place_flow_retention_hold"];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/v1/settings/flow-retention-holds/{hold_id}/extend-review": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    /**
+     * Extend the review date of a legal hold
+     * @description Move an active hold's review date later, with a reason. The hold keeps stopping deletion either way; the extension writes its required audit event (old and new review date, reason) in the same transaction.
+     */
+    post: operations["extend_flow_retention_hold_review"];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/v1/settings/flow-retention-holds/{hold_id}/release": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    /**
+     * Release a legal hold on Flow run history
+     * @description Release one hold with a reason. Only this hold's coverage ends: a run another active hold covers stays held. The released hold stays listed as part of the record, and the release writes its required audit event in the same transaction.
+     */
+    post: operations["release_flow_retention_hold"];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
   "/api/v1/settings/flow-retention-policy": {
     parameters: {
       query?: never;
@@ -7832,7 +7896,7 @@ export interface paths {
     get: operations["get_organization_flow_run_retention_policy"];
     /**
      * Replace the Organization Flow run-history retention policy
-     * @description Replace the complete Organization policy or clear it. The initial modes either preserve eligible data for explicit administrator purge or require human review; neither mode deletes data automatically.
+     * @description Replace the complete Organization policy or clear it. The initial modes either preserve eligible data for explicit administrator purge or require human review; neither mode deletes data automatically. The change waits for an open history deletion to finish.
      */
     put: operations["replace_organization_flow_run_retention_policy"];
     post?: never;
@@ -7856,7 +7920,7 @@ export interface paths {
     get: operations["get_flow_run_retention_policy"];
     /**
      * Replace a Flow run-history retention policy
-     * @description Replace the complete Flow override or clear it to inherit. Operational retention remains editable after a Flow definition is published because it does not mutate the published definition. The initial modes require a later explicit administrator action; saving this policy never schedules deletion. A deleted Flow is accepted.
+     * @description Replace the complete Flow override or clear it to inherit. Operational retention remains editable after a Flow definition is published because it does not mutate the published definition. The initial modes require a later explicit administrator action; saving this policy never schedules deletion. A deleted Flow is accepted. The change waits for an open history deletion to finish.
      */
     put: operations["replace_flow_run_retention_policy"];
     post?: never;
@@ -7877,7 +7941,7 @@ export interface paths {
     put?: never;
     /**
      * Preview or purge due Flow run history
-     * @description Apply the administrator purge to one Flow in the authenticated tenant. Dry-run is the default and reports candidates without deleting anything. Real batches delete due terminal runs under the effective preserve policy and expired unbound live transcripts in this Flow, with a transaction audit. The limit applies separately to runs and transcripts, with separate counts. Review-required runs and unresolved deliveries remain stored. A deleted Flow is accepted.
+     * @description Apply the administrator purge to one Flow in the authenticated tenant. Dry-run is the default and reports candidates without deleting anything. Real batches delete due terminal runs under the effective preserve policy and expired unbound live transcripts in this Flow, with a transaction audit. The limit applies separately to runs and transcripts, with separate counts. Review-required runs, unresolved deliveries and runs under a legal hold remain stored. A deleted Flow is accepted.
      */
     post: operations["purge_flow_run_history"];
     delete?: never;
@@ -7906,6 +7970,30 @@ export interface paths {
     patch?: never;
     trace?: never;
   };
+  "/api/v1/settings/flow-run-retention-policy/hold-review-limit": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /**
+     * Get the review limit for legal holds
+     * @description How far ahead, in days, a legal hold's review date may be set when it is placed or its review is moved, and whether the default of 365 days applies. Readable with retention_manage or retention_holds; changed with retention_manage.
+     */
+    get: operations["get_flow_retention_hold_review_limit"];
+    /**
+     * Replace the review limit for legal holds
+     * @description Set how far ahead, in days, a legal hold's review date may be set, or null for the default of 365 days. Applies to holds placed or reviewed after the change. A change writes the required audit action flow_run_retention_policy_changed in the same transaction.
+     */
+    put: operations["replace_flow_retention_hold_review_limit"];
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
   "/api/v1/settings/flow-run-retention-policy/purge": {
     parameters: {
       query?: never;
@@ -7917,7 +8005,7 @@ export interface paths {
     put?: never;
     /**
      * Preview or purge due Organization Flow run history
-     * @description Administrators can preview or explicitly purge one bounded batch of due terminal runs under the effective preserve policy, plus expired unbound live transcripts in the authenticated tenant. The limit applies separately to runs and transcripts, with separate candidate and deletion counts. Dry runs select candidates but delete nothing and emit no audit event. Real purges require an audit row in the same transaction. Review-required runs and unresolved deliveries are excluded.
+     * @description Administrators can preview or explicitly purge one bounded batch of due terminal runs under the effective preserve policy, plus expired unbound live transcripts in the authenticated tenant. The limit applies separately to runs and transcripts, with separate candidate and deletion counts. Dry runs select candidates but delete nothing and emit no audit event. Real purges require an audit row in the same transaction. Review-required runs, unresolved deliveries and runs under a legal hold are excluded.
      */
     post: operations["purge_organization_flow_run_history"];
     delete?: never;
@@ -7960,7 +8048,7 @@ export interface paths {
     get: operations["get_space_flow_run_retention_policy"];
     /**
      * Replace a Space Flow run-history retention policy
-     * @description Replace the complete Space override or clear it to inherit the Organization policy. The mode and day count move together, preventing ambiguous mixed inheritance. This setting controls Flow run history only: it does not change conversation or AI Builder retention, and it never schedules deletion.
+     * @description Replace the complete Space override or clear it to inherit the Organization policy. The mode and day count move together, preventing ambiguous mixed inheritance. This setting controls Flow run history only: it does not change conversation or AI Builder retention, and it never schedules deletion. The change waits for an open history deletion to finish.
      */
     put: operations["replace_space_flow_run_retention_policy"];
     post?: never;
@@ -7981,7 +8069,7 @@ export interface paths {
     put?: never;
     /**
      * Preview or purge due Space Flow run history
-     * @description Apply the administrator purge to one Space in the authenticated tenant. Dry-run is the default and reports candidates without deleting anything. Real batches delete due terminal runs under the effective preserve policy and expired unbound live transcripts in this Space, with a transaction audit. The limit applies separately to runs and transcripts, with separate counts. Review-required runs and unresolved deliveries remain stored.
+     * @description Apply the administrator purge to one Space in the authenticated tenant. Dry-run is the default and reports candidates without deleting anything. Real batches delete due terminal runs under the effective preserve policy and expired unbound live transcripts in this Space, with a transaction audit. The limit applies separately to runs and transcripts, with separate counts. Review-required runs, unresolved deliveries and runs under a legal hold remain stored.
      */
     post: operations["purge_space_flow_run_history"];
     delete?: never;
@@ -11937,6 +12025,9 @@ export interface components {
       | "flow_unpublished"
       | "flow_run_retention_policy_changed"
       | "flow_run_history_purged"
+      | "flow_retention_hold_placed"
+      | "flow_retention_hold_released"
+      | "flow_retention_hold_review_extended"
       | "flow_run_created"
       | "flow_live_transcription_started"
       | "flow_run_completed"
@@ -14124,7 +14215,7 @@ export interface components {
      * @example {
      *       "categories": [
      *         {
-     *           "action_count": 50,
+     *           "action_count": 53,
      *           "category": "admin_actions",
      *           "enabled": true,
      *           "example_actions": [
@@ -14506,7 +14597,7 @@ export interface components {
      *     Display text is intentionally omitted: the frontend translates ``category``
      *     by key (``audit_category_{category}`` / ``_description``).
      * @example {
-     *       "action_count": 50,
+     *       "action_count": 53,
      *       "category": "admin_actions",
      *       "enabled": true,
      *       "example_actions": [
@@ -19878,6 +19969,326 @@ export interface components {
       name: string;
     };
     /**
+     * FlowRetentionHold
+     * @example {
+     *       "active": true,
+     *       "created_at": "2026-10-04T08:00:00Z",
+     *       "created_by": {
+     *         "id": "00000000-0000-0000-0000-000000000101",
+     *         "name": "anna",
+     *         "type": "user"
+     *       },
+     *       "ends_at": null,
+     *       "flow_id": "00000000-0000-0000-0000-000000000301",
+     *       "flow_name": "Supplier assessment",
+     *       "flow_retired": false,
+     *       "flow_run_id": null,
+     *       "id": "00000000-0000-0000-0000-000000000901",
+     *       "reason": "Pending disclosure request 2026-114",
+     *       "release_reason": null,
+     *       "released_at": null,
+     *       "released_by": null,
+     *       "review_by": "2027-04-01T21:59:59Z",
+     *       "review_overdue": false,
+     *       "scope": "flow",
+     *       "space_id": "00000000-0000-0000-0000-000000000201"
+     *     }
+     */
+    FlowRetentionHold: {
+      /**
+       * Active
+       * @description True while the hold stops deletion: not released and its end date, if any, has not passed.
+       */
+      active: boolean;
+      /**
+       * Created At
+       * Format: date-time
+       * @description When the hold was placed.
+       */
+      created_at: string;
+      /** @description Who placed the hold, as recorded at that time. */
+      created_by: components["schemas"]["FlowRetentionHoldActor"] | null;
+      /**
+       * Ends At
+       * @description When the hold stops by itself, or null for no end date.
+       */
+      ends_at: string | null;
+      /**
+       * Flow Id
+       * Format: uuid
+       * @description Flow whose history the hold covers.
+       */
+      flow_id: string;
+      /**
+       * Flow Name
+       * @description Current Flow name.
+       */
+      flow_name: string;
+      /**
+       * Flow Retired
+       * @description True when the Flow is deleted.
+       */
+      flow_retired: boolean;
+      /**
+       * Flow Run Id
+       * @description The held run, or null when the hold covers every run of the Flow, including runs created later.
+       */
+      flow_run_id: string | null;
+      /**
+       * Id
+       * Format: uuid
+       */
+      id: string;
+      /**
+       * Reason
+       * @description Why the history is held.
+       */
+      reason: string;
+      /**
+       * Release Reason
+       * @description Why the hold was released.
+       */
+      release_reason: string | null;
+      /**
+       * Released At
+       * @description When the hold was released, or null.
+       */
+      released_at: string | null;
+      /** @description Who released the hold, as recorded at that time. */
+      released_by: components["schemas"]["FlowRetentionHoldActor"] | null;
+      /**
+       * Review By
+       * Format: date-time
+       * @description When the hold must be reviewed. Passing it does not end the hold.
+       */
+      review_by: string;
+      /**
+       * Review Overdue
+       * @description True while the hold is active and its review date has passed.
+       */
+      review_overdue: boolean;
+      /**
+       * Scope
+       * @description flow: every run of the Flow; run: one named run.
+       * @enum {string}
+       */
+      readonly scope: "flow" | "run";
+      /**
+       * Space Id
+       * Format: uuid
+       * @description Space that owns the Flow.
+       */
+      space_id: string;
+    };
+    /** FlowRetentionHoldActor */
+    FlowRetentionHoldActor: {
+      /**
+       * Id
+       * @description Identifier recorded for the actor.
+       */
+      id: string | null;
+      /**
+       * Name
+       * @description Display name recorded when the action happened.
+       */
+      name: string | null;
+      /**
+       * Type
+       * @description Kind of actor recorded when the action happened, e.g. user.
+       */
+      type: string;
+    };
+    /**
+     * FlowRetentionHoldCreateRequest
+     * @example {
+     *       "flow_id": "00000000-0000-0000-0000-000000000301",
+     *       "reason": "Pending disclosure request 2026-114",
+     *       "review_by": "2027-04-01T21:59:59Z"
+     *     }
+     */
+    FlowRetentionHoldCreateRequest: {
+      /**
+       * Ends At
+       * @description Optional time when the hold stops by itself. It must be in the future (`flow_retention_hold_end_not_in_future`). Omit to keep the hold until it is released.
+       */
+      ends_at?: string | null;
+      /**
+       * Flow Id
+       * Format: uuid
+       * @description Flow whose history is held. A deleted Flow that still has run history is accepted.
+       */
+      flow_id: string;
+      /**
+       * Reason
+       * @description Why the history must be kept, 1-512 characters after trimming.
+       */
+      reason: string;
+      /**
+       * Review By
+       * Format: date-time
+       * @description When the hold must be reviewed: in the future and at most the Organization's flow_retention_hold_max_review_days ahead (default 365; `flow_retention_hold_review_out_of_range`). The hold does not end at this date; it is shown as review overdue until the review date is extended or the hold is released.
+       */
+      review_by: string;
+      /**
+       * Run Ids
+       * @description Omit to hold every run of the Flow, including runs created later. Give 1-100 run ids to hold only those runs; each must belong to the Flow (`flow_retention_hold_run_not_in_flow`). One hold is created per run.
+       */
+      run_ids?: string[] | null;
+    };
+    /**
+     * FlowRetentionHoldExtendReviewRequest
+     * @example {
+     *       "reason": "The disclosure request is still being handled",
+     *       "review_by": "2027-10-01T21:59:59Z"
+     *     }
+     */
+    FlowRetentionHoldExtendReviewRequest: {
+      /**
+       * Reason
+       * @description Why the hold is still needed, 1-512 characters after trimming.
+       */
+      reason: string;
+      /**
+       * Review By
+       * Format: date-time
+       * @description The new review date: later than the current one (`flow_retention_hold_review_not_later`), in the future and at most flow_retention_hold_max_review_days ahead (`flow_retention_hold_review_out_of_range`).
+       */
+      review_by: string;
+    };
+    /**
+     * FlowRetentionHoldPage
+     * @example {
+     *       "has_more": false,
+     *       "items": [
+     *         {
+     *           "active": true,
+     *           "created_at": "2026-10-04T08:00:00Z",
+     *           "created_by": {
+     *             "id": "00000000-0000-0000-0000-000000000101",
+     *             "name": "anna",
+     *             "type": "user"
+     *           },
+     *           "ends_at": null,
+     *           "flow_id": "00000000-0000-0000-0000-000000000301",
+     *           "flow_name": "Supplier assessment",
+     *           "flow_retired": false,
+     *           "flow_run_id": null,
+     *           "id": "00000000-0000-0000-0000-000000000901",
+     *           "reason": "Pending disclosure request 2026-114",
+     *           "release_reason": null,
+     *           "released_at": null,
+     *           "released_by": null,
+     *           "review_by": "2027-04-01T21:59:59Z",
+     *           "review_overdue": false,
+     *           "scope": "flow",
+     *           "space_id": "00000000-0000-0000-0000-000000000201"
+     *         }
+     *       ],
+     *       "review_limit_days": 365
+     *     }
+     */
+    FlowRetentionHoldPage: {
+      /**
+       * Has More
+       * @description True when another page follows.
+       */
+      has_more: boolean;
+      /** Items */
+      items: components["schemas"]["FlowRetentionHold"][];
+      /**
+       * Review Limit Days
+       * @description How far ahead, in days, a review date may be set when a hold is placed or its review is moved (flow_retention_hold_max_review_days).
+       */
+      review_limit_days: number;
+    };
+    /**
+     * FlowRetentionHoldPlacement
+     * @example {
+     *       "holds": [
+     *         {
+     *           "active": true,
+     *           "created_at": "2026-10-04T08:00:00Z",
+     *           "created_by": {
+     *             "id": "00000000-0000-0000-0000-000000000101",
+     *             "name": "anna",
+     *             "type": "user"
+     *           },
+     *           "ends_at": null,
+     *           "flow_id": "00000000-0000-0000-0000-000000000301",
+     *           "flow_name": "Supplier assessment",
+     *           "flow_retired": false,
+     *           "flow_run_id": null,
+     *           "id": "00000000-0000-0000-0000-000000000901",
+     *           "reason": "Pending disclosure request 2026-114",
+     *           "release_reason": null,
+     *           "released_at": null,
+     *           "released_by": null,
+     *           "review_by": "2027-04-01T21:59:59Z",
+     *           "review_overdue": false,
+     *           "scope": "flow",
+     *           "space_id": "00000000-0000-0000-0000-000000000201"
+     *         }
+     *       ]
+     *     }
+     */
+    FlowRetentionHoldPlacement: {
+      /**
+       * Holds
+       * @description The holds created: one for a Flow hold, one per named run.
+       */
+      holds: components["schemas"]["FlowRetentionHold"][];
+    };
+    /**
+     * FlowRetentionHoldReleaseRequest
+     * @example {
+     *       "reason": "Disclosure request answered"
+     *     }
+     */
+    FlowRetentionHoldReleaseRequest: {
+      /**
+       * Reason
+       * @description Why the hold is released, 1-512 characters after trimming.
+       */
+      reason: string;
+    };
+    /**
+     * FlowRetentionHoldReviewLimit
+     * @example {
+     *       "days": 365,
+     *       "is_default": true
+     *     }
+     */
+    FlowRetentionHoldReviewLimit: {
+      /**
+       * Days
+       * @description How far ahead, in days, a review date may be set when a hold is placed or its review is moved.
+       */
+      days: number;
+      /**
+       * Is Default
+       * @description True while the default of 365 days applies.
+       */
+      is_default: boolean;
+    };
+    /**
+     * FlowRetentionHoldReviewLimitUpdate
+     * @example {
+     *       "days": 180
+     *     }
+     */
+    FlowRetentionHoldReviewLimitUpdate: {
+      /**
+       * Days
+       * @description 1-2555 days, or null to return to the default of 365 days.
+       */
+      days: number | null;
+    };
+    /**
+     * FlowRetentionHoldStatusFilter
+     * @enum {string}
+     */
+    FlowRetentionHoldStatusFilter: "active" | "all";
+    /**
      * FlowRetentionPolicyPublic
      * @example {
      *       "flow_runtime_upload_abandonment_days": 14,
@@ -22521,14 +22932,19 @@ export interface components {
     FlowRunHistoryPurgeBlockedPublic: {
       /**
        * Complete
-       * @description Whether the diagnostic window covers all due terminal runs in scope.
+       * @description Whether the diagnostic window and the legal-hold count cover all due terminal runs in scope.
        */
       complete: boolean;
       /**
        * Counted Runs
-       * @description Number of due terminal runs examined in the diagnostic window.
+       * @description Number of due terminal runs without a legal hold examined in the diagnostic window.
        */
       counted_runs: number;
+      /**
+       * Legal Hold
+       * @description Due terminal runs that an active legal hold keeps. They are counted apart (up to the window size) and take no place in the window below.
+       */
+      legal_hold: number;
       /** Review Required */
       review_required: number;
       /** Undelivered Audit */
@@ -22542,6 +22958,7 @@ export interface components {
      *       "blocked": {
      *         "complete": true,
      *         "counted_runs": 3,
+     *         "legal_hold": 0,
      *         "review_required": 1,
      *         "undelivered_audit": 0,
      *         "unresolved_webhook": 0
@@ -22922,6 +23339,11 @@ export interface components {
     /** FlowRunRetentionFlowTarget */
     FlowRunRetentionFlowTarget: {
       /**
+       * Held
+       * @description True while the Flow or any of its runs has an active legal hold: that history is not deleted, whatever the retention policy says.
+       */
+      held: boolean;
+      /**
        * Id
        * Format: uuid
        * @description Flow available for retention administration.
@@ -22951,6 +23373,7 @@ export interface components {
      *       "has_more": false,
      *       "items": [
      *         {
+     *           "held": false,
      *           "id": "00000000-0000-0000-0000-000000000301",
      *           "name": "Supplier assessment",
      *           "retired": false,
@@ -24604,7 +25027,8 @@ export interface components {
       | "AUDIT_OUTBOX_DEAD_LETTERS"
       | "WEBHOOK_OUTBOX_DELIVERY_BACKLOG"
       | "WEBHOOK_OUTBOX_EXPIRED_CLAIMS"
-      | "WEBHOOK_OUTBOX_DEAD_LETTERS";
+      | "WEBHOOK_OUTBOX_DEAD_LETTERS"
+      | "GALLRING_HOLD_REVIEW_OVERDUE";
     /** FlowRuntimeHealthResponse */
     FlowRuntimeHealthResponse: {
       audit_outbox?: components["schemas"]["FlowRuntimeAuditOutboxSummary"];
@@ -24615,6 +25039,7 @@ export interface components {
        * Format: date-time
        */
       response_timestamp_utc: string;
+      retention_holds?: components["schemas"]["FlowRuntimeRetentionHoldSummary"];
       review?: components["schemas"]["FlowRuntimeReviewSummary"];
       runs?: components["schemas"]["FlowRuntimeRunSummary"];
       status: components["schemas"]["FlowRuntimeHealthStatus"];
@@ -24953,6 +25378,20 @@ export interface components {
       space_id: string;
       /** Updated At */
       updated_at?: string | null;
+    };
+    /** FlowRuntimeRetentionHoldSummary */
+    FlowRuntimeRetentionHoldSummary: {
+      /**
+       * Oldest Review Overdue Age Seconds
+       * @description Seconds since the oldest overdue review date.
+       */
+      oldest_review_overdue_age_seconds?: number | null;
+      /**
+       * Review Overdue Count
+       * @description Active legal holds whose review date has passed. They still stop deletion; any positive count raises GALLRING_HOLD_REVIEW_OVERDUE (DEGRADED) until each is extended or released.
+       * @default 0
+       */
+      review_overdue_count?: number;
     };
     /** FlowRuntimeReviewSummary */
     FlowRuntimeReviewSummary: {
@@ -31049,6 +31488,8 @@ export interface components {
       | "flows_ai_builder"
       | "flows_ai_builder_review"
       | "flows_trace"
+      | "retention_manage"
+      | "retention_holds"
       | "storage"
       | "modules"
       | "assistant_debug"
@@ -66516,6 +66957,337 @@ export interface operations {
       };
     };
   };
+  list_flow_retention_holds: {
+    parameters: {
+      query?: {
+        /** @description active: holds that stop deletion now; all: every hold. */
+        status?: components["schemas"]["FlowRetentionHoldStatusFilter"];
+        /** @description Only this Flow's holds. */
+        flow_id?: string | null;
+        limit?: number;
+        offset?: number;
+      };
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["FlowRetentionHoldPage"];
+        };
+      };
+      /** @description Caller lacks retention_manage or retention_holds (`retention_permission_required`), or used an API key: retention is changed or stopped by signed-in people only (`retention_person_required`). */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          /**
+           * @example {
+           *       "code": "retention_permission_required",
+           *       "eneo_error_code": 9001,
+           *       "message": "Need permission retention_manage or retention_holds."
+           *     }
+           */
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+    };
+  };
+  place_flow_retention_hold: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["FlowRetentionHoldCreateRequest"];
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      201: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["FlowRetentionHoldPlacement"];
+        };
+      };
+      /** @description A named run is not a run of the Flow (`flow_retention_hold_run_not_in_flow`), the end date is not in the future (`flow_retention_hold_end_not_in_future`), or the review date is not in the future or beyond flow_retention_hold_max_review_days (`flow_retention_hold_review_out_of_range`). */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          /**
+           * @example {
+           *       "code": "flow_retention_hold_run_not_in_flow",
+           *       "eneo_error_code": 9007,
+           *       "message": "Every held run must be a run of the chosen Flow."
+           *     }
+           */
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Caller lacks retention_holds (`retention_permission_required`), or used an API key: retention is changed or stopped by signed-in people only (`retention_person_required`). */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          /**
+           * @example {
+           *       "code": "retention_permission_required",
+           *       "eneo_error_code": 9001,
+           *       "message": "Need permission retention_holds."
+           *     }
+           */
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Flow not found in the administrator's Organization. */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          /**
+           * @example {
+           *       "code": "not_found",
+           *       "eneo_error_code": 9000,
+           *       "message": "Flow not found."
+           *     }
+           */
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Another retention change or history deletion held the retention lock too long (`flow_retention_lock_busy`). Nothing changed; retry. */
+      409: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          /**
+           * @example {
+           *       "code": "flow_retention_lock_busy",
+           *       "eneo_error_code": 9057,
+           *       "message": "Flow history retention is busy with another change or deletion."
+           *     }
+           */
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+    };
+  };
+  extend_flow_retention_hold_review: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        hold_id: string;
+      };
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["FlowRetentionHoldExtendReviewRequest"];
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["FlowRetentionHold"];
+        };
+      };
+      /** @description The new review date is not later than the current one (`flow_retention_hold_review_not_later`), or not in the future and within flow_retention_hold_max_review_days (`flow_retention_hold_review_out_of_range`). */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          /**
+           * @example {
+           *       "code": "flow_retention_hold_review_not_later",
+           *       "eneo_error_code": 9007,
+           *       "message": "The new review date must be later than the current one."
+           *     }
+           */
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Caller lacks retention_holds (`retention_permission_required`), or used an API key: retention is changed or stopped by signed-in people only (`retention_person_required`). */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          /**
+           * @example {
+           *       "code": "retention_permission_required",
+           *       "eneo_error_code": 9001,
+           *       "message": "Need permission retention_holds."
+           *     }
+           */
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Legal hold not found in the administrator's Organization. */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          /**
+           * @example {
+           *       "code": "not_found",
+           *       "eneo_error_code": 9000,
+           *       "message": "Legal hold not found."
+           *     }
+           */
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description The hold is released or its end date has passed (`flow_retention_hold_not_active`), or another retention change or deletion held the retention lock too long (`flow_retention_lock_busy`). */
+      409: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          /**
+           * @example {
+           *       "code": "flow_retention_hold_not_active",
+           *       "eneo_error_code": 9057,
+           *       "message": "Only an active legal hold can have its review extended."
+           *     }
+           */
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+    };
+  };
+  release_flow_retention_hold: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        hold_id: string;
+      };
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["FlowRetentionHoldReleaseRequest"];
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["FlowRetentionHold"];
+        };
+      };
+      /** @description Caller lacks retention_holds (`retention_permission_required`), or used an API key: retention is changed or stopped by signed-in people only (`retention_person_required`). */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          /**
+           * @example {
+           *       "code": "retention_permission_required",
+           *       "eneo_error_code": 9001,
+           *       "message": "Need permission retention_holds."
+           *     }
+           */
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Legal hold not found in the administrator's Organization. */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          /**
+           * @example {
+           *       "code": "not_found",
+           *       "eneo_error_code": 9000,
+           *       "message": "Legal hold not found."
+           *     }
+           */
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description The hold is already released (`flow_retention_hold_already_released`), or another retention change or deletion held the retention lock too long (`flow_retention_lock_busy`). */
+      409: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          /**
+           * @example {
+           *       "code": "flow_retention_hold_already_released",
+           *       "eneo_error_code": 9057,
+           *       "message": "This legal hold is already released."
+           *     }
+           */
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+    };
+  };
   get_flow_retention_policy: {
     parameters: {
       query?: never;
@@ -66635,7 +67407,7 @@ export interface operations {
           "application/json": components["schemas"]["FlowRunRetentionPolicySettings"];
         };
       };
-      /** @description Caller lacks tenant admin permission to read or update Flow tenant settings. */
+      /** @description Caller lacks retention_manage or retention_holds (`retention_permission_required`), or used an API key: retention is changed or stopped by signed-in people only (`retention_person_required`). */
       403: {
         headers: {
           [name: string]: unknown;
@@ -66643,9 +67415,9 @@ export interface operations {
         content: {
           /**
            * @example {
-           *       "code": "insufficient_tenant_permission",
+           *       "code": "retention_permission_required",
            *       "eneo_error_code": 9001,
-           *       "message": "Insufficient permissions."
+           *       "message": "Need permission retention_manage or retention_holds."
            *     }
            */
           "application/json": components["schemas"]["GeneralError"];
@@ -66675,7 +67447,7 @@ export interface operations {
           "application/json": components["schemas"]["FlowRunRetentionPolicySettings"];
         };
       };
-      /** @description Caller lacks tenant admin permission to read or update Flow tenant settings. */
+      /** @description Caller lacks retention_manage (`retention_permission_required`), or used an API key: retention is changed or stopped by signed-in people only (`retention_person_required`). */
       403: {
         headers: {
           [name: string]: unknown;
@@ -66683,9 +67455,25 @@ export interface operations {
         content: {
           /**
            * @example {
-           *       "code": "insufficient_tenant_permission",
+           *       "code": "retention_permission_required",
            *       "eneo_error_code": 9001,
-           *       "message": "Insufficient permissions."
+           *       "message": "Need permission retention_manage."
+           *     }
+           */
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Another retention change or history deletion held the retention lock too long (`flow_retention_lock_busy`). Nothing changed; retry. */
+      409: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          /**
+           * @example {
+           *       "code": "flow_retention_lock_busy",
+           *       "eneo_error_code": 9057,
+           *       "message": "Flow history retention is busy with another change or deletion."
            *     }
            */
           "application/json": components["schemas"]["GeneralError"];
@@ -66722,7 +67510,7 @@ export interface operations {
           "application/json": components["schemas"]["FlowRunRetentionPolicySettings"];
         };
       };
-      /** @description Caller lacks tenant admin permission to read or update Flow tenant settings. */
+      /** @description Caller lacks retention_manage or retention_holds (`retention_permission_required`), or used an API key: retention is changed or stopped by signed-in people only (`retention_person_required`). */
       403: {
         headers: {
           [name: string]: unknown;
@@ -66730,9 +67518,9 @@ export interface operations {
         content: {
           /**
            * @example {
-           *       "code": "insufficient_tenant_permission",
+           *       "code": "retention_permission_required",
            *       "eneo_error_code": 9001,
-           *       "message": "Insufficient permissions."
+           *       "message": "Need permission retention_manage or retention_holds."
            *     }
            */
           "application/json": components["schemas"]["GeneralError"];
@@ -66789,7 +67577,7 @@ export interface operations {
           "application/json": components["schemas"]["FlowRunRetentionPolicySettings"];
         };
       };
-      /** @description Caller lacks tenant admin permission to read or update Flow tenant settings. */
+      /** @description Caller lacks retention_manage (`retention_permission_required`), or used an API key: retention is changed or stopped by signed-in people only (`retention_person_required`). */
       403: {
         headers: {
           [name: string]: unknown;
@@ -66797,9 +67585,9 @@ export interface operations {
         content: {
           /**
            * @example {
-           *       "code": "insufficient_tenant_permission",
+           *       "code": "retention_permission_required",
            *       "eneo_error_code": 9001,
-           *       "message": "Insufficient permissions."
+           *       "message": "Need permission retention_manage."
            *     }
            */
           "application/json": components["schemas"]["GeneralError"];
@@ -66816,6 +67604,22 @@ export interface operations {
            *       "code": "not_found",
            *       "eneo_error_code": 9000,
            *       "message": "Flow not found."
+           *     }
+           */
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Another retention change or history deletion held the retention lock too long (`flow_retention_lock_busy`). Nothing changed; retry. */
+      409: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          /**
+           * @example {
+           *       "code": "flow_retention_lock_busy",
+           *       "eneo_error_code": 9057,
+           *       "message": "Flow history retention is busy with another change or deletion."
            *     }
            */
           "application/json": components["schemas"]["GeneralError"];
@@ -66856,7 +67660,7 @@ export interface operations {
           "application/json": components["schemas"]["FlowRunHistoryPurgePublic"];
         };
       };
-      /** @description Caller lacks tenant admin permission to read or update Flow tenant settings. */
+      /** @description Caller lacks retention_manage (`retention_permission_required`), or used an API key: retention is changed or stopped by signed-in people only (`retention_person_required`). */
       403: {
         headers: {
           [name: string]: unknown;
@@ -66864,9 +67668,9 @@ export interface operations {
         content: {
           /**
            * @example {
-           *       "code": "insufficient_tenant_permission",
+           *       "code": "retention_permission_required",
            *       "eneo_error_code": 9001,
-           *       "message": "Insufficient permissions."
+           *       "message": "Need permission retention_manage."
            *     }
            */
           "application/json": components["schemas"]["GeneralError"];
@@ -66883,6 +67687,22 @@ export interface operations {
            *       "code": "not_found",
            *       "eneo_error_code": 9000,
            *       "message": "Flow not found."
+           *     }
+           */
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Another retention change or history deletion held the retention lock too long (`flow_retention_lock_busy`). Nothing changed; retry. */
+      409: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          /**
+           * @example {
+           *       "code": "flow_retention_lock_busy",
+           *       "eneo_error_code": 9057,
+           *       "message": "Flow history retention is busy with another change or deletion."
            *     }
            */
           "application/json": components["schemas"]["GeneralError"];
@@ -66939,7 +67759,7 @@ export interface operations {
           "application/json": components["schemas"]["GeneralError"];
         };
       };
-      /** @description Caller lacks tenant admin permission to read or update Flow tenant settings. */
+      /** @description Caller lacks retention_manage (`retention_permission_required`), or used an API key: retention is changed or stopped by signed-in people only (`retention_person_required`). */
       403: {
         headers: {
           [name: string]: unknown;
@@ -66947,9 +67767,9 @@ export interface operations {
         content: {
           /**
            * @example {
-           *       "code": "insufficient_tenant_permission",
+           *       "code": "retention_permission_required",
            *       "eneo_error_code": 9001,
-           *       "message": "Insufficient permissions."
+           *       "message": "Need permission retention_manage."
            *     }
            */
           "application/json": components["schemas"]["GeneralError"];
@@ -66966,6 +67786,107 @@ export interface operations {
            *       "code": "not_found",
            *       "eneo_error_code": 9000,
            *       "message": "Flow not found."
+           *     }
+           */
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+    };
+  };
+  get_flow_retention_hold_review_limit: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["FlowRetentionHoldReviewLimit"];
+        };
+      };
+      /** @description Caller lacks retention_manage or retention_holds (`retention_permission_required`), or used an API key: retention is changed or stopped by signed-in people only (`retention_person_required`). */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          /**
+           * @example {
+           *       "code": "retention_permission_required",
+           *       "eneo_error_code": 9001,
+           *       "message": "Need permission retention_manage or retention_holds."
+           *     }
+           */
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+    };
+  };
+  replace_flow_retention_hold_review_limit: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["FlowRetentionHoldReviewLimitUpdate"];
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["FlowRetentionHoldReviewLimit"];
+        };
+      };
+      /** @description Caller lacks retention_manage (`retention_permission_required`), or used an API key: retention is changed or stopped by signed-in people only (`retention_person_required`). */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          /**
+           * @example {
+           *       "code": "retention_permission_required",
+           *       "eneo_error_code": 9001,
+           *       "message": "Need permission retention_manage."
+           *     }
+           */
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Another retention change or history deletion held the retention lock too long (`flow_retention_lock_busy`). Nothing changed; retry. */
+      409: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          /**
+           * @example {
+           *       "code": "flow_retention_lock_busy",
+           *       "eneo_error_code": 9057,
+           *       "message": "Flow history retention is busy with another change or deletion."
            *     }
            */
           "application/json": components["schemas"]["GeneralError"];
@@ -67004,7 +67925,7 @@ export interface operations {
           "application/json": components["schemas"]["FlowRunHistoryPurgePublic"];
         };
       };
-      /** @description Caller lacks tenant admin permission to read or update Flow tenant settings. */
+      /** @description Caller lacks retention_manage (`retention_permission_required`), or used an API key: retention is changed or stopped by signed-in people only (`retention_person_required`). */
       403: {
         headers: {
           [name: string]: unknown;
@@ -67012,9 +67933,25 @@ export interface operations {
         content: {
           /**
            * @example {
-           *       "code": "insufficient_tenant_permission",
+           *       "code": "retention_permission_required",
            *       "eneo_error_code": 9001,
-           *       "message": "Insufficient permissions."
+           *       "message": "Need permission retention_manage."
+           *     }
+           */
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Another retention change or history deletion held the retention lock too long (`flow_retention_lock_busy`). Nothing changed; retry. */
+      409: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          /**
+           * @example {
+           *       "code": "flow_retention_lock_busy",
+           *       "eneo_error_code": 9057,
+           *       "message": "Flow history retention is busy with another change or deletion."
            *     }
            */
           "application/json": components["schemas"]["GeneralError"];
@@ -67069,7 +68006,7 @@ export interface operations {
           "application/json": components["schemas"]["GeneralError"];
         };
       };
-      /** @description Caller lacks tenant admin permission to read or update Flow tenant settings. */
+      /** @description Caller lacks retention_manage (`retention_permission_required`), or used an API key: retention is changed or stopped by signed-in people only (`retention_person_required`). */
       403: {
         headers: {
           [name: string]: unknown;
@@ -67077,9 +68014,9 @@ export interface operations {
         content: {
           /**
            * @example {
-           *       "code": "insufficient_tenant_permission",
+           *       "code": "retention_permission_required",
            *       "eneo_error_code": 9001,
-           *       "message": "Insufficient permissions."
+           *       "message": "Need permission retention_manage."
            *     }
            */
           "application/json": components["schemas"]["GeneralError"];
@@ -67116,7 +68053,7 @@ export interface operations {
           "application/json": components["schemas"]["FlowRunRetentionPolicySettings"];
         };
       };
-      /** @description Caller lacks tenant admin permission to read or update Flow tenant settings. */
+      /** @description Caller lacks retention_manage or retention_holds (`retention_permission_required`), or used an API key: retention is changed or stopped by signed-in people only (`retention_person_required`). */
       403: {
         headers: {
           [name: string]: unknown;
@@ -67124,9 +68061,9 @@ export interface operations {
         content: {
           /**
            * @example {
-           *       "code": "insufficient_tenant_permission",
+           *       "code": "retention_permission_required",
            *       "eneo_error_code": 9001,
-           *       "message": "Insufficient permissions."
+           *       "message": "Need permission retention_manage or retention_holds."
            *     }
            */
           "application/json": components["schemas"]["GeneralError"];
@@ -67183,7 +68120,7 @@ export interface operations {
           "application/json": components["schemas"]["FlowRunRetentionPolicySettings"];
         };
       };
-      /** @description Caller lacks tenant admin permission to read or update Flow tenant settings. */
+      /** @description Caller lacks retention_manage (`retention_permission_required`), or used an API key: retention is changed or stopped by signed-in people only (`retention_person_required`). */
       403: {
         headers: {
           [name: string]: unknown;
@@ -67191,9 +68128,9 @@ export interface operations {
         content: {
           /**
            * @example {
-           *       "code": "insufficient_tenant_permission",
+           *       "code": "retention_permission_required",
            *       "eneo_error_code": 9001,
-           *       "message": "Insufficient permissions."
+           *       "message": "Need permission retention_manage."
            *     }
            */
           "application/json": components["schemas"]["GeneralError"];
@@ -67210,6 +68147,22 @@ export interface operations {
            *       "code": "not_found",
            *       "eneo_error_code": 9000,
            *       "message": "Space not found."
+           *     }
+           */
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Another retention change or history deletion held the retention lock too long (`flow_retention_lock_busy`). Nothing changed; retry. */
+      409: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          /**
+           * @example {
+           *       "code": "flow_retention_lock_busy",
+           *       "eneo_error_code": 9057,
+           *       "message": "Flow history retention is busy with another change or deletion."
            *     }
            */
           "application/json": components["schemas"]["GeneralError"];
@@ -67250,7 +68203,7 @@ export interface operations {
           "application/json": components["schemas"]["FlowRunHistoryPurgePublic"];
         };
       };
-      /** @description Caller lacks tenant admin permission to read or update Flow tenant settings. */
+      /** @description Caller lacks retention_manage (`retention_permission_required`), or used an API key: retention is changed or stopped by signed-in people only (`retention_person_required`). */
       403: {
         headers: {
           [name: string]: unknown;
@@ -67258,9 +68211,9 @@ export interface operations {
         content: {
           /**
            * @example {
-           *       "code": "insufficient_tenant_permission",
+           *       "code": "retention_permission_required",
            *       "eneo_error_code": 9001,
-           *       "message": "Insufficient permissions."
+           *       "message": "Need permission retention_manage."
            *     }
            */
           "application/json": components["schemas"]["GeneralError"];
@@ -67277,6 +68230,22 @@ export interface operations {
            *       "code": "not_found",
            *       "eneo_error_code": 9000,
            *       "message": "Space not found."
+           *     }
+           */
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Another retention change or history deletion held the retention lock too long (`flow_retention_lock_busy`). Nothing changed; retry. */
+      409: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          /**
+           * @example {
+           *       "code": "flow_retention_lock_busy",
+           *       "eneo_error_code": 9057,
+           *       "message": "Flow history retention is busy with another change or deletion."
            *     }
            */
           "application/json": components["schemas"]["GeneralError"];
@@ -67333,7 +68302,7 @@ export interface operations {
           "application/json": components["schemas"]["GeneralError"];
         };
       };
-      /** @description Caller lacks tenant admin permission to read or update Flow tenant settings. */
+      /** @description Caller lacks retention_manage (`retention_permission_required`), or used an API key: retention is changed or stopped by signed-in people only (`retention_person_required`). */
       403: {
         headers: {
           [name: string]: unknown;
@@ -67341,9 +68310,9 @@ export interface operations {
         content: {
           /**
            * @example {
-           *       "code": "insufficient_tenant_permission",
+           *       "code": "retention_permission_required",
            *       "eneo_error_code": 9001,
-           *       "message": "Insufficient permissions."
+           *       "message": "Need permission retention_manage."
            *     }
            */
           "application/json": components["schemas"]["GeneralError"];
@@ -67397,7 +68366,7 @@ export interface operations {
           "application/json": components["schemas"]["FlowRunRetentionSpaceTargetPage"];
         };
       };
-      /** @description Caller lacks tenant admin permission to read or update Flow tenant settings. */
+      /** @description Caller lacks retention_manage or retention_holds (`retention_permission_required`), or used an API key: retention is changed or stopped by signed-in people only (`retention_person_required`). */
       403: {
         headers: {
           [name: string]: unknown;
@@ -67405,9 +68374,9 @@ export interface operations {
         content: {
           /**
            * @example {
-           *       "code": "insufficient_tenant_permission",
+           *       "code": "retention_permission_required",
            *       "eneo_error_code": 9001,
-           *       "message": "Insufficient permissions."
+           *       "message": "Need permission retention_manage or retention_holds."
            *     }
            */
           "application/json": components["schemas"]["GeneralError"];
@@ -67447,7 +68416,7 @@ export interface operations {
           "application/json": components["schemas"]["FlowRunRetentionFlowTargetPage"];
         };
       };
-      /** @description Caller lacks tenant admin permission to read or update Flow tenant settings. */
+      /** @description Caller lacks retention_manage or retention_holds (`retention_permission_required`), or used an API key: retention is changed or stopped by signed-in people only (`retention_person_required`). */
       403: {
         headers: {
           [name: string]: unknown;
@@ -67455,9 +68424,9 @@ export interface operations {
         content: {
           /**
            * @example {
-           *       "code": "insufficient_tenant_permission",
+           *       "code": "retention_permission_required",
            *       "eneo_error_code": 9001,
-           *       "message": "Insufficient permissions."
+           *       "message": "Need permission retention_manage or retention_holds."
            *     }
            */
           "application/json": components["schemas"]["GeneralError"];

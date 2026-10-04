@@ -70,6 +70,7 @@ Page paths are relative to `frontend/apps/docs-site/src/content/`. Code paths ar
 | `backend/src/eneo/flows/runtime/live_transcription/**`, `flows/api/flow_live_transcription_*.py`                                                                                                                                                                              | `guides/flows/integrating-flows.mdx`, `guides/ai-providers.mdx`, `guides/flows/reference/errors.mdx`    |
 | `backend/src/eneo/flows/runtime/step_handlers/text_sections.py`, `mapped_completion.py`, `summarize.py`, `backend/src/eneo/flows/domain/text_processing.py`, `frontend/apps/web/src/lib/features/flows/flowTextProcessingConfig.ts`, `components/FlowStepInputSection.svelte` | `docs/flows-long-material.mdx`, `docs/flows-best-practices.mdx`, `docs/flows.mdx`                       |
 | `frontend/apps/web/src/lib/features/flows/**`, `frontend/apps/web/src/routes/(app)/spaces/[spaceId]/flows/**` (editor labels, Enkel and Avancerad)                                                                                                                            | `docs/flows-best-practices.mdx`, `docs/flows-long-material.mdx`                                         |
+| Flow run-history retention and legal holds: `flows/application/flow_retention_*.py`, `flows/infrastructure/flow_retention_hold_repo.py`, retention permissions in `roles/**`, `data_retention/infrastructure/gallring_lock.py`, `routes/(app)/admin/flow-settings/*Retention*` | `guides/flows/retention-policy.mdx` |
 
 ## Storage, workers and operations
 

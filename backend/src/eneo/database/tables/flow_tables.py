@@ -33,6 +33,9 @@ from eneo.flow_packages.domain.flow_package_import_record import (
     FlowPackageImportStatus,
 )
 from eneo.flows.ai_builder.ai_builder_domain_models import PlanStatus, SessionStatus
+from eneo.flows.domain.flow_retention_hold import (
+    MAX_FLOW_RETENTION_HOLD_REASON_LENGTH,
+)
 from eneo.flows.domain.flow_run_retention_policy import FLOW_RUN_RETENTION_MODE_VALUES
 from eneo.flows.domain.provider_call import (
     PROVIDER_CALL_KIND_VALUES,
@@ -1062,6 +1065,87 @@ class FlowRuns(BasePublic):
         _principal_fk_index("flow_runs", "principal_user_id"),
         _principal_fk_index("flow_runs", "principal_service_id"),
         _principal_fk_index("flow_runs", "created_by_api_key_id"),
+    )
+
+
+class FlowRetentionHolds(BasePublic):
+    """Stores legal holds on Flow run history. Writer: FlowRetentionHoldRepository. Purpose: exclude held runs from the history purge and the debug redaction until release or end date; released holds stay as part of the record."""
+
+    tenant_id: Mapped[UUID] = mapped_column(
+        ForeignKey(Tenants.id, ondelete="CASCADE"), nullable=False
+    )
+    flow_id: Mapped[UUID] = mapped_column(nullable=False)
+    # No FK: a held run is never deleted, and a run hold is checked against its
+    # flow when placed.
+    flow_run_id: Mapped[Optional[UUID]] = mapped_column(nullable=True)
+    reason: Mapped[str] = mapped_column(sa.Text, nullable=False)
+    # Passing it does not end the hold; it flags the hold for review.
+    review_by: Mapped[datetime] = mapped_column(
+        sa.DateTime(timezone=True), nullable=False
+    )
+    ends_at: Mapped[Optional[datetime]] = mapped_column(
+        sa.DateTime(timezone=True), nullable=True
+    )
+    created_by_actor: Mapped[dict[str, Any]] = mapped_column(JSONB, nullable=False)
+    created_by_user_id: Mapped[Optional[UUID]] = mapped_column(
+        ForeignKey(Users.id, ondelete="SET NULL"), nullable=True
+    )
+    released_at: Mapped[Optional[datetime]] = mapped_column(
+        sa.DateTime(timezone=True), nullable=True
+    )
+    released_by_actor: Mapped[Optional[dict[str, Any]]] = mapped_column(
+        JSONB, nullable=True
+    )
+    released_by_user_id: Mapped[Optional[UUID]] = mapped_column(
+        ForeignKey(Users.id, ondelete="SET NULL"), nullable=True
+    )
+    release_reason: Mapped[Optional[str]] = mapped_column(sa.Text, nullable=True)
+
+    __table_args__ = (
+        ForeignKeyConstraint(
+            ["flow_id", "tenant_id"],
+            ["flows.id", "flows.tenant_id"],
+            ondelete="CASCADE",
+            name="fk_flow_retention_holds_flow_tenant",
+        ),
+        CheckConstraint(
+            "char_length(reason) BETWEEN 1 AND "
+            f"{MAX_FLOW_RETENTION_HOLD_REASON_LENGTH}",
+            name="ck_flow_retention_holds_reason_length",
+        ),
+        CheckConstraint(
+            "ends_at IS NULL OR ends_at > created_at",
+            name="ck_flow_retention_holds_ends_after_created",
+        ),
+        CheckConstraint(
+            "review_by > created_at",
+            name="ck_flow_retention_holds_review_after_created",
+        ),
+        CheckConstraint(
+            "(released_at IS NULL AND released_by_actor IS NULL AND "
+            "released_by_user_id IS NULL AND release_reason IS NULL) OR "
+            "(released_at IS NOT NULL AND released_by_actor IS NOT NULL AND "
+            "release_reason IS NOT NULL AND char_length(release_reason) BETWEEN 1 AND "
+            f"{MAX_FLOW_RETENTION_HOLD_REASON_LENGTH})",
+            name="ck_flow_retention_holds_release_complete",
+        ),
+        # The hold predicate's two arms: a flow hold by flow, a run hold by run.
+        Index(
+            "ix_flow_retention_holds_active_flow_id",
+            "flow_id",
+            postgresql_where=sa.text("released_at IS NULL"),
+        ),
+        Index(
+            "ix_flow_retention_holds_active_flow_run_id",
+            "flow_run_id",
+            postgresql_where=sa.text("released_at IS NULL AND flow_run_id IS NOT NULL"),
+        ),
+        # The Flow FK cascade and a Flow's hold history, released holds included.
+        Index("ix_flow_retention_holds_flow_id_tenant_id", "flow_id", "tenant_id"),
+        # The admin list and the tenant FK cascade.
+        Index("ix_flow_retention_holds_tenant_created", "tenant_id", "created_at"),
+        _principal_fk_index("flow_retention_holds", "created_by_user_id"),
+        _principal_fk_index("flow_retention_holds", "released_by_user_id"),
     )
 
 

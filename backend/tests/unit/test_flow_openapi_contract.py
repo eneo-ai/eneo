@@ -4560,6 +4560,7 @@ def test_openapi_admin_history_purge_defaults_to_preview_and_is_bounded(
         "undelivered_audit",
         "unresolved_webhook",
         "review_required",
+        "legal_hold",
         "counted_runs",
         "complete",
     }

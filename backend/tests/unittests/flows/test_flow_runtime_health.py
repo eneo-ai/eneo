@@ -392,3 +392,19 @@ def test_missing_maintenance_consumer_stays_unhealthy_when_db_probe_fails() -> N
     ]
     assert response.probe.db_query_ok is False
     assert response.probe.db_query_failure == FlowRuntimeProbeFailure.TIMEOUT
+
+
+def test_a_legal_hold_past_its_review_date_degrades_health_without_ending() -> None:
+    response = _classify(
+        FlowRuntimeHealthSnapshot(
+            retention_hold_review_overdue_count=2,
+            oldest_retention_hold_review_by=datetime(
+                2026, 5, 2, 11, 0, tzinfo=timezone.utc
+            ),
+        )
+    )
+
+    assert response.status == FlowRuntimeHealthStatus.DEGRADED
+    assert response.status_flags == [FlowRuntimeHealthFlag.GALLRING_HOLD_REVIEW_OVERDUE]
+    assert response.retention_holds.review_overdue_count == 2
+    assert response.retention_holds.oldest_review_overdue_age_seconds == 3600

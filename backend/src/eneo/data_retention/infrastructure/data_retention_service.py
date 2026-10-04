@@ -8,6 +8,10 @@ import sqlalchemy as sa
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from eneo.data_retention.constants import ORPHANED_SESSION_CLEANUP_DAYS
+from eneo.data_retention.infrastructure.gallring_lock import (
+    GallringSubject,
+    acquire_shared,
+)
 from eneo.database.affected_rows import affected_row_count
 from eneo.database.tables.app_table import AppRuns, Apps
 from eneo.database.tables.assistant_table import Assistants
@@ -32,6 +36,7 @@ from eneo.flows.ai_builder.ai_builder_failure_ledger import MAX_WINDOW_DAYS
 from eneo.flows.domain.flow_run_retention_policy import FlowRunRetentionMode
 from eneo.flows.enums import TERMINAL_FLOW_RUN_STATUS_VALUES
 from eneo.flows.flow_retention_policy import resolve_flow_retention_policy
+from eneo.flows.infrastructure.flow_retention_hold_repo import flow_run_held_predicate
 from eneo.flows.infrastructure.flow_run_history_purge_repo import (
     FlowRunHistoryPurgeCounts,
     FlowRunHistoryPurgeRepository,
@@ -69,6 +74,7 @@ class FlowRunHistoryPurgeBlockedCounts:
     skipped_undelivered_audit: int = 0
     skipped_unresolved_webhook: int = 0
     skipped_review_required: int = 0
+    skipped_legal_hold: int = 0
     counted_runs: int = 0
     complete: bool = True
 
@@ -471,14 +477,28 @@ class DataRetentionService:
     ) -> FlowRunHistoryPurgeBlockedCounts:
         _, preserve = self._flow_run_history_purge_eligibility_predicates()
         anchor = self._flow_run_history_retention_anchor()
-        due_runs = (
-            self._build_due_flow_run_history_purge_query(
-                now=now,
-                tenant_id=tenant_id,
-                space_id=space_id,
-                flow_id=flow_id,
-                include_blocked=True,
+        held = flow_run_held_predicate(run_id=FlowRuns.id, flow_id=FlowRuns.flow_id)
+        due = self._build_due_flow_run_history_purge_query(
+            now=now,
+            tenant_id=tenant_id,
+            space_id=space_id,
+            flow_id=flow_id,
+            include_blocked=True,
+        )
+        # Held runs are counted apart, bounded like the window, so they never
+        # push runs with a real blocker out of it.
+        held_count = (
+            await self.session.scalar(
+                sa.select(sa.func.count()).select_from(
+                    due.where(held)
+                    .limit(FLOW_RUN_HISTORY_PURGE_DIAGNOSTIC_WINDOW + 1)
+                    .subquery()
+                )
             )
+            or 0
+        )
+        due_runs = (
+            due.where(sa.not_(held))
             .add_columns(preserve.label("preserve"), anchor.label("anchor"))
             .order_by(anchor, FlowRuns.id)
             .limit(FLOW_RUN_HISTORY_PURGE_DIAGNOSTIC_WINDOW + 1)
@@ -512,8 +532,14 @@ class DataRetentionService:
             skipped_undelivered_audit=audit_count,
             skipped_unresolved_webhook=webhook_count,
             skipped_review_required=review_count,
+            skipped_legal_hold=min(
+                held_count, FLOW_RUN_HISTORY_PURGE_DIAGNOSTIC_WINDOW
+            ),
             counted_runs=len(window),
-            complete=len(rows) <= FLOW_RUN_HISTORY_PURGE_DIAGNOSTIC_WINDOW,
+            complete=(
+                len(rows) <= FLOW_RUN_HISTORY_PURGE_DIAGNOSTIC_WINDOW
+                and held_count <= FLOW_RUN_HISTORY_PURGE_DIAGNOSTIC_WINDOW
+            ),
         )
 
     async def purge_due_flow_run_history_for_tenant(
@@ -530,6 +556,10 @@ class DataRetentionService:
             raise ValueError("Flow history purge limit must be between 1 and 500.")
         if space_id is not None and flow_id is not None:
             raise ValueError("Flow history purge accepts only one scope.")
+        if not dry_run:
+            # Before any read or row lock: policy and hold changes commit either
+            # before this selection or after this transaction.
+            await acquire_shared(self.session, GallringSubject.FLOW_HISTORY)
         blocked = await self.count_blocked_flow_run_history_purge_candidates(
             now=now, tenant_id=tenant_id, space_id=space_id, flow_id=flow_id
         )
@@ -600,6 +630,13 @@ class DataRetentionService:
             )
             .where(sa.not_(flow_run_undelivered_audit_exists(FlowRuns.id)))
             .where(sa.not_(flow_run_unresolved_webhook_exists(FlowRuns.id)))
+            .where(
+                sa.not_(
+                    flow_run_held_predicate(
+                        run_id=FlowRuns.id, flow_id=FlowRuns.flow_id
+                    )
+                )
+            )
             .order_by(retention_anchor, FlowRuns.id)
             .limit(limit)
         )
@@ -777,7 +814,26 @@ class DataRetentionService:
         if not actions_by_run_id:
             return FlowDebugRedactionCounts()
 
-        run_ids = set(actions_by_run_id)
+        # Redaction removes run content, so a legal hold stops it like any
+        # deletion: under the gallring lock, held runs drop out here.
+        await acquire_shared(self.session, GallringSubject.FLOW_HISTORY)
+        run_ids = set(
+            (
+                await self.session.scalars(
+                    sa.select(FlowRuns.id)
+                    .where(FlowRuns.id.in_(list(actions_by_run_id)))
+                    .where(
+                        sa.not_(
+                            flow_run_held_predicate(
+                                run_id=FlowRuns.id, flow_id=FlowRuns.flow_id
+                            )
+                        )
+                    )
+                )
+            ).all()
+        )
+        if not run_ids:
+            return FlowDebugRedactionCounts()
         step_result_rows = await self.session.execute(
             sa.select(
                 FlowStepResults.id,
