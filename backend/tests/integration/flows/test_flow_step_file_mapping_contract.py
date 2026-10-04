@@ -1358,9 +1358,7 @@ async def transcript_spill_runtime(
         model = SimpleNamespace(
             id=uuid4(), name="whisper-1", model_name="whisper-1", can_access=True
         )
-        executor.space_repo.get_space_by_assistant.return_value = _SpaceStub(
-            [model], model
-        )
+        executor.space_repo.one.return_value = _SpaceStub([model], model)
         executor.transcriber = SimpleNamespace(
             transcribe=AsyncMock(
                 return_value=TranscribedAudio(text=text, duration_seconds=15000)

@@ -2572,6 +2572,7 @@ class FlowRunExecutor:
             resolve_http_input_source_text=self._resolve_http_input_source_text,
             file_service=self.file_service,
             transcriber=self.transcriber,
+            flow_repo=self.flow_repo,
             space_repo=self.space_repo,
             flow_run_repo=self.flow_run_repo,
             audit_service=self.audit_service,

@@ -240,7 +240,7 @@ def _case(user, text, spool_contract):
     model = SimpleNamespace(
         id=uuid4(), name="whisper-1", model_name="whisper-1", can_access=True
     )
-    executor.space_repo.get_space_by_assistant.return_value = _SpaceStub([model], model)
+    executor.space_repo.one.return_value = _SpaceStub([model], model)
     executor.transcriber = SimpleNamespace(
         transcribe=AsyncMock(
             return_value=TranscribedAudio(text=text, duration_seconds=15000)
@@ -305,7 +305,7 @@ async def test_transcript_spills_once_and_persisted_inputs_are_bounded(
 
 
 def _metadata(executor):
-    model = executor.space_repo.get_space_by_assistant.return_value.get_default_transcription_model()
+    model = executor.space_repo.one.return_value.get_default_transcription_model()
     return {
         "wizard": {
             "transcription_enabled": True,

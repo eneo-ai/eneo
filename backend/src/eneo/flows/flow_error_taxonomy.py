@@ -127,9 +127,18 @@ FLOW_ERROR_TAXONOMY: dict[FlowApiErrorCode, FlowErrorTaxonomyEntry] = {
     FlowApiErrorCode.FLOW_MANAGED_ASSISTANT: _entry(
         category="Flow access",
         surfaced_through="API error response",
-        cause="A step of the flow still uses the flow-managed assistant being deleted.",
-        consumer_action="Remove or replace the step that uses the assistant, then retry.",
-        user_action="Remove or replace the step before you delete its assistant.",
+        cause=(
+            "A step of the flow, or a run that has not finished, still uses the "
+            "flow-managed assistant being deleted."
+        ),
+        consumer_action=(
+            "Remove or replace the step that uses the assistant, or retry after "
+            "the unfinished run ends."
+        ),
+        user_action=(
+            "Remove or replace the step, or wait for the running flow to finish, "
+            "before you delete its assistant."
+        ),
     ),
     FlowApiErrorCode.SERVICE_KEY_ADMIN_REQUIRED: _entry(
         category="Flow access",

@@ -115,6 +115,7 @@ from eneo.main.exceptions import (
 if TYPE_CHECKING:
     from eneo.files.file_models import File, FileInfo
     from eneo.files.file_service import FileService
+    from eneo.flows.infrastructure.flow_repo import FlowRepository
     from eneo.flows.runtime.step_execution_runtime import ApplyOutputCapFn
     from eneo.flows.runtime.transcription import TranscriptSourcePreparation
     from eneo.model_providers.domain.provider_call_observer import (
@@ -140,6 +141,7 @@ class StepInputResolutionDeps:
     resolve_http_input_source_text: Callable[..., Awaitable[FlowHttpInputResolution]]
     file_service: FileService
     transcriber: Any | None
+    flow_repo: "FlowRepository"
     space_repo: Any
     flow_run_repo: Any
     audit_service: Any | None
@@ -322,6 +324,7 @@ async def resolve_step_input(
                 apply_output_cap=deps.apply_output_cap,
                 commit=deps.commit,
                 transcriber=deps.transcriber,
+                flow_repo=deps.flow_repo,
                 space_repo=deps.space_repo,
                 flow_run_repo=deps.flow_run_repo,
                 audit_service=deps.audit_service,

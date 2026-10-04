@@ -49,6 +49,7 @@ if TYPE_CHECKING:
     from eneo.files.audio import AudioDecodeLimits
     from eneo.files.file_models import FileInfo
     from eneo.flows.domain.flow import FlowRun
+    from eneo.flows.infrastructure.flow_repo import FlowRepository
     from eneo.flows.infrastructure.flow_run_repo import FlowRunRepository
     from eneo.flows.infrastructure.flow_transcript_words_repo import (
         FlowTranscriptWordsRepository,
@@ -93,6 +94,7 @@ class AudioRuntimeRequest:
 @dataclass(frozen=True)
 class AudioRuntimeDeps:
     transcriber: FlowStepTranscriber
+    flow_repo: "FlowRepository"
     space_repo: "SpaceRepository"
     flow_run_repo: "FlowRunRepository"
     audit_service: "AuditService | None"
@@ -256,8 +258,10 @@ async def resolve_transcribe_and_attach_audio_input(
             live_transcript = None
     transcription_result = await resolve_and_transcribe_audio_for_step(
         version_metadata=request.version_metadata,
+        flow_repo=deps.flow_repo,
         space_repo=deps.space_repo,
-        assistant_id=request.step.assistant_id,
+        flow_id=request.run.flow_id,
+        tenant_id=request.run.tenant_id,
         step_order=request.step.step_order,
         files=request.files,
         requested_ids=request.requested_ids,

@@ -123,7 +123,7 @@ async def test_empty_chunk_intervals_reach_audio_runtime_diagnostics(
     files = [_audio_file(name=f"part-{index}.wav") for index in range(len(chunk_texts))]
     model = SimpleNamespace(id=uuid4(), name="whisper-1", can_access=True)
     space_repo = AsyncMock()
-    space_repo.get_space_by_assistant.return_value = _SpaceStub([model], model)
+    space_repo.one.return_value = _SpaceStub([model], model)
     flow_run_repo = AsyncMock()
     run = _run(user=user, payload={})
     _patch_run_input_payload(flow_run_repo, run)
@@ -147,6 +147,7 @@ async def test_empty_chunk_intervals_reach_audio_runtime_diagnostics(
         ),
         deps=AudioRuntimeDeps(
             transcriber=_chunked_transcriber(monkeypatch, tmp_path, chunk_texts),
+            flow_repo=AsyncMock(),
             space_repo=space_repo,
             flow_run_repo=flow_run_repo,
             audit_service=None,
@@ -506,7 +507,7 @@ async def test_audio_resolve_transcribes_in_request_order_and_persists_transcrip
         model_name="kb-whisper-large",
         can_access=True,
     )
-    space_repo.get_space_by_assistant = AsyncMock(
+    space_repo.one = AsyncMock(
         return_value=_SpaceStub(models=[model], default_model=model)
     )
 
@@ -581,7 +582,7 @@ async def test_null_tenant_audio_limit_executes_with_default_capacity(
     model = SimpleNamespace(
         id=uuid4(), name="whisper-1", model_name="whisper-1", can_access=True
     )
-    space_repo.get_space_by_assistant = AsyncMock(
+    space_repo.one = AsyncMock(
         return_value=_SpaceStub(models=[model], default_model=model)
     )
     run = _run(user=user, payload={})
@@ -626,7 +627,7 @@ async def test_audio_resolve_passes_no_language_for_auto(spool_contract, user):
     model = SimpleNamespace(
         id=uuid4(), name="whisper-1", model_name="whisper-1", can_access=True
     )
-    space_repo.get_space_by_assistant = AsyncMock(
+    space_repo.one = AsyncMock(
         return_value=_SpaceStub(models=[model], default_model=model)
     )
 
@@ -667,7 +668,7 @@ async def test_audio_resolve_lets_the_runs_speaker_choice_replace_the_flow_defau
     model = SimpleNamespace(
         id=uuid4(), name="whisper-1", model_name="whisper-1", can_access=True
     )
-    space_repo.get_space_by_assistant = AsyncMock(
+    space_repo.one = AsyncMock(
         return_value=_SpaceStub(models=[model], default_model=model)
     )
     transcriber.transcribe = AsyncMock(return_value=_transcribed("ok"))
@@ -753,7 +754,7 @@ async def test_vemsa_receives_the_speaker_bound_the_run_settled(
     model = SimpleNamespace(
         id=uuid4(), name="whisper-1", model_name="whisper-1", can_access=True
     )
-    space_repo.get_space_by_assistant = AsyncMock(
+    space_repo.one = AsyncMock(
         return_value=_SpaceStub(models=[model], default_model=model)
     )
     run = _run(user=user, payload=stored)
@@ -804,7 +805,7 @@ async def test_audio_resolve_ignores_shared_file_transcription_cache(
     model = SimpleNamespace(
         id=uuid4(), name="whisper-1", model_name="whisper-1", can_access=True
     )
-    space_repo.get_space_by_assistant = AsyncMock(
+    space_repo.one = AsyncMock(
         return_value=_SpaceStub(models=[model], default_model=model)
     )
 
@@ -871,7 +872,7 @@ async def test_audio_resolve_missing_wizard_model_fails_strictly(spool_contract,
         model_name="kb-whisper-large",
         can_access=True,
     )
-    space_repo.get_space_by_assistant = AsyncMock(
+    space_repo.one = AsyncMock(
         return_value=_SpaceStub(models=[model], default_model=model)
     )
     transcriber.transcribe = AsyncMock(return_value=_transcribed("ok"))
@@ -919,7 +920,7 @@ async def test_audio_resolve_selected_model_unavailable_fails_without_fallback(
         can_access=True,
     )
     selected_but_missing = uuid4()
-    space_repo.get_space_by_assistant = AsyncMock(
+    space_repo.one = AsyncMock(
         return_value=_SpaceStub(models=[default_model], default_model=default_model)
     )
     transcriber.transcribe = AsyncMock(return_value=_transcribed("ok"))
@@ -962,7 +963,7 @@ async def test_audio_resolve_near_cap_adds_warning_diagnostic(spool_contract, us
     model = SimpleNamespace(
         id=uuid4(), name="whisper-1", model_name="whisper-1", can_access=True
     )
-    space_repo.get_space_by_assistant = AsyncMock(
+    space_repo.one = AsyncMock(
         return_value=_SpaceStub(models=[model], default_model=model)
     )
     transcriber.transcribe = AsyncMock(return_value=_transcribed("x" * 90))
@@ -1009,7 +1010,7 @@ async def test_audio_resolve_carries_empty_interval_diagnostics(spool_contract, 
     model = SimpleNamespace(
         id=uuid4(), name="whisper-1", model_name="whisper-1", can_access=True
     )
-    space_repo.get_space_by_assistant = AsyncMock(
+    space_repo.one = AsyncMock(
         return_value=_SpaceStub(models=[model], default_model=model)
     )
     transcriber.transcribe = AsyncMock(
@@ -1069,7 +1070,7 @@ async def test_audio_resolve_multifile_near_cap_keeps_request_order(
     model = SimpleNamespace(
         id=uuid4(), name="whisper-1", model_name="whisper-1", can_access=True
     )
-    space_repo.get_space_by_assistant = AsyncMock(
+    space_repo.one = AsyncMock(
         return_value=_SpaceStub(models=[model], default_model=model)
     )
 
@@ -1152,7 +1153,7 @@ async def test_audio_step_reads_one_payload_at_a_time(spool_contract, user):
     model = SimpleNamespace(
         id=uuid4(), name="whisper-1", model_name="whisper-1", can_access=True
     )
-    space_repo.get_space_by_assistant = AsyncMock(
+    space_repo.one = AsyncMock(
         return_value=_SpaceStub(models=[model], default_model=model)
     )
 
@@ -1245,7 +1246,7 @@ async def test_audio_payload_lost_between_identify_and_read_is_a_missing_file(
     model = SimpleNamespace(
         id=uuid4(), name="whisper-1", model_name="whisper-1", can_access=True
     )
-    space_repo.get_space_by_assistant = AsyncMock(
+    space_repo.one = AsyncMock(
         return_value=_SpaceStub(models=[model], default_model=model)
     )
     file_service.get_audio_download.error = NotFoundException()
@@ -1292,7 +1293,7 @@ async def test_audio_payload_read_failure_stays_inside_the_typed_contract(
     model = SimpleNamespace(
         id=uuid4(), name="whisper-1", model_name="whisper-1", can_access=True
     )
-    space_repo.get_space_by_assistant = AsyncMock(
+    space_repo.one = AsyncMock(
         return_value=_SpaceStub(models=[model], default_model=model)
     )
     # Not a missing file: storage unreachable, ownership raced, bytes failed
@@ -1340,7 +1341,7 @@ async def test_audio_resolve_multifile_overflow_spills_once_in_request_order(
     model = SimpleNamespace(
         id=uuid4(), name="whisper-1", model_name="whisper-1", can_access=True
     )
-    space_repo.get_space_by_assistant = AsyncMock(
+    space_repo.one = AsyncMock(
         return_value=_SpaceStub(models=[model], default_model=model)
     )
     transcriber.transcribe = AsyncMock(
@@ -1389,9 +1390,7 @@ async def test_audio_resolve_requires_space_transcription_model(spool_contract, 
     file_service.get_files_by_ids.return_value = [
         _audio_file(file_id=file_id, name="a.wav")
     ]
-    space_repo.get_space_by_assistant = AsyncMock(
-        return_value=_SpaceStub(models=[], default_model=None)
-    )
+    space_repo.one = AsyncMock(return_value=_SpaceStub(models=[], default_model=None))
 
     with pytest.raises(TypedIOValidationException) as exc:
         await executor._resolve_step_input(
@@ -1472,6 +1471,7 @@ async def test_resolve_transcribe_attach_updates_payload_context_and_audits(
         commit=AsyncMock(),
         apply_output_cap=AsyncMock(side_effect=lambda **kw: (kw["text"], [])),
         transcriber=transcriber,
+        flow_repo=AsyncMock(),
         space_repo=space_repo,
         flow_run_repo=flow_run_repo,
         audit_service=audit_service,
@@ -1487,6 +1487,10 @@ async def test_resolve_transcribe_attach_updates_payload_context_and_audits(
     assert result.text == "transcribed text"
     # The tenant's longest recording reaches the decoder.
     assert resolver.await_args.kwargs["decode_limits"] == request.decode_limits
+    # The model's space is the run's flow's, not a step assistant's.
+    assert resolver.await_args.kwargs["flow_id"] == run.flow_id
+    assert resolver.await_args.kwargs["tenant_id"] == run.tenant_id
+    assert "assistant_id" not in resolver.await_args.kwargs
     assert result.transcription_metadata["language"] == "sv"
     assert result.near_inline_limit_message is not None
     assert (
@@ -1562,6 +1566,7 @@ async def test_resolve_transcribe_attach_swallow_audit_errors(
         commit=AsyncMock(),
         apply_output_cap=AsyncMock(side_effect=lambda **kw: (kw["text"], [])),
         transcriber=AsyncMock(),
+        flow_repo=AsyncMock(),
         space_repo=AsyncMock(),
         flow_run_repo=flow_run_repo,
         audit_service=audit_service,

@@ -491,11 +491,16 @@ async def test_deleting_a_flow_assistant_a_step_uses_is_refused(
     assert body.pop("request_id")
     assert body == {
         "message": (
-            "Only assistants the flow manages and no step uses can be deleted with it."
+            "A step of the flow still uses this assistant. Remove or replace "
+            "that step first."
         ),
         "eneo_error_code": 9007,
         "code": "flow_managed_assistant",
-        "context": {"flow_id": str(flow.id), "assistant_ids": [str(used_id)]},
+        "context": {
+            "flow_id": str(flow.id),
+            "assistant_ids": [str(used_id)],
+            "reason": "step_reference",
+        },
     }
     assert await _state(
         db_container, assistant_ids=[used_id], key_id=key.id, icon_id=icon_id
@@ -575,6 +580,7 @@ async def test_the_delete_statement_refuses_an_assistant_a_step_uses_when_it_run
 
     assert response.status_code == 400, response.text
     assert response.json()["code"] == "flow_managed_assistant"
+    assert response.json()["context"]["reason"] == "step_reference"
     assert audited == []
     assert await _state(
         db_container, assistant_ids=[spare_id], key_id=key_id, icon_id=icon_id

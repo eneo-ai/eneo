@@ -286,6 +286,9 @@ TERMINAL_FLOW_RUN_STATUSES = frozenset(
 TERMINAL_FLOW_RUN_STATUS_VALUES = tuple(
     status.value for status in FlowRunStatus if status in TERMINAL_FLOW_RUN_STATUSES
 )
+NON_TERMINAL_FLOW_RUN_STATUS_VALUES = tuple(
+    status.value for status in FlowRunStatus if status not in TERMINAL_FLOW_RUN_STATUSES
+)
 CANCELLABLE_FLOW_RUN_STATUSES = frozenset(
     status
     for status, capability in FLOW_RUN_STATUS_CAPABILITIES.items()

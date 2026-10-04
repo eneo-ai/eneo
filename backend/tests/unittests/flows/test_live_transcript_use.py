@@ -92,7 +92,7 @@ def live_audio(user, monkeypatch, spool_contract):
         )
     )
     space_repo = AsyncMock()
-    space_repo.get_space_by_assistant.return_value = _SpaceStub([model], model)
+    space_repo.one.return_value = _SpaceStub([model], model)
     run_repo = AsyncMock()
     _patch_run_input_payload(run_repo, run)
     staged = []
@@ -114,6 +114,7 @@ def live_audio(user, monkeypatch, spool_contract):
     )
     deps = AudioRuntimeDeps(
         transcriber=DiarizingFlowTranscriber(registry, remote),
+        flow_repo=AsyncMock(),
         space_repo=space_repo,
         flow_run_repo=run_repo,
         audit_service=None,

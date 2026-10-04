@@ -66,6 +66,7 @@ from eneo.flows.http_transport import (
     unresolved_secret_sentinel_fields,
 )
 from eneo.flows.infrastructure.flow_repo import (
+    AssistantReclaimBlocker,
     DraftRevisionReservation,
     FlowRepository,
     StoredAssistantPrompt,
@@ -84,6 +85,31 @@ from eneo.main.models import NOT_PROVIDED, NotProvided, ResourcePermission
 from eneo.settings.encryption_service import EncryptionService
 from eneo.spaces.space_service import SpaceService
 from eneo.users.user import UserInDB
+
+
+def _assistant_delete_refusal(
+    *, flow_id: UUID, assistant_id: UUID, blocker: AssistantReclaimBlocker
+) -> BadRequestException:
+    if blocker.reason == "unfinished_run_reference":
+        message = (
+            f"An unfinished run of version {blocker.version} still uses this "
+            "assistant. Retry after it finishes."
+        )
+    else:
+        message = (
+            "A step of the flow still uses this assistant. Remove or replace "
+            "that step first."
+        )
+    context: dict[str, Any] = {
+        "flow_id": str(flow_id),
+        "assistant_ids": [str(assistant_id)],
+        "reason": blocker.reason,
+    }
+    if blocker.version is not None:
+        context["flow_version"] = blocker.version
+    return BadRequestException(
+        message, code=FlowApiErrorCode.FLOW_MANAGED_ASSISTANT.value, context=context
+    )
 
 
 class FlowService:
@@ -481,12 +507,49 @@ class FlowService:
         assistant_id: UUID,
     ) -> None:
         flow = await self.get_flow(flow_id)
-        self._ensure_flow_is_mutable(flow)
+        # The flow lock every flow mutation takes (an edit, a publish, a run
+        # start), held to the end of this transaction: nothing can attach,
+        # publish or run the assistant between the checks and the delete. The
+        # pointer read under it, not the read above, decides.
+        if (
+            await self.flow_repo.lock_publication_pointer(
+                flow_id=flow_id, tenant_id=self.user.tenant_id
+            )
+            is not None
+        ):
+            raise BadRequestException("Cannot mutate assistant of a published flow")
         assistant, _ = await self.assistant_service.get_assistant(assistant_id)
         self._assert_flow_assistant_owned_by_flow(flow=flow, assistant=assistant)
-        await self.assistant_service.delete_flow_managed_assistants(
-            flow_id=flow_id, assistant_ids={assistant_id}
+        reclaimable = await self.flow_repo.orphaned_flow_managed_assistant_ids(
+            flow_id=flow_id,
+            tenant_id=self.user.tenant_id,
+            assistant_ids={assistant_id},
         )
+        if assistant_id not in reclaimable:
+            # No blocker left means the published version alone holds it,
+            # which a mutable (unpublished) flow's draft cannot leave behind.
+            blocker = await self.flow_repo.assistant_reclaim_blocker(
+                flow_id=flow_id,
+                tenant_id=self.user.tenant_id,
+                assistant_id=assistant_id,
+            )
+            if blocker is not None:
+                raise _assistant_delete_refusal(
+                    flow_id=flow_id, assistant_id=assistant_id, blocker=blocker
+                )
+        try:
+            await self.assistant_service.delete_flow_managed_assistants(
+                flow_id=flow_id, assistant_ids={assistant_id}
+            )
+        except BadRequestException as exc:
+            # A step attached since the check above.
+            if exc.code != FlowApiErrorCode.FLOW_MANAGED_ASSISTANT.value:
+                raise
+            raise _assistant_delete_refusal(
+                flow_id=flow_id,
+                assistant_id=assistant_id,
+                blocker=AssistantReclaimBlocker(reason="step_reference"),
+            ) from exc
 
     async def unpublish_flow(self, *, flow_id: UUID) -> Flow:
         flow = await self.get_flow(flow_id)

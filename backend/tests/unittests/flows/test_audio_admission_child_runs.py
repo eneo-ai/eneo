@@ -422,7 +422,7 @@ async def test_the_runtime_decodes_a_step_under_the_limit_its_run_was_admitted_u
     model = SimpleNamespace(
         id=uuid4(), name="whisper-1", model_name="whisper-1", can_access=True
     )
-    space_repo.get_space_by_assistant = AsyncMock(
+    space_repo.one = AsyncMock(
         return_value=_SpaceStub(models=[model], default_model=model)
     )
     transcriber.transcribe = AsyncMock(return_value=_transcribed("ok"))

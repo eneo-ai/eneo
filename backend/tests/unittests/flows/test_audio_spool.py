@@ -64,7 +64,7 @@ async def test_audio_step_uses_download_and_removes_spool(
     model = SimpleNamespace(
         id=uuid4(), name="whisper", model_name="whisper-1", can_access=True
     )
-    space_repo.get_space_by_assistant.return_value = _SpaceStub([model], model)
+    space_repo.one.return_value = _SpaceStub([model], model)
     paths = []
     decodes = []
     decode = audio._decode_audio

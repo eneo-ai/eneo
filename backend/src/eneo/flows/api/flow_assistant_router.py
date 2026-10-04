@@ -376,24 +376,30 @@ async def update_flow_assistant(
         "keys scoped to it, deletes its icon when the icon is the tenant's own and "
         "nothing else uses it, and writes an audit event in the same transaction, so "
         "the assistant is never deleted without its audit row. An assistant that a step of "
-        "the flow still uses cannot be deleted (400 `flow_managed_assistant`); remove "
-        "or replace that step first."
+        "the flow still uses, or that a run which has not finished still uses, cannot "
+        "be deleted (400 `flow_managed_assistant`); `context.reason` is "
+        "`step_reference` (remove or replace that step) or `unfinished_run_reference` "
+        "(retry after the run of `context.flow_version` finishes)."
     ),
     responses={
         400: error_response(
             description=(
-                "A step of the flow still uses the assistant; remove or replace that "
-                "step first. A published flow is refused with 400 `bad_request`."
+                "A step of the flow (`context.reason` `step_reference`) or a run that "
+                "has not finished (`unfinished_run_reference`, with "
+                "`context.flow_version`) still uses the assistant. A published flow "
+                "is refused with 400 `bad_request`."
             ),
             message=(
-                "Only assistants the flow manages and no step uses can be deleted "
-                "with it."
+                "An unfinished run of version 3 still uses this assistant. Retry "
+                "after it finishes."
             ),
             eneo_error_code=ErrorCodes.BAD_REQUEST,
             code=FlowApiErrorCode.FLOW_MANAGED_ASSISTANT,
             context={
                 "flow_id": "00000000-0000-4000-8000-000000000001",
                 "assistant_ids": ["00000000-0000-4000-8000-000000000002"],
+                "reason": "unfinished_run_reference",
+                "flow_version": 3,
             },
         ),
         403: error_response(

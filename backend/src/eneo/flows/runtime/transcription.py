@@ -250,6 +250,7 @@ def _join_transcription_blocks(
 if TYPE_CHECKING:
     from eneo.database.tables.flow_tables import FlowLiveTranscripts
     from eneo.files.file_models import FileInfo
+    from eneo.flows.infrastructure.flow_repo import FlowRepository
     from eneo.model_providers.domain.provider_call_observer import (
         ProviderCallObserver,
     )
@@ -591,12 +592,21 @@ def order_files_by_request(
 
 async def resolve_transcription_model_for_step(
     *,
+    flow_repo: "FlowRepository",
     space_repo: "SpaceRepository",
-    assistant_id: UUID,
+    flow_id: UUID,
+    tenant_id: UUID,
     config: FlowTranscriptionConfig,
     step_order: int,
 ) -> "TranscriptionModel":
-    space = await space_repo.get_space_by_assistant(assistant_id=assistant_id)
+    """The flow owns its space; a step's assistant may be gone, and a deleted
+    flow's run may still be finishing."""
+    space_id = await flow_repo.get_space_id(
+        flow_id=flow_id, tenant_id=tenant_id, include_deleted=True
+    )
+    if space_id is None:
+        raise NotFoundException("Flow not found.")
+    space = await space_repo.one(space_id)
     return select_transcription_model(space, config=config, step_order=step_order)
 
 
@@ -1088,8 +1098,10 @@ def _combine_diarization_outcomes(outcomes: list[str | None]) -> str | None:
 async def resolve_and_transcribe_audio_for_step(
     *,
     version_metadata: dict[str, Any] | None,
+    flow_repo: "FlowRepository",
     space_repo: "SpaceRepository",
-    assistant_id: UUID,
+    flow_id: UUID,
+    tenant_id: UUID,
     step_order: int,
     files: list["FileInfo"],
     requested_ids: list[UUID],
@@ -1133,8 +1145,10 @@ async def resolve_and_transcribe_audio_for_step(
         )
 
     transcription_model = await resolve_transcription_model_for_step(
+        flow_repo=flow_repo,
         space_repo=space_repo,
-        assistant_id=assistant_id,
+        flow_id=flow_id,
+        tenant_id=tenant_id,
         config=transcription_config,
         step_order=step_order,
     )

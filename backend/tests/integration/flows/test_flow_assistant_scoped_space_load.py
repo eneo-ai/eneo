@@ -33,15 +33,12 @@ from eneo.flows.flow_authoring_spec import (
     OutputType,
     StepSpec,
 )
-from eneo.flows.runtime.transcription import resolve_transcription_model_for_step
-from eneo.flows.transcription_config import FlowTranscriptionConfig
 from eneo.main.exceptions import BadRequestException
 from eneo.main.models import ModelId
 from eneo.roles.permissions import Permission
 from eneo.roles.role import RoleCreate
 from eneo.users.user import UserUpdate
 from tests.integration.flows.test_ai_builder_session_api_regressions import (
-    _create_default_transcription_model,  # pyright: ignore[reportPrivateUsage]
     _create_proposed_ai_builder_plan,  # pyright: ignore[reportPrivateUsage]
     _create_space_with_planner_model,  # pyright: ignore[reportPrivateUsage]
     bearer_token,  # noqa: F401  (registers the fixture)
@@ -345,34 +342,6 @@ async def test_creating_a_flow_from_a_plan_does_not_build_the_spaces_other_hidde
     )
 
     assert with_retained == without
-
-
-@pytest.mark.asyncio
-@pytest.mark.integration
-async def test_runtime_transcription_model_resolves_through_a_hidden_step_assistant(
-    client, db_container, admin_user, patch_auth_service_jwt
-):
-    _ = patch_auth_service_jwt
-    space_id, (target, _), _, _ = await _hidden_and_visible(
-        client, db_container, admin_user, hidden=2
-    )
-    model_id = await _create_default_transcription_model(
-        db_container=db_container,
-        space_id=str(space_id),
-        tenant_id=admin_user.tenant_id,
-    )
-
-    async with db_container() as container:
-        model = await resolve_transcription_model_for_step(
-            space_repo=container.space_repo(),
-            assistant_id=target,
-            config=FlowTranscriptionConfig(
-                enabled=True, model_id=model_id, language="sv", diarization=False
-            ),
-            step_order=1,
-        )
-
-    assert model.id == model_id
 
 
 @pytest.mark.asyncio

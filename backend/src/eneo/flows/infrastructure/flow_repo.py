@@ -4,10 +4,11 @@ from collections import defaultdict
 from collections.abc import Collection, Sequence
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
-from typing import Any, TypeVar
+from typing import Any, Literal, TypeVar
 from uuid import UUID
 
 import sqlalchemy as sa
+from sqlalchemy.dialects import postgresql
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from eneo.database.tables.ai_models_table import CompletionModels
@@ -24,6 +25,7 @@ from eneo.database.tables.flow_tables import (
     Flows,
     FlowStepResults,
     FlowSteps,
+    FlowVersions,
 )
 from eneo.database.tables.prompts_table import Prompts, PromptsAssistants
 from eneo.database.tables.security_classifications_table import (
@@ -49,6 +51,7 @@ from eneo.flows.domain.flow_run_retention_policy import (
     resolve_flow_run_retention_policy,
 )
 from eneo.flows.enums import (
+    NON_TERMINAL_FLOW_RUN_STATUS_VALUES,
     FlowOutputMode,
     final_output_delivery,
     final_step_output_type,
@@ -74,6 +77,30 @@ class AssistantScopeRow:
     id: UUID
     origin: str | None
     managing_flow_id: UUID | None
+
+
+@dataclass(frozen=True, slots=True)
+class AssistantReclaimBlocker:
+    """What still holds a flow-managed assistant: a draft step, or a run of
+    ``version`` that has not finished."""
+
+    reason: Literal["step_reference", "unfinished_run_reference"]
+    version: int | None = None
+
+
+@dataclass(frozen=True, slots=True)
+class ExecutableVersions:
+    """The versions of a flow that can still execute: its published version
+    (None when unpublished or deleted) and those of its unfinished runs."""
+
+    published: int | None
+    unfinished: frozenset[int]
+
+    @property
+    def versions(self) -> frozenset[int]:
+        if self.published is None:
+            return self.unfinished
+        return self.unfinished | {self.published}
 
 
 @dataclass(frozen=True, slots=True)
@@ -368,15 +395,20 @@ class FlowRepository:
             ),
         )
 
-    async def get_space_id(self, *, flow_id: UUID, tenant_id: UUID) -> UUID | None:
-        """The space of a live flow of this tenant, or None: the ownership row
-        alone, never the flow's content."""
-        return await self.session.scalar(
+    async def get_space_id(
+        self, *, flow_id: UUID, tenant_id: UUID, include_deleted: bool = False
+    ) -> UUID | None:
+        """The space of a live flow of this tenant (a deleted one too, when
+        ``include_deleted``), or None: the ownership row alone, never the
+        flow's content."""
+        stmt = (
             sa.select(Flows.space_id)
             .where(Flows.id == flow_id)
             .where(Flows.tenant_id == tenant_id)
-            .where(Flows.deleted_at.is_(None))
         )
+        if not include_deleted:
+            stmt = stmt.where(Flows.deleted_at.is_(None))
+        return await self.session.scalar(stmt)
 
     async def get(self, flow_id: UUID, tenant_id: UUID) -> Flow:
         stmt = (
@@ -1175,23 +1207,36 @@ class FlowRepository:
         tenant_id: UUID,
         assistant_ids: Collection[UUID] | None = None,
     ) -> frozenset[UUID]:
-        """Assistants ``flow_id`` manages that no step references.
+        """Assistants ``flow_id`` manages that neither a draft step nor a
+        version that can still execute references.
 
         Only among ``assistant_ids`` when given, else every one the flow manages.
         """
         if assistant_ids is not None and not assistant_ids:
             return frozenset()
 
+        executable = await self._executable_versions(
+            flow_id=flow_id, tenant_id=tenant_id
+        )
         query = sa.select(Assistants.id)
         if assistant_ids is not None:
             query = query.where(Assistants.id.in_(assistant_ids))
-        orphaned_ids = await self.session.scalars(
+        query = (
             query.where(getattr(Assistants, "origin") == "flow_managed")
             .where(getattr(Assistants, "managing_flow_id") == flow_id)
             .where(self._managed_assistant_belongs_to_tenant(tenant_id=tenant_id))
             .where(self._managed_assistant_has_no_step_references(tenant_id=tenant_id))
         )
-        return frozenset(orphaned_ids)
+        if executable.versions:
+            query = query.where(
+                ~self._executable_version_holds(
+                    flow_id=flow_id,
+                    tenant_id=tenant_id,
+                    versions=executable.versions,
+                    assistant_id=sa.cast(Assistants.id, sa.Text),
+                )
+            )
+        return frozenset(await self.session.scalars(query))
 
     @staticmethod
     def _managed_assistant_belongs_to_tenant(
@@ -1213,4 +1258,137 @@ class FlowRepository:
             .select_from(FlowSteps)
             .where(FlowSteps.assistant_id == Assistants.id)
             .where(FlowSteps.tenant_id == tenant_id)
+        )
+
+    @staticmethod
+    def _unfinished_run_versions_statement(
+        *, flow_id: UUID, tenant_id: UUID
+    ) -> sa.Select[tuple[int]]:
+        """Positive membership on the non-terminal statuses of the one status
+        taxonomy, so ``ix_flow_runs_flow_id_status`` serves it whatever the
+        terminal history."""
+        return (
+            sa.select(FlowRuns.flow_version)
+            .where(FlowRuns.flow_id == flow_id)
+            .where(FlowRuns.tenant_id == tenant_id)
+            .where(FlowRuns.status.in_(NON_TERMINAL_FLOW_RUN_STATUS_VALUES))
+            .distinct()
+        )
+
+    async def _executable_versions(
+        self, *, flow_id: UUID, tenant_id: UUID
+    ) -> ExecutableVersions:
+        """The versions of ``flow_id`` that can execute, from the typed
+        columns alone and once per flow: the published version of a live flow
+        and the versions of its unfinished runs (a retry or a transcript
+        regeneration starts a run on the published version only)."""
+        unfinished = frozenset(
+            await self.session.scalars(
+                self._unfinished_run_versions_statement(
+                    flow_id=flow_id, tenant_id=tenant_id
+                )
+            )
+        )
+        published = await self.session.scalar(
+            sa.select(Flows.published_version)
+            .where(Flows.id == flow_id)
+            .where(Flows.tenant_id == tenant_id)
+            .where(Flows.deleted_at.is_(None))
+        )
+        return ExecutableVersions(published=published, unfinished=unfinished)
+
+    @staticmethod
+    def _version_snapshot_holds_assistant(
+        assistant_id: sa.ColumnElement[str],
+    ) -> sa.ColumnElement[bool]:
+        """Containment reads any snapshot shape: a missing or malformed
+        ``steps`` matches nothing."""
+        step_of_assistant = sa.func.jsonb_build_array(
+            sa.func.jsonb_build_object("assistant_id", assistant_id)
+        )
+        return FlowVersions.definition_json["steps"].op("@>")(step_of_assistant)
+
+    @staticmethod
+    def _version_among(versions: Collection[int]) -> sa.ColumnElement[bool]:
+        """One integer-array bind, whatever the number of versions: one bind
+        argument per version would pass asyncpg's 32,767-argument limit."""
+        return FlowVersions.version == sa.any_(
+            sa.bindparam(
+                "executable_versions",
+                value=sorted(versions),
+                type_=postgresql.ARRAY(sa.Integer),
+            )
+        )
+
+    @staticmethod
+    def _executable_version_holds(
+        *,
+        flow_id: UUID,
+        tenant_id: UUID,
+        versions: Collection[int],
+        assistant_id: sa.ColumnElement[str],
+    ) -> sa.ColumnElement[bool]:
+        """Some snapshot among ``versions`` of ``flow_id`` holds the
+        assistant; only those snapshots are read."""
+        return sa.exists(
+            sa.select(1)
+            .select_from(FlowVersions)
+            .where(FlowVersions.flow_id == flow_id)
+            .where(FlowVersions.tenant_id == tenant_id)
+            .where(FlowRepository._version_among(versions))
+            .where(FlowRepository._version_snapshot_holds_assistant(assistant_id))
+        )
+
+    @staticmethod
+    def _oldest_holding_version_statement(
+        *,
+        flow_id: UUID,
+        tenant_id: UUID,
+        versions: Collection[int],
+        assistant_id: UUID,
+    ) -> sa.Select[tuple[int]]:
+        return (
+            sa.select(sa.func.min(FlowVersions.version))
+            .where(FlowVersions.flow_id == flow_id)
+            .where(FlowVersions.tenant_id == tenant_id)
+            .where(FlowRepository._version_among(versions))
+            .where(
+                FlowRepository._version_snapshot_holds_assistant(
+                    sa.literal(str(assistant_id))
+                )
+            )
+        )
+
+    async def assistant_reclaim_blocker(
+        self, *, flow_id: UUID, tenant_id: UUID, assistant_id: UUID
+    ) -> AssistantReclaimBlocker | None:
+        """Why ``assistant_id`` is not reclaimable, for a refusal that names
+        its reason; None when no draft step and no unfinished run holds it.
+        (The published version cannot hold an assistant no draft step uses: a
+        published flow's draft cannot change.)"""
+        if await self.session.scalar(
+            sa.select(
+                sa.exists()
+                .where(FlowSteps.assistant_id == assistant_id)
+                .where(FlowSteps.tenant_id == tenant_id)
+            )
+        ):
+            return AssistantReclaimBlocker(reason="step_reference")
+        unfinished = (
+            await self._executable_versions(flow_id=flow_id, tenant_id=tenant_id)
+        ).unfinished
+        if not unfinished:
+            return None
+        version = await self.session.scalar(
+            self._oldest_holding_version_statement(
+                flow_id=flow_id,
+                tenant_id=tenant_id,
+                versions=unfinished,
+                assistant_id=assistant_id,
+            )
+        )
+        if version is None:
+            return None
+        return AssistantReclaimBlocker(
+            reason="unfinished_run_reference", version=version
         )

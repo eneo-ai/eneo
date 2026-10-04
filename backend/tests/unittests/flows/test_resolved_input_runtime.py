@@ -403,6 +403,7 @@ def _resolution_deps(
         ),
         file_service=file_service,
         transcriber=None,
+        flow_repo=object(),
         space_repo=object(),
         flow_run_repo=run_repo,
         audit_service=None,
