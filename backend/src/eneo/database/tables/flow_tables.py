@@ -158,6 +158,19 @@ FLOW_RUN_TERMINAL_RETENTION_ANCHOR_INDEX_PREDICATE = (
 )
 
 
+def _principal_fk_index(table_name: str, column: str) -> Index:
+    """Referencing-side index of a nullable user, service-principal or API-key FK.
+
+    Deleting that principal probes the column by equality; the partial predicate
+    keeps the NULL half of the user/service XOR columns out of the index.
+    """
+    return Index(
+        f"ix_{table_name}_{column}",
+        column,
+        postgresql_where=sa.text(f"{column} IS NOT NULL"),
+    )
+
+
 def _check_value_pairs(values: tuple[tuple[str, str], ...]) -> str:
     return ",".join(f"('{left}','{right}')" for left, right in values)
 
@@ -242,6 +255,8 @@ class Flows(BasePublic):
             postgresql_where=sa.text("deleted_at IS NULL"),
         ),
         Index("ix_flows_space_deleted", "space_id", "deleted_at"),
+        _principal_fk_index("flows", "created_by_user_id"),
+        _principal_fk_index("flows", "owner_user_id"),
     )
 
 
@@ -484,6 +499,8 @@ class FlowTemplateAssets(BasePublic):
             "updated_at",
             postgresql_where=sa.text("deleted_at IS NULL"),
         ),
+        _principal_fk_index("flow_template_assets", "created_by_user_id"),
+        _principal_fk_index("flow_template_assets", "updated_by_user_id"),
     )
 
 
@@ -707,6 +724,14 @@ class FlowRuntimeUploadedFiles(BaseCrossReference):
             "created_at",
             postgresql_where=sa.text("owner_type = 'service_key'"),
         ),
+        # Abandoned-upload selection reads oldest-first by created_at, file_id.
+        Index(
+            "ix_flow_runtime_uploaded_files_created_at_file_id",
+            "created_at",
+            "file_id",
+        ),
+        _principal_fk_index("flow_runtime_uploaded_files", "owner_user_id"),
+        _principal_fk_index("flow_runtime_uploaded_files", "owner_service_id"),
     )
 
 
@@ -783,6 +808,7 @@ class FlowPackageImports(BasePublic):
             "content_checksum",
             "created_at",
         ),
+        _principal_fk_index("flow_package_imports", "created_by_user_id"),
     )
 
 
@@ -1030,6 +1056,9 @@ class FlowRuns(BasePublic):
                 FLOW_RUN_TERMINAL_RETENTION_ANCHOR_INDEX_PREDICATE
             ),
         ),
+        _principal_fk_index("flow_runs", "principal_user_id"),
+        _principal_fk_index("flow_runs", "principal_service_id"),
+        _principal_fk_index("flow_runs", "created_by_api_key_id"),
     )
 
 
@@ -1451,6 +1480,12 @@ class FlowProviderCalls(BasePublic):
             "requested_at",
             postgresql_where=sa.text("status = 'started'"),
         ),
+        # Run purge deletes resolved-input rows; the NO ACTION FK check probes this.
+        Index(
+            "ix_flow_provider_calls_resolved_inputs_attempt_id",
+            "resolved_inputs_attempt_id",
+            postgresql_where=sa.text("resolved_inputs_attempt_id IS NOT NULL"),
+        ),
     )
 
 
@@ -1693,6 +1728,10 @@ class FlowRunReviewCheckpoints(BasePublic):
             postgresql_include=("tenant_id", "id"),
             postgresql_where=sa.text("state = 'approved'"),
         ),
+        _principal_fk_index("flow_run_review_checkpoints", "requester_user_id"),
+        _principal_fk_index("flow_run_review_checkpoints", "requester_service_id"),
+        _principal_fk_index("flow_run_review_checkpoints", "decided_by_user_id"),
+        _principal_fk_index("flow_run_review_checkpoints", "decided_by_service_id"),
     )
 
 
@@ -2434,6 +2473,7 @@ class BuilderClientErrors(BasePublic):
             "client_event_id",
             name="uq_builder_client_errors_tenant_event",
         ),
+        _principal_fk_index("builder_client_errors", "user_id"),
     )
 
 
@@ -2598,6 +2638,8 @@ class FlowTranscriptCorrections(BasePublic):
             "step_id",
             name="uq_flow_transcript_corrections_run_step",
         ),
+        _principal_fk_index("flow_transcript_corrections", "edited_by_user_id"),
+        _principal_fk_index("flow_transcript_corrections", "edited_by_service_id"),
     )
 
 
@@ -2644,6 +2686,12 @@ class FlowTranscriptCorrectionRevisions(BasePublic):
             "(edited_by_principal_type = 'service_key' AND edited_by_user_id IS NULL "
             "AND edited_by_service_id IS NOT NULL)",
             name="ck_correction_revisions_editor_principal",
+        ),
+        _principal_fk_index(
+            "flow_transcript_correction_revisions", "edited_by_user_id"
+        ),
+        _principal_fk_index(
+            "flow_transcript_correction_revisions", "edited_by_service_id"
         ),
     )
 
@@ -2716,6 +2764,8 @@ class FlowRunReviewCheckpointEdits(BasePublic):
             "AND edited_by_service_id IS NOT NULL)",
             name="ck_checkpoint_edits_editor_principal",
         ),
+        _principal_fk_index("flow_run_review_checkpoint_edits", "edited_by_user_id"),
+        _principal_fk_index("flow_run_review_checkpoint_edits", "edited_by_service_id"),
     )
 
 

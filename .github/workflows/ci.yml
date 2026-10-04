@@ -269,6 +269,13 @@ jobs:
           TESTCONTAINERS_RYUK_DISABLED: "true"
           DOCKER_HOST: unix:///var/run/docker.sock
 
+      - name: Verify flows migrations
+        # Every flows migration test owns its schema; the glob picks up future ones.
+        run: uv run pytest -q -m migration_isolation tests/integration/migrations/test_flow_*.py
+        env:
+          TESTCONTAINERS_RYUK_DISABLED: "true"
+          DOCKER_HOST: unix:///var/run/docker.sock
+
       - name: Verify File/Icon upgrade and optional cleanup on PostgreSQL 13
         if: matrix.suite == 'migrations'
         # Migration tests are opt-in and run outside the parallel suite. The
