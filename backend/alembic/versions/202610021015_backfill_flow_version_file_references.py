@@ -1,7 +1,7 @@
 """backfill file references for existing flow versions
 
 Revision ID: 202610021015
-Revises: 202609291100
+Revises: 202610021030
 Create Date: 2026-10-02 10:15:00.000000
 
 Snapshot writers now record the files a version names in the same transaction
@@ -30,7 +30,7 @@ Operational notes:
   after the migration's cursor has passed gets no references. Re-running the
   backfill after the last old pod is gone is idempotent and fills the gap.
 - Offline mode (`alembic upgrade --sql`) is refused: the upgrade raises before
-  anything is emitted, because rendering it as a no-op would stamp the revision
+  this revision is stamped, because rendering it as a no-op would stamp the revision
   as done and a later online upgrade would then skip the backfill. Run
   `alembic upgrade 202610021015` against the database, then continue offline
   if needed. Deletion protection for versions published before the upgrade is
@@ -51,7 +51,7 @@ from sqlalchemy.dialects.postgresql import insert as pg_insert
 from alembic import op
 
 revision: str = "202610021015"
-down_revision: str | None = "202609291100"
+down_revision: str | None = "202610021030"
 branch_labels: str | Sequence[str] | None = None
 depends_on: str | Sequence[str] | None = None
 

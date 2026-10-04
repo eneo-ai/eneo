@@ -582,7 +582,7 @@ def test_flow_version_reference_backfill_refuses_offline_and_never_stamps():
     config.output_buffer = output
 
     with pytest.raises(RuntimeError, match="must run online"):
-        command.upgrade(config, "202609291100:202610021015", sql=True)
+        command.upgrade(config, "202610021030:202610021015", sql=True)
 
     # Nothing marks the revision as applied, so an online upgrade still runs it.
     emitted = output.getvalue().lower()

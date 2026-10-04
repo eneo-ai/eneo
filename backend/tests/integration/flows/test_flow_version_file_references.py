@@ -343,7 +343,7 @@ async def test_backfill_gives_existing_versions_the_references_the_writer_record
     admin_user,
 ) -> None:
     migration = _backfill_module()
-    assert migration.down_revision == "202609291100"
+    assert migration.down_revision == "202610021030"
 
     async with db_container() as container:
         session = container.session()
