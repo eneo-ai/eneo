@@ -1,7 +1,7 @@
 """add the indexes the Flow run purge and principal deletion need
 
 Revision ID: 202610021030
-Revises: 202609291100
+Revises: 202610021000
 Create Date: 2026-10-02 10:30:00.000000
 
 Three query families scan flows-owned history tables without an index:
@@ -31,7 +31,7 @@ import sqlalchemy as sa
 from alembic import op
 
 revision: str = "202610021030"
-down_revision: str | None = "202609291100"
+down_revision: str | None = "202610021000"
 branch_labels: str | Sequence[str] | None = None
 depends_on: str | Sequence[str] | None = None
 

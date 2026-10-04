@@ -26,7 +26,7 @@ from eneo.database.tables.base_class import Base
 
 pytestmark = [pytest.mark.integration, pytest.mark.migration_isolation]
 
-PRE_REVISION = "202609291100"
+PRE_REVISION = "202610021000"
 REVISION = "202610021030"
 # The principal indexes are ix_<table>_<column>, partial on <column> IS NOT NULL.
 _PRINCIPAL_COLUMNS = {

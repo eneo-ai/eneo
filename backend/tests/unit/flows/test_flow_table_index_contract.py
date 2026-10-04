@@ -61,27 +61,10 @@ def _principal_foreign_keys() -> list[tuple[sa.Table, sa.Column]]:
     )
 
 
-# Indexed by the audit-actor revision (another lane); drop this entry when it lands.
-INDEXED_ELSEWHERE = frozenset(
-    {
-        ("flow_run_audit_outbox", "actor_id"),
-        ("flow_run_audit_outbox", "actor_api_key_id"),
-    }
-)
-
-
 def _leads_an_index(table: sa.Table, column: sa.Column) -> bool:
     return any(
         index.expressions and index.expressions[0] is column for index in table.indexes
     )
-
-
-def _guarded_principal_foreign_keys() -> list[tuple[sa.Table, sa.Column]]:
-    return [
-        (table, column)
-        for table, column in _principal_foreign_keys()
-        if (table.name, column.name) not in INDEXED_ELSEWHERE
-    ]
 
 
 def test_the_metadata_walk_sees_the_principal_columns_it_guards() -> None:
@@ -99,7 +82,7 @@ def test_the_metadata_walk_sees_the_principal_columns_it_guards() -> None:
 
 @pytest.mark.parametrize(
     ("table", "column"),
-    _guarded_principal_foreign_keys(),
+    _principal_foreign_keys(),
     ids=lambda value: getattr(value, "name", str(value)),
 )
 def test_every_principal_foreign_key_leads_an_index(
@@ -113,20 +96,8 @@ def test_every_principal_foreign_key_leads_an_index(
     )
 
 
-def test_exemptions_are_removed_once_the_column_is_indexed() -> None:
-    by_name = {
-        (table.name, column.name): (table, column)
-        for table, column in _principal_foreign_keys()
-    }
-    for key in sorted(INDEXED_ELSEWHERE):
-        table, column = by_name[key]
-        assert not _leads_an_index(table, column), (
-            f"{key[0]}.{key[1]} is indexed now: remove it from INDEXED_ELSEWHERE"
-        )
-
-
 def test_nullable_principal_indexes_skip_the_null_rows() -> None:
-    for table, column in _guarded_principal_foreign_keys():
+    for table, column in _principal_foreign_keys():
         if not column.nullable:
             continue
         index = next(index for index in table.indexes if index.expressions[0] is column)
