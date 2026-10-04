@@ -6,7 +6,6 @@ from datetime import datetime
 from uuid import UUID
 
 from eneo.audit.domain.action_types import ActionType
-from eneo.audit.domain.actor_types import ActorType
 from eneo.flows.application.flow_run_lifecycle_events import (
     emit_flow_run_terminalization_event,
 )
@@ -31,7 +30,7 @@ from eneo.flows.infrastructure.flow_run_repo import FlowRunRepository
 from eneo.flows.infrastructure.flow_run_review_checkpoint_repo import (
     FlowRunReviewCheckpointRepository,
 )
-from eneo.flows.principal import FlowAuditActorFields, FlowPrincipal
+from eneo.flows.principal import FlowPrincipal
 
 logger = logging.getLogger(__name__)
 
@@ -270,18 +269,15 @@ class FlowRunTerminalizer:
             error_message=effective_error_message,
         )
 
-        actor_fields = self._audit_actor_fields(
-            run=terminal_run,
-            principal=principal,
-            source=source,
-        )
         action = self._action_for_status(target_status)
         outbox_id = await self.audit_outbox_repo.insert_terminal_audit_outbox(
             run=terminal_run,
             action=action,
-            actor_id=actor_fields["actor_id"],
-            actor_type=actor_fields["actor_type"],
-            actor_api_key_id=actor_fields["actor_api_key_id"],
+            principal=self._audit_principal(
+                run=terminal_run,
+                principal=principal,
+                source=source,
+            ),
             source=source,
             target_status=target_status,
             error_code=effective_error_code,
@@ -326,15 +322,11 @@ class FlowRunTerminalizer:
             return None
 
     @staticmethod
-    def _audit_actor_fields(
+    def _audit_principal(
         *, run: FlowRun, principal: FlowPrincipal | None, source: FlowRunLifecycleSource
-    ) -> FlowAuditActorFields:
+    ) -> FlowPrincipal | None:
         if source == FlowRunLifecycleSource.ABANDONMENT_RECONCILER:
-            return {
-                "actor_id": None,
-                "actor_type": ActorType.SYSTEM,
-                "actor_api_key_id": None,
-            }
+            return None
         resolved = FlowRunTerminalizer._principal_or_none_from_run(
             run=run,
             principal=principal,
@@ -346,9 +338,4 @@ class FlowRunTerminalizer:
                 run.tenant_id,
                 source.value,
             )
-            return {
-                "actor_id": None,
-                "actor_type": ActorType.SYSTEM,
-                "actor_api_key_id": None,
-            }
-        return resolved.audit_actor_fields()
+        return resolved

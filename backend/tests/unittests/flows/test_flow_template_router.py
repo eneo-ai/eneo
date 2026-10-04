@@ -506,8 +506,10 @@ async def test_delete_flow_template_file_enforces_scope_and_audits_asset_delete(
         flow_id=flow_id,
         asset_id=asset.id,
     )
-    audit_service.log_async.assert_awaited_once()
-    audit_kwargs = audit_service.log_async.await_args.kwargs
+    audit_service.log.assert_awaited_once()
+    audit_service.log_async.assert_not_awaited()
+    audit_kwargs = audit_service.log.await_args.kwargs
+    assert audit_kwargs["required"] is True
     assert audit_kwargs["action"] == ActionType.FILE_DELETED
     assert audit_kwargs["entity_type"] == EntityType.FILE
     assert audit_kwargs["entity_id"] == asset.file_id

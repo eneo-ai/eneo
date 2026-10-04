@@ -27,12 +27,12 @@ generated through `AuditExportService`.
 
 ## Flow assurance contract
 
-| Level                    | Canonical examples                                                                                                                           | Failure behavior                                                                                                                                                                                                            |
-| ------------------------ | -------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Required transaction     | Run creation; runtime-file upload/delete; terminal and review transitions; redispatch; run-history policy replacement; package import        | Roll back the protected database transition. Idempotency keys, state compare-and-set, or unique outbox revisions prevent misleading duplicates.                                                                             |
-| Required before response | Run input/result detail; active review payloads; evidence/provider-call access and export; template and run-file signed URLs; package export | Return `503` without protected content, bytes, or a signed URL.                                                                                                                                                             |
-| Configurable async       | Routine authoring and most Flow setting changes                                                                                              | Apply tenant audit configuration. An ARQ outage does not roll back the completed low-risk change.                                                                                                                           |
-| Best-effort operational  | Executed Flow HTTP calls and transcription summary events                                                                                    | Preserve the authoritative runtime records even if the extra admin audit summary fails. Executed HTTP calls use persisted step/attempt or webhook-delivery state; transcription uses required `FlowProviderCalls` evidence. |
+| Level                    | Canonical examples                                                                                                                                                                                                         | Failure behavior                                                                                                                                                                                                            |
+| ------------------------ | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Required transaction     | Run creation; runtime-file upload/delete; the three explicit deletion endpoints (flow, flow-managed assistant, template file); terminal and review transitions; redispatch; run-history policy replacement; package import | Roll back the protected database transition. Idempotency keys, state compare-and-set, or unique outbox revisions prevent misleading duplicates.                                                                             |
+| Required before response | Run input/result detail; active review payloads; evidence/provider-call access and export; template and run-file signed URLs; package export                                                                               | Return `503` without protected content, bytes, or a signed URL.                                                                                                                                                             |
+| Configurable async       | Routine authoring (including removing a step) and most Flow setting changes                                                                                                                                                | Apply tenant audit configuration. An ARQ outage does not roll back the completed low-risk change.                                                                                                                           |
+| Best-effort operational  | Executed Flow HTTP calls and transcription summary events                                                                                                                                                                  | Preserve the authoritative runtime records even if the extra admin audit summary fails. Executed HTTP calls use persisted step/attempt or webhook-delivery state; transcription uses required `FlowProviderCalls` evidence. |
 
 Routine status polling and run-history summaries deliberately exclude accepted
 input, results, result-file metadata, and usage data, so they are not business
@@ -60,12 +60,18 @@ Audit logs are stored in PostgreSQL (table `audit_logs`) with structured JSON me
 Key fields include:
 
 - `action`, `entity_type`, `entity_id`
-- `actor_id` (nullable for system actions or deleted users)
+- `actor_id` / `actor_api_key_id` (set to null when the referenced user or API key is deleted)
 - `description`
 - `metadata` (JSONB)
 - `outcome`, `timestamp`
 
 Metadata follows a consistent schema via `AuditMetadata` to prevent drift. It stores actor and target snapshots so log entries remain meaningful even if users or entities are renamed or deleted.
+
+### Actor attribution
+
+`metadata.actor` records who acted, captured when the event happens: a user (`type`, `id`, `name`, `email`), a service key (`type`, `id`, `name`, `key_prefix`), a Flow service principal (`type`, `id`, `name`, `scope_type`, `scope_id`, `actor_api_key_id`), or the system (`{"type": "system", "via": ...}`). `AuditService` adds it when the caller supplied none and never replaces one the caller supplied. Flow lifecycle events capture it in the run transaction and the outbox delivery copies it unchanged. A service key run records its service principal: the principal identity and name survive deletion of the key, and the key id is included when it is still known. A user already deleted at that moment is recorded with its `type` and `id` and no name; a user deleted later keeps the name from the snapshot. An event queued for the audit worker keeps its row and actor block when the user or key is deleted before the worker writes it.
+
+A recorded actor (an actor block with a non-empty string `id`) is authoritative: the log view, the data subject view and exports return it as stored, so a later rename or deletion does not change who is shown. Exports (CSV and JSON Lines) always return the stored metadata and never look anything up. In the log view and the data subject view only, rows without a recorded actor show the user's current details from `actor_id`: rows written before this attribution existed, and events whose caller passes only `actor_id` (no user and no actor block), which get no snapshot. Today the only such callers are the module authentication events in `modules/module_auth.py`. That lookup is for display only and is never written back.
 
 ## Configuration model
 
@@ -95,7 +101,7 @@ The justification is stored server-side (Redis) and referenced by an HTTP-only c
 
 Audit queries support filters for:
 
-- actor (`actor_id`)
+- actor (`actor_id`): matches the user or API key id in `actor_id`, `actor_api_key_id`, the recorded `metadata.actor.id` or a recorded service principal's `actor_api_key_id`, so a deleted user's or key's events are still found
 - actions (single or multi-select)
 - date range
 
@@ -138,6 +144,8 @@ Endpoint: `GET /api/v1/audit/logs/export`
 - `format=csv` (default)
 - `format=json` (JSON Lines/NDJSON)
 
+CSV rows take **Actor ID** from `actor_id`, or from the recorded actor when the column is empty (API keys, deleted users), and add a last **Actor Name** column from the recorded actor. JSON Lines rows carry the recorded actor in `metadata.actor`.
+
 Synchronous exports are best for small to medium exports. They are capped at 50,000 records by default; `max_records` raises the cap to at most 100,000. When the cap is hit, the response carries the header `X-Records-Truncated: true`.
 
 ### Asynchronous export
@@ -155,6 +163,7 @@ Async exports are streamed and resilient for large datasets. Each tenant can hav
 
 - Free-text search matches the audit log description. Include names or identifiers in descriptions if you want them to be searchable.
 - Access to the audit log view is guarded by an access justification session.
+- The Actor column shows the recorded actor name. A recorded actor without a name (already deleted when the event happened) is shown as **Deleted user** or **Deleted key**; **System** is shown only for system actors and rows without an actor.
 
 ## Implementation example
 

@@ -22,6 +22,7 @@ from uuid import UUID, uuid4
 import aiofiles
 import orjson
 
+from eneo.audit.application.audit_metadata import recorded_actor
 from eneo.audit.domain.action_types import ActionType
 from eneo.audit.domain.repositories.audit_log_repository import (
     AuditLogRawRow,
@@ -64,6 +65,7 @@ CSV_HEADERS = [
     "Outcome",
     "Error Message",
     "Metadata",
+    "Actor Name",
 ]
 
 
@@ -274,11 +276,13 @@ class AuditExportService:
         )
 
         description_value = log_dict["description"]
-        actor_id_value = log_dict["actor_id"] or ""
+        actor = recorded_actor(metadata or {})
+        actor_id_value = log_dict["actor_id"] or (str(actor["id"]) if actor else "")
+        actor_name = actor.get("name") if actor else None
 
         return [
             ts,
-            str(actor_id_value),
+            _sanitize_csv_cell(actor_id_value),
             log_dict["actor_type"],
             log_dict["action"],
             log_dict["entity_type"],
@@ -287,6 +291,7 @@ class AuditExportService:
             log_dict["outcome"],
             _sanitize_csv_cell(log_dict.get("error_message") or ""),
             _sanitize_csv_cell(metadata_json),
+            _sanitize_csv_cell(actor_name if isinstance(actor_name, str) else ""),
         ]
 
     async def export_csv(

@@ -1,5 +1,6 @@
 """Audit logging worker task."""
 
+from dataclasses import replace
 from typing import Any
 from uuid import UUID, uuid4
 
@@ -13,6 +14,16 @@ from eneo.database.database import AsyncSession
 from eneo.main.logging import get_logger
 
 logger = get_logger(__name__)
+
+
+_ACTOR_FOREIGN_KEYS = ("audit_logs_actor_id_fkey", "fk_audit_logs_actor_api_key_id")
+
+
+async def _create_in_savepoint(
+    session: AsyncSession, repository: AuditLogRepositoryImpl, audit_log: AuditLog
+) -> AuditLog:
+    async with session.begin_nested():
+        return await repository.create(audit_log)
 
 
 class AuditLogTaskResult(TypedDict, total=False):
@@ -63,7 +74,7 @@ async def log_audit_event_task(
     repository = AuditLogRepositoryImpl(session)
 
     try:
-        created_log = await repository.create(audit_log)
+        created_log = await _create_in_savepoint(session, repository, audit_log)
     except IntegrityError as e:
         error_detail = str(e)
         # Gracefully handle case where tenant doesn't exist (during registration or after deletion)
@@ -75,8 +86,16 @@ async def log_audit_event_task(
                 f"Tenant may have been deleted or not yet created."
             )
             return {"skipped": True, "reason": "tenant_not_found"}
-        # Re-raise other integrity errors (actor_id FK, unique constraints, etc.)
-        raise
+        if not any(name in error_detail for name in _ACTOR_FOREIGN_KEYS):
+            raise
+        # The actor's user or key row was deleted after the event was enqueued.
+        # The FK columns would have been set NULL by that deletion anyway; the
+        # actor block captured at enqueue keeps who acted.
+        created_log = await _create_in_savepoint(
+            session,
+            repository,
+            replace(audit_log, actor_id=None, actor_api_key_id=None),
+        )
 
     logger.info(
         "Audit log created",

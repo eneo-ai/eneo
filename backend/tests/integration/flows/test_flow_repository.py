@@ -1630,6 +1630,11 @@ async def test_step_config_repair_is_atomic_narrow_and_idempotent(
         assert len(audits) == len(before_audits) + 1
         assert audits[-1].actor_type == "system"
         assert audits[-1].actor_id is None
+        assert audits[-1].log_metadata["actor"] == {
+            "type": "system",
+            "via": "operator_step_config_repair",
+        }
+        assert audits[-1].log_metadata["operator_identity"] == "test-operator"
         assert "stored-ciphertext" not in str(audits[-1].log_metadata)
         assert await repair(True) == "unchanged"
         assert await rows() == (after_flow, after_steps, audits)

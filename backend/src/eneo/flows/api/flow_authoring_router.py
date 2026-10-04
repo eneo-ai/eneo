@@ -592,7 +592,9 @@ async def update_flow(
     summary="Delete Flow",
     description=(
         "Soft-delete a flow definition so it is no longer available for editing or "
-        f"execution. {_FLOW_DRAFT_OWNERSHIP_DESCRIPTION}"
+        "execution. The deletion and its audit record are committed together: a "
+        "flow is never deleted without its audit row. "
+        f"{_FLOW_DRAFT_OWNERSHIP_DESCRIPTION}"
     ),
     responses={
         403: error_response(
@@ -626,9 +628,10 @@ async def delete_flow(
 
     await container.flow_service().delete_flow(id)
     user = container.user()
-    await container.audit_service().log_async(
+    await container.audit_service().log(
         tenant_id=user.tenant_id,
-        actor_id=user.id,
+        user=user,
+        required=True,
         action=ActionType.FLOW_DELETED,
         entity_type=EntityType.FLOW,
         entity_id=id,

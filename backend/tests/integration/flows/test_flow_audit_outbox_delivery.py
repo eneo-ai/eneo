@@ -11,6 +11,7 @@ from sqlalchemy.exc import IntegrityError
 from eneo.audit.domain.action_types import ActionType
 from eneo.audit.domain.actor_types import ActorType
 from eneo.audit.infrastructure.audit_log_repo_impl import AuditLogRepositoryImpl
+from eneo.authentication.principal_types import PrincipalType
 from eneo.database.database import sessionmanager
 from eneo.database.tables.audit_log_table import AuditLog as AuditLogTable
 from eneo.database.tables.flow_tables import (
@@ -31,6 +32,7 @@ from eneo.flows.infrastructure.flow_run_audit_outbox_repo import (
 )
 from eneo.flows.infrastructure.flow_run_repo import FlowRunRepository
 from eneo.flows.infrastructure.flow_version_repo import FlowVersionRepository
+from eneo.flows.principal import FlowPrincipal
 from tests.flow_snapshot_fixtures import assistant_snapshot
 
 
@@ -152,9 +154,9 @@ async def _insert_completed_outbox(
     return await outbox_repo.insert_terminal_audit_outbox(
         run=run,
         action=ActionType.FLOW_RUN_COMPLETED,
-        actor_id=actor_id,
-        actor_type=ActorType.USER,
-        actor_api_key_id=None,
+        principal=FlowPrincipal(
+            principal_type=PrincipalType.USER, principal_user_id=actor_id
+        ),
         source=FlowRunLifecycleSource.EXECUTOR_COMPLETED,
         target_status=FlowRunStatus.COMPLETED,
         error_code=None,
@@ -474,6 +476,7 @@ async def test_flow_audit_outbox_redrive_resets_budget_and_writes_operator_audit
     assert operator_audit.action == ActionType.FLOW_RUN_AUDIT_DELIVERY_REDRIVEN.value
     assert operator_audit.entity_id == run_id
     assert operator_audit.log_metadata == {
+        "actor": {"type": "system", "via": "operator_redrive"},
         "flow_id": str(flow_id),
         "flow_run_id": str(run_id),
         "outbox_id": str(outbox_id),

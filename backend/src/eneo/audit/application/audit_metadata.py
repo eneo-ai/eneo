@@ -32,13 +32,13 @@ Security considerations:
 - Use IDs instead of names where possible for data minimization
 """
 
-from typing import Any, Mapping, Optional
+from typing import Any, Mapping, Optional, cast
 from uuid import UUID
 
 from eneo.authentication.auth_models import is_service_api_key
 
 
-def _actor_snapshot(actor: Any) -> dict[str, Any]:
+def actor_snapshot(actor: Any) -> dict[str, Any]:
     """Build the ``actor`` block for audit metadata.
 
     Service keys resolve to a synthetic UserInDB whose id, email and
@@ -50,26 +50,77 @@ def _actor_snapshot(actor: Any) -> dict[str, Any]:
     For real users we keep the existing shape (id, name, email).
     """
     if is_service_api_key(actor):
-        key = actor.active_api_key
-        return {
-            "type": "service_key",
-            "id": str(key.id),
-            "name": key.name,
-            "key_prefix": getattr(key, "key_prefix", None),
-        }
+        return service_key_actor_snapshot(actor.active_api_key)
+    return user_actor_snapshot(actor)
 
+
+def user_actor_snapshot(user: Any) -> dict[str, Any]:
     actor_name = (
-        getattr(actor, "username", None)
-        or getattr(actor, "name", None)
-        or (getattr(actor, "email", "") or "").split("@")[0]
+        getattr(user, "username", None)
+        or getattr(user, "name", None)
+        or (getattr(user, "email", "") or "").split("@")[0]
         or "unknown"
     )
     return {
         "type": "user",
-        "id": str(actor.id),
+        "id": str(user.id),
         "name": actor_name,
-        "email": getattr(actor, "email", None),
+        "email": getattr(user, "email", None),
     }
+
+
+def service_key_actor_snapshot(key: Any) -> dict[str, Any]:
+    return {
+        "type": "service_key",
+        "id": str(key.id),
+        "name": key.name,
+        "key_prefix": getattr(key, "key_prefix", None),
+    }
+
+
+def service_principal_actor_snapshot(
+    service_principal: Any, *, actor_api_key_id: UUID | None
+) -> dict[str, Any]:
+    snapshot: dict[str, Any] = {
+        "type": "service_principal",
+        "id": str(service_principal.id),
+        "name": service_principal.display_name,
+        "scope_type": str(
+            getattr(service_principal.scope_type, "value", service_principal.scope_type)
+        ),
+        "scope_id": (
+            str(service_principal.scope_id)
+            if service_principal.scope_id is not None
+            else None
+        ),
+    }
+    if actor_api_key_id is not None:
+        snapshot["actor_api_key_id"] = str(actor_api_key_id)
+    return snapshot
+
+
+def system_actor_snapshot(via: str) -> dict[str, Any]:
+    return {"type": "system", "via": via}
+
+
+def deleted_actor_snapshot(actor_type: str, actor_id: UUID) -> dict[str, Any]:
+    """Attribution for an actor whose row was gone when the event was recorded."""
+    return {"type": actor_type, "id": str(actor_id)}
+
+
+def recorded_actor(metadata: Mapping[str, object]) -> Mapping[str, object] | None:
+    """The actor block recorded with the event, when it identifies the actor.
+
+    A mapping with a non-empty string ``id`` is the recorded identity: readers,
+    exports and the actor filter use it as stored. Anything else is a legacy row
+    without attribution.
+    """
+    actor = metadata.get("actor")
+    if not isinstance(actor, Mapping):
+        return None
+    recorded = cast(Mapping[str, object], actor)
+    actor_id = recorded.get("id")
+    return recorded if isinstance(actor_id, str) and actor_id else None
 
 
 class AuditMetadata:
@@ -138,7 +189,7 @@ class AuditMetadata:
             target_snapshot["tenant_name"] = getattr(tenant, "name", None)
 
         metadata: dict[str, Any] = {
-            "actor": _actor_snapshot(actor),
+            "actor": actor_snapshot(actor),
             "target": target_snapshot,
         }
 
@@ -184,7 +235,7 @@ class AuditMetadata:
             )
         """
         metadata: dict[str, Any] = {
-            "actor": _actor_snapshot(actor),
+            "actor": actor_snapshot(actor),
             "operation": operation,
             "targets": [
                 {
@@ -290,50 +341,13 @@ class AuditMetadata:
             )
         """
         metadata: dict[str, Any] = {
-            "actor": _actor_snapshot(actor),
+            "actor": actor_snapshot(actor),
             "authentication_method": method,
             "success": success,
         }
 
         if failure_reason:
             metadata["failure_reason"] = failure_reason
-
-        if extra:
-            metadata["extra"] = dict(extra)
-
-        return metadata
-
-    @staticmethod
-    def minimal(
-        actor_id: UUID,
-        target_id: UUID,
-        extra: Optional[Mapping[str, object]] = None,
-    ) -> Mapping[str, object]:
-        """
-        Create minimal metadata with just IDs (data minimization).
-
-        Use this when you need to reduce PII exposure or for high-volume operations
-        where detailed snapshots are unnecessary.
-
-        Args:
-            actor_id: ID of the actor
-            target_id: ID of the target entity
-            extra: Additional context (use sparingly)
-
-        Returns:
-            Minimal metadata with IDs only
-
-        Example:
-            metadata = AuditMetadata.minimal(
-                user=user,
-                target_id=file.id,
-                extra={"size_bytes": file.size}
-            )
-        """
-        metadata: dict[str, Any] = {
-            "actor": {"id": str(actor_id)},
-            "target": {"id": str(target_id)},
-        }
 
         if extra:
             metadata["extra"] = dict(extra)

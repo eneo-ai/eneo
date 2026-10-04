@@ -50,6 +50,22 @@ def escape_like(value: str) -> str:
     return value.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
 
 
+def _acted_as(principal_id: UUID) -> sa.ColumnElement[bool]:
+    """Rows a principal performed, also after its user or key row is deleted.
+
+    The actor columns become NULL when the row they reference is deleted; the
+    recorded actor block keeps the id, and a service principal block the key id
+    it acted through (both served by idx_audit_metadata_gin).
+    """
+    principal = str(principal_id)
+    return sa.or_(
+        AuditLogTable.actor_id == principal_id,
+        AuditLogTable.actor_api_key_id == principal_id,
+        AuditLogTable.log_metadata.contains({"actor": {"id": principal}}),
+        AuditLogTable.log_metadata.contains({"actor": {"actor_api_key_id": principal}}),
+    )
+
+
 class AuditLogRepositoryImpl(AuditLogRepository):
     """SQLAlchemy implementation of audit log repository."""
 
@@ -190,7 +206,7 @@ class AuditLogRepositoryImpl(AuditLogRepository):
             query = query.where(AuditLogTable.deleted_at.is_(None))
 
         if actor_id:
-            query = query.where(AuditLogTable.actor_id == actor_id)
+            query = query.where(_acted_as(actor_id))
 
         # Support both single action (deprecated) and multiple actions
         if actions:
@@ -257,7 +273,7 @@ class AuditLogRepositoryImpl(AuditLogRepository):
         actor_query = sa.select(AuditLogTable).where(
             sa.and_(
                 AuditLogTable.tenant_id == tenant_id,
-                AuditLogTable.actor_id == user_id,
+                _acted_as(user_id),
                 AuditLogTable.deleted_at.is_(None),
             )
         )
@@ -457,7 +473,7 @@ class AuditLogRepositoryImpl(AuditLogRepository):
         )
 
         if actor_id:
-            query = query.where(AuditLogTable.actor_id == actor_id)
+            query = query.where(_acted_as(actor_id))
 
         if action:
             query = query.where(AuditLogTable.action == action.value)
@@ -534,7 +550,7 @@ class AuditLogRepositoryImpl(AuditLogRepository):
         )
 
         if actor_id:
-            query = query.where(AuditLogTable.actor_id == actor_id)
+            query = query.where(_acted_as(actor_id))
 
         if action:
             query = query.where(AuditLogTable.action == action.value)
@@ -601,7 +617,7 @@ class AuditLogRepositoryImpl(AuditLogRepository):
         actor_query = sa.select(AuditLogTable).where(
             sa.and_(
                 AuditLogTable.tenant_id == tenant_id,
-                AuditLogTable.actor_id == user_id,
+                _acted_as(user_id),
                 AuditLogTable.deleted_at.is_(None),
             )
         )
@@ -703,7 +719,7 @@ class AuditLogRepositoryImpl(AuditLogRepository):
         ).where(
             sa.and_(
                 AuditLogTable.tenant_id == tenant_id,
-                AuditLogTable.actor_id == user_id,
+                _acted_as(user_id),
                 AuditLogTable.deleted_at.is_(None),
             )
         )
@@ -805,7 +821,7 @@ class AuditLogRepositoryImpl(AuditLogRepository):
         )
 
         if actor_id:
-            query = query.where(AuditLogTable.actor_id == actor_id)
+            query = query.where(_acted_as(actor_id))
 
         if action:
             query = query.where(AuditLogTable.action == action.value)
@@ -841,7 +857,7 @@ class AuditLogRepositoryImpl(AuditLogRepository):
         actor_query = sa.select(AuditLogTable).where(
             sa.and_(
                 AuditLogTable.tenant_id == tenant_id,
-                AuditLogTable.actor_id == user_id,
+                _acted_as(user_id),
                 AuditLogTable.deleted_at.is_(None),
             )
         )

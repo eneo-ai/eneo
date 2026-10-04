@@ -374,7 +374,8 @@ async def update_flow_assistant(
         "Delete a flow-managed assistant from the specified draft flow. The assistant id "
         "must belong to this flow. Deleting it removes the assistant, revokes the API "
         "keys scoped to it, deletes its icon when the icon is the tenant's own and "
-        "nothing else uses it, and writes an audit event. An assistant that a step of "
+        "nothing else uses it, and writes an audit event in the same transaction, so "
+        "the assistant is never deleted without its audit row. An assistant that a step of "
         "the flow still uses cannot be deleted (400 `flow_managed_assistant`); remove "
         "or replace that step first."
     ),
@@ -434,9 +435,10 @@ async def delete_flow_assistant(
     )
     await flow_service.delete_flow_assistant(flow_id=id, assistant_id=assistant_id)
 
-    await container.audit_service().log_async(
+    await container.audit_service().log(
         tenant_id=user.tenant_id,
-        actor_id=user.id,
+        user=user,
+        required=True,
         action=ActionType.ASSISTANT_DELETED,
         entity_type=EntityType.ASSISTANT,
         entity_id=assistant_id,

@@ -2,18 +2,29 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from datetime import datetime, timezone
+from typing import Any
 from uuid import UUID
 
 import sqlalchemy as sa
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from eneo.audit.application.audit_metadata import (
+    deleted_actor_snapshot,
+    service_principal_actor_snapshot,
+    system_actor_snapshot,
+    user_actor_snapshot,
+)
 from eneo.audit.domain.action_types import ActionType
 from eneo.audit.domain.actor_types import ActorType
 from eneo.audit.domain.entity_types import EntityType
+from eneo.authentication.principal_types import PrincipalType
+from eneo.database.tables.api_keys_v2_table import ApiKeysV2
 from eneo.database.tables.flow_tables import (
     FlowOutboxDeliveryStatus,
     FlowRunAuditOutbox,
 )
+from eneo.database.tables.service_principals_table import ServicePrincipals
+from eneo.database.tables.users_table import Users
 from eneo.flows.domain.flow import (
     FlowRun,
     FlowRunReviewCheckpoint,
@@ -26,6 +37,7 @@ from eneo.flows.enums import (
     FlowRunLifecycleSource,
     FlowRunReviewCheckpointState,
 )
+from eneo.flows.principal import FlowPrincipal
 
 
 @dataclass(frozen=True, slots=True)
@@ -52,6 +64,7 @@ class FlowRunAuditOutboxDeliveryRow:
     delivery_attempts: int
     payload_sha256_before: str | None = None
     payload_sha256_after: str | None = None
+    actor_snapshot: dict[str, Any] | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -103,6 +116,14 @@ class FlowRunAuditOutboxRedriveInspection:
     dead_lettered_at: datetime | None
 
 
+@dataclass(frozen=True, slots=True)
+class _CapturedActor:
+    actor_id: UUID | None
+    actor_type: ActorType
+    actor_api_key_id: UUID | None
+    snapshot: dict[str, Any]
+
+
 def flow_run_audit_description(
     *, action: ActionType, source: FlowRunLifecycleSource
 ) -> str:
@@ -118,14 +139,13 @@ class FlowRunAuditOutboxRepository:
         *,
         run: FlowRun,
         action: ActionType,
-        actor_id: UUID | None,
-        actor_type: ActorType,
-        actor_api_key_id: UUID | None,
+        principal: FlowPrincipal | None,
         source: FlowRunLifecycleSource,
         target_status: FlowRunStatus,
         error_code: str | None,
         error_message: str | None,
     ) -> UUID:
+        actor = await self._capture_actor(principal=principal, source=source)
         outbox_id = await self.session.scalar(
             sa.insert(FlowRunAuditOutbox)
             .values(
@@ -137,9 +157,10 @@ class FlowRunAuditOutboxRepository:
                 action=action.value,
                 entity_type=EntityType.FLOW_RUN.value,
                 entity_id=run.id,
-                actor_id=actor_id,
-                actor_type=actor_type.value,
-                actor_api_key_id=actor_api_key_id,
+                actor_id=actor.actor_id,
+                actor_type=actor.actor_type.value,
+                actor_api_key_id=actor.actor_api_key_id,
+                actor_snapshot=actor.snapshot,
                 source=source.value,
                 target_status=target_status.value,
                 error_code=error_code,
@@ -157,9 +178,7 @@ class FlowRunAuditOutboxRepository:
         checkpoint: FlowRunReviewCheckpoint,
         run_revision: int,
         action: ActionType,
-        actor_id: UUID | None,
-        actor_type: ActorType,
-        actor_api_key_id: UUID | None,
+        principal: FlowPrincipal | None,
         source: FlowRunLifecycleSource,
         target_state: FlowRunReviewCheckpointState,
         error_code: str | None = None,
@@ -167,6 +186,7 @@ class FlowRunAuditOutboxRepository:
         payload_sha256_before: str | None = None,
         payload_sha256_after: str | None = None,
     ) -> UUID:
+        actor = await self._capture_actor(principal=principal, source=source)
         outbox_id = await self.session.scalar(
             sa.insert(FlowRunAuditOutbox)
             .values(
@@ -182,9 +202,10 @@ class FlowRunAuditOutboxRepository:
                 action=action.value,
                 entity_type=EntityType.FLOW_RUN_REVIEW_CHECKPOINT.value,
                 entity_id=checkpoint.id,
-                actor_id=actor_id,
-                actor_type=actor_type.value,
-                actor_api_key_id=actor_api_key_id,
+                actor_id=actor.actor_id,
+                actor_type=actor.actor_type.value,
+                actor_api_key_id=actor.actor_api_key_id,
+                actor_snapshot=actor.snapshot,
                 source=source.value,
                 target_status=target_state.value,
                 error_code=error_code,
@@ -195,6 +216,64 @@ class FlowRunAuditOutboxRepository:
         if outbox_id is None:
             raise RuntimeError("Review checkpoint audit outbox insert returned no id.")
         return outbox_id
+
+    async def _capture_actor(
+        self, *, principal: FlowPrincipal | None, source: FlowRunLifecycleSource
+    ) -> _CapturedActor:
+        """Who acted, from the stable principal: None is a system transition.
+
+        The actor FK columns follow the principal's audit fields; a user or key
+        row already deleted leaves its column NULL. FOR KEY SHARE is the lock the
+        actor FK check takes on insert, taken at the read so the row cannot be
+        deleted before the insert.
+        """
+        if principal is None:
+            return _CapturedActor(
+                None, ActorType.SYSTEM, None, system_actor_snapshot(source.value)
+            )
+        if principal.principal_type == PrincipalType.USER:
+            user_id = principal.principal_user_id
+            assert user_id is not None
+            user = (
+                await self.session.execute(
+                    sa.select(Users.id, Users.username, Users.email)
+                    .where(Users.id == user_id)
+                    .with_for_update(read=True, key_share=True)
+                )
+            ).one_or_none()
+            if user is None:
+                gone = deleted_actor_snapshot("user", user_id)
+                return _CapturedActor(None, ActorType.USER, None, gone)
+            snapshot = user_actor_snapshot(user)
+            return _CapturedActor(user_id, ActorType.USER, None, snapshot)
+        service_id = principal.principal_service_id
+        assert service_id is not None
+        key_id = principal.actor_api_key_id
+        live_key_id = None
+        if key_id is not None:
+            live_key_id = await self.session.scalar(
+                sa.select(ApiKeysV2.id)
+                .where(ApiKeysV2.id == key_id)
+                .with_for_update(read=True, key_share=True)
+            )
+        service = (
+            await self.session.execute(
+                sa.select(
+                    ServicePrincipals.id,
+                    ServicePrincipals.display_name,
+                    ServicePrincipals.scope_type,
+                    ServicePrincipals.scope_id,
+                ).where(ServicePrincipals.id == service_id)
+            )
+        ).one_or_none()
+        snapshot = (
+            deleted_actor_snapshot("service_principal", service_id)
+            if service is None
+            else service_principal_actor_snapshot(service, actor_api_key_id=key_id)
+        )
+        if live_key_id is None:
+            return _CapturedActor(None, ActorType.SYSTEM, None, snapshot)
+        return _CapturedActor(None, ActorType.API_KEY, live_key_id, snapshot)
 
     async def list_due_delivery_rows(
         self,
@@ -457,4 +536,5 @@ class FlowRunAuditOutboxRepository:
             error_message=row.error_message,
             created_at=row.created_at,
             delivery_attempts=row.delivery_attempts,
+            actor_snapshot=row.actor_snapshot,
         )

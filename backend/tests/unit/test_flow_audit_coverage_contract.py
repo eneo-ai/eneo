@@ -277,10 +277,11 @@ FLOW_ROUTE_AUDIT_CONTRACTS: dict[str, FlowAuditContract] = {
         owner="flow_authoring_router.update_flow",
         metadata_keys=(*_FLOW_METADATA, "changed_fields"),
     ),
-    "delete_flow": _configurable(
+    "delete_flow": _required_transaction(
         ActionType.FLOW_DELETED,
         owner="flow_authoring_router.delete_flow",
         metadata_keys=_FLOW_METADATA,
+        idempotency="a repeated delete returns not found and emits no success event",
     ),
     "publish_flow": _configurable(
         ActionType.FLOW_PUBLISHED,
@@ -302,20 +303,22 @@ FLOW_ROUTE_AUDIT_CONTRACTS: dict[str, FlowAuditContract] = {
         owner="flow_assistant_router.update_flow_assistant",
         metadata_keys=("flow_id", "assistant_id", "origin"),
     ),
-    "delete_flow_assistant": _configurable(
+    "delete_flow_assistant": _required_transaction(
         ActionType.ASSISTANT_DELETED,
         owner="flow_assistant_router.delete_flow_assistant",
         metadata_keys=("flow_id", "assistant_id", "origin"),
+        idempotency="a repeated delete returns not found and emits no success event",
     ),
     "upload_flow_template_file": _configurable(
         ActionType.FILE_UPLOADED,
         owner="flow_template_router.upload_flow_template_file",
         metadata_keys=(*_FILE_METADATA, "template_asset_id", "upload_purpose"),
     ),
-    "delete_flow_template_file": _configurable(
+    "delete_flow_template_file": _required_transaction(
         ActionType.FILE_DELETED,
         owner="flow_template_router.delete_flow_template_file",
         metadata_keys=(*_FILE_METADATA, "template_asset_id", "upload_purpose"),
+        idempotency="a repeated delete returns not found and emits no success event",
     ),
     "generate_flow_template_signed_url": _required_read(
         ActionType.FILE_SIGNED_URL_MINTED,
@@ -696,6 +699,16 @@ def test_flow_audit_contracts_name_owners_failure_modes_and_safe_metadata() -> N
             assert contract.actions == ()
         else:
             assert contract.actions
+
+
+def test_flow_authoring_deletions_are_audited_in_the_deleting_transaction() -> None:
+    for operation_id in (
+        "delete_flow",
+        "delete_flow_assistant",
+        "delete_flow_template_file",
+    ):
+        contract = FLOW_ROUTE_AUDIT_CONTRACTS[operation_id]
+        assert contract.assurance is AuditAssurance.REQUIRED_TRANSACTION
 
 
 def test_outbound_and_transcription_keep_durable_evidence_below_admin_audit() -> None:

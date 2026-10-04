@@ -116,7 +116,6 @@ async def test_abandonment_update_rechecks_anchor_state_and_revision_under_paren
 async def test_abandonment_terminalizes_once_as_system_and_keeps_approval_actor(
     wait, lost_race
 ):
-    from eneo.audit.domain.actor_types import ActorType
     from eneo.flows.application.flow_run_terminalization import FlowRunTerminalizer
     from eneo.flows.domain.flow import FlowRun, FlowRunStatus
 
@@ -168,11 +167,7 @@ async def test_abandonment_terminalizes_once_as_system_and_keeps_approval_actor(
         )
         audit_repo.insert_terminal_audit_outbox.assert_awaited_once()
         assert (
-            audit_repo.insert_terminal_audit_outbox.await_args.kwargs["actor_type"]
-            == ActorType.SYSTEM
-        )
-        assert (
-            audit_repo.insert_terminal_audit_outbox.await_args.kwargs["actor_id"]
+            audit_repo.insert_terminal_audit_outbox.await_args.kwargs["principal"]
             is None
         )
 

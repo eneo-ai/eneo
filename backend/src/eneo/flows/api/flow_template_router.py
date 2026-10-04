@@ -257,7 +257,8 @@ async def upload_flow_template_file(
     operation_id="delete_flow_template_file",
     summary="Delete a flow template asset",
     description=(
-        "Remove a draft DOCX template asset from a flow. The underlying file "
+        "Remove a draft DOCX template asset from a flow. The removal and its audit "
+        "record are committed together. The underlying file "
         "remains stored until an administrator-requested purge explicitly includes "
         "it after no live or published-version reference can still use it."
     ),
@@ -308,9 +309,10 @@ async def delete_flow_template_file(
         asset_id=file_id,
     )
     user = container.user()
-    await container.audit_service().log_async(
+    await container.audit_service().log(
         tenant_id=user.tenant_id,
-        actor_id=user.id,
+        user=user,
+        required=True,
         action=ActionType.FILE_DELETED,
         entity_type=EntityType.FILE,
         entity_id=asset.file_id,

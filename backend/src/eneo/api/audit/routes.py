@@ -26,6 +26,7 @@ from eneo.api.audit.schemas import (
     ExportJobResponse,
     ExportJobStatusResponse,
 )
+from eneo.audit.application.audit_metadata import recorded_actor
 from eneo.audit.application.audit_service import AuditService
 from eneo.audit.domain.action_types import ActionType
 from eneo.audit.domain.audit_log import AuditLog
@@ -96,6 +97,22 @@ def parse_action_list(
 # Include config routes
 router.include_router(config_router)
 
+_RECORDED_ACTOR_DESCRIPTION = (
+    " `metadata.actor` is the attribution recorded when the event happened and is "
+    "kept after that user or API key is deleted. Rows without it (older rows, and "
+    "events whose caller passed only an actor id) show the user's current details "
+    "from `actor_id`."
+)
+_EXPORT_ACTOR_DESCRIPTION = (
+    " Exports return each row's stored metadata unchanged, with no live lookup:"
+    " `metadata.actor` is the attribution recorded when the event happened and is"
+    " kept after that user or API key is deleted."
+)
+_ACTOR_FILTER_DESCRIPTION = (
+    " The `actor_id` filter also matches the API key and the recorded actor "
+    "identity, so a deleted user's or key's events are still found."
+)
+
 
 async def _enrich_logs_with_actor_info(
     logs: Sequence[AuditLog], session: AsyncSession
@@ -103,13 +120,19 @@ async def _enrich_logs_with_actor_info(
     """
     Enrich audit logs with actor information (name/email).
 
-    This adds actor details to the metadata for display in the UI.
+    The actor recorded with the event is returned as stored. Only rows without
+    one get the current user's details, for display; nothing is written back.
     """
     if not logs:
         return []
 
-    # Get unique actor IDs from logs
-    actor_ids = list(set(log.actor_id for log in logs if log.actor_id))
+    actor_ids = list(
+        set(
+            log.actor_id
+            for log in logs
+            if log.actor_id and recorded_actor(log.metadata) is None
+        )
+    )
 
     # Fetch user information for all actors
     user_map: dict[UUID, dict[str, object]] = {}
@@ -139,9 +162,12 @@ async def _enrich_logs_with_actor_info(
         log_model = AuditLogResponse.model_validate(log)
         metadata = dict(log_model.metadata)
 
-        # Add actor information to metadata if we have it
         actor_id = log.actor_id
-        if actor_id is not None and actor_id in user_map:
+        if (
+            actor_id is not None
+            and actor_id in user_map
+            and recorded_actor(metadata) is None
+        ):
             metadata["actor"] = user_map[actor_id]
 
         enriched_logs.append(
@@ -356,7 +382,11 @@ async def create_access_session(
 @router.get(
     "/logs",
     response_model=AuditLogListResponse,
-    description="List audit logs for the authenticated user's tenant.",
+    description=(
+        "List audit logs for the authenticated user's tenant."
+        + _RECORDED_ACTOR_DESCRIPTION
+        + _ACTOR_FILTER_DESCRIPTION
+    ),
     responses=responses.get_responses([401, 403]),
 )
 @endpoint_access(
@@ -585,7 +615,12 @@ async def list_audit_logs(
 @router.get(
     "/logs/user/{user_id}",
     response_model=AuditLogListResponse,
-    description="Get all audit logs where the user is actor or target (GDPR Article 15 export).",
+    description=(
+        "Get all audit logs where the user is actor or target (GDPR Article 15 "
+        "export). The user counts as actor also through the recorded actor "
+        "identity, so their events are found after the account is deleted."
+        + _RECORDED_ACTOR_DESCRIPTION
+    ),
     responses=responses.get_responses([403, 404]),
 )
 @endpoint_access(
@@ -692,7 +727,9 @@ async def get_user_logs(
     description=(
         "Export audit logs to CSV or JSON Lines format. Default limit is 50,000 "
         "records (configurable via max_records, max 100,000); the response includes "
-        "an X-Records-Truncated header when the limit is hit."
+        "an X-Records-Truncated header when the limit is hit. CSV rows take Actor ID "
+        "from the recorded actor when `actor_id` is empty and end with an Actor Name "
+        "column from it." + _EXPORT_ACTOR_DESCRIPTION + _ACTOR_FILTER_DESCRIPTION
     ),
     responses=responses.get_responses([403, 413]),
 )
@@ -930,6 +967,8 @@ async def export_audit_logs(
         "Request an async background export of audit logs and receive a job ID. "
         "Limited to 2 concurrent exports per tenant; generated files are "
         "auto-deleted after 24 hours."
+        + _EXPORT_ACTOR_DESCRIPTION
+        + _ACTOR_FILTER_DESCRIPTION
     ),
     responses=responses.get_responses([403, 429]),
 )

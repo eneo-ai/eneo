@@ -2,9 +2,10 @@ from __future__ import annotations
 
 from dataclasses import dataclass, replace
 from datetime import datetime, timezone
-from typing import Literal, TypeAlias
+from typing import Any, Literal
 from uuid import UUID, uuid4
 
+from eneo.audit.application.audit_metadata import system_actor_snapshot
 from eneo.audit.application.guaranteed_delivery import (
     GuaranteedAuditDeliveryService,
 )
@@ -31,8 +32,6 @@ from eneo.flows.infrastructure.flow_run_audit_outbox_repo import (
     FlowRunAuditOutboxRedriveStateConflict,
     FlowRunAuditOutboxRepository,
 )
-
-FlowAuditOutboxMetadataValue: TypeAlias = str | int | None
 
 
 @dataclass(frozen=True, slots=True)
@@ -212,7 +211,8 @@ class FlowRunAuditOutboxDeliveryService(
             )
 
         operator_audit_id = uuid4()
-        metadata: dict[str, str | int | None] = {
+        metadata: dict[str, Any] = {
+            "actor": system_actor_snapshot("operator_redrive"),
             "flow_id": str(transition.flow_id),
             "flow_run_id": str(transition.flow_run_id),
             "outbox_id": str(transition.outbox_id),
@@ -341,10 +341,8 @@ def _audit_description(*, action: ActionType, source: str) -> str:
     return f"{label} by {source}."
 
 
-def _audit_metadata(
-    row: FlowRunAuditOutboxDeliveryRow,
-) -> dict[str, FlowAuditOutboxMetadataValue]:
-    return {
+def _audit_metadata(row: FlowRunAuditOutboxDeliveryRow) -> dict[str, Any]:
+    metadata: dict[str, Any] = {
         "flow_id": str(row.flow_id),
         "flow_run_id": str(row.flow_run_id),
         "run_revision": row.run_revision,
@@ -361,6 +359,10 @@ def _audit_metadata(
         "error_code": row.error_code,
         "outbox_description": row.description,
     }
+    # Rows written before the snapshot existed carry none; nothing is looked up.
+    if row.actor_snapshot is not None:
+        metadata["actor"] = row.actor_snapshot
+    return metadata
 
 
 def _failure_error_message(row: FlowRunAuditOutboxDeliveryRow) -> str:

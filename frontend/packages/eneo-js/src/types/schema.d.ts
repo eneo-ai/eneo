@@ -3294,7 +3294,7 @@ export interface paths {
     };
     /**
      * List Audit Logs
-     * @description List audit logs for the authenticated user's tenant.
+     * @description List audit logs for the authenticated user's tenant. `metadata.actor` is the attribution recorded when the event happened and is kept after that user or API key is deleted. Rows without it (older rows, and events whose caller passed only an actor id) show the user's current details from `actor_id`. The `actor_id` filter also matches the API key and the recorded actor identity, so a deleted user's or key's events are still found.
      */
     get: operations["list_audit_logs_api_v1_audit_logs_get"];
     put?: never;
@@ -3314,7 +3314,7 @@ export interface paths {
     };
     /**
      * Export Audit Logs
-     * @description Export audit logs to CSV or JSON Lines format. Default limit is 50,000 records (configurable via max_records, max 100,000); the response includes an X-Records-Truncated header when the limit is hit.
+     * @description Export audit logs to CSV or JSON Lines format. Default limit is 50,000 records (configurable via max_records, max 100,000); the response includes an X-Records-Truncated header when the limit is hit. CSV rows take Actor ID from the recorded actor when `actor_id` is empty and end with an Actor Name column from it. Exports return each row's stored metadata unchanged, with no live lookup: `metadata.actor` is the attribution recorded when the event happened and is kept after that user or API key is deleted. The `actor_id` filter also matches the API key and the recorded actor identity, so a deleted user's or key's events are still found.
      */
     get: operations["export_audit_logs_api_v1_audit_logs_export_get"];
     put?: never;
@@ -3336,7 +3336,7 @@ export interface paths {
     put?: never;
     /**
      * Request Async Export
-     * @description Request an async background export of audit logs and receive a job ID. Limited to 2 concurrent exports per tenant; generated files are auto-deleted after 24 hours.
+     * @description Request an async background export of audit logs and receive a job ID. Limited to 2 concurrent exports per tenant; generated files are auto-deleted after 24 hours. Exports return each row's stored metadata unchanged, with no live lookup: `metadata.actor` is the attribution recorded when the event happened and is kept after that user or API key is deleted. The `actor_id` filter also matches the API key and the recorded actor identity, so a deleted user's or key's events are still found.
      */
     post: operations["request_async_export_api_v1_audit_logs_export_async_post"];
     delete?: never;
@@ -3414,7 +3414,7 @@ export interface paths {
     };
     /**
      * Get User Logs
-     * @description Get all audit logs where the user is actor or target (GDPR Article 15 export).
+     * @description Get all audit logs where the user is actor or target (GDPR Article 15 export). The user counts as actor also through the recorded actor identity, so their events are found after the account is deleted. `metadata.actor` is the attribution recorded when the event happened and is kept after that user or API key is deleted. Rows without it (older rows, and events whose caller passed only an actor id) show the user's current details from `actor_id`.
      */
     get: operations["get_user_logs_api_v1_audit_logs_user__user_id__get"];
     put?: never;
@@ -4653,7 +4653,7 @@ export interface paths {
     post?: never;
     /**
      * Delete Flow
-     * @description Soft-delete a flow definition so it is no longer available for editing or execution. Draft ownership stays with the draft owner in the current backend policy. Space admins can manage shared space resources, but overriding another member's draft still requires the draft owner, a space owner, or a tenant admin.
+     * @description Soft-delete a flow definition so it is no longer available for editing or execution. The deletion and its audit record are committed together: a flow is never deleted without its audit row. Draft ownership stays with the draft owner in the current backend policy. Space admins can manage shared space resources, but overriding another member's draft still requires the draft owner, a space owner, or a tenant admin.
      */
     delete: operations["delete_flow"];
     options?: never;
@@ -4701,7 +4701,7 @@ export interface paths {
     post?: never;
     /**
      * Delete Flow Assistant
-     * @description Delete a flow-managed assistant from the specified draft flow. The assistant id must belong to this flow. Deleting it removes the assistant, revokes the API keys scoped to it, deletes its icon when the icon is the tenant's own and nothing else uses it, and writes an audit event. An assistant that a step of the flow still uses cannot be deleted (400 `flow_managed_assistant`); remove or replace that step first.
+     * @description Delete a flow-managed assistant from the specified draft flow. The assistant id must belong to this flow. Deleting it removes the assistant, revokes the API keys scoped to it, deletes its icon when the icon is the tenant's own and nothing else uses it, and writes an audit event in the same transaction, so the assistant is never deleted without its audit row. An assistant that a step of the flow still uses cannot be deleted (400 `flow_managed_assistant`); remove or replace that step first.
      */
     delete: operations["delete_flow_assistant"];
     options?: never;
@@ -5872,7 +5872,7 @@ export interface paths {
     post?: never;
     /**
      * Delete a flow template asset
-     * @description Remove a draft DOCX template asset from a flow. The underlying file remains stored until an administrator-requested purge explicitly includes it after no live or published-version reference can still use it.
+     * @description Remove a draft DOCX template asset from a flow. The removal and its audit record are committed together. The underlying file remains stored until an administrator-requested purge explicitly includes it after no live or published-version reference can still use it.
      */
     delete: operations["delete_flow_template_file"];
     options?: never;

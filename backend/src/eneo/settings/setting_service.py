@@ -647,7 +647,7 @@ class SettingService:
         updated = await self.get_flow_input_limits()
         await self.audit_service.log_async(
             tenant_id=self.user.tenant_id,
-            actor_id=self.user.id,
+            user=self.user,
             action=ActionType.TENANT_SETTINGS_UPDATED,
             entity_type=EntityType.TENANT_SETTINGS,
             entity_id=self.user.tenant_id,
@@ -697,7 +697,7 @@ class SettingService:
         updated = await self.get_flow_document_render_limits()
         await self.audit_service.log_async(
             tenant_id=self.user.tenant_id,
-            actor_id=self.user.id,
+            user=self.user,
             action=ActionType.TENANT_SETTINGS_UPDATED,
             entity_type=EntityType.TENANT_SETTINGS,
             entity_id=self.user.tenant_id,
@@ -753,7 +753,7 @@ class SettingService:
         updated = await self.get_flow_runtime_policy()
         await self.audit_service.log_async(
             tenant_id=self.user.tenant_id,
-            actor_id=self.user.id,
+            user=self.user,
             action=ActionType.TENANT_SETTINGS_UPDATED,
             entity_type=EntityType.TENANT_SETTINGS,
             entity_id=self.user.tenant_id,
@@ -844,7 +844,7 @@ class SettingService:
         updated = await self.get_mapped_execution_policy()
         await self.audit_service.log_async(
             tenant_id=self.user.tenant_id,
-            actor_id=self.user.id,
+            user=self.user,
             action=ActionType.TENANT_SETTINGS_UPDATED,
             entity_type=EntityType.TENANT_SETTINGS,
             entity_id=self.user.tenant_id,
@@ -915,7 +915,7 @@ class SettingService:
         updated = await self.get_rag_evidence_policy()
         await self.audit_service.log_async(
             tenant_id=self.user.tenant_id,
-            actor_id=self.user.id,
+            user=self.user,
             action=ActionType.TENANT_SETTINGS_UPDATED,
             entity_type=EntityType.TENANT_SETTINGS,
             entity_id=self.user.tenant_id,
@@ -996,7 +996,7 @@ class SettingService:
         updated = await self.get_ai_builder_budget_settings()
         await self.audit_service.log_async(
             tenant_id=self.user.tenant_id,
-            actor_id=self.user.id,
+            user=self.user,
             action=ActionType.TENANT_SETTINGS_UPDATED,
             entity_type=EntityType.TENANT_SETTINGS,
             entity_id=self.user.tenant_id,
@@ -1044,7 +1044,7 @@ class SettingService:
         await self._persist_flow_settings(next_flow_settings)
         await self.audit_service.log_async(
             tenant_id=self.user.tenant_id,
-            actor_id=self.user.id,
+            user=self.user,
             action=ActionType.TENANT_SETTINGS_UPDATED,
             entity_type=EntityType.TENANT_SETTINGS,
             entity_id=self.user.tenant_id,

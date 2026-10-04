@@ -11,6 +11,7 @@ from uuid import UUID, uuid4
 
 from pydantic import ValidationError
 
+from eneo.audit.application.audit_metadata import system_actor_snapshot
 from eneo.audit.domain.action_types import ActionType
 from eneo.audit.domain.actor_types import ActorType
 from eneo.audit.domain.audit_log import AuditLog
@@ -82,6 +83,7 @@ async def repair_flow_step_config(
                     timestamp=datetime.now(timezone.utc),
                     description="Current Flow step configuration cleaned by a system operator; published snapshots unchanged.",
                     metadata={
+                        "actor": system_actor_snapshot("operator_step_config_repair"),
                         "operation": "current_step_config_cleanup",
                         "operator_identity": operator_identity,
                         "prior_draft_revision": flow.draft_revision,

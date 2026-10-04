@@ -17,7 +17,6 @@ from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from eneo.audit.domain.action_types import ActionType
-from eneo.audit.domain.actor_types import ActorType
 from eneo.authentication.principal_types import PrincipalType
 from eneo.database.tables.flow_tables import (
     FlowRunReviewCheckpointEdits,
@@ -84,7 +83,7 @@ from eneo.flows.infrastructure.flow_run_audit_outbox_repo import (
     FlowRunAuditOutboxRepository,
 )
 from eneo.flows.infrastructure.flow_run_repo import FlowRunRepository
-from eneo.flows.principal import FlowAuditActorFields, FlowPrincipal
+from eneo.flows.principal import FlowPrincipal
 
 
 @dataclass(frozen=True, slots=True)
@@ -789,14 +788,11 @@ class FlowRunReviewCheckpointRepository:
         if updated_run_row is None:
             raise FlowReviewCheckpointRunNotRunningError()
 
-        actor_fields = requester_principal.audit_actor_fields()
         outbox_id = await self.audit_outbox_repo.insert_review_checkpoint_audit_outbox(
             checkpoint=checkpoint,
             run_revision=updated_run_row.revision,
             action=ActionType.FLOW_RUN_REVIEW_CHECKPOINT_OPENED,
-            actor_id=actor_fields["actor_id"],
-            actor_type=actor_fields["actor_type"],
-            actor_api_key_id=actor_fields["actor_api_key_id"],
+            principal=requester_principal,
             source=FlowRunLifecycleSource.REVIEW_CHECKPOINT_OPENED,
             target_state=FlowRunReviewCheckpointState.AWAITING_REVIEW,
         )
@@ -1652,22 +1648,11 @@ class FlowRunReviewCheckpointRepository:
         payload_sha256_before: str | None = None,
         payload_sha256_after: str | None = None,
     ) -> UUID:
-        actor_fields: FlowAuditActorFields = (
-            principal.audit_actor_fields()
-            if principal is not None
-            else {
-                "actor_id": None,
-                "actor_type": ActorType.SYSTEM,
-                "actor_api_key_id": None,
-            }
-        )
         return await self.audit_outbox_repo.insert_review_checkpoint_audit_outbox(
             checkpoint=checkpoint,
             run_revision=run_revision,
             action=action,
-            actor_id=actor_fields["actor_id"],
-            actor_type=actor_fields["actor_type"],
-            actor_api_key_id=actor_fields["actor_api_key_id"],
+            principal=principal,
             source=source,
             target_state=target_state,
             error_code=error_code,

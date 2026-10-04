@@ -39,6 +39,7 @@
   import AuditConfigTab from "./AuditConfigTab.svelte";
   import AccessJustificationForm from "./AccessJustificationForm.svelte";
   import { getActionLabel, getActionOptions } from "./audit-action-labels";
+  import { auditActorEmail, auditActorLabel } from "./audit-actor-label";
   import { escapeHtml } from "$lib/core/formatting/escapeHtml";
 
   type AuditLogResponse = components["schemas"]["AuditLogResponse"];
@@ -1790,13 +1791,11 @@
                         <td class="px-4 py-3">
                           <div class="flex flex-col">
                             <span class="text-default truncate text-sm">
-                              {(log.metadata as Record<string, Record<string, string>>)?.actor
-                                ?.name || "System"}
+                              {auditActorLabel(log.metadata)}
                             </span>
-                            {#if (log.metadata as Record<string, Record<string, string>>)?.actor?.email}
+                            {#if auditActorEmail(log.metadata)}
                               <span class="text-muted truncate text-xs">
-                                {(log.metadata as Record<string, Record<string, string>>).actor
-                                  .email}
+                                {auditActorEmail(log.metadata)}
                               </span>
                             {/if}
                           </div>

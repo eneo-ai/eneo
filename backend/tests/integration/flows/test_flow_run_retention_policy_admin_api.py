@@ -95,6 +95,12 @@ async def test_transcript_only_purge_reports_preview_and_audited_deletions(
         ).one()
         assert audit.tenant_id == admin_user.tenant_id
         assert audit.log_metadata == {
+            "actor": {
+                "type": "user",
+                "id": str(admin_user.id),
+                "name": admin_user.username,
+                "email": admin_user.email,
+            },
             "scope": scope,
             "scope_id": str(
                 {
@@ -195,6 +201,12 @@ async def test_admin_explicit_purge_defaults_to_preview_and_audits_deletion(
         ).one()
         assert audit.tenant_id == admin_user.tenant_id
         assert audit.log_metadata == {
+            "actor": {
+                "type": "user",
+                "id": str(admin_user.id),
+                "name": admin_user.username,
+                "email": admin_user.email,
+            },
             "scope": "organization",
             "scope_id": str(admin_user.tenant_id),
             "tenant_id": str(admin_user.tenant_id),
@@ -480,6 +492,12 @@ async def test_admin_replaces_and_clears_complete_hierarchical_policies(
     assert audit_rows[-1].entity_type == "flow"
     assert audit_rows[-1].entity_id == flow_id
     assert audit_rows[-1].log_metadata == {
+        "actor": {
+            "type": "user",
+            "id": str(admin_user.id),
+            "name": admin_user.username,
+            "email": admin_user.email,
+        },
         "scope": "flow",
         "scope_id": str(flow_id),
         "previous_local_policy": {"mode": "preserve", "days": 90},

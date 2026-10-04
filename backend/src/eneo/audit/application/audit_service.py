@@ -14,6 +14,7 @@ from typing import TYPE_CHECKING, Any, Optional, cast
 from uuid import UUID, uuid4
 
 from eneo.audit.application.audit_config_service import AuditConfigService
+from eneo.audit.application.audit_metadata import actor_snapshot, system_actor_snapshot
 from eneo.audit.domain.action_types import ActionType
 from eneo.audit.domain.actor_types import ActorType
 from eneo.audit.domain.audit_log import AuditLog
@@ -52,6 +53,23 @@ def _fill_request_context(
     if request_id is None:
         request_id = ctx.get("request_id")
     return ip_address, user_agent, request_id
+
+
+def _with_actor_snapshot(
+    metadata: dict[str, Any],
+    *,
+    user: Optional["UserInDB"],
+    actor_type: ActorType,
+    action: ActionType,
+) -> dict[str, Any]:
+    """Record who acted when the event happens; a caller's actor block wins."""
+    if "actor" in metadata:
+        return metadata
+    if user is not None:
+        return {**metadata, "actor": actor_snapshot(user)}
+    if actor_type == ActorType.SYSTEM:
+        return {**metadata, "actor": system_actor_snapshot(action.value)}
+    return metadata
 
 
 class AuditService:
@@ -174,6 +192,9 @@ class AuditService:
                 raise ValueError("actor_api_key_id required for api_key actions")
         elif actor_type != ActorType.SYSTEM and actor_id is None:
             raise ValueError("actor_id required for non-system actions")
+        metadata = _with_actor_snapshot(
+            metadata, user=user, actor_type=actor_type, action=action
+        )
 
         ip_address, user_agent, request_id = _fill_request_context(
             ip_address, user_agent, request_id
@@ -342,6 +363,9 @@ class AuditService:
                 raise ValueError("actor_api_key_id required for api_key actions")
         elif actor_type != ActorType.SYSTEM and actor_id is None:
             raise ValueError("actor_id required for non-system actions")
+        metadata = _with_actor_snapshot(
+            metadata, user=user, actor_type=actor_type, action=action
+        )
 
         # Validate
         if outcome == Outcome.FAILURE and not error_message:

@@ -10,7 +10,6 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from eneo.audit.domain.action_types import ActionType
-from eneo.audit.domain.actor_types import ActorType
 from eneo.audit.domain.entity_types import EntityType
 from eneo.authentication.principal_types import PrincipalType
 from eneo.database.database import sessionmanager
@@ -1155,7 +1154,14 @@ async def test_open_review_checkpoint_transitions_run_and_writes_outbox(
             outbox_row.checkpoint_revision,
             outbox_row.run_revision,
         )
+        outbox_actor_snapshot = outbox_row.actor_snapshot
 
+    assert outbox_actor_snapshot == {
+        "type": "user",
+        "id": str(admin_user.id),
+        "name": admin_user.username,
+        "email": admin_user.email,
+    }
     assert opened.created is True
     assert opened.run.status == FlowRunStatus.AWAITING_REVIEW
     assert opened.run.revision == scenario.run.revision + 1
@@ -2403,9 +2409,7 @@ async def test_review_checkpoint_outbox_uses_checkpoint_revision_key(
                 checkpoint=checkpoint,
                 run_revision=scenario.run.revision,
                 action=ActionType.FLOW_RUN_REVIEW_CHECKPOINT_OPENED,
-                actor_id=admin_user.id,
-                actor_type=ActorType.USER,
-                actor_api_key_id=None,
+                principal=FlowPrincipal.from_user(admin_user),
                 source=FlowRunLifecycleSource.REVIEW_CHECKPOINT_OPENED,
                 target_state=FlowRunReviewCheckpointState.AWAITING_REVIEW,
             )
@@ -2413,9 +2417,7 @@ async def test_review_checkpoint_outbox_uses_checkpoint_revision_key(
         terminal_outbox_id = await repo.audit_outbox_repo.insert_terminal_audit_outbox(
             run=scenario.run,
             action=ActionType.FLOW_RUN_CANCELLED,
-            actor_id=admin_user.id,
-            actor_type=ActorType.USER,
-            actor_api_key_id=None,
+            principal=FlowPrincipal.from_user(admin_user),
             source=FlowRunLifecycleSource.USER_CANCEL,
             target_status=FlowRunStatus.CANCELLED,
             error_code=FlowApiErrorCode.RUN_USER_CANCELLED.value,
@@ -2449,9 +2451,7 @@ async def test_review_checkpoint_outbox_uses_checkpoint_revision_key(
                 checkpoint=checkpoint,
                 run_revision=scenario.run.revision,
                 action=ActionType.FLOW_RUN_REVIEW_CHECKPOINT_OPENED,
-                actor_id=admin_user.id,
-                actor_type=ActorType.USER,
-                actor_api_key_id=None,
+                principal=FlowPrincipal.from_user(admin_user),
                 source=FlowRunLifecycleSource.REVIEW_CHECKPOINT_OPENED,
                 target_state=FlowRunReviewCheckpointState.AWAITING_REVIEW,
             )

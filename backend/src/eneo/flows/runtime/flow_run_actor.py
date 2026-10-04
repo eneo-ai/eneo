@@ -3,6 +3,10 @@ from __future__ import annotations
 from dataclasses import dataclass
 from uuid import UUID
 
+from eneo.audit.application.audit_metadata import (
+    actor_snapshot,
+    service_principal_actor_snapshot,
+)
 from eneo.audit.domain.actor_types import ActorType
 from eneo.authentication.auth_models import (
     ApiKeyPermission,
@@ -135,41 +139,13 @@ class FlowRunActor:
 
     def audit_actor_snapshot(self) -> dict[str, object]:
         if self.user is not None:
-            actor_name = (
-                self.user.username
-                or getattr(self.user, "name", None)
-                or (self.user.email or "").split("@")[0]
-                or "unknown"
-            )
-            return {
-                "type": "user",
-                "id": str(self.user.id),
-                "name": actor_name,
-                "email": self.user.email,
-            }
-
+            return actor_snapshot(self.user)
         if self.service_principal is None:
             raise FlowRunActorError("service-principal actor is missing")
-        snapshot: dict[str, object] = {
-            "type": "service_principal",
-            "id": str(self.service_principal.id),
-            "name": self.service_principal.display_name,
-            "scope_type": str(
-                getattr(
-                    self.service_principal.scope_type,
-                    "value",
-                    self.service_principal.scope_type,
-                )
-            ),
-            "scope_id": (
-                str(self.service_principal.scope_id)
-                if self.service_principal.scope_id is not None
-                else None
-            ),
-        }
-        if self.principal.actor_api_key_id is not None:
-            snapshot["actor_api_key_id"] = str(self.principal.actor_api_key_id)
-        return snapshot
+        return service_principal_actor_snapshot(
+            self.service_principal,
+            actor_api_key_id=self.principal.actor_api_key_id,
+        )
 
     def audit_metadata(
         self, *, target: object, extra: dict[str, object]

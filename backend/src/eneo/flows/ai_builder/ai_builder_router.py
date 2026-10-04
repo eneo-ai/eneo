@@ -936,7 +936,7 @@ async def report_client_error(
         reported = record.outcome == "inserted"
         await audit_service.log(
             tenant_id=user.tenant_id,
-            actor_id=user.id,
+            user=user,
             action=(
                 ActionType.AI_BUILDER_CLIENT_ERROR_REPORTED
                 if reported
@@ -952,27 +952,24 @@ async def report_client_error(
                     f"({record.first_action or 'displayed'})"
                 )
             ),
-            metadata=dict(
-                AuditMetadata.minimal(
-                    actor_id=user.id,
-                    target_id=record.error_id,
-                    extra={
-                        "phase": str(body.phase),
-                        "category": str(body.category),
-                        "code": body.code,
-                        # What the row holds after this report — the
-                        # tenant-resolved session and the facts a fill kept —
-                        # never the client's unverified claim.
-                        "session_id": (
-                            str(record.session_id) if record.session_id else None
-                        ),
-                        "request_id": body.request_id,
-                        "surface": record.surface,
-                        "presented_as": record.presented_as,
-                        "first_action": record.first_action,
-                    },
-                )
-            ),
+            metadata={
+                "target": {"id": str(record.error_id)},
+                "extra": {
+                    "phase": str(body.phase),
+                    "category": str(body.category),
+                    "code": body.code,
+                    # What the row holds after this report — the
+                    # tenant-resolved session and the facts a fill kept —
+                    # never the client's unverified claim.
+                    "session_id": (
+                        str(record.session_id) if record.session_id else None
+                    ),
+                    "request_id": body.request_id,
+                    "surface": record.surface,
+                    "presented_as": record.presented_as,
+                    "first_action": record.first_action,
+                },
+            },
         )
 
 

@@ -1923,6 +1923,10 @@ class FlowRunAuditOutbox(BasePublic):
         ForeignKey("api_keys_v2.id", ondelete="SET NULL"),
         nullable=True,
     )
+    # Who acted, captured in the run transaction; delivery copies it unchanged.
+    actor_snapshot: Mapped[Optional[dict[str, Any]]] = mapped_column(
+        JSONB, nullable=True
+    )
     source: Mapped[str] = mapped_column(sa.String(64), nullable=False)
     target_status: Mapped[str] = mapped_column(sa.String(32), nullable=False)
     error_code: Mapped[Optional[str]] = mapped_column(nullable=True)
@@ -1965,6 +1969,16 @@ class FlowRunAuditOutbox(BasePublic):
             "checkpoint_revision",
             unique=True,
             postgresql_where=sa.text("review_checkpoint_id IS NOT NULL"),
+        ),
+        Index(
+            "ix_flow_run_audit_outbox_actor_id",
+            "actor_id",
+            postgresql_where=sa.text("actor_id IS NOT NULL"),
+        ),
+        Index(
+            "ix_flow_run_audit_outbox_actor_api_key_id",
+            "actor_api_key_id",
+            postgresql_where=sa.text("actor_api_key_id IS NOT NULL"),
         ),
         ForeignKeyConstraint(
             ["flow_run_id", "tenant_id"],
