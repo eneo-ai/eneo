@@ -509,6 +509,18 @@ const ACTION_MESSAGES = {
     name: m.audit_action_flow_run_history_purged,
     description: m.audit_action_flow_run_history_purged_description
   },
+  flow_retention_hold_placed: {
+    name: m.audit_action_flow_retention_hold_placed,
+    description: m.audit_action_flow_retention_hold_placed_description
+  },
+  flow_retention_hold_released: {
+    name: m.audit_action_flow_retention_hold_released,
+    description: m.audit_action_flow_retention_hold_released_description
+  },
+  flow_retention_hold_review_extended: {
+    name: m.audit_action_flow_retention_hold_review_extended,
+    description: m.audit_action_flow_retention_hold_review_extended_description
+  },
   flow_run_created: {
     name: m.audit_action_flow_run_created,
     description: m.audit_action_flow_run_created_description

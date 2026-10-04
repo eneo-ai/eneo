@@ -28,7 +28,15 @@ const MEMBERS: Record<Exclude<PermissionGroupId, "other">, readonly string[]> = 
   build: ["assistants", "apps", "services", "skills", "skills_management", "AI"],
   knowledge: ["collections", "websites", "integrations"],
   insight: ["insights", "assistant_debug"],
-  admin: ["admin", "api_keys", "storage", "modules", "widgets"]
+  admin: [
+    "admin",
+    "retention_manage",
+    "retention_holds",
+    "api_keys",
+    "storage",
+    "modules",
+    "widgets"
+  ]
 };
 
 const ORDER: readonly PermissionGroupId[] = [

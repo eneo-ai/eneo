@@ -58,56 +58,68 @@
     return { route, href: localizeHref(route), icon, label };
   }
 
-  const groups = $derived<NavGroup[]>([
-    {
-      label: m.admin_section_overview(),
-      items: [navItem("/admin", Landmark, m.overview())]
-    },
-    {
-      label: m.admin_section_governance(),
-      items: [
-        navItem("/admin/personal-assistant", MessageSquareText, m.governance_title()),
-        navItem("/admin/prompt-library", BookText, m.governance_tab_prompts()),
-        navItem("/admin/flow-settings", Workflow, m.flow_settings_title()),
-        navItem("/admin/security-classifications", ShieldCheck, m.security_classifications())
-      ]
-    },
-    {
-      label: m.admin_section_configuration(),
-      items: [
-        navItem("/admin/models", Cpu, m.models()),
-        ...(settings?.using_templates
-          ? [navItem("/admin/templates", LayoutTemplate, m.templates())]
-          : []),
-        navItem("/admin/skills", BookOpenCheck, m.admin_skills_nav_label()),
-        navItem("/admin/help-assistants", Sparkles, m.admin_help_assistants_nav_label()),
-        navItem("/admin/tools", Plug, m.tools()),
-        navItem("/admin/integrations", Cloud, m.integrations()),
-        ...(user.hasPermission("modules")
-          ? [navItem("/admin/modules", Boxes, m.module_admin_title())]
-          : []),
-        navItem("/admin/storage", HardDrive, m.storage_settings_nav())
-      ]
-    },
-    {
-      label: m.admin_section_analytics_logs(),
-      items: [
-        navItem("/admin/usage", ChartPie, m.usage()),
-        navItem("/admin/insights", Lightbulb, m.insights()),
-        navItem("/admin/crawler", Globe, m.admin_crawler_title()),
-        navItem("/admin/audit-logs", RotateCcwClock, m.audit_logs())
-      ]
-    },
-    {
-      label: m.admin_section_access(),
-      items: [
-        navItem("/admin/users", UserRound, m.users()),
-        navItem("/admin/legacy/user-groups", UsersRound, m.user_groups()),
-        navItem("/admin/roles", FingerprintPattern, m.roles()),
-        navItem("/admin/api-keys", KeyRound, m.api_keys())
-      ]
-    }
-  ]);
+  // A retention-only role sees the one admin page it may use.
+  const retentionOnly = !user.hasPermission("admin");
+
+  const groups = $derived<NavGroup[]>(
+    retentionOnly
+      ? [
+          {
+            label: m.admin_section_governance(),
+            items: [navItem("/admin/flow-settings", Workflow, m.flow_settings_title())]
+          }
+        ]
+      : [
+          {
+            label: m.admin_section_overview(),
+            items: [navItem("/admin", Landmark, m.overview())]
+          },
+          {
+            label: m.admin_section_governance(),
+            items: [
+              navItem("/admin/personal-assistant", MessageSquareText, m.governance_title()),
+              navItem("/admin/prompt-library", BookText, m.governance_tab_prompts()),
+              navItem("/admin/flow-settings", Workflow, m.flow_settings_title()),
+              navItem("/admin/security-classifications", ShieldCheck, m.security_classifications())
+            ]
+          },
+          {
+            label: m.admin_section_configuration(),
+            items: [
+              navItem("/admin/models", Cpu, m.models()),
+              ...(settings?.using_templates
+                ? [navItem("/admin/templates", LayoutTemplate, m.templates())]
+                : []),
+              navItem("/admin/skills", BookOpenCheck, m.admin_skills_nav_label()),
+              navItem("/admin/help-assistants", Sparkles, m.admin_help_assistants_nav_label()),
+              navItem("/admin/tools", Plug, m.tools()),
+              navItem("/admin/integrations", Cloud, m.integrations()),
+              ...(user.hasPermission("modules")
+                ? [navItem("/admin/modules", Boxes, m.module_admin_title())]
+                : []),
+              navItem("/admin/storage", HardDrive, m.storage_settings_nav())
+            ]
+          },
+          {
+            label: m.admin_section_analytics_logs(),
+            items: [
+              navItem("/admin/usage", ChartPie, m.usage()),
+              navItem("/admin/insights", Lightbulb, m.insights()),
+              navItem("/admin/crawler", Globe, m.admin_crawler_title()),
+              navItem("/admin/audit-logs", RotateCcwClock, m.audit_logs())
+            ]
+          },
+          {
+            label: m.admin_section_access(),
+            items: [
+              navItem("/admin/users", UserRound, m.users()),
+              navItem("/admin/legacy/user-groups", UsersRound, m.user_groups()),
+              navItem("/admin/roles", FingerprintPattern, m.roles()),
+              navItem("/admin/api-keys", KeyRound, m.api_keys())
+            ]
+          }
+        ]
+  );
 </script>
 
 {#each groups as group (group.label)}

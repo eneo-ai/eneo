@@ -21,6 +21,11 @@
   import { initFaviconUrlService } from "$lib/features/knowledge/FaviconUrlService.svelte.js";
   import { m } from "$lib/paraglide/messages";
   import { localizeHref } from "$lib/paraglide/runtime";
+  import {
+    adminHomeHref,
+    canOpenAdmin,
+    retentionAccess
+  } from "$lib/features/flows/retentionAccess";
 
   export let data;
 
@@ -62,6 +67,7 @@
   $: isOrganization = currentRoute.startsWith("/spaces/organization");
   $: isSpacesGeneric = currentRoute.startsWith("/spaces") && !isPersonal && !isOrganization;
   const canBrowseOrganization = user.hasPermission("admin");
+  const adminAccess = retentionAccess(user.hasPermission);
 </script>
 
 <!-- eslint-disable svelte/no-navigation-without-resolve -- in-page anchor -->
@@ -145,10 +151,10 @@
       <div aria-hidden="true" class="flex-grow"></div>
 
       <!-- Toggle -->
-      {#if user.hasPermission("admin")}
+      {#if canOpenAdmin(adminAccess)}
         <!-- eslint-disable svelte/no-navigation-without-resolve -- localizeHref handles routing -->
         <a
-          href={localizeHref("/admin")}
+          href={localizeHref(adminHomeHref(adminAccess))}
           data-current={currentRoute.startsWith("/admin") ? "page" : undefined}>{m.admin()}</a
         >
         <!-- eslint-enable svelte/no-navigation-without-resolve -->

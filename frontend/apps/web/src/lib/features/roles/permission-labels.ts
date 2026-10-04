@@ -108,6 +108,16 @@ export function getPermissionCopy(name: string, fallbackDescription: string): En
         label: m.permission_flows_trace(),
         description: m.permission_flows_trace_description()
       };
+    case "retention_manage":
+      return {
+        label: m.permission_retention_manage(),
+        description: m.permission_retention_manage_description()
+      };
+    case "retention_holds":
+      return {
+        label: m.permission_retention_holds(),
+        description: m.permission_retention_holds_description()
+      };
     case "modules":
       return {
         label: m.permission_modules(),

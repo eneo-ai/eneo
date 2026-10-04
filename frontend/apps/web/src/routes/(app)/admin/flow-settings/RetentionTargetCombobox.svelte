@@ -8,7 +8,8 @@
   import { m } from "$lib/paraglide/messages";
 
   // `retired`: a deleted Flow still listed because it keeps run history.
-  type Target = { id: string; name: string; retired?: boolean };
+  // `held`: the Flow or some of its runs has an active legal hold.
+  type Target = { id: string; name: string; retired?: boolean; held?: boolean };
 
   let {
     id,
@@ -69,6 +70,9 @@
           {#if selected?.retired}
             <Badge variant="outline">{m.flow_run_retention_target_retired()}</Badge>
           {/if}
+          {#if selected?.held}
+            <Badge variant="secondary">{m.flow_run_retention_target_held()}</Badge>
+          {/if}
         </span>
         <ChevronsUpDown class="text-muted size-4 shrink-0" aria-hidden="true" />
       </Button>
@@ -92,10 +96,15 @@
               aria-hidden="true"
             />
             <span class="truncate">{item.name}</span>
-            {#if item.retired}
-              <Badge variant="outline" class="ml-auto">
-                {m.flow_run_retention_target_retired()}
-              </Badge>
+            {#if item.retired || item.held}
+              <span class="ml-auto flex shrink-0 gap-1">
+                {#if item.retired}
+                  <Badge variant="outline">{m.flow_run_retention_target_retired()}</Badge>
+                {/if}
+                {#if item.held}
+                  <Badge variant="secondary">{m.flow_run_retention_target_held()}</Badge>
+                {/if}
+              </span>
             {/if}
           </Command.Item>
         {/each}

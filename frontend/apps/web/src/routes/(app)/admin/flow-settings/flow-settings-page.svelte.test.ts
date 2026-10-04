@@ -13,6 +13,9 @@ const getFlowRunRetentionPolicy = vi.hoisted(() => vi.fn());
 const listOrganizationFlowRunRetentionReviewQueue = vi.hoisted(() => vi.fn());
 const listFlowRunRetentionSpaceTargets = vi.hoisted(() => vi.fn());
 const listFlowRunRetentionFlowTargets = vi.hoisted(() => vi.fn());
+const listFlowRetentionHolds = vi.hoisted(() => vi.fn());
+const placeFlowRetentionHold = vi.hoisted(() => vi.fn());
+const releaseFlowRetentionHold = vi.hoisted(() => vi.fn());
 const updateFlowInputLimits = vi.hoisted(() => vi.fn());
 const updateFlowRuntimePolicy = vi.hoisted(() => vi.fn());
 const toastSuccess = vi.hoisted(() => vi.fn());
@@ -34,7 +37,10 @@ vi.mock("$lib/core/Eneo", () => ({
       getFlowRunRetentionPolicy,
       listOrganizationFlowRunRetentionReviewQueue,
       listFlowRunRetentionSpaceTargets,
-      listFlowRunRetentionFlowTargets
+      listFlowRunRetentionFlowTargets,
+      listFlowRetentionHolds,
+      placeFlowRetentionHold,
+      releaseFlowRetentionHold
     }
   })
 }));
@@ -116,6 +122,8 @@ vi.mock("$lib/paraglide/runtime", () => ({
 }));
 
 import FlowSettingsPage from "./+page.svelte";
+import { BUILDER_BUDGET, pageData } from "./flow-settings-test-data";
+import { addLocalDays, endOfLocalDay, localDate } from "./flowRetentionHold";
 
 type PageProps = { data: never };
 
@@ -132,87 +140,6 @@ function pagePropsWithRunPolicy(overrides: Record<string, unknown>): PageProps {
   const data = pageData();
   return {
     data: { ...data, flowRuntimePolicy: { ...data.flowRuntimePolicy, ...overrides } } as never
-  };
-}
-
-const BUILDER_BUDGET = {
-  max_attachments: 100,
-  max_message_chars: 50_000,
-  review_evidence_max_input_tokens: null,
-  review_investigation_evidence_max_tokens: 16_000,
-  review_investigation_evidence_ceiling_tokens: 16_000,
-  max_attachments_hard_limit: 100,
-  max_message_chars_hard_limit: 50_000
-};
-
-function pageData(
-  mappedOverrides: Record<string, unknown> = {},
-  builderOverrides: Record<string, unknown> = {}
-) {
-  return {
-    flowRetentionPolicy: {
-      run_debug_evidence_days: null,
-      flow_runtime_upload_abandonment_days: null
-    },
-    flowRunRetentionPolicy: {
-      scope: "organization",
-      scope_id: "tenant-1",
-      local_policy: null,
-      inherited_policy: null,
-      effective: {
-        state: "off",
-        mode: null,
-        effective_days: null,
-        source: "none",
-        contributors: { organization: null, space: null, flow: null }
-      }
-    },
-    flowRunRetentionReviewQueue: {
-      items: [],
-      count: 0,
-      has_more: false,
-      next_cursor: null
-    },
-    spaceTargets: {
-      items: [
-        { id: "space-1", name: "Inköp" },
-        { id: "space-2", name: "Juridik" }
-      ],
-      count: 2,
-      has_more: false
-    },
-    flowInputLimits: {
-      file_max_size_bytes: 10 * 1024 * 1024,
-      audio_max_size_bytes: 200 * 1024 * 1024,
-      max_files_per_run: null,
-      audio_max_files_per_run: 10,
-      file_max_size_ceiling_bytes: 10 * 1024 * 1024,
-      audio_max_size_ceiling_bytes: 200 * 1024 * 1024,
-      audio_max_duration_seconds: 5 * 60 * 60,
-      audio_max_duration_ceiling_seconds: 8 * 60 * 60
-    },
-    flowRuntimePolicy: {
-      default_step_timeout_seconds: 600,
-      max_step_timeout_seconds: 3540,
-      hard_ceiling_seconds: 3540,
-      max_concurrent_runs: 4,
-      max_concurrent_runs_capacity: 8
-    },
-    mappedExecutionPolicy: {
-      version: 1,
-      max_provider_calls_per_mapped_step: 40,
-      max_estimated_input_tokens_per_mapped_step: null,
-      max_provider_calls_source: "organization",
-      deployment_default_max_provider_calls: 100,
-      ...mappedOverrides
-    },
-    aiBuilderBudgetSettings: { ...BUILDER_BUDGET, ...builderOverrides },
-    ragEvidencePolicy: {
-      max_sources_with_recorded_passages: 25,
-      max_recorded_passages_per_source: 5,
-      max_recorded_passage_bytes: 4096,
-      max_recorded_passage_bytes_per_step: 131_072
-    }
   };
 }
 
@@ -418,6 +345,148 @@ describe("flow settings page — mapped restore lifecycle", () => {
       )
       .toBeVisible();
     expect(getFlowRunRetentionPolicy).toHaveBeenCalledExactlyOnceWith({ flowId: "flow-old" });
+  });
+
+  test("marks a held Flow, explains it, and places a hold on the chosen Flow", async () => {
+    const offPolicy = {
+      scope: "flow",
+      scope_id: "flow-held",
+      local_policy: null,
+      inherited_policy: null,
+      effective: {
+        state: "off",
+        mode: null,
+        effective_days: null,
+        source: "none",
+        contributors: { organization: null, space: null, flow: null }
+      }
+    };
+    getSpaceFlowRunRetentionPolicy.mockResolvedValue({ ...offPolicy, scope: "space" });
+    getFlowRunRetentionPolicy.mockResolvedValue(offPolicy);
+    const targets = (held: boolean) => ({
+      items: [
+        { id: "flow-free", space_id: "space-1", name: "Fritt flöde", retired: false, held: false },
+        { id: "flow-held", space_id: "space-1", name: "Spärrat flöde", retired: false, held }
+      ],
+      count: 2,
+      has_more: false
+    });
+    listFlowRunRetentionFlowTargets.mockResolvedValueOnce(targets(false));
+    listFlowRunRetentionFlowTargets.mockResolvedValue(targets(true));
+    placeFlowRetentionHold.mockResolvedValue({ holds: [] });
+    listFlowRetentionHolds.mockResolvedValue({
+      items: [],
+      has_more: false,
+      review_limit_days: 365
+    });
+    render(FlowSettingsPage, pageProps());
+
+    await expect.element(page.getByRole("button", { name: "Lägg spärr" })).toBeDisabled();
+    await page.getByRole("combobox", { name: "Yta" }).click();
+    await page.getByRole("option", { name: "Inköp" }).click();
+    await page.getByRole("combobox", { name: "Flöde" }).click();
+    await expect.element(page.getByRole("option", { name: "Spärrat flöde" })).toBeVisible();
+    await expect
+      .element(page.getByRole("option", { name: "Spärrat flöde" }).getByText("Spärrad"))
+      .not.toBeInTheDocument();
+    await page.getByRole("option", { name: "Spärrat flöde" }).click();
+
+    await page.getByRole("button", { name: "Lägg spärr på Spärrat flöde" }).click();
+    const dialog = page.getByRole("dialog");
+    await dialog.getByRole("textbox", { name: "Skäl" }).fill("Begäran om utlämnande");
+    const review = addLocalDays(localDate(new Date()), 30);
+    await dialog.getByLabelText("Omprövas senast").fill(review);
+    await dialog.getByRole("button", { name: "Lägg spärr" }).click();
+
+    await vi.waitFor(() =>
+      expect(placeFlowRetentionHold).toHaveBeenCalledExactlyOnceWith({
+        flowId: "flow-held",
+        runIds: null,
+        reason: "Begäran om utlämnande",
+        reviewBy: endOfLocalDay(review),
+        endsAt: null
+      })
+    );
+    await expect
+      .element(
+        page.getByText(
+          "Flödet har en rättslig spärr. Spärrad historik gallras inte, oavsett policy."
+        )
+      )
+      .toBeVisible();
+    await page.getByRole("combobox", { name: "Flöde" }).click();
+    await expect.element(page.getByRole("option", { name: "Spärrat flöde Spärrad" })).toBeVisible();
+    await expect
+      .element(page.getByRole("option", { name: "Fritt flöde" }).getByText("Spärrad"))
+      .not.toBeInTheDocument();
+  });
+
+  test("a placed hold refreshes the hold marks on every loaded page of Flows", async () => {
+    const offPolicy = {
+      scope: "flow",
+      scope_id: "flow-200",
+      local_policy: null,
+      inherited_policy: null,
+      effective: {
+        state: "off",
+        mode: null,
+        effective_days: null,
+        source: "none",
+        contributors: { organization: null, space: null, flow: null }
+      }
+    };
+    getSpaceFlowRunRetentionPolicy.mockResolvedValue({ ...offPolicy, scope: "space" });
+    getFlowRunRetentionPolicy.mockResolvedValue(offPolicy);
+    const flowsPage = (start: number, count: number, held: boolean, hasMore: boolean) => ({
+      items: Array.from({ length: count }, (_, index) => ({
+        id: `flow-${start + index}`,
+        space_id: "space-1",
+        name: `Flöde ${String(start + index).padStart(3, "0")}`,
+        retired: false,
+        held: held && start + index === 200
+      })),
+      count,
+      has_more: hasMore
+    });
+    listFlowRunRetentionFlowTargets.mockImplementation(async ({ offset }: { offset: number }) =>
+      offset === 0
+        ? flowsPage(0, 200, false, true)
+        : flowsPage(200, 1, placeFlowRetentionHold.mock.calls.length > 0, false)
+    );
+    placeFlowRetentionHold.mockResolvedValue({ holds: [] });
+    listFlowRetentionHolds.mockResolvedValue({
+      items: [],
+      has_more: false,
+      review_limit_days: 365
+    });
+    render(FlowSettingsPage, pageProps());
+
+    await page.getByRole("combobox", { name: "Yta" }).click();
+    await page.getByRole("option", { name: "Inköp" }).click();
+    await page.getByRole("combobox", { name: "Flöde" }).click();
+    await page.getByRole("option", { name: "Ladda fler flöden" }).click();
+    await page.getByRole("option", { name: "Flöde 200" }).click();
+
+    await page.getByRole("button", { name: "Lägg spärr på Flöde 200" }).click();
+    const dialog = page.getByRole("dialog");
+    await dialog.getByRole("textbox", { name: "Skäl" }).fill("Begäran om utlämnande");
+    await dialog.getByLabelText("Omprövas senast").fill(addLocalDays(localDate(new Date()), 30));
+    await dialog.getByRole("button", { name: "Lägg spärr" }).click();
+
+    await vi.waitFor(() =>
+      expect(listFlowRunRetentionFlowTargets).toHaveBeenCalledWith({
+        spaceId: "space-1",
+        limit: 200,
+        offset: 200
+      })
+    );
+    await expect
+      .element(
+        page.getByText(
+          "Flödet har en rättslig spärr. Spärrad historik gallras inte, oavsett policy."
+        )
+      )
+      .toBeVisible();
   });
 
   test("loads Space and Flow targets incrementally", async () => {
