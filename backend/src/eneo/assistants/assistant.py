@@ -545,11 +545,6 @@ class Assistant(Entity):
                     f"Completion model {effective_model.name} do not support vision."
                 )
 
-        # Fill half the context
-        num_chunks = (
-            effective_model.max_input_tokens // 200 // 2 if version == 2 else 30
-        )
-
         # Tool mode: the loopback knowledge-MCP server (when provided by the
         # orchestrating service) replaces per-turn retrieval — the model calls
         # its search tool on demand instead of every turn's context being
@@ -563,7 +558,7 @@ class Assistant(Entity):
                 collections=self.collections,
                 websites=self.websites,
                 integration_knowledge_list=self.integration_knowledge_list,
-                num_chunks=num_chunks,
+                context_window_tokens=effective_model.max_input_tokens,
                 version=version,
             )
         else:

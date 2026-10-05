@@ -10,6 +10,7 @@ from tenacity import (
 )
 from typing_extensions import override
 
+from eneo.embedding_models.domain.chunking import E5_PASSAGE_PREFIX
 from eneo.embedding_models.infrastructure.adapters.base import (
     EmbeddingModelAdapter,
     PartialEmbeddingBatchError,
@@ -72,7 +73,7 @@ class LiteLLMEmbeddingAdapter(EmbeddingModelAdapter):
             # Add "passage:" prefix for E5 models, use text directly for others
             if self.model.family == "e5":
                 texts_for_chunks = [
-                    f"passage: {chunk.text}" for chunk in chunked_chunks
+                    f"{E5_PASSAGE_PREFIX}{chunk.text}" for chunk in chunked_chunks
                 ]
                 logger.debug(
                     "[LiteLLM] %s: Using 'passage:' prefix (family=%s)",

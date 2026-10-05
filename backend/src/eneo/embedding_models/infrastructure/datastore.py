@@ -3,10 +3,7 @@ import time
 from typing import TYPE_CHECKING, Optional
 from uuid import UUID
 
-from langchain_text_splitters import RecursiveCharacterTextSplitter
-from pydantic_settings import BaseSettings
-
-from eneo.completion_models.infrastructure.context_builder import count_tokens
+from eneo.embedding_models.domain.chunking import build_text_splitter
 from eneo.embedding_models.infrastructure.adapters.base import (
     PartialEmbeddingBatchError,
 )
@@ -33,14 +30,6 @@ if TYPE_CHECKING:
     from eneo.websites.domain.website import Website
 
 logger = get_logger(__name__)
-
-
-class ChunkSettings(BaseSettings):
-    chunk_size: int = 200
-    chunk_overlap: int = 40
-
-
-settings = ChunkSettings()
 
 
 def autocut(y_values: list[float], cutoff: int = 2) -> int:
@@ -89,12 +78,10 @@ class Datastore:
         self.chunk_repo = info_blob_chunk_repo
         self.create_embeddings_service = create_embeddings_service
 
-    def _chunk_text(self, info_blob: InfoBlobInDB) -> list[InfoBlobChunk]:
-        splitter = RecursiveCharacterTextSplitter(
-            chunk_size=settings.chunk_size,
-            chunk_overlap=settings.chunk_overlap,
-            length_function=count_tokens,
-        )
+    def _chunk_text(
+        self, info_blob: InfoBlobInDB, embedding_model: "EmbeddingModel"
+    ) -> list[InfoBlobChunk]:
+        splitter = build_text_splitter(embedding_model)
 
         info_blob_chunks = [
             InfoBlobChunk(
@@ -133,7 +120,9 @@ class Datastore:
 
     async def add(self, info_blob: InfoBlobInDB, embedding_model: "EmbeddingModel"):
         logger.debug("Chunking text.")
-        info_blob_chunks = await asyncio.to_thread(self._chunk_text, info_blob)
+        info_blob_chunks = await asyncio.to_thread(
+            self._chunk_text, info_blob, embedding_model
+        )
 
         if not info_blob_chunks:
             raise ValueError(
