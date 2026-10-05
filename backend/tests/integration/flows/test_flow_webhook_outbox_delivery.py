@@ -33,6 +33,10 @@ from eneo.flows.domain.flow import (
     FlowStep,
     FlowStepResultStatus,
 )
+from eneo.flows.domain.flow_webhook_delivery import (
+    WebhookDeliveryIntent,
+    WebhookPayloadRef,
+)
 from eneo.flows.enums import FlowRunLifecycleSource, FlowStepAttemptStatus
 from eneo.flows.flow_api_error_code import FlowApiErrorCode
 from eneo.flows.flow_run_error import FlowRunError
@@ -55,10 +59,6 @@ from eneo.flows.published_definition import (
 )
 from eneo.flows.runtime.flow_webhook_delivery import FlowRunWebhookDeliveryService
 from eneo.flows.runtime.http_runtime import FlowHttpRuntimeHelper
-from eneo.flows.runtime.step_execution_result import (
-    WebhookDeliveryIntent,
-    WebhookPayloadRef,
-)
 from eneo.flows.runtime.tasks import enable_autobegin_for_flow_task_session
 from eneo.flows.variable_resolver import FlowVariableResolver
 from eneo.main.container.container import Container

@@ -186,3 +186,14 @@ source_modules =
     eneo.flows.runtime.step_definition_parser
 forbidden_modules =
     eneo.database.tables.flow_tables
+
+[importlinter:contract:flows-infrastructure-no-runtime]
+# Persistence consumes domain delivery intents; runtime result envelopes
+# belong to execution callers.
+name = Flows infrastructure must not import runtime
+type = forbidden
+allow_indirect_imports = true
+source_modules =
+    eneo.flows.infrastructure
+forbidden_modules =
+    eneo.flows.runtime

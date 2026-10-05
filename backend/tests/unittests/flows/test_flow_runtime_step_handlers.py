@@ -11,6 +11,7 @@ import pytest
 
 from eneo.authentication.principal_types import PrincipalType
 from eneo.flows.domain.flow import FlowRun, FlowRunStatus
+from eneo.flows.domain.flow_webhook_delivery import WebhookPayloadRef
 from eneo.flows.domain.mapped_execution_policy import (
     resolve_flow_mapped_execution_policy,
 )
@@ -25,10 +26,7 @@ from eneo.flows.enums import FlowOutputMode
 from eneo.flows.flow_api_error_code import FlowApiErrorCode
 from eneo.flows.runtime.executor import FlowRunExecutor
 from eneo.flows.runtime.output_runtime import TypedOutputProcessingResult
-from eneo.flows.runtime.step_execution_result import (
-    StepExecutionResult,
-    WebhookPayloadRef,
-)
+from eneo.flows.runtime.step_execution_result import StepExecutionResult
 from eneo.flows.runtime.step_execution_runtime import (
     PreparedStepExecution,
     StepExecutionRuntimeDeps,

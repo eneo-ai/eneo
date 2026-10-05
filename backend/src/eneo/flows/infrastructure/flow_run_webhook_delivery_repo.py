@@ -13,8 +13,8 @@ from eneo.database.tables.flow_tables import (
     FlowOutboxDeliveryStatus,
     FlowRunWebhookDeliveries,
 )
+from eneo.flows.domain.flow_webhook_delivery import WebhookDeliveryIntent
 from eneo.flows.infrastructure.flow_run_repo import FlowRunRepository
-from eneo.flows.runtime.step_execution_result import WebhookDeliveryIntent
 
 
 @dataclass(frozen=True, slots=True)

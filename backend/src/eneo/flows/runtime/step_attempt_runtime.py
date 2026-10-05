@@ -10,6 +10,7 @@ from eneo.flows.domain.flow import (
     FlowStepAttemptStatus,
     FlowStepResult,
 )
+from eneo.flows.domain.flow_webhook_delivery import WebhookDeliveryIntent
 from eneo.flows.domain.runtime import RuntimeStep
 from eneo.flows.domain.step_output import RejectedCompletion, RejectedOutput
 from eneo.flows.enums import FlowStepPhase, is_terminal_flow_run_status
@@ -17,10 +18,7 @@ from eneo.flows.flow_api_error_code import FlowApiErrorCode
 from eneo.flows.flow_error_taxonomy import FLOW_ERROR_TAXONOMY
 from eneo.flows.flow_run_error import FlowRunErrorDetails
 from eneo.flows.runtime.claim_resolution import StepClaimResolution
-from eneo.flows.runtime.step_execution_result import (
-    StepExecutionResult,
-    WebhookDeliveryIntent,
-)
+from eneo.flows.runtime.step_execution_result import StepExecutionResult
 from eneo.flows.runtime.step_result_builder import (
     build_completed_step_result,
     build_failed_step_result,

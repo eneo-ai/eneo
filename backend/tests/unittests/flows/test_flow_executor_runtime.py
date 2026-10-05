@@ -45,6 +45,10 @@ from eneo.flows.domain.flow_run_exceptions import FlowRunPersistenceInvariantErr
 from eneo.flows.domain.flow_step_attempt_input import (
     FlowStepAttemptStart,
 )
+from eneo.flows.domain.flow_webhook_delivery import (
+    WebhookDeliveryIntent,
+    WebhookPayloadRef,
+)
 from eneo.flows.domain.mapped_execution_policy import FlowMappedExecutionPolicy
 from eneo.flows.domain.provider_call_evidence_gap import ProviderCallEvidenceGap
 from eneo.flows.domain.rag_evidence_policy import FlowRagEvidencePolicy
@@ -95,11 +99,7 @@ from eneo.flows.runtime.executor import (
 from eneo.flows.runtime.flow_run_actor import FlowRunActor
 from eneo.flows.runtime.generated_file_names import GeneratedFileNames
 from eneo.flows.runtime.output_runtime import TypedOutputProcessingResult
-from eneo.flows.runtime.step_execution_result import (
-    StepExecutionResult,
-    WebhookDeliveryIntent,
-    WebhookPayloadRef,
-)
+from eneo.flows.runtime.step_execution_result import StepExecutionResult
 from eneo.flows.runtime.step_execution_runtime import (
     RAG_RETRIEVAL_QUERY_CHAR_LIMIT,
     build_output_payload,
