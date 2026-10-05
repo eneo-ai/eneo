@@ -1,13 +1,7 @@
 import { redirect } from "next/navigation";
 import { cookies } from "next/headers";
 import { env } from "@/lib/env";
-import {
-  needsRefresh,
-  openSession,
-  sealSession,
-  type SessionPayload
-} from "@/lib/auth/session-codec";
-import { refreshTokens } from "@/lib/auth/oidc";
+import { openSession, sealSession, type SessionPayload } from "@/lib/auth/session-codec";
 
 export const SESSION_COOKIE = "eneo_session";
 /** Short-lived cookie carrying the OIDC authorization transaction. */
@@ -61,49 +55,10 @@ export async function requireSession(): Promise<SessionPayload> {
   return session;
 }
 
-/**
- * Returns a currently-valid access token, or null when there is no session
- * left to save (no cookie, refresh rejected, or an expired password-mode
- * token — no refresh until RB-3). Refreshes when needed.
- *
- * The primary sliding refresh happens in proxy.ts (which can always write
- * cookies). This path covers everything proxy.ts skips: in route handlers
- * and server actions the refreshed session is persisted; in RSC rendering
- * cookie writes throw, so the refreshed token is used in-memory and
- * persistence is left to the next proxied request.
- */
+/** Read-only in RSC, handlers and actions. proxy.ts owns refresh and persistence. */
 export async function getAccessTokenOrNull(): Promise<string | null> {
   const session = await getSession();
-  if (!session) return null;
-  if (!needsRefresh(session)) return session.accessToken;
-
-  if (session.mode === "oidc" && session.refreshToken) {
-    let refreshed;
-    try {
-      refreshed = await refreshTokens(session.refreshToken);
-    } catch {
-      // Refresh token rejected or IdP unreachable: the session is over.
-      return null;
-    }
-    const next: SessionPayload = {
-      ...session,
-      accessToken: refreshed.accessToken,
-      accessTokenExpiresAt: refreshed.accessTokenExpiresAt,
-      refreshToken: refreshed.refreshToken ?? session.refreshToken,
-      idToken: refreshed.idToken ?? session.idToken
-    };
-    try {
-      await setSessionCookie(next);
-    } catch {
-      // RSC render: cookies are read-only here; proxy.ts persists on the
-      // next request.
-    }
-    return next.accessToken;
-  }
-
-  if (session.accessTokenExpiresAt <= Math.floor(Date.now() / 1000)) {
-    return null;
-  }
+  if (!session || session.accessTokenExpiresAt <= Math.floor(Date.now() / 1000)) return null;
   return session.accessToken;
 }
 

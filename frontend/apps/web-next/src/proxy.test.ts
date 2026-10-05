@@ -1,9 +1,68 @@
 import { NextRequest } from "next/server";
-import { expect, it } from "vitest";
+import { afterEach, expect, it, vi } from "vitest";
 import { env } from "@/lib/env";
 import { SESSION_COOKIE } from "@/lib/auth/session";
-import { sealSession } from "@/lib/auth/session-codec";
+import { openSession, sealSession } from "@/lib/auth/session-codec";
 import { buildContentSecurityPolicy, proxy } from "./proxy";
+
+const refresh = vi.hoisted(() => vi.fn());
+vi.mock("@/lib/auth/oidc", () => ({ refreshTokens: refresh }));
+afterEach(() => vi.resetAllMocks());
+
+it.each(["/api/eneo/api/v1/files/", "/api/chat", "/deactivated", "/module-login"])(
+  "persists OIDC refresh before forwarding %s",
+  async (path) => {
+    refresh.mockResolvedValue({
+      accessToken: "new-access",
+      refreshToken: "new-refresh",
+      accessTokenExpiresAt: Math.floor(Date.now() / 1000) + 3600
+    });
+    const raw = await sealSession(
+      {
+        mode: "oidc",
+        accessToken: "old-access",
+        refreshToken: "old-refresh",
+        accessTokenExpiresAt: Math.floor(Date.now() / 1000) + 30,
+        user: { email: "anna@example.se" }
+      },
+      env.SESSION_SECRET,
+      3600
+    );
+    const response = await proxy(
+      new NextRequest(new URL(path, "http://localhost:3100"), {
+        headers: { cookie: `${SESSION_COOKIE}=${raw}` }
+      })
+    );
+    expect(response.status).toBe(200);
+    const renewed = response.cookies.get(SESSION_COOKIE)!.value;
+    expect((await openSession(renewed, env.SESSION_SECRET))?.refreshToken).toBe("new-refresh");
+    expect(response.headers.get("x-middleware-request-cookie")).toContain(renewed);
+    expect(refresh).toHaveBeenCalledExactlyOnceWith("old-refresh");
+  }
+);
+
+it("returns JSON 401 when refresh fails for an API request", async () => {
+  refresh.mockRejectedValue(new Error("Rejected"));
+  const raw = await sealSession(
+    {
+      mode: "oidc",
+      accessToken: "expired",
+      refreshToken: "old",
+      accessTokenExpiresAt: 1,
+      user: { email: "anna@example.se" }
+    },
+    env.SESSION_SECRET,
+    3600
+  );
+  const response = await proxy(
+    new NextRequest("http://localhost:3100/api/chat", {
+      headers: { cookie: `${SESSION_COOKIE}=${raw}` }
+    })
+  );
+  expect(response.status).toBe(401);
+  expect(response.headers.get("location")).toBeNull();
+  expect(await response.json()).toEqual({ message: "Unauthenticated" });
+});
 
 const IPHONE =
   "Mozilla/5.0 (iPhone; CPU iPhone OS 18_0 like Mac OS X) AppleWebKit/605.1.15 Mobile/15E148";

@@ -118,37 +118,42 @@ export async function proxy(request: NextRequest) {
     }
   }
 
-  // API routes handle auth themselves (401 JSON, not a login redirect), and
-  // /api/eneo needs its trailing slash intact for the backend.
-  if (pathname.startsWith("/api/")) {
-    return withContentSecurityPolicy(
-      NextResponse.next({ request: { headers: securityRequestHeaders } }),
-      csp
-    );
-  }
+  const apiRequest = pathname.startsWith("/api/");
+  const publicPage = isPublic(pathname);
+  // These public pages can consume an existing session during RSC rendering.
+  const sessionPage = ["/deactivated", "/activate", "/module-login"].some(
+    (prefix) => pathname === prefix || pathname.startsWith(`${prefix}/`)
+  );
+  const pass = () => authenticatedResponse(securityRequestHeaders, csp);
+  const rejected = () => {
+    if (!apiRequest && !publicPage) return loginRedirect(request, csp);
+    const response = apiRequest
+      ? withContentSecurityPolicy(
+          NextResponse.json({ message: "Unauthenticated" }, { status: 401 }),
+          csp
+        )
+      : pass();
+    response.cookies.delete(SESSION_COOKIE);
+    return response;
+  };
 
   // skipTrailingSlashRedirect (needed for /api/eneo) disables the built-in
   // normalization, so page routes strip the trailing slash here instead.
   // Plain URL on purpose: NextURL's pathname setter re-applies the original
   // trailing slash, which would redirect to itself.
-  if (pathname.length > 1 && pathname.endsWith("/")) {
+  if (!apiRequest && pathname.length > 1 && pathname.endsWith("/")) {
     const url = new URL(request.url);
     url.pathname = pathname.replace(/\/+$/, "");
     return withContentSecurityPolicy(NextResponse.redirect(url, 308), csp);
   }
 
-  if (isPublic(pathname)) {
-    return withContentSecurityPolicy(
-      NextResponse.next({ request: { headers: securityRequestHeaders } }),
-      csp
-    );
-  }
+  if (publicPage && !sessionPage) return pass();
 
   const raw = request.cookies.get(SESSION_COOKIE)?.value;
-  if (!raw) return loginRedirect(request, csp);
+  if (!raw) return apiRequest || publicPage ? pass() : rejected();
 
   const session = await openSession(raw, env.SESSION_SECRET);
-  if (!session) return loginRedirect(request, csp);
+  if (!session) return rejected();
 
   if (session.mode === "oidc" && session.refreshToken && needsRefresh(session)) {
     let refreshed: SessionPayload;
@@ -163,7 +168,7 @@ export async function proxy(request: NextRequest) {
       };
     } catch {
       // Refresh token rejected or IdP unreachable: the session is over.
-      return loginRedirect(request, csp);
+      return rejected();
     }
 
     const sealed = await sealSession(refreshed, env.SESSION_SECRET, OIDC_SESSION_MAX_AGE_SECONDS);
@@ -193,7 +198,7 @@ export async function proxy(request: NextRequest) {
 
   // Password mode has no refresh (until RB-3): an expired token means login.
   if (session.accessTokenExpiresAt <= Math.floor(Date.now() / 1000)) {
-    return loginRedirect(request, csp);
+    return rejected();
   }
 
   return authenticatedResponse(securityRequestHeaders, csp);
