@@ -91,7 +91,7 @@ class TestKnowledgeModeGating:
             collections=assistant.collections,
             websites=assistant.websites,
             integration_knowledge_list=assistant.integration_knowledge_list,
-            num_chunks=30,
+            context_window_tokens=100_000,
             version=1,
         )
         kwargs = completion_service.get_response.await_args.kwargs
