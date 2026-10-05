@@ -19,6 +19,7 @@
     method,
     isPublished,
     flowId,
+    stepId,
     variableContext,
     onConfigChange
   }: {
@@ -27,6 +28,7 @@
     method: HttpMethod;
     isPublished: boolean;
     flowId: string;
+    stepId?: string | null;
     variableContext?: VariablePickerContext;
     onConfigChange?: (detail: { config: HttpAuthoredConfig }) => void;
   } = $props();
@@ -179,6 +181,6 @@
     fullWidth={true}
     density="compact"
   >
-    <HttpTestConnection {config} {direction} {method} {flowId} {isPublished} />
+    <HttpTestConnection {config} {direction} {method} {flowId} {stepId} {isPublished} />
   </Settings.Row>
 </FlowStepSection>

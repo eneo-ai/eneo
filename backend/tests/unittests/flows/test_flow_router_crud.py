@@ -56,7 +56,11 @@ from eneo.flows.flow_api_error_code import FlowApiErrorCode
 from eneo.flows.http_transport import SECRET_SENTINEL, HttpTransportError
 from eneo.flows.http_transport.request_preview import HttpRequestPreview
 from eneo.flows.http_transport.test_action import HttpTestResult
-from eneo.main.exceptions import UnauthorizedException
+from eneo.main.exceptions import (
+    BadRequestException,
+    NotFoundException,
+    UnauthorizedException,
+)
 from eneo.roles.permissions import Permission
 from tests.unit.api_key_test_utils import flatten_routes
 from tests.unittests.flows.test_flow_router import (
@@ -97,6 +101,7 @@ def test_test_flow_http_rejects_malformed_config_at_request_boundary(monkeypatch
     response = client.post(
         f"/{uuid4()}/http-test",
         json={
+            "step_id": str(uuid4()),
             "config": {
                 "url": "https://example.org/api",
                 "auth": {"mode": "not-a-real-auth-mode"},
@@ -108,6 +113,10 @@ def test_test_flow_http_rejects_malformed_config_at_request_boundary(monkeypatch
     )
 
     assert response.status_code == 422
+    assert any(
+        error["loc"][:3] == ["body", "config", "auth"]
+        for error in response.json()["detail"]
+    )
 
 
 @pytest.mark.asyncio
@@ -147,6 +156,7 @@ async def test_test_flow_http_returns_typed_success_payload(monkeypatch):
         id=flow_id,
         request=_request(),
         body=HttpTestRequest(
+            step_id=flow.steps[0].id,
             config={
                 "url": "https://example.org/api",
                 "auth": {"mode": "none"},
@@ -177,6 +187,7 @@ async def test_test_flow_http_returns_typed_success_payload(monkeypatch):
     assert audit_event["user"] is user
     assert audit_event["metadata"]["extra"] == {
         "flow_id": str(flow_id),
+        "step_id": str(flow.steps[0].id),
         "test_direction": "output",
         "test_success": True,
         "status_code": 200,
@@ -186,22 +197,27 @@ async def test_test_flow_http_returns_typed_success_payload(monkeypatch):
     assert audit_event["error_message"] is None
 
 
+@pytest.mark.parametrize("direction", ["input", "output"])
 @pytest.mark.asyncio
-async def test_test_flow_http_round_trips_stored_bearer_secret(monkeypatch):
+async def test_http_test_restored_first_step_secret_does_not_replace_selected_second(
+    monkeypatch, direction
+):
+    # Mutant: restore the first HTTP config instead of the selected step's config.
     container = MagicMock()
     flow_id = uuid4()
     user = _user()
     flow_service = AsyncMock()
+    first_step_id, selected_step_id = uuid4(), uuid4()
     flow = _flow(flow_id).model_copy(
         update={
             "steps": [
-                _flow_step(uuid4(), 1).model_copy(
+                _flow_step(first_step_id, 1).model_copy(
                     update={
-                        "output_config": {
+                        f"{direction}_config": {
                             "url": "https://example.org/api",
                             "auth": {
                                 "mode": "bearer_token",
-                                "token": "stored-token",
+                                "token": "first-step-token",
                             },
                             "body": {"mode": "auto"},
                             "custom_headers": [],
@@ -212,6 +228,18 @@ async def test_test_flow_http_round_trips_stored_bearer_secret(monkeypatch):
             ]
         }
     )
+    first_step = flow.steps[0]
+    second_step = first_step.model_copy(
+        update={
+            "id": selected_step_id,
+            "step_order": 2,
+            f"{direction}_config": {
+                **getattr(first_step, f"{direction}_config"),
+                "auth": {"mode": "bearer_token", "token": "second-step-token"},
+            },
+        }
+    )
+    flow.steps.append(second_step)
     flow.owner_user_id = user.id
     flow_service.get_flow.return_value = flow
     container.flow_service.return_value = flow_service
@@ -243,6 +271,7 @@ async def test_test_flow_http_round_trips_stored_bearer_secret(monkeypatch):
         id=flow_id,
         request=_request(),
         body=HttpTestRequest(
+            step_id=selected_step_id,
             config={
                 "url": "https://example.org/api",
                 "auth": {
@@ -253,14 +282,14 @@ async def test_test_flow_http_round_trips_stored_bearer_secret(monkeypatch):
                 "custom_headers": [],
                 "timeout_seconds": 30,
             },
-            direction="output",
+            direction=direction,
             method="POST",
         ),
         container=container,
     )
 
     assert response.success is True
-    assert sent["headers"] == {"Authorization": "Bearer stored-token"}
+    assert sent["headers"] == {"Authorization": "Bearer second-step-token"}
 
 
 @pytest.mark.asyncio
@@ -310,6 +339,7 @@ async def test_test_flow_http_interpolates_variables_with_real_executor(monkeypa
         id=flow_id,
         request=_request(),
         body=HttpTestRequest(
+            step_id=flow.steps[0].id,
             config={
                 "url": "{{base_url}}/api/{{name}}",
                 "auth": {"mode": "none"},
@@ -479,6 +509,7 @@ async def test_test_flow_http_sends_through_the_flow_http_runtime(monkeypatch):
         id=flow_id,
         request=_request(),
         body=HttpTestRequest(
+            step_id=flow.steps[0].id,
             config={
                 "url": "https://example.org/api",
                 "auth": {"mode": "none"},
@@ -522,6 +553,7 @@ async def test_test_flow_http_returns_typed_failure_for_private_url(monkeypatch)
         id=flow_id,
         request=_request(),
         body=HttpTestRequest(
+            step_id=flow.steps[0].id,
             config={
                 "url": "http://127.0.0.1/private",
                 "auth": {"mode": "none"},
@@ -544,6 +576,7 @@ async def test_test_flow_http_returns_typed_failure_for_private_url(monkeypatch)
     assert audit_event["error_message"] == HttpTransportError.BLOCKED_URL.value
     assert audit_event["metadata"]["extra"] == {
         "flow_id": str(flow_id),
+        "step_id": str(flow.steps[0].id),
         "test_direction": "output",
         "test_success": False,
         "status_code": None,
@@ -551,30 +584,32 @@ async def test_test_flow_http_returns_typed_failure_for_private_url(monkeypatch)
     }
 
 
-def test_find_stored_http_config_logs_parse_failures(caplog, monkeypatch):
-    flow = _flow(uuid4()).model_copy(
-        update={
-            "steps": [
-                _flow_step(uuid4(), 1).model_copy(
-                    update={
-                        "output_config": {
-                            "auth": "bad",
-                        }
-                    }
-                )
-            ]
-        }
-    )
+def test_http_test_invalid_selected_config_is_not_skipped_for_another_step() -> None:
+    # Mutant: swallow selected-config validation and search another step's credentials.
+    flow = _flow(uuid4())
+    step = flow.steps[0]
+    step.output_config = {"auth": "bad"}
+    fallback_step = _flow(uuid4()).steps[0]
+    fallback_step.output_config = {
+        "url": "https://example.org/api",
+        "auth": {"mode": "none"},
+        "body": {"mode": "auto"},
+    }
+    flow.steps.append(fallback_step)
+    with pytest.raises(BadRequestException) as exc:
+        flow_http_test_router_module.find_stored_http_config(flow, step.id, "output")
+    assert exc.value.context == {"step_id": str(step.id)}
 
-    logger = flow_http_test_router_module.logger
-    monkeypatch.setattr(logger, "disabled", False)
-    monkeypatch.setattr(logger, "propagate", True)
 
-    with caplog.at_level("WARNING", logger=logger.name):
-        result = flow_http_test_router_module.find_stored_http_config(flow, "output")
-
-    assert result is None
-    assert "Failed to parse stored HTTP config" in caplog.text
+def test_http_test_foreign_step_does_not_restore_flow_credentials() -> None:
+    # Mutant: use a flow config after failing to find the requested step.
+    flow = _flow(uuid4())
+    foreign_step_id = uuid4()
+    with pytest.raises(NotFoundException) as exc:
+        flow_http_test_router_module.find_stored_http_config(
+            flow, foreign_step_id, "output"
+        )
+    assert exc.value.context == {"step_id": str(foreign_step_id)}
 
 
 @pytest.mark.asyncio

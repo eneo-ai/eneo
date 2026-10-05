@@ -39,6 +39,7 @@
     outputModeUsesCompletionModel
   } from "$lib/features/flows/flowStepTypes";
   import HttpConfigPanel from "./http/HttpConfigPanel.svelte";
+  import { stripTemporaryStepId } from "$lib/features/flows/flowStepPayloadShaping";
   import { parseHttpAuthoredConfig, type HttpAuthoredConfig } from "./http/httpConfigTypes";
   import { createDefaultHttpConfig } from "./http/httpConfigDefaults";
 
@@ -583,6 +584,7 @@
 {#if isHttpSource}
   <HttpConfigPanel
     config={httpConfig}
+    stepId={stripTemporaryStepId(step).id}
     direction="input"
     method={httpMethod}
     {isPublished}

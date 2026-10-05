@@ -1163,3 +1163,34 @@ it("pins the reviewed source and retry key when regenerating downstream output",
     }
   ]);
 });
+
+describe("flows HTTP test endpoint", () => {
+  it("uses the authenticated API base and retains the selected credential owner", async () => {
+    // Mutant: restore raw fetch, the wrong route, or drop step_id from the snapshot.
+    const response = { success: true, status_code: 204 };
+    const fetch = vi.fn(
+      async () =>
+        new Response(JSON.stringify(response), {
+          headers: { "Content-Type": "application/json" }
+        })
+    );
+    const flows = initFlows(
+      createClient({ baseUrl: "https://eneo.example", token: "test-token", fetch })
+    );
+    const request = {
+      step_id: "step-2",
+      direction: "output",
+      method: "POST",
+      config: { url: "https://api.example.com", auth: { mode: "none" } },
+      test_variables: { name: "Alex" }
+    };
+
+    expect(await flows.httpTest({ id: "flow-1", request })).toEqual(response);
+    expect(fetch).toHaveBeenCalledTimes(1);
+    const [url, init] = fetch.mock.calls[0];
+    expect(String(url)).toBe("https://eneo.example/api/v1/flows/flow-1/http-test");
+    expect(init.method).toBe("POST");
+    expect(new Headers(init.headers).get("Authorization")).toBe("Bearer test-token");
+    expect(JSON.parse(init.body)).toEqual(request);
+  });
+});

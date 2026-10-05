@@ -12,21 +12,26 @@
   } from "@eneo/eneo-js";
   import type { HttpAuthoredConfig, HttpDirection, HttpMethod } from "./httpConfigTypes";
   import { parseHttpTestVariables } from "./httpTestVariables";
+  import { getEneo } from "$lib/core/Eneo";
+  import { getFlowRuntimeErrorMessage } from "$lib/features/flows/flowRuntimeErrorMapping";
 
   let {
     config,
     direction,
     method,
     flowId,
+    stepId,
     isPublished
   }: {
     config: HttpAuthoredConfig;
     direction: HttpDirection;
     method: HttpMethod;
     flowId: string;
+    stepId?: string | null;
     isPublished: boolean;
   } = $props();
 
+  const eneo = getEneo();
   let testing = $state(false);
   let testVariablesText = $state("{}");
   let result: FlowHttpTestResponse | null = $state(null);
@@ -34,7 +39,7 @@
   const hasTemplateMarkers = $derived.by(() => JSON.stringify(config).includes("{{"));
 
   async function runTest() {
-    if (!config.url.trim()) return;
+    if (!stepId || !config.url.trim()) return;
 
     const parsedVariables = hasTemplateMarkers
       ? parseHttpTestVariables(testVariablesText)
@@ -49,26 +54,15 @@
 
     try {
       const body: FlowHttpTestRequest = {
+        step_id: stepId,
         config,
         direction,
         method,
         test_variables: parsedVariables.value
       };
-      const response = await fetch(`/api/v1/flows/${flowId}/http-test`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(body)
-      });
-      if (!response.ok) {
-        const payload: unknown = await response.json().catch(() => null);
-        result = localError(apiEnvelopeMessage(response, payload));
-        return;
-      }
-
-      const payload: FlowHttpTestResponse = await response.json();
-      result = payload;
+      result = await eneo.flows.httpTest({ id: flowId, request: body });
     } catch (err) {
-      result = localError(err instanceof Error ? err.message : m.http_test_unknown_error());
+      result = localError(getFlowRuntimeErrorMessage(err, m.http_test_unknown_error()));
     } finally {
       testing = false;
     }
@@ -76,24 +70,6 @@
 
   function localError(message: string): FlowHttpTestResponse {
     return { success: false, error_message: message };
-  }
-
-  function apiEnvelopeMessage(response: Response, payload: unknown): string {
-    const envelopeMessage = readEnvelopeMessage(payload);
-    if (envelopeMessage) return `${response.status}: ${envelopeMessage}`;
-    if (response.statusText) return `${response.status} ${response.statusText}`;
-    return m.http_test_request_failed({ status: response.status });
-  }
-
-  function readEnvelopeMessage(payload: unknown): string | null {
-    if (!isRecord(payload)) return null;
-    if (typeof payload.detail === "string") return payload.detail;
-    if (typeof payload.message === "string") return payload.message;
-    return null;
-  }
-
-  function isRecord(value: unknown): value is Record<string, unknown> {
-    return typeof value === "object" && value !== null && !Array.isArray(value);
   }
 
   function formatPreviewHeaders(preview: FlowHttpRequestPreview): string {
@@ -121,7 +97,7 @@
     <Button
       variant="outline"
       size="sm"
-      disabled={isPublished || testing || !config.url.trim()}
+      disabled={isPublished || testing || !stepId || !config.url.trim()}
       onclick={runTest}
     >
       {#if testing}
@@ -132,6 +108,8 @@
     </Button>
     {#if !isPublished && !config.url.trim()}
       <span class="text-muted text-xs">{m.http_test_needs_url()}</span>
+    {:else if !isPublished && !stepId}
+      <span class="text-muted text-xs">{m.http_test_saved_step_required()}</span>
     {/if}
     <div role="status" aria-live="polite" class="min-w-0">
       {#if result}

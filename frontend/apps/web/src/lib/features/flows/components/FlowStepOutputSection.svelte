@@ -24,6 +24,7 @@
   } from "$lib/features/flows/flowStepTypes";
   import { getEnkelAwareOutputTypeLabel, getOutputHintText } from "./flowStepEditHelpers";
   import HttpConfigPanel from "./http/HttpConfigPanel.svelte";
+  import { stripTemporaryStepId } from "$lib/features/flows/flowStepPayloadShaping";
   import { parseHttpAuthoredConfig, type HttpAuthoredConfig } from "./http/httpConfigTypes";
   import { createDefaultHttpConfig } from "./http/httpConfigDefaults";
   import type { FlowOutputHintKind } from "$lib/features/flows/flowStepPresentation";
@@ -302,6 +303,7 @@
 {#if isAdvancedMode && step.output_mode === "http_post" && (step.output_config?.auth || !step.output_config?.url)}
   <HttpConfigPanel
     config={httpConfig}
+    stepId={stripTemporaryStepId(step).id}
     direction="output"
     method="POST"
     {isPublished}
