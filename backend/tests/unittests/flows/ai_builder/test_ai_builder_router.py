@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import itertools
 import json
 import logging
 from collections.abc import Iterator
@@ -124,7 +123,6 @@ from eneo.flows.ai_builder.planning_state import (
 from eneo.flows.flow_access_policy import (
     FlowAccessFilterMode,
     FlowApiAction,
-    user_can_perform_flow_action,
 )
 from eneo.main.exceptions import (
     AuditLoggingUnavailableException,
@@ -871,6 +869,105 @@ def test_classifier_diagnostic_projection_exposes_slot_omission() -> None:
     assert runs[0].diagnostics[0].code == "slot_outcome_omitted"
 
 
+_NO_BUILDER = "no_builder"
+_BUILDER_ACTIONS = [
+    action for action in FlowApiAction if action.value.startswith("builder_")
+]
+_TENANT = "insufficient_tenant_permission"
+_SERVICE_KEY = "flow_service_key_principal_not_supported"
+_SCOPE = "insufficient_scope"
+_SPACE_ROLE = "insufficient_space_permission"
+_CREATOR = "session_creator_required"
+_AUTH_LAYER = {
+    _SERVICE_KEY: "service_key_principal",
+    _TENANT: "tenant_role",
+    _SCOPE: "api_key_scope",
+    _SPACE_ROLE: "space_membership",
+    _CREATOR: "session_creator",
+}
+_PRINCIPAL_PERMISSIONS = {
+    "builder": [Permission.FLOWS, Permission.FLOWS_AI_BUILDER_REVIEW],
+    "builder_without_review": [Permission.FLOWS_MANAGE, Permission.FLOWS_AI_BUILDER],
+    _NO_BUILDER: [Permission.FLOWS_MANAGE],
+    "service_key": [],
+}
+# What the tenant-level check decides for each principal on a request nothing
+# else would refuse: the code a refused action carries, per action.
+_TENANT_OUTCOME = {
+    "builder": {},
+    "builder_without_review": {FlowApiAction.BUILDER_REVIEW: _TENANT},
+    _NO_BUILDER: {action: _TENANT for action in _BUILDER_ACTIONS},
+    "service_key": {action: _SERVICE_KEY for action in _BUILDER_ACTIONS},
+}
+# Request shapes in which every later check would also refuse (or, for
+# `visible`, be skipped): the tenant-level refusal must still come first.
+_LATER_REFUSALS = {
+    "visible": dict(visible=True),
+    "everything_else_refuses": dict(
+        scope="space_mismatch",
+        can_edit=False,
+        with_space=True,
+        who="other",
+        creator=True,
+    ),
+}
+# fmt: off
+_TENANT_CASES = [
+    pytest.param(principal, action, {}, outcome.get(action), id=f"{principal}-{action.value}")
+    for principal, outcome in _TENANT_OUTCOME.items()
+    for action in _BUILDER_ACTIONS
+] + [
+    pytest.param(
+        principal,
+        action,
+        _LATER_REFUSALS[shape],
+        code,
+        id=f"{principal}-{shape}",
+    )
+    for principal, action, code in (
+        ("builder_without_review", FlowApiAction.BUILDER_REVIEW, _TENANT),
+        (_NO_BUILDER, FlowApiAction.BUILDER_SESSION_READ, _TENANT),
+        ("service_key", FlowApiAction.BUILDER_SESSION_READ, _SERVICE_KEY),
+    )
+    for shape in _LATER_REFUSALS
+]
+# A principal that holds the Builder permissions. Columns: request scope, can
+# the caller edit flows in the space, request names a space, session creator
+# (none = no session), require_creator, visible filter, expected refusal
+# (None = allowed) and whether the space was loaded.
+_SPACE_CASES = [
+    # The visible filter skips everything after the tenant check and loads no space.
+    ("visible_skips_every_later_refusal", "space_mismatch", False, True, "other", True, True, None, False),
+    ("visible_spaceless_skips_creator", "none", False, False, "other", True, True, None, False),
+    ("visible_with_space_loads_none", "none", True, True, "own", False, True, None, False),
+    # No space named: scope and role are not consulted; only the creator is.
+    ("spaceless_ignores_scope_and_role", "space_mismatch", False, False, "none", False, False, None, False),
+    ("spaceless_other_creator_not_required", "none", False, False, "other", False, False, None, False),
+    ("spaceless_other_creator_refused", "none", False, False, "other", True, False, _CREATOR, False),
+    ("spaceless_mismatch_scope_creator_refused", "space_mismatch", False, False, "other", True, False, _CREATOR, False),
+    ("spaceless_own_creator_allowed", "none", False, False, "own", True, False, None, False),
+    ("spaceless_no_session_allowed", "none", False, False, "none", True, False, None, False),
+    # A space is named: key scope first, then role, then creator.
+    ("scope_mismatch_refuses_editor", "space_mismatch", True, True, "none", False, False, _SCOPE, False),
+    ("scope_mismatch_before_role", "space_mismatch", False, True, "none", False, False, _SCOPE, False),
+    ("scope_mismatch_before_creator", "space_mismatch", True, True, "other", True, False, _SCOPE, False),
+    ("viewer_refused_no_key_scope", "none", False, True, "none", False, False, _SPACE_ROLE, False),
+    ("viewer_refused_tenant_key", "tenant", False, True, "none", False, False, _SPACE_ROLE, False),
+    ("viewer_refused_matching_space_key", "space_match", False, True, "none", False, False, _SPACE_ROLE, False),
+    ("viewer_refused_before_creator", "none", False, True, "other", True, False, _SPACE_ROLE, False),
+    ("viewer_refused_even_as_creator", "none", False, True, "own", True, False, _SPACE_ROLE, False),
+    ("editor_allowed_no_key_scope", "none", True, True, "none", False, False, None, True),
+    ("editor_allowed_tenant_key", "tenant", True, True, "none", False, False, None, True),
+    ("editor_allowed_matching_space_key", "space_match", True, True, "none", False, False, None, True),
+    ("editor_other_creator_not_required", "none", True, True, "other", False, False, None, True),
+    ("editor_other_creator_refused", "none", True, True, "other", True, False, _CREATOR, False),
+    ("editor_other_creator_refused_matching_key", "space_match", True, True, "other", True, False, _CREATOR, False),
+    ("editor_own_creator_allowed", "none", True, True, "own", True, False, None, True),
+    ("editor_no_session_allowed", "none", True, True, "none", True, False, None, True),
+]
+# fmt: on
+
+
 class TestAuthorizeAIBuilderRequest:
     @pytest.mark.anyio
     async def test_allows_when_can_edit(self):
@@ -895,125 +992,113 @@ class TestAuthorizeAIBuilderRequest:
                 space_id=uuid4(),
             )
 
-    @pytest.mark.anyio
-    async def test_every_combination_keeps_its_outcome_and_precedence(self):
-        """principal x key scope x space role x Builder action x session x
-        require_creator x visible filter: status code, error code, auth layer
-        and which check refuses first. Space-less and visible requests never
-        load a space."""
+    @staticmethod
+    async def _authorize_as(
+        principal,
+        action,
+        *,
+        scope="none",
+        can_edit=True,
+        with_space=False,
+        who="none",
+        creator=False,
+        visible=False,
+    ):
         space_id = uuid4()
-        principals = {
-            "builder": [Permission.FLOWS, Permission.FLOWS_AI_BUILDER_REVIEW],
-            "no_builder": [Permission.FLOWS_MANAGE],
-            "service_key": [],
-        }
-        scopes = {
+        key_scopes = {
             "none": None,
             "tenant": ("tenant", None),
             "space_match": ("space", space_id),
             "space_mismatch": ("space", uuid4()),
         }
-        edit_roles = {"editor", "admin", "owner"}
-        builder_actions = [
-            action for action in FlowApiAction if action.value.startswith("builder_")
-        ]
-        layers = {
-            "flow_service_key_principal_not_supported": "service_key_principal",
-            "insufficient_tenant_permission": "tenant_role",
-            "insufficient_scope": "api_key_scope",
-            "insufficient_space_permission": "space_membership",
-            "session_creator_required": "session_creator",
-        }
+        container = _make_container(can_edit_flows=can_edit)
+        user = container.user.return_value
+        user.permissions = _PRINCIPAL_PERMISSIONS[principal]
+        user.active_api_key = (
+            SimpleNamespace(
+                id=uuid4(),
+                ownership="service",
+                service_principal_id=uuid4(),
+                scope_type="tenant",
+                scope_id=None,
+                permission="admin",
+            )
+            if principal == "service_key"
+            else None
+        )
+        request = MagicMock()
+        request.state = (
+            SimpleNamespace()
+            if key_scopes[scope] is None
+            else SimpleNamespace(
+                api_key_scope_type=key_scopes[scope][0],
+                api_key_scope_id=key_scopes[scope][1],
+            )
+        )
+        session = (
+            None
+            if who == "none"
+            else _make_session_domain(
+                space_id=space_id,
+                actor_user_id=user.id if who == "own" else uuid4(),
+            )
+        )
+        try:
+            authorization = await _authorize_ai_builder_request(
+                request,
+                container,
+                action=action,
+                space_id=space_id if with_space else None,
+                session=session,
+                require_creator=creator,
+                filter_mode=FlowAccessFilterMode.VISIBLE if visible else None,
+            )
+            return container, authorization, None
+        except UnauthorizedException as error:
+            assert error.context is not None
+            assert error.context["auth_layer"] == _AUTH_LAYER[error.code]
+            return container, None, error.code
 
-        def expected(principal, action, scope, role, with_space, who, creator, visible):
-            if principal == "service_key":
-                return "flow_service_key_principal_not_supported"
-            if not user_can_perform_flow_action(
-                SimpleNamespace(permissions=principals[principal]), action
-            ):
-                return "insufficient_tenant_permission"
-            if visible:
-                return None
-            creator_refused = creator and who == "other"
-            if not with_space:
-                return "session_creator_required" if creator_refused else None
-            if scope == "space_mismatch":
-                return "insufficient_scope"
-            if role not in edit_roles:
-                return "insufficient_space_permission"
-            return "session_creator_required" if creator_refused else None
+    @pytest.mark.anyio
+    @pytest.mark.parametrize("principal, action, shape, expected", _TENANT_CASES)
+    async def test_tenant_level_check_decides_first(
+        self, principal, action, shape, expected
+    ):
+        """Kills: a dropped or swapped principal check, a dropped action
+        requirement, the visible filter or any later refusal running before
+        the tenant-level check."""
+        _, authorization, code = await self._authorize_as(principal, action, **shape)
+        assert code == expected
+        assert (authorization is not None) == (expected is None)
 
-        cases = 0
-        for combination in itertools.product(
-            principals,
-            builder_actions,
-            scopes,
-            ("viewer", "editor", "admin", "owner"),
-            (True, False),
-            ("none", "own", "other"),
-            (True, False),
-            (True, False),
-        ):
-            principal, action, scope, role, with_space, who, creator, visible = (
-                combination
-            )
-            container = _make_container(can_edit_flows=role in edit_roles)
-            user = container.user.return_value
-            user.permissions = principals[principal]
-            user.active_api_key = (
-                SimpleNamespace(
-                    id=uuid4(),
-                    ownership="service",
-                    service_principal_id=uuid4(),
-                    scope_type="tenant",
-                    scope_id=None,
-                    permission="admin",
-                )
-                if principal == "service_key"
-                else None
-            )
-            request = MagicMock()
-            request.state = (
-                SimpleNamespace()
-                if scopes[scope] is None
-                else SimpleNamespace(
-                    api_key_scope_type=scopes[scope][0],
-                    api_key_scope_id=scopes[scope][1],
-                )
-            )
-            session = (
-                None
-                if who == "none"
-                else _make_session_domain(
-                    space_id=space_id,
-                    actor_user_id=user.id if who == "own" else uuid4(),
-                )
-            )
-            try:
-                authorization = await _authorize_ai_builder_request(
-                    request,
-                    container,
-                    action=action,
-                    space_id=space_id if with_space else None,
-                    session=session,
-                    require_creator=creator,
-                    filter_mode=FlowAccessFilterMode.VISIBLE if visible else None,
-                )
-                refused = None
-            except UnauthorizedException as error:
-                refused = error
-            want = expected(*combination)
-            assert (refused.code if refused else None) == want, combination
-            if refused is not None:
-                assert refused.context is not None
-                assert refused.context["auth_layer"] == layers[want], combination
-            elif visible or not with_space:
-                assert authorization.space is None, combination
+    @pytest.mark.anyio
+    @pytest.mark.parametrize(
+        "scope, can_edit, with_space, who, creator, visible, expected, space_loaded",
+        [pytest.param(*row[1:], id=row[0]) for row in _SPACE_CASES],
+    )
+    async def test_space_scope_role_and_creator_checks(
+        self, scope, can_edit, with_space, who, creator, visible, expected, space_loaded
+    ):
+        """Kills: the visible filter or a space-less request skipping the creator
+        check, a dropped key-scope check, an edit permission that never refuses,
+        a creator check that is dropped, inverted or runs when not required, and
+        any reordering of scope, role and creator."""
+        container, authorization, code = await self._authorize_as(
+            "builder",
+            FlowApiAction.BUILDER_SESSION_READ,
+            scope=scope,
+            can_edit=can_edit,
+            with_space=with_space,
+            who=who,
+            creator=creator,
+            visible=visible,
+        )
+        assert code == expected
+        if expected is None:
+            assert authorization is not None
+            assert (authorization.space is not None) == space_loaded
+            if not space_loaded:
                 container.space_service.return_value.get_space.assert_not_called()
-            else:
-                assert authorization.space is not None, combination
-            cases += 1
-        assert cases == 3 * len(builder_actions) * 4 * 4 * 2 * 3 * 2 * 2
 
 
 # ---------------------------------------------------------------------------
