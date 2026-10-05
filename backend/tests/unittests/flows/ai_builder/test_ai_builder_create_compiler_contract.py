@@ -1964,11 +1964,8 @@ def test_audio_input_translates_source_reader_obligation_instead_of_dead_ending(
     assert validate_spec(compiled).valid
 
 
-def test_translated_obligation_survives_dropped_terminal_render_helper() -> None:
-    # When the model's intent ends with an explicit "create the DOCX" helper,
-    # assembly drops that helper during normalization. The server-owned
-    # obligation must land on the RETAINED content producer — never on the
-    # helper that is about to disappear.
+def test_kept_terminal_step_receives_server_obligation() -> None:
+    # Mutant: put the server obligation on the predecessor after keeping the last step.
     intent = parse_create_flow_intent_arguments(
         {
             "flow_name": "Beslutsunderlag från möte",
@@ -2006,10 +2003,13 @@ def test_translated_obligation_survives_dropped_terminal_render_helper() -> None
     ] == [
         (InputType.AUDIO, OutputType.TEXT, OutputMode.TRANSCRIBE_ONLY),
         (InputType.TEXT, OutputType.TEXT, OutputMode.PASS_THROUGH),
+        (InputType.TEXT, OutputType.TEXT, OutputMode.PASS_THROUGH),
         (InputType.TEXT, OutputType.DOCX, OutputMode.RENDER_VERBATIM),
     ]
-    writer_step = compiled.steps[1]
-    renderer_step = compiled.steps[2]
+    writer_step = compiled.steps[-2]
+    renderer_step = compiled.steps[-1]
+    assert writer_step.name == "Skapa DOCX"
+    assert "Skapa DOCX-dokumentet." in writer_step.assistant_spec.instructions
     assert "sammanfattning" in writer_step.assistant_spec.instructions.lower()
     assert "sammanfattning" not in renderer_step.assistant_spec.instructions.lower()
     assert validate_spec(compiled).valid
@@ -5734,162 +5734,58 @@ def test_document_artifact_keeps_body_writer_before_render_verbatim_renderer(
 
 
 @pytest.mark.parametrize(
-    ("helper_name", "helper_instructions"),
+    ("final_output_type", "name", "instructions"),
     [
-        (
-            "Formatera slutrapporten",
-            "Omvandla den färdiga rapporttexten till en professionell PDF "
-            "med tydlig struktur och läsbar layout.",
-        ),
-        ("Skapa PDF-rapport", "Skapa slutrapporten från den färdiga rapporttexten."),
+        (OutputType.PDF, "Skriv protokoll", "Skriv mötets beslut och skäl för PDF."),
+        (OutputType.PDF, "PDF-protokoll", "Skriv mötets beslut och skäl."),
+        (OutputType.DOCX, "Skriv protokoll", "Skriv mötets beslut och skäl för DOCX."),
+        (OutputType.DOCX, "DOCX-protokoll", "Skriv mötets beslut och skäl."),
     ],
 )
-def test_document_artifact_drops_explicit_pdf_render_helper(
-    helper_name: str,
-    helper_instructions: str,
+def test_generated_document_keeps_authored_step_that_text_match_would_drop(
+    final_output_type: OutputType, name: str, instructions: str
 ) -> None:
-    outline = parse_create_flow_intent_arguments(
+    # Mutant: restore the text-based drop when the final step names the artifact.
+    intent = parse_create_flow_intent_arguments(
         {
-            "flow_name": "Dokumentanalys till PDF",
-            "plan_rationale": (
-                "Läs dokument, skriv rapportinnehåll och leverera som PDF."
-            ),
+            "flow_name": "Mötesprotokoll",
+            "plan_rationale": "Transkribera och skriv beslut med motivering.",
             "steps": [
+                {"name": "Sammanställ fakta", "instructions": "Läs mötets fakta."},
                 {
-                    "name": "Identifiera dokumentens innehåll",
-                    "instructions": (
-                        "Läs varje inskickat dokument och avgör vad det är för "
-                        "typ av dokument, vilket ämne det handlar om, kategori, "
-                        "datum, författare och slutsatser."
-                    ),
+                    "name": name,
+                    "instructions": instructions,
                     "output_fields": [
                         {
-                            "name": "documents",
-                            "field_type": "array",
-                            "description": (
-                                "En post per dokument i körningen med de uppgifter "
-                                "som ska användas i rapporten."
-                            ),
-                        }
-                    ],
-                },
-                {
-                    "name": "Skriv rapportinnehåll",
-                    "instructions": (
-                        "Använd den extraherade informationen för att skriva den "
-                        "fullständiga rapporttexten för PDF:en. Presentera varje "
-                        "dokument tydligt med titel, år, kategori, dokumenttyp, "
-                        "författare, slutsatser och en kort sammanfattning."
-                    ),
-                },
-                {
-                    "name": helper_name,
-                    "instructions": helper_instructions,
-                },
-            ],
-        }
-    )
-
-    compiled = compile_create_intent_to_spec(
-        outline,
-        context=CreateCompileContext(
-            runtime_input_type=InputType.DOCUMENT,
-            final_output_type=OutputType.PDF,
-            final_output_mode=OutputMode.PASS_THROUGH,
-            aggregation_intent=cast(AggregationIntent, "linear"),
-        ),
-    )
-
-    assert [step.name for step in compiled.steps] == [
-        "Identifiera dokumentens innehåll",
-        "Skriv rapportinnehåll",
-        "Rendera PDF",
-    ]
-    assert [step.output_type for step in compiled.steps] == [
-        OutputType.JSON,
-        OutputType.TEXT,
-        OutputType.PDF,
-    ]
-    body_step = compiled.steps[-2]
-    renderer_step = compiled.steps[-1]
-    assert renderer_step.input_source == InputSource.PREVIOUS_STEP
-    assert renderer_step.input_type == InputType.TEXT
-    assert renderer_step.output_mode == OutputMode.RENDER_VERBATIM
-    assert renderer_step.input_bindings is None
-    assert renderer_step.plan_step_ref != body_step.plan_step_ref
-    assert compiled.document_body_writer_step_refs == (body_step.plan_step_ref,)
-    assert validate_spec(compiled).valid
-
-
-def test_document_artifact_folds_terminal_helper_fields_into_body_writer() -> None:
-    outline = parse_create_flow_intent_arguments(
-        {
-            "flow_name": "Dokumentanalys till PDF",
-            "plan_rationale": (
-                "Läs dokument, skriv rapportinnehåll och leverera som PDF."
-            ),
-            "steps": [
-                {
-                    "name": "Identifiera dokumentens innehåll",
-                    "instructions": "Läs dokumenten och extrahera källfakta.",
-                    "output_fields": [
-                        {
-                            "name": "documents",
-                            "field_type": "array",
-                            "description": "Dokumentfakta per fil.",
-                        }
-                    ],
-                },
-                {
-                    "name": "Skriv rapportinnehåll",
-                    "instructions": "Skriv den fullständiga rapporttexten.",
-                },
-                {
-                    "name": "Skapa PDF-rapport",
-                    "instructions": "Skapa slutrapporten som PDF.",
-                    "output_fields": [
-                        {
-                            "name": "author_or_source",
+                            "name": "decision_reasons",
                             "field_type": "string",
-                            "description": "Vem som skrev dokumentet.",
-                        },
-                        {
-                            "name": "conclusions",
-                            "field_type": "array",
-                            "description": "Dokumentets slutsatser.",
-                        },
+                            "description": "Skäl för mötets beslut.",
+                        }
                     ],
                 },
             ],
         }
     )
-
     compiled = compile_create_intent_to_spec(
-        outline,
+        intent,
         context=CreateCompileContext(
-            runtime_input_type=InputType.DOCUMENT,
-            final_output_type=OutputType.PDF,
-            final_output_mode=OutputMode.PASS_THROUGH,
-            aggregation_intent=cast(AggregationIntent, "linear"),
+            runtime_input_type=InputType.AUDIO,
+            final_output_type=final_output_type,
+            final_output_mode=OutputMode.RENDER_VERBATIM,
         ),
     )
 
-    assert [step.name for step in compiled.steps] == [
-        "Identifiera dokumentens innehåll",
-        "Skriv rapportinnehåll",
-        "Rendera PDF",
+    assert [(s.input_type, s.output_type, s.output_mode) for s in compiled.steps] == [
+        (InputType.AUDIO, OutputType.TEXT, OutputMode.TRANSCRIBE_ONLY),
+        (InputType.TEXT, OutputType.TEXT, OutputMode.PASS_THROUGH),
+        (InputType.TEXT, OutputType.TEXT, OutputMode.PASS_THROUGH),
+        (InputType.TEXT, final_output_type, OutputMode.RENDER_VERBATIM),
     ]
-    body_step = compiled.steps[-2]
-    renderer_step = compiled.steps[-1]
-    assert body_step.output_type == OutputType.TEXT
-    # The fold carries field MEANINGS, never machine keys — raw keys in a
-    # prose instruction invited JSON-envelope answers (live run 4fc4b445).
-    assert "Vem som skrev dokumentet" in body_step.assistant_spec.instructions
-    assert "author_or_source" not in body_step.assistant_spec.instructions
-    assert "aldrig som JSON" in body_step.assistant_spec.instructions
-    assert "Dokumentets slutsatser" in body_step.assistant_spec.instructions
-    assert renderer_step.output_type == OutputType.PDF
-    assert renderer_step.output_mode == OutputMode.RENDER_VERBATIM
+    writer = compiled.steps[-2]
+    assert writer.name == name
+    assert writer.assistant_spec.instructions.startswith(instructions)
+    assert "Skäl för mötets beslut." in writer.assistant_spec.instructions
+    assert compiled.document_body_writer_step_refs == (writer.plan_step_ref,)
     assert validate_spec(compiled).valid
 
 

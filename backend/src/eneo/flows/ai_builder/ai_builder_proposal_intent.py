@@ -462,13 +462,8 @@ class SemanticStepIntent(BaseModel):
     knowledge_refs: list[str] = Field(default_factory=list)
     citations_requested: bool = False
     review_mode: FlowStepReviewMode | None = None
-    # Create only: the proposal step (1-based) whose work this step carries,
-    # and the proposal step of each read folded in from a dropped step, so a
-    # read the compiler cannot bind is reported on the step that listed it.
+    # Retain the authored position so unbound form reads identify their owner.
     _proposal_step: int | None = PrivateAttr(default=None)
-    _folded_read_steps: dict[str, int | None] = PrivateAttr(
-        default_factory=lambda: cast(dict[str, int | None], {})
-    )
 
     @property
     def proposal_step(self) -> int | None:
@@ -476,28 +471,6 @@ class SemanticStepIntent(BaseModel):
 
     def mark_proposal_step(self, position: int) -> None:
         self._proposal_step = position
-
-    def form_field_read_step(self, field_name: str) -> int | None:
-        return self._folded_read_steps.get(field_name, self._proposal_step)
-
-    def with_folded_form_field_reads(
-        self, folded: "SemanticStepIntent"
-    ) -> "SemanticStepIntent":
-        """This step taking over the reads of a step the backend drops."""
-
-        added = [
-            name
-            for name in folded.uses_form_fields
-            if name not in self.uses_form_fields
-        ]
-        merged = self.model_copy(
-            update={"uses_form_fields": [*self.uses_form_fields, *added]}
-        )
-        merged._folded_read_steps = {
-            **self._folded_read_steps,
-            **{name: folded.form_field_read_step(name) for name in added},
-        }
-        return merged
 
     @field_validator("name", "instructions")
     @classmethod

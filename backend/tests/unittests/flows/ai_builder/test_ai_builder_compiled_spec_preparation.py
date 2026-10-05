@@ -323,27 +323,24 @@ def test_prepared_explicit_multi_step_fan_in_is_apply_normalization_fixed_point(
     _assert_prepared_spec_is_apply_normalization_fixed_point(spec)
 
 
-def test_prepared_assembly_document_pdf_spec_is_normalization_fixed_point() -> None:
+def test_create_preparation_keeps_artifact_named_step_without_edit_normalization() -> (
+    None
+):
+    # Mutant: apply edit-only artifact normalization to a compiled create plan.
     compiled = _assembly_document_pdf_spec()
 
     prepared = _prepare_valid_spec(
         compiled,
         terminal_output_type=OutputType.PDF,
     )
-    normalized, normalization_changes = normalize_ai_builder_spec(
-        prepared,
-        terminal_output_type=OutputType.PDF,
-        ui_language="sv",
-    )
-
     assert prepared == compiled
-    assert normalized == prepared
-    assert normalization_changes == []
     assert [step.output_type for step in prepared.steps] == [
         OutputType.JSON,
         OutputType.TEXT,
+        OutputType.TEXT,
         OutputType.PDF,
     ]
+    assert prepared.steps[-2].name == "Skapa PDF-rapport"
     assert prepared.steps[-1].output_mode == OutputMode.RENDER_VERBATIM
     _assert_prepared_spec_compiles_with_shared_compiler(prepared)
 

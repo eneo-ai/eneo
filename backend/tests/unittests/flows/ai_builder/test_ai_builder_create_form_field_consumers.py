@@ -335,32 +335,6 @@ def test_explicit_previous_refs_on_a_fan_in_step_stop_at_the_one_explicit_ref_ch
     assert exc_info.value.log_context["step_index"] == 3
 
 
-def test_dropped_render_helper_read_is_reported_on_the_helper() -> None:
-    error = _rejection(
-        [
-            {"name": "First note", "instructions": "Write the first note."},
-            {"name": "Second note", "instructions": "Write the second note."},
-            {"name": "Combine notes", "instructions": "Combine both notes."},
-            {
-                "name": "Render PDF",
-                "instructions": "Render the combined text as PDF with the rent.",
-                "uses_form_fields": ["hyra"],
-            },
-        ],
-        runtime_input_type=InputType.TEXT,
-        aggregation_intent="aggregate",
-        final_output_type=OutputType.PDF,
-        final_output_mode=OutputMode.RENDER_VERBATIM,
-    )
-
-    # The helper's work runs in the fan-in step, which cannot read the field;
-    # the model listed it on step 4, so step 4 is the step to change.
-    assert error.log_context["reason"] == "all_previous_step_cannot_use_explicit_refs"
-    assert error.log_context["step_index"] == 4
-    assert "'Render PDF' lists 'hyra'" in (error.detail or "")
-    assert "step 1 'First note', step 2 'Second note'" in (error.detail or "")
-
-
 def test_json_run_input_reader_consumer_is_a_repairable_rejection() -> None:
     error = _rejection(
         [
@@ -541,7 +515,8 @@ def test_folded_report_writer_reads_land_on_the_retained_writer() -> None:
     assert validate_spec(spec).valid
 
 
-def test_dropped_render_helper_hands_its_reads_to_the_step_before_it() -> None:
+def test_preserved_artifact_named_step_receives_its_own_form_value() -> None:
+    # Mutant: drop the final model step and move its read into the predecessor.
     spec = _compile(
         [
             {
@@ -561,7 +536,12 @@ def test_dropped_render_helper_hands_its_reads_to_the_step_before_it() -> None:
     )
 
     reads = {step.name: _question(step).count(_READ) for step in spec.steps}
-    assert reads["Write decision"] == 1
+    assert reads["Write decision"] == 0
+    assert reads["Render PDF"] == 1
+    assert "hyra: 7480" in _runtime_input(
+        spec, order=3, hyra=7480, prior={1: {"income": 21000}, 2: {"decision": "fee"}}
+    )
+    assert validate_spec(spec).valid
 
 
 def test_create_schema_offers_exactly_the_confirmed_inputs() -> None:
