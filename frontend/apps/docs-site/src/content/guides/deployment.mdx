@@ -1261,8 +1261,8 @@ No additional database, Redis, worker or backend instance is needed.
 
 1. Back up the existing database and storage, and rehearse the upgrade on staging.
    Apply backend migrations once with the backend release. This branch includes
-   feedback/provider-status migrations and a merge revision joining the existing
-   attachment migration; confirm `alembic heads` reports a single head.
+   feedback/provider-status migrations following the existing attachment
+   migration; confirm `alembic heads` reports a single head.
 2. Copy `docs/deployment/env_web_next.template` to `env_web_next.env`. Generate a
    separate `SESSION_SECRET` with `openssl rand -base64 48`, and set
    `LEGACY_APP_URL=https://app.example.com` for the return link in the beta profile
