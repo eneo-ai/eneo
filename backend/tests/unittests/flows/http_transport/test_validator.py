@@ -346,10 +346,20 @@ def test_timeout_at_boundary_no_errors() -> None:
 # --- Valid config ---
 
 
-def test_valid_config_returns_empty_error_list() -> None:
+@pytest.mark.parametrize(
+    ("url", "authenticated"),
+    [
+        ("https://example.org/api", True),
+        ("https://example.org/{{ datum }}?date={{ datum }}", True),
+        ("http://example.org/api", False),
+        ("{{ datum }}://{{ datum }}.example.org/api", False),
+    ],
+)
+def test_valid_config_returns_empty_error_list(url: str, authenticated: bool) -> None:
+    # Mutant: restrict anonymous destinations or credentialed path/query variables.
     cfg = _config(
-        url="https://example.org/api",
-        auth=HttpAuthBearer(token="tok-123"),
+        url=url,
+        auth=HttpAuthBearer(token="tok-123") if authenticated else HttpAuthNone(),
         body=HttpBody(mode=HttpBodyMode.JSON_TEMPLATE, template='{"key": "val"}'),
         timeout_seconds=30,
     )

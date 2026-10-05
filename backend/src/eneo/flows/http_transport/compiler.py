@@ -22,6 +22,7 @@ from eneo.flows.http_transport.authored_config import (
 )
 from eneo.flows.http_transport.effective_url import (
     InvalidHttpUrl,
+    parse_credential_http_url,
     parse_effective_http_url,
 )
 from eneo.flows.http_transport.errors import HttpCredentialTransportError
@@ -156,9 +157,9 @@ def compile_http_config(
         binding_ref="http.url",
     )
 
-    if secret_header_names:
+    if authored.has_declared_credentials:
         try:
-            authored_destination = parse_effective_http_url(authored.url)
+            authored_destination = parse_credential_http_url(authored.url)
         except InvalidHttpUrl as exc:
             # Run inputs may fill a path or query, never choose a credential's origin.
             raise HttpCredentialTransportError() from exc
@@ -169,7 +170,7 @@ def compile_http_config(
                 "Invalid HTTP URL.",
                 code=FlowApiErrorCode.TYPED_IO_HTTP_INVALID_URL.value,
             ) from exc
-        if destination.scheme != "https" or (
+        if (
             destination.scheme,
             destination.host,
             destination.port,

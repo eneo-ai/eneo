@@ -2359,6 +2359,55 @@ _UNACCEPTED_HTTP_CONFIGS = [
     ),
 ]
 
+_UNSAFE_CREDENTIAL_DESTINATIONS = [
+    # Mutant: save/publish credentials whose origin is plaintext or run-selected.
+    pytest.param(
+        {
+            "url": "http://example.org/hook",
+            "auth": {
+                "mode": "bearer_token",
+                "token": _OpaqueEncryptionService().encrypt("synthetic-credential"),
+            },
+        },
+        id="credential-origin-bearer-http",
+    ),
+    pytest.param(
+        {
+            "url": "https://{{ datum }}.example.org/hook",
+            "auth": {
+                "mode": "api_key",
+                "key": _OpaqueEncryptionService().encrypt("synthetic-credential"),
+            },
+        },
+        id="credential-origin-api-key-dynamic-host",
+    ),
+    pytest.param(
+        {
+            "url": "https://example.org:{{ datum }}/hook",
+            "auth": {
+                "mode": "basic_auth",
+                "username": "synthetic-user",
+                "password": _OpaqueEncryptionService().encrypt("synthetic-credential"),
+            },
+        },
+        id="credential-origin-basic-dynamic-port",
+    ),
+    pytest.param(
+        {
+            "url": "{{ datum }}://example.org/hook",
+            "auth": {"mode": "none"},
+            "custom_headers": [
+                {
+                    "name": "X-Integration-Credential",
+                    "value": _OpaqueEncryptionService().encrypt("synthetic-credential"),
+                    "secret": True,
+                }
+            ],
+        },
+        id="credential-origin-secret-header-dynamic-scheme",
+    ),
+]
+
 
 def _flow_with_bogus_http_config(user, side, config):
     return _published_flow_for_update(
@@ -2376,7 +2425,9 @@ def _assert_typed_http_config_refusal(error: BaseException, *, side: str) -> Non
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("config", _UNACCEPTED_HTTP_CONFIGS)
+@pytest.mark.parametrize(
+    "config", _UNACCEPTED_HTTP_CONFIGS + _UNSAFE_CREDENTIAL_DESTINATIONS
+)
 @pytest.mark.parametrize("side", ["input_config", "output_config"])
 async def test_create_flow_reports_the_typed_code_of_a_config_the_runtime_rejects(
     user, side, config
@@ -2399,9 +2450,11 @@ async def test_create_flow_reports_the_typed_code_of_a_config_the_runtime_reject
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("config", _UNACCEPTED_HTTP_CONFIGS)
+@pytest.mark.parametrize(
+    "config", _UNACCEPTED_HTTP_CONFIGS + _UNSAFE_CREDENTIAL_DESTINATIONS
+)
 @pytest.mark.parametrize("side", ["input_config", "output_config"])
-async def test_publish_flow_refuses_a_stored_http_config_that_does_not_parse(
+async def test_publish_flow_refuses_a_stored_http_config_that_authoring_rejects(
     user, side, config
 ):
     stored = _flow_with_bogus_http_config(user, side, config)
@@ -2424,9 +2477,11 @@ async def test_publish_flow_refuses_a_stored_http_config_that_does_not_parse(
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("config", _UNACCEPTED_HTTP_CONFIGS)
+@pytest.mark.parametrize(
+    "config", _UNACCEPTED_HTTP_CONFIGS + _UNSAFE_CREDENTIAL_DESTINATIONS
+)
 @pytest.mark.parametrize("side", ["input_config", "output_config"])
-async def test_update_flow_refuses_a_stored_http_config_that_does_not_parse(
+async def test_update_flow_refuses_a_stored_http_config_that_authoring_rejects(
     user, side, config
 ):
     stored = _flow_with_bogus_http_config(user, side, config)

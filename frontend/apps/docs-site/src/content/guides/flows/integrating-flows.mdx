@@ -1854,6 +1854,7 @@ only for the same URL scheme, hostname and effective port. Changing the origin
 requires entering the credential again. Credential-bearing requests require a
 fixed HTTPS origin; variables may fill the path or query, but cannot choose the
 server, scheme or port. Anonymous requests may still use HTTP and dynamic URLs.
+Saving or publishing refuses a credential configuration without a fixed HTTPS origin.
 
 New authored credentials use the same encryption owner as saved configurations;
 an unavailable encryption key returns `503`. A missing or wrong key cannot
