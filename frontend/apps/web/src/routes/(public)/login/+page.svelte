@@ -38,6 +38,7 @@
     "oidc_forbidden",
     "oidc_unauthorized",
     "oidc_invalid_request",
+    "oidc_attempt_rejected",
     "oidc_oauth_error",
     "oidc_access_denied",
     "oidc_unauthorized_client",
@@ -173,8 +174,9 @@
     };
   });
 
-  // Handle automatic redirects reactively
-  $effect(() => {
+  // Handle automatic redirects reactively. Named so tests can run the effect
+  // itself instead of relying on declaration order.
+  function redirectToExternalLogin() {
     if (!browser) return;
     if (showTenantSelector) return;
     if (isAwaitingLoginResponse || federationError) return;
@@ -190,7 +192,8 @@
     if (data.hasSingleTenantOidc && !hasQueryParams) {
       void beginOidcLogin();
     }
-  });
+  }
+  $effect(redirectToExternalLogin);
 
   // Check for tenant-based federation on mount
   onMount(async () => {
@@ -381,6 +384,9 @@
   }
 
   function getOidcErrorMessage(): string {
+    if (oidcErrorCode === "oidc_attempt_rejected") {
+      return m.oidc_error_attempt_rejected();
+    }
     if (oidcErrorDetailCode === "access_denied") {
       return m.oidc_error_forbidden();
     }

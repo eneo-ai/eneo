@@ -141,7 +141,7 @@ describe("generic OIDC browser-bound callback", () => {
         loginCallbackLoad(
           callbackEvent(`/login/callback?code=attacker-code&state=${signedState}`, cookies) as never
         )
-      ).rejects.toMatchObject({ status: 302, location: "/login?message=oidc_invalid_request" });
+      ).rejects.toMatchObject({ status: 302, location: "/login?message=oidc_attempt_rejected" });
 
       expect(mocks.loginWithOidc).not.toHaveBeenCalled();
       expect(cookies.set).not.toHaveBeenCalled();
@@ -156,7 +156,7 @@ describe("generic OIDC browser-bound callback", () => {
       loginCallbackLoad(
         callbackEvent(`/login/callback?code=older-code&state=${olderState}`, cookies) as never
       )
-    ).rejects.toMatchObject({ location: "/login?message=oidc_invalid_request" });
+    ).rejects.toMatchObject({ location: "/login?message=oidc_attempt_rejected" });
     expect(cookies.get(RESUME_COOKIE)).toBeDefined();
     expect(mocks.loginWithOidc).not.toHaveBeenCalled();
 
@@ -186,7 +186,7 @@ describe("generic OIDC browser-bound callback", () => {
       location: DEFAULT_LANDING_PAGE
     });
     await expect(loginCallbackLoad(event as never)).rejects.toMatchObject({
-      location: "/login?message=oidc_invalid_request"
+      location: "/login?message=oidc_attempt_rejected"
     });
     expect(mocks.loginWithOidc).toHaveBeenCalledOnce();
   });
@@ -198,7 +198,7 @@ describe("generic OIDC browser-bound callback", () => {
           `/auth/callback?code=attacker-code&state=${callbackState(frontendState(null))}`
         ) as never
       )
-    ).rejects.toMatchObject({ location: "/login?message=oidc_invalid_request" });
+    ).rejects.toMatchObject({ location: "/login?message=oidc_attempt_rejected" });
     expect(mocks.loginWithOidc).not.toHaveBeenCalled();
   });
 

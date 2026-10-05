@@ -718,6 +718,7 @@
   "job_failure_unknown": "Eneo could not process the file. Try again. If the problem continues, contact an administrator and provide the file name.",
   "failed_to_login": "Failed to login to Eneo.",
   "oidc_error_generic": "Please verify your details and try again. If the problem persists, contact your administrator.",
+  "oidc_error_attempt_rejected": "This sign-in attempt has expired or was started in another browser or tab. Start the sign-in again.",
   "oidc_error_detail": "Technical detail (in English): {detail}",
   "oidc_error_forbidden": "You do not have access to this organisation. Make sure you are using the correct account or contact your administrator.",
   "oidc_error_unauthorized": "We could not verify the sign-in. Please try again or contact your administrator.",

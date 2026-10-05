@@ -1,27 +1,9 @@
 import { deserialize } from "$app/forms";
-import { readFileSync } from "node:fs";
-import { runInNewContext } from "node:vm";
-import { parse } from "svelte/compiler";
-import { ModuleKind, ScriptTarget, transpileModule } from "typescript";
+import { readInstanceScript, runInstanceScript } from "$lib/test/instanceScript";
 import { describe, expect, test, vi } from "vitest";
 
-// Execute the actual client instance script, replacing only framework/browser
-// boundaries. Server-only Svelte compilation would remove its lifecycle code.
-const source = readFileSync(new URL("./+page.svelte", import.meta.url), "utf8");
-const instance = parse(source, { modern: true }).instance;
-if (instance === null) throw new Error("Login page has no instance script");
-const content = instance.content;
-if (
-  !("start" in content) ||
-  !("end" in content) ||
-  typeof content.start !== "number" ||
-  typeof content.end !== "number"
-) {
-  throw new Error("Login script has no source offsets");
-}
-const script = transpileModule(source.slice(content.start, content.end), {
-  compilerOptions: { module: ModuleKind.CommonJS, target: ScriptTarget.ES2022 }
-}).outputText;
+// Run the page's actual instance script; see $lib/test/instanceScript for why.
+const script = readInstanceScript(new URL("./+page.svelte", import.meta.url));
 
 function loginBrowser(
   response: Response,
@@ -38,43 +20,48 @@ function loginBrowser(
   const fetch = vi.fn().mockResolvedValue(response);
   const storage = new Map<string, string>();
   if (rememberedTenant !== undefined) storage.set("eneo-last-tenant-slug", rememberedTenant);
-  const effects: Array<() => void> = [];
   let mounted: (() => Promise<void>) | undefined;
-  const exported: {
-    flow?: {
-      begin: (slug?: string) => Promise<boolean>;
-      retry: () => Promise<void>;
-      state: () => { awaiting: boolean; initializing: boolean; error: string | null };
-    };
-  } = {};
   const identityDerived = Object.assign((value: unknown) => value, {
     by: (value: () => unknown) => value()
   });
-  runInNewContext(
-    `${script}\nexports.flow = { begin: beginOidcLogin, retry: retryTenantLogin, state: () => ({ awaiting: isAwaitingLoginResponse, initializing: isInitializing, error: federationError }) };`,
-    {
-      exports: exported,
-      require: (name: string) => {
-        if (name === "$app/state") return { page: route };
-        if (name === "$app/forms") return { deserialize };
-        if (name === "$app/navigation") return { goto: async () => undefined };
-        if (name === "$app/environment") return { browser: true };
-        if (name === "svelte") {
-          return {
-            onMount: (callback: () => Promise<void>) => {
-              mounted = callback;
-            }
-          };
+  const { flow } = runInstanceScript<{
+    flow: {
+      begin: (slug?: string) => Promise<boolean>;
+      retry: () => Promise<void>;
+      redirect: () => void;
+      state: () => { awaiting: boolean; initializing: boolean; error: string | null };
+    };
+  }>(script, {
+    filename: "login-page.js",
+    epilogue: [
+      "exports.flow = {",
+      "  begin: beginOidcLogin,",
+      "  retry: retryTenantLogin,",
+      "  redirect: redirectToExternalLogin,",
+      "  state: () => ({",
+      "    awaiting: isAwaitingLoginResponse,",
+      "    initializing: isInitializing,",
+      "    error: federationError",
+      "  })",
+      "};"
+    ].join("\n"),
+    modules: {
+      "$app/state": { page: route },
+      "$app/forms": { deserialize },
+      "$app/navigation": { goto: async () => undefined },
+      "$app/environment": { browser: true },
+      svelte: {
+        onMount: (callback: () => Promise<void>) => {
+          mounted = callback;
         }
-        if (name === "svelte/motion") return { prefersReducedMotion: { current: true } };
-        if (name === "svelte/reactivity") return { SvelteURLSearchParams: URLSearchParams };
-        if (name === "$lib/paraglide/messages") {
-          return {
-            m: new Proxy({}, { get: (_target, key) => () => String(key) })
-          };
-        }
-        throw new Error(`Unexpected login script import: ${name}`);
       },
+      "svelte/motion": { prefersReducedMotion: { current: true } },
+      "svelte/reactivity": { SvelteURLSearchParams: URLSearchParams },
+      "$lib/paraglide/messages": {
+        m: new Proxy({}, { get: (_target, key) => () => String(key) })
+      }
+    },
+    globals: {
       $props: () => ({
         data: {
           hasSingleTenantOidc: mode === "single",
@@ -83,7 +70,8 @@ function loginBrowser(
       }),
       $state: (value: unknown) => value,
       $derived: identityDerived,
-      $effect: (effect: () => void) => effects.push(effect),
+      // Effects are run explicitly through `flow.redirect`.
+      $effect: () => undefined,
       window,
       sessionStorage: {
         getItem: (key: string) => storage.get(key) ?? null,
@@ -94,12 +82,10 @@ function loginBrowser(
       FormData,
       URLSearchParams,
       console
-    },
-    { timeout: 1000, filename: "login-page.js" }
-  );
-  if (exported.flow === undefined) throw new Error("Login script did not expose its flow");
+    }
+  });
   if (mounted === undefined) throw new Error("Login script did not register its mount behavior");
-  return { flow: exported.flow, window, fetch, effects, mounted };
+  return { flow, window, fetch, mounted };
 }
 
 describe("login initiation client transport", () => {
@@ -141,7 +127,7 @@ describe("login initiation client transport", () => {
     expect(browser.window.location.href).toContain("https://eneo.example/login");
 
     // The actual automatic-redirect effect must not repeatedly retry this failure.
-    browser.effects[2]();
+    browser.flow.redirect();
     expect(browser.fetch).toHaveBeenCalledOnce();
     browser.fetch.mockResolvedValue(
       new Response(
@@ -153,6 +139,7 @@ describe("login initiation client transport", () => {
   });
 
   test.each([
+    "oidc_attempt_rejected",
     "oidc_invalid_request",
     "no_code_received",
     "no_state_received",

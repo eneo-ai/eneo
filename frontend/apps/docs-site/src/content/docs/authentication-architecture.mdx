@@ -143,10 +143,11 @@ this same action so each starts a fresh attempt.
 Both `/login/callback` and its `/auth/callback` alias require a matching, unexpired
 attempt before exchanging the authorization code or writing a session cookie.
 A missing, malformed, expired, or mismatched attempt returns the user to login
-with `oidc_invalid_request`. A matched attempt is consumed, so a later callback
-without that cookie cannot exchange another code. The backend still verifies
-the state signature; reading its frontend payload for browser correlation does
-not replace that verification.
+with `oidc_attempt_rejected`, which asks them to start the sign-in again;
+`oidc_invalid_request` remains the identity provider's own error. A matched
+attempt is consumed, so a later callback without that cookie cannot exchange
+another code. The backend still verifies the state signature; reading its
+frontend payload for browser correlation does not replace that verification.
 
 The optional local `next` destination is separate from the required binding.
 Unsafe or oversized destinations are omitted from the cookie without allowing

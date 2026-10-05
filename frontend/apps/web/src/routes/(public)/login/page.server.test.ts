@@ -213,7 +213,12 @@ describe("login resume", () => {
     ).rejects.toMatchObject({ status: 302, location: DEFAULT_LANDING_PAGE });
   });
 
-  test.each(["/login", "/login?message=oidc_invalid_request", "/login?message=oidc_access_denied"])(
+  test.each([
+    "/login",
+    "/login?message=oidc_attempt_rejected",
+    "/login?message=oidc_invalid_request",
+    "/login?message=oidc_access_denied"
+  ])(
     "viewing %s neither starts authentication nor changes another tab's browser binding",
     async (path) => {
       const event = loginEvent(cookieJar(), path);

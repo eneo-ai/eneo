@@ -95,7 +95,7 @@ export const load = (async (event) => {
       reason: oidcAttempt?.status,
       origin: event.url.origin
     });
-    return redirect(302, "/login?message=oidc_invalid_request");
+    return redirect(302, "/login?message=oidc_attempt_rejected");
   }
 
   let success = false;
