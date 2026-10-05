@@ -280,11 +280,12 @@ async def test_preflight_inlines_file_text_when_model_cannot_call_tools(monkeypa
 
 
 @pytest.mark.asyncio
-async def test_preflight_counts_assistant_attachments_despite_inline_disabled(
+async def test_preflight_counts_baseline_attachments_regardless_of_upload_toggle(
     monkeypatch,
 ):
-    """Assistant attachments are always inlined by the send path (they get no
-    URL references), so their token count ignores inline_file_text."""
+    """The assistant-wide inline_file_text toggle governs uploads only. Baseline
+    attachments arrive already reduced to the inlined set (the assistant
+    service applies each attachment's own mode), so they count in full."""
     settings = SimpleNamespace(
         file_reference_base_url="http://host.docker.internal:8123",
         public_origin=None,
@@ -797,3 +798,44 @@ async def test_preflight_group_chat_mention_uses_target_assistant_model():
     assert result.model_name == "target-model"
     assert result.context_window == 32000
     service.group_chat_service.find_suitable_completion_model.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_preflight_excludes_editor_attachments_marked_open_with_tool(monkeypatch):
+    """The config meter sends the unsaved attachment set with each file's mode;
+    one marked "open with tool" is sent as a signed URL and must not count."""
+    settings = SimpleNamespace(
+        file_reference_base_url="http://host.docker.internal:8123",
+        public_origin=None,
+        attachment_context_reserve_tokens=0,
+    )
+    monkeypatch.setattr(conversation_service_mod, "get_settings", lambda: settings)
+    monkeypatch.setattr(file_reference_mod, "get_settings", lambda: settings)
+
+    kontoplan = MagicMock()
+    kontoplan.id = uuid4()
+    kontoplan.file_type = FileType.TEXT
+    kontoplan.text = "konto 1910 kassa " * 200
+    kontoplan.name = "kontoplan.xlsx"
+    kontoplan.original_available = True
+    kontoplan.parent_file_id = None
+
+    assistant = _make_assistant()
+    service = _make_service(assistant=assistant, files=[kontoplan])
+
+    inlined = await service.preflight_tokens(
+        question="",
+        file_ids=[],
+        assistant_id=uuid4(),
+        attachments=[(kontoplan.id, True)],
+    )
+    opened_with_tool = await service.preflight_tokens(
+        question="",
+        file_ids=[],
+        assistant_id=uuid4(),
+        attachments=[(kontoplan.id, False)],
+    )
+
+    assert inlined.file_tokens > 0
+    assert opened_with_tool.file_tokens == 0
+    assert opened_with_tool.excluded_file_count == 1

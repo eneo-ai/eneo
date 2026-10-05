@@ -60,7 +60,7 @@ function initAssistantEditor(data: {
       mcp_servers: ["id"],
       mcp_tools: ["tool_id", "is_enabled"] as unknown as true,
       skill_bindings: ["skill_id", "skill_revision_id", "activation_mode"],
-      attachments: ["id"],
+      attachments: ["id", "inline_text"],
       data_retention_days: true
     } as Record<string, unknown>,
     manageAttachements: "attachments"
