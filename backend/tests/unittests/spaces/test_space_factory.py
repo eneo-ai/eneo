@@ -453,3 +453,85 @@ def test_create_space_from_db_maps_sharepoint_integration_knowledge(factory):
     assert ik.site_id == "site-xyz-789"
     assert ik.delta_token == "delta-token-123"
     assert ik.selected_item_type == "site_root"
+
+
+def test_create_space_from_db_records_rows_the_loader_skipped(factory, monkeypatch):
+    """Rows that fail validation are left out of the entity lists but their
+    ids are recorded, so a later save can tell "never loaded" from "removed"."""
+    from eneo.ai_models.completion_models.completion_model import ModelKwargs
+    from eneo.spaces import space_factory as space_factory_module
+
+    space_in_db = MagicMock()
+    space_in_db.id = uuid4()
+    space_in_db.tenant_id = uuid4()
+    space_in_db.tenant_space_id = None
+    space_in_db.user_id = None
+    space_in_db.name = "Test Space"
+    space_in_db.description = None
+    space_in_db.created_at = None
+    space_in_db.updated_at = None
+    space_in_db.members = []
+    space_in_db.capabilities = []
+    space_in_db.completion_models_mapping = []
+    space_in_db.transcription_models_mapping = []
+    space_in_db.embedding_models_mapping = []
+    space_in_db.integration_knowledge_list = []
+
+    def _assistant_row(*, is_default: bool):
+        row = MagicMock()
+        row.id = uuid4()
+        row.is_default = is_default
+        row.attachments = []
+        return row
+
+    default_row = _assistant_row(is_default=True)
+    good_row = _assistant_row(is_default=False)
+    corrupt_row = _assistant_row(is_default=False)
+
+    def build_assistant(*, assistant_in_db, **_kwargs):
+        if assistant_in_db is corrupt_row:
+            # A real ValidationError, as a non-numeric stored temperature raises.
+            ModelKwargs.model_validate({"temperature": "hot"})
+        built = MagicMock()
+        built.id = assistant_in_db.id
+        built.is_default = assistant_in_db.is_default
+        return built
+
+    factory.assistant_factory.create_space_assistant_from_db.side_effect = (
+        build_assistant
+    )
+
+    good_chat_row = MagicMock()
+    good_chat_row.id = uuid4()
+    corrupt_chat_row = MagicMock()
+    corrupt_chat_row.id = uuid4()
+
+    def build_group_chat(*, group_chat_db, assistants):
+        if group_chat_db is corrupt_chat_row:
+            ModelKwargs.model_validate({"temperature": "hot"})
+        built = MagicMock()
+        built.id = group_chat_db.id
+        return built
+
+    monkeypatch.setattr(
+        space_factory_module.GroupChatFactory,
+        "create_group_chat_from_db",
+        build_group_chat,
+    )
+
+    user = MagicMock()
+    user.id = uuid4()
+
+    space = factory.create_space_from_db(
+        space_in_db=space_in_db,
+        user=user,
+        assistants_in_db=[default_row, good_row, corrupt_row],
+        group_chats_in_db=[good_chat_row, corrupt_chat_row],
+    )
+
+    assert space.default_assistant is not None
+    assert space.default_assistant.id == default_row.id
+    assert [assistant.id for assistant in space.assistants] == [good_row.id]
+    assert space.unloaded_assistant_ids == frozenset({corrupt_row.id})
+    assert [chat.id for chat in space.group_chats] == [good_chat_row.id]
+    assert space.unloaded_group_chat_ids == frozenset({corrupt_chat_row.id})

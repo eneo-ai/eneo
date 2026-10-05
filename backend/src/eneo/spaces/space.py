@@ -82,6 +82,8 @@ class Space:
         enabled_capabilities: list[CapabilityPurpose] | None = None,
         group_members: dict[UUID, SpaceGroupMember] | None = None,
         default_assistant_load_failed: bool = False,
+        unloaded_assistant_ids: frozenset[UUID] = frozenset(),
+        unloaded_group_chat_ids: frozenset[UUID] = frozenset(),
     ):
         super().__init__()
         self.id = id
@@ -100,6 +102,11 @@ class Space:
         # distinguish "no default exists" from "default exists but unloadable"
         # so they don't auto-create a duplicate default. See SpaceInitService.
         self.default_assistant_load_failed = default_assistant_load_failed
+        # Rows that exist in the DB but were skipped by the same validation
+        # belt. They are not in `assistants`/`group_chats`, so a save must not
+        # read their absence as a deletion. See SpaceRepository.update.
+        self.unloaded_assistant_ids = unloaded_assistant_ids
+        self.unloaded_group_chat_ids = unloaded_group_chat_ids
         self.assistants = assistants or []
         self.group_chats = group_chats or []
         self.apps = apps or []
