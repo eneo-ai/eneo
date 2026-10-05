@@ -600,7 +600,12 @@ class SpaceRepository:
         # Refresh to reflect changes
         await self.session.refresh(space_in_db)
 
-    async def _set_assistants(self, space_in_db: Spaces, assistants: list["Assistant"]):
+    async def _set_assistants(
+        self,
+        space_in_db: Spaces,
+        assistants: list["Assistant"],
+        unloaded_ids: frozenset[UUID] = frozenset(),
+    ):
         new_assistants = [assistant for assistant in assistants if assistant.is_new]
         existing_assistants = [
             assistant for assistant in assistants if not assistant.is_new
@@ -614,12 +619,18 @@ class SpaceRepository:
             assistant.space_id = space_in_db.id  # type: ignore[attr-defined]
             await self.assistant_repo.update(assistant)
 
-        # Delete all assistants that are not in the list
-        # Don't delete the default assistant
+        # Delete all assistants that are not in the list.
+        # Don't delete the default assistant, nor rows the loader skipped as
+        # invalid: they were never in the list, so their absence is not a
+        # removal.
         stmt = (
             sa.delete(Assistants)
             .where(Assistants.space_id == space_in_db.id)
-            .where(Assistants.id.notin_([assistant.id for assistant in assistants]))
+            .where(
+                Assistants.id.notin_(
+                    [assistant.id for assistant in assistants] + list(unloaded_ids)
+                )
+            )
             .where(Assistants.is_default == False)  # noqa
         )
         await self.session.execute(stmt)
@@ -648,7 +659,11 @@ class SpaceRepository:
         await self.session.execute(stmt)
 
     async def _set_group_chats(
-        self, space_in_db: Spaces, group_chats: list["GroupChat"]
+        self,
+        space_in_db: Spaces,
+        group_chats: list["GroupChat"],
+        unloaded_ids: frozenset[UUID] = frozenset(),
+        unloaded_assistant_ids: frozenset[UUID] = frozenset(),
     ):
         new_group_chats = [
             group_chat for group_chat in group_chats if group_chat.is_new
@@ -695,10 +710,18 @@ class SpaceRepository:
 
             await self.session.execute(stmt)
 
-            # Delete all group chat assistants
+            # Delete all group chat assistants, except memberships of
+            # assistants the loader skipped: the entity dropped them on load,
+            # so they are not in `group_chat.assistants` to be re-added.
             stmt = sa.delete(GroupChatsAssistantsMapping).where(
                 GroupChatsAssistantsMapping.group_chat_id == group_chat.id
             )
+            if unloaded_assistant_ids:
+                stmt = stmt.where(
+                    GroupChatsAssistantsMapping.assistant_id.notin_(
+                        list(unloaded_assistant_ids)
+                    )
+                )
             await self.session.execute(stmt)
 
             # Add new group chat assistants
@@ -715,12 +738,15 @@ class SpaceRepository:
                 )
                 await self.session.execute(stmt)
 
-        # Delete all group chats that are not in the list
+        # Delete all group chats that are not in the list, except rows the
+        # loader skipped as invalid: their absence is not a removal.
         stmt = (
             sa.delete(GroupChatsTable)
             .where(GroupChatsTable.space_id == space_in_db.id)
             .where(
-                GroupChatsTable.id.notin_([group_chat.id for group_chat in group_chats])
+                GroupChatsTable.id.notin_(
+                    [group_chat.id for group_chat in group_chats] + list(unloaded_ids)
+                )
             )
         )
         await self.session.execute(stmt)
@@ -1824,8 +1850,14 @@ class SpaceRepository:
             entry_in_db,
             space.assistants
             + ([space.default_assistant] if space.default_assistant else []),
+            unloaded_ids=space.unloaded_assistant_ids,
         )
-        await self._set_group_chats(entry_in_db, space.group_chats)
+        await self._set_group_chats(
+            entry_in_db,
+            space.group_chats,
+            unloaded_ids=space.unloaded_group_chat_ids,
+            unloaded_assistant_ids=space.unloaded_assistant_ids,
+        )
 
         return await self.one(id=entry_in_db.id)
 

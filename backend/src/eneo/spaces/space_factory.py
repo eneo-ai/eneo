@@ -531,6 +531,9 @@ class SpaceFactory:
         default_assistant_load_failed = default_assistant is None and any(
             getattr(assistant, "is_default", False) for assistant in assistants_in_db
         )
+        unloaded_assistant_ids = frozenset(
+            assistant.id for assistant in assistants_in_db
+        ) - frozenset(assistant.id for assistant in all_assistants)
         space_assistants = [
             assistant
             for assistant in all_assistants
@@ -558,6 +561,9 @@ class SpaceFactory:
                 assistants=space_assistants,
             ),
         )
+        unloaded_group_chat_ids = frozenset(
+            group_chat.id for group_chat in group_chats_in_db
+        ) - frozenset(group_chat.id for group_chat in space_group_chats)
 
         def _build_service(service: "Services") -> Service:
             return Service(
@@ -617,6 +623,8 @@ class SpaceFactory:
             enabled_capabilities=[c.purpose for c in space_in_db.capabilities],
             default_assistant=default_assistant,
             default_assistant_load_failed=default_assistant_load_failed,
+            unloaded_assistant_ids=unloaded_assistant_ids,
+            unloaded_group_chat_ids=unloaded_group_chat_ids,
             assistants=space_assistants,
             group_chats=space_group_chats,
             apps=space_apps,
