@@ -5,11 +5,10 @@ import { type Cookies, type RequestEvent } from "@sveltejs/kit";
 
 export const EneoIdTokenCookie = "auth";
 export const EneoAccessTokenCookie = "acc";
-export const OidcLoginResumeCookie = "oidc-login-resume";
+export const OidcLoginAttemptCookie = "oidc-login-resume";
 
-const OIDC_LOGIN_RESUME_MAX_AGE_SECONDS = 10 * 60;
 // Leave room for the cookie name and attributes below the common 4 KiB limit.
-const OIDC_LOGIN_RESUME_MAX_ENCODED_LENGTH = 3000;
+const OIDC_LOGIN_ATTEMPT_MAX_ENCODED_LENGTH = 3000;
 
 export const setFrontendAuthCookie = async (tokens: {
   id_token: string;
@@ -138,7 +137,7 @@ type LoginMethod = "zitadel" | "mobilityguard" | "oidc";
 export type LoginStateParam = {
   loginMethod: LoginMethod;
   next: string | null;
-  /** Server-generated correlation value for the HttpOnly resume cookie. */
+  /** Server-generated correlation value for the HttpOnly login attempt cookie. */
   attemptId?: string;
 };
 
@@ -228,113 +227,133 @@ export function resolveOptionalLoginStateDestination(state: string | null): stri
 }
 
 /**
- * Remember one already-validated local destination while the browser is away
- * at a generic OIDC provider. The value is HttpOnly and can never carry an
- * external redirect. Oversized values are discarded instead of risking a
- * rejected Set-Cookie header.
+ * Bind generic OIDC authentication to the browser that started it, whether or
+ * not it has a post-login destination. Unsafe or oversized destinations are
+ * discarded without weakening the mandatory attempt binding.
  */
-type OidcLoginResumeBinding = {
+type OidcLoginAttempt = {
   attemptId: string;
-  destination: string;
+  destination: string | null;
+  expiresAt: number;
 };
+
+export type OidcLoginAttemptResult =
+  | { status: "matched"; destination: string | null }
+  | { status: "missing" | "invalid" | "expired" | "mismatch" };
 
 const OIDC_ATTEMPT_ID_PATTERN =
   /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 
-export function rememberOidcLoginDestination(
+export function startOidcLoginAttempt(
   cookies: Cookies,
   destination: unknown,
-  attemptId: string
+  attemptId: string,
+  expiresAt: number
 ): void {
-  const safeDestination = resolveValidatedLoginDestination(destination);
-  const binding: OidcLoginResumeBinding = {
+  if (!OIDC_ATTEMPT_ID_PATTERN.test(attemptId)) {
+    throw new Error("Invalid OIDC login attempt ID");
+  }
+  const maxAge = expiresAt - Math.floor(Date.now() / 1000);
+  if (!Number.isSafeInteger(expiresAt) || maxAge <= 0) {
+    throw new Error("Invalid OIDC login attempt expiry");
+  }
+
+  const attempt: OidcLoginAttempt = {
     attemptId,
-    destination: safeDestination ?? ""
+    destination: resolveValidatedLoginDestination(destination),
+    expiresAt
   };
-  const serializedBinding = JSON.stringify(binding);
 
   try {
     if (
-      safeDestination === null ||
-      !OIDC_ATTEMPT_ID_PATTERN.test(attemptId) ||
-      encodeURIComponent(serializedBinding).length > OIDC_LOGIN_RESUME_MAX_ENCODED_LENGTH
+      encodeURIComponent(JSON.stringify(attempt)).length > OIDC_LOGIN_ATTEMPT_MAX_ENCODED_LENGTH
     ) {
-      clearOidcLoginDestination(cookies);
-      return;
+      attempt.destination = null;
     }
   } catch {
-    clearOidcLoginDestination(cookies);
-    return;
+    attempt.destination = null;
   }
 
-  cookies.set(OidcLoginResumeCookie, serializedBinding, {
+  cookies.set(OidcLoginAttemptCookie, JSON.stringify(attempt), {
     path: "/",
     httpOnly: true,
-    maxAge: OIDC_LOGIN_RESUME_MAX_AGE_SECONDS,
+    maxAge,
     secure: !dev,
     sameSite: "lax"
   });
 }
 
 /**
- * Read a one-shot generic OIDC resume destination bound to this callback.
+ * Consume the browser binding before any generic OIDC code exchange.
  *
  * The signed state is still validated by the backend before authentication.
  * Here its unverified frontend payload is used only as a correlation value
  * against an HttpOnly cookie. A mismatch is left untouched so a parallel
- * login attempt cannot consume another tab's destination.
+ * login attempt cannot consume another tab's binding. Missing or rejected
+ * bindings must never proceed to authentication.
  */
-export async function consumeOidcLoginDestination(
+export async function consumeOidcLoginAttempt(
   cookies: Cookies,
   callbackState: string | null
-): Promise<string | null> {
-  const encodedBinding = cookies.get(OidcLoginResumeCookie);
-  if (encodedBinding === undefined) {
-    return null;
+): Promise<OidcLoginAttemptResult> {
+  const encodedAttempt = cookies.get(OidcLoginAttemptCookie);
+  if (encodedAttempt === undefined) {
+    return { status: "missing" };
   }
 
-  let binding: OidcLoginResumeBinding;
+  let attempt: OidcLoginAttempt;
   try {
-    const candidate = JSON.parse(encodedBinding) as Partial<OidcLoginResumeBinding>;
+    const candidate: unknown = JSON.parse(encodedAttempt);
     if (
+      typeof candidate !== "object" ||
+      candidate === null ||
+      !("attemptId" in candidate) ||
       typeof candidate.attemptId !== "string" ||
       !OIDC_ATTEMPT_ID_PATTERN.test(candidate.attemptId) ||
-      typeof candidate.destination !== "string"
+      !("destination" in candidate) ||
+      (candidate.destination !== null &&
+        resolveValidatedLoginDestination(candidate.destination) === null) ||
+      !("expiresAt" in candidate) ||
+      typeof candidate.expiresAt !== "number" ||
+      !Number.isSafeInteger(candidate.expiresAt)
     ) {
-      clearOidcLoginDestination(cookies);
-      return null;
+      clearOidcLoginAttempt(cookies);
+      return { status: "invalid" };
     }
-    binding = {
+    attempt = {
       attemptId: candidate.attemptId,
-      destination: candidate.destination
+      destination: resolveValidatedLoginDestination(candidate.destination),
+      expiresAt: candidate.expiresAt
     };
   } catch {
-    clearOidcLoginDestination(cookies);
-    return null;
+    clearOidcLoginAttempt(cookies);
+    return { status: "invalid" };
   }
 
-  const destination = resolveValidatedLoginDestination(binding.destination);
-  if (destination === null) {
-    clearOidcLoginDestination(cookies);
-    return null;
+  if (attempt.expiresAt <= Math.floor(Date.now() / 1000)) {
+    clearOidcLoginAttempt(cookies);
+    return { status: "expired" };
   }
   if (callbackState === null) {
-    return null;
+    return { status: "mismatch" };
   }
 
-  const statePayload = (await parseJwt(callbackState)) as { frontend_state?: unknown };
+  const statePayload: unknown = await parseJwt(callbackState);
   const frontendState =
+    typeof statePayload === "object" &&
+    statePayload !== null &&
+    "frontend_state" in statePayload &&
     typeof statePayload.frontend_state === "string"
       ? decodeState<LoginStateParam>(statePayload.frontend_state)
       : null;
-  if (frontendState?.attemptId !== binding.attemptId) {
-    return null;
+  if (frontendState?.loginMethod !== "oidc" || frontendState.attemptId !== attempt.attemptId) {
+    return { status: "mismatch" };
   }
 
-  clearOidcLoginDestination(cookies);
-  return destination;
+  clearOidcLoginAttempt(cookies);
+  return { status: "matched", destination: attempt.destination };
 }
 
-export function clearOidcLoginDestination(cookies: Cookies): void {
-  cookies.delete(OidcLoginResumeCookie, { path: "/" });
+export function clearOidcLoginAttempt(cookies: Cookies): void {
+  cookies.delete(OidcLoginAttemptCookie, { path: "/" });
 }

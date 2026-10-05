@@ -628,6 +628,7 @@ dependencies = [
     { name = "typing-extensions" },
     { name = "uvicorn", extra = ["standard"] },
     { name = "wrapt" },
+    { name = "yarl" },
 ]
 
 [package.dev-dependencies]
@@ -712,6 +713,7 @@ requires-dist = [
     { name = "typing-extensions", specifier = ">=4.12.0,<5" },
     { name = "uvicorn", extras = ["standard"], specifier = ">=0.30.0,<1" },
     { name = "wrapt", specifier = ">=1.16.0,<2" },
+    { name = "yarl", specifier = ">=1.24.2,<2" },
 ]
 
 [package.metadata.requires-dev]

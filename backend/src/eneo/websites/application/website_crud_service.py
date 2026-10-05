@@ -142,15 +142,20 @@ class WebsiteCRUDService:
 
         website = space.get_website(website_id=id)
 
-        website.update(
-            name=name,
-            url=url,
-            download_files=download_files,
-            crawl_type=crawl_type,
-            update_interval=update_interval,
-            http_auth_username=http_auth_username,
-            http_auth_password=http_auth_password,
-        )
+        try:
+            website.update(
+                name=name,
+                url=url,
+                download_files=download_files,
+                crawl_type=crawl_type,
+                update_interval=update_interval,
+                http_auth_username=http_auth_username,
+                http_auth_password=http_auth_password,
+            )
+        except ValueError as exc:
+            # HttpAuthDestinationError and the auth-field pairing rule are
+            # input validation, not server faults.
+            raise BadRequestException(str(exc)) from exc
 
         await self.space_repo.update(space=space)
 

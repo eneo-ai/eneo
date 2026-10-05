@@ -714,6 +714,7 @@
   "job_failure_unknown": "Eneo kunde inte behandla filen. Försök igen. Kontakta en administratör och ange filnamnet om problemet kvarstår.",
   "failed_to_login": "Misslyckades med att logga in på Eneo.",
   "oidc_error_generic": "Kontrollera dina uppgifter och försök igen. Om problemet kvarstår, kontakta din administratör.",
+  "oidc_error_attempt_rejected": "Inloggningsförsöket har gått ut eller startades i en annan webbläsare eller flik. Starta inloggningen igen.",
   "oidc_error_detail": "Teknisk detalj (på engelska): {detail}",
   "oidc_error_forbidden": "Du har inte behörighet att logga in i den här organisationen. Kontrollera att du använder rätt konto eller kontakta din administratör.",
   "oidc_error_unauthorized": "Inloggningen kunde inte verifieras. Försök igen eller kontakta din administratör.",
