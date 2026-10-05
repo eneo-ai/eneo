@@ -454,3 +454,79 @@ async def test_unknown_kid_after_refetch_is_rejected(setup):
 
     # One priming fetch plus exactly one rotation refetch, then failure.
     assert setup.http.calls.count(JWKS_URL) == 2
+
+
+@pytest.mark.asyncio
+async def test_random_unknown_key_ids_share_a_bounded_refresh_budget(setup):
+    await setup.service.authenticate(token=_make_idp_token(setup.private_pem, "kid-a"))
+    for number in range(5):
+        token = _make_idp_token(setup.private_pem, f"unknown-{number}")
+        with pytest.raises(AuthenticationException):
+            await setup.service.authenticate(token=token)
+    assert setup.http.calls == [DISCOVERY_URL, JWKS_URL] * 2
+
+
+@pytest.mark.asyncio
+async def test_cached_valid_tokens_do_not_wait_for_a_rotation_fetch(setup, monkeypatch):
+    token = _make_idp_token(setup.private_pem, "kid-a")
+    await setup.service.authenticate(token=token)
+    started = asyncio.Event()
+    release = asyncio.Event()
+    fetch_json = oidc_resource_server._fetch_json
+
+    async def slow_fetch(url):
+        started.set()
+        await release.wait()
+        return await fetch_json(url)
+
+    monkeypatch.setattr(oidc_resource_server, "_fetch_json", slow_fetch)
+    attack = asyncio.create_task(
+        setup.service.authenticate(token=_make_idp_token(setup.private_pem, "unknown"))
+    )
+    try:
+        await asyncio.wait_for(started.wait(), timeout=1)
+        user = await asyncio.wait_for(
+            setup.service.authenticate(token=token), timeout=1
+        )
+        assert user.id == setup.user.id
+    finally:
+        release.set()
+        with pytest.raises(AuthenticationException):
+            await attack
+
+
+@pytest.mark.asyncio
+async def test_failed_fetch_is_throttled_and_recovers_after_cooldown(
+    setup, monkeypatch
+):
+    now = 100.0
+    monkeypatch.setattr(oidc_resource_server.time, "monotonic", lambda: now)
+    fetch_json = oidc_resource_server._fetch_json
+    attempts = 0
+
+    async def unavailable(url):
+        nonlocal attempts
+        attempts += 1
+        raise TimeoutError("IdP unavailable")
+
+    monkeypatch.setattr(oidc_resource_server, "_fetch_json", unavailable)
+    token = _make_idp_token(setup.private_pem, "kid-a")
+    for _ in range(3):
+        with pytest.raises(AuthenticationException):
+            await setup.service.authenticate(token=token)
+    assert attempts == 1
+    now += oidc_resource_server.JWKS_REFRESH_COOLDOWN_SECONDS + 1
+    monkeypatch.setattr(oidc_resource_server, "_fetch_json", fetch_json)
+    assert (await setup.service.authenticate(token=token)).id == setup.user.id
+
+
+@pytest.mark.asyncio
+async def test_idp_access_token_must_include_expiry(setup):
+    token = jwt.encode(
+        {"iss": ISSUER, "aud": AUDIENCE, "sub": "subject", "email": setup.user.email},
+        setup.private_pem,
+        algorithm="RS256",
+        headers={"kid": "kid-a"},
+    )
+    with pytest.raises(AuthenticationException):
+        await setup.service.authenticate(token=token)

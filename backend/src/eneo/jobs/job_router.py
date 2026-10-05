@@ -56,8 +56,13 @@ async def get_running_jobs(
 )
 async def job_events(
     request: Request,
-    container: Annotated[Container, Depends(get_container(with_user=True))],
+    container: Annotated[
+        Container,
+        Depends(get_container(with_user=True, transaction_scope="function")),
+    ],
 ) -> EventSourceResponse:
+    # Authentication needs the database; the long-lived Redis stream only
+    # needs this user ID. Release the transaction before sending the body.
     user = container.user()
     return EventSourceResponse(
         stream_job_events(user.id, request),

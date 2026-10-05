@@ -14,6 +14,7 @@ import time
 from typing import TYPE_CHECKING, Any
 
 import jwt
+from aiohttp import ClientTimeout
 
 from eneo.main.aiohttp_client import aiohttp_client
 from eneo.main.config import get_settings
@@ -27,6 +28,8 @@ logger = get_logger(__name__)
 
 # Asymmetric signature algorithms accepted for IdP access tokens.
 RS256_FAMILY = ["RS256", "RS384", "RS512"]
+JWKS_REFRESH_COOLDOWN_SECONDS = 30
+JWKS_FETCH_TIMEOUT_SECONDS = 5
 
 
 class JWKSFetchError(Exception):
@@ -34,7 +37,9 @@ class JWKSFetchError(Exception):
 
 
 async def _fetch_json(url: str) -> dict[str, Any]:
-    async with aiohttp_client().get(url) as resp:
+    async with aiohttp_client().get(
+        url, timeout=ClientTimeout(total=JWKS_FETCH_TIMEOUT_SECONDS)
+    ) as resp:
         if resp.status != 200:
             raise JWKSFetchError(f"HTTP {resp.status} fetching {url}")
         return await resp.json()
@@ -43,35 +48,62 @@ async def _fetch_json(url: str) -> dict[str, Any]:
 class JWKSCache:
     """In-process JWKS cache keyed by issuer, with TTL and rotation refetch.
 
-    A token whose ``kid`` is not in the cached key set triggers exactly one
-    refetch (key rotation); the lookup fails if the key is still unknown.
+    Unknown key IDs may trigger one rotation refresh per cooldown, independent
+    of the attacker-chosen ID. Valid cached keys never wait for that network
+    request. Failed or expired refreshes are bounded by the same cooldown.
     """
 
     def __init__(self):
         self._issuer: str | None = None
         self._keys: dict[str, jwt.PyJWK] = {}
-        self._fetched_at: float = 0.0
+        self._fetched_at: float | None = None
+        self._refresh_retry_at = 0.0
+        self._rotation_retry_at = 0.0
         self._lock = asyncio.Lock()
 
     async def get_signing_key(
         self, *, issuer: str, kid: str, ttl_seconds: int
     ) -> jwt.PyJWK:
-        async with self._lock:
-            expired = (
-                self._issuer != issuer
-                or time.monotonic() - self._fetched_at > ttl_seconds
-            )
-            if expired:
-                await self._refresh(issuer)
-
+        now = time.monotonic()
+        if (
+            self._issuer == issuer
+            and self._fetched_at is not None
+            and now - self._fetched_at <= ttl_seconds
+        ):
             key = self._keys.get(kid)
-            if key is None and not expired:
-                # Unknown kid on a fresh-enough cache: refetch once in case
-                # the IdP rotated its keys.
-                await self._refresh(issuer)
-                key = self._keys.get(kid)
+            if key is not None:
+                return key
+
+        async with self._lock:
+            if self._issuer != issuer:
+                self._issuer = issuer
+                self._keys = {}
+                self._fetched_at = None
+                self._refresh_retry_at = self._rotation_retry_at = 0.0
+
+            now = time.monotonic()
+            expired = self._fetched_at is None or now - self._fetched_at > ttl_seconds
+            key = self._keys.get(kid)
+            if key is not None and not expired:
+                return key
+
+            retry_at = self._refresh_retry_at if expired else self._rotation_retry_at
+            if now < retry_at:
+                raise AuthenticationException("Could not validate token credentials.")
+
+            # Mark the attempt before I/O, so an outage cannot turn every
+            # waiting request into another discovery/JWKS fetch.
+            self._refresh_retry_at = now + JWKS_REFRESH_COOLDOWN_SECONDS
+            if not expired:
+                self._rotation_retry_at = now + JWKS_REFRESH_COOLDOWN_SECONDS
+            await self._refresh(issuer)
+            self._refresh_retry_at = 0.0
+            key = self._keys.get(kid)
 
             if key is None:
+                self._rotation_retry_at = (
+                    time.monotonic() + JWKS_REFRESH_COOLDOWN_SECONDS
+                )
                 raise AuthenticationException("Could not validate token credentials.")
             return key
 
@@ -145,7 +177,7 @@ async def validate_idp_access_token(
         raise AuthenticationException("Could not validate token credentials.")
 
     kid = header.get("kid")
-    if not kid:
+    if not isinstance(kid, str) or not kid:
         raise AuthenticationException("Could not validate token credentials.")
 
     try:

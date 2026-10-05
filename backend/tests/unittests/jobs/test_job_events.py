@@ -2,15 +2,26 @@
 
 import asyncio
 import json
+from collections.abc import AsyncIterator
 from datetime import datetime, timezone
+from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock
 from uuid import uuid4
 
 import pytest
+from dependency_injector import providers
+from fastapi import FastAPI, Request
+from httpx import ASGITransport, AsyncClient
+from sse_starlette import ServerSentEvent
 
-from eneo.jobs import job_events
+from eneo.database.database import get_session_with_transaction
+from eneo.jobs import job_events, job_router
 from eneo.jobs.job_models import JobInDb
+from eneo.main.container.container import Container
 from eneo.main.models import Status
+from eneo.server.dependencies import container as container_dependency
+from eneo.tenants.tenant import TenantInDB
+from eneo.users.user import UserInDB
 
 
 def make_job(**overrides) -> JobInDb:
@@ -132,3 +143,57 @@ async def test_stream_stops_as_soon_as_the_client_disconnects():
     ]
 
     assert events == []
+
+
+@pytest.mark.asyncio
+async def test_job_route_releases_auth_database_session_before_streaming(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    lifecycle: list[str] = []
+    user_id = uuid4()
+    tenant = TenantInDB(
+        id=uuid4(), name="Test", quota_limit=1024, modules=[], api_credentials={}
+    )
+    user = UserInDB(
+        id=user_id,
+        username="stream-user",
+        email="stream@example.com",
+        tenant_id=tenant.id,
+        tenant=tenant,
+        state="active",
+    )
+    session = MagicMock()
+    session.in_transaction.return_value = True
+
+    async def authentication_session() -> AsyncIterator[MagicMock]:
+        lifecycle.append("session-open")
+        try:
+            yield session
+        finally:
+            lifecycle.append("session-closed")
+
+    def authenticated_container(*, session: providers.Object) -> Container:
+        container = Container(session=session)
+        container.user_service.override(
+            providers.Object(SimpleNamespace(authenticate=AsyncMock(return_value=user)))
+        )
+        return container
+
+    async def stream(owner, request: Request) -> AsyncIterator[ServerSentEvent]:
+        assert owner == user_id
+        lifecycle.append("stream")
+        yield ServerSentEvent(event="job", data='{"status":"complete"}')
+
+    monkeypatch.setattr(container_dependency, "Container", authenticated_container)
+    monkeypatch.setattr(job_router, "stream_job_events", stream)
+    app = FastAPI()
+    app.include_router(job_router.router, prefix="/jobs")
+    app.dependency_overrides[get_session_with_transaction] = authentication_session
+    async with AsyncClient(
+        transport=ASGITransport(app=app), base_url="http://test"
+    ) as client:
+        response = await client.get("/jobs/events/")
+
+    assert response.status_code == 200
+    assert 'data: {"status":"complete"}' in response.text
+    assert lifecycle == ["session-open", "session-closed", "stream"]

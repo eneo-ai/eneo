@@ -475,6 +475,7 @@ class AuthService:
             key=key,
             signing_algos=signing_algos,
             client_id=audience,
+            options={"require": ["exp"]},
             correlation_id=correlation_id,
             verify_at_hash=False,
         )
