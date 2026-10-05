@@ -405,10 +405,10 @@ async def test_heartbeat_advances_updated_at_during_each_compute_phase(
 
     original_chunk_text = Datastore._chunk_text
 
-    def chunk_text(datastore: Datastore, info_blob: InfoBlobInDB):
+    def chunk_text(datastore: Datastore, info_blob: InfoBlobInDB, embedding_model):
         if stalled_phase == "chunking":
             stall_sync_phase()
-        return original_chunk_text(datastore, info_blob)
+        return original_chunk_text(datastore, info_blob, embedding_model)
 
     monkeypatch.setattr(Datastore, "_chunk_text", chunk_text)
 

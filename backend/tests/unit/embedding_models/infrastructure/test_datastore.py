@@ -61,7 +61,7 @@ async def test_add_surfaces_the_original_provider_error(monkeypatch):
         info_blob_id=uuid4(),
         tenant_id=uuid4(),
     )
-    monkeypatch.setattr(Datastore, "_chunk_text", lambda _self, _blob: [chunk])
+    monkeypatch.setattr(Datastore, "_chunk_text", lambda _self, _blob, _model: [chunk])
     provider_error = OpenAIException("provider unavailable")
     completed = ChunkEmbeddingList()
     embeddings = MagicMock()
@@ -86,3 +86,25 @@ async def test_add_surfaces_the_original_provider_error(monkeypatch):
     assert exc_info.value is provider_error
     assert completed._file.closed
     chunk_repo.add.assert_not_awaited()
+
+
+def test_chunk_text_clamps_to_the_embedding_models_limit(monkeypatch):
+    from types import SimpleNamespace
+
+    from eneo.embedding_models.domain import chunking
+    from eneo.tokens.token_utils import count_tokens
+
+    monkeypatch.setattr(chunking.settings, "chunk_size", 200)
+    monkeypatch.setattr(chunking.settings, "chunk_overlap", 40)
+    datastore = Datastore(
+        user=MagicMock(tenant_id=uuid4()),
+        info_blob_chunk_repo=MagicMock(),
+        create_embeddings_service=MagicMock(),
+    )
+    info_blob = SimpleNamespace(id=uuid4(), text=" ".join(f"w{i}" for i in range(300)))
+    small_model = SimpleNamespace(name="small", max_input=30)
+
+    chunks = datastore._chunk_text(info_blob, small_model)  # type: ignore[arg-type]
+
+    assert len(chunks) > 1
+    assert max(count_tokens(chunk.text) for chunk in chunks) <= 30
