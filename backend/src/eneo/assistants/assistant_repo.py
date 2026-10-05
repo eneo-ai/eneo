@@ -173,6 +173,25 @@ def _exclude_helper_assistants(
     return query.where(~sa.exists(active_role)).where(~sa.exists(former_helper))
 
 
+async def delete_removable_flow_managed_assistants(
+    session: AsyncSession, *, flow_id: UUID, assistant_ids: AbstractSet[UUID]
+) -> dict[UUID, UUID | None]:
+    """Delete the given assistants ``flow_id`` manages that no step uses.
+
+    Returns the deleted assistants' icon ids, keyed by assistant id, as the
+    statement saw them; anything else it skipped.
+    """
+    rows = await session.execute(
+        sa.delete(Assistants)
+        .where(Assistants.id.in_(assistant_ids))
+        .where(Assistants.origin == AssistantOrigin.FLOW_MANAGED.value)
+        .where(Assistants.managing_flow_id == flow_id)
+        .where(~sa.exists().where(FlowSteps.assistant_id == Assistants.id))
+        .returning(Assistants.id, Assistants.icon_id)
+    )
+    return {row.id: row.icon_id for row in rows}
+
+
 class AssistantRepository:
     def __init__(
         self,
@@ -713,20 +732,9 @@ class AssistantRepository:
         flow_id: UUID,
         assistant_ids: AbstractSet[UUID],
     ) -> dict[UUID, UUID | None]:
-        """Delete the given assistants ``flow_id`` manages that no step uses.
-
-        Returns the deleted assistants' icon ids, keyed by assistant id, as the
-        statement saw them; anything else it skipped.
-        """
-        rows = await self.session.execute(
-            sa.delete(Assistants)
-            .where(Assistants.id.in_(assistant_ids))
-            .where(Assistants.origin == AssistantOrigin.FLOW_MANAGED.value)
-            .where(Assistants.managing_flow_id == flow_id)
-            .where(~sa.exists().where(FlowSteps.assistant_id == Assistants.id))
-            .returning(Assistants.id, Assistants.icon_id)
+        return await delete_removable_flow_managed_assistants(
+            self.session, flow_id=flow_id, assistant_ids=assistant_ids
         )
-        return {row.id: row.icon_id for row in rows}
 
     async def add(self, assistant: Assistant):
         completion_model_id = (

@@ -19,6 +19,7 @@ from eneo.flows.application.flow_run_access_policy import (
     FlowRunAccessPolicy,
 )
 from eneo.flows.application.flow_run_terminalization import FlowRunTerminalizer
+from eneo.flows.application.step_result_assistant import with_snapshot_assistant_ids
 from eneo.flows.domain.flow import (
     Flow,
     FlowPersistedJsonObject,
@@ -1109,6 +1110,11 @@ class FlowRunService:
             run_id=run.id,
             tenant_id=self.user.tenant_id,
         )
+        if any(result.assistant_id is None for result in step_results):
+            version = await self.flow_version_repo.get(
+                flow_id=run.flow_id, version=run.flow_version, tenant_id=run.tenant_id
+            )
+            step_results = with_snapshot_assistant_ids(step_results, version)
         result_files = await self.flow_run_repo.list_result_files(
             run_id=run.id,
             tenant_id=self.user.tenant_id,

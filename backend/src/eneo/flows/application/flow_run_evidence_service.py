@@ -46,6 +46,7 @@ from eneo.flows.application.flow_run_export_json import render_evidence_json_exp
 from eneo.flows.application.flow_transcript_source_service import (
     FlowTranscriptSourceService,
 )
+from eneo.flows.application.step_result_assistant import with_snapshot_assistant_ids
 from eneo.flows.domain.canonical_json_hash import (
     canonical_json_bytes,
 )
@@ -808,10 +809,13 @@ class FlowRunEvidenceService:
             version=resolved_run.flow_version,
             tenant_id=self.user.tenant_id,
         )
-        step_results = await self.flow_run_repo.list_step_results(
-            run_id=resolved_run.id,
-            tenant_id=self.user.tenant_id,
-            **view_read_kwargs,
+        step_results = with_snapshot_assistant_ids(
+            await self.flow_run_repo.list_step_results(
+                run_id=resolved_run.id,
+                tenant_id=self.user.tenant_id,
+                **view_read_kwargs,
+            ),
+            version,
         )
         if is_view:
             self._record_view_omission(

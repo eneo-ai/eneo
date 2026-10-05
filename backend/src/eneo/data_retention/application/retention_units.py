@@ -43,6 +43,16 @@ class RetentionEffects:
         for _, tenant_id in rows:
             self.add(tenant_id, key)
 
+    def merge(self, committed: RetentionEffects) -> None:
+        """Include a unit's effects only after its savepoint has committed."""
+        for tenant_id, counts in committed.counts.items():
+            for key, value in counts.items():
+                self.add(tenant_id, key, value)
+        for tenant_id, receipt_ids in committed.receipts.items():
+            self.receipts[tenant_id].extend(receipt_ids)
+        for key, value in committed.blocked.items():
+            self.blocked[key] += value
+
     def result(
         self,
         *,

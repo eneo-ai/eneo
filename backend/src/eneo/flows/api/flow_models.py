@@ -1637,7 +1637,13 @@ class FlowRunStepPublic(BaseModel):
     tenant_id: UUID
     step_id: UUID
     step_order: int
-    assistant_id: UUID | None = None
+    assistant_id: UUID | None = Field(
+        default=None,
+        description=(
+            "The step assistant this step ran with, as the run's version names "
+            "it, also after that assistant was deleted."
+        ),
+    )
     status: FlowStepResultStatus
     input_payload_json: dict[str, Any] | None = None
     runtime_input_file_ids: list[UUID] = Field(

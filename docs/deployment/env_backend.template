@@ -481,6 +481,8 @@ TASK_EXECUTION_TIMEOUT_SECONDS=28800
 TASK_MAINTENANCE_TIMEOUT_SECONDS=120
 # Seconds between sweeps that cancel the unfinished runs of deleted flows (divides 60).
 # FLOW_RETIRED_RUN_DRAIN_INTERVAL_SECONDS=60
+# Hours an unattached flow step assistant is kept before reclamation may delete it (minimum 1).
+# FLOW_STEP_ASSISTANT_UNATTACHED_GRACE_HOURS=24
 
 # Inline text, structured JSON output, and retained rejected-output previews.
 FLOW_MAX_INLINE_TEXT_BYTES=8388608

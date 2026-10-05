@@ -24450,7 +24450,10 @@ export interface components {
      *     }
      */
     FlowRunStepPublic: {
-      /** Assistant Id */
+      /**
+       * Assistant Id
+       * @description The step assistant this step ran with, as the run's version names it, also after that assistant was deleted.
+       */
       assistant_id?: string | null;
       citation_summary?: components["schemas"]["FlowCitationSummaryPublic"] | null;
       /**

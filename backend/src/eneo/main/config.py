@@ -385,6 +385,9 @@ class Settings(BaseSettings):
     # Seconds between sweeps that cancel the runs of deleted flows; a divisor of
     # 60, since the sweep runs at fixed seconds of every minute.
     flow_retired_run_drain_interval_seconds: int = 60
+    # Hours a flow-managed step assistant no step uses is kept after it was
+    # created: the editor creates it before the save that attaches it.
+    flow_step_assistant_unattached_grace_hours: int = Field(default=24, ge=1)
     flow_max_inline_text_bytes: int = 8 * 1024 * 1024
     flow_pdf_max_pages: int = Field(default=2000, gt=0)
     flow_pdf_max_extracted_bytes: int = Field(default=128 * 1024 * 1024, gt=0)

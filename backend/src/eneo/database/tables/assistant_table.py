@@ -125,6 +125,14 @@ class Assistants(BasePublic):
             name="ck_assistants_flow_managed_hidden",
         ),
         Index("ix_assistants_origin_managing_flow", "origin", "managing_flow_id"),
+        # Reclamation walks managed assistants in creation order without sorting
+        # the remaining candidates on every bounded batch.
+        Index(
+            "ix_assistants_flow_managed_created_at_id",
+            "created_at",
+            "id",
+            postgresql_where=sa.text("origin = 'flow_managed'"),
+        ),
         Index(
             "uq_assistants_space_id_id",
             "space_id",

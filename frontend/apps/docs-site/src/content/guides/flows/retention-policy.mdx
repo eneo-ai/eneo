@@ -62,7 +62,7 @@ Open **Admin → Flow settings → Retention and preservation**.
 
 The selectors use an Organization-wide administrative catalog. They include non-personal Spaces and active Flows even when the person is not a member of the target Space; ordinary Space and Flow authoring lists remain membership-scoped.
 
-A deleted Flow that still has run history stays in the Flow selector with a **Deleted** badge. Deleting a Flow retires it: it can no longer run, but its runs, results, reviews and evidence stay readable with each reader's current permissions and follow the Flow's retention rule. Runs that were still queued, running or waiting for review are cancelled by a maintenance sweep that runs every minute by default, so they become finished history too. Its Flow policy, review queue and purge keep working. A deleted Flow without runs is not listed.
+A deleted Flow that still has run history stays in the Flow selector with a **Deleted** badge. Deleting a Flow retires it: it can no longer run, but its runs, results, reviews and evidence stay readable with each reader's current permissions and follow the Flow's retention rule. Runs that were still queued, running or waiting for review are cancelled by a maintenance sweep that runs every minute by default, so they become finished history too. Once they are, the nightly retention task can reclaim their hidden step assistants, subject to the grace period, holds, other uses and the per-unit cap; the run history keeps naming them. Its Flow policy, review queue and purge keep working. A deleted Flow without runs is not listed.
 
 1. Set or leave unset the Organization default.
 2. Select a Space only when it needs an exception.

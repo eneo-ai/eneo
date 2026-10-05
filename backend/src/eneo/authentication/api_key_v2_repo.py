@@ -227,13 +227,19 @@ class ApiKeysV2Repository:
         tenant_id: UUID,
         scope_type: Optional[ApiKeyScopeType] = None,
         scope_id: Optional[UUID] = None,
+        unrevoked_only: bool = False,
+        limit: int | None = None,
     ) -> list[ApiKeyV2InDB]:
         query = sa.select(self.table).where(self.table.tenant_id == tenant_id)
         if scope_type is not None:
             query = query.where(self.table.scope_type == scope_type)
         if scope_id is not None:
             query = query.where(self.table.scope_id == scope_id)
+        if unrevoked_only:
+            query = query.where(self.table.revoked_at.is_(None))
         query = query.order_by(self.table.created_at.desc())
+        if limit is not None:
+            query = query.limit(limit)
 
         records = await self.session.scalars(query)
 

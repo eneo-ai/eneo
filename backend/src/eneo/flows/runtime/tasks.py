@@ -24,6 +24,10 @@ from eneo.flows.application.flow_webhook_delivery_policy import (
     FLOW_WEBHOOK_DELIVERY_CLAIM_TTL_SECONDS,
     FLOW_WEBHOOK_DELIVERY_CONCURRENCY,
 )
+from eneo.flows.application.step_assistant_reclamation import (
+    ReclamationInventory,
+    StepAssistantReclamation,
+)
 from eneo.flows.domain.flow import FlowRunStatus
 from eneo.flows.domain.flow_run_recovery_policy import (
     FLOW_EXECUTION_HEARTBEAT_EXPIRY_SECONDS,
@@ -923,6 +927,13 @@ async def reconcile_expired_review_checkpoints() -> dict[str, int | str]:
 
 async def drain_retired_flow_runs() -> dict[str, int | str]:
     return await _drain_retired_flow_runs()
+
+
+async def inventory_flow_step_assistants() -> ReclamationInventory:
+    """The dry run of step-assistant reclamation (the flows.housekeeping
+    step_assistants step): counts by reason, no lock taken, nothing written."""
+    async with sessionmanager.session() as session:
+        return await StepAssistantReclamation(session).inventory()
 
 
 async def redispatch_stale_queued_runs() -> dict[str, int | str]:

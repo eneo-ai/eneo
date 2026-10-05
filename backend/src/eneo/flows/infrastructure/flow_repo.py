@@ -485,6 +485,22 @@ class FlowRepository:
             await self._lock_flow_row(flow_id=flow_id, tenant_id=tenant_id)
         ).published_version
 
+    async def flow_row_for_step_assistant_reclamation(
+        self, *, flow_id: UUID, tenant_id: UUID, lock: bool
+    ) -> sa.Row[tuple[datetime | None]] | None:
+        """``deleted_at`` of a live or deleted flow. With ``lock`` it takes the
+        row lock `_lock_flow_row` takes, SKIP LOCKED: None while another
+        transaction (an edit, publish, run start or delete) holds the row.
+        Without it a plain read (an inventory that never blocks a writer)."""
+        query = (
+            sa.select(Flows.deleted_at)
+            .where(Flows.id == flow_id)
+            .where(Flows.tenant_id == tenant_id)
+        )
+        if lock:
+            query = query.with_for_update(key_share=True, skip_locked=True)
+        return (await self.session.execute(query)).one_or_none()
+
     async def _lock_flow_row(
         self, *, flow_id: UUID, tenant_id: UUID
     ) -> sa.Row[tuple[int, int | None]]:
@@ -1222,7 +1238,16 @@ class FlowRepository:
         )
         query = sa.select(Assistants.id)
         if assistant_ids is not None:
-            query = query.where(Assistants.id.in_(assistant_ids))
+            query = query.where(
+                Assistants.id
+                == sa.any_(
+                    sa.bindparam(
+                        "assistant_ids",
+                        value=sorted(assistant_ids),
+                        type_=postgresql.ARRAY(postgresql.UUID(as_uuid=True)),
+                    )
+                )
+            )
         query = (
             query.where(getattr(Assistants, "origin") == "flow_managed")
             .where(getattr(Assistants, "managing_flow_id") == flow_id)
@@ -1255,11 +1280,23 @@ class FlowRepository:
     def _managed_assistant_has_no_step_references(
         *, tenant_id: UUID
     ) -> sa.ColumnElement[bool]:
+        """No draft step holds the assistant. A deleted flow's draft can never
+        be edited, published or run, so its own steps hold nothing; they are
+        removed with the assistant."""
         return ~sa.exists(
             sa.select(1)
             .select_from(FlowSteps)
             .where(FlowSteps.assistant_id == Assistants.id)
             .where(FlowSteps.tenant_id == tenant_id)
+            .where(
+                ~sa.exists(
+                    sa.select(1)
+                    .select_from(Flows)
+                    .where(Flows.id == FlowSteps.flow_id)
+                    .where(Flows.id == Assistants.managing_flow_id)
+                    .where(Flows.deleted_at.is_not(None))
+                )
+            )
         )
 
     @staticmethod

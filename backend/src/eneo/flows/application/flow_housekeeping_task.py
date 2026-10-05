@@ -10,7 +10,9 @@ Steps, in order (each call is one chunk of the runner):
 3. live_transcripts: transcripts never bound to a run, past the current window;
 4. audit_outbox: delivered mirrors past the audit retention whose audit log
    entry is gone;
-5. physical_confirmation, 6. prune_receipts, 7. prune_job_runs.
+5. step_assistants: flow-managed step assistants nothing can use any more
+   (step_assistant_reclamation);
+6. physical_confirmation, 7. prune_receipts, 8. prune_job_runs.
 
 A family is reclaimed atomically, in one transaction: measured within the
 family cap, every member locked and checked afresh for another owner, the depth
@@ -70,6 +72,12 @@ from eneo.data_retention.infrastructure.retention_job_run_repo import (
 from eneo.data_retention.infrastructure.retention_receipt_repo import (
     RetentionReceiptRepository,
 )
+from eneo.flows.application.step_assistant_reclamation import (
+    STEP_ASSISTANT_BLOCKED_KEYS,
+    STEP_ASSISTANT_COUNT_KEYS,
+    STEP_ASSISTANTS_STEP,
+    StepAssistantReclamation,
+)
 from eneo.flows.infrastructure.flow_file_family_repo import (
     UPLOAD_ANCHOR_EDGES,
     FamilyBlock,
@@ -98,6 +106,7 @@ _COUNT_KEYS = frozenset(
         "job_runs_pruned",
         *PHYSICAL_CONFIRMATION_COUNT_KEYS,
         *RECEIPT_PRUNING_COUNT_KEYS,
+        *STEP_ASSISTANT_COUNT_KEYS,
     }
 )
 _BLOCKED_KEYS = frozenset(
@@ -108,6 +117,7 @@ _BLOCKED_KEYS = frozenset(
         "audit_log_retained",
         *PHYSICAL_CONFIRMATION_BLOCKED_KEYS,
         *(reason.value for reason in ReceiptReason),
+        *STEP_ASSISTANT_BLOCKED_KEYS,
     }
 )
 
@@ -155,6 +165,9 @@ class FlowHousekeepingTask:
         self._families = FlowFileFamilyRepository(session)
         self._housekeeping = FlowHousekeepingRepository(session)
         self._transcripts = LiveTranscriptRepository(session)
+        self._step_assistants = StepAssistantReclamation(
+            session, family_rows=self._family_rows, chunk_rows=self._chunk_rows
+        )
 
     @property
     def name(self) -> str:
@@ -172,11 +185,17 @@ class FlowHousekeepingTask:
         if self._now().date().toordinal() % 2:
             families.reverse()
         return tuple(
-            RetentionStep(name, self._after_flow_history_lock(run), max_batch=batch)
+            RetentionStep(
+                name,
+                self._after_flow_history_lock(run),
+                max_batch=batch,
+                max_files=0 if name == STEP_ASSISTANTS_STEP else None,
+            )
             for name, run, batch in (
                 *families,
                 ("live_transcripts", self._live_transcripts, None),
                 ("audit_outbox", self._audit_outbox, None),
+                (STEP_ASSISTANTS_STEP, self._step_assistants.step, family),
                 ("physical_confirmation", self._receipts.physical_step, None),
                 ("prune_receipts", self._prune_receipts, None),
                 ("prune_job_runs", self._prune_job_runs, None),

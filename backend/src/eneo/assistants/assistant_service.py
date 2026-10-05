@@ -1,12 +1,14 @@
 import copy
 import re
 from collections import defaultdict
-from collections.abc import AsyncGenerator, Callable, Sequence
+from collections.abc import AsyncGenerator, Awaitable, Callable, Sequence
 from collections.abc import Set as AbstractSet
 from dataclasses import dataclass, replace
 from datetime import datetime
-from typing import TYPE_CHECKING, Optional, TypeVar, cast
+from typing import TYPE_CHECKING, Optional, Protocol, TypeVar, cast
 from uuid import UUID
+
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from eneo.ai_models.completion_models.completion_model import (
     Completion,
@@ -290,6 +292,55 @@ def _reject_direct_flow_managed_assistant_mutation(
             "action": action,
         },
     )
+
+
+class DeleteRemovableFlowManaged(Protocol):
+    """The delete statement of `delete_removable_flow_managed_assistants`."""
+
+    async def __call__(
+        self, *, flow_id: UUID, assistant_ids: AbstractSet[UUID]
+    ) -> dict[UUID, UUID | None]: ...
+
+
+async def remove_flow_managed_assistants(
+    *,
+    session: AsyncSession,
+    delete_removable: DeleteRemovableFlowManaged,
+    icon_repo: IconRepository,
+    flow_id: UUID,
+    tenant_id: UUID,
+    assistant_ids: AbstractSet[UUID],
+    revoke_api_keys: Callable[[UUID], Awaitable[object]],
+) -> None:
+    """Delete assistants ``flow_id`` manages, with every deletion effect: their
+    API keys revoked through ``revoke_api_keys`` and their unused icons of
+    ``tenant_id`` deleted. All or nothing, in a savepoint of ``session``:
+    ``delete_removable`` (delete_removable_flow_managed_assistants) decides
+    which assistants go, so one the flow does not manage, or one a step uses by
+    the time it runs, refuses the whole call, and so does a failed revocation."""
+    if not assistant_ids:
+        return
+    async with session.begin_nested():
+        icon_ids = await delete_removable(
+            flow_id=flow_id,
+            assistant_ids=assistant_ids,
+        )
+        refused = assistant_ids - icon_ids.keys()
+        if refused:
+            raise BadRequestException(
+                "Only assistants the flow manages and no step uses can be "
+                "deleted with it.",
+                code="flow_managed_assistant",
+                context={
+                    "flow_id": str(flow_id),
+                    "assistant_ids": sorted(str(id) for id in refused),
+                },
+            )
+        for assistant_id in sorted(icon_ids):
+            await revoke_api_keys(assistant_id)
+        for icon_id in icon_ids.values():
+            if icon_id is not None:
+                await icon_repo.delete_unused(icon_id, tenant_id=tenant_id)
 
 
 TReference = TypeVar("TReference")
@@ -2212,40 +2263,21 @@ class AssistantService:
         flow_id: UUID,
         assistant_ids: AbstractSet[UUID],
     ) -> None:
-        """Delete assistants ``flow_id`` manages, with every deletion effect.
+        """Delete assistants ``flow_id`` manages (remove_flow_managed_assistants).
 
         Flow edit access authorizes this, so there is no assistant permission
-        check. It is all or nothing: the delete statement itself decides which
-        assistants go, so one the flow does not manage, or one a step uses by
-        the time the statement runs, refuses the whole call; so does a failed
-        key revocation. Either way the savepoint undoes every change. The space
-        aggregate never deletes flow-managed rows, so they go in one statement.
+        check. The space aggregate never deletes flow-managed rows, so they go
+        in one statement.
         """
-        if not assistant_ids:
-            return
-        async with self.repo.session.begin_nested():
-            icon_ids = await self.repo.delete_removable_flow_managed(
-                flow_id=flow_id,
-                assistant_ids=assistant_ids,
-            )
-            refused = assistant_ids - icon_ids.keys()
-            if refused:
-                raise BadRequestException(
-                    "Only assistants the flow manages and no step uses can be "
-                    "deleted with it.",
-                    code="flow_managed_assistant",
-                    context={
-                        "flow_id": str(flow_id),
-                        "assistant_ids": sorted(str(id) for id in refused),
-                    },
-                )
-            for assistant_id in sorted(icon_ids):
-                await self._revoke_assistant_api_keys(assistant_id)
-            for icon_id in icon_ids.values():
-                if icon_id is not None:
-                    await self.icon_repo.delete_unused(
-                        icon_id, tenant_id=self.user.tenant_id
-                    )
+        await remove_flow_managed_assistants(
+            session=self.repo.session,
+            delete_removable=self.repo.delete_removable_flow_managed,
+            icon_repo=self.icon_repo,
+            flow_id=flow_id,
+            tenant_id=self.user.tenant_id,
+            assistant_ids=assistant_ids,
+            revoke_api_keys=self._revoke_assistant_api_keys,
+        )
 
     async def _revoke_assistant_api_keys(self, assistant_id: UUID) -> None:
         await self.api_key_scope_revoker.revoke_scope(
