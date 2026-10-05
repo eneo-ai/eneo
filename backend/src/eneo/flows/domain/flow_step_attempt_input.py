@@ -24,6 +24,9 @@ class _FlowStepAttemptInputModel(BaseModel):
 
 MappedExecutionMode: TypeAlias = Literal["per_item", "per_source_reader"]
 
+ITEM_MAP_EXECUTION_MODE_KEY = "item_map_execution_mode"
+ITEM_MAP_EXECUTION_MODE: MappedExecutionMode = "per_item"
+
 
 class FlowStepAttemptMappedAdmission(_FlowStepAttemptInputModel):
     version: Literal[1] = 1
