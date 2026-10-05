@@ -8,8 +8,8 @@ import sqlalchemy as sa
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from eneo.data_retention.constants import ORPHANED_SESSION_CLEANUP_DAYS
-from eneo.data_retention.infrastructure.gallring_lock import (
-    GallringSubject,
+from eneo.data_retention.infrastructure.retention_lock import (
+    RetentionSubject,
     acquire_shared,
 )
 from eneo.database.affected_rows import affected_row_count
@@ -480,7 +480,7 @@ class DataRetentionService:
         if not dry_run:
             # Before any read or row lock: policy and hold changes commit either
             # before this selection or after this transaction.
-            await acquire_shared(self.session, GallringSubject.FLOW_HISTORY)
+            await acquire_shared(self.session, RetentionSubject.FLOW_HISTORY)
         blocked = await self.count_blocked_flow_run_history_purge_candidates(
             now=now, tenant_id=tenant_id, space_id=space_id, flow_id=flow_id
         )
@@ -736,8 +736,8 @@ class DataRetentionService:
             return FlowDebugRedactionCounts()
 
         # Redaction removes run content, so a legal hold stops it like any
-        # deletion: under the gallring lock, held runs drop out here.
-        await acquire_shared(self.session, GallringSubject.FLOW_HISTORY)
+        # deletion: under the retention lock, held runs drop out here.
+        await acquire_shared(self.session, RetentionSubject.FLOW_HISTORY)
         run_ids = set(
             (
                 await self.session.scalars(

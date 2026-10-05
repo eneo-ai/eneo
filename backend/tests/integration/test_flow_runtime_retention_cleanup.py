@@ -12,7 +12,7 @@ from sqlalchemy import delete, func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from eneo.audit.infrastructure.audit_log_repo_impl import AuditLogRepositoryImpl
-from eneo.data_retention.application.gallring_runner import GallringBatch
+from eneo.data_retention.application.retention_runner import RetentionBatch
 from eneo.data_retention.infrastructure import (
     data_retention_worker,
 )
@@ -1060,7 +1060,7 @@ async def _housekeep(session: AsyncSession) -> dict[str, int]:
         cursor = None
         for batch_seq in itertools.count(1):
             result = await step.run(
-                GallringBatch(
+                RetentionBatch(
                     job_run_id=uuid4(),
                     batch_seq=batch_seq,
                     rows=100,

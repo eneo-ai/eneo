@@ -31,41 +31,44 @@ receipt pruning keeps the receipts of held Flows.
 from __future__ import annotations
 
 import time
-from collections import defaultdict
-from collections.abc import Awaitable, Callable, Iterable, Sequence
-from dataclasses import dataclass, field
+from collections.abc import Awaitable, Callable, Sequence
 from datetime import datetime, timezone
-from enum import Enum
 from uuid import UUID
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from eneo.data_retention.application.gallring_receipts import (
+from eneo.data_retention.application.retention_receipts import (
     PHYSICAL_CONFIRMATION_BLOCKED_KEYS,
     PHYSICAL_CONFIRMATION_COUNT_KEYS,
     RECEIPT_PRUNING_COUNT_KEYS,
-    GallringReceiptService,
+    RetentionReceiptService,
 )
-from eneo.data_retention.application.gallring_runner import (
-    GallringBatch,
-    GallringStep,
-    GallringStepResult,
-    GallringTenantEffect,
+from eneo.data_retention.application.retention_runner import (
+    RetentionBatch,
+    RetentionStep,
+    RetentionStepResult,
 )
-from eneo.data_retention.domain.gallring import (
-    GallringCategory,
-    GallringEntityKind,
-    GallringKeyset,
-    GallringReceipt,
-    NewGallringReceipt,
+from eneo.data_retention.application.retention_units import (
+    RetentionEffects,
+    RetentionUnitCandidate,
+    RetentionUnitDisposition,
+    RetentionUnitUsage,
+    gather_retention_units,
+)
+from eneo.data_retention.domain.retention import (
+    NewRetentionReceipt,
     ReceiptPhase,
     ReceiptReason,
+    RetentionCategory,
+    RetentionEntityKind,
+    RetentionKeyset,
+    RetentionReceipt,
 )
-from eneo.data_retention.infrastructure.gallring_job_run_repo import (
-    GallringJobRunRepository,
+from eneo.data_retention.infrastructure.retention_job_run_repo import (
+    RetentionJobRunRepository,
 )
-from eneo.data_retention.infrastructure.gallring_receipt_repo import (
-    GallringReceiptRepository,
+from eneo.data_retention.infrastructure.retention_receipt_repo import (
+    RetentionReceiptRepository,
 )
 from eneo.flows.infrastructure.flow_file_family_repo import (
     UPLOAD_ANCHOR_EDGES,
@@ -102,57 +105,11 @@ _BLOCKED_KEYS = frozenset(
         "held",
         "lock_deferred",
         "recorded",
-        "family_deferred",
         "audit_log_retained",
         *PHYSICAL_CONFIRMATION_BLOCKED_KEYS,
         *(reason.value for reason in ReceiptReason),
     }
 )
-
-
-@dataclass
-class _Out:
-    """One step call's audited effects per tenant and its blocked counts."""
-
-    counts: defaultdict[UUID | None, defaultdict[str, int]] = field(
-        default_factory=lambda: defaultdict(lambda: defaultdict(int))
-    )
-    receipts: defaultdict[UUID | None, list[UUID]] = field(
-        default_factory=lambda: defaultdict(list)
-    )
-    blocked: defaultdict[str, int] = field(default_factory=lambda: defaultdict(int))
-
-    def add(self, tenant_id: UUID | None, key: str, value: int = 1) -> None:
-        if value:
-            self.counts[tenant_id][key] += value
-
-    def add_rows(self, rows: Iterable[tuple[UUID, UUID]], key: str) -> None:
-        for _, tenant_id in rows:
-            self.add(tenant_id, key)
-
-    def result(
-        self,
-        *,
-        rows: int,
-        files: int = 0,
-        exhausted: bool,
-        cursor: GallringKeyset | None = None,
-    ) -> GallringStepResult:
-        return GallringStepResult(
-            rows=rows,
-            files=files,
-            effects=tuple(
-                GallringTenantEffect(
-                    tenant_id=tenant_id,
-                    counts=dict(counts),
-                    receipt_ids=tuple(dict.fromkeys(self.receipts[tenant_id])),
-                )
-                for tenant_id, counts in self.counts.items()
-            ),
-            blocked={key: value for key, value in self.blocked.items() if value},
-            exhausted=exhausted,
-            cursor=cursor,
-        )
 
 
 def _block_reason(block: FamilyBlock) -> ReceiptReason:
@@ -165,26 +122,6 @@ def _block_reason(block: FamilyBlock) -> ReceiptReason:
 
 def _utcnow() -> datetime:
     return datetime.now(timezone.utc)
-
-
-_Candidate = tuple[GallringKeyset, Callable[[int, int, bool], Awaitable["_Spent"]]]
-
-
-class _Fit(Enum):
-    DONE = "done"
-    # The family needs a chunk of its own: the next call starts with it.
-    NEXT_CHUNK = "next_chunk"
-    # It does not fit what is left of tonight: its step ends for the night.
-    TONIGHT = "tonight"
-
-
-@dataclass(frozen=True, slots=True)
-class _Spent:
-    """What one candidate charged: rows examined, rows deleted or recorded."""
-
-    rows: int
-    files: int
-    fit: _Fit = _Fit.DONE
 
 
 class FlowHousekeepingTask:
@@ -213,11 +150,8 @@ class FlowHousekeepingTask:
             chunk_rows if chunk_rows is not None else settings.gallring_chunk_rows
         )
         self._gather_seconds = settings.gallring_family_gather_seconds
-        # Family steps that met a family not fitting tonight's remainder: they
-        # end for this execution (step state, never family state).
-        self._done_tonight: set[str] = set()
-        self._receipts = GallringReceiptService(GallringReceiptRepository(session))
-        self._job_runs = GallringJobRunRepository(session)
+        self._receipts = RetentionReceiptService(RetentionReceiptRepository(session))
+        self._job_runs = RetentionJobRunRepository(session)
         self._families = FlowFileFamilyRepository(session)
         self._housekeeping = FlowHousekeepingRepository(session)
         self._transcripts = LiveTranscriptRepository(session)
@@ -226,7 +160,7 @@ class FlowHousekeepingTask:
     def name(self) -> str:
         return FLOWS_HOUSEKEEPING_TASK
 
-    def steps(self) -> Sequence[GallringStep]:
+    def steps(self) -> Sequence[RetentionStep]:
         family = self._family_rows
         families = [
             ("file_families", self._file_families, family),
@@ -238,7 +172,7 @@ class FlowHousekeepingTask:
         if self._now().date().toordinal() % 2:
             families.reverse()
         return tuple(
-            GallringStep(name, self._after_flow_history_lock(run), max_batch=batch)
+            RetentionStep(name, self._after_flow_history_lock(run), max_batch=batch)
             for name, run, batch in (
                 *families,
                 ("live_transcripts", self._live_transcripts, None),
@@ -250,9 +184,9 @@ class FlowHousekeepingTask:
         )
 
     def _after_flow_history_lock(
-        self, run: Callable[[GallringBatch], Awaitable[GallringStepResult]]
-    ) -> Callable[[GallringBatch], Awaitable[GallringStepResult]]:
-        async def locked(batch: GallringBatch) -> GallringStepResult:
+        self, run: Callable[[RetentionBatch], Awaitable[RetentionStepResult]]
+    ) -> Callable[[RetentionBatch], Awaitable[RetentionStepResult]]:
+        async def locked(batch: RetentionBatch) -> RetentionStepResult:
             # Before any selection: holds are read as they are at deletion.
             await self._housekeeping.lock_flow_history()
             return await run(batch)
@@ -261,11 +195,13 @@ class FlowHousekeepingTask:
 
     # Families ---------------------------------------------------------------
 
-    async def _file_families(self, batch: GallringBatch) -> GallringStepResult:
+    async def _file_families(self, batch: RetentionBatch) -> RetentionStepResult:
         """Paused receipts, oldest first, one at a time from the durable cursor."""
-        out = _Out()
+        out = RetentionEffects()
 
-        async def next_candidate(after: GallringKeyset | None) -> _Candidate | None:
+        async def next_candidate(
+            after: RetentionKeyset | None,
+        ) -> RetentionUnitCandidate | None:
             receipts = await self._receipts.unfinished(
                 task=FLOWS_HOUSEKEEPING_TASK,
                 after=(after.at, after.id) if after is not None else None,
@@ -275,27 +211,35 @@ class FlowHousekeepingTask:
                 return None
             receipt = receipts[0]
 
-            async def handle(rows: int, files: int, fresh: bool) -> _Spent:
+            async def handle(rows: int, files: int) -> RetentionUnitUsage:
                 if receipt.flow_id is not None and await self._held({receipt.flow_id}):
                     out.blocked["held"] += 1
-                    return _Spent(rows=1, files=0)
+                    return RetentionUnitUsage(rows=1, files=0)
                 return await self._reclaim(
                     receipt.entity_id,
                     receipt=receipt,
                     rows=rows,
                     files=files,
-                    fresh=fresh,
                     out=out,
                 )
 
-            return GallringKeyset(at=receipt.started_at, id=receipt.id), handle
+            return RetentionKeyset(at=receipt.started_at, id=receipt.id), handle
 
-        return await self._families_page("file_families", batch, next_candidate, out)
+        return await gather_retention_units(
+            batch,
+            next_candidate,
+            out,
+            chunk_rows=self._chunk_rows,
+            gather_seconds=self._gather_seconds,
+            clock=time.monotonic,
+        )
 
-    async def _abandoned_uploads(self, batch: GallringBatch) -> GallringStepResult:
-        out = _Out()
+    async def _abandoned_uploads(self, batch: RetentionBatch) -> RetentionStepResult:
+        out = RetentionEffects()
 
-        async def next_candidate(after: GallringKeyset | None) -> _Candidate | None:
+        async def next_candidate(
+            after: RetentionKeyset | None,
+        ) -> RetentionUnitCandidate | None:
             uploads = await self._housekeeping.abandoned_uploads(
                 now=self._now(), after=after, limit=1
             )
@@ -303,80 +247,35 @@ class FlowHousekeepingTask:
                 return None
             upload = uploads[0]
 
-            async def handle(rows: int, files: int, fresh: bool) -> _Spent:
+            async def handle(rows: int, files: int) -> RetentionUnitUsage:
                 if await self._housekeeping.recorded_families(
                     task=FLOWS_HOUSEKEEPING_TASK,
-                    category=GallringCategory.ABANDONED_UPLOAD,
+                    category=RetentionCategory.ABANDONED_UPLOAD,
                     root_ids=[upload.file_id],
                 ):
                     out.blocked["recorded"] += 1  # the file_families step owns it
-                    return _Spent(rows=1, files=0)
+                    return RetentionUnitUsage(rows=1, files=0)
                 if await self._held({upload.flow_id}):
                     out.blocked["held"] += 1
-                    return _Spent(rows=1, files=0)
+                    return RetentionUnitUsage(rows=1, files=0)
                 return await self._reclaim(
                     upload.file_id,
                     upload=upload,
                     rows=rows,
                     files=files,
-                    fresh=fresh,
                     out=out,
                 )
 
-            return GallringKeyset(at=upload.created_at, id=upload.file_id), handle
+            return RetentionKeyset(at=upload.created_at, id=upload.file_id), handle
 
-        return await self._families_page(
-            "abandoned_uploads", batch, next_candidate, out
+        return await gather_retention_units(
+            batch,
+            next_candidate,
+            out,
+            chunk_rows=self._chunk_rows,
+            gather_seconds=self._gather_seconds,
+            clock=time.monotonic,
         )
-
-    async def _families_page(
-        self,
-        step: str,
-        batch: GallringBatch,
-        next_candidate: Callable[[GallringKeyset | None], Awaitable[_Candidate | None]],
-        out: _Out,
-    ) -> GallringStepResult:
-        """Take candidates one at a time, in cursor order, while the call may.
-
-        Each candidate is selected only when it will be processed and costs at
-        least its own examined row. A call collects families up to the normal
-        chunk size, stopping further selection after the configured gather time.
-        Each family still finishes atomically even if it takes longer; a family
-        that alone needs more rows starts a call of its own, up to the cap.
-        The cursor stays before a family deferred for budget.
-        """
-        cursor = batch.cursor
-        if step in self._done_tonight:
-            return out.result(rows=0, exhausted=False, cursor=cursor)
-        rows = files = 0
-        started = time.monotonic()
-        while True:
-            fresh = rows == 0 and files == 0
-            row_limit = batch.rows if fresh else min(batch.rows, self._chunk_rows)
-            file_limit = batch.files if fresh else min(batch.files, self._chunk_rows)
-            if (
-                rows >= row_limit
-                or files >= file_limit
-                or (not fresh and time.monotonic() - started > self._gather_seconds)
-            ):
-                return out.result(
-                    rows=rows, files=files, exhausted=False, cursor=cursor
-                )
-            candidate = await next_candidate(cursor)
-            if candidate is None:
-                return out.result(rows=rows, files=files, exhausted=True, cursor=cursor)
-            keyset, handle = candidate
-            spent = await handle(row_limit - rows, file_limit - files, fresh)
-            rows += spent.rows
-            files += spent.files
-            if spent.fit is not _Fit.DONE:
-                if spent.fit is _Fit.TONIGHT:
-                    self._done_tonight.add(step)
-                    out.blocked["family_deferred"] += 1
-                return out.result(
-                    rows=rows, files=files, exhausted=False, cursor=cursor
-                )
-            cursor = keyset
 
     async def _reclaim(
         self,
@@ -384,11 +283,10 @@ class FlowHousekeepingTask:
         *,
         rows: int,
         files: int,
-        fresh: bool,
-        out: _Out,
-        receipt: GallringReceipt | None = None,
+        out: RetentionEffects,
+        receipt: RetentionReceipt | None = None,
         upload: AbandonedUpload | None = None,
-    ) -> _Spent:
+    ) -> RetentionUnitUsage:
         """Reclaim one family atomically, or pause its receipt with the reason.
 
         `rows` (examined) and `files` (deleted or recorded) are what this
@@ -408,15 +306,15 @@ class FlowHousekeepingTask:
         ):
             await self._receipts.withdraw(receipt)
             out.add(receipt.tenant_id, "receipts_withdrawn")
-            return _Spent(rows=1, files=0)
+            return RetentionUnitUsage(rows=1, files=0)
         if not await self._housekeeping.lock_upload(root, now=now):
             out.blocked["lock_deferred"] += 1
-            return _Spent(rows=1, files=0)
+            return RetentionUnitUsage(rows=1, files=0)
         cap = self._family_rows
-        not_now = _Fit.TONIGHT if fresh else _Fit.NEXT_CHUNK
+        not_now = RetentionUnitDisposition.DOES_NOT_FIT
         used = 1
         if rows <= used:
-            return _Spent(rows=used, files=0, fit=not_now)
+            return RetentionUnitUsage(rows=used, files=0, disposition=not_now)
 
         def room(most: int) -> int:
             # A count may examine `most` + 1 rows (the sentinel) within what is left.
@@ -429,7 +327,7 @@ class FlowHousekeepingTask:
         if members > member_max:
             return await self._over_cap(root, receipt, upload, used, out)
         if members > limit:
-            return _Spent(rows=used, files=0, fit=not_now)
+            return RetentionUnitUsage(rows=used, files=0, disposition=not_now)
         reference_max = (cap - 2 - 4 * members) // 2
         limit = room(reference_max)
         references = await self._families.count_references(root, limit=limit + 1)
@@ -437,7 +335,7 @@ class FlowHousekeepingTask:
         if references > reference_max:
             return await self._over_cap(root, receipt, upload, used, out)
         if references > limit:
-            return _Spent(rows=used, files=0, fit=not_now)
+            return RetentionUnitUsage(rows=used, files=0, disposition=not_now)
         transcript_max = (cap - 2 - 4 * members - 2 * references) // 2
         limit = room(transcript_max)
         transcripts = await self._families.count_bound_transcripts(
@@ -451,7 +349,7 @@ class FlowHousekeepingTask:
             or 2 + 4 * members + 2 * references + 2 * transcripts > rows
             or 1 + members + 2 * references + transcripts > files
         ):
-            return _Spent(rows=used, files=0, fit=not_now)
+            return RetentionUnitUsage(rows=used, files=0, disposition=not_now)
 
         # Under the locks the family is read again, never past what was counted:
         # anything that grew in between makes it wait for another pass.
@@ -459,7 +357,7 @@ class FlowHousekeepingTask:
         used += locked.examined
         if locked.items is None:
             out.blocked["lock_deferred"] += 1
-            return _Spent(rows=used, files=0)
+            return RetentionUnitUsage(rows=used, files=0)
         manifest = await self._families.manifest(locked.items, limit=references)
         used += manifest.examined
         bound = await self._families.count_all_bound_transcripts(
@@ -468,7 +366,7 @@ class FlowHousekeepingTask:
         used += bound
         if manifest.items is None or bound > transcripts:
             out.blocked["lock_deferred"] += 1
-            return _Spent(rows=used, files=0)
+            return RetentionUnitUsage(rows=used, files=0)
         members_locked, pairs = locked.items, manifest.items
         receipt = await self._receipt(root, receipt, upload)
         tenant_id = receipt.tenant_id
@@ -479,7 +377,7 @@ class FlowHousekeepingTask:
         ) or await self._families.too_deep(root)
         if block is not None:
             await self._pause(receipt, _block_reason(block), out)
-            return _Spent(rows=used, files=0)
+            return RetentionUnitUsage(rows=used, files=0)
         receipt = await self._receipts.append_manifest(
             receipt, pairs, manifest_after=None, complete=True
         )
@@ -501,7 +399,7 @@ class FlowHousekeepingTask:
         ):
             out.add(tenant_id, key, value)
         out.receipts[tenant_id].append(receipt.id)
-        return _Spent(
+        return RetentionUnitUsage(
             rows=used,
             files=2 * len(pairs) + deleted + released + deleted_transcripts,
         )
@@ -509,32 +407,32 @@ class FlowHousekeepingTask:
     async def _over_cap(
         self,
         root: UUID,
-        receipt: GallringReceipt | None,
+        receipt: RetentionReceipt | None,
         upload: AbandonedUpload | None,
         used: int,
-        out: _Out,
-    ) -> _Spent:
+        out: RetentionEffects,
+    ) -> RetentionUnitUsage:
         """Larger than the family cap: never reclaimed, paused once a pass."""
         receipt = await self._receipt(root, receipt, upload)
         await self._pause(receipt, ReceiptReason.FAMILY_EXCEEDS_BUDGET, out)
-        return _Spent(rows=used, files=0)
+        return RetentionUnitUsage(rows=used, files=0)
 
     async def _receipt(
         self,
         root: UUID,
-        receipt: GallringReceipt | None,
+        receipt: RetentionReceipt | None,
         upload: AbandonedUpload | None,
-    ) -> GallringReceipt:
+    ) -> RetentionReceipt:
         """The family's receipt, open (pending) for this transaction."""
         if receipt is None:
             assert upload is not None
             policy = await self._housekeeping.abandonment_policy()
             receipt = await self._receipts.open(
-                NewGallringReceipt(
+                NewRetentionReceipt(
                     task=FLOWS_HOUSEKEEPING_TASK,
-                    entity_kind=GallringEntityKind.FILE_FAMILY,
+                    entity_kind=RetentionEntityKind.FILE_FAMILY,
                     entity_id=root,
-                    category=GallringCategory.ABANDONED_UPLOAD,
+                    category=RetentionCategory.ABANDONED_UPLOAD,
                     tenant_id=upload.tenant_id,
                     flow_id=upload.flow_id,
                     policy_source=policy.source,
@@ -547,14 +445,14 @@ class FlowHousekeepingTask:
         return receipt
 
     async def _pause(
-        self, receipt: GallringReceipt, reason: ReceiptReason, out: _Out
+        self, receipt: RetentionReceipt, reason: ReceiptReason, out: RetentionEffects
     ) -> None:
         await self._receipts.pause(receipt, reason)
         out.blocked[reason.value] += 1
 
     # Live transcripts never bound to a run -----------------------------------
 
-    async def _live_transcripts(self, batch: GallringBatch) -> GallringStepResult:
+    async def _live_transcripts(self, batch: RetentionBatch) -> RetentionStepResult:
         now = self._now()
         page = await self._transcripts.expired_unbound_page(
             now=now, after=batch.cursor, limit=batch.rows
@@ -563,14 +461,14 @@ class FlowHousekeepingTask:
         deleted = await self._transcripts.delete_expired_unbound_ids(
             [row.id for row in page if row.flow_id not in held], now=now
         )
-        out = _Out()
+        out = RetentionEffects()
         out.add_rows(deleted, "transcripts_deleted")
         out.blocked["held"] += sum(1 for row in page if row.flow_id in held)
         return out.result(
             rows=len(page),
             exhausted=len(page) < batch.rows,
             cursor=(
-                GallringKeyset(at=page[-1].created_at, id=page[-1].id)
+                RetentionKeyset(at=page[-1].created_at, id=page[-1].id)
                 if page
                 else batch.cursor
             ),
@@ -578,14 +476,14 @@ class FlowHousekeepingTask:
 
     # Delivered audit outbox mirrors -------------------------------------------
 
-    async def _audit_outbox(self, batch: GallringBatch) -> GallringStepResult:
+    async def _audit_outbox(self, batch: RetentionBatch) -> RetentionStepResult:
         page = await self._housekeeping.deletable_audit_outbox(
             now=self._now(), after=batch.cursor, limit=batch.rows
         )
         deleted = await self._housekeeping.delete_delivered_audit_outbox(
             [row.id for row in page if not row.held]
         )
-        out = _Out()
+        out = RetentionEffects()
         out.add_rows(deleted, "outbox_rows_deleted")
         held_rows = sum(1 for row in page if row.held)
         out.blocked["held"] += held_rows
@@ -595,7 +493,7 @@ class FlowHousekeepingTask:
             rows=len(page),
             exhausted=len(page) < batch.rows,
             cursor=(
-                GallringKeyset(at=page[-1].delivered_at, id=page[-1].id)
+                RetentionKeyset(at=page[-1].delivered_at, id=page[-1].id)
                 if page
                 else batch.cursor
             ),
@@ -603,15 +501,15 @@ class FlowHousekeepingTask:
 
     # Physical confirmation, pruning --------------------------------------------
 
-    async def _prune_receipts(self, batch: GallringBatch) -> GallringStepResult:
+    async def _prune_receipts(self, batch: RetentionBatch) -> RetentionStepResult:
         # A held Flow's receipts keep their proof, in both pruning stages.
         return await self._receipts.prune_step(
             batch, held=self._housekeeping.receipt_held()
         )
 
-    async def _prune_job_runs(self, batch: GallringBatch) -> GallringStepResult:
+    async def _prune_job_runs(self, batch: RetentionBatch) -> RetentionStepResult:
         pruned = await self._job_runs.prune_after_audit_retention(limit=batch.rows)
-        out = _Out()
+        out = RetentionEffects()
         # Job runs belong to the deployment, not to a tenant's row.
         out.add(None, "job_runs_pruned", pruned)
         return out.result(rows=pruned, exhausted=pruned < batch.rows)

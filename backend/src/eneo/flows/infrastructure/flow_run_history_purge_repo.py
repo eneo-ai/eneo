@@ -12,8 +12,8 @@ from sqlalchemy.dialects import postgresql
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import InstrumentedAttribute, aliased
 
-from eneo.data_retention.infrastructure.gallring_lock import (
-    GallringSubject,
+from eneo.data_retention.infrastructure.retention_lock import (
+    RetentionSubject,
     acquire_shared,
 )
 from eneo.database.tables.app_table import AppRunsFiles, AppsFiles
@@ -165,7 +165,7 @@ class FlowRunHistoryPurgeRepository:
             return FlowRunHistoryPurgeResult()
         # A caller that selected without the lock still deletes only under it;
         # re-taking it in the same transaction is a no-op.
-        await acquire_shared(self.session, GallringSubject.FLOW_HISTORY)
+        await acquire_shared(self.session, RetentionSubject.FLOW_HISTORY)
         bounded_run_ids = await self._candidate_bounded_run_ids(ordered_run_ids)
         unique_run_ids = set(bounded_run_ids)
 

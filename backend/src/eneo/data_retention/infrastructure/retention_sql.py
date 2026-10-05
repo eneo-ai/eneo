@@ -1,4 +1,4 @@
-"""SQL building blocks the gallring repositories share."""
+"""SQL building blocks the retention repositories share."""
 
 from __future__ import annotations
 

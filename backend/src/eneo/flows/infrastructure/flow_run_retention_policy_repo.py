@@ -8,8 +8,8 @@ from uuid import UUID
 import sqlalchemy as sa
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from eneo.data_retention.infrastructure.gallring_lock import (
-    GallringSubject,
+from eneo.data_retention.infrastructure.retention_lock import (
+    RetentionSubject,
     acquire_exclusive,
 )
 from eneo.database.tables.flow_tables import FlowRuns, Flows
@@ -268,7 +268,7 @@ class FlowRunRetentionPolicyRepository:
         tenant_id: UUID,
         policy: FlowRunRetentionPolicy | None,
     ) -> FlowRunRetentionPolicyChange:
-        await acquire_exclusive(self.session, GallringSubject.FLOW_HISTORY)
+        await acquire_exclusive(self.session, RetentionSubject.FLOW_HISTORY)
         await self._lock_organization(tenant_id=tenant_id)
         before = await self.get_organization(tenant_id=tenant_id)
         if before.local_policy != policy:
@@ -289,7 +289,7 @@ class FlowRunRetentionPolicyRepository:
         space_id: UUID,
         policy: FlowRunRetentionPolicy | None,
     ) -> FlowRunRetentionPolicyChange:
-        await acquire_exclusive(self.session, GallringSubject.FLOW_HISTORY)
+        await acquire_exclusive(self.session, RetentionSubject.FLOW_HISTORY)
         await self._lock_space(tenant_id=tenant_id, space_id=space_id)
         before = await self.get_space(tenant_id=tenant_id, space_id=space_id)
         if before.local_policy != policy:
@@ -311,7 +311,7 @@ class FlowRunRetentionPolicyRepository:
         flow_id: UUID,
         policy: FlowRunRetentionPolicy | None,
     ) -> FlowRunRetentionPolicyChange:
-        await acquire_exclusive(self.session, GallringSubject.FLOW_HISTORY)
+        await acquire_exclusive(self.session, RetentionSubject.FLOW_HISTORY)
         await self._lock_flow(tenant_id=tenant_id, flow_id=flow_id)
         before = await self.get_flow(tenant_id=tenant_id, flow_id=flow_id)
         if before.local_policy != policy:
@@ -338,7 +338,7 @@ class FlowRunRetentionPolicyRepository:
         self, *, tenant_id: UUID, days: int | None
     ) -> tuple[FlowRetentionHoldReviewLimit, FlowRetentionHoldReviewLimit]:
         """Store the limit in the tenant's flow settings; returns (before, after)."""
-        await acquire_exclusive(self.session, GallringSubject.FLOW_HISTORY)
+        await acquire_exclusive(self.session, RetentionSubject.FLOW_HISTORY)
         change = await update_tenant_flow_settings(
             self.session,
             tenant_id,

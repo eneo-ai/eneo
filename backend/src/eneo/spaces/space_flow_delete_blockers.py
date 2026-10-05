@@ -4,8 +4,8 @@ import sqlalchemy as sa
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.sql.selectable import Exists
 
-from eneo.data_retention.infrastructure.gallring_lock import (
-    GallringSubject,
+from eneo.data_retention.infrastructure.retention_lock import (
+    RetentionSubject,
     acquire_shared,
 )
 from eneo.database.tables.assistant_table import Assistants
@@ -26,7 +26,7 @@ async def space_has_flow_delete_blockers(session: AsyncSession, space_id: UUID) 
     # Soft-deleted Flows count here: retained children can still block raw cascades.
     # Deleting a Space deletes Flow history, so it takes the gallring lock: a
     # legal hold committed after this check cannot be cascaded away unseen.
-    await acquire_shared(session, GallringSubject.FLOW_HISTORY)
+    await acquire_shared(session, RetentionSubject.FLOW_HISTORY)
     stmt = sa.select(
         _flow_run_history_exists(space_id)
         | _flow_step_exists(space_id)

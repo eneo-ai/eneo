@@ -1,4 +1,4 @@
-"""Gallring bookkeeping: job executions, deletion receipts and their manifests.
+"""Retention bookkeeping: job executions, deletion receipts and their manifests.
 
 Owner: eneo.data_retention (job runs, receipts and items are written only through
 its repositories). Lifecycle: the flows.housekeeping task prunes final receipts
@@ -16,20 +16,20 @@ from uuid import UUID
 
 import sqlalchemy as sa
 from sqlalchemy.dialects.postgresql import JSONB
-from sqlalchemy.orm import Mapped, mapped_column
+from sqlalchemy.orm import Mapped, declared_attr, mapped_column
 
-from eneo.data_retention.domain.gallring import (
-    GALLRING_NAME_PATTERN,
+from eneo.data_retention.domain.retention import (
     NON_FINAL_RECEIPT_PHASES,
-    GallringCategory,
-    GallringEntityKind,
-    GallringErrorCode,
-    GallringJobOutcome,
-    GallringPolicySource,
-    GallringTrigger,
+    RETENTION_NAME_PATTERN,
     ReceiptItemDisposition,
     ReceiptPhase,
     ReceiptReason,
+    RetentionCategory,
+    RetentionEntityKind,
+    RetentionErrorCode,
+    RetentionJobOutcome,
+    RetentionPolicySource,
+    RetentionTrigger,
 )
 from eneo.database.tables.base_class import BaseWithTableName, IdMixin
 
@@ -41,11 +41,15 @@ def _sql_values(values: Any) -> str:
 _NON_FINAL_PHASES_SQL = f"phase IN ({_sql_values(NON_FINAL_RECEIPT_PHASES)})"
 _ACTIVE_PHASES = NON_FINAL_RECEIPT_PHASES - {ReceiptPhase.PAUSED}
 # Task names are code identifiers, never content.
-_TASK_NAME_SQL = f"task ~ '{GALLRING_NAME_PATTERN}'"
+_TASK_NAME_SQL = f"task ~ '{RETENTION_NAME_PATTERN}'"
 
 
-class GallringJobRuns(IdMixin, BaseWithTableName):
+class RetentionJobRuns(IdMixin, BaseWithTableName):
     """One execution of one registered task; the running row is the task's lease."""
+
+    @declared_attr.directive
+    def __tablename__(cls) -> str:
+        return "gallring_job_runs"
 
     task: Mapped[str] = mapped_column(sa.String(64), nullable=False)
     outcome: Mapped[str] = mapped_column(sa.String(16), nullable=False)
@@ -74,7 +78,7 @@ class GallringJobRuns(IdMixin, BaseWithTableName):
 
     __table_args__ = (
         sa.CheckConstraint(
-            f"outcome IN ({_sql_values(GallringJobOutcome)})",
+            f"outcome IN ({_sql_values(RetentionJobOutcome)})",
             name="ck_gallring_job_runs_outcome",
         ),
         sa.CheckConstraint(
@@ -82,7 +86,7 @@ class GallringJobRuns(IdMixin, BaseWithTableName):
             name="ck_gallring_job_runs_finished",
         ),
         sa.CheckConstraint(
-            f"error_code IS NULL OR error_code IN ({_sql_values(GallringErrorCode)})",
+            f"error_code IS NULL OR error_code IN ({_sql_values(RetentionErrorCode)})",
             name="ck_gallring_job_runs_error_code",
         ),
         sa.CheckConstraint(_TASK_NAME_SQL, name="ck_gallring_job_runs_task"),
@@ -113,8 +117,12 @@ class GallringJobRuns(IdMixin, BaseWithTableName):
     )
 
 
-class GallringReceipts(IdMixin, BaseWithTableName):
-    """Gallringsbevis for one entity and category, and the resume point of its work."""
+class RetentionReceipts(IdMixin, BaseWithTableName):
+    """Deletion evidence for one entity and category, and the resume point of its work."""
+
+    @declared_attr.directive
+    def __tablename__(cls) -> str:
+        return "gallring_receipts"
 
     task: Mapped[str] = mapped_column(sa.String(64), nullable=False)
     entity_kind: Mapped[str] = mapped_column(sa.String(32), nullable=False)
@@ -185,16 +193,16 @@ class GallringReceipts(IdMixin, BaseWithTableName):
             name="ck_gallring_receipts_paused_from_value",
         ),
         sa.CheckConstraint(
-            f"entity_kind IN ({_sql_values(GallringEntityKind)})",
+            f"entity_kind IN ({_sql_values(RetentionEntityKind)})",
             name="ck_gallring_receipts_entity_kind",
         ),
         sa.CheckConstraint(
-            f"category IN ({_sql_values(GallringCategory)})",
+            f"category IN ({_sql_values(RetentionCategory)})",
             name="ck_gallring_receipts_category",
         ),
         sa.CheckConstraint(
             "policy_source IS NULL OR policy_source IN "
-            f"({_sql_values(GallringPolicySource)})",
+            f"({_sql_values(RetentionPolicySource)})",
             name="ck_gallring_receipts_policy_source",
         ),
         sa.CheckConstraint("files_deleted >= 0", name="ck_gallring_receipts_files"),
@@ -204,13 +212,13 @@ class GallringReceipts(IdMixin, BaseWithTableName):
             name="ck_gallring_receipts_manifest_after",
         ),
         sa.CheckConstraint(
-            f"manifest_after_variant ~ '{GALLRING_NAME_PATTERN}' "
+            f"manifest_after_variant ~ '{RETENTION_NAME_PATTERN}' "
             "AND manifest_after_ordinal >= 0",
             name="ck_gallring_receipts_manifest_after_value",
         ),
         sa.CheckConstraint(_TASK_NAME_SQL, name="ck_gallring_receipts_task"),
         sa.CheckConstraint(
-            f"trigger IN ({_sql_values(GallringTrigger)})",
+            f"trigger IN ({_sql_values(RetentionTrigger)})",
             name="ck_gallring_receipts_trigger",
         ),
         sa.CheckConstraint(
@@ -269,8 +277,12 @@ class GallringReceipts(IdMixin, BaseWithTableName):
     )
 
 
-class GallringReceiptItems(BaseWithTableName):
+class RetentionReceiptItems(BaseWithTableName):
     """Complete manifest: every (file, content) pair a receipt releases."""
+
+    @declared_attr.directive
+    def __tablename__(cls) -> str:
+        return "gallring_receipt_items"
 
     id: Mapped[int] = mapped_column(sa.BigInteger, sa.Identity(), primary_key=True)
     receipt_id: Mapped[UUID] = mapped_column(

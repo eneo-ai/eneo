@@ -9,8 +9,8 @@ from eneo.audit.application.audit_service import AuditService
 from eneo.audit.domain.action_types import ActionType
 from eneo.audit.domain.entity_types import EntityType
 from eneo.authentication.auth_models import audit_actor_for
-from eneo.data_retention.infrastructure.gallring_lock import (
-    GallringSubject,
+from eneo.data_retention.infrastructure.retention_lock import (
+    RetentionSubject,
     acquire_exclusive,
 )
 from eneo.flows.application.flow_retention_authz import (
@@ -87,7 +87,7 @@ class FlowRetentionHoldService:
                 code=FLOW_RETENTION_HOLD_END_NOT_IN_FUTURE_CODE,
             )
         tenant_id = self.user.tenant_id
-        await acquire_exclusive(self.repository.session, GallringSubject.FLOW_HISTORY)
+        await acquire_exclusive(self.repository.session, RetentionSubject.FLOW_HISTORY)
         await self._require_review_in_range(request.review_by, now=now)
         await self.repository.require_flow(tenant_id=tenant_id, flow_id=request.flow_id)
         run_ids = list(dict.fromkeys(request.run_ids)) if request.run_ids else None
@@ -139,7 +139,7 @@ class FlowRetentionHoldService:
     ) -> FlowRetentionHold:
         require_retention_holds(self.user)
         tenant_id = self.user.tenant_id
-        await acquire_exclusive(self.repository.session, GallringSubject.FLOW_HISTORY)
+        await acquire_exclusive(self.repository.session, RetentionSubject.FLOW_HISTORY)
         hold = await self.repository.lock_for_change(
             tenant_id=tenant_id, hold_id=hold_id
         )
@@ -182,7 +182,7 @@ class FlowRetentionHoldService:
     async def release(self, *, hold_id: UUID, reason: str) -> FlowRetentionHold:
         require_retention_holds(self.user)
         tenant_id = self.user.tenant_id
-        await acquire_exclusive(self.repository.session, GallringSubject.FLOW_HISTORY)
+        await acquire_exclusive(self.repository.session, RetentionSubject.FLOW_HISTORY)
         hold = await self.repository.lock_for_change(
             tenant_id=tenant_id, hold_id=hold_id
         )

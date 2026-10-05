@@ -20,7 +20,7 @@ import sqlalchemy as sa
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import aliased
 
-from eneo.data_retention.infrastructure.gallring_sql import uuid_in
+from eneo.data_retention.infrastructure.retention_sql import uuid_in
 from eneo.database.tables.files_table import Files
 from eneo.database.tables.flow_tables import (
     FlowLiveTranscripts,

@@ -56,7 +56,7 @@ async def cleanup_old_data(container: Container) -> CleanupResults:
     """Run the daily cleanup for non-Flow retention policies.
 
     Flow-owned data is deliberately excluded: flow staging and waste data are
-    deleted by the gallring runner (gallring_worker.run_gallring, task
+    deleted by the retention runner (retention_worker.run_retention, task
     flows.housekeeping), and flow run history only by an administrator's purge.
 
     Uses explicit sessionmanager.session() to avoid nested transaction issues

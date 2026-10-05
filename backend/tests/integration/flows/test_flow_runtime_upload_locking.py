@@ -10,7 +10,7 @@ from sqlalchemy.exc import DBAPIError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from eneo.authentication.principal_types import PrincipalType
-from eneo.data_retention.application.gallring_runner import GallringBatch
+from eneo.data_retention.application.retention_runner import RetentionBatch
 from eneo.database.database import sessionmanager
 from eneo.database.tables.files_table import Files
 from eneo.database.tables.flow_tables import (
@@ -232,7 +232,7 @@ async def _sweep_abandoned_runtime_uploads(
             if step.name == "abandoned_uploads"
         ]
         result = await uploads.run(
-            GallringBatch(job_run_id=uuid4(), batch_seq=1, rows=10, files=10)
+            RetentionBatch(job_run_id=uuid4(), batch_seq=1, rows=10, files=10)
         )
         counts = dict(result.blocked)
         for effect in result.effects:

@@ -17,7 +17,7 @@ import sqlalchemy as sa
 from sqlalchemy.exc import IntegrityError
 
 from eneo.audit.infrastructure.audit_log_repo_impl import AuditLogRepositoryImpl
-from eneo.data_retention.infrastructure import data_retention_service, gallring_lock
+from eneo.data_retention.infrastructure import data_retention_service, retention_lock
 from eneo.data_retention.infrastructure.data_retention_service import (
     DataRetentionService,
 )
@@ -200,7 +200,7 @@ async def _wait_for_retention_lock_waiter(db_container, timeout: float = 4.0) ->
                     "AND NOT granted AND objsubid = 1 "
                     "AND ((classid::bigint << 32) | objid::bigint) = :key"
                 ),
-                {"key": gallring_lock.GallringSubject.FLOW_HISTORY.key},
+                {"key": retention_lock.RetentionSubject.FLOW_HISTORY.key},
             )
         if waiting:
             return
@@ -440,7 +440,7 @@ async def test_a_busy_retention_lock_is_refused_typed_and_writes_nothing(
 ):
     flow_id = history["flow_id"]
     await _add_run(db_container, admin_user, flow_id)
-    monkeypatch.setattr(gallring_lock, "GALLRING_LOCK_TIMEOUT", "100ms")
+    monkeypatch.setattr(retention_lock, "RETENTION_LOCK_TIMEOUT", "100ms")
     async with db_container() as purging:
         await purging.flow_run_retention_policy_service().purge_due_history(
             dry_run=False, limit=10, flow_id=flow_id

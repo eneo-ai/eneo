@@ -12,8 +12,8 @@ from eneo.completion_models.domain.skill_context import skill_context_token_allo
 from eneo.data_retention.infrastructure.data_retention_service import (
     DataRetentionService,
 )
-from eneo.data_retention.infrastructure.gallring_lock import (
-    GallringSubject,
+from eneo.data_retention.infrastructure.retention_lock import (
+    RetentionSubject,
     acquire_exclusive,
 )
 from eneo.files.docx_template_validation import (
@@ -1148,7 +1148,7 @@ class SettingService:
             # with open deletions before the tenant row is locked.
             require_retention_manage(self.user)
             await acquire_exclusive(
-                self.tenant_repo.session, GallringSubject.FLOW_HISTORY
+                self.tenant_repo.session, RetentionSubject.FLOW_HISTORY
             )
 
         def transform(current: dict[str, Any] | None) -> dict[str, Any]:

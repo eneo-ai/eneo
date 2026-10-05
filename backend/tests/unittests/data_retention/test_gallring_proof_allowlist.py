@@ -13,10 +13,10 @@ import pytest
 import sqlalchemy as sa
 from sqlalchemy.dialects import postgresql
 
-from eneo.database.tables.gallring_tables import (
-    GallringJobRuns,
-    GallringReceiptItems,
-    GallringReceipts,
+from eneo.database.tables.retention_tables import (
+    RetentionJobRuns,
+    RetentionReceiptItems,
+    RetentionReceipts,
 )
 
 # A JSONB column is a map keyed by declared step or count names: counts, or
@@ -24,7 +24,7 @@ from eneo.database.tables.gallring_tables import (
 ID, TIME, NUMBER, CODE, NAME_MAP = "id", "time", "number", "code", "name-keyed map"
 
 _ALLOWED = {
-    GallringJobRuns: {
+    RetentionJobRuns: {
         "id": ID,
         "task": CODE,
         "outcome": CODE,
@@ -37,7 +37,7 @@ _ALLOWED = {
         "cursors": NAME_MAP,
         "error_code": CODE,
     },
-    GallringReceipts: {
+    RetentionReceipts: {
         "id": ID,
         "task": CODE,
         "entity_kind": CODE,
@@ -66,7 +66,7 @@ _ALLOWED = {
         "physical_confirmed_at": TIME,
         "pruning_started_at": TIME,
     },
-    GallringReceiptItems: {
+    RetentionReceiptItems: {
         "id": NUMBER,
         "receipt_id": ID,
         "file_id": ID,

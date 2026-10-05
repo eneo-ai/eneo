@@ -19,17 +19,17 @@ from sqlalchemy.dialects.postgresql import ARRAY
 from sqlalchemy.dialects.postgresql import UUID as PG_UUID
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from eneo.data_retention.domain.gallring import (
-    GallringCategory,
-    GallringEntityKind,
-    GallringKeyset,
-    GallringPolicySource,
+from eneo.data_retention.domain.retention import (
+    RetentionCategory,
+    RetentionEntityKind,
+    RetentionKeyset,
+    RetentionPolicySource,
 )
-from eneo.data_retention.infrastructure.gallring_lock import (
-    GallringSubject,
+from eneo.data_retention.infrastructure.retention_lock import (
+    RetentionSubject,
     acquire_shared,
 )
-from eneo.data_retention.infrastructure.gallring_sql import (
+from eneo.data_retention.infrastructure.retention_sql import (
     deployment_audit_retention_days,
     deployment_tenant_id,
     uuid_in,
@@ -44,7 +44,7 @@ from eneo.database.tables.flow_tables import (
     FlowRunStepInputFiles,
     FlowRuntimeUploadedFiles,
 )
-from eneo.database.tables.gallring_tables import GallringReceipts
+from eneo.database.tables.retention_tables import RetentionReceipts
 from eneo.database.tables.tenant_table import Tenants
 from eneo.flows.flow_retention_policy import (
     DEFAULT_FLOW_RUNTIME_UPLOAD_ABANDONMENT_DAYS,
@@ -67,7 +67,7 @@ class AbandonedUpload:
 @dataclass(frozen=True, slots=True)
 class AbandonmentPolicy:
     days: int
-    source: GallringPolicySource
+    source: RetentionPolicySource
 
 
 @dataclass(frozen=True, slots=True)
@@ -111,7 +111,7 @@ class FlowHousekeepingRepository:
         self.session = session
 
     async def recorded_families(
-        self, *, task: str, category: GallringCategory, root_ids: Collection[UUID]
+        self, *, task: str, category: RetentionCategory, root_ids: Collection[UUID]
     ) -> set[UUID]:
         """Roots a receipt already covers (the unique key, one lookup per page).
 
@@ -121,13 +121,13 @@ class FlowHousekeepingRepository:
             return set()
         return set(
             await self.session.scalars(
-                sa.select(GallringReceipts.entity_id).where(
-                    GallringReceipts.task == task,
-                    GallringReceipts.entity_kind
-                    == GallringEntityKind.FILE_FAMILY.value,
-                    GallringReceipts.category == category.value,
-                    uuid_in(GallringReceipts.entity_id, root_ids),
-                    GallringReceipts.pruning_started_at.is_(None),
+                sa.select(RetentionReceipts.entity_id).where(
+                    RetentionReceipts.task == task,
+                    RetentionReceipts.entity_kind
+                    == RetentionEntityKind.FILE_FAMILY.value,
+                    RetentionReceipts.category == category.value,
+                    uuid_in(RetentionReceipts.entity_id, root_ids),
+                    RetentionReceipts.pruning_started_at.is_(None),
                 )
             )
         )
@@ -141,14 +141,14 @@ class FlowHousekeepingRepository:
         if days is None:
             return AbandonmentPolicy(
                 DEFAULT_FLOW_RUNTIME_UPLOAD_ABANDONMENT_DAYS,
-                GallringPolicySource.DEFAULT,
+                RetentionPolicySource.DEFAULT,
             )
-        return AbandonmentPolicy(days, GallringPolicySource.TENANT)
+        return AbandonmentPolicy(days, RetentionPolicySource.TENANT)
 
     # Abandoned runtime uploads (anchor: the upload binding) ---------------------
 
     async def abandoned_uploads(
-        self, *, now: datetime, after: GallringKeyset | None, limit: int
+        self, *, now: datetime, after: RetentionKeyset | None, limit: int
     ) -> list[AbandonedUpload]:
         """Uploads never attached to a run and past the window, oldest first."""
         stmt = (
@@ -258,7 +258,7 @@ class FlowHousekeepingRepository:
         waits for the chunk to commit, and the chunk waits for it, so every
         decision below reads the holds as they are when it deletes.
         """
-        await acquire_shared(self.session, GallringSubject.FLOW_HISTORY)
+        await acquire_shared(self.session, RetentionSubject.FLOW_HISTORY)
 
     async def held_flows(self, flow_ids: Collection[UUID]) -> set[UUID]:
         """Flows whose run-less data an active hold covers (flow_run_held_predicate)."""
@@ -282,7 +282,7 @@ class FlowHousekeepingRepository:
     @staticmethod
     def receipt_held() -> sa.ColumnElement[bool]:
         """A receipt whose Flow a hold covers keeps its proof (receipt pruning)."""
-        return flow_runless_data_held_predicate(flow_id=GallringReceipts.flow_id)
+        return flow_runless_data_held_predicate(flow_id=RetentionReceipts.flow_id)
 
     # Delivered audit outbox mirrors -------------------------------------------
 
@@ -290,7 +290,7 @@ class FlowHousekeepingRepository:
         self,
         *,
         now: datetime,
-        after: GallringKeyset | None,
+        after: RetentionKeyset | None,
         limit: int,
     ) -> list[DeletableOutboxRow]:
         """Delivered mirrors older than the audit retention whose audit log is gone.

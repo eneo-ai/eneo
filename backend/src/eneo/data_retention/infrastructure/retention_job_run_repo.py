@@ -1,4 +1,4 @@
-"""Job executions of registered gallring tasks; the running row is the task's lease."""
+"""Job executions of registered retention tasks; the running row is the task's lease."""
 
 from __future__ import annotations
 
@@ -11,31 +11,31 @@ import sqlalchemy as sa
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from eneo.data_retention.domain.gallring import (
-    GALLRING_COMPLETED_OUTCOMES,
-    GallringErrorCode,
-    GallringJobOutcome,
-    GallringKeyset,
-    gallring_name,
+from eneo.data_retention.domain.retention import (
+    RETENTION_COMPLETED_OUTCOMES,
+    RetentionErrorCode,
+    RetentionJobOutcome,
+    RetentionKeyset,
+    retention_name,
 )
-from eneo.data_retention.infrastructure.gallring_sql import (
+from eneo.data_retention.infrastructure.retention_sql import (
     deployment_audit_retention_days,
     deployment_tenant_id,
     uuid_in,
 )
 from eneo.database.affected_rows import affected_row_count
-from eneo.database.tables.gallring_tables import GallringJobRuns
+from eneo.database.tables.retention_tables import RetentionJobRuns
 
-_RUNNING = GallringJobOutcome.RUNNING.value
+_RUNNING = RetentionJobOutcome.RUNNING.value
 
 
 def _owned(job_run_id: UUID) -> tuple[sa.ColumnElement[bool], ...]:
-    return (GallringJobRuns.id == job_run_id, GallringJobRuns.outcome == _RUNNING)
+    return (RetentionJobRuns.id == job_run_id, RetentionJobRuns.outcome == _RUNNING)
 
 
-def _stored_cursors(cursors: Mapping[str, GallringKeyset]) -> dict[str, Any]:
+def _stored_cursors(cursors: Mapping[str, RetentionKeyset]) -> dict[str, Any]:
     return {
-        gallring_name(step): {
+        retention_name(step): {
             "at": keyset.at.isoformat(),
             "id": str(keyset.id),
             **({"item": keyset.item} if keyset.item is not None else {}),
@@ -44,16 +44,16 @@ def _stored_cursors(cursors: Mapping[str, GallringKeyset]) -> dict[str, Any]:
     }
 
 
-def _read_cursors(stored: object) -> dict[str, GallringKeyset]:
+def _read_cursors(stored: object) -> dict[str, RetentionKeyset]:
     """The step cursors of a job row; an entry of any other shape is dropped,
     which restarts that step's pass (never a wrong position)."""
-    cursors: dict[str, GallringKeyset] = {}
+    cursors: dict[str, RetentionKeyset] = {}
     if not isinstance(stored, dict):
         return cursors
     for step, value in cast(dict[object, object], stored).items():
         try:
             entry = cast(dict[str, Any], value)
-            cursors[gallring_name(cast(str, step))] = GallringKeyset(
+            cursors[retention_name(cast(str, step))] = RetentionKeyset(
                 at=datetime.fromisoformat(entry["at"]),
                 id=UUID(entry["id"]),
                 item=entry.get("item"),
@@ -63,7 +63,7 @@ def _read_cursors(stored: object) -> dict[str, GallringKeyset]:
     return cursors
 
 
-class GallringJobRunRepository:
+class RetentionJobRunRepository:
     def __init__(self, session: AsyncSession) -> None:
         self.session = session
 
@@ -80,30 +80,30 @@ class GallringJobRunRepository:
         """
         now = sa.func.clock_timestamp()
         await self.session.execute(
-            sa.update(GallringJobRuns)
+            sa.update(RetentionJobRuns)
             .where(
-                GallringJobRuns.task == task,
-                GallringJobRuns.outcome == _RUNNING,
-                GallringJobRuns.heartbeat_at
+                RetentionJobRuns.task == task,
+                RetentionJobRuns.outcome == _RUNNING,
+                RetentionJobRuns.heartbeat_at
                 < now - sa.func.make_interval(0, 0, 0, 0, 0, 0, stale_after_seconds),
             )
             .values(
-                outcome=GallringJobOutcome.SUPERSEDED.value,
+                outcome=RetentionJobOutcome.SUPERSEDED.value,
                 finished_at=now,
             )
         )
         latest_cursors = (
-            sa.select(GallringJobRuns.cursors)
+            sa.select(RetentionJobRuns.cursors)
             .where(
-                GallringJobRuns.task == task,
-                GallringJobRuns.outcome != GallringJobOutcome.SKIPPED.value,
+                RetentionJobRuns.task == task,
+                RetentionJobRuns.outcome != RetentionJobOutcome.SKIPPED.value,
             )
-            .order_by(GallringJobRuns.started_at.desc(), GallringJobRuns.id.desc())
+            .order_by(RetentionJobRuns.started_at.desc(), RetentionJobRuns.id.desc())
             .limit(1)
             .scalar_subquery()
         )
         return await self.session.scalar(
-            pg_insert(GallringJobRuns)
+            pg_insert(RetentionJobRuns)
             .values(
                 task=task,
                 outcome=_RUNNING,
@@ -112,30 +112,30 @@ class GallringJobRunRepository:
                 cursors=sa.func.coalesce(latest_cursors, sa.text("'{}'::jsonb")),
             )
             .on_conflict_do_nothing(
-                index_elements=[GallringJobRuns.task],
+                index_elements=[RetentionJobRuns.task],
                 # A literal predicate: the partial index is inferred at plan time.
                 index_where=sa.text("outcome = 'running'"),
             )
-            .returning(GallringJobRuns.id)
+            .returning(RetentionJobRuns.id)
         )
 
-    async def record_skip(self, *, task: str, error_code: GallringErrorCode) -> UUID:
+    async def record_skip(self, *, task: str, error_code: RetentionErrorCode) -> UUID:
         """A finished execution row for a run the deployment setting suppressed."""
         now = sa.func.clock_timestamp()
         job_run_id = await self.session.scalar(
-            sa.insert(GallringJobRuns)
+            sa.insert(RetentionJobRuns)
             .values(
                 task=task,
-                outcome=GallringJobOutcome.SKIPPED.value,
+                outcome=RetentionJobOutcome.SKIPPED.value,
                 started_at=now,
                 heartbeat_at=now,
                 finished_at=now,
                 error_code=error_code.value,
             )
-            .returning(GallringJobRuns.id)
+            .returning(RetentionJobRuns.id)
         )
         if job_run_id is None:
-            raise RuntimeError("Gallring skip record did not return an id.")
+            raise RuntimeError("Retention skip record did not return an id.")
         return job_run_id
 
     async def deployment_tenant_id(self) -> UUID | None:
@@ -146,11 +146,11 @@ class GallringJobRunRepository:
         """
         return await self.session.scalar(sa.select(deployment_tenant_id()))
 
-    async def cursors(self, job_run_id: UUID) -> dict[str, GallringKeyset]:
+    async def cursors(self, job_run_id: UUID) -> dict[str, RetentionKeyset]:
         return _read_cursors(
             await self.session.scalar(
-                sa.select(GallringJobRuns.cursors).where(
-                    GallringJobRuns.id == job_run_id
+                sa.select(RetentionJobRuns.cursors).where(
+                    RetentionJobRuns.id == job_run_id
                 )
             )
         )
@@ -158,10 +158,10 @@ class GallringJobRunRepository:
     async def renew(self, job_run_id: UUID) -> bool:
         """The ownership check every chunk runs first; its row lock lasts to commit."""
         renewed = await self.session.scalar(
-            sa.update(GallringJobRuns)
+            sa.update(RetentionJobRuns)
             .where(*_owned(job_run_id))
             .values(heartbeat_at=sa.func.clock_timestamp())
-            .returning(GallringJobRuns.id)
+            .returning(RetentionJobRuns.id)
         )
         return renewed is not None
 
@@ -172,10 +172,10 @@ class GallringJobRunRepository:
         batch_count: int,
         counts: Mapping[str, int],
         blocked: Mapping[str, int],
-        cursors: Mapping[str, GallringKeyset],
+        cursors: Mapping[str, RetentionKeyset],
     ) -> None:
         await self.session.execute(
-            sa.update(GallringJobRuns)
+            sa.update(RetentionJobRuns)
             .where(*_owned(job_run_id))
             .values(
                 batch_count=batch_count,
@@ -189,41 +189,41 @@ class GallringJobRunRepository:
         self,
         job_run_id: UUID,
         *,
-        outcome: GallringJobOutcome,
-        error_code: GallringErrorCode | None,
+        outcome: RetentionJobOutcome,
+        error_code: RetentionErrorCode | None,
     ) -> bool:
         """Set the final outcome unless the execution was superseded meanwhile."""
-        if outcome == GallringJobOutcome.RUNNING:
+        if outcome == RetentionJobOutcome.RUNNING:
             raise ValueError("A finished execution needs a final outcome.")
         finished = await self.session.scalar(
-            sa.update(GallringJobRuns)
+            sa.update(RetentionJobRuns)
             .where(*_owned(job_run_id))
             .values(
                 outcome=outcome.value,
                 finished_at=sa.func.clock_timestamp(),
                 error_code=error_code.value if error_code is not None else None,
             )
-            .returning(GallringJobRuns.id)
+            .returning(RetentionJobRuns.id)
         )
         return finished is not None
 
     async def last_completed_at(self, task: str) -> datetime | None:
         return await self.session.scalar(
-            sa.select(GallringJobRuns.finished_at)
+            sa.select(RetentionJobRuns.finished_at)
             .where(
-                GallringJobRuns.task == task,
-                GallringJobRuns.outcome.in_(
-                    [outcome.value for outcome in GALLRING_COMPLETED_OUTCOMES]
+                RetentionJobRuns.task == task,
+                RetentionJobRuns.outcome.in_(
+                    [outcome.value for outcome in RETENTION_COMPLETED_OUTCOMES]
                 ),
             )
-            .order_by(GallringJobRuns.finished_at.desc())
+            .order_by(RetentionJobRuns.finished_at.desc())
             .limit(1)
         )
 
     async def first_started_at(self, task: str) -> datetime | None:
         return await self.session.scalar(
-            sa.select(sa.func.min(GallringJobRuns.started_at)).where(
-                GallringJobRuns.task == task
+            sa.select(sa.func.min(RetentionJobRuns.started_at)).where(
+                RetentionJobRuns.task == task
             )
         )
 
@@ -234,15 +234,15 @@ class GallringJobRunRepository:
         )
         ids = list(
             await self.session.scalars(
-                sa.select(GallringJobRuns.id)
-                .where(GallringJobRuns.finished_at < cutoff)
-                .order_by(GallringJobRuns.finished_at)
+                sa.select(RetentionJobRuns.id)
+                .where(RetentionJobRuns.finished_at < cutoff)
+                .order_by(RetentionJobRuns.finished_at)
                 .limit(limit)
             )
         )
         if not ids:
             return 0
         result = await self.session.execute(
-            sa.delete(GallringJobRuns).where(uuid_in(GallringJobRuns.id, ids))
+            sa.delete(RetentionJobRuns).where(uuid_in(RetentionJobRuns.id, ids))
         )
         return affected_row_count(result)

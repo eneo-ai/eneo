@@ -1,4 +1,4 @@
-"""Receipt (gallringsbevis) rules: phase changes, manifests, physical confirmation.
+"""Receipt (deletion evidence) rules: phase changes, manifests, physical confirmation.
 
 A receipt records what a deletion releases before anything is released: the
 manifest of (file, content) pairs is appended in bounded batches while the
@@ -19,17 +19,15 @@ from uuid import UUID
 
 import sqlalchemy as sa
 
-from eneo.data_retention.application.gallring_runner import (
-    GallringBatch,
-    GallringStepResult,
-    GallringTenantEffect,
+from eneo.data_retention.application.retention_runner import (
+    RetentionBatch,
+    RetentionStepResult,
+    RetentionTenantEffect,
 )
-from eneo.data_retention.domain.gallring import (
-    GallringKeyset,
-    GallringReceipt,
+from eneo.data_retention.domain.retention import (
     InvalidReceiptTransition,
     ManifestPosition,
-    NewGallringReceipt,
+    NewRetentionReceipt,
     PhysicalCursor,
     PhysicalItemPage,
     PhysicalReceiptKey,
@@ -38,6 +36,8 @@ from eneo.data_retention.domain.gallring import (
     ReceiptReason,
     ReceiptState,
     ReceiptUpdate,
+    RetentionKeyset,
+    RetentionReceipt,
 )
 
 # The names receipt pruning reports; a task that registers prune_step declares them.
@@ -50,14 +50,14 @@ PHYSICAL_CONFIRMATION_COUNT_KEYS = frozenset({"items_examined", "receipts_confir
 PHYSICAL_CONFIRMATION_BLOCKED_KEYS = frozenset({"physical_pending"})
 
 
-class GallringReceiptStore(Protocol):
-    async def open(self, receipt: NewGallringReceipt) -> GallringReceipt: ...
+class RetentionReceiptStore(Protocol):
+    async def open(self, receipt: NewRetentionReceipt) -> RetentionReceipt: ...
 
-    async def lock(self, receipt_id: UUID) -> GallringReceipt | None: ...
+    async def lock(self, receipt_id: UUID) -> RetentionReceipt | None: ...
 
     async def unfinished(
         self, *, task: str, after: tuple[datetime, UUID] | None, limit: int
-    ) -> list[GallringReceipt]: ...
+    ) -> list[RetentionReceipt]: ...
 
     async def prune(
         self, *, limit: int, held: sa.ColumnElement[bool] | None = None
@@ -72,7 +72,7 @@ class GallringReceiptStore(Protocol):
     ) -> None: ...
 
     async def physical_pending(
-        self, *, start: GallringKeyset | None, inclusive: bool, limit: int
+        self, *, start: RetentionKeyset | None, inclusive: bool, limit: int
     ) -> list[PhysicalReceiptKey]: ...
 
     async def confirm_items(
@@ -91,20 +91,20 @@ class PhysicalConfirmation:
     confirmed: tuple[PhysicalReceiptKey, ...] = ()
 
 
-class GallringReceiptService:
-    def __init__(self, store: GallringReceiptStore) -> None:
+class RetentionReceiptService:
+    def __init__(self, store: RetentionReceiptStore) -> None:
         self.store = store
 
-    async def open(self, receipt: NewGallringReceipt) -> GallringReceipt:
+    async def open(self, receipt: NewRetentionReceipt) -> RetentionReceipt:
         return await self.store.open(receipt)
 
-    async def lock(self, receipt_id: UUID) -> GallringReceipt | None:
+    async def lock(self, receipt_id: UUID) -> RetentionReceipt | None:
         """A receipt this chunk continues, locked; None once it is gone."""
         return await self.store.lock(receipt_id)
 
     async def unfinished(
         self, *, task: str, after: tuple[datetime, UUID] | None, limit: int
-    ) -> list[GallringReceipt]:
+    ) -> list[RetentionReceipt]:
         """Unfinished receipts of a task after a keyset position, locked."""
         return await self.store.unfinished(task=task, after=after, limit=limit)
 
@@ -120,8 +120,8 @@ class GallringReceiptService:
         return await self.store.prune(limit=limit, held=held)
 
     async def prune_step(
-        self, batch: GallringBatch, *, held: sa.ColumnElement[bool] | None = None
-    ) -> GallringStepResult:
+        self, batch: RetentionBatch, *, held: sa.ColumnElement[bool] | None = None
+    ) -> RetentionStepResult:
         """One runner call of receipt pruning; every row it wrote is an effect.
 
         The task declares RECEIPT_PRUNING_COUNT_KEYS. Receipts marked in a call
@@ -146,10 +146,10 @@ class GallringReceiptService:
         receipt_ids: dict[UUID, list[UUID]] = {}
         for receipt_id, tenant_id in pruned.receipts:
             receipt_ids.setdefault(tenant_id, []).append(receipt_id)
-        return GallringStepResult(
+        return RetentionStepResult(
             rows=pruned.rows,
             effects=tuple(
-                GallringTenantEffect(
+                RetentionTenantEffect(
                     tenant_id=tenant_id,
                     counts=tenant_counts,
                     receipt_ids=tuple(receipt_ids.get(tenant_id, ())),
@@ -159,7 +159,7 @@ class GallringReceiptService:
             exhausted=pruned.rows == 0,
         )
 
-    async def withdraw(self, receipt: GallringReceipt) -> None:
+    async def withdraw(self, receipt: RetentionReceipt) -> None:
         """Drop a receipt whose entity left the candidate set before any release.
 
         The receipt is marked at once and stops covering its entity; pruning
@@ -171,12 +171,12 @@ class GallringReceiptService:
 
     async def append_manifest(
         self,
-        receipt: GallringReceipt,
+        receipt: RetentionReceipt,
         pairs: Sequence[tuple[UUID, UUID]],
         *,
         manifest_after: ManifestPosition | None,
         complete: bool,
-    ) -> GallringReceipt:
+    ) -> RetentionReceipt:
         if receipt.state.phase != ReceiptPhase.PENDING or receipt.manifest_complete:
             raise InvalidReceiptTransition("The manifest is closed once released.")
         await self.store.append_items(receipt.id, pairs)
@@ -187,7 +187,7 @@ class GallringReceiptService:
             manifest_complete=complete,
         )
 
-    async def release(self, receipt: GallringReceipt) -> GallringReceipt:
+    async def release(self, receipt: RetentionReceipt) -> RetentionReceipt:
         """Mark the discovery anchor released; only after the complete manifest."""
         if not receipt.manifest_complete:
             raise InvalidReceiptTransition("Release needs the complete manifest first.")
@@ -195,27 +195,27 @@ class GallringReceiptService:
 
     async def advance(
         self,
-        receipt: GallringReceipt,
+        receipt: RetentionReceipt,
         target: ReceiptPhase,
         *,
         files_deleted: int = 0,
-    ) -> GallringReceipt:
+    ) -> RetentionReceipt:
         return await self._save(
             receipt, receipt.state.advance(target), files_deleted=files_deleted
         )
 
     async def record(
-        self, receipt: GallringReceipt, *, files_deleted: int
-    ) -> GallringReceipt:
+        self, receipt: RetentionReceipt, *, files_deleted: int
+    ) -> RetentionReceipt:
         """Add a chunk's deletions without a phase change."""
         return await self._save(receipt, receipt.state, files_deleted=files_deleted)
 
     async def pause(
-        self, receipt: GallringReceipt, reason: ReceiptReason
-    ) -> GallringReceipt:
+        self, receipt: RetentionReceipt, reason: ReceiptReason
+    ) -> RetentionReceipt:
         return await self._save(receipt, receipt.state.pause(reason))
 
-    async def resume(self, receipt: GallringReceipt) -> GallringReceipt:
+    async def resume(self, receipt: RetentionReceipt) -> RetentionReceipt:
         return await self._save(receipt, receipt.state.resume())
 
     async def confirm_physical(
@@ -246,7 +246,7 @@ class GallringReceiptService:
                     return (
                         PhysicalConfirmation(examined, finished, tuple(confirmed)),
                         PhysicalCursor(
-                            receipt=GallringKeyset(at=key.completed_at, id=key.id),
+                            receipt=RetentionKeyset(at=key.completed_at, id=key.id),
                             after_item=after_item or 0,
                         ),
                     )
@@ -269,10 +269,10 @@ class GallringReceiptService:
         if len(receipts) < budget or last is None:
             return confirmation, None
         return confirmation, PhysicalCursor(
-            receipt=GallringKeyset(at=last.completed_at, id=last.id)
+            receipt=RetentionKeyset(at=last.completed_at, id=last.id)
         )
 
-    async def physical_step(self, batch: GallringBatch) -> GallringStepResult:
+    async def physical_step(self, batch: RetentionBatch) -> RetentionStepResult:
         """One runner call of physical confirmation, from the durable cursor.
 
         The cursor keeps the receipt and the item position inside it, so a
@@ -284,7 +284,7 @@ class GallringReceiptService:
             budget=batch.rows,
             cursor=(
                 PhysicalCursor(
-                    receipt=GallringKeyset(at=start.at, id=start.id),
+                    receipt=RetentionKeyset(at=start.at, id=start.id),
                     after_item=start.item,
                 )
                 if start is not None
@@ -296,11 +296,11 @@ class GallringReceiptService:
             receipts.setdefault(key.tenant_id, []).append(key.id)
         # Item confirmations are bookkeeping of the deployment's proof.
         effects = [
-            GallringTenantEffect(
+            RetentionTenantEffect(
                 tenant_id=None, counts={"items_examined": confirmation.items_examined}
             ),
             *(
-                GallringTenantEffect(
+                RetentionTenantEffect(
                     tenant_id=tenant_id,
                     counts={"receipts_confirmed": len(ids)},
                     receipt_ids=tuple(ids),
@@ -308,7 +308,7 @@ class GallringReceiptService:
                 for tenant_id, ids in receipts.items()
             ),
         ]
-        return GallringStepResult(
+        return RetentionStepResult(
             rows=confirmation.items_examined + confirmation.receipts_examined,
             effects=tuple(effects),
             # Examined receipts whose content is not all gone yet.
@@ -318,7 +318,7 @@ class GallringReceiptService:
             },
             exhausted=cursor is None,
             cursor=(
-                GallringKeyset(
+                RetentionKeyset(
                     at=cursor.receipt.at, id=cursor.receipt.id, item=cursor.after_item
                 )
                 if cursor is not None
@@ -328,13 +328,13 @@ class GallringReceiptService:
 
     async def _save(
         self,
-        receipt: GallringReceipt,
+        receipt: RetentionReceipt,
         state: ReceiptState,
         *,
         manifest_after: ManifestPosition | None = None,
         files_deleted: int = 0,
         manifest_complete: bool = False,
-    ) -> GallringReceipt:
+    ) -> RetentionReceipt:
         complete = receipt.manifest_complete or manifest_complete
         if state.phase == ReceiptPhase.COMPLETED and not complete:
             raise InvalidReceiptTransition("A receipt completes after its manifest.")

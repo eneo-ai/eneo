@@ -1,4 +1,4 @@
-"""Gallring receipts (gallringsbevis), their manifests and physical-deletion tracking."""
+"""Retention receipts (deletion evidence), their manifests and physical-deletion tracking."""
 
 from __future__ import annotations
 
@@ -13,14 +13,11 @@ from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import aliased
 
-from eneo.data_retention.domain.gallring import (
+from eneo.data_retention.domain.retention import (
     FINAL_RECEIPT_PHASES,
     NON_FINAL_RECEIPT_PHASES,
-    GallringCategory,
-    GallringKeyset,
-    GallringReceipt,
     ManifestPosition,
-    NewGallringReceipt,
+    NewRetentionReceipt,
     PhysicalItemPage,
     PhysicalReceiptKey,
     PrunedReceipts,
@@ -29,26 +26,29 @@ from eneo.data_retention.domain.gallring import (
     ReceiptReason,
     ReceiptState,
     ReceiptUpdate,
+    RetentionCategory,
+    RetentionKeyset,
+    RetentionReceipt,
 )
-from eneo.data_retention.infrastructure.gallring_sql import (
+from eneo.data_retention.infrastructure.retention_sql import (
     deployment_audit_retention_days,
     uuid_in,
 )
-from eneo.database.tables.gallring_tables import (
-    GallringReceiptItems,
-    GallringReceipts,
-)
 from eneo.database.tables.object_content_table import ObjectContents
+from eneo.database.tables.retention_tables import (
+    RetentionReceiptItems,
+    RetentionReceipts,
+)
 from eneo.object_content.content import ContentState
 
 
-def _receipt(row: GallringReceipts) -> GallringReceipt:
-    return GallringReceipt(
+def _receipt(row: RetentionReceipts) -> RetentionReceipt:
+    return RetentionReceipt(
         id=row.id,
         entity_id=row.entity_id,
         tenant_id=row.tenant_id,
         flow_id=row.flow_id,
-        category=GallringCategory(row.category),
+        category=RetentionCategory(row.category),
         state=ReceiptState(
             phase=ReceiptPhase(row.phase),
             paused_from=(
@@ -81,18 +81,18 @@ def _phase_values(phases: frozenset[ReceiptPhase]) -> list[str]:
 
 # A receipt being pruned no longer covers its entity: it is never continued,
 # reopened or physically confirmed.
-_NOT_PRUNING = GallringReceipts.pruning_started_at.is_(None)
+_NOT_PRUNING = RetentionReceipts.pruning_started_at.is_(None)
 
 
-class GallringReceiptRepository:
+class RetentionReceiptRepository:
     def __init__(self, session: AsyncSession) -> None:
         self.session = session
 
-    async def open(self, receipt: NewGallringReceipt) -> GallringReceipt:
+    async def open(self, receipt: NewRetentionReceipt) -> RetentionReceipt:
         """Insert the receipt or return the existing one, locked for this chunk."""
         now = sa.func.clock_timestamp()
         await self.session.execute(
-            pg_insert(GallringReceipts)
+            pg_insert(RetentionReceipts)
             .values(
                 task=receipt.task,
                 entity_kind=receipt.entity_kind.value,
@@ -116,36 +116,36 @@ class GallringReceiptRepository:
             )
             .on_conflict_do_nothing(
                 index_elements=[
-                    GallringReceipts.task,
-                    GallringReceipts.entity_kind,
-                    GallringReceipts.entity_id,
-                    GallringReceipts.category,
+                    RetentionReceipts.task,
+                    RetentionReceipts.entity_kind,
+                    RetentionReceipts.entity_id,
+                    RetentionReceipts.category,
                 ],
                 # A literal predicate: the partial index is inferred at plan time.
                 index_where=sa.text("pruning_started_at IS NULL"),
             )
         )
         row = await self.session.scalar(
-            sa.select(GallringReceipts)
+            sa.select(RetentionReceipts)
             .where(
-                GallringReceipts.task == receipt.task,
-                GallringReceipts.entity_kind == receipt.entity_kind.value,
-                GallringReceipts.entity_id == receipt.entity_id,
-                GallringReceipts.category == receipt.category.value,
+                RetentionReceipts.task == receipt.task,
+                RetentionReceipts.entity_kind == receipt.entity_kind.value,
+                RetentionReceipts.entity_id == receipt.entity_id,
+                RetentionReceipts.category == receipt.category.value,
                 _NOT_PRUNING,
             )
             .with_for_update()
             .execution_options(populate_existing=True)
         )
         if row is None:
-            raise RuntimeError("Gallring receipt vanished while it was opened.")
+            raise RuntimeError("Retention receipt vanished while it was opened.")
         return _receipt(row)
 
-    async def lock(self, receipt_id: UUID) -> GallringReceipt | None:
+    async def lock(self, receipt_id: UUID) -> RetentionReceipt | None:
         """The receipt, locked for this chunk; None once it is gone or pruning."""
         row = await self.session.scalar(
-            sa.select(GallringReceipts)
-            .where(GallringReceipts.id == receipt_id, _NOT_PRUNING)
+            sa.select(RetentionReceipts)
+            .where(RetentionReceipts.id == receipt_id, _NOT_PRUNING)
             .with_for_update()
             .execution_options(populate_existing=True)
         )
@@ -157,23 +157,23 @@ class GallringReceiptRepository:
         task: str,
         after: tuple[datetime, UUID] | None,
         limit: int,
-    ) -> list[GallringReceipt]:
+    ) -> list[RetentionReceipt]:
         """Unfinished receipts after a keyset position; rows another chunk holds are skipped."""
         stmt = (
-            sa.select(GallringReceipts)
+            sa.select(RetentionReceipts)
             .where(
-                GallringReceipts.task == task,
-                GallringReceipts.phase.in_(_phase_values(NON_FINAL_RECEIPT_PHASES)),
+                RetentionReceipts.task == task,
+                RetentionReceipts.phase.in_(_phase_values(NON_FINAL_RECEIPT_PHASES)),
                 _NOT_PRUNING,
             )
-            .order_by(GallringReceipts.started_at, GallringReceipts.id)
+            .order_by(RetentionReceipts.started_at, RetentionReceipts.id)
             .limit(limit)
             .with_for_update(skip_locked=True)
             .execution_options(populate_existing=True)
         )
         if after is not None:
             stmt = stmt.where(
-                sa.tuple_(GallringReceipts.started_at, GallringReceipts.id)
+                sa.tuple_(RetentionReceipts.started_at, RetentionReceipts.id)
                 > sa.tuple_(sa.literal(after[0]), sa.literal(after[1]))
             )
         return [_receipt(row) for row in await self.session.scalars(stmt)]
@@ -192,18 +192,18 @@ class GallringReceiptRepository:
             "manifest_after_variant": after.variant if after else None,
             "manifest_after_ordinal": after.ordinal if after else None,
             "files_deleted": update.files_deleted,
-            "chunk_count": GallringReceipts.chunk_count + 1,
+            "chunk_count": RetentionReceipts.chunk_count + 1,
             "updated_at": now,
         }
         if update.manifest_complete:
             values["manifest_completed_at"] = sa.func.coalesce(
-                GallringReceipts.manifest_completed_at, now
+                RetentionReceipts.manifest_completed_at, now
             )
         if state.is_final:
             values["completed_at"] = now
         await self.session.execute(
-            sa.update(GallringReceipts)
-            .where(GallringReceipts.id == receipt_id)
+            sa.update(RetentionReceipts)
+            .where(RetentionReceipts.id == receipt_id)
             .values(**values)
         )
 
@@ -211,10 +211,10 @@ class GallringReceiptRepository:
         """Mark a receipt that released nothing for pruning; one row, its manifest
         is deleted by the bounded pruning."""
         await self.session.execute(
-            sa.update(GallringReceipts)
+            sa.update(RetentionReceipts)
             .where(
-                GallringReceipts.id == receipt_id,
-                GallringReceipts.phase == ReceiptPhase.PENDING.value,
+                RetentionReceipts.id == receipt_id,
+                RetentionReceipts.phase == ReceiptPhase.PENDING.value,
                 _NOT_PRUNING,
             )
             .values(pruning_started_at=sa.func.clock_timestamp())
@@ -226,7 +226,7 @@ class GallringReceiptRepository:
         if not pairs:
             return
         await self.session.execute(
-            sa.insert(GallringReceiptItems),
+            sa.insert(RetentionReceiptItems),
             [
                 {"receipt_id": receipt_id, "file_id": file_id, "content_id": content_id}
                 for file_id, content_id in pairs
@@ -234,27 +234,27 @@ class GallringReceiptRepository:
         )
 
     async def physical_pending(
-        self, *, start: GallringKeyset | None, inclusive: bool, limit: int
+        self, *, start: RetentionKeyset | None, inclusive: bool, limit: int
     ) -> list[PhysicalReceiptKey]:
         """Completed receipts (manifest enumerated, empty included) not yet confirmed,
         in (completed_at, id) order from `start`."""
         stmt = (
             sa.select(
-                GallringReceipts.completed_at,
-                GallringReceipts.id,
-                GallringReceipts.tenant_id,
+                RetentionReceipts.completed_at,
+                RetentionReceipts.id,
+                RetentionReceipts.tenant_id,
             )
             .where(
-                GallringReceipts.phase == ReceiptPhase.COMPLETED.value,
-                GallringReceipts.manifest_completed_at.is_not(None),
-                GallringReceipts.physical_confirmed_at.is_(None),
+                RetentionReceipts.phase == ReceiptPhase.COMPLETED.value,
+                RetentionReceipts.manifest_completed_at.is_not(None),
+                RetentionReceipts.physical_confirmed_at.is_(None),
                 _NOT_PRUNING,
             )
-            .order_by(GallringReceipts.completed_at, GallringReceipts.id)
+            .order_by(RetentionReceipts.completed_at, RetentionReceipts.id)
             .limit(limit)
         )
         if start is not None:
-            key = sa.tuple_(GallringReceipts.completed_at, GallringReceipts.id)
+            key = sa.tuple_(RetentionReceipts.completed_at, RetentionReceipts.id)
             bound = sa.tuple_(sa.literal(start.at), sa.literal(start.id))
             stmt = stmt.where(key >= bound if inclusive else key > bound)
         rows = await self.session.execute(stmt)
@@ -276,16 +276,16 @@ class GallringReceiptRepository:
         looked at again in a later execution.
         """
         page_stmt = (
-            sa.select(GallringReceiptItems.id)
+            sa.select(RetentionReceiptItems.id)
             .where(
-                GallringReceiptItems.receipt_id == receipt_id,
-                GallringReceiptItems.confirmed_at.is_(None),
+                RetentionReceiptItems.receipt_id == receipt_id,
+                RetentionReceiptItems.confirmed_at.is_(None),
             )
-            .order_by(GallringReceiptItems.id)
+            .order_by(RetentionReceiptItems.id)
             .limit(limit)
         )
         if after_item is not None:
-            page_stmt = page_stmt.where(GallringReceiptItems.id > after_item)
+            page_stmt = page_stmt.where(RetentionReceiptItems.id > after_item)
         item_ids = list(await self.session.scalars(page_stmt))
         if not item_ids:
             return PhysicalItemPage(examined=0, last_item=after_item, finished=True)
@@ -302,17 +302,17 @@ class GallringReceiptRepository:
             else_=None,
         )
         resolved = (
-            sa.select(GallringReceiptItems.id.label("item_id"), disposition.label("d"))
-            .outerjoin(content, content.id == GallringReceiptItems.content_id)
+            sa.select(RetentionReceiptItems.id.label("item_id"), disposition.label("d"))
+            .outerjoin(content, content.id == RetentionReceiptItems.content_id)
             .where(
-                GallringReceiptItems.id
+                RetentionReceiptItems.id
                 == sa.any_(sa.literal(item_ids, type_=ARRAY(sa.BigInteger)))
             )
             .subquery()
         )
         await self.session.execute(
-            sa.update(GallringReceiptItems)
-            .where(GallringReceiptItems.id == resolved.c.item_id)
+            sa.update(RetentionReceiptItems)
+            .where(RetentionReceiptItems.id == resolved.c.item_id)
             .where(resolved.c.d.is_not(None))
             .values(disposition=resolved.c.d, confirmed_at=sa.func.clock_timestamp())
         )
@@ -327,10 +327,10 @@ class GallringReceiptRepository:
             await self.session.scalar(
                 sa.select(
                     sa.select(sa.literal(1))
-                    .select_from(GallringReceiptItems)
+                    .select_from(RetentionReceiptItems)
                     .where(
-                        GallringReceiptItems.receipt_id == receipt_id,
-                        GallringReceiptItems.confirmed_at.is_(None),
+                        RetentionReceiptItems.receipt_id == receipt_id,
+                        RetentionReceiptItems.confirmed_at.is_(None),
                     )
                     .exists()
                 )
@@ -339,11 +339,11 @@ class GallringReceiptRepository:
 
     async def mark_physically_confirmed(self, receipt_id: UUID) -> None:
         await self.session.execute(
-            sa.update(GallringReceipts)
+            sa.update(RetentionReceipts)
             .where(
-                GallringReceipts.id == receipt_id,
-                GallringReceipts.phase == ReceiptPhase.COMPLETED.value,
-                GallringReceipts.manifest_completed_at.is_not(None),
+                RetentionReceipts.id == receipt_id,
+                RetentionReceipts.phase == ReceiptPhase.COMPLETED.value,
+                RetentionReceipts.manifest_completed_at.is_not(None),
                 _NOT_PRUNING,
             )
             .values(physical_confirmed_at=sa.func.clock_timestamp())
@@ -367,9 +367,9 @@ class GallringReceiptRepository:
         kept = sa.not_(held) if held is not None else sa.true()
         marked = (
             await self.session.execute(
-                sa.select(GallringReceipts.id, GallringReceipts.tenant_id)
-                .where(GallringReceipts.pruning_started_at.is_not(None), kept)
-                .order_by(GallringReceipts.pruning_started_at, GallringReceipts.id)
+                sa.select(RetentionReceipts.id, RetentionReceipts.tenant_id)
+                .where(RetentionReceipts.pruning_started_at.is_not(None), kept)
+                .order_by(RetentionReceipts.pruning_started_at, RetentionReceipts.id)
                 .limit(left)
                 .with_for_update(skip_locked=True)
             )
@@ -390,9 +390,9 @@ class GallringReceiptRepository:
         pruned: list[tuple[UUID, UUID]] = []
         if emptied:
             rows = await self.session.execute(
-                sa.delete(GallringReceipts)
-                .where(uuid_in(GallringReceipts.id, emptied))
-                .returning(GallringReceipts.id, GallringReceipts.tenant_id)
+                sa.delete(RetentionReceipts)
+                .where(uuid_in(RetentionReceipts.id, emptied))
+                .returning(RetentionReceipts.id, RetentionReceipts.tenant_id)
             )
             pruned = [
                 (receipt_id, tenant_id) for receipt_id, tenant_id in rows.tuples()
@@ -412,17 +412,17 @@ class GallringReceiptRepository:
     async def _delete_items(self, receipt_id: UUID, *, limit: int) -> int:
         item_ids = list(
             await self.session.scalars(
-                sa.select(GallringReceiptItems.id)
-                .where(GallringReceiptItems.receipt_id == receipt_id)
-                .order_by(GallringReceiptItems.id)
+                sa.select(RetentionReceiptItems.id)
+                .where(RetentionReceiptItems.receipt_id == receipt_id)
+                .order_by(RetentionReceiptItems.id)
                 .limit(limit)
             )
         )
         if not item_ids:
             return 0
         await self.session.execute(
-            sa.delete(GallringReceiptItems).where(
-                GallringReceiptItems.id
+            sa.delete(RetentionReceiptItems).where(
+                RetentionReceiptItems.id
                 == sa.any_(sa.literal(item_ids, type_=ARRAY(sa.BigInteger)))
             )
         )
@@ -438,14 +438,14 @@ class GallringReceiptRepository:
         )
         ids = list(
             await self.session.scalars(
-                sa.select(GallringReceipts.id)
+                sa.select(RetentionReceipts.id)
                 .where(
-                    GallringReceipts.phase.in_(_phase_values(FINAL_RECEIPT_PHASES)),
-                    GallringReceipts.completed_at < cutoff,
+                    RetentionReceipts.phase.in_(_phase_values(FINAL_RECEIPT_PHASES)),
+                    RetentionReceipts.completed_at < cutoff,
                     _NOT_PRUNING,
                     kept,
                 )
-                .order_by(GallringReceipts.completed_at, GallringReceipts.id)
+                .order_by(RetentionReceipts.completed_at, RetentionReceipts.id)
                 .limit(limit)
                 .with_for_update(skip_locked=True)
             )
@@ -454,9 +454,9 @@ class GallringReceiptRepository:
             return []
         return list(
             await self.session.scalars(
-                sa.update(GallringReceipts)
-                .where(uuid_in(GallringReceipts.id, ids))
+                sa.update(RetentionReceipts)
+                .where(uuid_in(RetentionReceipts.id, ids))
                 .values(pruning_started_at=sa.func.clock_timestamp())
-                .returning(GallringReceipts.tenant_id)
+                .returning(RetentionReceipts.tenant_id)
             )
         )

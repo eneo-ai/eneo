@@ -9,7 +9,7 @@ from eneo.authentication.endpoint_access import (
     Authorization,
     endpoint_access,
 )
-from eneo.data_retention.infrastructure.gallring_lock import GallringSubject
+from eneo.data_retention.infrastructure.retention_lock import RetentionSubject
 from eneo.files.mime_support import supported_mimes
 from eneo.flows.application.flow_retention_authz import (
     RETENTION_PERMISSION_REQUIRED_CODE,
@@ -226,7 +226,7 @@ def _flow_retention_not_found_response(entity: str) -> dict[str, object]:
     )
 
 
-_FLOW_RETENTION_LOCK_BUSY_CODE = GallringSubject.FLOW_HISTORY.busy_code
+_FLOW_RETENTION_LOCK_BUSY_CODE = RetentionSubject.FLOW_HISTORY.busy_code
 
 
 def _flow_retention_lock_busy_response() -> dict[str, object]:

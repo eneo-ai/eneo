@@ -1,4 +1,4 @@
-"""Gallring (scheduled deletion) value types: budgets, job outcomes, receipt phases.
+"""Retention (scheduled deletion) value types: budgets, job outcomes, receipt phases.
 
 Pure domain code: no I/O. The application layer persists these states; the
 database CHECK constraints mirror the closed sets defined here.
@@ -15,13 +15,13 @@ from typing import cast
 from uuid import UUID, uuid5
 
 # Every registered task runs once a day; health compares against this cadence.
-GALLRING_CADENCE = timedelta(days=1)
+RETENTION_CADENCE = timedelta(days=1)
 
 # Namespace for deterministic batch audit ids (uuid5 over the batch identity).
-_GALLRING_AUDIT_NAMESPACE = UUID("6f1d3a0e-7c55-4a8e-9a43-0b7f3a6c2d11")
+_RETENTION_AUDIT_NAMESPACE = UUID("6f1d3a0e-7c55-4a8e-9a43-0b7f3a6c2d11")
 
 
-class GallringJobOutcome(StrEnum):
+class RetentionJobOutcome(StrEnum):
     RUNNING = "running"
     SUCCEEDED = "succeeded"
     # The budget ran out with work left; the next execution resumes it.
@@ -35,23 +35,23 @@ class GallringJobOutcome(StrEnum):
 
 
 # Outcomes of an execution that ran to its own end (health: the task is alive).
-GALLRING_COMPLETED_OUTCOMES = frozenset(
-    {GallringJobOutcome.SUCCEEDED, GallringJobOutcome.PARTIAL}
+RETENTION_COMPLETED_OUTCOMES = frozenset(
+    {RetentionJobOutcome.SUCCEEDED, RetentionJobOutcome.PARTIAL}
 )
 
 
 # Task, step and count names are code identifiers, never content.
-GALLRING_NAME_PATTERN = r"^[a-z][a-z0-9_]*(\.[a-z][a-z0-9_]*)*$"
-_NAME = re.compile(GALLRING_NAME_PATTERN)
+RETENTION_NAME_PATTERN = r"^[a-z][a-z0-9_]*(\.[a-z][a-z0-9_]*)*$"
+_NAME = re.compile(RETENTION_NAME_PATTERN)
 
 
-def gallring_name(value: str) -> str:
+def retention_name(value: str) -> str:
     if len(value) > 64 or not _NAME.fullmatch(value):
-        raise ValueError("A gallring task, step or count name is a code identifier.")
+        raise ValueError("A retention task, step or count name is a code identifier.")
     return value
 
 
-class GallringErrorCode(StrEnum):
+class RetentionErrorCode(StrEnum):
     CHUNK_TIMEOUT = "chunk_timeout"
     CHUNK_FAILED = "chunk_failed"
     CLAIM_TIMEOUT = "claim_timeout"
@@ -61,16 +61,16 @@ class GallringErrorCode(StrEnum):
 
 
 @dataclass(frozen=True, slots=True)
-class GallringUsage:
+class RetentionUsage:
     rows: int = 0
     files: int = 0
 
-    def plus(self, *, rows: int, files: int) -> GallringUsage:
-        return GallringUsage(rows=self.rows + rows, files=self.files + files)
+    def plus(self, *, rows: int, files: int) -> RetentionUsage:
+        return RetentionUsage(rows=self.rows + rows, files=self.files + files)
 
 
 @dataclass(frozen=True, slots=True)
-class GallringBudget:
+class RetentionBudget:
     """What one execution of one task may spend: rows, files and seconds."""
 
     rows: int
@@ -79,17 +79,17 @@ class GallringBudget:
 
     def __post_init__(self) -> None:
         if self.rows <= 0 or self.files <= 0 or self.seconds <= 0:
-            raise ValueError("A gallring budget must be positive.")
+            raise ValueError("A retention budget must be positive.")
 
-    def left(self, used: GallringUsage, *, elapsed_seconds: float) -> GallringUsage:
+    def left(self, used: RetentionUsage, *, elapsed_seconds: float) -> RetentionUsage:
         """Rows and files still available; zero in both once any limit is spent."""
         if elapsed_seconds >= self.seconds:
-            return GallringUsage()
+            return RetentionUsage()
         rows = self.rows - used.rows
         files = self.files - used.files
         if rows <= 0 or files <= 0:
-            return GallringUsage()
-        return GallringUsage(rows=rows, files=files)
+            return RetentionUsage()
+        return RetentionUsage(rows=rows, files=files)
 
 
 class ReceiptPhase(StrEnum):
@@ -177,43 +177,43 @@ class ReceiptState:
         return ReceiptState(phase=ReceiptPhase.STOPPED, reason=reason)
 
 
-class GallringEntityKind(StrEnum):
+class RetentionEntityKind(StrEnum):
     # A root file and every file derived from it (files.parent_file_id).
     FILE_FAMILY = "file_family"
 
 
-class GallringCategory(StrEnum):
+class RetentionCategory(StrEnum):
     ABANDONED_UPLOAD = "abandoned_upload"
     TEMPLATE_ASSET = "template_asset"
 
 
-class GallringPolicySource(StrEnum):
+class RetentionPolicySource(StrEnum):
     TENANT = "tenant"
     DEFAULT = "default"
 
 
-class GallringTrigger(StrEnum):
+class RetentionTrigger(StrEnum):
     SCHEDULED = "scheduled"
     EXPLICIT = "explicit"
 
 
 @dataclass(frozen=True, slots=True)
-class NewGallringReceipt:
+class NewRetentionReceipt:
     task: str
-    entity_kind: GallringEntityKind
+    entity_kind: RetentionEntityKind
     entity_id: UUID
-    category: GallringCategory
+    category: RetentionCategory
     tenant_id: UUID
     flow_id: UUID | None = None
     space_id: UUID | None = None
-    policy_source: GallringPolicySource | None = None
+    policy_source: RetentionPolicySource | None = None
     policy_days: int | None = None
     anchor_at: datetime | None = None
     due_at: datetime | None = None
-    trigger: GallringTrigger = GallringTrigger.SCHEDULED
+    trigger: RetentionTrigger = RetentionTrigger.SCHEDULED
 
     def __post_init__(self) -> None:
-        gallring_name(self.task)
+        retention_name(self.task)
 
 
 @dataclass(frozen=True, slots=True)
@@ -230,18 +230,18 @@ class ManifestPosition:
     def __post_init__(self) -> None:
         if not isinstance(cast(object, self.file_id), UUID):
             raise TypeError("A manifest position names a file by its id.")
-        gallring_name(self.variant)
+        retention_name(self.variant)
         if self.ordinal < 0:
             raise ValueError("A content reference ordinal is not negative.")
 
 
 @dataclass(frozen=True, slots=True)
-class GallringReceipt:
+class RetentionReceipt:
     id: UUID
     entity_id: UUID
     tenant_id: UUID
     flow_id: UUID | None
-    category: GallringCategory
+    category: RetentionCategory
     state: ReceiptState
     # Resume point of the manifest enumeration: the last recorded reference.
     manifest_after: ManifestPosition | None
@@ -296,7 +296,7 @@ class PrunedReceipts:
 
 
 @dataclass(frozen=True, slots=True)
-class GallringKeyset:
+class RetentionKeyset:
     """A step's durable discovery position: a keyset of a timestamp and an id,
     and optionally a position (a row number) inside that row's own items.
 
@@ -329,7 +329,7 @@ class PhysicalCursor:
     there; without one, confirmation continues after the receipt.
     """
 
-    receipt: GallringKeyset
+    receipt: RetentionKeyset
     after_item: int | None = None
 
 
@@ -342,8 +342,8 @@ class ReceiptItemDisposition(StrEnum):
     SHARED = "shared"
 
 
-def gallring_batch_audit_id(
+def retention_batch_audit_id(
     *, job_run_id: UUID, batch_seq: int, tenant_id: UUID
 ) -> UUID:
     """One audit id per committed batch and tenant; replaying a batch reuses it."""
-    return uuid5(_GALLRING_AUDIT_NAMESPACE, f"{job_run_id}:{batch_seq}:{tenant_id}")
+    return uuid5(_RETENTION_AUDIT_NAMESPACE, f"{job_run_id}:{batch_seq}:{tenant_id}")

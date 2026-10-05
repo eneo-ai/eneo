@@ -8,9 +8,9 @@ import sqlalchemy as sa
 from pydantic import BaseModel, Field
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from eneo.data_retention.domain.gallring import GALLRING_CADENCE
-from eneo.data_retention.infrastructure.gallring_job_run_repo import (
-    GallringJobRunRepository,
+from eneo.data_retention.domain.retention import RETENTION_CADENCE
+from eneo.data_retention.infrastructure.retention_job_run_repo import (
+    RetentionJobRunRepository,
 )
 from eneo.database.tables.flow_tables import (
     FlowOutboxDeliveryStatus,
@@ -98,7 +98,7 @@ class FlowRuntimeHealthPolicy:
     webhook_outbox_backlog_grace_seconds: int
     # Enabled gallring tasks; each must complete within twice its cadence.
     gallring_tasks: tuple[str, ...] = ()
-    gallring_stale_after: timedelta = 2 * GALLRING_CADENCE
+    gallring_stale_after: timedelta = 2 * RETENTION_CADENCE
     # Tasks the deployment's emergency switch turns off; never a silent stop.
     gallring_disabled_tasks: tuple[str, ...] = ()
 
@@ -1083,7 +1083,7 @@ async def _load_stale_gallring_tasks(
     *, session: AsyncSession, tasks: tuple[str, ...], stale_before: datetime
 ) -> tuple[str, ...]:
     """Tasks whose latest completion (or, never completed, first start) is too old."""
-    job_runs = GallringJobRunRepository(session)
+    job_runs = RetentionJobRunRepository(session)
     stale: list[str] = []
     for task in tasks:
         anchor = await job_runs.last_completed_at(task)

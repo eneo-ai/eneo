@@ -8,8 +8,8 @@ from uuid import UUID
 import sqlalchemy as sa
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from eneo.data_retention.domain.gallring import GallringKeyset
-from eneo.data_retention.infrastructure.gallring_sql import (
+from eneo.data_retention.domain.retention import RetentionKeyset
+from eneo.data_retention.infrastructure.retention_sql import (
     deployment_tenant_id,
     uuid_in,
 )
@@ -214,7 +214,7 @@ class LiveTranscriptRepository:
         )
 
     async def expired_unbound_page(
-        self, *, now: datetime, after: GallringKeyset | None, limit: int
+        self, *, now: datetime, after: RetentionKeyset | None, limit: int
     ) -> list[ExpiredLiveTranscript]:
         """Scheduled gallring: the next expired unbound transcripts, locked.
 

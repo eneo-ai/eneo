@@ -29,54 +29,60 @@ from eneo.audit.domain.action_types import ActionType
 from eneo.audit.domain.actor_types import ActorType
 from eneo.audit.domain.entity_types import EntityType
 from eneo.audit.infrastructure.audit_log_repo_impl import AuditLogRepositoryImpl
-from eneo.data_retention.application.gallring_receipts import (
+from eneo.data_retention.application.retention_receipts import (
     PHYSICAL_CONFIRMATION_BLOCKED_KEYS,
     PHYSICAL_CONFIRMATION_COUNT_KEYS,
     RECEIPT_PRUNING_COUNT_KEYS,
-    GallringReceiptService,
+    RetentionReceiptService,
 )
-from eneo.data_retention.application.gallring_runner import (
-    GallringBatch,
-    GallringChunkLimits,
-    GallringContractError,
-    GallringRunner,
-    GallringRunReport,
-    GallringStep,
-    GallringStepResult,
-    GallringTenantEffect,
+from eneo.data_retention.application.retention_runner import (
+    RetentionBatch,
+    RetentionChunkLimits,
+    RetentionContractError,
+    RetentionRunner,
+    RetentionRunReport,
+    RetentionStep,
+    RetentionStepResult,
+    RetentionTenantEffect,
 )
-from eneo.data_retention.domain.gallring import (
-    GallringBudget,
-    GallringCategory,
-    GallringEntityKind,
-    GallringErrorCode,
-    GallringJobOutcome,
-    GallringKeyset,
+from eneo.data_retention.application.retention_units import (
+    RetentionEffects,
+    RetentionUnitDisposition,
+    RetentionUnitUsage,
+    gather_retention_units,
+)
+from eneo.data_retention.domain.retention import (
     ManifestPosition,
-    NewGallringReceipt,
+    NewRetentionReceipt,
     PrunedReceipts,
-    gallring_batch_audit_id,
+    RetentionBudget,
+    RetentionCategory,
+    RetentionEntityKind,
+    RetentionErrorCode,
+    RetentionJobOutcome,
+    RetentionKeyset,
+    retention_batch_audit_id,
 )
-from eneo.data_retention.infrastructure.gallring_job_run_repo import (
-    GallringJobRunRepository,
+from eneo.data_retention.infrastructure.retention_job_run_repo import (
+    RetentionJobRunRepository,
 )
-from eneo.data_retention.infrastructure.gallring_receipt_repo import (
-    GallringReceiptRepository,
+from eneo.data_retention.infrastructure.retention_receipt_repo import (
+    RetentionReceiptRepository,
 )
-from eneo.data_retention.infrastructure.gallring_sql import uuid_in
+from eneo.data_retention.infrastructure.retention_sql import uuid_in
 from eneo.database.database import sessionmanager
 from eneo.database.tables.audit_log_table import AuditLog as AuditLogTable
 from eneo.database.tables.audit_retention_policy_table import AuditRetentionPolicy
 from eneo.database.tables.files_table import Files
-from eneo.database.tables.gallring_tables import (
-    GallringJobRuns,
-    GallringReceiptItems,
-    GallringReceipts,
-)
 from eneo.database.tables.object_content_table import (
     FileContentReferences,
     InlineContentPayloads,
     ObjectContents,
+)
+from eneo.database.tables.retention_tables import (
+    RetentionJobRuns,
+    RetentionReceiptItems,
+    RetentionReceipts,
 )
 from eneo.files.file_models import FileContentVariant, FileType
 from eneo.object_content.content import ContentAccessClass, ContentState, StorageKind
@@ -106,8 +112,8 @@ class _FakeTask:
     def __init__(
         self,
         session: AsyncSession,
-        after_batch: Callable[[GallringBatch], Awaitable[None]] | None = None,
-        extra_steps: tuple[GallringStep, ...] = (),
+        after_batch: Callable[[RetentionBatch], Awaitable[None]] | None = None,
+        extra_steps: tuple[RetentionStep, ...] = (),
         counts: Callable[[int], Mapping[str, int]] = lambda n: {"deleted": n},
     ) -> None:
         self.session = session
@@ -119,18 +125,18 @@ class _FakeTask:
     def name(self) -> str:
         return _TASK
 
-    def steps(self) -> Sequence[GallringStep]:
-        return (GallringStep(name="items", run=self._items), *self.extra_steps)
+    def steps(self) -> Sequence[RetentionStep]:
+        return (RetentionStep(name="items", run=self._items), *self.extra_steps)
 
-    async def _items(self, batch: GallringBatch) -> GallringStepResult:
+    async def _items(self, batch: RetentionBatch) -> RetentionStepResult:
         ids = list(
             await self.session.scalars(
-                sa.select(GallringReceipts.id)
+                sa.select(RetentionReceipts.id)
                 .where(
-                    GallringReceipts.task == _TASK,
-                    GallringReceipts.category == "abandoned_upload",
+                    RetentionReceipts.task == _TASK,
+                    RetentionReceipts.category == "abandoned_upload",
                 )
-                .order_by(GallringReceipts.id)
+                .order_by(RetentionReceipts.id)
                 .limit(batch.rows)
                 .with_for_update()
             )
@@ -138,9 +144,9 @@ class _FakeTask:
         deleted = list(
             (
                 await self.session.execute(
-                    sa.delete(GallringReceipts)
-                    .where(uuid_in(GallringReceipts.id, ids))
-                    .returning(GallringReceipts.tenant_id)
+                    sa.delete(RetentionReceipts)
+                    .where(uuid_in(RetentionReceipts.id, ids))
+                    .returning(RetentionReceipts.tenant_id)
                 )
             ).scalars()
         )
@@ -149,10 +155,10 @@ class _FakeTask:
             per_tenant[tenant_id] = per_tenant.get(tenant_id, 0) + 1
         if self.after_batch is not None:
             await self.after_batch(batch)
-        return GallringStepResult(
+        return RetentionStepResult(
             rows=len(ids),
             effects=tuple(
-                GallringTenantEffect(tenant_id=tenant, counts=self.counts(count))
+                RetentionTenantEffect(tenant_id=tenant, counts=self.counts(count))
                 for tenant, count in per_tenant.items()
             ),
             exhausted=len(ids) < batch.rows,
@@ -163,12 +169,12 @@ class _FakeTask:
 class _Task:
     """A task made of the given steps and names."""
 
-    steps_: tuple[GallringStep, ...]
+    steps_: tuple[RetentionStep, ...]
     count_keys: frozenset[str] = frozenset({"deleted"})
     blocked_keys: frozenset[str] = frozenset({"busy"})
     name: str = _TASK
 
-    def steps(self) -> Sequence[GallringStep]:
+    def steps(self) -> Sequence[RetentionStep]:
         return self.steps_
 
 
@@ -178,8 +184,8 @@ def _receipt_row(
     phase: str,
     category: str = "abandoned_upload",
     **values: Any,
-) -> GallringReceipts:
-    return GallringReceipts(
+) -> RetentionReceipts:
+    return RetentionReceipts(
         task=_TASK,
         entity_kind="file_family",
         entity_id=uuid4(),
@@ -214,8 +220,8 @@ async def _remaining(ids: list[UUID]) -> int:
         return int(
             await session.scalar(
                 sa.select(sa.func.count())
-                .select_from(GallringReceipts)
-                .where(GallringReceipts.id.in_(ids))
+                .select_from(RetentionReceipts)
+                .where(RetentionReceipts.id.in_(ids))
             )
             or 0
         )
@@ -229,13 +235,13 @@ def _runner(
     budget_seconds: float = 600,
     lock_timeout_ms: int = 2_000,
     clock: Callable[[], float] | None = None,
-) -> GallringRunner:
-    return GallringRunner(
+) -> RetentionRunner:
+    return RetentionRunner(
         session=session,
-        job_runs=GallringJobRunRepository(session),
+        job_runs=RetentionJobRunRepository(session),
         audit_service=AuditService(repository=AuditLogRepositoryImpl(session)),
-        budget=GallringBudget(rows=budget_rows, files=100_000, seconds=budget_seconds),
-        limits=GallringChunkLimits(
+        budget=RetentionBudget(rows=budget_rows, files=100_000, seconds=budget_seconds),
+        limits=RetentionChunkLimits(
             rows=chunk_rows,
             statement_timeout_ms=30_000,
             lock_timeout_ms=lock_timeout_ms,
@@ -246,12 +252,12 @@ def _runner(
 
 
 async def _run(
-    after_batch: Callable[[GallringBatch], Awaitable[None]] | None = None,
+    after_batch: Callable[[RetentionBatch], Awaitable[None]] | None = None,
     *,
-    extra_steps: tuple[GallringStep, ...] = (),
+    extra_steps: tuple[RetentionStep, ...] = (),
     counts: Callable[[int], Mapping[str, int]] = lambda n: {"deleted": n},
     **limits: Any,
-) -> GallringRunReport:
+) -> RetentionRunReport:
     async with sessionmanager.session() as session:
         task = _FakeTask(session, after_batch, extra_steps, counts)
         return await _runner(session, **limits).run(task)
@@ -279,7 +285,7 @@ async def _audits() -> list[AuditLogTable]:
 
 async def _claim(stale_after_seconds: int = 3600) -> UUID | None:
     async with _committed() as session:
-        return await GallringJobRunRepository(session).claim(
+        return await RetentionJobRunRepository(session).claim(
             task=_TASK, stale_after_seconds=stale_after_seconds
         )
 
@@ -306,8 +312,8 @@ async def _running_rows() -> int:
         return int(
             await session.scalar(
                 sa.select(sa.func.count())
-                .select_from(GallringJobRuns)
-                .where(GallringJobRuns.outcome == GallringJobOutcome.RUNNING.value)
+                .select_from(RetentionJobRuns)
+                .where(RetentionJobRuns.outcome == RetentionJobOutcome.RUNNING.value)
             )
             or 0
         )
@@ -324,8 +330,8 @@ class _JobRowHolder:
     async def _hold(self, job_run_id: UUID) -> None:
         async with _committed() as session:
             await session.execute(
-                sa.select(GallringJobRuns.id)
-                .where(GallringJobRuns.id == job_run_id)
+                sa.select(RetentionJobRuns.id)
+                .where(RetentionJobRuns.id == job_run_id)
                 .with_for_update()
             )
             self.locked.set()
@@ -339,8 +345,8 @@ class _JobRowHolder:
 async def _make_stale(job_run_id: UUID) -> None:
     async with _committed() as session:
         await session.execute(
-            sa.update(GallringJobRuns)
-            .where(GallringJobRuns.id == job_run_id)
+            sa.update(RetentionJobRuns)
+            .where(RetentionJobRuns.id == job_run_id)
             .values(heartbeat_at=sa.func.now() - timedelta(hours=2))
         )
 
@@ -351,7 +357,7 @@ async def _make_stale(job_run_id: UUID) -> None:
 async def test_two_claims_at_once_leave_one_execution() -> None:
     async with sessionmanager.session() as first:
         async with first.begin():
-            first_id = await GallringJobRunRepository(first).claim(
+            first_id = await RetentionJobRunRepository(first).claim(
                 task=_TASK, stale_after_seconds=3600
             )
             second = asyncio.create_task(_claim())
@@ -372,17 +378,17 @@ async def test_stale_takeover_fences_the_superseded_execution() -> None:
 
     assert replacement_id not in (None, stale_id)
     async with _committed() as session:
-        repo = GallringJobRunRepository(session)
+        repo = RetentionJobRunRepository(session)
         assert await repo.renew(stale_id) is False
         assert (
             await repo.finish(
-                stale_id, outcome=GallringJobOutcome.SUCCEEDED, error_code=None
+                stale_id, outcome=RetentionJobOutcome.SUCCEEDED, error_code=None
             )
             is False
         )
-        superseded = await session.get(GallringJobRuns, stale_id)
+        superseded = await session.get(RetentionJobRuns, stale_id)
         assert superseded is not None
-        assert superseded.outcome == GallringJobOutcome.SUPERSEDED.value
+        assert superseded.outcome == RetentionJobOutcome.SUPERSEDED.value
     assert await _running_rows() == 1
 
 
@@ -396,16 +402,16 @@ async def test_renewed_execution_is_not_superseded() -> None:
     async with sessionmanager.session() as owner:
         async with owner.begin():
             # A chunk's first statement renews and keeps the row locked to commit.
-            assert await GallringJobRunRepository(owner).renew(owner_id)
+            assert await RetentionJobRunRepository(owner).renew(owner_id)
             takeover = asyncio.create_task(_claim(stale_after_seconds=3600))
             await _until_a_session_waits_on_a_lock()
             assert not takeover.done()
 
     assert await takeover is None
     async with _committed() as session:
-        owner_row = await session.get(GallringJobRuns, owner_id)
+        owner_row = await session.get(RetentionJobRuns, owner_id)
         assert owner_row is not None
-        assert owner_row.outcome == GallringJobOutcome.RUNNING.value
+        assert owner_row.outcome == RetentionJobOutcome.RUNNING.value
 
 
 async def test_superseded_runner_commits_no_further_chunk(test_tenant) -> None:
@@ -415,15 +421,15 @@ async def test_superseded_runner_commits_no_further_chunk(test_tenant) -> None:
     async def supersede(job_run_id: UUID) -> None:
         async with _committed() as session:
             await session.execute(
-                sa.update(GallringJobRuns)
-                .where(GallringJobRuns.id == job_run_id)
+                sa.update(RetentionJobRuns)
+                .where(RetentionJobRuns.id == job_run_id)
                 .values(
-                    outcome=GallringJobOutcome.SUPERSEDED.value,
+                    outcome=RetentionJobOutcome.SUPERSEDED.value,
                     finished_at=sa.func.now(),
                 )
             )
 
-    async def take_over_after_first_batch(batch: GallringBatch) -> None:
+    async def take_over_after_first_batch(batch: RetentionBatch) -> None:
         if batch.batch_seq == 1:
             # Another worker takes over while this chunk still holds the job row.
             takeovers.append(asyncio.create_task(supersede(batch.job_run_id)))
@@ -432,12 +438,12 @@ async def test_superseded_runner_commits_no_further_chunk(test_tenant) -> None:
     report = await _run(take_over_after_first_batch, chunk_rows=1)
 
     await asyncio.gather(*takeovers)
-    assert report.outcome == GallringJobOutcome.SUPERSEDED
+    assert report.outcome == RetentionJobOutcome.SUPERSEDED
     assert await _remaining(items) == 2  # chunk 2 failed its ownership check
     async with _committed() as session:
-        job = await session.get(GallringJobRuns, report.job_run_id)
+        job = await session.get(RetentionJobRuns, report.job_run_id)
         assert job is not None
-        assert job.outcome == GallringJobOutcome.SUPERSEDED.value
+        assert job.outcome == RetentionJobOutcome.SUPERSEDED.value
 
 
 async def test_a_contended_claim_times_out_and_is_recorded() -> None:
@@ -455,16 +461,16 @@ async def test_a_contended_claim_times_out_and_is_recorded() -> None:
         await holder.release()
 
     assert time.monotonic() - started < 5
-    assert report.outcome == GallringJobOutcome.SKIPPED
-    assert report.error_code == GallringErrorCode.CLAIM_TIMEOUT
+    assert report.outcome == RetentionJobOutcome.SKIPPED
+    assert report.error_code == RetentionErrorCode.CLAIM_TIMEOUT
     async with _committed() as session:
         rows = {
             row.id: (row.outcome, row.error_code)
-            for row in await session.scalars(sa.select(GallringJobRuns))
+            for row in await session.scalars(sa.select(RetentionJobRuns))
         }
     assert rows == {
-        stale_id: (GallringJobOutcome.RUNNING.value, None),
-        report.job_run_id: (GallringJobOutcome.SKIPPED.value, "claim_timeout"),
+        stale_id: (RetentionJobOutcome.RUNNING.value, None),
+        report.job_run_id: (RetentionJobOutcome.SKIPPED.value, "claim_timeout"),
     }
 
 
@@ -472,13 +478,13 @@ async def test_a_contended_ownership_row_bounds_renew_and_finish(test_tenant) ->
     items = await _work_items(test_tenant.id, 2)
     holders: list[_JobRowHolder] = []
 
-    async def lock_after_this_chunk(batch: GallringBatch) -> None:
+    async def lock_after_this_chunk(batch: RetentionBatch) -> None:
         if batch.batch_seq == 1:
             holders.append(_JobRowHolder(batch.job_run_id))
             # Queued behind this chunk's ownership lock; it holds the row next.
             await _until_a_session_waits_on_a_lock()
 
-    class _Contended(GallringJobRunRepository):
+    class _Contended(RetentionJobRunRepository):
         async def renew(self, job_run_id: UUID) -> bool:
             if holders:
                 await holders[0].locked.wait()
@@ -498,8 +504,8 @@ async def test_a_contended_ownership_row_bounds_renew_and_finish(test_tenant) ->
 
     assert time.monotonic() - started < 5
     # Chunk 2's renew and then the finish timed out: the run kept chunk 1 only.
-    assert report.outcome == GallringJobOutcome.RUNNING
-    assert report.error_code == GallringErrorCode.FINISH_TIMEOUT
+    assert report.outcome == RetentionJobOutcome.RUNNING
+    assert report.error_code == RetentionErrorCode.FINISH_TIMEOUT
     assert report.counts == {"items.deleted": 1}
     assert await _remaining(items) == 1
     # The row keeps the recorded progress until the stale takeover records it.
@@ -507,10 +513,10 @@ async def test_a_contended_ownership_row_bounds_renew_and_finish(test_tenant) ->
     await _make_stale(report.job_run_id)
     assert await _claim() is not None
     async with _committed() as session:
-        job = await session.get(GallringJobRuns, report.job_run_id)
+        job = await session.get(RetentionJobRuns, report.job_run_id)
         assert job is not None
         assert (job.outcome, job.batch_count, job.counts) == (
-            GallringJobOutcome.SUPERSEDED.value,
+            RetentionJobOutcome.SUPERSEDED.value,
             1,
             {"items.deleted": 1},
         )
@@ -531,10 +537,10 @@ async def test_audit_failure_rolls_back_the_batch_and_its_progress(
 
     report = await _run()
 
-    assert report.outcome == GallringJobOutcome.FAILED
+    assert report.outcome == RetentionJobOutcome.FAILED
     assert await _remaining(items) == 1
     async with _committed() as session:
-        job = await session.get(GallringJobRuns, report.job_run_id)
+        job = await session.get(RetentionJobRuns, report.job_run_id)
         assert job is not None
         assert (job.batch_count, job.counts) == (0, {})
 
@@ -556,22 +562,24 @@ async def test_batch_audit_is_required_even_when_the_action_is_switched_off(
 
 async def test_effects_for_one_audit_tenant_are_one_event(test_tenant) -> None:
     async with _committed() as session:
-        deployment_tenant_id = await GallringJobRunRepository(
+        deployment_tenant_id = await RetentionJobRunRepository(
             session
         ).deployment_tenant_id()
     assert deployment_tenant_id is not None
     first, second = uuid4(), uuid4()
 
-    async def deployment_and_tenant_effect(batch: GallringBatch) -> GallringStepResult:
+    async def deployment_and_tenant_effect(
+        batch: RetentionBatch,
+    ) -> RetentionStepResult:
         # A deployment-level effect and one in the deployment's own tenant share
         # the batch's audit identity.
-        return GallringStepResult(
+        return RetentionStepResult(
             rows=2,
             effects=(
-                GallringTenantEffect(
+                RetentionTenantEffect(
                     tenant_id=None, counts={"deleted": 1}, receipt_ids=(first,)
                 ),
-                GallringTenantEffect(
+                RetentionTenantEffect(
                     tenant_id=deployment_tenant_id,
                     counts={"confirmed": 1},
                     receipt_ids=(second,),
@@ -581,7 +589,7 @@ async def test_effects_for_one_audit_tenant_are_one_event(test_tenant) -> None:
         )
 
     await _run(
-        extra_steps=(GallringStep(name="both", run=deployment_and_tenant_effect),)
+        extra_steps=(RetentionStep(name="both", run=deployment_and_tenant_effect),)
     )
 
     [audit] = [a for a in await _audits() if a.log_metadata.get("step") == "both"]
@@ -596,9 +604,9 @@ async def test_budget_stops_the_run_and_the_next_run_resumes(test_tenant) -> Non
     first = await _run(chunk_rows=2, budget_rows=3)
     second = await _run(chunk_rows=2, budget_rows=3)
 
-    assert first.outcome == GallringJobOutcome.PARTIAL
+    assert first.outcome == RetentionJobOutcome.PARTIAL
     assert first.counts == {"items.deleted": 3}
-    assert second.outcome == GallringJobOutcome.SUCCEEDED
+    assert second.outcome == RetentionJobOutcome.SUCCEEDED
     assert second.counts == {"items.deleted": 2}
     assert await _remaining(items) == 0
     audits = await _audits()
@@ -608,7 +616,7 @@ async def test_budget_stops_the_run_and_the_next_run_resumes(test_tenant) -> Non
     for audit in audits:
         job_run_id = UUID(audit.log_metadata["job_run_id"])
         assert job_run_id in (first.job_run_id, second.job_run_id)
-        assert audit.id == gallring_batch_audit_id(
+        assert audit.id == retention_batch_audit_id(
             job_run_id=job_run_id,
             batch_seq=audit.log_metadata["batch_seq"],
             tenant_id=test_tenant.id,
@@ -642,7 +650,7 @@ async def test_seconds_budget_stops_the_run(test_tenant) -> None:
         clock=lambda: 0.0 if next(ticks) < 2 else 11.0,
     )
 
-    assert report.outcome == GallringJobOutcome.PARTIAL
+    assert report.outcome == RetentionJobOutcome.PARTIAL
     assert report.counts == {"items.deleted": 1}
 
 
@@ -654,19 +662,19 @@ async def test_a_lock_timeout_ends_the_run_as_partial_and_the_next_run_finishes(
     async with sessionmanager.session() as holder:
         async with holder.begin():
             await holder.execute(
-                sa.select(GallringReceipts.id)
-                .where(GallringReceipts.id == items[0])
+                sa.select(RetentionReceipts.id)
+                .where(RetentionReceipts.id == items[0])
                 .with_for_update()
             )
             blocked = await _run(lock_timeout_ms=200)
 
-    assert blocked.outcome == GallringJobOutcome.PARTIAL
-    assert blocked.error_code == GallringErrorCode.CHUNK_TIMEOUT
+    assert blocked.outcome == RetentionJobOutcome.PARTIAL
+    assert blocked.error_code == RetentionErrorCode.CHUNK_TIMEOUT
     assert await _remaining(items) == 2  # the chunk rolled back
 
     finished = await _run()
 
-    assert finished.outcome == GallringJobOutcome.SUCCEEDED
+    assert finished.outcome == RetentionJobOutcome.SUCCEEDED
     assert await _remaining(items) == 0
 
 
@@ -684,30 +692,30 @@ async def test_a_timeout_another_error_wraps_still_ends_the_run_as_partial(
 
     async with sessionmanager.session() as holder, holder.begin():
         await holder.execute(
-            sa.select(GallringReceipts.id)
-            .where(GallringReceipts.id == locked_id)
+            sa.select(RetentionReceipts.id)
+            .where(RetentionReceipts.id == locked_id)
             .with_for_update()
         )
         async with sessionmanager.session() as session:
 
-            async def busy(batch: GallringBatch) -> GallringStepResult:
+            async def busy(batch: RetentionBatch) -> RetentionStepResult:
                 try:
                     await session.execute(
-                        sa.select(GallringReceipts.id)
-                        .where(GallringReceipts.id == locked_id)
+                        sa.select(RetentionReceipts.id)
+                        .where(RetentionReceipts.id == locked_id)
                         .with_for_update()
                     )
                 except DBAPIError as exc:
                     raise _Busy("busy") from exc
-                return GallringStepResult(exhausted=True)
+                return RetentionStepResult(exhausted=True)
 
             task = _FakeTask(
-                session, extra_steps=(GallringStep(name="busy", run=busy),)
+                session, extra_steps=(RetentionStep(name="busy", run=busy),)
             )
             report = await _runner(session, lock_timeout_ms=200).run(task)
 
-    assert report.outcome == GallringJobOutcome.PARTIAL
-    assert report.error_code == GallringErrorCode.CHUNK_TIMEOUT
+    assert report.outcome == RetentionJobOutcome.PARTIAL
+    assert report.error_code == RetentionErrorCode.CHUNK_TIMEOUT
 
 
 async def test_emergency_switch_skip_is_recorded_and_audited(test_tenant) -> None:
@@ -716,7 +724,7 @@ async def test_emergency_switch_skip_is_recorded_and_audited(test_tenant) -> Non
     for _ in range(2):
         async with sessionmanager.session() as session:
             report = await _runner(session).skip(_TASK)
-        assert report.outcome == GallringJobOutcome.SKIPPED
+        assert report.outcome == RetentionJobOutcome.SKIPPED
 
     assert await _remaining(items) == 1
     skips = [
@@ -728,8 +736,8 @@ async def test_emergency_switch_skip_is_recorded_and_audited(test_tenant) -> Non
     assert len(skips) == 2
     assert {audit.actor_type for audit in skips} == {ActorType.SYSTEM.value}
     async with _committed() as session:
-        outcomes = list(await session.scalars(sa.select(GallringJobRuns.outcome)))
-    assert outcomes == [GallringJobOutcome.SKIPPED.value] * 2
+        outcomes = list(await session.scalars(sa.select(RetentionJobRuns.outcome)))
+    assert outcomes == [RetentionJobOutcome.SKIPPED.value] * 2
 
 
 # Every charged row is audited; durable step cursors ---------------------------------
@@ -747,11 +755,11 @@ async def test_an_item_only_pruning_chunk_writes_its_audit(
         pruning_started_at=_NOW,
     )
 
-    async def run() -> GallringRunReport:
+    async def run() -> RetentionRunReport:
         async with sessionmanager.session() as session:
-            service = GallringReceiptService(GallringReceiptRepository(session))
+            service = RetentionReceiptService(RetentionReceiptRepository(session))
             task = _Task(
-                (GallringStep(name="prune", run=service.prune_step),),
+                (RetentionStep(name="prune", run=service.prune_step),),
                 count_keys=RECEIPT_PRUNING_COUNT_KEYS,
             )
             return await _runner(session, chunk_rows=2, budget_rows=2).run(task)
@@ -771,10 +779,10 @@ async def test_an_item_only_pruning_chunk_writes_its_audit(
     monkeypatch.setattr(AuditLogRepositoryImpl, "create_if_absent", unavailable)
     failed = await run()
 
-    assert failed.outcome == GallringJobOutcome.FAILED
+    assert failed.outcome == RetentionJobOutcome.FAILED
     assert await _stored_rows(receipt_id) == 4  # the items' deletion rolled back
     async with _committed() as session:
-        job = await session.get(GallringJobRuns, failed.job_run_id)
+        job = await session.get(RetentionJobRuns, failed.job_run_id)
         assert job is not None and (job.batch_count, job.counts) == (0, {})
 
 
@@ -782,13 +790,13 @@ async def test_an_item_only_pruning_chunk_writes_its_audit(
     "result",
     [
         # Deleted, charged and not reported.
-        lambda batch: GallringStepResult(rows=1, exhausted=True),
+        lambda batch: RetentionStepResult(rows=1, exhausted=True),
         # Deleted files, charged and not reported.
-        lambda batch: GallringStepResult(files=1, exhausted=True),
+        lambda batch: RetentionStepResult(files=1, exhausted=True),
         # Charged more than the batch allows.
-        lambda batch: GallringStepResult(
+        lambda batch: RetentionStepResult(
             rows=batch.rows + 1,
-            effects=(GallringTenantEffect(tenant_id=None, counts={"deleted": 1}),),
+            effects=(RetentionTenantEffect(tenant_id=None, counts={"deleted": 1}),),
             exhausted=True,
         ),
     ],
@@ -801,48 +809,62 @@ async def test_a_call_that_charges_unreported_or_excess_work_is_refused(
 
     async with sessionmanager.session() as session:
 
-        async def delete_one(batch: GallringBatch) -> GallringStepResult:
+        async def delete_one(batch: RetentionBatch) -> RetentionStepResult:
             await session.execute(
-                sa.delete(GallringReceipts).where(GallringReceipts.id == items[0])
+                sa.delete(RetentionReceipts).where(RetentionReceipts.id == items[0])
             )
             return result(batch)
 
         report = await _runner(session, chunk_rows=1).run(
-            _Task((GallringStep(name="delete", run=delete_one),))
+            _Task((RetentionStep(name="delete", run=delete_one),))
         )
 
-    assert report.outcome == GallringJobOutcome.FAILED
+    assert report.outcome == RetentionJobOutcome.FAILED
     assert await _remaining(items) == 1
     assert await _audits() == []
 
 
-@pytest.mark.parametrize(("charged", "outcome"), [(3, "succeeded"), (4, "failed")])
+@pytest.mark.parametrize(
+    ("charged", "charged_files", "outcome"),
+    [(3, 0, "succeeded"), (4, 0, "failed"), (3, 1, "succeeded")],
+)
+@pytest.mark.parametrize("file_limit", [None, 0])
 async def test_a_step_batch_bounds_its_calls_instead_of_the_chunk_size(
-    test_tenant, charged, outcome
+    test_tenant, charged, charged_files, outcome, file_limit
 ) -> None:
+    """Kills M87: row-only steps can commit work charged to the file budget."""
     items = await _work_items(test_tenant.id, 1)
-    batches: list[GallringBatch] = []
+    batches: list[RetentionBatch] = []
 
     async with sessionmanager.session() as session:
 
-        async def whole_unit(batch: GallringBatch) -> GallringStepResult:
+        async def whole_unit(batch: RetentionBatch) -> RetentionStepResult:
             batches.append(batch)
             await session.execute(
-                sa.delete(GallringReceipts).where(GallringReceipts.id == items[0])
+                sa.delete(RetentionReceipts).where(RetentionReceipts.id == items[0])
             )
-            return GallringStepResult(
+            return RetentionStepResult(
                 rows=charged,
-                effects=(GallringTenantEffect(tenant_id=None, counts={"deleted": 1}),),
+                files=charged_files,
+                effects=(RetentionTenantEffect(tenant_id=None, counts={"deleted": 1}),),
                 exhausted=True,
             )
 
         report = await _runner(session, chunk_rows=1).run(
-            _Task((GallringStep(name="unit", run=whole_unit, max_batch=3),))
+            _Task(
+                (
+                    RetentionStep(
+                        name="unit", run=whole_unit, max_batch=3, max_files=file_limit
+                    ),
+                )
+            )
         )
 
     # The step's batch replaces the one-row chunk; more than it is refused.
-    assert (batches[0].rows, batches[0].files) == (3, 3)
-    assert report.outcome == GallringJobOutcome(outcome)
+    assert (batches[0].rows, batches[0].files) == (3, 3 if file_limit is None else 0)
+    if file_limit == 0 and charged_files:
+        outcome = "failed"
+    assert report.outcome == RetentionJobOutcome(outcome)
     assert await _remaining(items) == (0 if outcome == "succeeded" else 1)
 
 
@@ -865,23 +887,23 @@ async def test_a_step_cursor_carries_a_pass_across_executions(test_tenant) -> No
         deletable_id = rows[3].id
     examined: list[list[UUID]] = []
 
-    async def run() -> GallringRunReport:
+    async def run() -> RetentionRunReport:
         async with sessionmanager.session() as session:
 
-            async def scan(batch: GallringBatch) -> GallringStepResult:
+            async def scan(batch: RetentionBatch) -> RetentionStepResult:
                 stmt = (
                     sa.select(
-                        GallringReceipts.started_at,
-                        GallringReceipts.id,
-                        GallringReceipts.category,
+                        RetentionReceipts.started_at,
+                        RetentionReceipts.id,
+                        RetentionReceipts.category,
                     )
-                    .where(GallringReceipts.task == _TASK)
-                    .order_by(GallringReceipts.started_at, GallringReceipts.id)
+                    .where(RetentionReceipts.task == _TASK)
+                    .order_by(RetentionReceipts.started_at, RetentionReceipts.id)
                     .limit(batch.rows)
                 )
                 if batch.cursor is not None:
                     stmt = stmt.where(
-                        sa.tuple_(GallringReceipts.started_at, GallringReceipts.id)
+                        sa.tuple_(RetentionReceipts.started_at, RetentionReceipts.id)
                         > sa.tuple_(
                             sa.literal(batch.cursor.at), sa.literal(batch.cursor.id)
                         )
@@ -891,15 +913,15 @@ async def test_a_step_cursor_carries_a_pass_across_executions(test_tenant) -> No
                 deletable = [i for _, i, c in page if c == "abandoned_upload"]
                 if deletable:
                     await session.execute(
-                        sa.delete(GallringReceipts).where(
-                            uuid_in(GallringReceipts.id, deletable)
+                        sa.delete(RetentionReceipts).where(
+                            uuid_in(RetentionReceipts.id, deletable)
                         )
                     )
-                return GallringStepResult(
+                return RetentionStepResult(
                     rows=len(page),
                     effects=(
                         (
-                            GallringTenantEffect(
+                            RetentionTenantEffect(
                                 tenant_id=test_tenant.id,
                                 counts={"deleted": len(deletable)},
                             ),
@@ -909,18 +931,18 @@ async def test_a_step_cursor_carries_a_pass_across_executions(test_tenant) -> No
                     ),
                     blocked={"busy": len(page) - len(deletable)},
                     exhausted=len(page) < batch.rows,
-                    cursor=GallringKeyset(at=page[-1][0], id=page[-1][1])
+                    cursor=RetentionKeyset(at=page[-1][0], id=page[-1][1])
                     if page
                     else None,
                 )
 
             return await _runner(session, chunk_rows=2, budget_rows=2).run(
-                _Task((GallringStep(name="scan", run=scan),))
+                _Task((RetentionStep(name="scan", run=scan),))
             )
 
     first = await run()
     async with _committed() as session:
-        job = await session.get(GallringJobRuns, first.job_run_id)
+        job = await session.get(RetentionJobRuns, first.job_run_id)
         assert job is not None
         stored = job.cursors
     # A night the emergency switch suppressed does not restart the pass.
@@ -930,7 +952,7 @@ async def test_a_step_cursor_carries_a_pass_across_executions(test_tenant) -> No
     third = await run()
     fourth = await run()
 
-    assert first.outcome == GallringJobOutcome.PARTIAL
+    assert first.outcome == RetentionJobOutcome.PARTIAL
     assert stored == {
         "scan": {
             "at": (_NOW + timedelta(seconds=1)).isoformat(),
@@ -941,18 +963,18 @@ async def test_a_step_cursor_carries_a_pass_across_executions(test_tenant) -> No
     assert examined[:2] == [blocked_ids[:2], [blocked_ids[2], deletable_id]]
     assert await _remaining([deletable_id]) == 0
     # The pass ends in the third execution, so the fourth starts a new one.
-    assert (third.outcome, examined[2]) == (GallringJobOutcome.SUCCEEDED, [])
+    assert (third.outcome, examined[2]) == (RetentionJobOutcome.SUCCEEDED, [])
     assert examined[3] == blocked_ids[:2]
     assert second.counts == {"scan.deleted": 1}
     assert fourth.blocked == {"scan.busy": 2}
 
 
 async def test_a_stale_takeover_continues_from_the_superseded_cursors() -> None:
-    position = GallringKeyset(at=_NOW, id=uuid4(), item=7)
+    position = RetentionKeyset(at=_NOW, id=uuid4(), item=7)
     stale_id = await _claim()
     assert stale_id is not None
     async with _committed() as session:
-        await GallringJobRunRepository(session).record_progress(
+        await RetentionJobRunRepository(session).record_progress(
             stale_id, batch_count=1, counts={}, blocked={}, cursors={"scan": position}
         )
     await _make_stale(stale_id)
@@ -961,7 +983,7 @@ async def test_a_stale_takeover_continues_from_the_superseded_cursors() -> None:
 
     assert replacement_id is not None
     async with _committed() as session:
-        cursors = await GallringJobRunRepository(session).cursors(replacement_id)
+        cursors = await RetentionJobRunRepository(session).cursors(replacement_id)
     # The superseded execution committed its chunks; their positions hold.
     assert cursors == {"scan": position}
 
@@ -986,44 +1008,44 @@ async def test_a_timed_out_chunk_keeps_the_cursor_of_the_last_commit(
     async with sessionmanager.session() as holder, holder.begin():
         # The second page's first row is locked: that chunk times out.
         await holder.execute(
-            sa.select(GallringReceipts.id)
-            .where(GallringReceipts.id == ids[2])
+            sa.select(RetentionReceipts.id)
+            .where(RetentionReceipts.id == ids[2])
             .with_for_update()
         )
         async with sessionmanager.session() as session:
 
-            async def scan(batch: GallringBatch) -> GallringStepResult:
+            async def scan(batch: RetentionBatch) -> RetentionStepResult:
                 stmt = (
-                    sa.select(GallringReceipts.started_at, GallringReceipts.id)
-                    .where(GallringReceipts.task == _TASK)
-                    .order_by(GallringReceipts.started_at, GallringReceipts.id)
+                    sa.select(RetentionReceipts.started_at, RetentionReceipts.id)
+                    .where(RetentionReceipts.task == _TASK)
+                    .order_by(RetentionReceipts.started_at, RetentionReceipts.id)
                     .limit(batch.rows)
                     .with_for_update()
                 )
                 if batch.cursor is not None:
                     stmt = stmt.where(
-                        sa.tuple_(GallringReceipts.started_at, GallringReceipts.id)
+                        sa.tuple_(RetentionReceipts.started_at, RetentionReceipts.id)
                         > sa.tuple_(
                             sa.literal(batch.cursor.at), sa.literal(batch.cursor.id)
                         )
                     )
                 page = list((await session.execute(stmt)).tuples())
-                return GallringStepResult(
+                return RetentionStepResult(
                     rows=len(page),
                     blocked={"busy": len(page)},
                     exhausted=len(page) < batch.rows,
-                    cursor=GallringKeyset(at=page[-1][0], id=page[-1][1]),
+                    cursor=RetentionKeyset(at=page[-1][0], id=page[-1][1]),
                 )
 
             report = await _runner(session, chunk_rows=2, lock_timeout_ms=200).run(
-                _Task((GallringStep(name="scan", run=scan),))
+                _Task((RetentionStep(name="scan", run=scan),))
             )
 
-    assert report.error_code == GallringErrorCode.CHUNK_TIMEOUT
+    assert report.error_code == RetentionErrorCode.CHUNK_TIMEOUT
     async with _committed() as session:
-        cursors = await GallringJobRunRepository(session).cursors(report.job_run_id)
+        cursors = await RetentionJobRunRepository(session).cursors(report.job_run_id)
     assert cursors == {
-        "scan": GallringKeyset(at=_NOW + timedelta(seconds=1), id=ids[1])
+        "scan": RetentionKeyset(at=_NOW + timedelta(seconds=1), id=ids[1])
     }
 
 
@@ -1031,14 +1053,14 @@ async def test_a_skip_without_a_tenant_to_audit_it_is_refused(monkeypatch) -> No
     async def no_tenant(self) -> None:
         return None
 
-    monkeypatch.setattr(GallringJobRunRepository, "deployment_tenant_id", no_tenant)
+    monkeypatch.setattr(RetentionJobRunRepository, "deployment_tenant_id", no_tenant)
 
     async with sessionmanager.session() as session:
-        with pytest.raises(GallringContractError):
+        with pytest.raises(RetentionContractError):
             await _runner(session).skip(_TASK)
 
     async with _committed() as session:
-        assert list(await session.scalars(sa.select(GallringJobRuns.id))) == []
+        assert list(await session.scalars(sa.select(RetentionJobRuns.id))) == []
 
 
 # Physical tracking ----------------------------------------------------------------
@@ -1125,16 +1147,16 @@ async def test_physical_confirmation_continues_inside_a_receipt_the_next_night(
         content_id = await _live_content(test_tenant.id, admin_user.id)
         async with _committed() as session:
             session.add(
-                GallringReceiptItems(
+                RetentionReceiptItems(
                     receipt_id=r1_id, file_id=uuid4(), content_id=content_id
                 )
             )
 
-    async def night() -> GallringRunReport:
+    async def night() -> RetentionRunReport:
         async with sessionmanager.session() as session:
-            service = GallringReceiptService(GallringReceiptRepository(session))
+            service = RetentionReceiptService(RetentionReceiptRepository(session))
             task = _Task(
-                (GallringStep(name="physical", run=service.physical_step),),
+                (RetentionStep(name="physical", run=service.physical_step),),
                 count_keys=PHYSICAL_CONFIRMATION_COUNT_KEYS,
                 blocked_keys=PHYSICAL_CONFIRMATION_BLOCKED_KEYS,
             )
@@ -1149,9 +1171,9 @@ async def test_physical_confirmation_continues_inside_a_receipt_the_next_night(
         0,
     ]
     async with _committed() as session:
-        r2_row = await session.get(GallringReceipts, r2_id)
+        r2_row = await session.get(RetentionReceipts, r2_id)
         assert r2_row is not None and r2_row.physical_confirmed_at is not None
-        r1_row = await session.get(GallringReceipts, r1_id)
+        r1_row = await session.get(RetentionReceipts, r1_id)
         assert r1_row is not None and r1_row.physical_confirmed_at is None
 
 
@@ -1174,14 +1196,14 @@ async def test_physical_confirmation_waits_for_a_complete_manifest(test_tenant) 
             receipt_ids[name] = receipt.id
 
     async with _committed() as session:
-        await GallringReceiptService(
-            GallringReceiptRepository(session)
+        await RetentionReceiptService(
+            RetentionReceiptRepository(session)
         ).confirm_physical(budget=100, cursor=None)
 
     async with _committed() as session:
         confirmed = set()
         for name, receipt_id in receipt_ids.items():
-            receipt = await session.get(GallringReceipts, receipt_id)
+            receipt = await session.get(RetentionReceipts, receipt_id)
             assert receipt is not None
             if receipt.physical_confirmed_at is not None:
                 confirmed.add(name)
@@ -1195,7 +1217,7 @@ async def _receipt_with_items(tenant_id: UUID, items: int, **values: Any) -> UUI
         session.add(receipt)
         await session.flush()
         session.add_all(
-            GallringReceiptItems(
+            RetentionReceiptItems(
                 receipt_id=receipt.id, file_id=uuid4(), content_id=uuid4()
             )
             for _ in range(items)
@@ -1208,20 +1230,20 @@ async def _stored_rows(receipt_id: UUID) -> int:
     async with _committed() as session:
         receipts = await session.scalar(
             sa.select(sa.func.count())
-            .select_from(GallringReceipts)
-            .where(GallringReceipts.id == receipt_id)
+            .select_from(RetentionReceipts)
+            .where(RetentionReceipts.id == receipt_id)
         )
         items = await session.scalar(
             sa.select(sa.func.count())
-            .select_from(GallringReceiptItems)
-            .where(GallringReceiptItems.receipt_id == receipt_id)
+            .select_from(RetentionReceiptItems)
+            .where(RetentionReceiptItems.receipt_id == receipt_id)
         )
         return int(receipts or 0) + int(items or 0)
 
 
 async def _prune(limit: int) -> PrunedReceipts:
     async with _committed() as session:
-        return await GallringReceiptService(GallringReceiptRepository(session)).prune(
+        return await RetentionReceiptService(RetentionReceiptRepository(session)).prune(
             limit=limit
         )
 
@@ -1250,8 +1272,8 @@ async def test_a_manifest_larger_than_the_budget_is_pruned_across_chunks(
         if len(calls) == 2:
             # Partly pruned: its remaining items are never confirmed as proof.
             async with _committed() as session:
-                confirmation, _ = await GallringReceiptService(
-                    GallringReceiptRepository(session)
+                confirmation, _ = await RetentionReceiptService(
+                    RetentionReceiptRepository(session)
                 ).confirm_physical(budget=100, cursor=None)
             assert confirmation.items_examined == 0
 
@@ -1264,15 +1286,15 @@ async def test_a_manifest_larger_than_the_budget_is_pruned_across_chunks(
 async def test_a_withdrawn_receipt_stops_covering_its_entity_and_is_pruned(
     test_tenant,
 ) -> None:
-    family = NewGallringReceipt(
+    family = NewRetentionReceipt(
         task=_TASK,
-        entity_kind=GallringEntityKind.FILE_FAMILY,
+        entity_kind=RetentionEntityKind.FILE_FAMILY,
         entity_id=uuid4(),
-        category=GallringCategory.ABANDONED_UPLOAD,
+        category=RetentionCategory.ABANDONED_UPLOAD,
         tenant_id=test_tenant.id,
     )
     async with _committed() as session:
-        service = GallringReceiptService(GallringReceiptRepository(session))
+        service = RetentionReceiptService(RetentionReceiptRepository(session))
         receipt = await service.append_manifest(
             await service.open(family),
             [(uuid4(), uuid4()) for _ in range(3)],
@@ -1282,7 +1304,7 @@ async def test_a_withdrawn_receipt_stops_covering_its_entity_and_is_pruned(
         await service.withdraw(receipt)
 
     async with _committed() as session:
-        service = GallringReceiptService(GallringReceiptRepository(session))
+        service = RetentionReceiptService(RetentionReceiptRepository(session))
         assert await service.lock(receipt.id) is None
         assert await service.unfinished(task=_TASK, after=None, limit=10) == []
         reopened = await service.open(family)
@@ -1314,8 +1336,8 @@ async def test_physical_confirmation_charges_items_and_receipts_from_one_budget(
     charged: list[int] = []
     for _ in range(20):
         async with _committed() as session:
-            confirmation, cursor = await GallringReceiptService(
-                GallringReceiptRepository(session)
+            confirmation, cursor = await RetentionReceiptService(
+                RetentionReceiptRepository(session)
             ).confirm_physical(budget=2, cursor=cursor)
         charged.append(confirmation.items_examined + confirmation.receipts_examined)
         if cursor is None:
@@ -1326,10 +1348,10 @@ async def test_physical_confirmation_charges_items_and_receipts_from_one_budget(
     async with _committed() as session:
         confirmed = await session.scalar(
             sa.select(sa.func.count())
-            .select_from(GallringReceipts)
+            .select_from(RetentionReceipts)
             .where(
-                uuid_in(GallringReceipts.id, receipt_ids),
-                GallringReceipts.physical_confirmed_at.is_not(None),
+                uuid_in(RetentionReceipts.id, receipt_ids),
+                RetentionReceipts.physical_confirmed_at.is_not(None),
             )
         )
     assert confirmed == 3
@@ -1366,24 +1388,24 @@ async def test_a_step_call_without_progress_ends_that_step_only(test_tenant) -> 
     items = await _work_items(test_tenant.id, 2)
     calls: list[int] = []
 
-    async def no_progress(batch: GallringBatch) -> GallringStepResult:
+    async def no_progress(batch: RetentionBatch) -> RetentionStepResult:
         calls.append(batch.batch_seq)
-        return GallringStepResult()  # nothing visited, not exhausted
+        return RetentionStepResult()  # nothing visited, not exhausted
 
     report = await _run(
         extra_steps=(
-            GallringStep(name="stuck", run=no_progress),
-            GallringStep(name="after", run=no_progress),
+            RetentionStep(name="stuck", run=no_progress),
+            RetentionStep(name="after", run=no_progress),
         )
     )
 
     # Each stalled step is called once, recorded, and the run goes on.
     assert len(calls) == 2
-    assert report.outcome == GallringJobOutcome.PARTIAL
+    assert report.outcome == RetentionJobOutcome.PARTIAL
     assert report.counts == {"items.deleted": 2, "stuck.stalled": 1, "after.stalled": 1}
     assert await _remaining(items) == 0
     async with _committed() as session:
-        job = await session.get(GallringJobRuns, report.job_run_id)
+        job = await session.get(RetentionJobRuns, report.job_run_id)
         assert job is not None and job.counts == report.counts
 
 
@@ -1392,9 +1414,204 @@ async def test_a_count_outside_the_task_names_is_refused(test_tenant) -> None:
 
     report = await _run(counts=lambda n: {"Lönelista Anna.pdf": n})
 
-    assert report.outcome == GallringJobOutcome.FAILED
+    assert report.outcome == RetentionJobOutcome.FAILED
     assert await _remaining(items) == 1  # the chunk rolled back
     assert await _audits() == []
+
+
+@pytest.mark.parametrize(("charge", "exhausted"), [(0, False), (2, False), (2, True)])
+async def test_deferral_commits_proof_and_cursor_before_the_next_step(
+    test_tenant, charge, exhausted
+) -> None:
+    """Kills M85 (defer repeats/stalls or loses audit) and M86 (defer+exhausted accepted)."""
+    items = await _work_items(test_tenant.id, 3)
+    position = RetentionKeyset(at=_NOW, id=items[0])
+    async with sessionmanager.session() as session:
+
+        async def before(batch: RetentionBatch) -> RetentionStepResult:
+            effects = ()
+            if charge:
+                deleted = list(
+                    await session.scalars(
+                        sa.delete(RetentionReceipts)
+                        .where(RetentionReceipts.id == items[0])
+                        .returning(RetentionReceipts.id)
+                    )
+                )
+                effects = (
+                    RetentionTenantEffect(test_tenant.id, {"deleted": len(deleted)}),
+                )
+            return RetentionStepResult(
+                rows=charge,
+                effects=effects,
+                deferred=True,
+                exhausted=exhausted,
+                cursor=position,
+            )
+
+        async def after(batch: RetentionBatch) -> RetentionStepResult:
+            deleted = list(
+                await session.scalars(
+                    sa.delete(RetentionReceipts)
+                    .where(RetentionReceipts.id == items[1])
+                    .returning(RetentionReceipts.id)
+                )
+            )
+            return RetentionStepResult(
+                rows=2,
+                exhausted=True,
+                effects=(
+                    RetentionTenantEffect(test_tenant.id, {"deleted": len(deleted)}),
+                ),
+            )
+
+        report = await _runner(session).run(
+            _Task(
+                (
+                    RetentionStep("before", before),
+                    RetentionStep("after", after),
+                )
+            )
+        )
+    if exhausted:
+        assert report.outcome == RetentionJobOutcome.FAILED
+        assert await _remaining(items) == 3
+        assert await _audits() == []
+        return
+    assert report.outcome == RetentionJobOutcome.PARTIAL
+    assert report.counts.get("before.deferred") == 1
+    assert "before.stalled" not in report.counts
+    assert report.counts["after.deleted"] == 1
+    assert await _remaining(items) == (1 if charge else 2)
+    assert report.job_run_id is not None
+    async with _committed() as session:
+        assert await RetentionJobRunRepository(session).cursors(report.job_run_id) == {
+            "before": position
+        }
+    audits = [a for a in await _audits() if a.log_metadata["step"] == "before"]
+    assert len(audits) == 1 and audits[0].log_metadata["blocked"] == {"deferred": 1}
+
+
+@pytest.mark.parametrize(
+    "case",
+    [
+        "row_only",
+        "over_rows",
+        "over_files",
+        "zero_rows",
+        "nonfresh_fit",
+        "fresh_fit",
+        "continue",
+    ],
+)
+async def test_collected_units_preserve_admission_cursor_and_committed_work(
+    test_tenant, case
+) -> None:
+    """Kills M88 zero-file stall, M89/90 bad unit admission, M91 fit routing, M92 lost continuation."""
+    items = await _work_items(test_tenant.id, 3)
+    failed = case in {"over_rows", "over_files", "zero_rows"}
+    async with sessionmanager.session() as session:
+
+        async def collect(batch: RetentionBatch) -> RetentionStepResult:
+            out = RetentionEffects()
+
+            async def next_candidate(after: RetentionKeyset | None):
+                index = 0 if after is None else items.index(after.id) + 1
+                if index == len(items):
+                    return None
+                item = items[index]
+
+                async def handle(rows: int, files: int) -> RetentionUnitUsage:
+                    needed = (
+                        5
+                        if (
+                            (case == "nonfresh_fit" and index == 1)
+                            or (case == "fresh_fit" and index == 0)
+                        )
+                        else 2
+                    )
+                    if needed > rows:
+                        out.blocked["busy"] += 1
+                        return RetentionUnitUsage(
+                            1, 0, RetentionUnitDisposition.DOES_NOT_FIT
+                        )
+                    if case == "continue" and index == 0:
+                        changed = list(
+                            await session.scalars(
+                                sa.update(RetentionReceipts)
+                                .where(
+                                    RetentionReceipts.id == item,
+                                    RetentionReceipts.physical_confirmed_at.is_(None),
+                                )
+                                .values(physical_confirmed_at=_NOW)
+                                .returning(RetentionReceipts.id)
+                            )
+                        )
+                        if changed:
+                            out.add(test_tenant.id, "confirmed", len(changed))
+                            return RetentionUnitUsage(
+                                2, 0, RetentionUnitDisposition.CONTINUE
+                            )
+                    deleted = list(
+                        await session.scalars(
+                            sa.delete(RetentionReceipts)
+                            .where(RetentionReceipts.id == item)
+                            .returning(RetentionReceipts.id)
+                        )
+                    )
+                    out.add(test_tenant.id, "deleted", len(deleted))
+                    if index == 1:
+                        if case == "over_rows":
+                            return RetentionUnitUsage(rows + 1, 0)
+                        if case == "over_files":
+                            return RetentionUnitUsage(needed, files + 1)
+                        if case == "zero_rows":
+                            return RetentionUnitUsage(0, 0)
+                    return RetentionUnitUsage(needed, 0)
+
+                return RetentionKeyset(
+                    at=_NOW + timedelta(seconds=index), id=item
+                ), handle
+
+            return await gather_retention_units(
+                batch, next_candidate, out, chunk_rows=4, gather_seconds=10
+            )
+
+        task = _Task(
+            (
+                RetentionStep(
+                    "units",
+                    collect,
+                    max_batch=8,
+                    max_files=0 if case == "row_only" else None,
+                ),
+            ),
+            count_keys=frozenset({"deleted", "confirmed"}),
+        )
+        report = await _runner(
+            session, budget_rows=4 if case == "fresh_fit" else 16
+        ).run(task)
+        if case == "fresh_fit":
+            assert report.outcome == RetentionJobOutcome.PARTIAL
+            assert await _remaining(items) == 3
+            assert report.counts["units.deferred"] == 1
+            report = await _runner(session, budget_rows=16).run(task)
+    assert report.outcome == (
+        RetentionJobOutcome.FAILED if failed else RetentionJobOutcome.SUCCEEDED
+    )
+    assert await _remaining(items) == (3 if failed else 0)
+    if failed:
+        assert await _audits() == []
+        assert report.job_run_id is not None
+        async with _committed() as session:
+            assert (
+                await RetentionJobRunRepository(session).cursors(report.job_run_id)
+                == {}
+            )
+    else:
+        assert report.counts["units.deleted"] == 3
+        if case == "continue":
+            assert report.counts["units.confirmed"] == 1
 
 
 async def test_gallring_audits_carry_only_allowlisted_metadata(test_tenant) -> None:
@@ -1418,13 +1635,13 @@ async def test_gallring_audits_carry_only_allowlisted_metadata(test_tenant) -> N
 
 async def test_a_receipt_resume_point_is_a_file_id_never_a_name(test_tenant) -> None:
     async with _committed() as session:
-        service = GallringReceiptService(GallringReceiptRepository(session))
+        service = RetentionReceiptService(RetentionReceiptRepository(session))
         receipt = await service.open(
-            NewGallringReceipt(
+            NewRetentionReceipt(
                 task=_TASK,
-                entity_kind=GallringEntityKind.FILE_FAMILY,
+                entity_kind=RetentionEntityKind.FILE_FAMILY,
                 entity_id=uuid4(),
-                category=GallringCategory.ABANDONED_UPLOAD,
+                category=RetentionCategory.ABANDONED_UPLOAD,
                 tenant_id=test_tenant.id,
             )
         )
@@ -1438,11 +1655,11 @@ async def test_a_receipt_resume_point_is_a_file_id_never_a_name(test_tenant) -> 
     with pytest.raises(ValueError):
         ManifestPosition(file_id=uuid4(), variant="Lönelista Anna.pdf", ordinal=0)
     with pytest.raises(ValueError):
-        NewGallringReceipt(
+        NewRetentionReceipt(
             task="Lönelista Anna",
-            entity_kind=GallringEntityKind.FILE_FAMILY,
+            entity_kind=RetentionEntityKind.FILE_FAMILY,
             entity_id=uuid4(),
-            category=GallringCategory.ABANDONED_UPLOAD,
+            category=RetentionCategory.ABANDONED_UPLOAD,
             tenant_id=test_tenant.id,
         )
 
@@ -1484,7 +1701,7 @@ async def test_pruning_is_bounded_by_the_deployment_audit_retention(
 
     async with _committed() as session:
         statements = await _selects_during(
-            GallringReceiptRepository(session).prune(limit=500)
+            RetentionReceiptRepository(session).prune(limit=500)
         )
     pruned = (await _prune(limit=500)).receipts
     async with _committed() as session:

@@ -4,14 +4,14 @@ from uuid import UUID
 
 import pytest
 
-from eneo.data_retention.domain.gallring import (
-    GallringBudget,
-    GallringUsage,
+from eneo.data_retention.domain.retention import (
     InvalidReceiptTransition,
     ReceiptPhase,
     ReceiptReason,
     ReceiptState,
-    gallring_batch_audit_id,
+    RetentionBudget,
+    RetentionUsage,
+    retention_batch_audit_id,
 )
 
 _P = ReceiptPhase
@@ -58,24 +58,24 @@ def test_final_receipts_neither_pause_nor_stop(final) -> None:
 
 
 def test_budget_is_spent_by_any_limit() -> None:
-    budget = GallringBudget(rows=10, files=5, seconds=60)
+    budget = RetentionBudget(rows=10, files=5, seconds=60)
 
-    assert budget.left(GallringUsage(rows=4, files=1), elapsed_seconds=1) == (
-        GallringUsage(rows=6, files=4)
+    assert budget.left(RetentionUsage(rows=4, files=1), elapsed_seconds=1) == (
+        RetentionUsage(rows=6, files=4)
     )
-    for used, elapsed in ((GallringUsage(rows=10), 1), (GallringUsage(files=5), 1)):
-        assert budget.left(used, elapsed_seconds=elapsed) == GallringUsage()
-    assert budget.left(GallringUsage(), elapsed_seconds=60) == GallringUsage()
+    for used, elapsed in ((RetentionUsage(rows=10), 1), (RetentionUsage(files=5), 1)):
+        assert budget.left(used, elapsed_seconds=elapsed) == RetentionUsage()
+    assert budget.left(RetentionUsage(), elapsed_seconds=60) == RetentionUsage()
 
 
 def test_batch_audit_id_is_stable_per_batch_and_tenant() -> None:
     job, tenant = UUID(int=1), UUID(int=2)
 
-    first = gallring_batch_audit_id(job_run_id=job, batch_seq=1, tenant_id=tenant)
+    first = retention_batch_audit_id(job_run_id=job, batch_seq=1, tenant_id=tenant)
 
-    assert first == gallring_batch_audit_id(
+    assert first == retention_batch_audit_id(
         job_run_id=job, batch_seq=1, tenant_id=tenant
     )
-    assert first != gallring_batch_audit_id(
+    assert first != retention_batch_audit_id(
         job_run_id=job, batch_seq=2, tenant_id=tenant
     )

@@ -17,17 +17,17 @@ import sqlalchemy as sa
 import eneo.database.tables  # noqa: F401
 from alembic import command
 from alembic.config import Config
-from eneo.database.tables.gallring_tables import (
-    GallringJobRuns,
-    GallringReceiptItems,
-    GallringReceipts,
+from eneo.database.tables.retention_tables import (
+    RetentionJobRuns,
+    RetentionReceiptItems,
+    RetentionReceipts,
 )
 
 pytestmark = [pytest.mark.integration, pytest.mark.migration_isolation]
 
 PRE_REVISION = "202610041000"
 REVISION = "202610041200"
-_TABLES = (GallringJobRuns, GallringReceipts, GallringReceiptItems)
+_TABLES = (RetentionJobRuns, RetentionReceipts, RetentionReceiptItems)
 
 
 @pytest.fixture(autouse=True)

@@ -6,9 +6,9 @@ from typing import Any
 
 import pytest
 
-from eneo.data_retention.application.gallring_runner import GallringRunReport
-from eneo.data_retention.domain.gallring import GallringJobOutcome
-from eneo.data_retention.infrastructure import gallring_worker
+from eneo.data_retention.application.retention_runner import RetentionRunReport
+from eneo.data_retention.domain.retention import RetentionJobOutcome
+from eneo.data_retention.infrastructure import retention_worker
 from eneo.flows.application.flow_housekeeping_task import (
     FLOWS_HOUSEKEEPING_TASK,
     FlowHousekeepingTask,
@@ -19,16 +19,16 @@ class _Runner:
     def __init__(self) -> None:
         self.calls: list[tuple[str, Any]] = []
 
-    async def run(self, task: Any) -> GallringRunReport:
+    async def run(self, task: Any) -> RetentionRunReport:
         self.calls.append(("run", task))
-        return GallringRunReport(
-            task=task.name, job_run_id=None, outcome=GallringJobOutcome.SUCCEEDED
+        return RetentionRunReport(
+            task=task.name, job_run_id=None, outcome=RetentionJobOutcome.SUCCEEDED
         )
 
-    async def skip(self, task: str) -> GallringRunReport:
+    async def skip(self, task: str) -> RetentionRunReport:
         self.calls.append(("skip", task))
-        return GallringRunReport(
-            task=task, job_run_id=None, outcome=GallringJobOutcome.SKIPPED
+        return RetentionRunReport(
+            task=task, job_run_id=None, outcome=RetentionJobOutcome.SKIPPED
         )
 
 
@@ -39,11 +39,11 @@ async def test_nightly_run_executes_an_enabled_task_and_records_a_disabled_one(
 ) -> None:
     runner = _Runner()
     settings = SimpleNamespace(gallring_flows_housekeeping_enabled=enabled)
-    monkeypatch.setattr(gallring_worker, "get_settings", lambda: settings)
-    monkeypatch.setattr(gallring_worker, "gallring_runner", lambda **_: runner)
+    monkeypatch.setattr(retention_worker, "get_settings", lambda: settings)
+    monkeypatch.setattr(retention_worker, "retention_runner", lambda **_: runner)
     container = SimpleNamespace(session=lambda: object())
 
-    reports = await inspect.unwrap(gallring_worker.run_gallring)(container=container)
+    reports = await inspect.unwrap(retention_worker.run_retention)(container=container)
 
     [(kind, target)] = runner.calls
     if enabled:

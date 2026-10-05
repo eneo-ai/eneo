@@ -24,26 +24,26 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from eneo.audit.application.audit_service import AuditService
 from eneo.audit.domain.action_types import ActionType
 from eneo.audit.infrastructure.audit_log_repo_impl import AuditLogRepositoryImpl
-from eneo.data_retention.application.gallring_runner import (
-    GallringChunkLimits,
-    GallringRunner,
-    GallringRunReport,
+from eneo.data_retention.application.retention_runner import (
+    RetentionChunkLimits,
+    RetentionRunner,
+    RetentionRunReport,
 )
-from eneo.data_retention.domain.gallring import (
-    GallringBudget,
-    GallringCategory,
-    GallringJobOutcome,
+from eneo.data_retention.domain.retention import (
     ReceiptItemDisposition,
     ReceiptPhase,
     ReceiptReason,
-    gallring_batch_audit_id,
+    RetentionBudget,
+    RetentionCategory,
+    RetentionJobOutcome,
+    retention_batch_audit_id,
 )
-from eneo.data_retention.infrastructure.gallring_job_run_repo import (
-    GallringJobRunRepository,
+from eneo.data_retention.infrastructure.retention_job_run_repo import (
+    RetentionJobRunRepository,
 )
-from eneo.data_retention.infrastructure.gallring_lock import (
-    GallringLockBusy,
-    GallringSubject,
+from eneo.data_retention.infrastructure.retention_lock import (
+    RetentionLockBusy,
+    RetentionSubject,
     acquire_exclusive,
 )
 from eneo.database.database import sessionmanager
@@ -59,15 +59,15 @@ from eneo.database.tables.flow_tables import (
     FlowTemplateAssets,
     FlowVersions,
 )
-from eneo.database.tables.gallring_tables import (
-    GallringJobRuns,
-    GallringReceiptItems,
-    GallringReceipts,
-)
 from eneo.database.tables.object_content_table import (
     FileContentReferences,
     InlineContentPayloads,
     ObjectContents,
+)
+from eneo.database.tables.retention_tables import (
+    RetentionJobRuns,
+    RetentionReceiptItems,
+    RetentionReceipts,
 )
 from eneo.database.tables.spaces_table import Spaces
 from eneo.database.tables.tenant_table import Tenants
@@ -392,7 +392,7 @@ async def _place_hold(
     run_id: UUID | None = None,
 ) -> None:
     """A legal hold placed as the hold service does: EXCLUSIVE lock, then the row."""
-    await acquire_exclusive(session, GallringSubject.FLOW_HISTORY)
+    await acquire_exclusive(session, RetentionSubject.FLOW_HISTORY)
     await FlowRetentionHoldRepository(session).insert(
         tenant_id=tenant_id,
         flow_id=flow_id,
@@ -419,8 +419,8 @@ async def _until_a_session_waits_on_the_flow_history_lock() -> None:
     raise AssertionError("no session waited on the flow history lock")
 
 
-def _limits(chunk_rows: int, lock_timeout_ms: int = 2_000) -> GallringChunkLimits:
-    return GallringChunkLimits(
+def _limits(chunk_rows: int, lock_timeout_ms: int = 2_000) -> RetentionChunkLimits:
+    return RetentionChunkLimits(
         rows=chunk_rows,
         statement_timeout_ms=30_000,
         lock_timeout_ms=lock_timeout_ms,
@@ -437,12 +437,12 @@ def _runner(
     budget_seconds: float = 600,
     clock: Callable[[], float] | None = None,
     lock_timeout_ms: int = 2_000,
-) -> GallringRunner:
-    return GallringRunner(
+) -> RetentionRunner:
+    return RetentionRunner(
         session=session,
-        job_runs=GallringJobRunRepository(session),
+        job_runs=RetentionJobRunRepository(session),
         audit_service=AuditService(repository=AuditLogRepositoryImpl(session)),
-        budget=GallringBudget(
+        budget=RetentionBudget(
             rows=budget_rows, files=budget_files, seconds=budget_seconds
         ),
         limits=_limits(chunk_rows, lock_timeout_ms),
@@ -452,7 +452,7 @@ def _runner(
 
 async def _housekeeping(
     *, family_rows: int | None = None, now: datetime | None = None, **limits: Any
-) -> GallringRunReport:
+) -> RetentionRunReport:
     async with sessionmanager.session() as session:
         task = FlowHousekeepingTask(
             session,
@@ -501,10 +501,10 @@ async def _gallring_audits(tenant_id: UUID) -> list[AuditLogTable]:
         return audits
 
 
-async def _receipt(entity_id: UUID) -> GallringReceipts:
+async def _receipt(entity_id: UUID) -> RetentionReceipts:
     async with _committed() as session:
         receipt = await session.scalar(
-            sa.select(GallringReceipts).where(GallringReceipts.entity_id == entity_id)
+            sa.select(RetentionReceipts).where(RetentionReceipts.entity_id == entity_id)
         )
         assert receipt is not None
         session.expunge(receipt)
@@ -538,7 +538,7 @@ async def test_abandoned_upload_family_is_reclaimed_bottom_up_with_a_receipt(
 
     report = await _housekeeping()
 
-    assert report.outcome == GallringJobOutcome.SUCCEEDED
+    assert report.outcome == RetentionJobOutcome.SUCCEEDED
     assert await _existing_files(file_ids) == set()
     assert (
         await _scalar(
@@ -557,8 +557,8 @@ async def test_abandoned_upload_family_is_reclaimed_bottom_up_with_a_receipt(
             (
                 await session.execute(
                     sa.select(
-                        GallringReceiptItems.file_id, GallringReceiptItems.content_id
-                    ).where(GallringReceiptItems.receipt_id == receipt.id)
+                        RetentionReceiptItems.file_id, RetentionReceiptItems.content_id
+                    ).where(RetentionReceiptItems.receipt_id == receipt.id)
                 )
             ).tuples()
         )
@@ -600,8 +600,8 @@ async def test_abandoned_upload_family_is_reclaimed_bottom_up_with_a_receipt(
     async with _committed() as session:
         dispositions = set(
             await session.scalars(
-                sa.select(GallringReceiptItems.disposition).where(
-                    GallringReceiptItems.receipt_id == receipt.id
+                sa.select(RetentionReceiptItems.disposition).where(
+                    RetentionReceiptItems.receipt_id == receipt.id
                 )
             )
         )
@@ -641,8 +641,8 @@ async def test_a_paused_family_completes_once_released_with_its_current_referenc
             (
                 await session.execute(
                     sa.select(
-                        GallringReceiptItems.file_id, GallringReceiptItems.content_id
-                    ).where(GallringReceiptItems.receipt_id == receipt.id)
+                        RetentionReceiptItems.file_id, RetentionReceiptItems.content_id
+                    ).where(RetentionReceiptItems.receipt_id == receipt.id)
                 )
             ).tuples()
         )
@@ -694,7 +694,7 @@ async def test_an_owner_gained_while_paused_is_seen_by_a_fresh_check(
     assert (
         await _scalar(
             sa.select(sa.func.count()).where(
-                GallringReceiptItems.receipt_id == receipt.id
+                RetentionReceiptItems.receipt_id == receipt.id
             )
         )
         == 0
@@ -709,7 +709,7 @@ async def test_a_deferred_family_gets_the_whole_budget_within_two_nights(
     held_flow_id = await _flow(tenant_id, user_id, space_id)
     async with _committed() as session:
         session.add_all(
-            GallringReceipts(
+            RetentionReceipts(
                 task=FLOWS_HOUSEKEEPING_TASK,
                 entity_kind="file_family",
                 entity_id=uuid4(),
@@ -739,7 +739,7 @@ async def test_a_deferred_family_gets_the_whole_budget_within_two_nights(
 
     # file_families goes first on the first night and leaves too little; the
     # next night abandoned_uploads goes first with the whole budget.
-    assert nights[0].blocked["abandoned_uploads.family_deferred"] == 1
+    assert nights[0].counts["abandoned_uploads.deferred"] == 1
     assert nights[1].counts["abandoned_uploads.families_completed"] == 1
     assert await _existing_files([f for f, _ in family]) == set()
 
@@ -765,7 +765,7 @@ async def test_a_family_at_or_over_the_cap_never_blocks_the_uploads_behind_it(
     assert nights[0].counts["abandoned_uploads.families_completed"] == 1
     # Looked at once more each night, within the cap, never in a loop.
     assert nights[1].blocked["file_families.family_exceeds_budget"] == 1
-    assert all(night.outcome == GallringJobOutcome.SUCCEEDED for night in nights)
+    assert all(night.outcome == RetentionJobOutcome.SUCCEEDED for night in nights)
     assert await _existing_files([small[0][0]]) == set()
     assert await _existing_files([f for f, _ in big]) == {f for f, _ in big}
 
@@ -789,7 +789,7 @@ async def test_the_cap_counts_every_examined_row_of_a_family(
     report = await _housekeeping(family_rows=cap)
 
     assert (await _receipt(family[0][0])).phase == phase
-    assert report.outcome == GallringJobOutcome.SUCCEEDED
+    assert report.outcome == RetentionJobOutcome.SUCCEEDED
 
 
 @pytest.mark.parametrize(("budget", "remaining"), [(1, 2), (9, 1)])
@@ -803,11 +803,11 @@ async def test_one_row_left_defers_the_family_without_failing_the_execution(
 
     report = await _housekeeping(family_rows=8, budget_rows=budget)
 
-    assert report.outcome == GallringJobOutcome.PARTIAL
+    assert report.outcome == RetentionJobOutcome.PARTIAL
     assert report.error_code is None
     assert len(await _existing_files(files)) == remaining
     next_report = await _housekeeping(family_rows=8)
-    assert next_report.outcome == GallringJobOutcome.SUCCEEDED
+    assert next_report.outcome == RetentionJobOutcome.SUCCEEDED
     assert await _existing_files(files) == set()
 
 
@@ -880,7 +880,7 @@ async def test_a_call_selects_only_the_candidates_it_processes(scope) -> None:
     held_flow_id = await _flow(tenant_id, user_id, space_id)
     async with _committed() as session:
         session.add_all(
-            GallringReceipts(
+            RetentionReceipts(
                 task=FLOWS_HOUSEKEEPING_TASK,
                 entity_kind="file_family",
                 entity_id=uuid4(),
@@ -974,8 +974,8 @@ async def test_many_small_families_never_hold_the_gallring_lock_long(scope) -> N
             async with sessionmanager.session() as session, session.begin():
                 started = time.monotonic()
                 try:
-                    await acquire_exclusive(session, GallringSubject.FLOW_HISTORY)
-                except GallringLockBusy:
+                    await acquire_exclusive(session, RetentionSubject.FLOW_HISTORY)
+                except RetentionLockBusy:
                     busy.append(time.monotonic() - started)
             await asyncio.sleep(0.05)
 
@@ -1015,7 +1015,7 @@ async def test_a_child_added_while_the_family_is_locked_defers_only_that_family(
     monkeypatch.undo()
 
     # The night goes on: the family waits, the next step still runs.
-    assert report.outcome == GallringJobOutcome.SUCCEEDED
+    assert report.outcome == RetentionJobOutcome.SUCCEEDED
     assert report.blocked["abandoned_uploads.lock_deferred"] == 1
     assert report.counts["live_transcripts.transcripts_deleted"] == 1
     assert await _existing_files([*(f for f, _ in family), *added]) == {
@@ -1062,7 +1062,7 @@ async def test_a_family_of_401_files_is_reclaimed_in_one_transaction(scope) -> N
 
     report = await _housekeeping()
 
-    assert report.outcome == GallringJobOutcome.SUCCEEDED
+    assert report.outcome == RetentionJobOutcome.SUCCEEDED
     [audit] = [
         audit
         for audit in await _gallring_audits(tenant_id)
@@ -1086,7 +1086,7 @@ async def test_a_receipt_being_pruned_no_longer_covers_its_root(scope) -> None:
     covered, withdrawn = uuid4(), uuid4()
     async with _committed() as session:
         session.add_all(
-            GallringReceipts(
+            RetentionReceipts(
                 task=FLOWS_HOUSEKEEPING_TASK,
                 entity_kind="file_family",
                 entity_id=root,
@@ -1104,7 +1104,7 @@ async def test_a_receipt_being_pruned_no_longer_covers_its_root(scope) -> None:
     async with _committed() as session:
         recorded = await FlowHousekeepingRepository(session).recorded_families(
             task=FLOWS_HOUSEKEEPING_TASK,
-            category=GallringCategory.ABANDONED_UPLOAD,
+            category=RetentionCategory.ABANDONED_UPLOAD,
             root_ids=[covered, withdrawn],
         )
 
@@ -1125,7 +1125,7 @@ async def test_each_deleter_is_bounded_and_audited_once_per_batch(scope) -> None
     # batch however high the cap, which only lets a single family start a batch.
     report = await _housekeeping(chunk_rows=2, family_rows=50)
 
-    assert report.outcome == GallringJobOutcome.SUCCEEDED
+    assert report.outcome == RetentionJobOutcome.SUCCEEDED
     audits = await _gallring_audits(tenant_id)
     removed = {
         "abandoned_uploads": ("families_completed", 3),
@@ -1139,7 +1139,7 @@ async def test_each_deleter_is_bounded_and_audited_once_per_batch(scope) -> None
         batches = [a.log_metadata["batch_seq"] for a in step_audits]
         assert len(batches) == len(set(batches)) >= least, step
         for audit in step_audits:
-            assert audit.id == gallring_batch_audit_id(
+            assert audit.id == retention_batch_audit_id(
                 job_run_id=report.job_run_id,
                 batch_seq=audit.log_metadata["batch_seq"],
                 tenant_id=tenant_id,
@@ -1205,11 +1205,11 @@ async def test_health_flags_a_task_without_a_recent_completion() -> None:
             )
         return snapshot.stale_gallring_tasks
 
-    async def execution(outcome: GallringJobOutcome, *, hours_ago: int) -> None:
+    async def execution(outcome: RetentionJobOutcome, *, hours_ago: int) -> None:
         async with _committed() as session:
             at = datetime.now(timezone.utc) - timedelta(hours=hours_ago)
             session.add(
-                GallringJobRuns(
+                RetentionJobRuns(
                     task=FLOWS_HOUSEKEEPING_TASK,
                     outcome=outcome.value,
                     started_at=at,
@@ -1219,11 +1219,11 @@ async def test_health_flags_a_task_without_a_recent_completion() -> None:
             )
 
     assert await stale_tasks() == ()  # never ran
-    await execution(GallringJobOutcome.FAILED, hours_ago=72)
+    await execution(RetentionJobOutcome.FAILED, hours_ago=72)
     assert await stale_tasks() == (FLOWS_HOUSEKEEPING_TASK,)
-    await execution(GallringJobOutcome.SUCCEEDED, hours_ago=60)
+    await execution(RetentionJobOutcome.SUCCEEDED, hours_ago=60)
     assert await stale_tasks() == (FLOWS_HOUSEKEEPING_TASK,)
-    await execution(GallringJobOutcome.PARTIAL, hours_ago=1)
+    await execution(RetentionJobOutcome.PARTIAL, hours_ago=1)
     assert await stale_tasks() == ()
 
 
@@ -1275,7 +1275,7 @@ async def test_proof_rows_and_audits_hold_no_content_or_digest(scope) -> None:
     async with _committed() as session:
         proof_rows = [
             dict(row._mapping)
-            for table in (GallringJobRuns, GallringReceipts, GallringReceiptItems)
+            for table in (RetentionJobRuns, RetentionReceipts, RetentionReceiptItems)
             for row in await session.execute(sa.select(table.__table__))
         ]
     audits = await _gallring_audits(tenant_id)
@@ -1302,7 +1302,7 @@ async def test_final_receipts_and_job_runs_are_pruned_after_audit_retention(
     tenant_id, *_ = scope
     old = _NOW - timedelta(days=400)  # past the 365-day default audit retention
     async with _committed() as session:
-        final = GallringReceipts(
+        final = RetentionReceipts(
             task=FLOWS_HOUSEKEEPING_TASK,
             entity_kind="file_family",
             entity_id=uuid4(),
@@ -1316,7 +1316,7 @@ async def test_final_receipts_and_job_runs_are_pruned_after_audit_retention(
             completed_at=old,
         )
         # Another task's unfinished receipt: pruning never removes it by age.
-        unfinished = GallringReceipts(
+        unfinished = RetentionReceipts(
             task="tests.other",
             entity_kind="file_family",
             entity_id=uuid4(),
@@ -1330,15 +1330,15 @@ async def test_final_receipts_and_job_runs_are_pruned_after_audit_retention(
             updated_at=old,
             manifest_completed_at=old,
         )
-        old_run = GallringJobRuns(
+        old_run = RetentionJobRuns(
             task=FLOWS_HOUSEKEEPING_TASK,
-            outcome=GallringJobOutcome.SUCCEEDED.value,
+            outcome=RetentionJobOutcome.SUCCEEDED.value,
             started_at=old,
             heartbeat_at=old,
             finished_at=old,
         )
         recent = _NOW - timedelta(days=10)
-        recent_final = GallringReceipts(
+        recent_final = RetentionReceipts(
             task=FLOWS_HOUSEKEEPING_TASK,
             entity_kind="file_family",
             entity_id=uuid4(),
@@ -1359,11 +1359,11 @@ async def test_final_receipts_and_job_runs_are_pruned_after_audit_retention(
     report = await _housekeeping()
 
     async with _committed() as session:
-        assert await session.get(GallringReceipts, final_id) is None
-        assert await session.get(GallringReceipts, unfinished_id) is not None
-        assert await session.get(GallringReceipts, recent_id) is not None
-        assert await session.get(GallringJobRuns, old_run_id) is None
-        assert await session.get(GallringJobRuns, report.job_run_id) is not None
+        assert await session.get(RetentionReceipts, final_id) is None
+        assert await session.get(RetentionReceipts, unfinished_id) is not None
+        assert await session.get(RetentionReceipts, recent_id) is not None
+        assert await session.get(RetentionJobRuns, old_run_id) is None
+        assert await session.get(RetentionJobRuns, report.job_run_id) is not None
     # One chunk marks the expired receipt, the next deletes it; both audited.
     assert [
         audit.log_metadata["counts"]
@@ -1376,8 +1376,8 @@ async def test_receipt_pruning_keeps_the_proof_of_a_held_flow(scope) -> None:
     tenant_id, _, _, held_flow_id = scope
     old = _NOW - timedelta(days=400)  # past the 365-day default audit retention
 
-    def receipt(**values: Any) -> GallringReceipts:
-        return GallringReceipts(
+    def receipt(**values: Any) -> RetentionReceipts:
+        return RetentionReceipts(
             task=FLOWS_HOUSEKEEPING_TASK,
             entity_kind="file_family",
             entity_id=uuid4(),
@@ -1402,7 +1402,7 @@ async def test_receipt_pruning_keeps_the_proof_of_a_held_flow(scope) -> None:
         session.add_all([expired, marked, unheld])
         await session.flush()
         session.add(
-            GallringReceiptItems(
+            RetentionReceiptItems(
                 receipt_id=marked.id, file_id=uuid4(), content_id=uuid4()
             )
         )
@@ -1415,11 +1415,11 @@ async def test_receipt_pruning_keeps_the_proof_of_a_held_flow(scope) -> None:
         kept = {
             name
             for name, receipt_id in ids.items()
-            if await session.get(GallringReceipts, receipt_id) is not None
+            if await session.get(RetentionReceipts, receipt_id) is not None
         }
         items = await session.scalar(
             sa.select(sa.func.count()).where(
-                GallringReceiptItems.receipt_id == ids["marked"]
+                RetentionReceiptItems.receipt_id == ids["marked"]
             )
         )
     assert kept == {"expired", "marked"}
@@ -1608,7 +1608,7 @@ async def test_a_discovery_pass_continues_across_nightly_executions(scope) -> No
     first = await _housekeeping(chunk_rows=2, budget_rows=2)
     second = await _housekeeping(chunk_rows=2, budget_rows=2)
 
-    assert first.outcome == GallringJobOutcome.PARTIAL
+    assert first.outcome == RetentionJobOutcome.PARTIAL
     assert first.blocked == {"live_transcripts.held": 2}
     # The second night continues after the prefix and reaches the free transcript.
     assert second.blocked == {"live_transcripts.held": 1}
