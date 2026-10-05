@@ -1574,7 +1574,13 @@ async def test_collected_units_preserve_admission_cursor_and_committed_work(
                 ), handle
 
             return await gather_retention_units(
-                batch, next_candidate, out, chunk_rows=4, gather_seconds=10
+                next_candidate,
+                out,
+                max_rows=batch.rows,
+                max_files=batch.files,
+                cursor=batch.cursor,
+                chunk_rows=4,
+                gather_seconds=10,
             )
 
         task = _Task(

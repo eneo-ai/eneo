@@ -172,9 +172,11 @@ class StepAssistantReclamation:
             return RetentionKeyset(at=candidate.created_at, id=candidate.id), handle
 
         return await gather_retention_units(
-            batch,
             next_candidate,
             out,
+            max_rows=batch.rows,
+            max_files=batch.files,
+            cursor=batch.cursor,
             chunk_rows=self._chunk_rows,
             gather_seconds=self._gather_seconds,
         )

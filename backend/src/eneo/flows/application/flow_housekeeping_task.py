@@ -245,9 +245,11 @@ class FlowHousekeepingTask:
             return RetentionKeyset(at=receipt.started_at, id=receipt.id), handle
 
         return await gather_retention_units(
-            batch,
             next_candidate,
             out,
+            max_rows=batch.rows,
+            max_files=batch.files,
+            cursor=batch.cursor,
             chunk_rows=self._chunk_rows,
             gather_seconds=self._gather_seconds,
             clock=time.monotonic,
@@ -288,9 +290,11 @@ class FlowHousekeepingTask:
             return RetentionKeyset(at=upload.created_at, id=upload.file_id), handle
 
         return await gather_retention_units(
-            batch,
             next_candidate,
             out,
+            max_rows=batch.rows,
+            max_files=batch.files,
+            cursor=batch.cursor,
             chunk_rows=self._chunk_rows,
             gather_seconds=self._gather_seconds,
             clock=time.monotonic,

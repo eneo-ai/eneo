@@ -15,7 +15,6 @@ from enum import Enum
 from uuid import UUID
 
 from eneo.data_retention.application.retention_runner import (
-    RetentionBatch,
     RetentionContractError,
     RetentionStepResult,
     RetentionTenantEffect,
@@ -94,7 +93,7 @@ class RetentionUnitDisposition(Enum):
 
 @dataclass(frozen=True, slots=True)
 class RetentionUnitUsage:
-    """What one candidate charged: rows examined, rows deleted or recorded."""
+    """Logical row and file work charged by one candidate."""
 
     rows: int
     files: int
@@ -102,14 +101,17 @@ class RetentionUnitUsage:
 
 
 async def gather_retention_units(
-    batch: RetentionBatch,
     next_candidate: Callable[
         [RetentionKeyset | None], Awaitable[RetentionUnitCandidate | None]
     ],
     out: RetentionEffects,
     *,
+    max_rows: int,
+    max_files: int,
+    cursor: RetentionKeyset | None,
     chunk_rows: int,
     gather_seconds: float,
+    min_candidate_rows: int = 1,
     clock: Callable[[], float] = time.monotonic,
 ) -> RetentionStepResult:
     """Gather completed units; a larger first unit may use the whole batch.
@@ -117,19 +119,25 @@ async def gather_retention_units(
     CONTINUE leaves the cursor for another fresh preparation. DOES_NOT_FIT
     retries in a fresh chunk, or ends this step when the call already started
     fresh. The runner commits charges, audit and cursor before either stop.
-    A consumer with max_files=0 has no file gathering limit.
+    Reserve the candidate's discovery rows before selecting it. A row-only
+    consumer has zero file allowance, which does not stop candidate gathering.
     """
-    cursor = batch.cursor
     rows = files = 0
     started = clock()
     while True:
         fresh = rows == 0 and files == 0
-        row_limit = batch.rows if fresh else min(batch.rows, chunk_rows)
-        file_limit = batch.files if fresh else min(batch.files, chunk_rows)
-        if (
-            rows >= row_limit
-            or (file_limit > 0 and files >= file_limit)
-            or (not fresh and clock() - started > gather_seconds)
+        row_limit = max_rows if fresh else min(max_rows, chunk_rows)
+        file_limit = max_files if fresh else min(max_files, chunk_rows)
+        if row_limit - rows < min_candidate_rows:
+            return out.result(
+                rows=rows,
+                files=files,
+                exhausted=False,
+                cursor=cursor,
+                deferred=fresh,
+            )
+        if (file_limit > 0 and files >= file_limit) or (
+            not fresh and clock() - started > gather_seconds
         ):
             return out.result(rows=rows, files=files, exhausted=False, cursor=cursor)
         candidate = await next_candidate(cursor)
