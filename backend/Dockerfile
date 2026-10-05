@@ -1,7 +1,4 @@
-FROM ghcr.io/astral-sh/uv:python3.11-bookworm-slim AS builder
-
-# Install system dependencies
-RUN apt-get update && apt-get install -y --no-install-recommends ffmpeg libmagic1 && rm -rf /var/lib/apt/lists/*
+FROM ghcr.io/astral-sh/uv:python3.11-trixie-slim AS builder
 
 # Set uv optimizations
 ENV UV_LINK_MODE=copy \
@@ -31,10 +28,14 @@ RUN mkdir -p /tiktoken
 ADD --chmod=644 https://openaipublic.blob.core.windows.net/encodings/cl100k_base.tiktoken /tiktoken/9b5ad71b2ce5302211f9c61530b329a4922fc6a4
 
 # Production stage
-FROM python:3.11-slim-bookworm
+FROM python:3.11-slim-trixie
 
 # Install runtime dependencies
-RUN apt-get update && apt-get install -y --no-install-recommends ffmpeg libmagic1 && rm -rf /var/lib/apt/lists/*
+RUN apt-get update && apt-get upgrade -y && apt-get install -y --no-install-recommends ffmpeg libmagic1t64 && rm -rf /var/lib/apt/lists/*
+
+# The runtime uses the frozen application venv; global packaging tools are
+# build-only and bring a separate, otherwise unaudited dependency tree.
+RUN python -m pip uninstall -y pip setuptools wheel
 
 # Copy venv and tiktoken from builder
 COPY --from=builder /app/.venv /app/.venv

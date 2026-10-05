@@ -2,7 +2,7 @@
 # vite itself runs under Node, as it does in CI and on developer machines.
 # Without a Node binary, Bun runs vite on its own JavaScript runtime, which
 # has crashed (1.3.0) or starved the CI runner (1.3.14) on this build.
-FROM node:22-bookworm-slim AS builder
+FROM node:22-trixie-slim AS builder
 COPY --from=oven/bun:1.3.14-slim /usr/local/bin/bun /usr/local/bin/bun
 
 WORKDIR /app
@@ -19,7 +19,13 @@ RUN bun run --filter @eneo/ui build && bun run --filter @eneo/web build
 # Stage 2: Production runtime using Node.js
 # Required ENV vars, see README.md
 # ORIGIN, JWT_SECRET, PUBLIC_API_URL
-FROM node:20-bullseye-slim AS runner
+FROM node:22-trixie-slim AS runner
+# Apply available OS fixes and remove package managers: runtime executes only Node.
+RUN apt-get update && apt-get upgrade -y && rm -rf /var/lib/apt/lists/* \
+    /usr/local/lib/node_modules/npm /usr/local/lib/node_modules/corepack /opt/yarn-* \
+    && rm -f /usr/local/bin/npm /usr/local/bin/npx /usr/local/bin/corepack \
+    /usr/local/bin/yarn /usr/local/bin/yarnpkg
+
 
 WORKDIR /app
 # No node_modules in this image: adapter-node bundles apps/web devDependencies into build/,
