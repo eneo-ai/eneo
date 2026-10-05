@@ -1,26 +1,8 @@
-import { readFileSync } from "node:fs";
-import { runInNewContext } from "node:vm";
-import { parse } from "svelte/compiler";
-import { ModuleKind, ScriptTarget, transpileModule } from "typescript";
+import { readInstanceScript, runInstanceScript } from "$lib/test/instanceScript";
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 
-// SSR compilation removes onMount. Execute the page's actual instance script,
-// retaining its callback logic while replacing only browser/framework boundaries.
-const source = readFileSync(new URL("./+page.svelte", import.meta.url), "utf8");
-const instance = parse(source, { modern: true }).instance;
-if (instance === null) throw new Error("Callback page has no instance script");
-const content = instance.content;
-if (
-  !("start" in content) ||
-  !("end" in content) ||
-  typeof content.start !== "number" ||
-  typeof content.end !== "number"
-) {
-  throw new Error("Callback script has no source offsets");
-}
-const script = transpileModule(source.slice(content.start, content.end), {
-  compilerOptions: { module: ModuleKind.CommonJS, target: ScriptTarget.ES2022 }
-}).outputText;
+// Run the page's actual instance script; see $lib/test/instanceScript for why.
+const script = readInstanceScript(new URL("./+page.svelte", import.meta.url));
 
 const CALLBACK_ORIGIN = "https://eneo.example";
 const CALLBACK_QUERY = "?code=provider-code&state=bound-state&session_state=provider-session";
@@ -53,33 +35,30 @@ function callbackBrowser(openerOrigin: string | null, storedState?: string) {
 
 async function mountCallback(browser: ReturnType<typeof callbackBrowser>) {
   const lifecycle: { mounted?: () => Promise<void> } = {};
-  runInNewContext(
-    script,
-    {
-      exports: {},
-      require: (name: string) => {
-        if (name === "svelte") {
-          return {
-            onMount: (callback: () => Promise<void>) => {
-              lifecycle.mounted = callback;
-            }
-          };
+  runInstanceScript(script, {
+    filename: "integration-callback-page.js",
+    modules: {
+      svelte: {
+        onMount: (callback: () => Promise<void>) => {
+          lifecycle.mounted = callback;
         }
-        if (name === "$lib/paraglide/messages") {
-          return {
-            m: { integration_callback_oauth_state_mismatch: () => "OAuth state mismatch" }
-          };
-        }
-        throw new Error(`Unexpected callback script import: ${name}`);
       },
+      "$lib/paraglide/messages": {
+        m: { integration_callback_oauth_state_mismatch: () => "OAuth state mismatch" }
+      },
+      // Used only in the markup today, so TypeScript elides them. Stubbed so
+      // moving them into the script does not break this test unexpectedly.
+      "$app/navigation": { goto: async () => undefined },
+      "$app/forms": { enhance: () => undefined }
+    },
+    globals: {
       $state: (value: unknown) => value,
       window: browser.window,
       sessionStorage: browser.sessionStorage,
       URL,
       setTimeout
-    },
-    { timeout: 1000, filename: "integration-callback-page.js" }
-  );
+    }
+  });
   const mounted = lifecycle.mounted;
   if (mounted === undefined) throw new Error("Callback page did not register its mount behavior");
   const completed = mounted();
