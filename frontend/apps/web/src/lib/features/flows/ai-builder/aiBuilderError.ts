@@ -89,6 +89,10 @@ function publicErrorFromRecord(record: Record<string, unknown>): AIBuilderError 
 export function toAIBuilderError(publicError: AIBuilderPublicErrorPayload): AIBuilderError {
   return {
     ...publicError,
+    message:
+      publicError.code === "flow_owner_required"
+        ? m.flow_error_flow_owner_required()
+        : publicError.message,
     schema_version: 2,
     diagnostic_context: publicError.diagnostic_context ?? null,
     details: publicError.details ?? {}
