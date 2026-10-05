@@ -634,7 +634,6 @@
   "default_roles": "Standardroller",
   "delete_conversation": "Radera konversation",
   "delete_cookies": "radera dina cookies.",
-
   "delete_file": "Radera fil",
   "delete_prompt": "Radera prompt",
   "do_you_really_want_to_delete_this_version": "Vill du verkligen radera denna version?",
@@ -3454,7 +3453,6 @@
   "chat_tokens_separator": "token ·",
   "pagination_showing_range": "{start}–{end} av {total}",
   "spaces_more_members": "+{count} till",
-
   "this_run_did_not_receive_any_inputs": "Den här körningen tog inte emot några indata.",
   "governance_prompt_form_desc": "Promptbiblioteket gör det möjligt att dela samma system-prompt till alla användares personliga chatt.",
   "governance_prompt_form_name_placeholder": "t.ex. Standard personlig assistent",
@@ -4463,5 +4461,8 @@
   "material_open_when_needed": "Öppna vid behov",
   "material_read_directly": "Läs in direkt",
   "config_attachment_meter_scope": "Uppskattning för instruktionstext och bilagor som läses in direkt. Chatthistorik, skills, verktyg och hämtat innehåll tillkommer.",
-  "material_attachments_description": "Filer som är bifogade till assistenten. Varje fil visar om den läses in inför varje svar eller öppnas vid behov."
+  "material_attachments_description": "Filer som är bifogade till assistenten. Varje fil visar om den läses in inför varje svar eller öppnas vid behov.",
+  "new_app_banner_title": "Nya Eneo i beta",
+  "new_app_banner_description": "Vill du prova nya Eneo? Du kan fortsätta använda båda apparna.",
+  "new_app_banner_action": "Testa nya appen (öppnas i ny flik)"
 }

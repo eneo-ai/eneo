@@ -129,7 +129,10 @@ export function useIntegrationAuth(onConnected: (result: ConnectResult) => void)
       try {
         const { auth_url, state } = await unwrap(
           browserApi.GET("/api/v1/integrations/auth/{tenant_integration_id}/url/", {
-            params: { path: { tenant_integration_id: tenantIntegrationId } }
+            params: {
+              path: { tenant_integration_id: tenantIntegrationId },
+              query: { redirect_uri: window.location.origin + "/integrations/callback/token/" }
+            }
           })
         );
         const request = requestsRef.current.get(tenantIntegrationId);

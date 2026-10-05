@@ -11,6 +11,7 @@ import {
 import { useSideNavCollapse } from "@astryxdesign/core/SideNav";
 import {
   Accessibility,
+  ArrowLeft,
   Building2,
   ChevronsUpDown,
   Globe,
@@ -173,6 +174,13 @@ export function ProfileMenu() {
         </DropdownMenuRadioGroup>
       </DropdownMenuSubMenu>
       <ThemeSubMenu />
+      {links.legacyApp && (
+        <DropdownMenuItem
+          icon={ArrowLeft}
+          label={t("beta_return_to_legacy")}
+          onClick={() => navigateTo(links.legacyApp!)}
+        />
+      )}
       {links.accessibilityStatement && (
         <DropdownMenuItem
           icon={Accessibility}

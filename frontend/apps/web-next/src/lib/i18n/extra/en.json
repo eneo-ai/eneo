@@ -1595,5 +1595,8 @@
   "job_toast_completed": "{name} is done.",
   "job_toast_failed": "{name} failed.",
   "job_toast_cancelled": "{name} was stopped.",
-  "file_just_added": "Just added"
+  "file_just_added": "Just added",
+  "beta_return_to_legacy": "Return to the previous app",
+  "select_additional_knowledge": "Select additional knowledge sources that this assistant will be able to search for relevant answers.",
+  "organization_knowledge_description": "Select additional sources from your organization's space that this assistant will be able to search for relevant answers."
 }

@@ -534,6 +534,30 @@ class Settings(BaseSettings):
 
     # integration callback
     oauth_callback_url: Optional[str] = None
+    oauth_callback_urls: list[str] = Field(default_factory=list)
+
+    def integration_callback_uri(self, requested: str | None = None) -> str:
+        """Select an exact operator-registered callback, preserving its path."""
+        default = self.oauth_callback_url
+        if not default and self.public_origin:
+            default = self.public_origin + "/integrations/callback/token/"
+        allowed = set(self.oauth_callback_urls)
+        if default:
+            allowed.add(default)
+        if requested is not None and requested not in allowed:
+            raise ValueError("The integration callback is not registered.")
+        selected = requested if requested is not None else default
+        if selected is None:
+            raise ValueError("OAUTH_CALLBACK_URL or PUBLIC_ORIGIN must be set.")
+        if selected != selected.strip() or any(ord(char) < 32 for char in selected):
+            raise ValueError(
+                "The integration callback must not contain whitespace controls."
+            )
+        validate_redirect_uri(selected)
+        parsed = urlparse(selected)
+        if parsed.username is not None or parsed.password is not None:
+            raise ValueError("The integration callback must not contain credentials.")
+        return selected
 
     # Confluence
     confluence_client_id: Optional[str] = None

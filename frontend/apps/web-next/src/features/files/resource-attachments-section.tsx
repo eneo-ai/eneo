@@ -41,7 +41,19 @@ import type { Schema } from "@/lib/api/models";
 import { formatBytes } from "@/lib/format";
 import { cn } from "@/lib/utils";
 
-type Attachment = Schema<"FilePublic">;
+type Attachment = Schema<"FilePublic"> | Schema<"AssistantAttachmentPublic">;
+
+// Assistants persist a read mode per attachment; Apps use the same editor
+// without that field. Preserve the server-owned mode when either is edited.
+function attachmentReference(file: Attachment): Schema<"AssistantAttachmentInput"> {
+  return !("inline_text" in file)
+    ? { id: file.id }
+    : { id: file.id, inline_text: file.inline_text };
+}
+
+function attachmentsKey(items: Attachment[]) {
+  return JSON.stringify(items.map(attachmentReference).sort((a, b) => a.id.localeCompare(b.id)));
+}
 
 const TYPE_LABELS: Record<string, string> = {
   "application/pdf": "PDF",
@@ -246,7 +258,7 @@ export function ResourceAttachmentsSection({
   attachments: Attachment[];
   allowedAttachments: Schema<"FileRestrictions">;
   description: string;
-  onSave: (attachments: { id: string }[]) => Promise<unknown>;
+  onSave: (attachments: Schema<"AssistantAttachmentInput">[]) => Promise<unknown>;
 }) {
   const t = useTranslations();
   const locale = useLocale();
@@ -267,20 +279,17 @@ export function ResourceAttachmentsSection({
 
   // Adopt server changes (our own save landing, or an edit elsewhere) unless the
   // user diverged locally. Attachments persist immediately on add/remove.
-  const savedKey = JSON.stringify(saved.map((file) => file.id).sort());
+  const savedKey = attachmentsKey(saved);
   const savedRef = useRef(savedKey);
   useEffect(() => {
     if (savedRef.current === savedKey) return;
     const previous = savedRef.current;
     savedRef.current = savedKey;
     setFiles((current) => {
-      const currentKey = JSON.stringify(current.map((file) => file.id).sort());
+      const currentKey = attachmentsKey(current);
       return currentKey === previous ? saved : current;
     });
   }, [savedKey, saved]);
-
-  const attachmentsKey = (items: Attachment[]) =>
-    JSON.stringify(items.map((file) => file.id).sort());
 
   const persist = (
     next: Attachment[],
@@ -288,7 +297,7 @@ export function ResourceAttachmentsSection({
     cleanup: { deleteOnFailure?: Attachment[]; deleteOnSuccess?: Attachment[] } = {}
   ) => {
     const attemptedKey = attachmentsKey(next);
-    return autosave(() => onSave(next.map((file) => ({ id: file.id })))).then((result) => {
+    return autosave(() => onSave(next.map(attachmentReference))).then((result) => {
       if (result !== undefined) {
         if (cleanup.deleteOnSuccess?.length) void deleteUploadedFiles(cleanup.deleteOnSuccess);
         return result;

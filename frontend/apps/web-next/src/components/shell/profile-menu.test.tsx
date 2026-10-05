@@ -64,6 +64,14 @@ describe("ProfileMenu", () => {
     expect(screen.queryByRole("menuitem", { name: "Tillgänglighetsredogörelse" })).toBeNull();
   });
 
+  it("offers a return to the existing app only when configured", async () => {
+    renderInApp(<ProfileMenu />, {
+      appContext: testAppContext({ links: { legacyApp: "https://app.example" } })
+    });
+    fireEvent.click(screen.getByRole("button", { name: TRIGGER }));
+    expect(await screen.findByRole("menuitem", { name: "Tillbaka till gamla appen" })).toBeTruthy();
+  });
+
   it("names each language in its own language", async () => {
     await openMenu();
     fireEvent.click(screen.getByRole("menuitem", { name: /Språk/ }));

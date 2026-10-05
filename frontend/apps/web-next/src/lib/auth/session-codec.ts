@@ -34,6 +34,19 @@ export const txnSchema = z.object({
 
 export type TxnPayload = z.infer<typeof txnSchema>;
 
+const federationTxnSchema = z.object({ state: z.string().min(1), next: z.string() });
+export type FederationTxn = z.infer<typeof federationTxnSchema>;
+export const FEDERATION_TXN_COOKIE = "eneo_federation_txn";
+export const FEDERATION_TXN_MAX_AGE = 600;
+
+export function sealFederationTxn(txn: FederationTxn, secret: string) {
+  return seal({ data: txn }, secret, FEDERATION_TXN_MAX_AGE);
+}
+
+export function openFederationTxn(token: string, secret: string) {
+  return open(token, secret, federationTxnSchema);
+}
+
 const keyCache = new Map<string, Uint8Array>();
 
 /** SESSION_SECRET is an arbitrary string; derive a fixed 32-byte key from it. */

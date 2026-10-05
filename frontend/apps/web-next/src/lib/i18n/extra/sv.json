@@ -1595,5 +1595,8 @@
   "job_toast_completed": "{name} är klar.",
   "job_toast_failed": "{name} misslyckades.",
   "job_toast_cancelled": "{name} stoppades.",
-  "file_just_added": "Nyss tillagd"
+  "file_just_added": "Nyss tillagd",
+  "beta_return_to_legacy": "Tillbaka till gamla appen",
+  "select_additional_knowledge": "Välj ytterligare kunskapskällor som denna assistent kommer att kunna söka i för relevanta svar.",
+  "organization_knowledge_description": "Välj ytterligare källor från din organisations utrymme som den här assistenten kan söka i för att hitta relevanta svar."
 }

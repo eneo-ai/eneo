@@ -28,20 +28,6 @@ async function getFederationStatus(): Promise<Schema<"FederationStatusResponse">
   }
 }
 
-async function getSingleTenantFederationHref(): Promise<string | null> {
-  try {
-    const response = await fetch(`${env.ENEO_BACKEND_URL}/api/v1/auth/initiate`, {
-      headers: { accept: "application/json" },
-      cache: "no-store"
-    });
-    if (!response.ok) return null;
-    const body = (await response.json()) as Schema<"InitiateAuthResponse">;
-    return body.authorization_url;
-  } catch {
-    return null;
-  }
-}
-
 export default async function LoginPage({
   searchParams
 }: {
@@ -64,7 +50,7 @@ export default async function LoginPage({
   const multiTenantFederation = federationStatus?.has_multi_tenant_federation === true;
   const singleTenantFederationHref =
     !multiTenantFederation && federationStatus?.has_single_tenant_federation === true
-      ? await getSingleTenantFederationHref()
+      ? "/api/auth/initiate" + (next ? "?next=" + encodeURIComponent(next) : "")
       : null;
   const t = await getTranslations();
   const oidc = !multiTenantFederation && (isOidcEnabled() || Boolean(singleTenantFederationHref));
@@ -88,7 +74,7 @@ export default async function LoginPage({
       )}
       {multiTenantFederation ? (
         <>
-          <TenantFederationLogin />
+          <TenantFederationLogin next={next} />
           <div className="text-muted-foreground text-center text-xs uppercase">{t("or")}</div>
         </>
       ) : oidc ? (

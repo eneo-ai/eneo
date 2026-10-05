@@ -1,28 +1,34 @@
 import { NextRequest, NextResponse } from "next/server";
+import { z } from "zod";
 import { buildLoginDiagnosticsUrl } from "@/lib/auth/login-diagnostics";
 import { sessionFromEneoJwt } from "@/lib/auth/password";
 import { sealedSessionCookie } from "@/lib/auth/session";
-import { DEFAULT_LANDING } from "@/lib/auth/safe-next";
+import { safeNextPath } from "@/lib/auth/safe-next";
+import { FEDERATION_TXN_COOKIE, openFederationTxn } from "@/lib/auth/session-codec";
 import { env } from "@/lib/env";
 
-function failedRedirect(detailCode: string, rawDetail?: string) {
-  return NextResponse.redirect(
+function failedRedirect(detailCode: string) {
+  const response = NextResponse.redirect(
     buildLoginDiagnosticsUrl("/login", env.APP_ORIGIN, {
       message: "oidc_callback_failed",
-      detailCode,
-      rawDetail
+      detailCode
     })
   );
+  response.cookies.delete(FEDERATION_TXN_COOKIE);
+  return response;
 }
 
 /** Completes backend-first tenant federation and establishes the web-next session cookie. */
 export async function GET(request: NextRequest) {
+  const raw = request.cookies.get(FEDERATION_TXN_COOKIE)?.value;
+  const txn = raw ? await openFederationTxn(raw, env.SESSION_SECRET) : null;
+  const callbackState = request.nextUrl.searchParams.get("state");
+  if (!txn || !callbackState || txn.state !== callbackState) {
+    return failedRedirect("invalid_login_attempt");
+  }
   const oauthError = request.nextUrl.searchParams.get("error");
   if (oauthError) {
-    return failedRedirect(
-      oauthError,
-      request.nextUrl.searchParams.get("error_description") ?? undefined
-    );
+    return failedRedirect("identity_provider_error");
   }
 
   const code = request.nextUrl.searchParams.get("code");
@@ -39,17 +45,18 @@ export async function GET(request: NextRequest) {
         accept: "application/json",
         "content-type": "application/json"
       },
-      body: JSON.stringify({ code, state })
+      body: JSON.stringify({ code, state }),
+      redirect: "error",
+      signal: AbortSignal.timeout(15_000)
     });
-  } catch (error) {
-    return failedRedirect("network_error", error instanceof Error ? error.message : undefined);
+  } catch {
+    return failedRedirect("network_error");
   }
 
   if (!response.ok) {
     const traceId =
       response.headers.get("x-trace-id") ?? response.headers.get("x-correlation-id") ?? undefined;
-    const detail = await response.text().catch(() => undefined);
-    return NextResponse.redirect(
+    const failure = NextResponse.redirect(
       buildLoginDiagnosticsUrl("/login", env.APP_ORIGIN, {
         message: "oidc_callback_failed",
         detailCode:
@@ -58,20 +65,24 @@ export async function GET(request: NextRequest) {
             : response.status === 401
               ? "unauthorized"
               : `http_${response.status}`,
-        correlation: traceId,
-        rawDetail: detail || undefined
+        correlation: traceId
       })
     );
+    failure.cookies.delete(FEDERATION_TXN_COOKIE);
+    return failure;
   }
 
-  const body = (await response.json()) as { access_token?: string };
-  const session = body.access_token ? sessionFromEneoJwt(body.access_token) : null;
+  const body = z
+    .object({ access_token: z.string() })
+    .safeParse(await response.json().catch(() => null));
+  const session = body.success ? sessionFromEneoJwt(body.data.access_token) : null;
   if (!session) {
     return failedRedirect("missing_access_token");
   }
 
-  const redirect = NextResponse.redirect(new URL(DEFAULT_LANDING, env.APP_ORIGIN));
+  const redirect = NextResponse.redirect(new URL(safeNextPath(txn.next), env.APP_ORIGIN));
   const cookie = await sealedSessionCookie(session);
   redirect.cookies.set(cookie.name, cookie.value, cookie.options);
+  redirect.cookies.delete(FEDERATION_TXN_COOKIE);
   return redirect;
 }

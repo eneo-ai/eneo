@@ -1,0 +1,13 @@
+# Runtime environment for the optional Next beta. Never reuse backend JWT_SECRET.
+# Generate: openssl rand -base64 48
+SESSION_SECRET=
+LEGACY_APP_URL=https://your-domain.com
+ACCESSIBILITY_STATEMENT_URL=
+SHOW_WEB_SEARCH=false
+SHOW_HELP_CENTER=false
+HELP_CENTER_URL=
+REQUEST_INTEGRATION_FORM_URL=
+# Compose sets ENEO_BACKEND_URL=http://backend:8000 and APP_ORIGIN from WEB_NEXT_HOST.
+# Backend federation normally needs no IdP credentials here. If using the separate
+# frontend-managed OIDC flow, set OIDC_ISSUER, OIDC_CLIENT_ID, OIDC_CLIENT_SECRET
+# and register https://<WEB_NEXT_HOST>/auth/callback with that provider.

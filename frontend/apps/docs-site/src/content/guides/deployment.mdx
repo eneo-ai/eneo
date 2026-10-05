@@ -15,15 +15,15 @@ import { Callout, Steps, Tabs } from "nextra/components";
 
 ## Start here
 
-| Your task                           | Go to                                                                                                                                    |
-| ----------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------- |
-| Install a new production instance   | [Quick start](#quick-start)                                                                                                              |
-| Upgrade an existing instance        | [Updating Eneo](#updating-eneo)                                                                                                          |
-| Choose PostgreSQL or object storage | [Choose Content Storage](/guides/object-content-storage)                                                                                 |
-| Configure OIDC or SSO               | [Single-Tenant OIDC](/guides/oidc-federation/single-tenant) or [Multi-Tenant OIDC Federation](/guides/oidc-federation/multi-tenant)     |
-| Configure model providers           | [AI Provider Configuration](/guides/ai-providers)                                                                                        |
-| Add an optional module              | [Optional modules](#optional-modules)                                                                                                    |
-| Diagnose a failed deployment        | [Troubleshooting](#troubleshooting)                                                                                                      |
+| Your task                           | Go to                                                                                                                               |
+| ----------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------- |
+| Install a new production instance   | [Quick start](#quick-start)                                                                                                         |
+| Upgrade an existing instance        | [Updating Eneo](#updating-eneo)                                                                                                     |
+| Choose PostgreSQL or object storage | [Choose Content Storage](/guides/object-content-storage)                                                                            |
+| Configure OIDC or SSO               | [Single-Tenant OIDC](/guides/oidc-federation/single-tenant) or [Multi-Tenant OIDC Federation](/guides/oidc-federation/multi-tenant) |
+| Configure model providers           | [AI Provider Configuration](/guides/ai-providers)                                                                                   |
+| Add an optional module              | [Optional modules](#optional-modules)                                                                                               |
+| Diagnose a failed deployment        | [Troubleshooting](#troubleshooting)                                                                                                 |
 
 <Callout type="info">
   You do not need S3-compatible storage to start Eneo. The default deployment
@@ -44,16 +44,16 @@ enabled when needed.
 
 </div>
 
-| Service            | Technology               | Port         | Role                                                    |
-| ------------------ | ------------------------ | ------------ | ------------------------------------------------------- |
-| **Frontend**       | SvelteKit                | 3000         | Web interface, SSR                                      |
-| **Backend**        | FastAPI (Python)         | 8000         | API server, authentication                              |
-| **Worker**         | ARQ                      | -            | Background processing, document indexing                |
-| **Database**       | PostgreSQL 16 + pgvector | 5432         | Data storage, vector search                             |
-| **Redis**          | Redis 7                  | 6379         | Cache, task queue                                       |
-| **Object content** | S3-compatible endpoint   | 8333 private | Durable original and derived bytes (optional)           |
-| **db-init**        | Python                   | -            | One-time database initialization                        |
-| **Modules**        | Separate containers      | per module   | Optional module apps on `module_net` (Compose overlay)  |
+| Service            | Technology               | Port         | Role                                                   |
+| ------------------ | ------------------------ | ------------ | ------------------------------------------------------ |
+| **Frontend**       | SvelteKit                | 3000         | Web interface, SSR                                     |
+| **Backend**        | FastAPI (Python)         | 8000         | API server, authentication                             |
+| **Worker**         | ARQ                      | -            | Background processing, document indexing               |
+| **Database**       | PostgreSQL 16 + pgvector | 5432         | Data storage, vector search                            |
+| **Redis**          | Redis 7                  | 6379         | Cache, task queue                                      |
+| **Object content** | S3-compatible endpoint   | 8333 private | Durable original and derived bytes (optional)          |
+| **db-init**        | Python                   | -            | One-time database initialization                       |
+| **Modules**        | Separate containers      | per module   | Optional module apps on `module_net` (Compose overlay) |
 
 <Callout type="info">
   **Traefik is provided as an example reverse proxy**, not a requirement. You
@@ -122,8 +122,8 @@ curl -O https://raw.githubusercontent.com/eneo-ai/eneo/develop/docs/deployment/e
 ```
 
 <Callout type="info">
-  The `develop` branch carries the deployment files for the next release. If
-  you run a released version, take the files from that release's tag or branch
+  The `develop` branch carries the deployment files for the next release. If you
+  run a released version, take the files from that release's tag or branch
   instead so the templates match the images you deploy.
 </Callout>
 
@@ -228,12 +228,12 @@ Then add your first model provider in **Admin → Models** (see
 
 The Docker Compose stack uses four networks:
 
-| Network                                 | Services                                        | Purpose                                                                |
-| --------------------------------------- | ----------------------------------------------- | ---------------------------------------------------------------------- |
-| `proxy_tier` (external)                 | Traefik, frontend, backend, worker              | Ingress and outbound access for APIs, OIDC, and crawls                 |
-| `data_net` (`internal: true`)           | db, redis, backend, worker, db-init             | Data layer without internet egress, isolated from Traefik and frontend |
-| `module_net` (`internal: true`)         | Traefik, backend, optional module containers    | Modules reach only `backend:8000`; no internet egress                  |
-| `object_content_net` (`internal: true`) | optional object-content, backend, worker        | Private S3-compatible byte plane when enabled; never routed publicly   |
+| Network                                 | Services                                     | Purpose                                                                |
+| --------------------------------------- | -------------------------------------------- | ---------------------------------------------------------------------- |
+| `proxy_tier` (external)                 | Traefik, frontend, backend, worker           | Ingress and outbound access for APIs, OIDC, and crawls                 |
+| `data_net` (`internal: true`)           | db, redis, backend, worker, db-init          | Data layer without internet egress, isolated from Traefik and frontend |
+| `module_net` (`internal: true`)         | Traefik, backend, optional module containers | Modules reach only `backend:8000`; no internet egress                  |
+| `object_content_net` (`internal: true`) | optional object-content, backend, worker     | Private S3-compatible byte plane when enabled; never routed publicly   |
 
 PostgreSQL and Redis are only attached to `data_net`. They are not reachable from frontend, Traefik, or module containers, and they have no outbound internet access.
 
@@ -543,11 +543,11 @@ Two controls limit the exposure of a link:
 
 Choose `FILE_REFERENCE_BASE_URL` by where the MCP servers run:
 
-| MCP servers run | `FILE_REFERENCE_BASE_URL` | Notes |
-| --- | --- | --- |
-| Nowhere, or only Eneo's built-in tools | leave unset | Built-in tools never fetch the link. `PUBLIC_ORIGIN` is used and is not contacted. |
-| On the same private network as the backend | an internal address the servers can resolve, e.g. `http://eneo-backend:8000` or `https://eneo.intra.example.se` | Plain `http` and internal hostnames are allowed. The address only needs to resolve from the MCP servers' network; browsers never see it. |
-| On the internet, outside the private network | the public origin, e.g. `https://eneo.example.com` | The backend must be reachable from the internet on the `/api/v1/files/*/original/download/` route. If the deployment is otherwise private, this is the one route that needs to be exposed, and only signed requests succeed on it. |
+| MCP servers run                              | `FILE_REFERENCE_BASE_URL`                                                                                       | Notes                                                                                                                                                                                                                              |
+| -------------------------------------------- | --------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Nowhere, or only Eneo's built-in tools       | leave unset                                                                                                     | Built-in tools never fetch the link. `PUBLIC_ORIGIN` is used and is not contacted.                                                                                                                                                 |
+| On the same private network as the backend   | an internal address the servers can resolve, e.g. `http://eneo-backend:8000` or `https://eneo.intra.example.se` | Plain `http` and internal hostnames are allowed. The address only needs to resolve from the MCP servers' network; browsers never see it.                                                                                           |
+| On the internet, outside the private network | the public origin, e.g. `https://eneo.example.com`                                                              | The backend must be reachable from the internet on the `/api/v1/files/*/original/download/` route. If the deployment is otherwise private, this is the one route that needs to be exposed, and only signed requests succeed on it. |
 
 On a private network with no route from the MCP server to the backend, the
 tool call fails. The model is told the link is valid, so it reports that the
@@ -569,10 +569,10 @@ compatible endpoint, including MinIO. Both object-store paths use the same
 contract and fail closed when configuration or the database/bucket binding does
 not match.
 
-| Owner                                 | Responsibility                                                                                                                                     |
-| ------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Owner                                 | Responsibility                                                                                                                                          |
+| ------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | Administrator with Storage permission | Choose one deployment-wide target for eligible new File, Icon, and knowledge-original writes and set business upload limits in **Admin > File storage** |
-| Operator                              | Run PostgreSQL and any optional compatible endpoint; own credentials, TLS, capacity, backups, and `OBJECT_CONTENT_INLINE_MAXIMUM_BYTES`            |
+| Operator                              | Run PostgreSQL and any optional compatible endpoint; own credentials, TLS, capacity, backups, and `OBJECT_CONTENT_INLINE_MAXIMUM_BYTES`                 |
 
 Policy changes take effect without a backend or worker restart. They affect
 eligible new writes only; existing content stays in its recorded backend until
@@ -625,12 +625,12 @@ docker compose -f docker-compose.yml -f docker-compose.modules.yml \
   --profile speech-to-text up -d
 ```
 
-| File                                                                                                                           | Purpose                                                                                                                                |
-| ------------------------------------------------------------------------------------------------------------------------------ | -------------------------------------------------------------------------------------------------------------------------------------- |
-| [`docker-compose.modules.yml`](https://github.com/eneo-ai/eneo/blob/develop/docs/deployment/docker-compose.modules.yml)       | The overlay. Every module sits behind a profile (`speech-to-text`, or `all-modules`) and waits for the backend `/api/healthz` check  |
-| [`env_modules.template`](https://github.com/eneo-ai/eneo/blob/develop/docs/deployment/env_modules.template)                   | Defaults shared by all module containers (`LOG_LEVEL`, `NODE_ENV`, `ENEO_API_KEY_HEADER_NAME`)                                        |
-| [`env_module_ttt.template`](https://github.com/eneo-ai/eneo/blob/develop/docs/deployment/env_module_ttt.template)             | Per-module secrets for the speech-to-text module (`TAL_TILL_TEXT_FLOW_ID`, `ENEO_API_KEY`, `SESSION_SECRET`)                          |
-| [`MODULES.md`](https://github.com/eneo-ai/eneo/blob/develop/docs/deployment/MODULES.md)                                       | Operator guide: install the module in **Admin → Modules**, mint the service key, smoke test, rotate keys, uninstall                    |
+| File                                                                                                                    | Purpose                                                                                                                             |
+| ----------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------- |
+| [`docker-compose.modules.yml`](https://github.com/eneo-ai/eneo/blob/develop/docs/deployment/docker-compose.modules.yml) | The overlay. Every module sits behind a profile (`speech-to-text`, or `all-modules`) and waits for the backend `/api/healthz` check |
+| [`env_modules.template`](https://github.com/eneo-ai/eneo/blob/develop/docs/deployment/env_modules.template)             | Defaults shared by all module containers (`LOG_LEVEL`, `NODE_ENV`, `ENEO_API_KEY_HEADER_NAME`)                                      |
+| [`env_module_ttt.template`](https://github.com/eneo-ai/eneo/blob/develop/docs/deployment/env_module_ttt.template)       | Per-module secrets for the speech-to-text module (`TAL_TILL_TEXT_FLOW_ID`, `ENEO_API_KEY`, `SESSION_SECRET`)                        |
+| [`MODULES.md`](https://github.com/eneo-ai/eneo/blob/develop/docs/deployment/MODULES.md)                                 | Operator guide: install the module in **Admin → Modules**, mint the service key, smoke test, rotate keys, uninstall                 |
 
 The module domain must point at the same Traefik ingress; the overlay routes
 it over `eneo_module_net`. See [Module
@@ -647,14 +647,14 @@ Any reverse proxy (Traefik, nginx, HAProxy, Caddy) must meet these requirements:
 
 **Routing:**
 
-| Path            | Target               | Description                                                              |
-| --------------- | -------------------- | ------------------------------------------------------------------------ |
-| `/*`            | Frontend (port 3000) | All requests except the backend paths below                              |
-| `/api/*`        | Backend (port 8000)  | API endpoints (`/api/v1/...`) and health probes                          |
+| Path            | Target               | Description                                                                          |
+| --------------- | -------------------- | ------------------------------------------------------------------------------------ |
+| `/*`            | Frontend (port 3000) | All requests except the backend paths below                                          |
+| `/api/*`        | Backend (port 8000)  | API endpoints (`/api/v1/...`) and health probes                                      |
 | `/scim/*`       | Backend (port 8000)  | SCIM 2.0 provisioning (mounted at `/scim/v2`; see [SCIM](/guides/scim-provisioning)) |
-| `/docs`         | Backend (port 8000)  | OpenAPI documentation                                                    |
-| `/openapi.json` | Backend (port 8000)  | OpenAPI spec                                                             |
-| `/version`      | Backend (port 8000)  | Version endpoint                                                         |
+| `/docs`         | Backend (port 8000)  | OpenAPI documentation                                                                |
+| `/openapi.json` | Backend (port 8000)  | OpenAPI spec                                                                         |
+| `/version`      | Backend (port 8000)  | Version endpoint                                                                     |
 
 These are the exact prefixes the shipped Traefik labels route to the backend.
 
@@ -839,7 +839,8 @@ After deployment, some features require additional configuration in the Admin pa
 <Callout type="info">
   Document uploads require the **general worker**. Web crawls require both the
   **general worker and crawler worker**. Enable at least one embedding model in
-  Admin → Models → Embeddings. See [how crawling works](/docs/architecture#worker-service-arq-today).
+  Admin → Models → Embeddings. See [how crawling
+  works](/docs/architecture#worker-service-arq-today).
 </Callout>
 
 When applying source-URL migration `202609071200`, stop the API and both workers,
@@ -876,25 +877,25 @@ key or a tenant ID. The container side is covered in
 
 ### Common Issues
 
-| Symptom                              | Likely Cause                                         | Fix                                                                                 |
-| ------------------------------------ | ---------------------------------------------------- | ----------------------------------------------------------------------------------- |
-| Can't login with default credentials | `DEFAULT_*` vars commented or db-init didn't run     | Uncomment vars in env_backend.env, check `docker logs eneo_db_init`                 |
-| Can't see Users page in Admin        | `USING_ACCESS_MANAGEMENT=false` (default is `true`)  | Set to `true`, restart backend                                                      |
-| Frontend shows wrong API URL         | `PUBLIC_ENEO_BACKEND_URL` incorrect                  | Set to the external origin (not localhost in prod)                                  |
-| Browser requests hit `/api/api/v1/…` | `PUBLIC_ENEO_BACKEND_URL` ends with `/api`           | Use the bare origin, e.g. `https://eneo.example.com`                                |
-| Large file uploads fail              | Admin policy or applicable operator ceiling is lower | Review configured, effective, and source values in Admin > File storage             |
-| "Failed to decrypt credential"       | `ENCRYPTION_KEY` missing or changed                  | Set correct key or re-enter credentials                                             |
-| Credentials API returns 404          | `TENANT_CREDENTIALS_ENABLED=false`                   | Set to `true`, requires `ENCRYPTION_KEY`                                            |
-| OIDC redirect fails                  | `PUBLIC_ORIGIN` mismatch                             | Must match in backend, frontend, AND the IdP redirect URI (`{PUBLIC_ORIGIN}/login/callback`) |
-| Crawls not processing                | Crawler worker unavailable or execution leases expired | Check `/api/healthz/crawler`; an increasing `oldest_active_age_seconds` or nonzero `expired_leases` identifies stalled lifecycle work |
-| Crawls/uploads not working           | Worker not running or no embedding model               | Check both workers are running, enable embedding model in Admin → Models                                                              |
-| Can't create Apps                    | No transcription model enabled                       | Admin → Models → Transcription models tab, enable Whisper                           |
-| JWT token invalid                    | Backend `JWT_SECRET` changed since the token was issued | Tokens signed with the old key are rejected; sign in again                       |
-| Worker jobs stuck or slow            | Worker overloaded                                    | Reduce `WORKER_MAX_JOBS` or increase resources                                      |
-| `ECONNREFUSED 127.0.0.1:8000`        | Frontend using localhost instead of Docker service   | Set `ENEO_BACKEND_SERVER_URL=http://backend:8000` (use service name, not localhost) |
-| HTTP to HTTPS redirect broken        | Missing Traefik label                                | Ensure `traefik.enable=true` label on traefik service                               |
-| 502 Bad Gateway                      | Domain not replaced in docker-compose.yml            | Replace `your-domain.com` in all 4 locations                                        |
-| SCIM provisioning returns 404        | Reverse proxy does not forward `/scim`               | Route `/scim/*` to the backend (see [Reverse Proxy Requirements](#reverse-proxy-requirements)) |
+| Symptom                              | Likely Cause                                            | Fix                                                                                                                                   |
+| ------------------------------------ | ------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------- |
+| Can't login with default credentials | `DEFAULT_*` vars commented or db-init didn't run        | Uncomment vars in env_backend.env, check `docker logs eneo_db_init`                                                                   |
+| Can't see Users page in Admin        | `USING_ACCESS_MANAGEMENT=false` (default is `true`)     | Set to `true`, restart backend                                                                                                        |
+| Frontend shows wrong API URL         | `PUBLIC_ENEO_BACKEND_URL` incorrect                     | Set to the external origin (not localhost in prod)                                                                                    |
+| Browser requests hit `/api/api/v1/…` | `PUBLIC_ENEO_BACKEND_URL` ends with `/api`              | Use the bare origin, e.g. `https://eneo.example.com`                                                                                  |
+| Large file uploads fail              | Admin policy or applicable operator ceiling is lower    | Review configured, effective, and source values in Admin > File storage                                                               |
+| "Failed to decrypt credential"       | `ENCRYPTION_KEY` missing or changed                     | Set correct key or re-enter credentials                                                                                               |
+| Credentials API returns 404          | `TENANT_CREDENTIALS_ENABLED=false`                      | Set to `true`, requires `ENCRYPTION_KEY`                                                                                              |
+| OIDC redirect fails                  | `PUBLIC_ORIGIN` mismatch                                | Must match in backend, frontend, AND the IdP redirect URI (`{PUBLIC_ORIGIN}/login/callback`)                                          |
+| Crawls not processing                | Crawler worker unavailable or execution leases expired  | Check `/api/healthz/crawler`; an increasing `oldest_active_age_seconds` or nonzero `expired_leases` identifies stalled lifecycle work |
+| Crawls/uploads not working           | Worker not running or no embedding model                | Check both workers are running, enable embedding model in Admin → Models                                                              |
+| Can't create Apps                    | No transcription model enabled                          | Admin → Models → Transcription models tab, enable Whisper                                                                             |
+| JWT token invalid                    | Backend `JWT_SECRET` changed since the token was issued | Tokens signed with the old key are rejected; sign in again                                                                            |
+| Worker jobs stuck or slow            | Worker overloaded                                       | Reduce `WORKER_MAX_JOBS` or increase resources                                                                                        |
+| `ECONNREFUSED 127.0.0.1:8000`        | Frontend using localhost instead of Docker service      | Set `ENEO_BACKEND_SERVER_URL=http://backend:8000` (use service name, not localhost)                                                   |
+| HTTP to HTTPS redirect broken        | Missing Traefik label                                   | Ensure `traefik.enable=true` label on traefik service                                                                                 |
+| 502 Bad Gateway                      | Domain not replaced in docker-compose.yml               | Replace `your-domain.com` in all 4 locations                                                                                          |
+| SCIM provisioning returns 404        | Reverse proxy does not forward `/scim`                  | Route `/scim/*` to the backend (see [Reverse Proxy Requirements](#reverse-proxy-requirements))                                        |
 
 ### Debug Mode
 
@@ -1244,3 +1245,80 @@ across all workers through leader election.
 - [System Architecture](/docs/architecture) - Complete architecture overview
 - [Object Content Storage](/guides/object-content-storage) - Configure SeaweedFS, MinIO, backups, and readiness
 - [Release SBOMs and attestations](/docs/release-sboms) - Verify shipped image digests and provenance
+
+## Run the Next beta alongside the existing app
+
+The existing Svelte frontend remains `ghcr.io/eneo-ai/eneo-frontend`. The optional
+Next frontend uses `ghcr.io/eneo-ai/eneo-web-next`. Deploy both against **one
+backend** with matching release tags. They share accounts, permissions,
+conversations, assistants, files, workers and database changes. Beta writes are
+real writes to the same data; this is not a separate sandbox.
+
+Use a separate HTTPS hostname, for example `beta.example.com`, rather than a
+path prefix. Keep the existing app and backend `PUBLIC_ORIGIN` unchanged.
+The beta proxies API and streaming requests server-side to the shared backend.
+No additional database, Redis, worker or backend instance is needed.
+
+1. Back up the existing database and storage, and rehearse the upgrade on staging.
+   Apply backend migrations once with the backend release. This branch includes
+   feedback/provider-status migrations and a merge revision joining the existing
+   attachment migration; confirm `alembic heads` reports a single head.
+2. Copy `docs/deployment/env_web_next.template` to `env_web_next.env`. Generate a
+   separate `SESSION_SECRET` with `openssl rand -base64 48`, and set
+   `LEGACY_APP_URL=https://app.example.com` for the return link in the beta profile
+   menu. Protect the file as you protect other deployment secrets.
+3. Set `WEB_NEXT_HOST=beta.example.com` and `WEB_NEXT_TAG=<matching-release-tag>`
+   in the deployment `.env`. Merge the optional overlay into the reference stack:
+
+   ```bash
+   docker compose -f docker-compose.yml -f docker-compose.web-next.yml --profile web-next up -d
+   ```
+
+4. For backend-managed federation, add
+   `https://beta.example.com/login/callback` to each applicable federation
+   configuration's `additional_redirect_uris`, and register the same URI with the
+   identity provider. The existing canonical callback stays registered.
+   If using frontend-managed OIDC instead, configure the beta's `OIDC_*` variables
+   and register `https://beta.example.com/auth/callback` with that client.
+5. For SharePoint and Confluence, retain `OAUTH_CALLBACK_URL` for the existing UI
+   and add this backend runtime variable (a JSON array):
+
+   ```dotenv
+   OAUTH_CALLBACK_URLS=["https://beta.example.com/integrations/callback/token/"]
+   ```
+
+   Register both full callback URLs with the provider, including the trailing
+   slash. The backend accepts only exact registered values and binds the chosen
+   callback to the initiating user's single-use OAuth state. Existing clients
+   that omit a callback keep using the default. Restart the backend after changing
+   its environment; finish or restart in-flight integration logins during upgrade.
+
+6. Verify password/federated login, logout, streaming chat, files, tenant
+   permissions and both integration providers in each UI before inviting users.
+   Each UI has its own host-only session cookie. SSO can reuse the provider session,
+   but a local logout in one UI does not necessarily log out the other.
+
+### Enable the invitation banner
+
+Set these **Svelte frontend runtime** variables and restart that frontend:
+
+```dotenv
+SHOW_NEW_APP_BANNER=true
+NEW_APP_URL=https://beta.example.com
+```
+
+The flag defaults to `false`. Both an enabled flag and a valid HTTP(S) destination
+are required. The invitation appears in the signed-in shell and opens a new tab,
+leaving the current app available. Setting the flag back to `false` hides it; the
+beta remains reachable by its URL. The banner is discoverability, not access control.
+
+To withdraw the beta, disable the invitation and stop the `web-next` service or
+remove its ingress. Keep the shared backend and database running. Do not downgrade
+the shared database simply to turn off the beta; a backend rollback is a separate
+operation that requires a tested migration/restore plan and preserved user data.
+
+Before release, require the normal CI/E2E checks, source/dependency/secret scans
+and scans of the exact built application images. Review the temporary dependency
+mitigation in `frontend/patches/SECURITY.md`. Scanner success alone does not prove
+that authentication, tenant separation or accessibility is correct in the actual
+deployment; complete the staging checks with the configured providers.

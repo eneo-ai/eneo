@@ -18,17 +18,7 @@ async function fetchTenants(): Promise<TenantInfo[]> {
   return body.tenants ?? [];
 }
 
-async function initiateTenant(slug: string): Promise<string> {
-  const response = await fetch(`/api/auth/initiate?tenant=${encodeURIComponent(slug)}`, {
-    headers: { accept: "application/json" }
-  });
-  if (!response.ok) throw new Error("Failed to initiate authentication");
-  const body = (await response.json()) as { authorization_url?: string };
-  if (!body.authorization_url) throw new Error("Missing authorization URL");
-  return body.authorization_url;
-}
-
-export function TenantFederationLogin() {
+export function TenantFederationLogin({ next }: { next?: string }) {
   const t = useTranslations();
   const [tenants, setTenants] = useState<TenantInfo[]>([]);
   const [rememberedSlug, setRememberedSlug] = useState<string | null>(null);
@@ -80,7 +70,9 @@ export function TenantFederationLogin() {
       setError(null);
       setRedirecting(true);
       sessionStorage.setItem(LAST_TENANT_KEY, slug);
-      window.location.href = await initiateTenant(slug);
+      const query = new URLSearchParams({ tenant: slug });
+      if (next) query.set("next", next);
+      window.location.href = "/api/auth/initiate?" + query;
     } catch {
       setRedirecting(false);
       setError(t("failed_to_start_authentication"));

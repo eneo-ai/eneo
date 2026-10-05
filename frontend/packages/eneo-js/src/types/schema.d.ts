@@ -18715,6 +18715,11 @@ export interface components {
      */
     ServiceAccountAuthStart: {
       /**
+       * Redirect Uri
+       * @description An exact operator-registered OAuth callback URL.
+       */
+      redirect_uri?: string | null;
+      /**
        * Client Id
        * @description Microsoft Entra ID Application (Client) ID
        * @example 12345678-1234-1234-1234-123456789012
@@ -49087,7 +49092,10 @@ export interface operations {
   };
   gen_url_api_v1_integrations_auth__tenant_integration_id__url__get: {
     parameters: {
-      query?: never;
+      query?: {
+        /** @description An exact operator-registered OAuth callback URL. */
+        redirect_uri?: string | null;
+      };
       header?: never;
       path: {
         tenant_integration_id: string;

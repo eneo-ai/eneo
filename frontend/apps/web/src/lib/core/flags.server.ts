@@ -1,5 +1,5 @@
 import { env } from "$env/dynamic/private";
-import { getBackendUrl } from "$lib/core/environment.server";
+import { getBackendUrl, getNewAppUrl } from "$lib/core/environment.server";
 
 /**
  * Gets a boolean flag value from environment variables with fallback support.
@@ -166,6 +166,7 @@ export async function getFeatureFlags(fetchFn: typeof fetch = fetch) {
   return Object.freeze({
     newAuth: useNewAuth,
     showHelpCenter,
+    showNewAppBanner: getFlagFromEnv("SHOW_NEW_APP_BANNER", false) && !!getNewAppUrl(),
     federationStatus
   });
 }

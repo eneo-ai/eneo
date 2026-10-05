@@ -917,7 +917,9 @@ class AnalysisService:
         Same access check and filters as ``get_assistant_question_history_page``.
         """
         assistant, _ = await self.assistant_service.get_assistant(assistant_id)
-        await self._check_space_permissions(assistant.space_id)
+        await self._check_assistant_question_access(
+            assistant_id=assistant_id, space_id=assistant.space_id
+        )
         return await self.repo.get_message_feedback_counts(
             tenant_id=self.user.tenant_id,
             assistant_id=assistant_id,

@@ -23,7 +23,14 @@ const envSchema = z
     // Encrypts the session cookie (any string >= 32 chars).
     SESSION_SECRET: z.string().min(32),
     // Origin the app is reached at; used to build OIDC redirect URIs.
-    APP_ORIGIN: z.url().default("http://localhost:3100"),
+    APP_ORIGIN: z
+      .url({ protocol: /^https?$/ })
+      .default("http://localhost:3100")
+      .refine((value) => {
+        const url = new URL(value);
+        return !url.username && !url.password && !url.search && !url.hash && url.pathname === "/";
+      }, "APP_ORIGIN must be an origin without credentials, path, query or fragment")
+      .transform((value) => new URL(value).origin),
     // OIDC mode is enabled iff OIDC_ISSUER is set (discovery base URL).
     OIDC_ISSUER: z.url().optional(),
     OIDC_CLIENT_ID: z.string().optional(),
@@ -32,6 +39,7 @@ const envSchema = z
     SHOW_WEB_SEARCH: boolFlag,
     SHOW_HELP_CENTER: boolFlag,
     HELP_CENTER_URL: optionalLinkUrl,
+    LEGACY_APP_URL: optionalLinkUrl,
     REQUEST_INTEGRATION_FORM_URL: optionalLinkUrl,
     // The deploying organisation's accessibility statement
     // (tillgänglighetsredogörelse, DOS-lagen). Linked from every public page

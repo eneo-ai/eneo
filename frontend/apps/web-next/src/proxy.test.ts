@@ -9,6 +9,29 @@ const IPHONE =
   "Mozilla/5.0 (iPhone; CPU iPhone OS 18_0 like Mac OS X) AppleWebKit/605.1.15 Mobile/15E148";
 const ANDROID = "Mozilla/5.0 (Android 14; Mobile) AppleWebKit/537.36";
 
+it.each([undefined, "null", "https://attacker.example", "http://other.localhost:3100"])(
+  "rejects mutations from an untrusted origin: %s",
+  async (origin) => {
+    const response = await proxy(
+      new NextRequest("http://localhost:3100/api/eneo/api/v1/spaces/", {
+        method: "POST",
+        headers: origin ? { origin } : {}
+      })
+    );
+    expect(response.status).toBe(403);
+  }
+);
+
+it("accepts a mutation from the configured app origin", async () => {
+  const response = await proxy(
+    new NextRequest("http://localhost:3100/api/chat", {
+      method: "POST",
+      headers: { origin: "http://localhost:3100" }
+    })
+  );
+  expect(response.status).toBe(200);
+});
+
 async function signedInRequest(path: string, userAgent: string) {
   const session = await sealSession(
     {

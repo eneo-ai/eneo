@@ -19,6 +19,7 @@ export type AppContextData = {
     accessibilityStatement: string | null;
     /** HELP_CENTER_URL when SHOW_HELP_CENTER is on: "Har du en fråga?" in the navigation. */
     helpCenter: string | null;
+    legacyApp: string | null;
   };
   versions: { frontend: string; backend: string };
 };

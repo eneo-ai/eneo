@@ -8,7 +8,23 @@ export const DEFAULT_LANDING = "/spaces/personal/chat";
 
 export function safeNextPath(next: string | null | undefined): string {
   if (typeof next !== "string" || next.length === 0 || next[0] !== "/") return DEFAULT_LANDING;
-  // Second char "/" or "\" would make it protocol-relative (→ another origin).
-  if (next[1] === "/" || next[1] === "\\") return DEFAULT_LANDING;
+  try {
+    const decoded = decodeURIComponent(next);
+    for (const value of [next, decoded]) {
+      if (
+        value.startsWith("//") ||
+        value.includes("\\") ||
+        Array.from(value).some((character) => {
+          const code = character.charCodeAt(0);
+          return code <= 31 || code === 127;
+        })
+      )
+        return DEFAULT_LANDING;
+    }
+    const origin = "https://login-destination.invalid";
+    if (new URL(next, origin).origin !== origin) return DEFAULT_LANDING;
+  } catch {
+    return DEFAULT_LANDING;
+  }
   return next;
 }

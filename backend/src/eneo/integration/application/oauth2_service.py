@@ -5,6 +5,7 @@ from typing import TYPE_CHECKING
 from eneo.integration.domain.entities.oauth_token import OauthToken
 from eneo.integration.domain.entities.user_integration import UserIntegration
 from eneo.integration.presentation.models import IntegrationType
+from eneo.main.config import get_settings
 from eneo.main.exceptions import BadRequestException
 from eneo.main.logging import get_logger
 
@@ -65,7 +66,7 @@ class Oauth2Service:
         }
 
     async def _store_oauth_state(
-        self, state: str, tenant_integration_id: "UUID"
+        self, state: str, tenant_integration_id: "UUID", redirect_uri: str
     ) -> None:
         await self.redis_client.set(
             f"{_OAUTH_STATE_PREFIX}{state}",
@@ -73,6 +74,7 @@ class Oauth2Service:
                 {
                     "user_id": str(self.user.id),
                     "tenant_integration_id": str(tenant_integration_id),
+                    "redirect_uri": redirect_uri,
                 }
             ),
             ex=_OAUTH_STATE_TTL_SECONDS,
@@ -97,6 +99,7 @@ class Oauth2Service:
     async def start_auth(
         self,
         tenant_integration_id: "UUID",
+        redirect_uri: str | None = None,
     ) -> dict[str, str]:
         tenant_integration = await self.tenant_integration_repo.one(
             id=tenant_integration_id, tenant_id=self.user.tenant_id
@@ -106,19 +109,27 @@ class Oauth2Service:
         if integration_type not in self._auth_mapper:
             raise BadRequestException("Invalid integration type")
 
+        try:
+            redirect_uri = get_settings().integration_callback_uri(redirect_uri)
+        except ValueError as exc:
+            raise BadRequestException(str(exc)) from exc
+
         # Backend-generated, single-use state bound to this user + integration.
         state = secrets.token_urlsafe(32)
         await self._store_oauth_state(
             state=state,
             tenant_integration_id=tenant_integration_id,
+            redirect_uri=redirect_uri,
         )
 
         if integration_type == IntegrationType.Sharepoint.value:
             result = await self.sharepoint_auth_service.gen_auth_url(
-                state, tenant_id=tenant_integration.tenant_id
+                state, tenant_id=tenant_integration.tenant_id, redirect_uri=redirect_uri
             )
         elif integration_type == IntegrationType.Confluence.value:
-            result = await self.confluence_auth_service.gen_auth_url(state)
+            result = await self.confluence_auth_service.gen_auth_url(
+                state, redirect_uri=redirect_uri
+            )
         else:
             raise BadRequestException("Invalid integration type")
 
@@ -168,7 +179,9 @@ class Oauth2Service:
         )
 
         await self._fetch_token(
-            auth_code=auth_code, authenticated_integration=authenticated_integration
+            auth_code=auth_code,
+            authenticated_integration=authenticated_integration,
+            redirect_uri=stored.get("redirect_uri"),
         )
 
         return authenticated_integration
@@ -177,12 +190,14 @@ class Oauth2Service:
         self,
         auth_code: str,
         authenticated_integration: "UserIntegration",
+        redirect_uri: str | None = None,
     ) -> None:
         integration_type = authenticated_integration.integration_type
         if integration_type == IntegrationType.Sharepoint.value:
             token_result = await self.sharepoint_auth_service.exchange_token(
                 auth_code,
                 tenant_id=authenticated_integration.tenant_integration.tenant_id,
+                redirect_uri=redirect_uri,
             )
             if token_result is None:
                 raise BadRequestException("Failed to exchange SharePoint auth code")
@@ -191,7 +206,9 @@ class Oauth2Service:
                 access_token
             )
         elif integration_type == IntegrationType.Confluence.value:
-            token_result = await self.confluence_auth_service.exchange_token(auth_code)
+            token_result = await self.confluence_auth_service.exchange_token(
+                auth_code, redirect_uri=redirect_uri
+            )
             if token_result is None:
                 raise BadRequestException("Failed to exchange Confluence auth code")
             access_token = token_result["access_token"]

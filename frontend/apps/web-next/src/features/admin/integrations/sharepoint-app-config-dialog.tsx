@@ -160,6 +160,7 @@ export function SharePointAppConfigDialog({
       unwrap(
         browserApi.POST("/api/v1/admin/sharepoint/service-account/auth/start", {
           body: {
+            redirect_uri: window.location.origin + "/integrations/callback/token/",
             client_id: clientId.trim(),
             client_secret: clientSecret,
             tenant_domain: tenantDomain.trim()

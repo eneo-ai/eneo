@@ -107,6 +107,17 @@ export async function proxy(request: NextRequest) {
   const csp = buildContentSecurityPolicy(nonce);
   const securityRequestHeaders = createSecurityRequestHeaders(request, nonce, csp);
 
+  // SameSite cookies also accompany requests from sibling subdomains. Bind
+  // mutations to the configured app origin, never a forwarded Host header.
+  if (!["GET", "HEAD", "OPTIONS"].includes(request.method)) {
+    if (request.headers.get("origin") !== new URL(env.APP_ORIGIN).origin) {
+      return withContentSecurityPolicy(
+        NextResponse.json({ message: "Untrusted request origin" }, { status: 403 }),
+        csp
+      );
+    }
+  }
+
   // API routes handle auth themselves (401 JSON, not a login redirect), and
   // /api/eneo needs its trailing slash intact for the backend.
   if (pathname.startsWith("/api/")) {
@@ -191,5 +202,5 @@ export async function proxy(request: NextRequest) {
 export const config = {
   // Everything except Next internals and static assets (anything with a file
   // extension); public paths are filtered in code above.
-  matcher: ["/((?!_next/|.*\\..*).*)"]
+  matcher: ["/api/:path*", "/((?!_next/|.*\\..*).*)"]
 };

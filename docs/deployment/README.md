@@ -7,6 +7,7 @@ Quick deployment reference for Eneo using Docker Compose.
 ## Files in This Directory
 
 - `docker-compose.yml` - Complete production stack (Traefik, frontend, backend, worker, PostgreSQL, Redis)
+- `docker-compose.web-next.yml` / `env_web_next.template` - Optional Next beta sharing the existing backend; see [parallel frontend deployment](https://docs.eneo.ai/dev/guides/deployment#run-the-next-beta-alongside-the-existing-app)
 - `docker-compose.object-content.yml` - Optional bundled SeaweedFS profile
 - `.env.template` - Optional object-store profile, endpoint, and secret inputs
 - `docker-compose.modules.yml` - Optional module overlay (inert unless a `--profile` is passed; see [MODULES.md](MODULES.md))

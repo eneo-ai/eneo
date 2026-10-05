@@ -350,6 +350,11 @@ async def test_ask_question_personal_space_with_access(service: AnalysisService)
     [
         ("get_questions_since", "get_assistant_sessions_since", {}),
         (
+            "get_assistant_feedback_counts",
+            "get_message_feedback_counts",
+            {"include_followups": False},
+        ),
+        (
             "get_assistant_question_history_page",
             "get_assistant_question_history_page",
             {"include_followups": False, "limit": 20},
@@ -666,8 +671,8 @@ async def test_get_assistant_feedback_counts_checks_access_and_passes_filters(
     service.repo.get_message_feedback_counts.return_value = MessageFeedbackCounts(
         positive=4, negative=1
     )
-    check_space = AsyncMock()
-    service._check_space_permissions = check_space
+    space = service.space_service.get_space.return_value
+    space.is_personal.return_value = False
 
     counts = await service.get_assistant_feedback_counts(
         assistant_id=assistant_id,
@@ -678,7 +683,7 @@ async def test_get_assistant_feedback_counts_checks_access_and_passes_filters(
 
     assert counts == MessageFeedbackCounts(positive=4, negative=1)
     service.assistant_service.get_assistant.assert_awaited_once_with(assistant_id)
-    check_space.assert_awaited_once_with(space_id)
+    service.space_service.get_space.assert_awaited_once_with(space_id)
     service.repo.get_message_feedback_counts.assert_awaited_once_with(
         tenant_id=service.user.tenant_id,
         assistant_id=assistant_id,
@@ -686,6 +691,34 @@ async def test_get_assistant_feedback_counts_checks_access_and_passes_filters(
         to_date=datetime(2026, 2, 11),
         include_followups=False,
     )
+
+
+@pytest.mark.parametrize(
+    "permissions, allowed", [([], False), ([Permission.INSIGHTS], True)]
+)
+async def test_personal_assistant_feedback_requires_insights_permission(
+    service: AnalysisService, permissions: list[Permission], allowed: bool
+):
+    service.user.permissions = permissions
+    service.assistant_service.get_assistant.return_value = (
+        MagicMock(space_id=uuid4()),
+        [],
+    )
+    service.space_service.get_space.return_value.is_personal.return_value = True
+    arguments = dict(
+        assistant_id=uuid4(),
+        from_date=datetime(2026, 2, 1),
+        to_date=datetime(2026, 2, 11),
+        include_followups=True,
+    )
+    if allowed:
+        assert await service.get_assistant_feedback_counts(
+            **arguments
+        ) == MessageFeedbackCounts(positive=0, negative=0)
+    else:
+        with pytest.raises(UnauthorizedException, match="Need permission"):
+            await service.get_assistant_feedback_counts(**arguments)
+        service.repo.get_message_feedback_counts.assert_not_awaited()
 
 
 async def test_get_assistant_feedback_counts_denied_without_assistant_access(
