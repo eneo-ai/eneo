@@ -27,7 +27,11 @@ import { KnowledgePicker } from "@/features/knowledge/select/knowledge-picker";
 import type { KnowledgeSelections } from "@/features/knowledge/select/logic";
 import { browserApi } from "@/lib/api/browser";
 import { unwrap } from "@/lib/api/errors";
-import { toastApiError } from "@/lib/api/toast";
+import {
+  useFileUploads,
+  releasePreviews,
+  type FileUpload
+} from "@/features/files/use-file-uploads";
 import { formatBytes } from "@/lib/format";
 import type { Schema } from "@/lib/api/models";
 import { toast } from "@/lib/toast";
@@ -41,14 +45,7 @@ type TemplateKind = "assistant" | "app";
 type TemplateOption = Schema<"AssistantTemplatePublic"> | Schema<"AppTemplatePublic">;
 type TemplateCreate = Schema<"TemplateCreate">;
 
-type TemplateAttachment = {
-  key: string;
-  fileId?: string;
-  name: string;
-  size: number;
-  mimetype: string;
-  uploading: boolean;
-};
+type TemplateAttachment = FileUpload;
 
 const EMPTY_KNOWLEDGE_SELECTIONS: KnowledgeSelections = {
   collections: [],
@@ -68,21 +65,6 @@ function templateAttachmentRules(formats: Schema<"AttachmentLimits">["formats"])
       extensions: format.extensions
     }))
   };
-}
-
-async function uploadTemplateFile(file: File): Promise<Schema<"FilePublic">> {
-  const body = new FormData();
-  body.append("upload_file", file);
-  return unwrap(
-    browserApi.POST("/api/v1/files/", {
-      body: body as unknown as { upload_file: string },
-      bodySerializer: (formData: unknown) => formData as FormData
-    })
-  );
-}
-
-function deleteUploadedFile(id: string): void {
-  browserApi.DELETE("/api/v1/files/{id}/", { params: { path: { id } } }).catch(() => undefined);
 }
 
 function WizardSection({
@@ -326,7 +308,8 @@ export function TemplateGalleryDialog({
   const [knowledgeSelections, setKnowledgeSelections] = useState<KnowledgeSelections>(
     EMPTY_KNOWLEDGE_SELECTIONS
   );
-  const [attachments, setAttachments] = useState<TemplateAttachment[]>([]);
+  const uploads = useFileUploads();
+  const attachments = uploads.files;
 
   const uploadRules = useMemo(
     () => templateAttachmentRules(limits.attachments.formats),
@@ -342,59 +325,28 @@ export function TemplateGalleryDialog({
   const uploading = attachments.some((attachment) => attachment.uploading);
 
   const reset = ({ deleteUploaded }: { deleteUploaded: boolean }) => {
-    if (deleteUploaded) {
-      for (const attachment of attachments) {
-        if (attachment.fileId) deleteUploadedFile(attachment.fileId);
-      }
-    }
+    if (deleteUploaded) uploads.discard();
+    else releasePreviews(uploads.detach());
     setSelected(null);
     setName("");
     setSubmitted(false);
     setStep("gallery");
     setKnowledgeSelections({ ...EMPTY_KNOWLEDGE_SELECTIONS });
-    setAttachments([]);
   };
 
   async function addFiles(files: File[]) {
-    if (files.length === 0) return;
+    if (pending || files.length === 0) return;
     const plan = planFileUploads(files, attachments, uploadRules);
     const shown = { maxFiles: false };
     for (const rejection of plan.rejected) toastUploadRejection(rejection, t, locale, shown);
 
-    for (const file of plan.accepted) {
-      const key = crypto.randomUUID();
-      setAttachments((current) => [
-        ...current,
-        { key, name: file.name, size: file.size, mimetype: file.type, uploading: true }
-      ]);
-
-      try {
-        const uploaded = await uploadTemplateFile(file);
-        setAttachments((current) =>
-          current.map((attachment) =>
-            attachment.key === key
-              ? {
-                  ...attachment,
-                  fileId: uploaded.id,
-                  name: uploaded.name ?? attachment.name,
-                  mimetype: uploaded.mimetype ?? attachment.mimetype,
-                  size: uploaded.size ?? attachment.size,
-                  uploading: false
-                }
-              : attachment
-          )
-        );
-      } catch (error) {
-        toastApiError(error, t);
-        setAttachments((current) => current.filter((attachment) => attachment.key !== key));
-      }
-    }
+    await uploads.add(plan.accepted);
   }
 
-  function removeAttachment(key: string) {
-    const attachment = attachments.find((candidate) => candidate.key === key);
-    if (attachment?.fileId) deleteUploadedFile(attachment.fileId);
-    setAttachments((current) => current.filter((candidate) => candidate.key !== key));
+  function close() {
+    if (pending) return;
+    reset({ deleteUploaded: true });
+    onOpenChange(false);
   }
 
   // What is missing (a template, its name) shows on submit, and focus moves there.
@@ -432,16 +384,23 @@ export function TemplateGalleryDialog({
       toast.info(t("template_knowledge_recommendation"));
     }
 
-    await onCreate(buildTemplateCreate(selected.id, submission.additionalFields), name.trim());
-    reset({ deleteUploaded: false });
+    const submittedFiles = uploads.detach();
+    try {
+      await onCreate(buildTemplateCreate(selected.id, submission.additionalFields), name.trim());
+      releasePreviews(submittedFiles);
+      reset({ deleteUploaded: false });
+    } catch {
+      // The create mutation reports its error; keep the draft available for retry.
+      uploads.restore(submittedFiles);
+    }
   }
 
   return (
     <Dialog
       open={open}
       onOpenChange={(next) => {
-        if (!next) reset({ deleteUploaded: true });
-        onOpenChange(next);
+        if (!next) close();
+        else onOpenChange(next);
       }}
     >
       <DialogContent className="max-h-[90vh] overflow-y-auto sm:max-w-2xl">
@@ -513,7 +472,7 @@ export function TemplateGalleryDialog({
             uploadRules={uploadRules}
             uploading={uploading}
             onAddFiles={(files) => void addFiles(files)}
-            onRemoveAttachment={removeAttachment}
+            onRemoveAttachment={uploads.remove}
           />
         ) : null}
 
@@ -529,12 +488,7 @@ export function TemplateGalleryDialog({
               {t("back")}
             </Button>
           ) : null}
-          <Button
-            type="button"
-            variant="outline"
-            disabled={pending}
-            onClick={() => onOpenChange(false)}
-          >
+          <Button type="button" variant="outline" disabled={pending} onClick={close}>
             {t("cancel")}
           </Button>
           {/* Never disabled: busy, it keeps focus and a second press is ignored. */}

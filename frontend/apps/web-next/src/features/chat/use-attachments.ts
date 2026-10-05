@@ -1,34 +1,15 @@
 "use client";
 
-import { useState } from "react";
 import { useTranslations } from "next-intl";
 import { useAppContext } from "@/components/providers/app-context";
-import { unwrap } from "@/lib/api/errors";
-import { browserApi } from "@/lib/api/browser";
-import { toastApiError } from "@/lib/api/toast";
+import { useFileUploads, type FileUpload } from "@/features/files/use-file-uploads";
+export { releasePreviews } from "@/features/files/use-file-uploads";
 import type { ChatPartner } from "@/lib/chat/types";
 import { toast } from "@/lib/toast";
 import { chatCapabilities } from "./chat-capabilities";
 import { type ChatAttachmentRejection, planChatAttachmentUploads } from "./chat-attachment-plan";
 
-export type Attachment = {
-  /** Local key while uploading; backend file id once uploaded. */
-  key: string;
-  fileId?: string;
-  name: string;
-  size: number;
-  mimetype: string;
-  uploading: boolean;
-  /** Object URL for previewing the file in the composer (revoked on removal). */
-  previewUrl?: string;
-};
-
-/** Frees the composer preview URLs of attachments that have left the composer. */
-export function releasePreviews(attachments: Attachment[]) {
-  for (const attachment of attachments) {
-    if (attachment.previewUrl) URL.revokeObjectURL(attachment.previewUrl);
-  }
-}
+export type Attachment = FileUpload;
 
 function toastRejection(
   rejection: ChatAttachmentRejection<File>,
@@ -59,7 +40,8 @@ function toastRejection(
 export function useAttachments(partner: ChatPartner) {
   const t = useTranslations();
   const { limits, can } = useAppContext();
-  const [attachments, setAttachments] = useState<Attachment[]>([]);
+  const uploads = useFileUploads({ previews: true });
+  const attachments = uploads.files;
 
   const vision =
     (partner.completionModel?.vision ?? false) ||
@@ -76,72 +58,7 @@ export function useAttachments(partner: ChatPartner) {
     const shown = { maxFiles: false };
     for (const rejection of plan.rejected) toastRejection(rejection, t, shown);
 
-    for (const file of plan.accepted) {
-      const key = crypto.randomUUID();
-      const previewUrl = URL.createObjectURL(file);
-      setAttachments((current) => [
-        ...current,
-        { key, name: file.name, size: file.size, mimetype: file.type, uploading: true, previewUrl }
-      ]);
-
-      try {
-        const body = new FormData();
-        body.append("upload_file", file);
-        const uploaded = await unwrap(
-          browserApi.POST("/api/v1/files/", {
-            // The schema types multipart bodies as the parsed shape; hand the
-            // serializer a FormData instance instead.
-            body: body as unknown as { upload_file: string },
-            bodySerializer: (formData: unknown) => formData as FormData
-          })
-        );
-        setAttachments((current) =>
-          current.map((attachment) =>
-            attachment.key === key
-              ? { ...attachment, fileId: uploaded.id, uploading: false }
-              : attachment
-          )
-        );
-      } catch (error) {
-        toastApiError(error, t);
-        setAttachments((current) => current.filter((attachment) => attachment.key !== key));
-      }
-    }
-  }
-
-  async function removeAttachment(key: string) {
-    const attachment = attachments.find((candidate) => candidate.key === key);
-    if (attachment?.previewUrl) URL.revokeObjectURL(attachment.previewUrl);
-    setAttachments((current) => current.filter((candidate) => candidate.key !== key));
-    if (attachment?.fileId) {
-      browserApi
-        .DELETE("/api/v1/files/{id}/", { params: { path: { id: attachment.fileId } } })
-        .catch(() => undefined);
-    }
-  }
-
-  /**
-   * Takes the attachments with these file ids out of the composer when their
-   * question is sent. Their previews stay valid: the caller puts them back with
-   * `restore` (the question failed before it was sent) or frees them with
-   * `releasePreviews`.
-   */
-  function detach(fileIds: ReadonlySet<string>): Attachment[] {
-    const taken = attachments.filter(
-      (attachment) => attachment.fileId !== undefined && fileIds.has(attachment.fileId)
-    );
-    const keys = new Set(taken.map((attachment) => attachment.key));
-    setAttachments((current) => current.filter((attachment) => !keys.has(attachment.key)));
-    return taken;
-  }
-
-  /** Puts detached attachments back, before any added since. */
-  function restore(taken: Attachment[]) {
-    const keys = new Set(taken.map((attachment) => attachment.key));
-    setAttachments((current) => [
-      ...taken,
-      ...current.filter((attachment) => !keys.has(attachment.key))
-    ]);
+    await uploads.add(plan.accepted);
   }
 
   return {
@@ -149,9 +66,9 @@ export function useAttachments(partner: ChatPartner) {
     acceptString,
     canAddMore,
     addFiles,
-    removeAttachment,
-    detach,
-    restore,
+    removeAttachment: uploads.remove,
+    detach: uploads.detach,
+    restore: uploads.restore,
     maxFiles,
     uploading: attachments.some((attachment) => attachment.uploading),
     fileIds: attachments.flatMap((attachment) => (attachment.fileId ? [attachment.fileId] : []))

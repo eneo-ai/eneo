@@ -15,7 +15,8 @@ import { toastApiError } from "@/lib/api/toast";
 import { useJobs } from "@/features/jobs/use-jobs";
 import type { App } from "../apps";
 import { AppInputs } from "./app-inputs";
-import { useAppRunInputs } from "./use-app-run";
+import { releasePreviews } from "@/features/files/use-file-uploads";
+import { useAppRunInputs, type RunFile } from "./use-app-run";
 
 /**
  * The "run" surface of an app: its identity, the dynamic input form, and a
@@ -31,22 +32,26 @@ export function RunView({ app, resultHref }: { app: App; resultHref: (runId: str
   const hasModel = app.completion_model !== null && app.completion_model !== undefined;
 
   const run = useMutation({
-    mutationFn: () =>
+    mutationFn: ({ files, text }: { files: RunFile[]; text: string }) =>
       unwrap(
         browserApi.POST("/api/v1/apps/{id}/runs/", {
           params: { path: { id: app.id } },
           body: {
-            files: inputs.fileIds.map((id) => ({ id })),
-            text: inputs.text.trim() || null
+            files: files.flatMap((file) => (file.fileId ? [{ id: file.fileId }] : [])),
+            text: text.trim() || null
           }
         })
       ),
-    onSuccess: (created) => {
+    onSuccess: (created, submittedInputs) => {
       trackJob();
-      inputs.clear();
+      releasePreviews(submittedInputs.files);
+      inputs.setText((current) => (current === submittedInputs.text ? "" : current));
       router.push(resultHref(created.id));
     },
-    onError: (error) => toastApiError(error, t)
+    onError: (error, submittedInputs) => {
+      inputs.restoreFiles(submittedInputs.files);
+      toastApiError(error, t);
+    }
   });
 
   const [submitted, setSubmitted] = useState(false);
@@ -71,7 +76,7 @@ export function RunView({ app, resultHref }: { app: App; resultHref: (runId: str
       return;
     }
     setWaitNoticed(false);
-    run.mutate();
+    run.mutate({ files: inputs.detachFiles(), text: inputs.text });
   }
 
   return (

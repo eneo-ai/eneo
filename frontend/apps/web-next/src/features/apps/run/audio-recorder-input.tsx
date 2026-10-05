@@ -16,9 +16,22 @@ const TIMESLICE_MS = 10_000;
 
 function pickMimeType(): string {
   if (typeof MediaRecorder === "undefined") return "audio/webm";
-  return MediaRecorder.isTypeSupported("audio/mp4;codecs=avc1")
-    ? "audio/mp4;codecs=avc1"
-    : "audio/webm;codecs=opus";
+  return MediaRecorder.isTypeSupported("audio/mp4") ? "audio/mp4" : "audio/webm;codecs=opus";
+}
+
+type Capture = {
+  phase: "acquiring" | "recording" | "stopping";
+  stream: MediaStream | null;
+  recorder: MediaRecorder | null;
+  context: AudioContext | null;
+  raf: number | null;
+};
+
+function releaseCapture(capture: Capture) {
+  if (capture.raf !== null) cancelAnimationFrame(capture.raf);
+  capture.stream?.getTracks().forEach((track) => track.stop());
+  if (capture.recorder && capture.recorder.state !== "inactive") capture.recorder.stop();
+  void capture.context?.close().catch(() => undefined);
 }
 
 function formatElapsed(seconds: number): string {
@@ -50,107 +63,108 @@ export function AudioRecorderInput({
   const rules = inputFieldRules(field);
   const maxBytes = Number.isFinite(rules.maxSize) ? rules.maxSize : null;
 
-  const [recording, setRecording] = useState(false);
+  const [phase, setPhase] = useState<"idle" | Capture["phase"]>("idle");
+  const recording = phase === "recording";
+  const busy = phase === "acquiring" || phase === "stopping";
   const [elapsed, setElapsed] = useState(0);
   const [volume, setVolume] = useState(0);
   const [bytes, setBytes] = useState(0);
   const [error, setError] = useState<string | null>(null);
   const [recorded, setRecorded] = useState<{ file: File; url: string } | null>(null);
 
-  const streamRef = useRef<MediaStream | null>(null);
-  const recorderRef = useRef<MediaRecorder | null>(null);
-  const chunksRef = useRef<Blob[]>([]);
-  const totalBytesRef = useRef(0);
-  const startedAtRef = useRef(0);
-  const rafRef = useRef<number | null>(null);
-  const analyserRef = useRef<AnalyserNode | null>(null);
-  const audioContextRef = useRef<AudioContext | null>(null);
+  const captureRef = useRef<Capture | null>(null);
   const previewUrlRef = useRef<string | null>(null);
 
-  // Release media + animation handles on unmount (and the preview blob URL,
-  // tracked via a ref so the latest value is freed, not the mount-time null).
-  useEffect(() => {
-    return () => {
-      if (rafRef.current !== null) cancelAnimationFrame(rafRef.current);
-      if (recorderRef.current && recorderRef.current.state !== "inactive") {
-        recorderRef.current.stop();
-      }
-      streamRef.current?.getTracks().forEach((track) => track.stop());
-      void audioContextRef.current?.close().catch(() => undefined);
+  useEffect(
+    () => () => {
+      const capture = captureRef.current;
+      captureRef.current = null;
+      if (capture) releaseCapture(capture);
       if (previewUrlRef.current) URL.revokeObjectURL(previewUrlRef.current);
-    };
-  }, []);
-
-  const tick = () => {
-    const analyser = analyserRef.current;
-    if (analyser) {
-      const buffer = new Float32Array(analyser.fftSize);
-      analyser.getFloatTimeDomainData(buffer);
-      let sum = 0;
-      for (const amplitude of buffer) sum += amplitude * amplitude;
-      setVolume(Math.min(1, Math.sqrt(sum / buffer.length) / 0.15));
-    }
-    setElapsed((Date.now() - startedAtRef.current) / 1000);
-    rafRef.current = requestAnimationFrame(tick);
-  };
+    },
+    []
+  );
 
   async function startRecording() {
+    if (captureRef.current) return;
+    const capture: Capture = {
+      phase: "acquiring",
+      stream: null,
+      recorder: null,
+      context: null,
+      raf: null
+    };
+    captureRef.current = capture;
+    setPhase("acquiring");
     setError(null);
     try {
       const stream = await navigator.mediaDevices.getUserMedia({
         audio: { noiseSuppression: true, echoCancellation: true, autoGainControl: true }
       });
-      streamRef.current = stream;
-
-      const audioContext = new AudioContext();
-      const analyser = audioContext.createAnalyser();
-      audioContext.createMediaStreamSource(stream).connect(analyser);
-      audioContextRef.current = audioContext;
-      analyserRef.current = analyser;
-
-      const mimeType = pickMimeType();
-      const recorder = new MediaRecorder(stream, { mimeType });
-      recorderRef.current = recorder;
-      chunksRef.current = [];
-      totalBytesRef.current = 0;
+      if (captureRef.current !== capture) {
+        stream.getTracks().forEach((track) => track.stop());
+        return;
+      }
+      capture.stream = stream;
+      const context = new AudioContext();
+      capture.context = context;
+      const analyser = context.createAnalyser();
+      context.createMediaStreamSource(stream).connect(analyser);
+      const recorder = new MediaRecorder(stream, { mimeType: pickMimeType() });
+      capture.recorder = recorder;
+      const chunks: Blob[] = [];
+      let totalBytes = 0;
       setBytes(0);
-
       recorder.addEventListener("dataavailable", (event) => {
-        if (event.data.size === 0) return;
-        chunksRef.current.push(event.data);
-        totalBytesRef.current += event.data.size;
-        setBytes(totalBytesRef.current);
-        if (maxBytes && totalBytesRef.current >= maxBytes) {
+        if (captureRef.current !== capture || event.data.size === 0) return;
+        chunks.push(event.data);
+        totalBytes += event.data.size;
+        setBytes(totalBytes);
+        if (maxBytes && totalBytes >= maxBytes && capture.phase === "recording") {
           toast.warning(t("recording_limit_reached"));
           stopRecording();
         }
       });
-
       recorder.addEventListener("stop", () => {
-        const blob = new Blob(chunksRef.current, { type: mimeType });
+        if (captureRef.current !== capture) return;
+        captureRef.current = null;
+        releaseCapture(capture);
+        const mimeType = recorder.mimeType || pickMimeType();
+        const blob = new Blob(chunks, { type: mimeType });
         if (blob.size > 0) {
-          const extension = mimeType.replace("audio/", "").split(";")[0] || "webm";
-          const file = new File([blob], `recording.${extension}`, { type: mimeType });
+          // File validation uses MIME essence; codecs describe the recording transport.
+          const fileType = mimeType.split(";")[0]!.trim();
+          const extension = fileType.replace("audio/", "") || "webm";
+          const file = new File([blob], `recording.${extension}`, { type: fileType });
+          if (previewUrlRef.current) URL.revokeObjectURL(previewUrlRef.current);
           const url = URL.createObjectURL(blob);
           previewUrlRef.current = url;
           setRecorded({ file, url });
         }
-        streamRef.current?.getTracks().forEach((track) => track.stop());
-        streamRef.current = null;
-        if (rafRef.current !== null) cancelAnimationFrame(rafRef.current);
-        rafRef.current = null;
-        void audioContextRef.current?.close().catch(() => undefined);
-        audioContextRef.current = null;
-        analyserRef.current = null;
+        setPhase("idle");
         setVolume(0);
       });
-
       recorder.start(TIMESLICE_MS);
-      startedAtRef.current = Date.now();
+      capture.phase = "recording";
+      const startedAt = Date.now();
+      const buffer = new Float32Array(analyser.fftSize);
+      const tick = () => {
+        if (captureRef.current !== capture || capture.phase !== "recording") return;
+        analyser.getFloatTimeDomainData(buffer);
+        let sum = 0;
+        for (const amplitude of buffer) sum += amplitude * amplitude;
+        setVolume(Math.min(1, Math.sqrt(sum / buffer.length) / 0.15));
+        setElapsed((Date.now() - startedAt) / 1000);
+        capture.raf = requestAnimationFrame(tick);
+      };
       setElapsed(0);
-      setRecording(true);
-      rafRef.current = requestAnimationFrame(tick);
+      setPhase("recording");
+      capture.raf = requestAnimationFrame(tick);
     } catch (caught) {
+      if (captureRef.current !== capture) return;
+      captureRef.current = null;
+      releaseCapture(capture);
+      setPhase("idle");
       const name = caught instanceof DOMException ? caught.name : "";
       setError(
         name === "NotAllowedError" || name === "PermissionDeniedError"
@@ -163,10 +177,11 @@ export function AudioRecorderInput({
   }
 
   function stopRecording() {
-    setRecording(false);
-    if (recorderRef.current && recorderRef.current.state !== "inactive") {
-      recorderRef.current.stop();
-    }
+    const capture = captureRef.current;
+    if (!capture?.recorder || capture.phase !== "recording") return;
+    capture.phase = "stopping";
+    setPhase("stopping");
+    capture.recorder.stop();
   }
 
   function discardRecording() {
@@ -211,6 +226,7 @@ export function AudioRecorderInput({
             variant={recording ? "destructive" : "default"}
             className="size-12 rounded-full"
             aria-label={recording ? t("stop_recording") : t("start_recording")}
+            aria-busy={busy || undefined}
             onClick={recording ? stopRecording : startRecording}
           >
             {recording ? <Square className="size-5" /> : <Mic className="size-5" />}
