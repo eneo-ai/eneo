@@ -20,6 +20,7 @@ let searchParams = new URLSearchParams();
 
 /** What `useRouter()` returns: every method is a `vi.fn()`. */
 export const router = {
+  bfcacheId: "test-route",
   push: vi.fn(),
   replace: vi.fn(),
   refresh: vi.fn(),
@@ -42,7 +43,9 @@ export function setRoute(route: string): void {
 /** Back to `/` with fresh router mocks. */
 export function resetNavigation(): void {
   setRoute(HOME);
-  for (const method of Object.values(router)) method.mockReset();
+  for (const method of Object.values(router)) {
+    if (vi.isMockFunction(method)) method.mockReset();
+  }
 }
 
 export function usePathname(): string {

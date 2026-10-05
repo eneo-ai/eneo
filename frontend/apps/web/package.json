@@ -38,7 +38,7 @@
     "@lucide/svelte": "^1.22.0",
     "@playwright/test": "1.61.1",
     "@sveltejs/adapter-node": "^5.5.7",
-    "@sveltejs/kit": "^2.68.0",
+    "@sveltejs/kit": "^2.70.3",
     "@sveltejs/vite-plugin-svelte": "^5.0.3",
     "@tailwindcss/node": "^4.3.2",
     "@tailwindcss/oxide": "^4.3.2",
@@ -51,7 +51,7 @@
     "@vitest/coverage-v8": "4.1.11",
     "bits-ui": "^2.18.1",
     "clsx": "^2.1.1",
-    "dompurify": "^3.4.11",
+    "dompurify": "^3.4.16",
     "eslint": "^9.39.4",
     "eslint-config-prettier": "^10.1.2",
     "eslint-plugin-svelte": "^3.20.0",
@@ -80,6 +80,7 @@
     "@eneo/ui": "workspace:*",
     "@eneo/whats-new": "workspace:*",
     "@inlang/paraglide-js": "^2.20.2",
-    "paneforge": "^1.0.2"
+    "paneforge": "^1.0.2",
+    "dompurify": "^3.4.16"
   }
 }
