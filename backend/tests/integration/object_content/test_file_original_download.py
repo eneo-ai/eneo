@@ -79,7 +79,9 @@ async def _persist_prepared(db_container, prepared: PreparedFileUpload) -> UUID:
         return await container.file_service()._persist_prepared_file(prepared)
 
 
-async def _signed_download(client, headers, file_id: UUID, *, original: bool):
+async def _signed_download(
+    client, headers, file_id: UUID, *, original: bool, range_header: str | None = None
+):
     segment = "original/" if original else ""
     signed = await client.post(
         f"/api/v1/files/{file_id}/{segment}signed-url/",
@@ -88,7 +90,10 @@ async def _signed_download(client, headers, file_id: UUID, *, original: bool):
     )
     assert signed.status_code == 200, signed.text
     parsed = urlsplit(signed.json()["url"])
-    return await client.get(f"{parsed.path}?{parsed.query}")
+    return await client.get(
+        f"{parsed.path}?{parsed.query}",
+        headers={"Range": range_header} if range_header is not None else {},
+    )
 
 
 @pytest.mark.integration
@@ -158,6 +163,28 @@ async def test_original_text_download_does_not_fall_back_to_extracted_text(
     assert downloaded.headers["content-disposition"].endswith(f'filename="{name}"')
     digest = base64.b64encode(sha256(original).digest()).decode("ascii")
     assert downloaded.headers["repr-digest"] == f"sha-256=:{digest}:"
+
+    for requested, start, end in [
+        ("bytes=5-9", 5, 9),
+        ("bytes=-4", len(original) - 4, len(original) - 1),
+    ]:
+        partial = await _signed_download(
+            client, headers, file_id, original=True, range_header=requested
+        )
+        assert partial.status_code == 206, partial.text
+        assert partial.content == original[start : end + 1]
+        assert partial.headers["content-type"] == media_type
+        assert (
+            partial.headers["content-range"] == f"bytes {start}-{end}/{len(original)}"
+        )
+        assert partial.headers["accept-ranges"] == "bytes"
+        assert partial.headers["repr-digest"] == downloaded.headers["repr-digest"]
+
+    unavailable = await _signed_download(
+        client, headers, file_id, original=True, range_header="bytes=999-"
+    )
+    assert unavailable.status_code == 416
+    assert unavailable.headers["content-range"] == f"bytes */{len(original)}"
 
 
 @pytest.mark.integration
@@ -294,7 +321,7 @@ async def test_original_image_and_audio_ranges_preserve_exact_bytes(
     assert image_processing.content == b"bounded model image"
     assert image_download.content == image_original
     assert image_download.headers["content-type"] == "image/png"
-    assert "accept-ranges" not in image_download.headers
+    assert image_download.headers["accept-ranges"] == "bytes"
     assert audio_range.status_code == 206
     assert audio_range.content == audio[3:7]
     assert audio_range.headers["content-range"] == f"bytes 3-6/{len(audio)}"

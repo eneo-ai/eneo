@@ -472,9 +472,7 @@ def _range_not_satisfiable_response(exc: FileContentRangeError) -> JSONResponse:
         206: {
             "description": "Successfully downloaded a partial content (range request)"
         },
-        400: {
-            "description": "Bad request - Invalid token or range requests not supported for this file type"  # noqa
-        },
+        400: {"description": "Bad request - Invalid token or malformed request"},
         401: {"description": "Unauthorized - Token is invalid or has expired"},
         403: {"description": "Unauthorized - Not authorized to view this file"},
         404: {"description": "File content not found or file does not exist"},
@@ -524,7 +522,7 @@ async def download_file_signed(
     summary="Download the exact original file using a signed URL",
     responses={
         200: {"description": "Successfully downloaded the entire original file"},
-        206: {"description": "Successfully downloaded part of the original audio"},
+        206: {"description": "Successfully downloaded part of the original file"},
         **responses.get_responses([400, 401, 403, 404, 409, 416, 503]),
     },
 )

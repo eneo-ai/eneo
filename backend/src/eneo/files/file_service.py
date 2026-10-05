@@ -49,7 +49,6 @@ from eneo.files.file_repo import (
 from eneo.files.file_usage import FileUsageRepository
 from eneo.files.text import PdfExtractionLimits
 from eneo.main.exceptions import (
-    BadRequestException,
     NotFoundException,
     UnauthorizedException,
 )
@@ -955,11 +954,8 @@ class FileService:
         range_header: str | None,
         require_local_path: bool = False,
     ) -> FileDownload:
-        if range_header is not None and metadata.file_type is not FileType.AUDIO:
-            raise BadRequestException("Range is only supported for audio files")
-
         if isinstance(reference, LegacyFileContentRecord):
-            assert range_header is None
+            # Legacy non-audio storage cannot select a range; HTTP permits returning the complete representation.
             return self._open_legacy_download(metadata, reference)
 
         self._parse_requested_range(range_header, size_bytes=reference.size_bytes)
@@ -990,7 +986,7 @@ class FileService:
             ),
             sha256=reference.sha256,
             content_range=opened.content_range,
-            range_supported=metadata.file_type is FileType.AUDIO,
+            range_supported=True,
             _close=opened.aclose,
             verified_path=opened.verified_path,
         )

@@ -144,10 +144,14 @@ whether it was intended for download or inline display; the bearer token itself
 is never written to the audit log.
 
 The original response includes `Repr-Digest` for the SHA-256 of the complete
-original. That value stays the same on an audio `206` range response because it
-describes the full representation, not only the returned range. Range requests
-remain audio-only for File downloads. Knowledge originals use a complete
-streamed download.
+original. That value stays the same on a `206` range response because it
+describes the full representation, not only the returned range. File downloads
+stored through object-content support a single byte range for any file type,
+including PDF originals. A satisfiable range returns `206` and `Content-Range`;
+an unsatisfiable range returns `416` and the complete length in `Content-Range`.
+Legacy audio also supports ranges. Legacy non-audio files return the complete
+representation with `200` when a range is requested. Knowledge originals use a
+complete streamed download.
 
 This contract is independent of placement. It behaves the same whether the
 bytes are stored inline in PostgreSQL or in an optional configured

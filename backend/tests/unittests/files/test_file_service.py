@@ -403,7 +403,10 @@ async def test_legacy_download_streams_without_opening_object_content() -> None:
 
 
 @pytest.mark.asyncio
-async def test_text_download_prefers_exact_legacy_text_over_object_original() -> None:
+@pytest.mark.parametrize("range_header", [None, "bytes=2-8"])
+async def test_text_download_prefers_exact_legacy_text_over_object_original(
+    range_header: str | None,
+) -> None:
     metadata = _legacy_metadata()
     extracted = LegacyFileContentRecord(
         file_id=metadata.id,
@@ -452,10 +455,13 @@ async def test_text_download_prefers_exact_legacy_text_over_object_original() ->
     opened = await service.get_download_no_auth(
         metadata.id,
         tenant_id=metadata.tenant_id,
+        range_header=range_header,
     )
 
     assert b"".join([chunk async for chunk in opened.chunks]) == extracted.payload
     assert opened.filename == "legacy.txt"
+    assert opened.content_range is None
+    assert opened.range_supported is False
     repository.get_legacy_content.assert_awaited_once_with(
         {metadata.id: {FileContentVariant.EXTRACTED_TEXT}}
     )

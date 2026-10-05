@@ -53657,7 +53657,7 @@ export interface operations {
         };
         content?: never;
       };
-      /** @description Bad request - Invalid token or range requests not supported for this file type */
+      /** @description Bad request - Invalid token or malformed request */
       400: {
         headers: {
           [name: string]: unknown;
@@ -53735,7 +53735,7 @@ export interface operations {
         };
         content?: never;
       };
-      /** @description Successfully downloaded part of the original audio */
+      /** @description Successfully downloaded part of the original file */
       206: {
         headers: {
           [name: string]: unknown;
