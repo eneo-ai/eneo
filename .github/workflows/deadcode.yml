@@ -91,9 +91,10 @@ jobs:
         run: uv run deptry src > "$GITHUB_WORKSPACE/deadcode-deptry.txt" 2>&1 || true
 
       - name: Knip — unused files / exports / deps
+        id: knip
         continue-on-error: true
         working-directory: frontend
-        run: bun run knip --no-exit-code > "$GITHUB_WORKSPACE/deadcode-knip.txt" 2>&1 || true
+        run: bun run knip --no-exit-code > "$GITHUB_WORKSPACE/deadcode-knip.txt" 2>&1
 
       - name: Post or update PR comment
         if: ${{ !cancelled() }}
@@ -128,6 +129,9 @@ jobs:
             const vulture = read(`${ws}/deadcode-vulture.txt`);
             const deptry = read(`${ws}/deadcode-deptry.txt`);
             const knip = read(`${ws}/deadcode-knip.txt`);
+            // --no-exit-code keeps findings advisory; a failed step means the
+            // analysis itself did not complete and must never be called clean.
+            const knipFailed = "${{ steps.knip.outcome }}" !== "success";
 
             // Per-tool finding counts — best-effort heuristics matched to each
             // tool's output shape; used only for the at-a-glance table.
@@ -139,7 +143,10 @@ jobs:
               .reduce((sum, m) => sum + Number(m[1]), 0);
 
             const fence = (text) => "```\n" + text + "\n```";
-            const section = (title, tool, count, text) => {
+            const section = (title, tool, count, text, failed = false) => {
+              if (failed) {
+                return `<details><summary>${title} — ${tool}: ⚠️ analysis failed</summary>\n\n_Check the job logs; no clean result is available._\n\n${fence(clip(text).body)}\n\n</details>\n`;
+              }
               if (!text) {
                 return `<details><summary>${title} — ${tool}: scan produced no output</summary>\n\n_No output captured (tool may have failed to run — check the job logs)._\n\n</details>\n`;
               }
@@ -156,7 +163,11 @@ jobs:
             let body = `${marker}\n## 🧹 Dead-code & unused-dependency report\n\n`;
             body += `Advisory — never gates the PR. Whole-repo scan, so some findings may be false positives (dynamic dispatch, framework hooks, runtime-resolved imports). Triage before removing.\n\n`;
 
-            if (total === 0) {
+            if (knipFailed) {
+              body += `⚠️ **Frontend analysis failed. This report is incomplete.**\n\n`;
+            }
+
+            if (total === 0 && !knipFailed) {
               body += `✅ **No dead code or unused dependencies detected.**\n`;
             } else {
               body += `| Scan | Tool | Findings |\n| --- | --- | ---: |\n`;
@@ -165,7 +176,7 @@ jobs:
               body += `| Frontend files / exports / deps | knip | ${knipCount} |\n\n`;
               body += section("Unused Python code", "vulture", vultureCount, vulture);
               body += section("Python dependencies", "deptry", deptryCount, deptry);
-              body += section("Frontend", "knip", knipCount, knip);
+              body += section("Frontend", "knip", knipCount, knip, knipFailed);
             }
 
             await core.summary.addRaw(body).write();

@@ -58,7 +58,7 @@ pre-commit install --overwrite --install-hooks \
 # during container creation, so it's already on PATH here — no nvm step needed.
 
 # Install Bun
-curl -fsSL https://bun.com/install | bash -s "bun-v1.3.0"
+curl -fsSL https://bun.com/install | bash -s "bun-v1.3.14"
 
 # Add Bun to PATH for this session
 export PATH="$HOME/.bun/bin:$PATH"

@@ -60,7 +60,7 @@
     "@astryxdesign/cli": "0.6.4",
     "@axe-core/playwright": "4.13.0",
     "@eneo/eslint-plugin": "workspace:*",
-    "@playwright/test": "1.58.2",
+    "@playwright/test": "1.61.1",
     "@tailwindcss/postcss": "^4",
     "@tanstack/react-query-devtools": "^5.101.0",
     "@testing-library/dom": "^10.4.0",

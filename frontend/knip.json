@@ -1,18 +1,8 @@
 {
   "$schema": "https://unpkg.com/knip@6/schema.json",
-  "ignore": [
-    "**/paraglide/**",
-    "**/tests/**",
-    "scripts/fixtures/**"
-  ],
-  "ignoreDependencies": [
-    "@eneo/icons.*",
-    "prettier",
-    "prettier-plugin-.*"
-  ],
-  "ignoreWorkspaces": [
-    "apps/docs-site"
-  ],
+  "ignore": ["**/paraglide/**", "**/tests/**", "scripts/fixtures/**"],
+  "ignoreDependencies": ["@eneo/icons.*", "prettier", "prettier-plugin-.*"],
+  "ignoreWorkspaces": ["apps/docs-site"],
   "rules": {
     "exports": "off",
     "nsExports": "off",
@@ -21,14 +11,15 @@
     "enumMembers": "off"
   },
   "workspaces": {
-    "apps/web": {
+    ".": {
       "entry": [
-        "src/hooks.ts"
-      ],
-      "ignore": [
-        "src/lib/paraglide/**",
-        "plugins/fixtures/**"
+        "scripts/audit-dependencies.mjs",
+        "scripts/security-patches.test.mjs"
       ]
+    },
+    "apps/web": {
+      "entry": ["src/hooks.ts"],
+      "ignore": ["src/lib/paraglide/**", "plugins/fixtures/**"]
     },
     "apps/web-next": {
       "entry": [
@@ -38,17 +29,11 @@
       ]
     },
     "packages/ui": {
-      "entry": [
-        "src/lib/index.ts"
-      ],
-      "ignore": [
-        "src/icons/Icon.svelte"
-      ]
+      "entry": ["src/lib/index.ts"],
+      "ignore": ["src/icons/Icon.svelte"]
     },
     "packages/eneo-js": {
-      "ignoreDependencies": [
-        "openapi-typescript"
-      ]
+      "ignoreDependencies": ["openapi-typescript"]
     },
     "packages/eslint-plugin": {}
   }
