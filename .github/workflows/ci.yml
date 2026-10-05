@@ -48,6 +48,11 @@ env:
   OPENAI_API_KEY: test-api-key
 
 jobs:
+  security:
+    uses: ./.github/workflows/security.yml
+    with:
+      base_sha: ${{ github.event.pull_request.base.sha || github.event.merge_group.base_sha || github.event.before || '' }}
+
   changes:
     name: Change scope
     runs-on: ubuntu-latest
@@ -65,7 +70,7 @@ jobs:
 
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
           fetch-depth: 0
 
@@ -143,7 +148,7 @@ jobs:
 
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
 
       - name: Install uv
         uses: astral-sh/setup-uv@d0cc045d04ccac9d8b7881df0226f9e82c39688e # v6
@@ -215,7 +220,7 @@ jobs:
 
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
 
       - name: Install uv
         uses: astral-sh/setup-uv@d0cc045d04ccac9d8b7881df0226f9e82c39688e # v6
@@ -296,7 +301,7 @@ jobs:
 
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
 
       - name: Run developer-tooling tests
         run: python3 -m unittest discover -s scripts/tests -p 'test_*.py'
@@ -326,7 +331,7 @@ jobs:
 
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
 
       - name: Check all HTTP route decorators
         run: python3 scripts/check_route_metadata.py --repo-root . --all
@@ -337,7 +342,7 @@ jobs:
 
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
 
       - name: Guard against re-introducing the old product name
         run: python3 scripts/check_no_intric.py --repo-root .
@@ -359,7 +364,7 @@ jobs:
 
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
 
       # Enforced in pre-commit too, but pre-commit can be bypassed; CI is the
       # backstop that keeps the i18n catalogs duplicate-free, in key parity and free of
@@ -444,7 +449,7 @@ jobs:
 
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
 
       - name: Setup Bun
         uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2
@@ -473,7 +478,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
 
       # Isolated, prod-safe stack: own postgres/redis, a deterministic mock model,
       # and the backend built from its Dockerfile. Nothing touches a real provider.
@@ -551,7 +556,7 @@ jobs:
 
       - name: Upload Playwright report
         if: ${{ !cancelled() }}
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: playwright-report
           path: |
@@ -587,7 +592,7 @@ jobs:
       PLAYWRIGHT_VERSION: 1.58.2
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
 
       # Isolated, prod-safe stack: own postgres/redis, a deterministic mock model,
       # and the backend built from its Dockerfile. Nothing touches a real provider.
@@ -605,7 +610,7 @@ jobs:
           bun-version: 1.3.14
 
       - name: Cache Bun packages
-        uses: actions/cache@v4
+        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
         with:
           path: ~/.bun/install/cache
           key: bun-${{ runner.os }}-${{ hashFiles('frontend/bun.lock') }}
@@ -617,7 +622,7 @@ jobs:
 
       - name: Cache Playwright browsers
         id: playwright-cache
-        uses: actions/cache@v4
+        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
         with:
           path: ~/.cache/ms-playwright
           key: playwright-${{ runner.os }}-${{ env.PLAYWRIGHT_VERSION }}-chromium
@@ -635,7 +640,7 @@ jobs:
 
       # Next's incremental build cache: unchanged modules are not recompiled.
       - name: Cache Next.js build
-        uses: actions/cache@v4
+        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
         with:
           path: frontend/apps/web-next/.next/cache
           key: next-web-next-${{ runner.os }}-${{ hashFiles('frontend/bun.lock') }}-${{ hashFiles('frontend/apps/web-next/src/**', 'frontend/apps/web-next/next.config.ts', 'frontend/apps/web-next/public/**') }}
@@ -677,7 +682,7 @@ jobs:
 
       - name: Upload Playwright report
         if: ${{ !cancelled() }}
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: playwright-report-web-next
           path: |
@@ -709,7 +714,7 @@ jobs:
 
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
 
       - name: Install uv
         uses: astral-sh/setup-uv@d0cc045d04ccac9d8b7881df0226f9e82c39688e # v6
@@ -821,6 +826,9 @@ jobs:
           - image: frontend
             context: ./frontend
             file: ./frontend/Dockerfile
+          - image: web-next
+            context: ./frontend
+            file: ./frontend/apps/web-next/Dockerfile
           - image: devcontainer
             context: ./.devcontainer
             file: ./.devcontainer/Dockerfile
@@ -830,9 +838,9 @@ jobs:
         if: >-
           github.event_name != 'pull_request' ||
           (matrix.image == 'backend' && needs.changes.outputs.docker_backend == 'true') ||
-          (matrix.image == 'frontend' && needs.changes.outputs.docker_frontend == 'true') ||
+          ((matrix.image == 'frontend' || matrix.image == 'web-next') && needs.changes.outputs.docker_frontend == 'true') ||
           (matrix.image == 'devcontainer' && needs.changes.outputs.docker_devcontainer == 'true')
-        uses: actions/checkout@v4
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
 
       # The frontend production build needs more memory than the hosted runner
       # can provide without swap once it runs inside Docker. Keep this scoped to
@@ -848,14 +856,30 @@ jobs:
           sudo swapon /mnt/eneo-frontend.swap
 
       - name: Build Docker image
+        id: build-image
         if: >-
           github.event_name != 'pull_request' ||
           (matrix.image == 'backend' && needs.changes.outputs.docker_backend == 'true') ||
-          (matrix.image == 'frontend' && needs.changes.outputs.docker_frontend == 'true') ||
+          ((matrix.image == 'frontend' || matrix.image == 'web-next') && needs.changes.outputs.docker_frontend == 'true') ||
           (matrix.image == 'devcontainer' && needs.changes.outputs.docker_devcontainer == 'true')
         env:
           DOCKER_BUILDKIT: "1"
         run: docker build --pull --file "${{ matrix.file }}" --tag "eneo-${{ matrix.image }}:ci" "${{ matrix.context }}"
+
+
+      - uses: ./.github/actions/security-tools
+        if: steps.build-image.outcome == 'success' && matrix.image != 'devcontainer'
+      - name: Scan the built application image
+        if: steps.build-image.outcome == 'success' && matrix.image != 'devcontainer'
+        env:
+          IMAGE: eneo-${{ matrix.image }}:ci
+        run: trivy image --scanners vuln --severity HIGH,CRITICAL --exit-code 1 --format json --output "$RUNNER_TEMP/image-security.json" "$IMAGE"
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        if: always() && steps.build-image.outcome == 'success' && matrix.image != 'devcontainer'
+        with:
+          name: security-image-${{ matrix.image }}
+          path: ${{ runner.temp }}/image-security.json
+          retention-days: 14
 
   ci:
     name: CI
@@ -863,6 +887,7 @@ jobs:
     if: always()
     needs:
       - changes
+      - security
       - branch-policy
       - backend-quality
       - backend-tests
@@ -880,6 +905,7 @@ jobs:
     steps:
       - name: Check required jobs
         env:
+          SECURITY_RESULT: ${{ needs.security.result }}
           CHANGES_RESULT: ${{ needs.changes.result }}
           BRANCH_POLICY_RESULT: ${{ needs.branch-policy.result }}
           BACKEND_QUALITY_RESULT: ${{ needs.backend-quality.result }}
@@ -912,6 +938,7 @@ jobs:
             esac
           }
 
+          check_result "Security" "$SECURITY_RESULT"
           check_result "Change scope" "$CHANGES_RESULT"
           check_result "Branch policy" "$BRANCH_POLICY_RESULT"
           check_result "Backend quality" "$BACKEND_QUALITY_RESULT"

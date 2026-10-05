@@ -10,7 +10,7 @@ Do not report sensitive vulnerabilities in public issues, pull requests, or disc
 
 ## Pull Request Checks
 
-Pull requests into `develop` run two security and quality gates:
+Pull requests into `develop` run the following security and quality gates:
 
 ### CI
 
@@ -18,7 +18,7 @@ Pull requests into `develop` run two security and quality gates:
 
 Backend dependency installs use `uv sync --frozen --all-groups`. Frontend dependency installs use `bun install --frozen-lockfile`. This matters because dependency PRs should prove that the committed lockfiles still install and the app still builds.
 
-The CI workflow also builds the backend, frontend, and devcontainer Docker images without pushing them. This catches Dockerfile and base-image update problems before Dependabot Docker PRs merge.
+The CI workflow also builds the backend, Svelte frontend, Next frontend, and devcontainer Docker images without pushing them. This catches Dockerfile and base-image update problems before Dependabot Docker PRs merge.
 
 Ruff currently checks `backend/src/eneo`. Tests and Alembic are not part of the Ruff gate yet.
 
@@ -27,6 +27,19 @@ Ruff currently checks `backend/src/eneo`. Tests and Alembic are not part of the 
 `Dependency Review / Dependency Review` checks dependency and lockfile changes in pull requests. It fails if a PR introduces a known vulnerable dependency at `high` severity or above.
 
 When this check fails, update the dependency to a safe version, remove it, or document why the vulnerable code is not reachable. Do not dismiss the warning just to make the PR green.
+
+### Source, dependency, secret and container scanning
+
+The reusable `Security` workflow is part of the CI aggregate. It runs a complete
+lockfile audit, Semgrep's security-audit and GitHub Actions rules, and Gitleaks on
+added Git history. Application Docker candidates are scanned by Trivy; unfixed
+HIGH/CRITICAL findings block publication too. Reports are retained as artifacts.
+Temporary dependency mitigations require a documented owner, targeted tests and
+an expiry; see `frontend/patches/SECURITY.md`.
+
+The release review also scans full Git history, verifies credential revocation,
+and exercises both frontends in staging with the actual authentication and
+integration providers. Automated scanning does not replace those checks.
 
 ### Code scanning
 

@@ -1,0 +1,89 @@
+name: Security
+
+on:
+  workflow_call:
+    inputs:
+      base_sha:
+        type: string
+        default: ''
+  workflow_dispatch:
+  schedule:
+    - cron: '17 6 * * 1'
+
+permissions:
+  contents: read
+
+jobs:
+  dependencies:
+    name: Dependency vulnerabilities
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+      - uses: astral-sh/setup-uv@d0cc045d04ccac9d8b7881df0226f9e82c39688e # v6
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2
+        with:
+          bun-version: 1.3.14
+      - name: Audit backend runtime lock
+        working-directory: backend
+        run: |
+          uv export --frozen --no-dev --no-emit-project --format requirements-txt --output-file "$RUNNER_TEMP/requirements.txt" >/dev/null
+          uvx --from pip-audit==2.10.1 pip-audit --no-deps --disable-pip -r "$RUNNER_TEMP/requirements.txt" --format json -o "$RUNNER_TEMP/backend-audit.json"
+      - name: Install frontend lock without lifecycle scripts
+        working-directory: frontend
+        run: bun install --frozen-lockfile --ignore-scripts
+      - name: Audit frontend dependencies and verify the temporary mitigation
+        working-directory: frontend
+        run: node scripts/audit-dependencies.mjs "$RUNNER_TEMP/frontend-audit.json"
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        if: always()
+        with:
+          name: dependency-security-reports
+          path: |
+            ${{ runner.temp }}/backend-audit.json
+            ${{ runner.temp }}/frontend-audit.json
+          retention-days: 14
+
+  source:
+    name: Source and secret scanning
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: ./.github/actions/security-tools
+      - uses: astral-sh/setup-uv@d0cc045d04ccac9d8b7881df0226f9e82c39688e # v6
+      - name: Scan source and workflows
+        run: >-
+          uvx --from semgrep==1.179.0 semgrep scan
+          --config p/security-audit --config p/github-actions --metrics off
+          --jobs 1 --timeout 10 --max-memory 2048 --error
+          --exclude '**/*.test.*' --exclude '**/paraglide/**'
+          --json --output "$RUNNER_TEMP/semgrep.json"
+          backend/src frontend/apps/web-next/src frontend/apps/web/src .github
+      - name: Scan added Git history for secrets
+        env:
+          BASE_SHA: ${{ inputs.base_sha }}
+        run: |
+          set -euo pipefail
+          if [[ -z "$BASE_SHA" || "$BASE_SHA" =~ ^0+$ ]]; then
+            # A manual/scheduled review scans the current tree's commit. Full
+            # historical audits are a release-review task, including revocation.
+            range="-1 HEAD"
+          else
+            git cat-file -e "$BASE_SHA^{commit}"
+            range="$BASE_SHA..HEAD"
+          fi
+          gitleaks git --redact=100 --no-banner --log-opts="$range" --report-format json --report-path "$RUNNER_TEMP/gitleaks.json" .
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        if: always()
+        with:
+          name: source-security-reports
+          path: |
+            ${{ runner.temp }}/semgrep.json
+            ${{ runner.temp }}/gitleaks.json
+          retention-days: 14

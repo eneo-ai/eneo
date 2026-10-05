@@ -16,6 +16,9 @@ class RenamedPackageUnpickler(pickle.Unpickler):
 
 
 def serialize_job(data: dict[str, object]) -> bytes:
+    # Serialization cannot execute the payload. ARQ deserialization below trusts
+    # the private Redis queue; never accept serialized jobs from an HTTP client.
+    # nosemgrep: python.lang.security.deserialization.pickle.avoid-pickle
     return pickle.dumps(data)
 
 
