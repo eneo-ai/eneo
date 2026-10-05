@@ -27,6 +27,10 @@ from eneo.flows.ai_builder.ai_builder_json_schema_paths import (
     schema_leaf_property_names,
 )
 from eneo.flows.ai_builder.ai_builder_text_fitting import fit_text_allocations
+from eneo.flows.domain.flow_step_attempt_input import (
+    ITEM_MAP_EXECUTION_MODE,
+    ITEM_MAP_EXECUTION_MODE_KEY,
+)
 from eneo.flows.domain.runtime import RuntimeStep
 from eneo.flows.domain.step_output import (
     OUTPUT_TEXT_OVERFLOW_KEY,
@@ -467,14 +471,14 @@ def _is_mapped_record(record: Mapping[str, Any]) -> bool:
     A mapped step records only its first call's instruction and a summary in
     place of the input text; neither is the evidence of any one call.
     """
-    output = record.get("output_payload_json")
-    if isinstance(output, dict):
-        output_mapping = cast(dict[str, object], output)
-        if output_mapping.get("item_map_execution_mode") == "per_item":
-            return True
     parameters = record.get("model_parameters_json")
     if isinstance(parameters, dict):
         parameters_mapping = cast(dict[str, object], parameters)
+        if (
+            parameters_mapping.get(ITEM_MAP_EXECUTION_MODE_KEY)
+            == ITEM_MAP_EXECUTION_MODE
+        ):
+            return True
         if parameters_mapping.get("runtime_input_execution_mode") == "per_source":
             return True
     return False

@@ -8,6 +8,10 @@ from typing import Any, cast
 from uuid import UUID
 
 from eneo.flows.domain.flow import FlowRun
+from eneo.flows.domain.flow_step_attempt_input import (
+    ITEM_MAP_EXECUTION_MODE,
+    ITEM_MAP_EXECUTION_MODE_KEY,
+)
 from eneo.flows.domain.mapped_execution_policy import (
     FlowMappedExecutionPolicy,
     effective_mapped_cardinality,
@@ -432,7 +436,7 @@ async def _assemble_per_item_output(
         effective_prompt=first_output.effective_prompt,
         model_parameters_json={
             **first_output.model_parameters_json,
-            "item_map_execution_mode": "per_item",
+            ITEM_MAP_EXECUTION_MODE_KEY: ITEM_MAP_EXECUTION_MODE,
             "per_item_call_count": len(item_calls),
         },
         requested_model=first_output.requested_model,
