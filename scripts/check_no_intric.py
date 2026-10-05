@@ -84,11 +84,6 @@ ALLOWED = [
         re.compile(r"intric", re.IGNORECASE),
         paths=("frontend/apps/docs-site/src/content/guides/upgrade-2-2-0.mdx",),
     ),
-    # Historical migration reviews record the old product and package names.
-    AllowedOccurrence(
-        re.compile(r"intric", re.IGNORECASE),
-        paths=("docs/migration/*",),
-    ),
 ]
 
 INTRIC_RE = re.compile(r"intric", re.IGNORECASE)

@@ -1,7 +1,10 @@
 # @eneo/web-next
 
-Next.js (App Router) rewrite of the Eneo web frontend. Runs side-by-side with
-`apps/web` (SvelteKit) until cutover; see `docs/migration/` for the phase plan.
+The optional Next.js (App Router) frontend for Eneo. The existing SvelteKit
+app remains the default. Both apps share the backend, accounts and data.
+
+For deployment, callback registration, the opt-in banner and rollback, use
+[the deployment guide](../docs-site/src/content/guides/deployment.mdx#run-the-next-beta-alongside-the-existing-app).
 
 ## Development
 
@@ -19,53 +22,28 @@ bun run theme:build # compile src/theme/eneo-theme.ts after editing it
 
 ## Environment
 
-Create a local `.env` (or `.env.local`) from this template:
-
-```bash
-# Server-side backend base URL (the browser never calls the backend directly)
-ENEO_BACKEND_URL=http://localhost:8123
-
-# Encrypts the session cookie (required, min 32 chars)
-SESSION_SECRET=
-
-# Origin the app is reached at; used for OIDC redirect URIs (default http://localhost:3100)
-# APP_ORIGIN=
-
-# OIDC login (enabled iff OIDC_ISSUER is set; any discovery-capable IdP).
-# The IdP must issue JWT-format access tokens with an email claim, and the
-# client may need offline tokens/consent enabled for the offline_access scope.
-# OIDC_ISSUER=
-# OIDC_CLIENT_ID=
-# OIDC_CLIENT_SECRET=
-# OIDC_SCOPES=openid profile email offline_access
-
-# Feature flags
-SHOW_WEB_SEARCH=false
-# "Har du en fråga?" in the navigation: needs both the flag and the URL.
-SHOW_HELP_CENTER=false
-# HELP_CENTER_URL=
-# REQUEST_INTEGRATION_FORM_URL=
-
-# Your organisation's accessibility statement (tillgänglighetsredogörelse,
-# required by DOS-lagen). Linked from the login page and the profile menu when
-# set; see ACCESSIBILITY.md.
-# ACCESSIBILITY_STATEMENT_URL=
-```
+Copy [`.env.example`](.env.example) to `.env.local`. Set the backend URL,
+the app's public origin and a separate `SESSION_SECRET` (at least 32
+characters). Generate the secret with `openssl rand -base64 48`; rotating
+it invalidates existing Next sessions. Do not reuse the backend JWT secret.
 
 Validation lives in `src/lib/env.ts` (zod, parsed at import time). There is no
 `NEXT_PUBLIC_*` backend URL by design: all backend calls go through the server.
 
 ## Auth
 
-Two login modes (see `docs/migration/02-auth-oidc.md`):
+- **Password and tenant federation** use the existing backend authentication
+  flow and store the backend-issued token in the encrypted, HTTP-only
+  `eneo_session` cookie. Register the beta callback with the tenant's
+  federation configuration and identity provider as described in the
+  deployment guide. These sessions end when the backend token expires.
+- **Frontend-managed OIDC** is an optional separate confidential client,
+  configured with `OIDC_*`. It supports refresh tokens; the backend accepts
+  the IdP access token when `OIDC_RESOURCE_SERVER_ENABLED` is enabled and
+  the matching issuer/audience are configured.
 
-- **OIDC**: the app is a confidential client riding the IdP session. Tokens
-  live in the encrypted httpOnly `eneo_session` cookie (JWE); `src/proxy.ts`
-  does optimistic gating and the sliding refresh. The backend accepts the IdP
-  access token directly when `OIDC_RESOURCE_SERVER_ENABLED` is on (RB-1).
-- **Password**: server action against the backend's OAuth2 password flow; the
-  backend-issued Eneo JWT lives in the same session cookie. No refresh until
-  RB-3 ships, so the session ends when the JWT expires.
+`src/proxy.ts` gates navigation and request origins. Backend authorization
+remains responsible for tenant, role and resource access on every API call.
 
 ## UI components
 
