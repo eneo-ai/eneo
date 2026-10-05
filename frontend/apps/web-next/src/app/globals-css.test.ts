@@ -76,9 +76,14 @@ describe("globals.css", () => {
   it("paints the hover tint over filled legacy controls instead of fading the fill", () => {
     // Used by the shadcn Button and Badge fills; the contrast of their labels
     // on this overlay is checked in eneo-theme.contrast.test.ts.
-    const rule = css.match(/\.hover\\:bg-ax-hover-overlay\s*\{([\s\S]*?)\n {2}\}/)?.[1] ?? "";
-    expect(rule).toContain(
-      "background-image: linear-gradient(var(--color-overlay-hover), var(--color-overlay-hover))"
+    let backgroundImage: string | undefined;
+    postcss.parse(css).walkRules(".hover\\:bg-ax-hover-overlay:hover", (rule: Rule) => {
+      rule.walkDecls("background-image", (decl) => {
+        backgroundImage = decl.value;
+      });
+    });
+    expect(backgroundImage).toBe(
+      "linear-gradient(var(--color-overlay-hover), var(--color-overlay-hover))"
     );
   });
 
