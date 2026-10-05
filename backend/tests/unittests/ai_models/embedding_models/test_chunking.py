@@ -28,8 +28,10 @@ def log(monkeypatch: pytest.MonkeyPatch) -> MagicMock:
     return recorder
 
 
-def model(max_input: int | None, name: str = "model") -> SimpleNamespace:
-    return SimpleNamespace(name=name, max_input=max_input)
+def model(
+    max_input: int | None, name: str = "model", family: str | None = None
+) -> SimpleNamespace:
+    return SimpleNamespace(name=name, family=family, max_input=max_input)
 
 
 def test_settings_come_from_the_environment(monkeypatch: pytest.MonkeyPatch):
@@ -46,13 +48,29 @@ def test_a_model_with_room_gets_the_configured_values():
 def test_a_model_with_a_lower_limit_clamps_the_size_and_scales_the_overlap(
     log: MagicMock,
 ):
-    assert effective_chunk_config(model(120, "e5")) == ChunkConfig(120, 24)
-    effective_chunk_config(model(120, "e5"))
+    assert effective_chunk_config(model(120, "small")) == ChunkConfig(120, 24)
+    effective_chunk_config(model(120, "small"))
 
-    # Announced once per model, not per document.
+    # Announced once per model and limit, not per document.
     assert log.info.call_count == 1
-    assert "exceeds max_input 120" in log.info.call_args.args[0]
+    assert "max_input 120" in log.info.call_args.args[0]
     log.warning.assert_not_called()
+
+    # A model sharing the name but not the limit is its own announcement.
+    effective_chunk_config(model(60, "small"))
+    assert log.info.call_count == 2
+
+
+def test_an_e5_model_leaves_room_for_the_passage_prefix():
+    prefix = count_tokens("passage: ")
+
+    assert effective_chunk_config(model(120, "e5", family="e5")) == ChunkConfig(
+        120 - prefix, 40 * (120 - prefix) // 200
+    )
+    # With room to spare the prefix costs nothing.
+    assert effective_chunk_config(model(8191, "e5", family="e5")) == ChunkConfig(
+        200, 40
+    )
 
 
 def test_a_model_without_a_limit_is_not_clamped_but_warns_once(log: MagicMock):

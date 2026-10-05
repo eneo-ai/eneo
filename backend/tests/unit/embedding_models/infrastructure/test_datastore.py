@@ -102,7 +102,7 @@ def test_chunk_text_clamps_to_the_embedding_models_limit(monkeypatch):
         create_embeddings_service=MagicMock(),
     )
     info_blob = SimpleNamespace(id=uuid4(), text=" ".join(f"w{i}" for i in range(300)))
-    small_model = SimpleNamespace(name="small", max_input=30)
+    small_model = SimpleNamespace(name="small", family=None, max_input=30)
 
     chunks = datastore._chunk_text(info_blob, small_model)  # type: ignore[arg-type]
 

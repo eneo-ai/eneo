@@ -441,7 +441,9 @@ async def test_heartbeat_advances_updated_at_during_each_compute_phase(
                 text="replacement knowledge",
                 group_id=uuid4(),
             ),
-            embedding_model=SimpleNamespace(name="test-model", max_input=8191),
+            embedding_model=SimpleNamespace(
+                name="test-model", family=None, max_input=8191
+            ),
         )
         return SimpleNamespace(id=uuid4())
 

@@ -10,6 +10,7 @@ set from the same answer, so the number is known in one place.
 
 from __future__ import annotations
 
+import threading
 from dataclasses import dataclass
 from typing import Protocol
 
@@ -29,6 +30,10 @@ class ChunkSettings(BaseSettings):
 
 settings = ChunkSettings()
 
+# E5 models expect every passage to carry this prefix; the embedding adapter adds it
+# after chunking, so the chunk budget has to leave room for it.
+E5_PASSAGE_PREFIX = "passage: "
+
 
 class ChunkTarget(Protocol):
     """What chunking needs to know about the model that will embed the chunks.
@@ -41,6 +46,9 @@ class ChunkTarget(Protocol):
     def name(self) -> str: ...
 
     @property
+    def family(self) -> str | None: ...
+
+    @property
     def max_input(self) -> int | None: ...
 
 
@@ -50,26 +58,39 @@ class ChunkConfig:
     chunk_overlap: int
 
 
-# Each (event, model) pair is logged once per process: chunking runs per document,
-# and the message is about the model, not the document.
-_announced: set[tuple[str, str]] = set()
+# Each (event, model name, limit) is logged once per process: chunking runs per
+# document, and the message is about the model, not the document. Chunking also runs
+# from worker threads, hence the lock.
+_announced: set[tuple[str, str, int | None]] = set()
+_announced_lock = threading.Lock()
 
 
-def _announce_once(event: str, model_name: str, message: str, *, warning: bool) -> None:
-    key = (event, model_name)
-    if key in _announced:
-        return
-    _announced.add(key)
+def _announce_once(
+    event: str, model_name: str, max_input: int | None, message: str, *, warning: bool
+) -> None:
+    key = (event, model_name, max_input)
+    with _announced_lock:
+        if key in _announced:
+            return
+        _announced.add(key)
     if warning:
         logger.warning(message, extra={"embedding_model": model_name})
     else:
         logger.info(message, extra={"embedding_model": model_name})
 
 
+def _prefix_tokens(embedding_model: ChunkTarget) -> int:
+    """Tokens the embedding adapter adds to every chunk before sending it."""
+    if embedding_model.family == "e5":
+        return count_tokens(E5_PASSAGE_PREFIX)
+    return 0
+
+
 def effective_chunk_config(embedding_model: ChunkTarget) -> ChunkConfig:
     """The chunk size and overlap actually used for ``embedding_model``.
 
-    The configured size is clamped to the model's ``max_input``; the overlap keeps the
+    The configured size is clamped so that a chunk, plus any prefix the adapter adds
+    for the model family, fits the model's ``max_input``; the overlap keeps the
     configured ratio so it stays below the size. A model without ``max_input`` is not
     clamped, and that is logged once so operators know the limit is unguarded.
     """
@@ -81,23 +102,36 @@ def effective_chunk_config(embedding_model: ChunkTarget) -> ChunkConfig:
         _announce_once(
             "missing_max_input",
             model_name,
+            max_input,
             f"Embedding model {model_name} has no max_input; chunks are not clamped "
             "to its limit",
             warning=True,
         )
         return ChunkConfig(size, overlap)
 
-    if max_input < size:
-        clamped_overlap = overlap * max_input // size
+    budget = max_input - _prefix_tokens(embedding_model)
+    if budget <= 0:
+        _announce_once(
+            "unusable_max_input",
+            model_name,
+            max_input,
+            f"max_input {max_input} of embedding model {model_name} leaves no room "
+            "for a chunk; chunks are not clamped to its limit",
+            warning=True,
+        )
+        return ChunkConfig(size, overlap)
+    if budget < size:
+        clamped_overlap = overlap * budget // size
         _announce_once(
             "clamped",
             model_name,
-            f"CHUNK_SIZE {size} exceeds max_input {max_input} of embedding model "
-            f"{model_name}; chunking at {max_input} tokens with {clamped_overlap} "
+            max_input,
+            f"CHUNK_SIZE {size} exceeds what max_input {max_input} of embedding model "
+            f"{model_name} allows; chunking at {budget} tokens with {clamped_overlap} "
             "overlap",
             warning=False,
         )
-        return ChunkConfig(max_input, clamped_overlap)
+        return ChunkConfig(budget, clamped_overlap)
 
     return ChunkConfig(size, overlap)
 
