@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import re
 from collections.abc import Callable, Mapping, Sequence
 from typing import TYPE_CHECKING, assert_never
 from uuid import UUID, uuid4
@@ -23,7 +22,7 @@ from eneo.flows.application.flow_template_attachment_materialization import (
     materialize_template_imports,
 )
 from eneo.flows.domain.flow import FlowStep
-from eneo.flows.flow_authoring_name import normalize_flow_name
+from eneo.flows.flow_authoring_name import flow_name_family, normalize_flow_name
 from eneo.flows.flow_authoring_spec import AssistantSpec
 from eneo.flows.flow_authoring_variable_rewriting import renumber_step_aliases
 from eneo.flows.flow_capability_manifest import requires_completion_model
@@ -699,7 +698,7 @@ async def _deduplicate_flow_name(
     if desired_name not in existing_names:
         return desired_name
 
-    base = re.sub(r"\s*\(\d+\)$", "", desired_name)
+    base = flow_name_family(desired_name)
     for index in range(2, 100):
         candidate = f"{base} ({index})"
         if candidate not in existing_names:

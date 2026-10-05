@@ -10,9 +10,11 @@ import sys
 import time
 from collections.abc import Iterator, Mapping
 from concurrent.futures import ThreadPoolExecutor
+from contextlib import contextmanager
 from dataclasses import replace
+from email.message import Message
 from pathlib import Path
-from threading import Barrier, Lock, Thread
+from threading import Barrier, Event, Lock, Thread
 from types import ModuleType, SimpleNamespace
 from typing import Any, NoReturn, get_args
 from urllib.error import HTTPError, URLError
@@ -6808,6 +6810,480 @@ def test_applied_flow_lifecycle_preserves_evidence_then_deletes_flow(
     )
 
 
+def _apply_named_create(
+    harness: ModuleType,
+    *,
+    plan_id: str,
+    flow_name: object,
+    config: Any = None,
+    timeout_seconds: int = 1,
+) -> tuple[dict[str, object], dict[str, object] | None, dict[str, object]]:
+    return harness._apply_execute_and_cleanup_flow(
+        case=harness.BattleCase(case_id=plan_id, prompt="Build.", apply_plan=True),
+        config=config
+        or harness.ApiConfig(
+            base_url="http://localhost:8123/api/v1",
+            api_key="test-key",
+            timeout_seconds=1,
+        ),
+        plan_id=plan_id,
+        flow_name=flow_name,
+        runtime_file_paths=(),
+        timeout_seconds=timeout_seconds,
+        artifact_output_dir=Path("/unused"),
+    )
+
+
+def _fake_create_api(
+    monkeypatch: MonkeyPatch,
+    harness: ModuleType,
+    on_create: Any,
+    deleted: list[str] | None = None,
+) -> None:
+    def request_json(*, path: str, **_: object) -> dict[str, object]:
+        if path.endswith("/create"):
+            return on_create(path.split("/")[-2])
+        return {"steps": []}
+
+    monkeypatch.setattr(harness, "_request_json", request_json)
+    monkeypatch.setattr(
+        harness,
+        "_request_no_content",
+        lambda *, path, **_kwargs: (deleted if deleted is not None else []).append(
+            path
+        ),
+    )
+
+
+def test_creates_for_different_flow_names_are_not_serialized(
+    monkeypatch: MonkeyPatch,
+) -> None:
+    harness = _battle_harness()
+    both_creating = Barrier(2, timeout=3)
+
+    def on_create(plan_id: str) -> dict[str, object]:
+        both_creating.wait()
+        return {"flow_id": f"flow-{plan_id}"}
+
+    _fake_create_api(monkeypatch, harness, on_create)
+    with ThreadPoolExecutor(2) as pool:
+        futures = [
+            pool.submit(_apply_named_create, harness, plan_id=f"p{i}", flow_name=name)
+            for i, name in enumerate(("Alpha report", "Beta report"))
+        ]
+        lifecycles = [future.result(timeout=10)[2] for future in futures]
+
+    assert [item["status"] for item in lifecycles] == ["deleted", "deleted"]
+
+
+def test_creates_that_can_share_an_allocated_name_run_one_at_a_time(
+    monkeypatch: MonkeyPatch,
+) -> None:
+    harness = _battle_harness()
+    events: list[str] = []
+
+    def on_create(plan_id: str) -> dict[str, object]:
+        events.append(f"start-{plan_id}")
+        time.sleep(0.05)
+        events.append(f"end-{plan_id}")
+        return {"flow_id": f"flow-{plan_id}"}
+
+    _fake_create_api(monkeypatch, harness, on_create)
+    # The product allocates "Weekly report (2)" for a clash on "Weekly report",
+    # so the numbered form and a case difference are one allocation family.
+    names = ("Weekly report", "weekly  report (2)", "Weekly report (3)")
+    with ThreadPoolExecutor(3) as pool:
+        futures = [
+            pool.submit(_apply_named_create, harness, plan_id=f"p{i}", flow_name=name)
+            for i, name in enumerate(names)
+        ]
+        for future in futures:
+            future.result(timeout=10)
+
+    assert [event.split("-")[0] for event in events] == ["start", "end"] * 3
+
+
+@mark.parametrize("flow_name", [None, "", "   ", 7, ["x"]])
+def test_creates_without_a_readable_name_share_one_fail_safe_gate(
+    monkeypatch: MonkeyPatch, flow_name: object
+) -> None:
+    harness = _battle_harness()
+    events: list[str] = []
+
+    def on_create(plan_id: str) -> dict[str, object]:
+        events.append(f"start-{plan_id}")
+        time.sleep(0.05)
+        events.append(f"end-{plan_id}")
+        return {"flow_id": f"flow-{plan_id}"}
+
+    _fake_create_api(monkeypatch, harness, on_create)
+    with ThreadPoolExecutor(2) as pool:
+        futures = [
+            pool.submit(
+                _apply_named_create, harness, plan_id=f"p{i}", flow_name=flow_name
+            )
+            for i in range(2)
+        ]
+        for future in futures:
+            future.result(timeout=10)
+
+    assert [event.split("-")[0] for event in events] == ["start", "end"] * 2
+
+
+@mark.parametrize("bound", ["observation_deadline", "run_timeout"])
+def test_a_create_that_cannot_get_its_gate_in_time_is_a_typed_acquisition_loss(
+    monkeypatch: MonkeyPatch, bound: str
+) -> None:
+    harness = _battle_harness()
+    holder_creating = Event()
+    release_holder = Event()
+    created: list[str] = []
+    deleted: list[str] = []
+
+    def on_create(plan_id: str) -> dict[str, object]:
+        created.append(plan_id)
+        if plan_id == "holder":
+            holder_creating.set()
+            release_holder.wait(5)
+        return {"flow_id": f"flow-{plan_id}"}
+
+    _fake_create_api(monkeypatch, harness, on_create, deleted)
+    base = harness.ApiConfig(
+        base_url="http://localhost:8123/api/v1", api_key="k", timeout_seconds=1
+    )
+    waiter_config = (
+        replace(base, deadline=time.monotonic() + 0.2)
+        if bound == "observation_deadline"
+        else base
+    )
+    with ThreadPoolExecutor(1) as pool:
+        holder = pool.submit(
+            _apply_named_create, harness, plan_id="holder", flow_name="Same name"
+        )
+        assert holder_creating.wait(3)
+        started = time.monotonic()
+        try:
+            with raises(harness.BattleFlowLifecycleError) as exc_info:
+                _apply_named_create(
+                    harness,
+                    plan_id="waiter",
+                    flow_name="Same name",
+                    config=waiter_config,
+                    timeout_seconds=1 if bound == "run_timeout" else 600,
+                )
+            waited = time.monotonic() - started
+        finally:
+            release_holder.set()
+        holder_lifecycle = holder.result(timeout=10)[2]
+
+    error = exc_info.value
+    assert isinstance(error.cause, harness.FlowCreateWaitExpired)
+    assert waited < 3
+    # Refused before any request: no Flow was created, nothing to delete.
+    assert created == ["holder"]
+    assert deleted == ["/flows/flow-holder/"]
+    assert error.flow_lifecycle == {"status": "creation_failed"}
+    fields = harness._failure_error_fields(error)
+    # The harness's own wait, not a stack fault: it must not read as a stack timeout.
+    assert fields["failure_class"] == "harness_configuration"
+    assert fields["failure_class"] in harness.ACQUISITION_FAILURE_CLASSES
+    assert "create was not sent" in str(fields["error"])
+    assert holder_lifecycle["status"] == "deleted"
+
+
+def _second_create_error(
+    monkeypatch: MonkeyPatch,
+    harness: ModuleType,
+    *,
+    holder_name: object,
+    waiter_name: object,
+) -> Exception:
+    """Hold one create open, then try another that has 0.2 s to get its gate."""
+
+    holder_creating = Event()
+    release_holder = Event()
+
+    def on_create(plan_id: str) -> dict[str, object]:
+        if plan_id == "holder":
+            holder_creating.set()
+            release_holder.wait(5)
+        return {"flow_id": f"flow-{plan_id}"}
+
+    _fake_create_api(monkeypatch, harness, on_create)
+    base = harness.ApiConfig(
+        base_url="http://localhost:8123/api/v1", api_key="k", timeout_seconds=1
+    )
+    with ThreadPoolExecutor(1) as pool:
+        holder = pool.submit(
+            _apply_named_create, harness, plan_id="holder", flow_name=holder_name
+        )
+        assert holder_creating.wait(3)
+        try:
+            with raises(harness.BattleFlowLifecycleError) as exc_info:
+                _apply_named_create(
+                    harness,
+                    plan_id="waiter",
+                    flow_name=waiter_name,
+                    config=replace(base, deadline=time.monotonic() + 0.2),
+                )
+        finally:
+            release_holder.set()
+        holder.result(timeout=10)
+    # Neither the finished create nor the one that lost its wait leaves a hold.
+    for name in (None, "Weekly report", waiter_name, holder_name):
+        _apply_named_create(
+            harness,
+            plan_id="after",
+            flow_name=name,
+            config=replace(base, deadline=time.monotonic() + 0.5),
+        )
+    return exc_info.value
+
+
+@mark.parametrize(
+    ("holder_name", "waiter_name"),
+    [("Weekly report", None), (None, "Weekly report"), (None, None), (5, "Other")],
+)
+def test_a_create_without_a_readable_name_excludes_every_name_family(
+    monkeypatch: MonkeyPatch, holder_name: object, waiter_name: object
+) -> None:
+    error = _second_create_error(
+        monkeypatch,
+        _battle_harness(),
+        holder_name=holder_name,
+        waiter_name=waiter_name,
+    )
+
+    assert type(error.cause).__name__ == "FlowCreateWaitExpired"
+    assert error.flow_lifecycle == {"status": "creation_failed"}
+
+
+def test_a_create_of_another_name_family_is_not_blocked_by_a_named_create(
+    monkeypatch: MonkeyPatch,
+) -> None:
+    harness = _battle_harness()
+    holder_creating = Event()
+    release_holder = Event()
+
+    def on_create(plan_id: str) -> dict[str, object]:
+        if plan_id == "holder":
+            holder_creating.set()
+            release_holder.wait(5)
+        return {"flow_id": f"flow-{plan_id}"}
+
+    _fake_create_api(monkeypatch, harness, on_create)
+    with ThreadPoolExecutor(1) as pool:
+        holder = pool.submit(
+            _apply_named_create, harness, plan_id="holder", flow_name="Weekly report"
+        )
+        assert holder_creating.wait(3)
+        try:
+            lifecycle = _apply_named_create(
+                harness, plan_id="other", flow_name="Quarterly plan"
+            )[2]
+        finally:
+            release_holder.set()
+        holder.result(timeout=10)
+
+    assert lifecycle["status"] == "deleted"
+
+
+def _drive_plan_apply(
+    monkeypatch: MonkeyPatch, tmp_path: Path, *, plan: dict[str, object] | None
+) -> list[tuple[object, float | None]]:
+    """Run `_run_case_session` to its create with a Builder that ends on `plan`."""
+
+    harness = _battle_harness()
+    gated: list[tuple[object, float | None]] = []
+
+    @contextmanager
+    def recording_gate(
+        config: Any, *, flow_name: object, wait_until: float
+    ) -> Iterator[None]:
+        gated.append((flow_name, config.deadline))
+        yield
+
+    def send_and_fetch(**kwargs: object) -> dict[str, object]:
+        return {
+            "client_turn_id": "turn-1",
+            "message": kwargs["message"],
+            "question_answer": None,
+            "events": [],
+            "latest_session": {"latest_plan_id": "plan-1"},
+            "plan_id": "plan-1",
+            "plan": plan,
+            "plan_summary": harness._summarize_plan(plan),
+        }
+
+    def request_json(**kwargs: object) -> dict[str, object]:
+        path = str(kwargs["path"])
+        if path == "/flows/ai-builder/sessions":
+            return {"session_id": _TEST_SESSION_ID}
+        if path.endswith("/models"):
+            return {
+                "default_model_id": "m",
+                "models": [{"id": "m", "name": "n", "provider": "p"}],
+            }
+        if path.endswith("/create"):
+            return {"flow_id": "flow-1"}
+        if path == "/flows/flow-1/":
+            return {"steps": []}
+        if path.endswith("/_diagnostics/classifier-slots"):
+            return {"session_id": _TEST_SESSION_ID, "classifier_runs": []}
+        if path == f"/flows/ai-builder/sessions/{_TEST_SESSION_ID}":
+            return {"latest_plan_id": "plan-1"}
+        raise AssertionError(f"unexpected request: {kwargs['method']} {path}")
+
+    monkeypatch.setattr(harness, "_create_gate", recording_gate)
+    monkeypatch.setattr(harness, "_send_and_fetch", send_and_fetch)
+    monkeypatch.setattr(harness, "_request_json", request_json)
+    monkeypatch.setattr(harness, "_request_no_content", lambda **_kwargs: None)
+    monkeypatch.setattr(harness, "_optional_request_json", lambda **_kwargs: None)
+    monkeypatch.setattr(
+        harness,
+        "_git_output",
+        lambda *args: "a" * 40 if args == ("rev-parse", "HEAD") else "",
+    )
+    args = SimpleNamespace(
+        space_id="space-1",
+        model_id="m",
+        file_ids=(),
+        ui_language="sv",
+        auto_confirm_requirements=True,
+        timeout_seconds=1,
+        observation_deadline_seconds=1,
+    )
+    harness._observation_runner(args)(
+        case=harness.BattleCase(case_id="named", prompt="Build.", apply_plan=True),
+        config=harness.ApiConfig(
+            base_url="http://localhost:8123/api/v1",
+            api_key="test-key",
+            timeout_seconds=1,
+        ),
+        args=args,
+        existing_session_id=None,
+        artifact_output_dir=tmp_path,
+    )
+    return gated
+
+
+def test_the_builder_arm_gates_its_create_on_the_plans_flow_name(
+    monkeypatch: MonkeyPatch, tmp_path: Path
+) -> None:
+    plan = {
+        "plan_id": "plan-1",
+        "proposal": {"spec": {"flow_name": "Weekly report", "steps": []}},
+    }
+    now = time.monotonic()
+
+    [(name, deadline)] = _drive_plan_apply(monkeypatch, tmp_path, plan=plan)
+
+    assert name == "Weekly report"
+    # The observation boundary starts the deadline the create's wait spends.
+    assert deadline is not None and now < deadline <= time.monotonic() + 1.0
+
+
+def test_a_builder_create_whose_plan_is_unreadable_is_gated_as_unnamed(
+    monkeypatch: MonkeyPatch, tmp_path: Path
+) -> None:
+    [(name, _)] = _drive_plan_apply(monkeypatch, tmp_path, plan=None)
+
+    assert name is None
+
+
+@mark.parametrize("flow_name", ["Weekly report", None])
+def test_a_create_whose_budget_has_ended_is_not_sent_even_with_free_gates(
+    monkeypatch: MonkeyPatch, flow_name: object
+) -> None:
+    harness = _battle_harness()
+    created: list[str] = []
+
+    def on_create(plan_id: str) -> dict[str, object]:
+        created.append(plan_id)
+        return {"flow_id": f"flow-{plan_id}"}
+
+    _fake_create_api(monkeypatch, harness, on_create)
+    base = harness.ApiConfig(
+        base_url="http://localhost:8123/api/v1", api_key="k", timeout_seconds=1
+    )
+    with raises(harness.BattleFlowLifecycleError) as exc_info:
+        _apply_named_create(
+            harness,
+            plan_id="late",
+            flow_name=flow_name,
+            config=replace(base, deadline=time.monotonic() - 1),
+        )
+
+    assert type(exc_info.value.cause).__name__ == "FlowCreateWaitExpired"
+    assert created == []
+    # Nothing was left held: the same name now creates.
+    _apply_named_create(harness, plan_id="after", flow_name=flow_name)
+    assert created == ["after"]
+
+
+def test_a_create_whose_budget_ends_while_it_takes_its_gate_releases_it_unsent(
+    monkeypatch: MonkeyPatch,
+) -> None:
+    harness = _battle_harness()
+    created: list[str] = []
+    events: list[str] = []
+
+    class LateLock:
+        def acquire(self, timeout: float) -> bool:
+            time.sleep(timeout + 0.05)  # the gate frees just after the budget
+            events.append("acquired")
+            return True
+
+        def release(self) -> None:
+            events.append("released")
+
+    def on_create(plan_id: str) -> dict[str, object]:
+        created.append(plan_id)
+        return {"flow_id": f"flow-{plan_id}"}
+
+    _fake_create_api(monkeypatch, harness, on_create)
+    harness._CREATE_GATES._families[harness._create_name_family("Late name")] = (
+        LateLock()
+    )
+    base = harness.ApiConfig(
+        base_url="http://localhost:8123/api/v1", api_key="k", timeout_seconds=1
+    )
+    with raises(harness.BattleFlowLifecycleError) as exc_info:
+        _apply_named_create(
+            harness,
+            plan_id="late",
+            flow_name="Late name",
+            config=replace(base, deadline=time.monotonic() + 0.1),
+        )
+
+    assert type(exc_info.value.cause).__name__ == "FlowCreateWaitExpired"
+    assert created == [] and events == ["acquired", "released"]
+    # The any-family guard it shared was released too: an unnamed create runs.
+    _apply_named_create(harness, plan_id="after", flow_name=None)
+    assert created == ["after"]
+
+
+def test_a_failed_create_releases_its_gate(monkeypatch: MonkeyPatch) -> None:
+    harness = _battle_harness()
+
+    def on_create(plan_id: str) -> dict[str, object]:
+        if plan_id == "first":
+            raise HTTPError("http://x/create", 500, "boom", Message(), None)
+        return {"flow_id": f"flow-{plan_id}"}
+
+    _fake_create_api(monkeypatch, harness, on_create)
+    with raises(harness.BattleFlowLifecycleError):
+        _apply_named_create(harness, plan_id="first", flow_name="Same name")
+
+    started = time.monotonic()
+    _, _, lifecycle = _apply_named_create(
+        harness, plan_id="second", flow_name="Same name"
+    )
+
+    assert lifecycle["status"] == "deleted"
+    assert time.monotonic() - started < 1
+
+
 def test_applied_flow_lifecycle_deletes_flow_when_fetch_fails(
     monkeypatch: MonkeyPatch,
 ) -> None:
@@ -6981,54 +7457,6 @@ def test_cleanup_failure_invalidates_an_otherwise_successful_observation(
         "failure_class": "dependency_stack",
         "flow_lifecycle": {"status": "cleanup_failed", "flow_id": "flow-leaked"},
     }
-
-
-def test_plan_application_is_serialized_across_different_cases(
-    monkeypatch: MonkeyPatch,
-) -> None:
-    harness = _battle_harness()
-    config = harness.ApiConfig(
-        base_url="http://localhost:8123/api/v1",
-        api_key="test-key",
-        timeout_seconds=1,
-    )
-    state_lock = Lock()
-    active_applies = 0
-    maximum_active_applies = 0
-
-    def request_json(*, method: str, path: str, **_: object) -> dict[str, object]:
-        nonlocal active_applies, maximum_active_applies
-        if method == "POST":
-            with state_lock:
-                active_applies += 1
-                maximum_active_applies = max(maximum_active_applies, active_applies)
-            time.sleep(0.02)
-            with state_lock:
-                active_applies -= 1
-            return {"flow_id": f"flow-{path.rsplit('/', 2)[-2]}"}
-        return _applied_flow_from_plan(_review_policy_plan())
-
-    monkeypatch.setattr(harness, "_request_json", request_json)
-    monkeypatch.setattr(harness, "_request_no_content", lambda **_kwargs: None)
-
-    def apply(plan_id: str) -> object:
-        return harness._apply_execute_and_cleanup_flow(
-            case=harness.BattleCase(
-                case_id=plan_id,
-                prompt="Build a Flow.",
-                apply_plan=True,
-            ),
-            config=config,
-            plan_id=plan_id,
-            runtime_file_paths=(),
-            timeout_seconds=1,
-            artifact_output_dir=Path("/unused"),
-        )
-
-    with ThreadPoolExecutor(max_workers=2) as executor:
-        list(executor.map(apply, ("plan-a", "plan-b")))
-
-    assert maximum_active_applies == 1
 
 
 def test_runtime_sentinel_checks_persisted_named_results_and_plan_invariants() -> None:
@@ -13772,6 +14200,8 @@ def test_a_run_is_cancelled_at_its_deadline_and_its_record_kept(
                 base_url="http://localhost:8123/api/v1",
                 api_key="test-key",
                 timeout_seconds=1,
+                # The create has time; it is the run's own timeout that is nil.
+                deadline=time.monotonic() + 60,
             ),
             plan_id="plan-1",
             runtime_file_paths=(Path("05_lokalkalkyl.csv"),),
@@ -14738,20 +15168,21 @@ def _run_edit(
     *,
     deadline_seconds: float | None = None,
 ) -> dict[str, Any]:
-    return harness._run_case(
+    args = SimpleNamespace(
+        space_id="space-1",
+        model_id="m",
+        file_ids=(),
+        ui_language="sv",
+        auto_confirm_requirements=False,
+        timeout_seconds=5,
+        observation_deadline_seconds=deadline_seconds,
+    )
+    return harness._observation_runner(args)(
         case=case,
         config=harness.ApiConfig(
             base_url="http://localhost/api/v1", api_key="k", timeout_seconds=5
         ),
-        args=SimpleNamespace(
-            space_id="space-1",
-            model_id="m",
-            file_ids=(),
-            ui_language="sv",
-            auto_confirm_requirements=False,
-            timeout_seconds=5,
-            observation_deadline_seconds=deadline_seconds,
-        ),
+        args=args,
         existing_session_id=None,
         artifact_output_dir=tmp_path,
         cases_path=harness.EDIT_CASES_FILE,

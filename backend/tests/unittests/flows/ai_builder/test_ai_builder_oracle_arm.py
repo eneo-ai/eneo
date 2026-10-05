@@ -12,6 +12,7 @@ import importlib.util
 import json
 import sys
 import threading
+import time
 from collections.abc import Callable
 from contextlib import asynccontextmanager
 from pathlib import Path
@@ -525,7 +526,11 @@ def test_the_command_has_a_package_origin_and_a_template_intent_for_the_last_ste
     template_id = uuid4()
     command = arm.build_create_command(
         arm.MaterializeRequest(
-            space_id=uuid4(), gold=gold, spec=spec, template_file_id=template_id
+            space_id=uuid4(),
+            gold=gold,
+            spec=spec,
+            template_file_id=template_id,
+            wait_until=time.monotonic() + 1.0,
         )
     )
     assert command.kind == "create"
@@ -598,13 +603,14 @@ def _materializer(
     return materializer
 
 
-def _request(arm: ModuleType) -> Any:
+def _request(arm: ModuleType, *, wait_until: float | None = None) -> Any:
     spec = _spec(final_instructions="x")
     return arm.MaterializeRequest(
         space_id=uuid4(),
         gold=arm.GoldSpec("case-1", spec, "f.json", "b" * 64, None, {}),
         spec=spec,
         template_file_id=None,
+        wait_until=time.monotonic() + 30.0 if wait_until is None else wait_until,
     )
 
 
@@ -705,6 +711,58 @@ def test_concurrent_applies_take_turns_with_the_process_singletons(
         thread.join()
 
     assert peak == 1
+
+
+def test_an_apply_that_cannot_get_the_process_singletons_in_time_is_not_started(
+    arm: ModuleType,
+) -> None:
+    held = threading.Event()
+    release = threading.Event()
+    started: list[str] = []
+
+    @asynccontextmanager
+    async def persistence() -> Any:
+        started.append("apply")
+        held.set()
+        await asyncio.get_running_loop().run_in_executor(None, release.wait, 5)
+        yield
+
+    materializer = _materializer(
+        arm, _RecordingService(), persistence_scope=persistence
+    )
+    holder = threading.Thread(target=materializer.materialize, args=(_request(arm),))
+    holder.start()
+    assert held.wait(3)
+    try:
+        with pytest.raises(arm.PersistenceWaitExpired):
+            materializer.materialize(_request(arm, wait_until=time.monotonic() + 0.2))
+    finally:
+        release.set()
+        holder.join()
+
+    assert started == ["apply"]  # the second apply never started
+
+
+def test_the_oracle_apply_wait_expiring_is_the_harness_typed_acquisition_loss(
+    harness: ModuleType,
+    arm: ModuleType,
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    with pytest.raises(harness.BattleFlowLifecycleError) as exc_info:
+        _run(
+            harness,
+            arm,
+            monkeypatch,
+            tmp_path,
+            spec=_spec(final_instructions="x"),
+            refusal=arm.PersistenceWaitExpired("busy"),
+        )
+
+    assert isinstance(exc_info.value.cause, harness.FlowCreateWaitExpired)
+    fields = harness._failure_error_fields(exc_info.value)
+    assert fields["failure_class"] == "harness_configuration"
+    assert exc_info.value.flow_lifecycle == {"status": "creation_failed"}
 
 
 def test_the_default_persistence_is_the_lifespans_own_start_and_stop(
@@ -888,7 +946,9 @@ def _run(
     spec: FlowDraftSpecCore,
     refusal: Exception | None = None,
     executed: dict[str, Any] | None = None,
-) -> tuple[dict[str, Any], _Stack, _Materializer]:
+    materializer: Any = None,
+    deadline_seconds: float | None = None,
+) -> tuple[dict[str, Any], _Stack, Any]:
     specs = tmp_path / "specs"
     specs.mkdir()
     _freeze(specs, "case-1", spec)
@@ -897,7 +957,7 @@ def _run(
     stack = _Stack(spec, input_text="Ärende om bygglov.")
     if executed is not None:
         stack.executed = executed
-    materializer = _Materializer(arm, refusal=refusal)
+    materializer = materializer or _Materializer(arm, refusal=refusal)
     monkeypatch.setattr(harness, "_request_json", stack.request_json)
     monkeypatch.setattr(harness, "_request_no_content", stack.request_no_content)
     monkeypatch.setattr(
@@ -911,6 +971,7 @@ def _run(
         oracle_materializer=materializer,
         space_id=str(uuid4()),
         timeout_seconds=1,
+        observation_deadline_seconds=deadline_seconds,
     )
     config = harness.ApiConfig(
         base_url="http://localhost:8123/api/v1", api_key="k", timeout_seconds=1
@@ -1032,6 +1093,127 @@ def test_a_spec_the_platform_refuses_is_attempted_not_executed_and_valid_evidenc
     assert observation["evidence_valid"] is True
     assert bundle["oracle"]["refusal"]["code"] == "flow_name_taken"
     assert stack.deleted == []  # nothing was created, so nothing is deleted
+
+
+def test_the_oracle_create_waits_on_the_gate_of_the_specs_flow_name(
+    harness: ModuleType,
+    arm: ModuleType,
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    gated: list[tuple[object, float | None]] = []
+    real_gate = harness._create_gate
+
+    def recording_gate(config: Any, *, flow_name: object, wait_until: float) -> Any:
+        gated.append((flow_name, config.deadline))
+        return real_gate(config, flow_name=flow_name, wait_until=wait_until)
+
+    monkeypatch.setattr(harness, "_create_gate", recording_gate)
+    spec = _spec(final_instructions="x")
+    now = time.monotonic()
+
+    _run(harness, arm, monkeypatch, tmp_path, spec=spec, deadline_seconds=1.0)
+
+    [(name, deadline)] = gated
+    assert name == spec.flow_name
+    # The oracle arm gets the observation deadline like the Builder arm does.
+    assert deadline is not None and now < deadline <= time.monotonic() + 1.0
+
+
+def test_an_oracle_create_spends_one_wait_budget_across_its_gate_and_persistence(
+    harness: ModuleType,
+    arm: ModuleType,
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    spec = _spec(final_instructions="x")
+    family = harness._create_name_family(spec.flow_name)
+    gate_held = threading.Event()
+    release_gate = threading.Event()
+
+    def hold_family() -> None:
+        with harness._CREATE_GATES.hold(family, until=time.monotonic() + 30):
+            gate_held.set()
+            release_gate.wait(5)
+
+    holder = threading.Thread(target=hold_family)
+    holder.start()
+    assert gate_held.wait(3)
+    # The gate frees at 0.2 s of a 0.4 s budget; the persistence lock never does.
+    threading.Timer(0.2, release_gate.set).start()
+    assert arm._PERSISTENCE_LOCK.acquire(timeout=3)
+    started = time.monotonic()
+    try:
+        with pytest.raises(harness.BattleFlowLifecycleError) as exc_info:
+            _run(
+                harness,
+                arm,
+                monkeypatch,
+                tmp_path,
+                spec=spec,
+                materializer=_materializer(arm, _RecordingService()),
+                deadline_seconds=0.4,
+            )
+        waited = time.monotonic() - started
+    finally:
+        arm._PERSISTENCE_LOCK.release()
+        release_gate.set()
+        holder.join()
+
+    assert isinstance(exc_info.value.cause, harness.FlowCreateWaitExpired)
+    # Two stages that each got the whole budget would wait 0.2 + 0.4 s.
+    assert waited < 0.55
+
+
+def test_an_apply_whose_budget_has_ended_never_starts_even_with_a_free_lock(
+    arm: ModuleType,
+) -> None:
+    started: list[str] = []
+
+    @asynccontextmanager
+    async def persistence() -> Any:
+        started.append("apply")
+        yield
+
+    materializer = _materializer(
+        arm, _RecordingService(), persistence_scope=persistence
+    )
+    with pytest.raises(arm.PersistenceWaitExpired):
+        materializer.materialize(_request(arm, wait_until=time.monotonic() - 1))
+
+    assert started == []
+    assert arm._PERSISTENCE_LOCK.acquire(timeout=1)  # nothing is left held
+    arm._PERSISTENCE_LOCK.release()
+
+
+def test_an_apply_whose_budget_ends_while_it_acquires_releases_and_never_starts(
+    arm: ModuleType, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    started: list[str] = []
+    events: list[str] = []
+
+    class LateLock:
+        def acquire(self, timeout: float) -> bool:
+            time.sleep(timeout + 0.05)  # the lock frees just after the budget
+            events.append("acquired")
+            return True
+
+        def release(self) -> None:
+            events.append("released")
+
+    @asynccontextmanager
+    async def persistence() -> Any:
+        started.append("apply")
+        yield
+
+    monkeypatch.setattr(arm, "_PERSISTENCE_LOCK", LateLock())
+    materializer = _materializer(
+        arm, _RecordingService(), persistence_scope=persistence
+    )
+    with pytest.raises(arm.PersistenceWaitExpired):
+        materializer.materialize(_request(arm, wait_until=time.monotonic() + 0.1))
+
+    assert started == [] and events == ["acquired", "released"]
 
 
 def _refused(arm: ModuleType) -> Exception:

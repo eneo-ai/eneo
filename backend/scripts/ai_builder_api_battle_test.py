@@ -26,14 +26,14 @@ import unicodedata
 from collections import Counter, deque
 from collections.abc import Callable, Iterator, Mapping, Sequence
 from concurrent.futures import FIRST_COMPLETED, Future, ThreadPoolExecutor, wait
-from contextlib import contextmanager
+from contextlib import AbstractContextManager, contextmanager
 from dataclasses import asdict, dataclass, replace
 from dataclasses import field as dataclass_field
 from dataclasses import fields as dataclass_fields
 from decimal import Decimal
 from http.client import HTTPException
 from pathlib import Path
-from threading import BoundedSemaphore, Lock
+from threading import BoundedSemaphore, Condition, Lock
 from typing import Any, Literal, cast
 from urllib.error import HTTPError, URLError
 from urllib.parse import quote, urlsplit, urlunsplit
@@ -49,9 +49,6 @@ if _SCRIPTS_DIR not in sys.path:
 
 _MAX_CONCURRENT_OBSERVATIONS_PER_CASE = 1
 _FLOW_ISOLATION_SEMANTICS_VERSION = 1
-# Flow materialization lists active names before inserting. Serialize that
-# read-then-write operation so concurrent observations cannot select one suffix.
-_FLOW_APPLY_LOCK = Lock()
 
 from ai_builder_receipt import (  # noqa: E402
     ACQUISITION_FAILURE_CLASSES,
@@ -296,6 +293,10 @@ from eneo.flows.enums import (  # noqa: E402
     FlowOutputType,
     FlowRunStatus,
 )
+from eneo.flows.flow_authoring_name import (  # noqa: E402
+    flow_name_family,
+    normalize_flow_name,
+)
 from eneo.flows.flow_review_policy import FlowStepReviewMode  # noqa: E402
 from eneo.flows.runtime.docx_template_runtime import (  # noqa: E402
     extract_docx_text,
@@ -358,6 +359,115 @@ def _acquire_run_slot(
         slots.release()
         raise ObservationDeadlineExceeded("observation deadline reached")
     return slots
+
+
+class FlowCreateWaitExpired(ValueError):
+    """A create waited out its bound for the creates it must not overlap.
+
+    The harness's own wait, not the stack's: the create was never sent, so the
+    observation is an acquisition loss the slot can be re-measured from.
+    """
+
+
+def _create_wait_until(config: ApiConfig, *, timeout_seconds: float) -> float:
+    """The monotonic time a create may wait until, fixed once per create: the
+    observation's deadline, or the run's own timeout outside one (the rule of
+    `_acquire_run_slot`). Every stage of the create spends this one budget."""
+
+    deadline = getattr(config, "deadline", None)
+    if deadline is None:
+        return time.monotonic() + timeout_seconds
+    return deadline
+
+
+def _require_create_budget(until: float) -> None:
+    if time.monotonic() >= until:
+        raise FlowCreateWaitExpired(
+            "the create's wait budget ended before it could start; "
+            "the create was not sent."
+        )
+
+
+class _CreateGates:
+    """Keeps creates that can allocate the same Flow name from overlapping.
+
+    The create route runs in one request transaction, but the allocator lists
+    the space's active names and inserts as separate statements in it, which
+    stays racy under READ COMMITTED. A create naming a family holds that
+    family's gate (so only creates that can clash wait) and shares the
+    any-family guard; a create whose name the harness cannot read may clash
+    with any family, so it holds the guard alone. The budget is checked before
+    anything is taken and after every acquisition, and an expired one releases
+    what it took and ends in `FlowCreateWaitExpired`. Gates live for the
+    process, one per distinct family attempted (up to cases x repetitions per
+    run), which needs no eviction.
+    """
+
+    def __init__(self) -> None:
+        self._condition = Condition()
+        self._sharing = 0
+        self._exclusive = False
+        self._families: dict[str, Lock] = {}
+
+    @contextmanager
+    def hold(self, family: str | None, *, until: float) -> Iterator[None]:
+        alone = family is None
+        with self._condition:
+            if not self._condition.wait_for(
+                lambda: not self._exclusive and not (alone and self._sharing),
+                timeout=max(0.0, until - time.monotonic()),
+            ):
+                raise FlowCreateWaitExpired(
+                    "another create that may allocate the same Flow name held "
+                    "its gate past the wait budget; the create was not sent."
+                )
+            _require_create_budget(until)
+            if alone:
+                self._exclusive = True
+            else:
+                self._sharing += 1
+            gate = None if family is None else self._families.setdefault(family, Lock())
+        try:
+            if gate is None:
+                yield
+                return
+            if not gate.acquire(timeout=max(0.0, until - time.monotonic())):
+                raise FlowCreateWaitExpired(
+                    "another create for the same Flow name held its gate past "
+                    "the wait budget; the create was not sent."
+                )
+            try:
+                _require_create_budget(until)
+                yield
+            finally:
+                gate.release()
+        finally:
+            with self._condition:
+                if alone:
+                    self._exclusive = False
+                else:
+                    self._sharing -= 1
+                self._condition.notify_all()
+
+
+_CREATE_GATES = _CreateGates()
+
+
+def _create_name_family(flow_name: object) -> str | None:
+    """The family a create allocates from, or None when the name is unreadable."""
+
+    if not isinstance(flow_name, str):
+        return None
+    try:
+        return flow_name_family(normalize_flow_name(flow_name)).casefold()
+    except ValueError:
+        return None
+
+
+def _create_gate(
+    config: ApiConfig, *, flow_name: object, wait_until: float
+) -> AbstractContextManager[None]:
+    return _CREATE_GATES.hold(_create_name_family(flow_name), until=wait_until)
 
 
 def _without_deadline(config: ApiConfig) -> ApiConfig:
@@ -1466,7 +1576,7 @@ def main() -> int:
             )
         case = cases[0]
         cases_path = _cases_path_from_args(args)
-        bundle = _run_case(
+        bundle = _observation_runner(args)(
             case=case,
             config=config,
             args=args,
@@ -3896,13 +4006,23 @@ def _observation_runner(args: argparse.Namespace) -> Callable[..., JsonObject]:
 
     arm = getattr(args, "arm", "builder")
     if arm == "builder":
-        return _run_case
-    if arm == "oracle":
-        return functools.partial(
+        run: Callable[..., JsonObject] = _run_case
+    elif arm == "oracle":
+        run = functools.partial(
             importlib.import_module(ORACLE_ARM_MODULE).run_oracle_case,
             harness=sys.modules[__name__],
         )
-    raise ValueError(f"unknown arm {arm!r}; choose one of {', '.join(ARMS)}.")
+    else:
+        raise ValueError(f"unknown arm {arm!r}; choose one of {', '.join(ARMS)}.")
+    seconds = getattr(args, "observation_deadline_seconds", None)
+
+    def run_within_deadline(*, config: ApiConfig, **kwargs: Any) -> JsonObject:
+        # The one place an observation's total time starts, for every arm.
+        if seconds:
+            config = replace(config, deadline=time.monotonic() + seconds)
+        return run(config=config, **kwargs)
+
+    return run_within_deadline
 
 
 def _acquire_suite_observation(
@@ -5112,9 +5232,6 @@ def _run_case(
     cases_path: Path | None = DEFAULT_CASES_FILE,
     provisioned_fixtures: Mapping[str, object] | None = None,
 ) -> JsonObject:
-    deadline_seconds = getattr(args, "observation_deadline_seconds", None)
-    if deadline_seconds:
-        config = replace(config, deadline=time.monotonic() + deadline_seconds)
     if case.edit is None:
         return _run_case_session(
             case=case,
@@ -5654,6 +5771,7 @@ def _run_case_session(
                     case=case,
                     config=config,
                     plan_id=plan_id,
+                    flow_name=_plan_spec(plan).get("flow_name") if plan else None,
                     runtime_file_paths=runtime_file_paths,
                     timeout_seconds=args.timeout_seconds,
                     artifact_output_dir=artifact_output_dir,
@@ -5917,7 +6035,8 @@ def _apply_execute_and_cleanup_flow(
     seeded_flow: SeededFlow | None = None,
     edit_evidence: JsonObject | None = None,
     structure_passed: Callable[[], bool] | None = None,
-    create_flow: Callable[[], JsonObject] | None = None,
+    create_flow: Callable[[float], JsonObject] | None = None,
+    flow_name: object = None,
 ) -> tuple[JsonObject, JsonObject | None, JsonObject]:
     """Own one benchmark Flow from materialization through evidence.
 
@@ -5929,6 +6048,10 @@ def _apply_execute_and_cleanup_flow(
     seeding owner (`_run_case`), which deletes it. An edit runs only when its
     structure passed: a failed edit is already failed, and its run would only
     spend the runtime model.
+
+    A create holds only the gate of the Flow name it allocates from
+    (`flow_name`, the name the plan or spec asks for); one wait budget, fixed
+    here, is spent across the gate and `create_flow`'s own waits.
     """
 
     apply_result: JsonObject | None = None
@@ -5943,9 +6066,10 @@ def _apply_execute_and_cleanup_flow(
     try:
         try:
             if seeded_flow is None:
-                with _FLOW_APPLY_LOCK:
+                wait_until = _create_wait_until(config, timeout_seconds=timeout_seconds)
+                with _create_gate(config, flow_name=flow_name, wait_until=wait_until):
                     if create_flow is not None:
-                        apply_result = create_flow()
+                        apply_result = create_flow(wait_until)
                     else:
                         if plan_id is None:
                             raise ValueError("a create needs a plan or create_flow.")

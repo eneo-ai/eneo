@@ -38,6 +38,7 @@ import hashlib
 import importlib
 import json
 import threading
+import time
 from collections.abc import AsyncIterator, Awaitable, Callable, Mapping, Sequence
 from contextlib import AbstractAsyncContextManager, asynccontextmanager
 from dataclasses import dataclass
@@ -464,6 +465,9 @@ class MaterializeRequest:
     gold: GoldSpec
     spec: FlowDraftSpecCore
     template_file_id: UUID | None
+    # The monotonic time the apply may wait until for the process singletons it
+    # shares with other applies; past it the apply is lost, never started.
+    wait_until: float
 
 
 @dataclass(frozen=True, slots=True)
@@ -479,6 +483,10 @@ class MaterializeRefused(ValueError):
     def __init__(self, *, code: str, message: str) -> None:
         super().__init__(message)
         self.code = code
+
+
+class PersistenceWaitExpired(ValueError):
+    """The apply waited out its bound for the process singletons."""
 
 
 class MaterializeInfrastructureError(URLError):
@@ -559,8 +567,12 @@ async def _process_persistence() -> AsyncIterator[None]:
         await stop_persistence()
 
 
-# The session manager and the object-content runtime are singletons of the
-# process and refuse a second start, so one apply owns them at a time.
+# The database session manager and the object-content runtime are process
+# singletons: the lifespan's start refuses a second start while one is running,
+# so one apply owns them at a time. Each apply starts and stops them on its own
+# event loop; narrowing this would need one process-lifetime loop with
+# persistence started once, a different design. The wait is bounded, never
+# open-ended.
 _PERSISTENCE_LOCK = threading.Lock()
 
 
@@ -593,9 +605,20 @@ class InProcessSpecMaterializer:
         self._persistence = persistence or _process_persistence
 
     def materialize(self, request: MaterializeRequest) -> MaterializedFlow:
+        remaining = request.wait_until - time.monotonic()
+        if remaining <= 0 or not _PERSISTENCE_LOCK.acquire(timeout=remaining):
+            raise PersistenceWaitExpired(
+                "the apply's wait budget ended before it could start; "
+                "the apply was not started."
+            )
+        if time.monotonic() >= request.wait_until:
+            _PERSISTENCE_LOCK.release()
+            raise PersistenceWaitExpired(
+                "the apply's wait budget ended while it waited; "
+                "the apply was not started."
+            )
         try:
-            with _PERSISTENCE_LOCK:
-                return asyncio.run(self._apply(request))
+            return asyncio.run(self._apply(request))
         except _REFUSING_EXCEPTIONS as error:
             raise MaterializeRefused(
                 code=str(getattr(error, "code", type(error).__name__)),
@@ -606,6 +629,8 @@ class InProcessSpecMaterializer:
                 f"applying the gold spec failed in the stack: "
                 f"{type(error).__name__}: {error}"
             ) from error
+        finally:
+            _PERSISTENCE_LOCK.release()
 
     async def _apply(self, request: MaterializeRequest) -> MaterializedFlow:
         async with self._persistence(), self._session_scope() as session:
@@ -852,16 +877,21 @@ def run_oracle_case(
     materializer = getattr(args, "oracle_materializer", None) or _default_materializer(
         harness, config
     )
-    request = MaterializeRequest(
-        space_id=UUID(str(args.space_id)),
-        gold=gold,
-        spec=spec,
-        template_file_id=template_file_id,
-    )
     kept: JsonObject = {}
 
-    def create_flow() -> JsonObject:
-        flow = materializer.materialize(request)
+    def create_flow(wait_until: float) -> JsonObject:
+        # Built here: the wait budget is the create's, spent across the gate.
+        request = MaterializeRequest(
+            space_id=UUID(str(args.space_id)),
+            gold=gold,
+            spec=spec,
+            template_file_id=template_file_id,
+            wait_until=wait_until,
+        )
+        try:
+            flow = materializer.materialize(request)
+        except PersistenceWaitExpired as error:
+            raise harness.FlowCreateWaitExpired(str(error)) from error
         kept["materialized"] = flow
         try:
             # Read back before the run, while the flow is as applied: each
@@ -897,6 +927,7 @@ def run_oracle_case(
                 timeout_seconds=args.timeout_seconds,
                 artifact_output_dir=artifact_output_dir,
                 create_flow=create_flow,
+                flow_name=spec.flow_name,
             )
         )
     except harness.BattleFlowLifecycleError as error:

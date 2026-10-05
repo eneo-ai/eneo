@@ -5,6 +5,7 @@ import re
 MAX_FLOW_NAME_LENGTH = 120
 
 _WHITESPACE_RE = re.compile(r"\s+")
+_NUMBERED_SUFFIX_RE = re.compile(r"\s*\(\d+\)$")
 _SLUG_DELIMITER_RE = re.compile(r"[_-]+")
 _SLUG_TOKEN_RE = re.compile(r"[A-Za-z0-9]+")
 _GENERATED_NAME_TOKENS = {
@@ -45,6 +46,12 @@ def normalize_flow_name(value: str) -> str:
             f"Flow names must be at most {MAX_FLOW_NAME_LENGTH} characters long."
         )
     return normalized
+
+
+def flow_name_family(value: str) -> str:
+    """The name without the ` (n)` suffix a create adds when the name is taken."""
+
+    return _NUMBERED_SUFFIX_RE.sub("", value)
 
 
 def normalize_optional_flow_name(value: str | None) -> str | None:

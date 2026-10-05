@@ -59,6 +59,7 @@ _DOCX_MIME = "application/vnd.openxmlformats-officedocument.wordprocessingml.doc
 _HARNESS_PROCESS = """
 import json
 import sys
+import time
 from types import SimpleNamespace
 from uuid import UUID
 
@@ -87,6 +88,7 @@ request = arm.MaterializeRequest(
     template_file_id=(
         UUID(payload["template_file_id"]) if payload["template_file_id"] else None
     ),
+    wait_until=time.monotonic() + 600.0,
 )
 first_error = None
 if payload["fail_first_start"]:
