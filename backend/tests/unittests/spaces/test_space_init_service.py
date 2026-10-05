@@ -14,11 +14,14 @@ def _service(space):
     )
     space_repo = MagicMock()
     space_repo.update = AsyncMock(side_effect=lambda s: s)
+    assistant_repo = MagicMock()
+    assistant_repo.update = AsyncMock()
     init_service = SpaceInitService(
         user=MagicMock(),
         space_service=space_service,
         assistant_service=assistant_service,
         space_repo=space_repo,
+        assistant_repo=assistant_repo,
     )
     return init_service, assistant_service
 
@@ -119,7 +122,10 @@ async def test_personal_space_assigns_default_model_when_assistant_has_none():
     assistant.update.assert_called_once()
     assert assistant.update.call_args.kwargs["completion_model"] is org_default
     assert "completion_model_kwargs" in assistant.update.call_args.kwargs
-    init_service.space_repo.update.assert_awaited_once_with(space)
+    init_service.assistant_repo.update.assert_awaited_once_with(assistant)
+    # Only the assistant row is written; a full space rewrite would delete
+    # sibling assistants the loader skipped as invalid.
+    init_service.space_repo.update.assert_not_awaited()
 
 
 async def test_personal_space_replaces_deleted_model():
@@ -133,7 +139,7 @@ async def test_personal_space_replaces_deleted_model():
     await init_service.get_personal_space()
 
     assert assistant.update.call_args.kwargs["completion_model"] is org_default
-    init_service.space_repo.update.assert_awaited_once()
+    init_service.assistant_repo.update.assert_awaited_once_with(assistant)
 
 
 async def test_personal_space_replaces_disabled_model():
@@ -147,7 +153,7 @@ async def test_personal_space_replaces_disabled_model():
     await init_service.get_personal_space()
 
     assert assistant.update.call_args.kwargs["completion_model"] is org_default
-    init_service.space_repo.update.assert_awaited_once()
+    init_service.assistant_repo.update.assert_awaited_once_with(assistant)
 
 
 async def test_personal_space_keeps_usable_model():
@@ -163,7 +169,7 @@ async def test_personal_space_keeps_usable_model():
     await init_service.get_personal_space()
 
     assistant.update.assert_not_called()
-    init_service.space_repo.update.assert_not_awaited()
+    init_service.assistant_repo.update.assert_not_awaited()
 
 
 async def test_personal_space_without_usable_models_leaves_assistant_alone():
@@ -177,7 +183,7 @@ async def test_personal_space_without_usable_models_leaves_assistant_alone():
     await init_service.get_personal_space()
 
     assistant.update.assert_not_called()
-    init_service.space_repo.update.assert_not_awaited()
+    init_service.assistant_repo.update.assert_not_awaited()
 
 
 async def test_personal_space_without_any_models_leaves_assistant_alone():
@@ -187,7 +193,7 @@ async def test_personal_space_without_any_models_leaves_assistant_alone():
     await init_service.get_personal_space()
 
     assistant.update.assert_not_called()
-    init_service.space_repo.update.assert_not_awaited()
+    init_service.assistant_repo.update.assert_not_awaited()
 
 
 async def test_personal_space_policy_does_not_override_users_choice():
@@ -210,7 +216,7 @@ async def test_personal_space_policy_does_not_override_users_choice():
     await init_service.get_personal_space()
 
     assistant.update.assert_not_called()
-    init_service.space_repo.update.assert_not_awaited()
+    init_service.assistant_repo.update.assert_not_awaited()
 
 
 async def test_personal_space_policy_stores_policy_default_when_model_missing():
@@ -233,7 +239,7 @@ async def test_personal_space_policy_stores_policy_default_when_model_missing():
     await init_service.get_personal_space()
 
     assert assistant.update.call_args.kwargs["completion_model"] is policy_default
-    init_service.space_repo.update.assert_awaited_once()
+    init_service.assistant_repo.update.assert_awaited_once_with(assistant)
 
 
 async def test_personal_space_policy_with_empty_whitelist_leaves_assistant_alone():
@@ -248,7 +254,7 @@ async def test_personal_space_policy_with_empty_whitelist_leaves_assistant_alone
     await init_service.get_personal_space()
 
     assistant.update.assert_not_called()
-    init_service.space_repo.update.assert_not_awaited()
+    init_service.assistant_repo.update.assert_not_awaited()
 
 
 async def test_personal_space_policy_off_falls_back_to_org_default():

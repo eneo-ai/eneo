@@ -10,6 +10,7 @@ if TYPE_CHECKING:
     from uuid import UUID
 
     from eneo.assistants.assistant import Assistant
+    from eneo.assistants.assistant_repo import AssistantRepository
     from eneo.assistants.assistant_service import AssistantService
     from eneo.completion_models.domain.completion_model import CompletionModel
     from eneo.governance_policy.application.effective_config_service import (
@@ -40,6 +41,7 @@ class SpaceInitService:
         space_service: "SpaceService",
         assistant_service: "AssistantService",
         space_repo: "SpaceRepository",
+        assistant_repo: "AssistantRepository",
         effective_config_service: "EffectiveConfigService | None" = None,
     ):
         super().__init__()
@@ -47,6 +49,7 @@ class SpaceInitService:
         self.space_service = space_service
         self.assistant_service = assistant_service
         self.space_repo = space_repo
+        self.assistant_repo = assistant_repo
         self.effective_config_service = effective_config_service
 
     async def _update_space_with_default_assistant(self, space: "Space"):
@@ -102,6 +105,9 @@ class SpaceInitService:
         enforced, the policy's own resolution is stored so the saved id matches
         what the chat actually runs. With no usable model anywhere the
         assistant is left alone, so the "no model available" state stays true.
+
+        Only the assistant row is written. Rewriting the whole space would also
+        delete any sibling assistant the loader skipped as invalid.
         """
         assistant = space.default_assistant
         if assistant is None:
@@ -129,7 +135,8 @@ class SpaceInitService:
             _unusable_reason(current),
             fallback.id,
         )
-        return await self.space_repo.update(space)
+        await self.assistant_repo.update(assistant)
+        return space
 
     async def _fallback_completion_model(
         self, space: "Space", assistant: "Assistant"
