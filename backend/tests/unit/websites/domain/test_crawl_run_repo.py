@@ -4,13 +4,11 @@ from uuid import uuid4
 import pytest
 
 from eneo.database.tables.websites_table import Websites
-from eneo.websites.domain.crawl_run import CrawlOutcome
 from eneo.websites.domain.crawl_run_repo import CrawlRunRepository
 from eneo.websites.domain.website import UpdateInterval
-from eneo.worker.crawl_tasks import _crawl_counts_as_scheduled_run
 
 
-def test_useful_partial_result_resets_website_failure_backoff() -> None:
+def test_scheduled_run_resets_website_failure_backoff() -> None:
     now = datetime(2026, 9, 30, tzinfo=timezone.utc)
     website = Websites(
         id=uuid4(),
@@ -21,11 +19,7 @@ def test_useful_partial_result_resets_website_failure_backoff() -> None:
     )
 
     CrawlRunRepository._update_website_circuit_breaker(
-        website,
-        counts_as_scheduled_run=_crawl_counts_as_scheduled_run(
-            CrawlOutcome.PARTIAL, useful_items=2, failed_items=1
-        ),
-        now=now,
+        website, counts_as_scheduled_run=True, now=now
     )
 
     assert website.consecutive_failures == 0

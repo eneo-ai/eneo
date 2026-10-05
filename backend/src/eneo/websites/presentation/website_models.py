@@ -46,6 +46,10 @@ def _require_http_url(url: str) -> str:
         raise ValueError(
             "URL must start with http:// or https:// and include a host name"
         )
+    try:
+        parsed.port
+    except ValueError:
+        raise ValueError("URL port must be a number between 0 and 65535") from None
     return url
 
 

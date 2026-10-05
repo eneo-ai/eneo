@@ -14,7 +14,6 @@ from eneo.websites.domain.crawl_run_repo import (
     WebsiteCrawlActiveError,
     WebsiteCrawlCleanupPendingError,
 )
-from eneo.websites.domain.http_auth_credentials import HttpAuthDestinationError
 from eneo.websites.domain.website import UpdateInterval, Website
 
 if TYPE_CHECKING:
@@ -153,7 +152,9 @@ class WebsiteCRUDService:
                 http_auth_username=http_auth_username,
                 http_auth_password=http_auth_password,
             )
-        except HttpAuthDestinationError as exc:
+        except ValueError as exc:
+            # HttpAuthDestinationError and the auth-field pairing rule are
+            # input validation, not server faults.
             raise BadRequestException(str(exc)) from exc
 
         await self.space_repo.update(space=space)

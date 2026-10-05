@@ -36,6 +36,8 @@ def test_create_trims_surrounding_whitespace():
         "https://",
         "www.sundsvall.se",
         "",
+        "https://example.com:abc/",
+        "https://example.com:70000/",
     ],
 )
 def test_create_rejects_non_http_urls(url: str):
@@ -43,9 +45,10 @@ def test_create_rejects_non_http_urls(url: str):
         WebsiteCreate(url=url)
 
 
-def test_update_rejects_non_http_url():
+@pytest.mark.parametrize("url", ["file:///etc/hostname", "https://example.com:abc/"])
+def test_update_rejects_non_http_url(url: str):
     with pytest.raises(ValidationError):
-        WebsiteUpdate(url="file:///etc/hostname")
+        WebsiteUpdate(url=url)
 
 
 def test_update_accepts_http_url_and_omitted_url():
