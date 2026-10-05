@@ -4463,7 +4463,6 @@
   "config_attachment_meter_scope": "Estimate for prompt text and directly loaded attachments. Chat history, skills, tools and retrieved content use additional context.",
   "material_attachments_description": "Files attached to the assistant. Each file shows whether it is loaded before every answer or opened on demand.",
   "source_metadata_label": "Document properties",
-  "source_metadata_label": "Document properties",
   "sharepoint_select_all_matches": "Select all matches ({count})",
   "sharepoint_deselect_all_matches": "Deselect the matches",
   "sharepoint_search_content": "Search files and properties in {name}",

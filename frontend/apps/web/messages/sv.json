@@ -4463,7 +4463,6 @@
   "config_attachment_meter_scope": "Uppskattning för instruktionstext och bilagor som läses in direkt. Chatthistorik, skills, verktyg och hämtat innehåll tillkommer.",
   "material_attachments_description": "Filer som är bifogade till assistenten. Varje fil visar om den läses in inför varje svar eller öppnas vid behov.",
   "source_metadata_label": "Dokumentegenskaper",
-  "source_metadata_label": "Dokumentegenskaper",
   "sharepoint_select_all_matches": "Välj alla träffar ({count})",
   "sharepoint_deselect_all_matches": "Avmarkera träffarna",
   "sharepoint_search_content": "Sök filer och egenskaper i {name}",
