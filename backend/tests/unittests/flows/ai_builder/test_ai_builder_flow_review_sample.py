@@ -210,7 +210,8 @@ def test_excerpts_mark_what_was_not_recorded_or_cannot_be_read() -> None:
             1,
             effective_prompt="Läs källorna.",
             input_payload_json={"text": "Underlag"},
-            output_payload_json={"item_map_execution_mode": "per_item", "text": "Ut"},
+            output_payload_json={"text": "Ut"},
+            model_parameters_json={"item_map_execution_mode": "per_item"},
         ),
         _record(
             2,
