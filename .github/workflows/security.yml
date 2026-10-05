@@ -6,7 +6,15 @@ on:
       base_sha:
         type: string
         default: ''
+      audit_published:
+        type: boolean
+        default: false
   workflow_dispatch:
+    inputs:
+      audit_published:
+        description: Recheck already published develop images
+        type: boolean
+        default: true
   schedule:
     - cron: '17 6 * * 1'
 
@@ -16,7 +24,7 @@ permissions:
 jobs:
   published-images:
     name: Published image (${{ matrix.image }})
-    if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
+    if: github.event_name == 'schedule' || inputs.audit_published
     runs-on: ubuntu-latest
     timeout-minutes: 15
     strategy:
