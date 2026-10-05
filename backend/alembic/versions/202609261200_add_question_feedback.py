@@ -5,7 +5,7 @@ optional comment and the principal that rated it. Additive; the
 conversation-level rating on sessions.feedback_value is left as it is.
 
 Revision ID: 202609261200
-Revises: 202609231001
+Revises: 202609221000
 Create Date: 2026-09-26 12:00:00.000000
 """
 
@@ -19,7 +19,7 @@ from sqlalchemy.dialects import postgresql
 from alembic import op
 
 revision: str = "202609261200"
-down_revision: str | None = "202609231001"
+down_revision: str | None = "202609221000"
 branch_labels: str | Sequence[str] | None = None
 depends_on: str | Sequence[str] | None = None
 
