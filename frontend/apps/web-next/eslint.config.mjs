@@ -10,13 +10,12 @@ const generatedAndVendored = [
   "src/components/ai-elements/**",
   "src/components/ui/**",
   "src/app/global-error.tsx",
-  "src/app/(app)/chat-mock/**",
   "src/**/*.test.{ts,tsx}"
 ];
 
-// UI that never ships: tests and the dev-only chat mock (404 in production).
+// UI that never ships: tests.
 // Vendored primitives DO ship, so the accessibility rules cover them too.
-const notShippedUi = ["src/**/*.test.tsx", "src/app/(app)/chat-mock/**"];
+const notShippedUi = ["src/**/*.test.tsx"];
 
 const eslintConfig = defineConfig([
   ...nextVitals,
