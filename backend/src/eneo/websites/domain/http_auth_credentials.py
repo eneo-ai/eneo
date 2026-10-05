@@ -8,7 +8,21 @@ Why Value Object:
 """
 
 from dataclasses import dataclass
-from urllib.parse import urlparse
+from urllib.parse import urlsplit
+
+from yarl import URL
+
+from eneo.websites.domain.source_url import normalize_url
+
+
+class HttpAuthDestinationError(ValueError):
+    """Stored credentials cannot safely be used for the requested destination."""
+
+    def __init__(self) -> None:
+        super().__init__(
+            "HTTP authentication is not bound to this website URL. "
+            "Re-enter the username and password, or remove authentication."
+        )
 
 
 @dataclass(frozen=True)
@@ -19,12 +33,47 @@ class HttpAuthCredentials:
     - This object holds PLAINTEXT credentials temporarily during domain operations
     - Never persisted in plaintext - encryption happens at infrastructure boundary
     - Short-lived - exists only during request/crawl lifecycle
-    - Domain-locked to prevent credential leakage across crawl origins
+    - Origin-bound to prevent credential leakage across crawl destinations
     """
 
     username: str
     password: str
     auth_domain: str
+
+    @staticmethod
+    def origin_for_url(url: str) -> str:
+        """Use the crawl transport's origin and IDNA rules after URL normalization."""
+        normalized = normalize_url(url.strip())
+        if normalized is None:
+            raise ValueError("HTTP authentication requires an HTTP(S) URL")
+        return str(URL(normalized).origin())
+
+    @classmethod
+    def require_destination(cls, auth_domain: str | None, url: str) -> None:
+        """Check persisted binding before a worker decrypts any secret.
+
+        Before origin binding, http_auth_domain stored only netloc. Those rows
+        prove host/port ownership but cannot prove the original scheme. They
+        remain usable only over HTTPS at that authority, without rewriting the
+        binding. HTTP requires explicitly entered credentials with a full origin.
+        """
+        if not auth_domain:
+            raise HttpAuthDestinationError()
+        binding = auth_domain.strip()
+        qualified = "://" in binding
+        bound_url = binding if qualified else f"https://{binding}"
+        try:
+            parsed = urlsplit(bound_url)
+            valid_binding = (
+                parsed.path in {"", "/"}
+                and not parsed.query
+                and not parsed.fragment
+                and cls.origin_for_url(bound_url) == cls.origin_for_url(url)
+            )
+        except ValueError:
+            valid_binding = False
+        if not valid_binding:
+            raise HttpAuthDestinationError()
 
     def __post_init__(self):
         """Validate credentials meet business rules."""
@@ -41,28 +90,24 @@ class HttpAuthCredentials:
     def from_website_url(
         cls, username: str, password: str, website_url: str
     ) -> "HttpAuthCredentials":
-        """Factory method to create credentials with auto-extracted domain.
+        """Bind newly supplied credentials to the exact normalized HTTP origin.
 
-        Extracting the domain from the website URL ensures credentials only apply
-        to the intended crawl origin.
+        The existing auth_domain storage field carries the full origin for newly
+        supplied credentials; older host-only values are never silently upgraded.
 
         Args:
             username: HTTP Basic Auth username
             password: HTTP Basic Auth password
-            website_url: Full website URL to extract domain from
+            website_url: Website URL to bind the credentials to
 
         Returns:
-            HttpAuthCredentials with domain extracted from URL
+            HttpAuthCredentials bound to the URL's scheme, host and effective port
 
         Raises:
-            ValueError: If domain cannot be extracted from URL
+            ValueError: If the URL is not a valid HTTP origin
         """
-        parsed_uri = urlparse(website_url)
-        auth_domain = parsed_uri.netloc
-
-        if not auth_domain:
-            raise ValueError(f"Cannot extract domain from URL: {website_url}")
-
         return cls(
-            username=username.strip(), password=password, auth_domain=auth_domain
+            username=username.strip(),
+            password=password,
+            auth_domain=cls.origin_for_url(website_url),
         )
