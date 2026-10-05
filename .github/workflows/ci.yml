@@ -871,14 +871,18 @@ jobs:
         if: steps.build-image.outcome == 'success' && matrix.image != 'devcontainer'
       - name: Scan the built application image
         if: steps.build-image.outcome == 'success' && matrix.image != 'devcontainer'
-        env:
-          IMAGE: eneo-${{ matrix.image }}:ci
-        run: trivy image --scanners vuln --severity HIGH,CRITICAL --exit-code 1 --format json --output "$RUNNER_TEMP/image-security.json" "$IMAGE"
+        uses: ./.github/actions/scan-application-image
+        with:
+          image: eneo-${{ matrix.image }}:ci
+          output-directory: ${{ runner.temp }}/image-security
+      - name: Verify the application runtime
+        if: ${{ !cancelled() && steps.build-image.outcome == 'success' && matrix.image != 'devcontainer' }}
+        run: ./scripts/check-application-image.sh "${{ matrix.image }}" "eneo-${{ matrix.image }}:ci"
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         if: always() && steps.build-image.outcome == 'success' && matrix.image != 'devcontainer'
         with:
           name: security-image-${{ matrix.image }}
-          path: ${{ runner.temp }}/image-security.json
+          path: ${{ runner.temp }}/image-security/*.json
           retention-days: 14
 
   ci:

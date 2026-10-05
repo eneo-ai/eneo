@@ -45,12 +45,10 @@ ENV ENEO_BACKEND_URL=http://build.invalid \
 RUN npm run build
 
 # ---- runner -----------------------------------------------------------------
-FROM node:22-trixie-slim AS runner
-# Apply available OS fixes and remove package managers: runtime executes only Node.
-RUN apt-get update && apt-get upgrade -y && rm -rf /var/lib/apt/lists/* \
-    /usr/local/lib/node_modules/npm /usr/local/lib/node_modules/corepack /opt/yarn-* \
-    && rm -f /usr/local/bin/npm /usr/local/bin/npx /usr/local/bin/corepack \
-    /usr/local/bin/yarn /usr/local/bin/yarnpkg
+FROM gcr.io/distroless/nodejs22-debian13:nonroot@sha256:ec2313763dd43931543bd03830466e0c409ce73a487e8d46f10db72d3b816c1c AS runner
+# Keep glibc aligned with the builder, including Sharp's native module.
+# Deployment health checks execute `node` directly rather than the entrypoint.
+ENV PATH="/nodejs/bin:$PATH"
 
 WORKDIR /app
 ENV NODE_ENV=production \
@@ -58,11 +56,11 @@ ENV NODE_ENV=production \
     HOSTNAME=0.0.0.0
 
 # Standalone output bundles the minimal server + traced node_modules.
-COPY --from=builder --chown=node:node /repo/apps/web-next/.next/standalone ./
-COPY --from=builder --chown=node:node /repo/apps/web-next/.next/static ./apps/web-next/.next/static
-COPY --from=builder --chown=node:node /repo/apps/web-next/public ./apps/web-next/public
+COPY --from=builder --chown=1000:1000 /repo/apps/web-next/.next/standalone ./
+COPY --from=builder --chown=1000:1000 /repo/apps/web-next/.next/static ./apps/web-next/.next/static
+COPY --from=builder --chown=1000:1000 /repo/apps/web-next/public ./apps/web-next/public
 
-USER node
+USER 1000:1000
 EXPOSE 3000
 # Standalone server entrypoint lives at the app's path inside the bundle.
-CMD ["node", "apps/web-next/server.js"]
+CMD ["apps/web-next/server.js"]

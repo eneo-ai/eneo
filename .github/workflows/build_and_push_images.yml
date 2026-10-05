@@ -180,14 +180,25 @@ jobs:
           cache-to: type=gha,mode=max
 
       - uses: ./.github/actions/security-tools
-      - name: Scan and publish the verified image
+      - uses: ./.github/actions/scan-application-image
+        with:
+          image: ${{ steps.build-backend.outputs.imageid }}
+          output-directory: ${{ runner.temp }}/image-security
+      - name: Verify backend runtime
+        run: ./scripts/check-application-image.sh backend "${{ steps.build-backend.outputs.imageid }}"
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        if: always()
+        with:
+          name: security-publish-backend
+          path: ${{ runner.temp }}/image-security/*.json
+          retention-days: 14
+      - name: Publish the verified image
         id: publish-backend
         env:
           IMAGE_TAGS: ${{ steps.meta-backend.outputs.tags }}
         run: |
           set -euo pipefail
           image="$(head -n 1 <<< "$IMAGE_TAGS")"
-          trivy image --scanners vuln --severity HIGH,CRITICAL --exit-code 1 "$image"
           while IFS= read -r tag; do
             [[ -z "$tag" ]] || docker push "$tag"
           done <<< "$IMAGE_TAGS"
@@ -296,14 +307,25 @@ jobs:
           cache-to: type=gha,mode=max,scope=${{ matrix.name }}
 
       - uses: ./.github/actions/security-tools
-      - name: Scan and publish the verified image
+      - uses: ./.github/actions/scan-application-image
+        with:
+          image: ${{ steps.build-frontend.outputs.imageid }}
+          output-directory: ${{ runner.temp }}/image-security
+      - name: Verify frontend runtime
+        run: ./scripts/check-application-image.sh "${{ matrix.name }}" "${{ steps.build-frontend.outputs.imageid }}"
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        if: always()
+        with:
+          name: security-publish-${{ matrix.name }}
+          path: ${{ runner.temp }}/image-security/*.json
+          retention-days: 14
+      - name: Publish the verified image
         id: publish-frontend
         env:
           IMAGE_TAGS: ${{ steps.meta-frontend.outputs.tags }}
         run: |
           set -euo pipefail
           image="$(head -n 1 <<< "$IMAGE_TAGS")"
-          trivy image --scanners vuln --severity HIGH,CRITICAL --exit-code 1 "$image"
           while IFS= read -r tag; do
             [[ -z "$tag" ]] || docker push "$tag"
           done <<< "$IMAGE_TAGS"

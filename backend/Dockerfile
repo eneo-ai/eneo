@@ -1,9 +1,21 @@
-FROM ghcr.io/astral-sh/uv:python3.11-trixie-slim AS builder
+FROM cgr.dev/chainguard/wolfi-base:latest@sha256:9c2092b053779e14c82fb50f77b37bcc38b7d2c83972352d5813280f9d035b03 AS runtime-base
+# Maintained glibc packages retain Python 3.11 and the complete audio format set.
+# Keep APK metadata: both distribution and upstream CVEs are gated in CI.
+RUN apk update && apk upgrade && apk add --no-cache \
+    python-3.11 bash ffmpeg-9.0 libmagic libxml2-16 libxslt libstdc++ \
+    && rm -rf /var/cache/apk/*
+
+FROM runtime-base AS builder
+COPY --from=ghcr.io/astral-sh/uv:0.12.23 /uv /usr/local/bin/uv
+# Link lxml to the maintained system libxml2/libxslt, avoiding a hidden copy in
+# the manylinux wheel. Only the builder needs compiler and development headers.
+RUN apk add --no-cache build-base python-3.11-dev libxml2-dev libxslt-dev
 
 # Set uv optimizations
 ENV UV_LINK_MODE=copy \
     UV_COMPILE_BYTECODE=1 \
-    UV_PYTHON_DOWNLOADS=never
+    UV_PYTHON_DOWNLOADS=never \
+    UV_NO_BINARY_PACKAGE=lxml
 
 WORKDIR /app
 
@@ -28,14 +40,7 @@ RUN mkdir -p /tiktoken
 ADD --chmod=644 https://openaipublic.blob.core.windows.net/encodings/cl100k_base.tiktoken /tiktoken/9b5ad71b2ce5302211f9c61530b329a4922fc6a4
 
 # Production stage
-FROM python:3.11-slim-trixie
-
-# Install runtime dependencies
-RUN apt-get update && apt-get upgrade -y && apt-get install -y --no-install-recommends ffmpeg libmagic1t64 && rm -rf /var/lib/apt/lists/*
-
-# The runtime uses the frozen application venv; global packaging tools are
-# build-only and bring a separate, otherwise unaudited dependency tree.
-RUN python -m pip uninstall -y pip setuptools wheel
+FROM runtime-base AS runner
 
 # Copy venv and tiktoken from builder
 COPY --from=builder /app/.venv /app/.venv

@@ -19,13 +19,10 @@ RUN bun run --filter @eneo/ui build && bun run --filter @eneo/web build
 # Stage 2: Production runtime using Node.js
 # Required ENV vars, see README.md
 # ORIGIN, JWT_SECRET, PUBLIC_API_URL
-FROM node:22-trixie-slim AS runner
-# Apply available OS fixes and remove package managers: runtime executes only Node.
-RUN apt-get update && apt-get upgrade -y && rm -rf /var/lib/apt/lists/* \
-    /usr/local/lib/node_modules/npm /usr/local/lib/node_modules/corepack /opt/yarn-* \
-    && rm -f /usr/local/bin/npm /usr/local/bin/npx /usr/local/bin/corepack \
-    /usr/local/bin/yarn /usr/local/bin/yarnpkg
-
+FROM gcr.io/distroless/nodejs22-debian13:nonroot@sha256:ec2313763dd43931543bd03830466e0c409ce73a487e8d46f10db72d3b816c1c AS runner
+# Keep glibc aligned with the builder; runtime has no shell/package managers.
+# Explicit PATH also supports deployment probes that execute `node` directly.
+ENV PATH="/nodejs/bin:$PATH"
 
 WORKDIR /app
 # No node_modules in this image: adapter-node bundles apps/web devDependencies into build/,
@@ -35,6 +32,6 @@ COPY --from=builder /app/apps/web/build build/
 COPY --from=builder /app/apps/web/package.json .
 
 EXPOSE 3000
-USER node
+USER 1000:1000
 ENV NODE_ENV="production"
-CMD ["node", "build"]
+CMD ["build"]

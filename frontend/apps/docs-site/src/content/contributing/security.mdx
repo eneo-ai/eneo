@@ -32,8 +32,14 @@ When this check fails, update the dependency to a safe version, remove it, or do
 
 The reusable `Security` workflow is part of the CI aggregate. It runs a complete
 lockfile audit, Semgrep's security-audit and GitHub Actions rules, and Gitleaks on
-added Git history. Application Docker candidates are scanned by Trivy; unfixed
-HIGH/CRITICAL findings block publication too. Reports are retained as artifacts.
+added Git history. Application Docker candidates are scanned by Trivy and Grype;
+unfixed HIGH/CRITICAL findings block publication too. Grype supplements Wolfi's
+distribution feed with upstream NVD/CPE matches. Both reports are retained as
+artifacts, and the weekly workflow rescans published develop images.
+Runtime checks exercise actual audio decoding and MP3 segmentation, native
+libraries, startup dispatch, SBOM tooling, frontend health and Next image
+optimization before publication. The runtime/update policy is maintained in
+`docs/SECURITY.md`; Docker Dependabot updates include both frontends.
 Temporary dependency mitigations require a documented owner, targeted tests and
 an expiry; see `frontend/patches/SECURITY.md`.
 

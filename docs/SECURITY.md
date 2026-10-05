@@ -57,10 +57,27 @@ The repository uses GitHub security features and CI to prevent regressions:
   frontend lock, runs Semgrep security-audit/GitHub Actions rules, and scans the
   added Git history with Gitleaks. It is included in the required CI aggregate
   and runs before image publication. Reports are retained as CI artifacts.
-- Each application image (backend, Svelte, Next) is scanned with Trivy before
-  publication. HIGH/CRITICAL findings, including unfixed findings, block the
-  image. CI also scans its locally built candidates. A frontend-only beta rollback
-  does not roll back the shared backend or database.
+- Each application image (backend, Svelte, Next) is scanned with Trivy and Grype
+  before publication. HIGH/CRITICAL findings, including unfixed findings, block
+  the image. The shared `.github/actions/scan-application-image` gate keeps both
+  raw reports. Grype also checks upstream NVD/CPE records for APK packages;
+  Trivy's Wolfi feed alone does not detect unfixed vulnerabilities. CI scans its
+  locally built candidates; the weekly Security run rechecks published develop
+  images. A frontend-only beta rollback does not roll back the shared backend
+  or database.
+- Frontend runtimes use digest-pinned Debian 13 Distroless Node 22 images. They
+  have no shell or package manager; probes execute `node` directly. Backend
+  builder/runtime share a digest-pinned Wolfi base with Python 3.11 and maintained
+  FFmpeg 9.0 packages. FFmpeg owns audio decoding and MP3 segmentation; there is
+  no wheel-bundled libsndfile. lxml is built against the scanned system
+  libxml2/libxslt. Package metadata stays in every image for inventory and scans.
+- Runtime maintainers review the weekly grouped Docker Dependabot updates
+  (one open PR per area, including both frontends). Base-digest updates rebuild
+  the package layer; scanners and runtime smoke tests must pass before merge.
+  A new advisory may require an immediate refresh outside that schedule.
+  `scripts/check-application-image.sh` is shared by CI and publication. It checks
+  real audio formats and failure cleanup, native parser loading, worker/API
+  launch dispatch, SBOM venv bootstrap, frontend health and Next image optimization.
 - Temporary dependency mitigations belong in `frontend/patches/SECURITY.md`, with
   an owner, exact advisory, regression tests and review expiry. The audit retains
   the raw finding and only accepts the named mitigation after its tests pass.
