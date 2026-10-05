@@ -12,7 +12,7 @@ import { env } from "@/lib/env";
  */
 
 /** Request headers forwarded to the backend (cookie et al. stay behind). */
-const FORWARDED_REQUEST_HEADERS = ["accept", "accept-language", "content-type"];
+const FORWARDED_REQUEST_HEADERS = ["accept", "accept-language", "content-type", "range"];
 
 /**
  * The only browser cookie forwarded to the backend. Audit-log access is gated
@@ -38,6 +38,8 @@ function rescopeSetCookie(setCookie: string): string {
 const FORWARDED_RESPONSE_HEADERS = [
   "content-type",
   "content-disposition",
+  "accept-ranges",
+  "content-range",
   "x-trace-id",
   "x-correlation-id"
 ];

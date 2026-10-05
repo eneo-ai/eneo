@@ -79,6 +79,34 @@ describe("/api/eneo proxy", () => {
     await expect(new Response(init.body).text()).resolves.toBe('{"name":"New space"}');
   });
 
+  it("preserves partial file downloads for audio seeking and resumed transfers", async () => {
+    fetchMock.mockResolvedValue(
+      new Response("part", {
+        status: 206,
+        headers: {
+          "content-type": "audio/mpeg",
+          "accept-ranges": "bytes",
+          "content-range": "bytes 10-13/100",
+          "content-length": "4"
+        }
+      })
+    );
+    const response = await GET(
+      new NextRequest("http://localhost:3100/api/eneo/api/v1/files/file-1/download/?token=signed", {
+        headers: { range: "bytes=10-13" }
+      })
+    );
+    const [, init] = fetchMock.mock.calls[0] as [string, RequestInit];
+    expect(new Headers(init.headers).get("range")).toBe("bytes=10-13");
+    expect(new Headers(init.headers).get("authorization")).toBe("Bearer test-token");
+    expect(response.status).toBe(206);
+    expect(response.headers.get("accept-ranges")).toBe("bytes");
+    expect(response.headers.get("content-range")).toBe("bytes 10-13/100");
+    expect(response.headers.get("cache-control")).toBe("no-store");
+    expect(response.headers.get("content-length")).toBeNull();
+    expect(await response.text()).toBe("part");
+  });
+
   it("does not attach a body to bodyless methods", async () => {
     await DELETE(
       new NextRequest("http://localhost:3100/api/eneo/api/v1/spaces/some-id/", {

@@ -7,7 +7,7 @@ import type { AppRun } from "../apps";
 
 const api = vi.hoisted(() => ({
   POST: vi.fn(async () => ({
-    data: { url: "https://files.example/intervju.mp3" },
+    data: { url: "http://backend:8000/api/v1/files/file-1/download/?token=signed-value" },
     response: new Response("{}")
   }))
 }));
@@ -18,6 +18,7 @@ import { ResultDetail } from "./result-detail";
 afterEach(() => {
   cleanup();
   api.POST.mockClear();
+  vi.restoreAllMocks();
 });
 
 function makeRun(overrides: Partial<AppRun> = {}): AppRun {
@@ -83,7 +84,7 @@ describe("ResultDetail", () => {
     expect(screen.queryByText("Sammanfattning av intervjun")).toBeNull();
     await waitFor(() =>
       expect(transcriptionPanel.querySelector("audio")?.getAttribute("src")).toBe(
-        "https://files.example/intervju.mp3"
+        "/api/eneo/api/v1/files/file-1/download/?token=signed-value"
       )
     );
     await expectNoAxeViolations(container);
@@ -99,5 +100,19 @@ describe("ResultDetail", () => {
     expect(screen.getByText("Sammanfattning av intervjun")).toBeTruthy();
     expect(screen.getByRole("button", { name: "Kopiera" })).toBeTruthy();
     expect(screen.getByRole("link", { name: "Ny körning" }).getAttribute("href")).toBe("/apps/new");
+  });
+
+  it("downloads failed-run input files through the app's authenticated proxy", async () => {
+    const open = vi.spyOn(window, "open").mockReturnValue(null);
+    const run = makeRun({ status: "failed", output: null });
+    run.input.files[0]!.transcription = null;
+    renderResult(run);
+    fireEvent.click(screen.getByRole("button", { name: 'Ladda ner "intervju.mp3"' }));
+    await waitFor(() =>
+      expect(open).toHaveBeenCalledWith(
+        "/api/eneo/api/v1/files/file-1/download/?token=signed-value",
+        "_blank"
+      )
+    );
   });
 });

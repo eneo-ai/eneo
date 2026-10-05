@@ -80,18 +80,3 @@ export function appRunQueryOptions(api: EneoClient, runId: string) {
       unwrap(api.GET("/api/v1/app-runs/{id}/", { params: { path: { id: runId } } }))
   });
 }
-
-/** Short-lived signed URL for downloading or embedding a run's input file. */
-export async function fileSignedUrl(
-  api: EneoClient,
-  fileId: string,
-  contentDisposition: "inline" | "attachment" = "attachment"
-): Promise<string> {
-  const { url } = await unwrap(
-    api.POST("/api/v1/files/{id}/signed-url/", {
-      params: { path: { id: fileId } },
-      body: { content_disposition: contentDisposition }
-    })
-  );
-  return url;
-}

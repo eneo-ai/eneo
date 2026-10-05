@@ -3,7 +3,7 @@ import { cleanup, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { expectNoAxeViolations } from "@/test/axe";
 import { renderInApp } from "@/test/render";
-import { AttachmentPreviewDialog, proxiedFileDownloadUrl } from "./attachments";
+import { AttachmentPreviewDialog } from "./attachments";
 
 afterEach(() => {
   cleanup();
@@ -11,18 +11,6 @@ afterEach(() => {
 });
 
 describe("signed file previews", () => {
-  it("keeps the signed token on the same-origin API proxy", () => {
-    expect(
-      proxiedFileDownloadUrl(
-        "http://backend:8123/api/v1/files/file-1/download/?token=signed-value",
-        "file-1"
-      )
-    ).toBe("/api/eneo/api/v1/files/file-1/download/?token=signed-value");
-    expect(() =>
-      proxiedFileDownloadUrl("https://example.org/other?token=signed-value", "file-1")
-    ).toThrow("Unexpected signed file URL");
-  });
-
   it("shows a proxied PDF through a blob frame and revokes it when closed", async () => {
     const url = "/api/eneo/api/v1/files/file-1/download/?token=signed-value";
     const fetchMock = vi

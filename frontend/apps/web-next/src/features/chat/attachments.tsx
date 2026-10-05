@@ -8,7 +8,7 @@ import { useLocale, useTranslations } from "next-intl";
 import { useEffect, useRef, useState } from "react";
 import { useReturnFocus } from "@/components/ui/dialog-focus";
 import { browserApi } from "@/lib/api/browser";
-import { unwrap } from "@/lib/api/errors";
+import { signedFileUrl } from "@/features/files/signed-file-url";
 import { cn } from "@/lib/utils";
 import { formatBytes } from "@/lib/format";
 import type { Attachment } from "./use-attachments";
@@ -23,36 +23,6 @@ export function FileKindIcon({ mimetype, className }: { mimetype: string; classN
   return <File aria-hidden className={className} />;
 }
 
-/**
- * The backend signs its own absolute URL, which can name a Docker-only host.
- * Keep the signed token but serve the file through the browser's same-origin
- * API proxy, where the existing session and CSP apply.
- */
-export function proxiedFileDownloadUrl(signedUrl: string, fileId: string): string {
-  const parsed = new URL(signedUrl);
-  if (
-    parsed.pathname !== `/api/v1/files/${encodeURIComponent(fileId)}/download/` ||
-    !parsed.searchParams.has("token")
-  ) {
-    throw new Error("Unexpected signed file URL");
-  }
-  return `/api/eneo${parsed.pathname}${parsed.search}`;
-}
-
-/** The signed file URL is always consumed through the browser's own origin. */
-export async function signedFileUrl(
-  fileId: string,
-  disposition: "inline" | "attachment"
-): Promise<string> {
-  const signed = await unwrap(
-    browserApi.POST("/api/v1/files/{id}/signed-url/", {
-      params: { path: { id: fileId } },
-      body: { expires_in: 3600, content_disposition: disposition }
-    })
-  );
-  return proxiedFileDownloadUrl(signed.url, fileId);
-}
-
 /** Resolves a short-lived inline signed URL for a backend file on mount. */
 export function useSignedUrl(fileId: string) {
   const [result, setResult] = useState<{
@@ -63,7 +33,7 @@ export function useSignedUrl(fileId: string) {
 
   useEffect(() => {
     let active = true;
-    signedFileUrl(fileId, "inline")
+    signedFileUrl(browserApi, fileId, "inline")
       .then((url) => {
         if (active) setResult({ fileId, url, error: false });
       })

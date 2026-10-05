@@ -14,13 +14,8 @@ import { PageHeader } from "@/components/composites/page-header";
 import { browserApi } from "@/lib/api/browser";
 import { toast } from "@/lib/toast";
 import { ClientTime } from "@/components/composites/client-time";
-import {
-  appRunQueryOptions,
-  fileSignedUrl,
-  getResultTitle,
-  isRunActive,
-  type AppRun
-} from "../apps";
+import { signedFileUrl } from "@/features/files/signed-file-url";
+import { appRunQueryOptions, getResultTitle, isRunActive, type AppRun } from "../apps";
 import { AppRunStatusBadge } from "../status-badge";
 
 const RESULT_POLL_MS = 3_000;
@@ -95,7 +90,7 @@ function FailedFileDownloads({ run }: { run: AppRun }) {
           label={`${t("download")} "${file.name}"`}
           icon={<Download className="size-4" aria-hidden="true" />}
           onClick={async () => {
-            const url = await fileSignedUrl(browserApi, file.id, "attachment");
+            const url = await signedFileUrl(browserApi, file.id, "attachment");
             window.open(url, "_blank");
           }}
         />
@@ -111,7 +106,7 @@ function TranscriptionTab({ run }: { run: AppRun }) {
     queryFn: async (): Promise<Record<string, string>> => {
       const entries = await Promise.all(
         transcribed.map(
-          async (file) => [file.id, await fileSignedUrl(browserApi, file.id, "inline")] as const
+          async (file) => [file.id, await signedFileUrl(browserApi, file.id, "inline")] as const
         )
       );
       return Object.fromEntries(entries);
