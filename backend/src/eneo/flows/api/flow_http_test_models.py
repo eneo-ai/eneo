@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from typing import Any, Literal
+from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict
 from pydantic.config import JsonDict
@@ -13,6 +14,7 @@ from eneo.flows.http_transport import (
 )
 
 HTTP_TEST_REQUEST_EXAMPLE: JsonDict = {
+    "step_id": "e0388e4a-699d-43d9-a216-43c3f50b9be3",
     "direction": "output",
     "method": "POST",
     "config": {
@@ -57,6 +59,7 @@ class HttpTestRequest(BaseModel):
         json_schema_extra={"example": HTTP_TEST_REQUEST_EXAMPLE},
     )
 
+    step_id: UUID
     config: HttpAuthoredConfig
     direction: Literal["input", "output"] = "output"
     method: HttpMethod = "POST"

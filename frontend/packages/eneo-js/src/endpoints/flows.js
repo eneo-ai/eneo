@@ -242,6 +242,18 @@ export function initFlows(client) {
   };
 
   return {
+    /**
+     * Test the submitted HTTP snapshot with credentials from the selected saved step.
+     * @param {{id: string, request: import('../types/resources').FlowHttpTestRequest}} args
+     * @returns {Promise<import('../types/resources').FlowHttpTestResponse>}
+     * @throws {EneoError}
+     */
+    httpTest: async ({ id, request }) =>
+      _fetch("/api/v1/flows/{id}/http-test", {
+        method: "post",
+        params: { path: { id } },
+        requestBody: { "application/json": request }
+      }),
     retention: {
       /**
        * Preview or explicitly purge a bounded batch of due Flow run history.

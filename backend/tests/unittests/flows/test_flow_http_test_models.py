@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from uuid import uuid4
+
 import pytest
 from pydantic import BaseModel, ValidationError
 
@@ -14,6 +16,7 @@ from eneo.flows.http_transport import HttpAuthoredConfig, HttpTransportError
 
 def _http_test_payload(**overrides: object) -> dict[str, object]:
     payload: dict[str, object] = {
+        "step_id": str(uuid4()),
         "config": {
             "url": "https://example.org/api",
             "auth": {"mode": "none"},
@@ -154,3 +157,13 @@ def test_http_test_response_rejects_incomplete_request_preview() -> None:
                 "error_code": "HTTP_INVALID_URL",
             }
         )
+
+
+def test_http_test_request_cannot_omit_credential_owner_step() -> None:
+    # Mutant: make step_id optional and restore an arbitrary step's credentials.
+    payload = _http_test_payload()
+    del payload["step_id"]
+    with pytest.raises(ValidationError) as exc:
+        HttpTestRequest.model_validate(payload)
+    assert exc.value.errors()[0]["loc"] == ("step_id",)
+    assert exc.value.errors()[0]["type"] == "missing"

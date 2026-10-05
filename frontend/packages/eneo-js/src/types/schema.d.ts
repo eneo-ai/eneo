@@ -4755,7 +4755,7 @@ export interface paths {
     put?: never;
     /**
      * Test HTTP Connection
-     * @description Send a test HTTP request using the submitted authored config snapshot and return a typed preview of the attempted request and response. This endpoint does not persist the config or publish the flow; it is for authoring UIs that need to validate URL, auth, timeout, headers, body mode, and SSRF guard behavior before saving an HTTP input or output step. `test_variables` is the raw template context used for URL, header, auth, and body interpolation; callers can send flat keys such as `name` or runtime-shaped keys such as `flow_input` and `step_1`.
+     * @description Send a test HTTP request using the submitted authored config snapshot and return a typed preview of the attempted request and response. This endpoint requires the saved step_id in this flow; stored credentials are resolved only from that step and the submitted direction. It does not persist the config or publish the flow; it is for authoring UIs that need to validate URL, auth, timeout, headers, body mode, and SSRF guard behavior before saving an HTTP input or output step. `test_variables` is the raw template context used for URL, header, auth, and body interpolation; callers can send flat keys such as `name` or runtime-shaped keys such as `flow_input` and `step_1`.
      */
     post: operations["test_flow_http"];
     delete?: never;
@@ -27656,6 +27656,7 @@ export interface components {
      *       },
      *       "direction": "output",
      *       "method": "POST",
+     *       "step_id": "e0388e4a-699d-43d9-a216-43c3f50b9be3",
      *       "test_variables": {
      *         "base_url": "https://webhook.example.com",
      *         "flow_input": {
@@ -27679,6 +27680,11 @@ export interface components {
        * @enum {string}
        */
       method?: "GET" | "POST";
+      /**
+       * Step Id
+       * Format: uuid
+       */
+      step_id: string;
       /** Test Variables */
       test_variables?: {
         [key: string]: unknown;
@@ -56770,6 +56776,21 @@ export interface operations {
           "application/json": components["schemas"]["HttpTestResponse"];
         };
       };
+      /** @description The selected saved step has an invalid authored HTTP config. */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          /**
+           * @example {
+           *       "eneo_error_code": 9007,
+           *       "message": "Stored HTTP step configuration is invalid."
+           *     }
+           */
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
       /** @description Caller lacks permission to edit this flow. */
       403: {
         headers: {
@@ -56784,6 +56805,21 @@ export interface operations {
            *       },
            *       "eneo_error_code": 9001,
            *       "message": "Insufficient permissions."
+           *     }
+           */
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description The flow or the selected saved step was not found. */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          /**
+           * @example {
+           *       "eneo_error_code": 9000,
+           *       "message": "Flow step not found."
            *     }
            */
           "application/json": components["schemas"]["GeneralError"];
