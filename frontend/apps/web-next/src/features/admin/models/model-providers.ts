@@ -114,9 +114,9 @@ export function comparableEndpoint(value: string): string {
   try {
     const url = new URL(trimmed.includes("://") ? trimmed : `https://${trimmed}`);
     const path = url.pathname.replace(/\/+$/, "");
-    return `${url.protocol}//${url.host}${path}${url.search}`.toLowerCase();
+    return `${url.protocol}//${url.host}${path}${url.search}`;
   } catch {
-    return trimmed.replace(/\/+$/, "").toLowerCase();
+    return trimmed.replace(/\/+$/, "");
   }
 }
 

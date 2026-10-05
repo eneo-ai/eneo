@@ -69,21 +69,27 @@ const TOKEN_PRICED: ReadonlySet<ModelKind> = new Set(["completion", "embedding"]
  * (token limits and prices, per-minute price, or an image model's per-image
  * price and request defaults) plus hosting, stability and classification.
  */
-export function EditModelDialog({
-  model,
-  kind,
-  classifications,
-  securityEnabled,
-  open,
-  onOpenChange
-}: {
+type EditModelDialogProps = {
   model: AdminModel;
   kind: ModelKind;
   classifications: SecurityClassification[];
   securityEnabled: boolean;
   open: boolean;
   onOpenChange: (open: boolean) => void;
-}) {
+};
+
+export function EditModelDialog(props: EditModelDialogProps) {
+  return props.open ? <EditModelForm {...props} /> : null;
+}
+
+function EditModelForm({
+  model,
+  kind,
+  classifications,
+  securityEnabled,
+  open,
+  onOpenChange
+}: EditModelDialogProps) {
   const t = useTranslations();
   const queryClient = useQueryClient();
   const imageLabels = useImageOptionLabels();

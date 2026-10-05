@@ -318,7 +318,11 @@ export function SkillBindingsEditor({
     const submitted = draft.map((binding) => ({ ...binding }));
     try {
       await save(resource === "app" ? appBindingPayload(submitted) : submitted);
-      setEditing({ source: configuration.data, baseline: submitted, draft: submitted });
+      setEditing((current) => ({
+        source: configuration.data,
+        baseline: submitted,
+        draft: current?.draft ?? submitted
+      }));
       setAnnouncement(t("skills_bindings_saved"));
       void queryClient.invalidateQueries({ queryKey: key });
     } catch (cause) {

@@ -370,6 +370,11 @@ export function AddModelWizard({
             options={options}
             favorites={favorites}
             onSelect={(type) => {
+              if (type !== providerType) {
+                setFieldValues({});
+                setFieldConfirmations({});
+                setKeyExpiresOn(null);
+              }
               setProviderType(type);
               // Seed the editable name from the chosen provider, like Svelte.
               setProviderName(providerDisplayName(type));

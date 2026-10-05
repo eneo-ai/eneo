@@ -1,3 +1,4 @@
+import { calendarDate } from "@/lib/calendar-date";
 import { queryOptions } from "@tanstack/react-query";
 import type { EneoClient } from "@/lib/api/browser";
 import { unwrap } from "@/lib/api/errors";
@@ -11,8 +12,6 @@ export type StorageInfo = Schema<"StorageInfoModel">;
 export type UserUsageRow = Schema<"UserTokenUsage">;
 
 export type UsageRange = { from: string; to: string };
-
-const DATE_INPUT_RE = /^\d{4}-\d{2}-\d{2}$/;
 
 function dateInput(date: Date): string {
   return date.toISOString().slice(0, 10);
@@ -29,9 +28,9 @@ export function usageRangeFromSearchParams(
   fallback = defaultUsageRange()
 ): UsageRange {
   const first = (value: string | string[] | undefined) => (Array.isArray(value) ? value[0] : value);
-  const from = first(searchParams.from);
-  const to = first(searchParams.to);
-  if (!from?.match(DATE_INPUT_RE) || !to?.match(DATE_INPUT_RE)) return fallback;
+  const from = calendarDate(first(searchParams.from));
+  const to = calendarDate(first(searchParams.to));
+  if (!from || !to || from > to) return fallback;
   return { from, to };
 }
 

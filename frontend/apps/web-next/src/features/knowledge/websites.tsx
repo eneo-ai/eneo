@@ -432,7 +432,7 @@ export function WebsitesTab({ canCreate, labelledBy }: { canCreate: boolean; lab
   const stoppableIds = websites
     .filter((website) => website.latest_crawl && canRequestCrawlStop(website.latest_crawl))
     .map((website) => website.id);
-  const selectedStoppableIds = stoppableIds.filter((id) => selected.has(id));
+  const selectedStoppableIds = stoppableIds.filter((id) => selectedIds.includes(id));
   const selectedDeletableIds = visibleWebsites
     .filter((website) => selected.has(website.id) && website.permissions?.includes("delete"))
     .map((website) => website.id);

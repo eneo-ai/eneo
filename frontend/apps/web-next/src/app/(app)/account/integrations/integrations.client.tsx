@@ -2,6 +2,7 @@
 
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useTranslations } from "next-intl";
+import { QueryStateBoundary } from "@/components/composites/query-state";
 import { EmptyState } from "@/components/composites/empty-state";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -89,7 +90,7 @@ export function AccountIntegrations() {
   const t = useTranslations();
   const queryClient = useQueryClient();
 
-  const { data: integrations, isPending } = useQuery({
+  const integrations = useQuery({
     queryKey: ["integrations", "me"],
     queryFn: async () => {
       const result = await unwrap(browserApi.GET("/api/v1/integrations/me/"));
@@ -106,20 +107,24 @@ export function AccountIntegrations() {
     }
   });
 
-  if (!isPending && (integrations ?? []).length === 0) {
-    return <EmptyState title={t("integrations")} description={t("no_results")} />;
-  }
-
   return (
-    <div className="flex flex-col gap-3">
-      {(integrations ?? []).map((integration) => (
-        <IntegrationCard
-          key={integration.id ?? integration.name}
-          integration={integration}
-          connecting={isConnecting(integration)}
-          onConnect={() => void connect(integration)}
-        />
-      ))}
-    </div>
+    <QueryStateBoundary query={integrations}>
+      {(items) =>
+        items.length === 0 ? (
+          <EmptyState title={t("integrations")} description={t("no_results")} />
+        ) : (
+          <div className="flex flex-col gap-3">
+            {items.map((integration) => (
+              <IntegrationCard
+                key={integration.id ?? integration.name}
+                integration={integration}
+                connecting={isConnecting(integration)}
+                onConnect={() => void connect(integration)}
+              />
+            ))}
+          </div>
+        )
+      }
+    </QueryStateBoundary>
   );
 }

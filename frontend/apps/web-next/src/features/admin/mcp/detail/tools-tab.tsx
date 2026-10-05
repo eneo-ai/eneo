@@ -283,11 +283,13 @@ export function ToolsTab({ serverId }: { serverId: string }) {
       const targets = (tools ?? []).filter(
         (tool) => !tool.requires_approval && tool.is_enabled_by_default !== enabled
       );
-      await Promise.allSettled(
+      const results = await Promise.allSettled(
         targets.map((tool) => updateTenantToolEnabled(browserApi, tool.id, enabled))
       );
+      const failure = results.find((result) => result.status === "rejected");
+      if (failure?.status === "rejected") throw failure.reason;
     },
-    onSuccess: invalidate,
+    onSettled: invalidate,
     onError: (error) => toastApiError(error, t)
   });
 

@@ -368,6 +368,47 @@ describe("KnowledgePage", () => {
     expect(screen.getByRole("button", { name: "Synkronisera valda (1)" })).toBeTruthy();
   });
 
+  it("stops selected crawls only within the visible filter", async () => {
+    const running = (id: string, name: string) =>
+      makeWebsite({
+        id,
+        name,
+        latest_crawl: {
+          ...(makeWebsite().latest_crawl as object),
+          id: `run-${id}`,
+          status: "in progress",
+          phase: "running",
+          outcome: null
+        }
+      });
+    show(
+      makeSpace({ websites: [running("w1", "Webben"), running("w2", "Intranätet")] }),
+      "websites"
+    );
+    fireEvent.click(screen.getByRole("checkbox", { name: "Markera alla rader" }));
+    fireEvent.change(screen.getByRole("textbox", { name: "Filtrera webbplatser" }), {
+      target: { value: "intranät" }
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Stoppa valda (1)" }));
+    const dialog = await screen.findByRole("alertdialog", {
+      name: "Stoppa aktiva synkroniseringar? (1)"
+    });
+    state.bulkResult = {
+      total: 1,
+      stopped: 1,
+      not_running: 0,
+      failed: 0,
+      crawl_runs: [],
+      errors: []
+    };
+    fireEvent.click(within(dialog).getByRole("button", { name: "Stoppa" }));
+    await waitFor(() =>
+      expect(state.posted).toEqual([
+        { path: "/api/v1/websites/bulk/stop/", body: { website_ids: ["w2"] } }
+      ])
+    );
+  });
+
   it("stops every active crawl from the toolbar after a confirmation", async () => {
     const running = (id: string, name: string) =>
       makeWebsite({

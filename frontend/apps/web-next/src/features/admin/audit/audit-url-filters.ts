@@ -1,3 +1,4 @@
+import { calendarDate } from "@/lib/calendar-date";
 import type { ActionType, AuditFilters } from "./audit";
 
 type ReadableSearchParams = Pick<URLSearchParams, "get" | "getAll">;
@@ -34,8 +35,8 @@ export function parseAuditFilters(searchParams: ReadableSearchParams): AuditFilt
 
   return {
     page: parsePage(searchParams.get("page")),
-    from_date: readParam(searchParams, "from_date"),
-    to_date: readParam(searchParams, "to_date"),
+    from_date: calendarDate(readParam(searchParams, "from_date")),
+    to_date: calendarDate(readParam(searchParams, "to_date")),
     actions: userId ? [] : parseActions(searchParams),
     search: userId ? "" : (readParam(searchParams, "search") ?? ""),
     userId,

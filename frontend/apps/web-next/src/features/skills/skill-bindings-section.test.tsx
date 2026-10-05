@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const get = vi.hoisted(() => vi.fn());
@@ -72,6 +72,41 @@ describe("resource Skill bindings", () => {
     fireEvent.click(screen.getByRole("button", { name: "skills_bindings_save" }));
     await waitFor(() =>
       expect(save).toHaveBeenCalledWith([
+        { skill_id: "b", skill_revision_id: "revision-b", activation_mode: "always" },
+        { skill_id: "a", skill_revision_id: "revision-a", activation_mode: "on_demand" }
+      ])
+    );
+  });
+
+  it("preserves edits made while an earlier draft is saving", async () => {
+    get.mockImplementation(() =>
+      ok({
+        bindings: [summary("a", 1), summary("b", 2)],
+        runtime: { fallback_reason: null, effective_mode: "selective" }
+      })
+    );
+    let finish!: () => void;
+    const save = vi
+      .fn()
+      .mockImplementationOnce(
+        () =>
+          new Promise<void>((resolve) => {
+            finish = resolve;
+          })
+      )
+      .mockResolvedValue({});
+    show("assistant", save);
+    const modes = await screen.findAllByLabelText("skills_activation_mode_label");
+    fireEvent.change(modes[0]!, { target: { value: "on_demand" } });
+    fireEvent.click(screen.getByRole("button", { name: "skills_bindings_save" }));
+    await waitFor(() => expect(save).toHaveBeenCalledTimes(1));
+    fireEvent.click(screen.getAllByRole("button", { name: "skills_move_down_aria" })[0]!);
+    await act(async () => {
+      finish();
+    });
+    fireEvent.click(await screen.findByRole("button", { name: "skills_bindings_save" }));
+    await waitFor(() =>
+      expect(save).toHaveBeenLastCalledWith([
         { skill_id: "b", skill_revision_id: "revision-b", activation_mode: "always" },
         { skill_id: "a", skill_revision_id: "revision-a", activation_mode: "on_demand" }
       ])

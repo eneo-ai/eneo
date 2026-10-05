@@ -533,11 +533,11 @@ export function draftReducer(state: EditableState, action: DraftAction): Editabl
         };
       }
       // When a provider is whitelisted, individual selections under it become
-      // redundant — clear them so the UI doesn't show duplicate state.
+      // redundant, except for the explicit row carrying the default.
       const next = { ...state.modelSelections };
       for (const mid of action.providerModelIds) {
         const cur = next[mid];
-        if (cur) next[mid] = { selected: false, isDefault: cur.isDefault };
+        if (cur) next[mid] = { selected: cur.isDefault, isDefault: cur.isDefault };
       }
       return {
         ...state,

@@ -9,6 +9,13 @@ import {
 } from "./usage";
 
 describe("usage ranges", () => {
+  it.each(["2026-99-99", "2026-02-30", "2025-02-29", "2026-07-01"])(
+    "falls back for impossible or reversed ranges: %s",
+    (from) => {
+      const fallback = { from: "2026-06-01", to: "2026-06-30" };
+      expect(usageRangeFromSearchParams({ from, to: "2026-06-30" }, fallback)).toEqual(fallback);
+    }
+  );
   it("creates a date-input range for the last 30 days", () => {
     expect(defaultUsageRange(new Date("2026-07-06T12:00:00Z"))).toEqual({
       from: "2026-06-06",

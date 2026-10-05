@@ -6,6 +6,19 @@ import { auditFiltersSearchParams, parseAuditFilters } from "./audit-url-filters
 const action = (value: string) => value as ActionType;
 
 describe("parseAuditFilters", () => {
+  it.each(["bad", "2026-99-99", "2026-02-30", "2025-02-29"])(
+    "ignores an invalid calendar date: %s",
+    (date) => {
+      const filters = parseAuditFilters(new URLSearchParams({ from_date: date, to_date: date }));
+      expect(filters.from_date).toBeUndefined();
+      expect(filters.to_date).toBeUndefined();
+    }
+  );
+  it("accepts leap days", () => {
+    expect(parseAuditFilters(new URLSearchParams({ from_date: "2024-02-29" })).from_date).toBe(
+      "2024-02-29"
+    );
+  });
   it("restores a search deep link with paging, dates, and actions", () => {
     const filters = parseAuditFilters(
       new URLSearchParams(

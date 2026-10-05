@@ -96,7 +96,10 @@ function renderWizard({
   initialProviderId?: string;
   models?: AdminModel[];
   providersLoaded?: boolean;
-  caps?: typeof capabilities;
+  caps?: {
+    providers: Record<string, typeof capabilities.providers.openai>;
+    default_fields: typeof capabilities.default_fields;
+  };
 } = {}) {
   api.GET.mockImplementation(
     (path: string, options?: { params?: { query?: { mode?: string } } }) => {
@@ -255,6 +258,23 @@ describe("the add-provider wizard's credentials", () => {
     );
     fireEvent.click(within(dialog).getByRole("button", { name: "Lägg till OpenAI" }));
     await waitFor(() => expect(field(/^API-nyckel/).value).toBe("sk-live-1234"));
+  });
+
+  it("clears credentials when switching provider type", async () => {
+    const { dialog } = renderWizard({
+      caps: {
+        ...capabilities,
+        providers: { ...capabilities.providers, anthropic: capabilities.providers.openai }
+      }
+    });
+    fireEvent.click(within(dialog).getByRole("button", { name: "Lägg till OpenAI" }));
+    await waitFor(() => expect(field(/^API-nyckel/)).toBeTruthy());
+    fireEvent.change(field(/^API-nyckel/), { target: { value: "sk-openai-secret" } });
+    fireEvent.change(field(/^Bekräfta API-nyckel/), { target: { value: "sk-openai-secret" } });
+    fireEvent.click(within(dialog).getByRole("button", { name: "Tillbaka" }));
+    fireEvent.click(within(dialog).getByRole("button", { name: "Lägg till Anthropic" }));
+    await waitFor(() => expect(field(/^API-nyckel/).value).toBe(""));
+    expect(field(/^Bekräfta API-nyckel/).value).toBe("");
   });
 
   it("adds models to an existing provider through its own step", async () => {

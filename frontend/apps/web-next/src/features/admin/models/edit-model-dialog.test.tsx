@@ -33,6 +33,28 @@ afterEach(() => {
   vi.clearAllMocks();
 });
 
+it("discards cancelled edits and loads the current model on reopen", async () => {
+  api.PUT.mockImplementation(() => ok({}));
+  const props = {
+    model: imageModel,
+    kind: "image" as const,
+    classifications: [],
+    securityEnabled: false,
+    onOpenChange: vi.fn()
+  };
+  const { rerender } = renderInApp(<EditModelDialog {...props} open />);
+  fireEvent.change(screen.getByLabelText(/^Pris per bild/), { target: { value: "99" } });
+  rerender(<EditModelDialog {...props} open={false} />);
+  rerender(
+    <EditModelDialog
+      {...props}
+      model={{ ...imageModel, cost_per_image: "0.08" } as AdminModel}
+      open
+    />
+  );
+  expect(((await screen.findByLabelText(/^Pris per bild/)) as HTMLInputElement).value).toBe("0.08");
+});
+
 describe("EditModelDialog for an image model", () => {
   it("edits the per-image price and request defaults, never token fields", async () => {
     api.PUT.mockImplementation(() => ok({}));

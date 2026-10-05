@@ -628,6 +628,7 @@ export function PromptGuideDialog({
       ]);
 
       const appendAnswer = (chunk: HelperRunResponse) => {
+        if (activeAbortRef.current !== controller || controller.signal.aborted) return;
         if (!runIdRef.current && chunk.run.id) setRunId(chunk.run.id);
         if (!chunk.answer) return;
         setTurns((current) =>
@@ -676,12 +677,24 @@ export function PromptGuideDialog({
           )
         );
       } finally {
-        if (activeAbortRef.current === controller) activeAbortRef.current = null;
-        isStreamingRef.current = false;
-        setIsStreaming(false);
+        if (activeAbortRef.current === controller) {
+          activeAbortRef.current = null;
+          isStreamingRef.current = false;
+          setIsStreaming(false);
+        }
       }
     },
     [setRunId, t, targetId]
+  );
+
+  useEffect(
+    () => () => {
+      activeAbortRef.current?.abort();
+      activeAbortRef.current = null;
+      isStreamingRef.current = false;
+      wasOpenRef.current = false;
+    },
+    []
   );
 
   useEffect(() => {

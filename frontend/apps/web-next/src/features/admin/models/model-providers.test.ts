@@ -18,6 +18,12 @@ describe("comparableEndpoint", () => {
     expect(comparableEndpoint("https://api.example.com/v1?tenant=a")).not.toBe(base);
   });
 
+  it("preserves case-sensitive paths and query values", () => {
+    expect(comparableEndpoint("https://EXAMPLE.COM/Service?tenant=A")).not.toBe(
+      comparableEndpoint("https://example.com/service?tenant=a")
+    );
+  });
+
   it("assumes https for a bare host and keeps a non-URL comparable", () => {
     expect(comparableEndpoint("api.example.com/v1/")).toBe(
       comparableEndpoint("https://api.example.com/v1")

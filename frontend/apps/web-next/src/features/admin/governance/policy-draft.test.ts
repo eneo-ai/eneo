@@ -284,7 +284,7 @@ describe("reducer + derived", () => {
     expect(defaultModelId(state)).toBe("m1");
   });
 
-  it("whitelisting a provider clears redundant individual selections but keeps the default flag", () => {
+  it("whitelisting a provider clears redundant individual selections but persists the default model", () => {
     let state = seedEditable(policy(), MODELS, []);
     state = draftReducer(state, { type: "setModelsEnabled", on: true });
     state = draftReducer(state, { type: "setDefault", id: "m1" });
@@ -296,7 +296,14 @@ describe("reducer + derived", () => {
     });
 
     expect(state.providerSelections).toEqual(["p1"]);
-    expect(state.modelSelections.m1).toEqual({ selected: false, isDefault: true });
+    expect(defaultModelId(state)).toBe("m1");
+    expect(
+      buildUpdate(state, { models: true, mcp: false, prompt: false }, []).models_restriction
+    ).toEqual({
+      enabled: true,
+      provider_ids: ["p1"],
+      models: [{ completion_model_id: "m1", is_default: true }]
+    });
 
     const effective = effectiveModelIdSet(state, modelsByProvider(MODELS));
     expect([...effective].sort()).toEqual(["m1", "m2"]);
