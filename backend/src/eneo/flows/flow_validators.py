@@ -9,12 +9,6 @@ from typing import Any, cast
 
 from pydantic import ValidationError
 
-from eneo.database.tables.flow_tables import (
-    FLOW_STEP_INPUT_SOURCE_VALUES,
-    FLOW_STEP_INPUT_TYPE_VALUES,
-    FLOW_STEP_OUTPUT_MODE_VALUES,
-    FLOW_STEP_OUTPUT_TYPE_VALUES,
-)
 from eneo.flows.citation_sidecar import (
     CITATION_MODE_INLINE_INREF_SIDECAR,
     CITATION_MODE_OFF,
@@ -45,6 +39,11 @@ from eneo.flows.domain.step_mapped_execution import (
     single_mapped_array_key,
 )
 from eneo.flows.domain.text_processing import text_processing_config
+from eneo.flows.enums import (
+    FLOW_INPUT_SOURCE_VALUES,
+    FLOW_INPUT_TYPE_VALUES,
+    FLOW_OUTPUT_TYPE_VALUES,
+)
 from eneo.flows.flow_authoring_spec import MAX_FLOW_AUTHORING_STEPS
 from eneo.flows.flow_authoring_transcription import requires_audio_transcription
 from eneo.flows.flow_capability_manifest import (
@@ -92,6 +91,7 @@ from eneo.flows.input_binding_contract_rules import (
     validate_source_refs_binding,
 )
 from eneo.flows.output_modes import (
+    ALLOWED_OUTPUT_MODES,
     compose_text_violation,
     render_verbatim_violation,
     speaker_mapping_violation,
@@ -127,10 +127,9 @@ from eneo.flows.variable_resolver import (
 )
 from eneo.main.exceptions import BadRequestException, TypedIOValidationException
 
-_ALLOWED_FLOW_INPUT_SOURCES = set(FLOW_STEP_INPUT_SOURCE_VALUES)
-_ALLOWED_FLOW_INPUT_TYPES = set(FLOW_STEP_INPUT_TYPE_VALUES)
-_ALLOWED_FLOW_OUTPUT_MODES = set(FLOW_STEP_OUTPUT_MODE_VALUES)
-_ALLOWED_FLOW_OUTPUT_TYPES = set(FLOW_STEP_OUTPUT_TYPE_VALUES)
+_ALLOWED_FLOW_INPUT_SOURCES = set(FLOW_INPUT_SOURCE_VALUES)
+_ALLOWED_FLOW_INPUT_TYPES = set(FLOW_INPUT_TYPE_VALUES)
+_ALLOWED_FLOW_OUTPUT_TYPES = set(FLOW_OUTPUT_TYPE_VALUES)
 FLOW_AUDIO_TRANSCRIPTION_REQUIRED = (
     FlowGraphIssueCode.FLOW_AUDIO_TRANSCRIPTION_REQUIRED.value
 )
@@ -786,7 +785,7 @@ def _validate_step_enum_values(step: FlowStepValidationView) -> None:
             f"Step {step.step_order}: unsupported input_type '{_enum_value(step.input_type)}'.",
             step_order=step.step_order,
         )
-    if step.output_mode not in _ALLOWED_FLOW_OUTPUT_MODES:
+    if step.output_mode not in ALLOWED_OUTPUT_MODES:
         raise FlowStepValidationError(
             f"Step {step.step_order}: unsupported output_mode '{_enum_value(step.output_mode)}'.",
             step_order=step.step_order,

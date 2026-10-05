@@ -5,10 +5,6 @@ from enum import Enum
 from typing import Mapping, Sequence, TypeGuard, cast
 from uuid import UUID
 
-from eneo.database.tables.flow_tables import (
-    FLOW_STEP_INPUT_TYPE_VALUES,
-    FLOW_STEP_OUTPUT_TYPE_VALUES,
-)
 from eneo.flows.assistant_execution_snapshot import (
     validate_assistant_execution_snapshot,
 )
@@ -22,7 +18,13 @@ from eneo.flows.domain.runtime import RuntimeStep
 from eneo.flows.domain.runtime_input import build_runtime_input_config
 from eneo.flows.domain.speaker_labels import SPEAKER_MAPPING_OUTPUT_CONTRACT
 from eneo.flows.domain.step_item_map import build_step_item_map_config
-from eneo.flows.enums import FlowOutputMode, FlowOutputType
+from eneo.flows.enums import (
+    FLOW_INPUT_SOURCE_VALUES,
+    FLOW_INPUT_TYPE_VALUES,
+    FLOW_OUTPUT_TYPE_VALUES,
+    FlowOutputMode,
+    FlowOutputType,
+)
 from eneo.flows.flow_api_error_code import FlowApiErrorCode
 from eneo.flows.flow_review_policy import parse_flow_step_review_policy
 from eneo.flows.input_binding_contract_rules import (
@@ -46,14 +48,9 @@ from eneo.flows.source_identity import has_required_runtime_managed_source_field
 from eneo.flows.step_chain_rules import find_first_step_chain_violation
 from eneo.main.exceptions import BadRequestException
 
-ALLOWED_INPUT_SOURCES = {
-    "flow_input",
-    "previous_step",
-    "all_previous_steps",
-    "http_get",
-}
-ALLOWED_INPUT_TYPES = set(FLOW_STEP_INPUT_TYPE_VALUES)
-ALLOWED_OUTPUT_TYPES = set(FLOW_STEP_OUTPUT_TYPE_VALUES)
+ALLOWED_INPUT_SOURCES = set(FLOW_INPUT_SOURCE_VALUES)
+ALLOWED_INPUT_TYPES = set(FLOW_INPUT_TYPE_VALUES)
+ALLOWED_OUTPUT_TYPES = set(FLOW_OUTPUT_TYPE_VALUES)
 
 FLOW_VERSION_INVALID_STEP_ORDER = "flow_version_invalid_step_order"
 FLOW_VERSION_INVALID_STEP_IDENTIFIER = "flow_version_invalid_step_identifier"

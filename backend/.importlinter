@@ -174,3 +174,15 @@ source_modules =
     eneo.crawler
 forbidden_modules =
     eneo.flows
+
+[importlinter:contract:flow-vocabulary-readers-no-orm]
+# Vocabulary belongs to the flows enum owner; these readers do not need
+# table declarations to decide which values are valid.
+name = Flow vocabulary readers must not import ORM tables
+type = forbidden
+allow_indirect_imports = true
+source_modules =
+    eneo.flows.flow_validators
+    eneo.flows.runtime.step_definition_parser
+forbidden_modules =
+    eneo.database.tables.flow_tables
