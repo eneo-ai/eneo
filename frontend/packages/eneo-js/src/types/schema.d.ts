@@ -4676,7 +4676,7 @@ export interface paths {
     put?: never;
     /**
      * Create Flow Assistant
-     * @description Create a flow-managed assistant owned by the specified draft flow. Use this authoring endpoint when a flow editor needs a dedicated assistant for one or more steps instead of reusing an existing assistant. The created assistant is returned with the caller's effective permissions and can then be referenced by step `assistant_id` values in flow create/update payloads.
+     * @description Create a flow-managed assistant owned by the specified draft flow. Use this authoring endpoint when a flow editor needs a dedicated assistant for one or more steps instead of reusing an existing assistant. The created assistant is returned with the caller's effective permissions and can then be referenced by step `assistant_id` values in flow create/update payloads. The caller must own the draft; tenant admins and space owners may override draft ownership. Existing action, space permission and API-key scope checks apply.
      */
     post: operations["create_flow_assistant"];
     delete?: never;
@@ -4701,14 +4701,14 @@ export interface paths {
     post?: never;
     /**
      * Delete Flow Assistant
-     * @description Delete a flow-managed assistant from the specified draft flow. The assistant id must belong to this flow. Deleting it removes the assistant, revokes the API keys scoped to it, deletes its icon when the icon is the tenant's own and nothing else uses it, and writes an audit event in the same transaction, so the assistant is never deleted without its audit row. An assistant that a step of the flow still uses, or that a run which has not finished still uses, cannot be deleted (400 `flow_managed_assistant`); `context.reason` is `step_reference` (remove or replace that step) or `unfinished_run_reference` (retry after the run of `context.flow_version` finishes).
+     * @description Delete a flow-managed assistant from the specified draft flow. The assistant id must belong to this flow. Deleting it removes the assistant, revokes the API keys scoped to it, deletes its icon when the icon is the tenant's own and nothing else uses it, and writes an audit event in the same transaction, so the assistant is never deleted without its audit row. An assistant that a step of the flow still uses, or that a run which has not finished still uses, cannot be deleted (400 `flow_managed_assistant`); `context.reason` is `step_reference` (remove or replace that step) or `unfinished_run_reference` (retry after the run of `context.flow_version` finishes). The caller must own the draft; tenant admins and space owners may override draft ownership. Existing action, space permission and API-key scope checks apply.
      */
     delete: operations["delete_flow_assistant"];
     options?: never;
     head?: never;
     /**
      * Update Flow Assistant
-     * @description Update a flow-managed assistant that belongs to the specified draft flow. Only fields accepted by `FlowAssistantPatchRequest` are applied; omitted fields are left unchanged. Use this endpoint for assistant details that should travel with the flow authoring experience, not for updating unrelated shared assistants. The assistant is part of the flow's draft: the update advances the flow's `draft_revision` by one and returns it, fenced on `expected_revision` like a flow update.
+     * @description Update a flow-managed assistant that belongs to the specified draft flow. Only fields accepted by `FlowAssistantPatchRequest` are applied; omitted fields are left unchanged. Use this endpoint for assistant details that should travel with the flow authoring experience, not for updating unrelated shared assistants. The assistant is part of the flow's draft: the update advances the flow's `draft_revision` by one and returns it, fenced on `expected_revision` like a flow update. The caller must own the draft; tenant admins and space owners may override draft ownership. Existing action, space permission and API-key scope checks apply.
      */
     patch: operations["update_flow_assistant"];
     trace?: never;
@@ -56296,7 +56296,7 @@ export interface operations {
           "application/json": components["schemas"]["FlowAssistantPublic"];
         };
       };
-      /** @description Caller lacks permission or API key scope to manage assistants for this flow. */
+      /** @description Caller lacks permission, API-key scope, or draft ownership to manage assistants for this flow. Tenant admins and space owners may override draft ownership. */
       403: {
         headers: {
           [name: string]: unknown;
@@ -56491,7 +56491,7 @@ export interface operations {
           "application/json": components["schemas"]["GeneralError"];
         };
       };
-      /** @description Caller lacks permission or API key scope to delete assistants for this flow. */
+      /** @description Caller lacks permission, API-key scope, or draft ownership to manage assistants for this flow. Tenant admins and space owners may override draft ownership. */
       403: {
         headers: {
           [name: string]: unknown;
@@ -56620,7 +56620,7 @@ export interface operations {
           "application/json": components["schemas"]["GeneralError"];
         };
       };
-      /** @description Caller lacks permission or API key scope to update assistants for this flow. */
+      /** @description Caller lacks permission, API-key scope, or draft ownership to manage assistants for this flow. Tenant admins and space owners may override draft ownership. */
       403: {
         headers: {
           [name: string]: unknown;

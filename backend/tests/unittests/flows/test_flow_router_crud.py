@@ -641,7 +641,9 @@ async def test_create_flow_assistant_calls_flow_scoped_service():
     container.assistant_assembler.return_value = assistant_assembler
     container.audit_service.return_value = audit_service
     container.user.return_value = user
-    flow_service.get_flow.return_value = _flow(flow_id)
+    flow = _flow(flow_id)
+    flow.owner_user_id = user.id
+    flow_service.get_flow.return_value = flow
     _enable_space_access(container)
 
     response = await create_flow_assistant(
@@ -690,7 +692,9 @@ async def test_update_flow_assistant_forwards_payload():
     container.assistant_assembler.return_value = assistant_assembler
     container.audit_service.return_value = audit_service
     container.user.return_value = user
-    flow_service.get_flow.return_value = _flow(flow_id)
+    flow = _flow(flow_id)
+    flow.owner_user_id = user.id
+    flow_service.get_flow.return_value = flow
     _enable_space_access(container)
 
     response = await update_flow_assistant(

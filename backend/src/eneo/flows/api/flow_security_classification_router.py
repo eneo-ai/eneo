@@ -14,7 +14,7 @@ from eneo.flows.api.flow_api_common import error_response
 from eneo.flows.api.flow_assembler import FlowAssembler
 from eneo.flows.api.flow_assistant_router import (
     flow_assistant_update_command,
-    require_flow_assistant_access,
+    require_flow_assistant_read_access,
 )
 from eneo.flows.api.flow_request_body import body_too_large, capped_body_route_class
 from eneo.flows.api.flow_security_classification_models import (
@@ -146,7 +146,7 @@ async def preview_flow_security_classification(
 ):
     # The result is derived from the flow's assistants (prompt, model,
     # knowledge), which are readable only with the permission to edit the flow.
-    await require_flow_assistant_access(request, container, flow_id=id)
+    await require_flow_assistant_read_access(request, container, flow_id=id)
     # Before any step is converted: the canonical refusal for an oversized list.
     if body.steps is not None:
         validate_step_count(len(body.steps))

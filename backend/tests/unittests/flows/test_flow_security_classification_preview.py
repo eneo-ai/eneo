@@ -502,7 +502,7 @@ def _preview_client(world, monkeypatch) -> TestClient:
     async def _allow(*_args, **_kwargs):
         return None
 
-    monkeypatch.setattr(router_module, "require_flow_assistant_access", _allow)
+    monkeypatch.setattr(router_module, "require_flow_assistant_read_access", _allow)
     return TestClient(app)
 
 
