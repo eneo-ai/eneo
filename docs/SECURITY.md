@@ -65,8 +65,9 @@ The repository uses GitHub security features and CI to prevent regressions:
   locally built candidates; the weekly Security run rechecks published develop
   images. A frontend-only beta rollback does not roll back the shared backend
   or database.
-- Frontend runtimes use digest-pinned Debian 13 Distroless Node 22 images. They
-  have no shell or package manager; probes execute `node` directly. Backend
+- Frontend runtimes copy the builder's official Node 22 binary and license into
+  a digest-pinned Chainguard `glibc-dynamic` image with maintained C/C++ libraries.
+  They have no shell or package manager; probes execute `node` directly. Backend
   builder/runtime share a digest-pinned Wolfi base with Python 3.11 and maintained
   FFmpeg 9.0 packages. FFmpeg owns audio decoding and MP3 segmentation; there is
   no wheel-bundled libsndfile. lxml is built against the scanned system

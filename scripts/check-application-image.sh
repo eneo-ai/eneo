@@ -46,6 +46,8 @@ for _ in $(seq 1 40); do
   sleep 1
 done
 [[ "$ready" == 1 ]]
+docker exec "$container" node -e \
+  "if(process.versions.node.split('.')[0]!=='22')process.exit(1);console.log(JSON.stringify(process.versions))"
 if [[ "$kind" == web-next ]]; then
   # Exercises Sharp, the image endpoint and its on-disk cache as the runtime UID.
   docker exec "$container" node -e \

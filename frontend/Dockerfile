@@ -19,10 +19,12 @@ RUN bun run --filter @eneo/ui build && bun run --filter @eneo/web build
 # Stage 2: Production runtime using Node.js
 # Required ENV vars, see README.md
 # ORIGIN, JWT_SECRET, PUBLIC_API_URL
-FROM gcr.io/distroless/nodejs22-debian13:nonroot@sha256:ec2313763dd43931543bd03830466e0c409ce73a487e8d46f10db72d3b816c1c AS runner
-# Keep glibc aligned with the builder; runtime has no shell/package managers.
-# Explicit PATH also supports deployment probes that execute `node` directly.
-ENV PATH="/nodejs/bin:$PATH"
+FROM cgr.dev/chainguard/glibc-dynamic:latest@sha256:82edc253a57efee78d0fb504e11a93b7c74687b1b736110ad3a2a4f3edf632ab AS runner
+# Use the exact Node 22 binary from the builder with maintained glibc/C++
+# libraries. Keep its license and the base's package inventory for SBOM/scans.
+COPY --from=builder /usr/local/bin/node /usr/bin/node
+COPY --from=builder /usr/local/LICENSE /usr/share/licenses/node/LICENSE
+ENTRYPOINT ["/usr/bin/node"]
 
 WORKDIR /app
 # No node_modules in this image: adapter-node bundles apps/web devDependencies into build/,
