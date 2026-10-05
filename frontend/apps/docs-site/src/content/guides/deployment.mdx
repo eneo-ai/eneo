@@ -1278,8 +1278,13 @@ No additional database, Redis, worker or backend instance is needed.
    `https://beta.example.com/login/callback` to each applicable federation
    configuration's `additional_redirect_uris`, and register the same URI with the
    identity provider. The existing canonical callback stays registered.
-   If using frontend-managed OIDC instead, configure the beta's `OIDC_*` variables
-   and register `https://beta.example.com/auth/callback` with that client.
+   Use backend-managed authentication for the beta rollout. The separate
+   frontend-managed OIDC flow remains experimental: concurrent requests can reuse
+   a one-time rotating refresh token and invalidate the session. Refresh ownership
+   is not coordinated across requests or replicas. Before releasing that mode,
+   implement shared refresh coordination and validate the intended provider's
+   rotation behavior. Its development configuration uses the beta's `OIDC_*`
+   variables and the client callback `https://beta.example.com/auth/callback`.
 5. For SharePoint and Confluence, retain `OAUTH_CALLBACK_URL` for the existing UI
    and add this backend runtime variable (a JSON array):
 

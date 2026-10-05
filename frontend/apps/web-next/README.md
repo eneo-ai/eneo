@@ -37,10 +37,13 @@ Validation lives in `src/lib/env.ts` (zod, parsed at import time). There is no
   `eneo_session` cookie. Register the beta callback with the tenant's
   federation configuration and identity provider as described in the
   deployment guide. These sessions end when the backend token expires.
-- **Frontend-managed OIDC** is an optional separate confidential client,
-  configured with `OIDC_*`. It supports refresh tokens; the backend accepts
-  the IdP access token when `OIDC_RESOURCE_SERVER_ENABLED` is enabled and
-  the matching issuer/audience are configured.
+- **Frontend-managed OIDC** is an experimental separate confidential client,
+  configured with `OIDC_*`. The backend accepts its IdP access token when
+  `OIDC_RESOURCE_SERVER_ENABLED` and the matching issuer/audience are configured.
+  Concurrent requests can reuse a one-time rotating refresh token and invalidate
+  the session; refresh ownership is not coordinated across requests or replicas.
+  Use backend-managed authentication for the beta rollout. See the deployment
+  guide before evaluating this alternative.
 
 `src/proxy.ts` gates navigation and request origins. Backend authorization
 remains responsible for tenant, role and resource access on every API call.
