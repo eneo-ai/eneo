@@ -18,7 +18,7 @@ from typing import Any
 
 from pytest import MonkeyPatch, mark, raises
 
-from tests.unittests.flows.ai_builder.test_ai_builder_api_battle_harness import (
+from tests.scripts.test_ai_builder_api_battle_harness import (
     _RUN_PATH,  # pyright: ignore[reportPrivateUsage]
     _battle_harness,  # pyright: ignore[reportPrivateUsage]
     _complete_live_case_bundle,  # pyright: ignore[reportPrivateUsage]
@@ -28,7 +28,7 @@ from tests.unittests.flows.ai_builder.test_ai_builder_api_battle_harness import 
     _provider_call_item,  # pyright: ignore[reportPrivateUsage]
     _RuntimeApi,  # pyright: ignore[reportPrivateUsage]
 )
-from tests.unittests.flows.ai_builder.test_ai_builder_battle_compare import (
+from tests.scripts.test_ai_builder_battle_compare import (
     _compare_module,  # pyright: ignore[reportPrivateUsage]
     _summary,  # pyright: ignore[reportPrivateUsage]
 )

@@ -14,9 +14,11 @@ if not os.getenv("CRAWL_MAX_LENGTH"):
 
 import asyncio
 import faulthandler
+import re
 import sys
 import threading
 import warnings
+from pathlib import Path
 from typing import TYPE_CHECKING
 
 import pytest
@@ -150,13 +152,17 @@ def pytest_sessionfinish(
 def pytest_terminal_summary(
     terminalreporter: "TerminalReporter",
     exitstatus: int,  # noqa: ARG001  # required by pytest hook contract
-    config: pytest.Config,  # noqa: ARG001
+    config: pytest.Config,
 ) -> None:
-    """Print the active warning ignores at the end of every run.
+    """Note that tests/scripts were left out, then print the active warning ignores at the end of every run.
 
     We want this tech debt visible on every test run so it doesn't quietly
     rot. Each entry carries the concrete action required to delete it.
     """
+    if not _scripts_requested(config) and _run_covers_script_tests(config):
+        terminalreporter.write_line(
+            "tests/scripts (backend/scripts tooling tests) left out of this run; run them with -m scripts"
+        )
     if not IGNORED_WARNINGS:
         return
 
@@ -174,12 +180,53 @@ def pytest_terminal_summary(
         terminalreporter.write_line("")
 
 
+SCRIPT_TESTS_DIR = Path(__file__).parent / "scripts"
+
+
+def _scripts_requested(config: pytest.Config) -> bool:
+    """True when -m names the ``scripts`` marker as a token."""
+    return re.search(r"\bscripts\b", config.getoption("-m", default="")) is not None
+
+
+def _run_covers_script_tests(config: pytest.Config) -> bool:
+    """True when a path argument is tests/scripts, inside it, or a directory above it."""
+    for arg in config.args:
+        path = (Path(config.invocation_params.dir) / arg.split("::")[0]).resolve()
+        if (
+            path == SCRIPT_TESTS_DIR
+            or SCRIPT_TESTS_DIR in path.parents
+            or path in SCRIPT_TESTS_DIR.parents
+        ):
+            return True
+    return False
+
+
+@pytest.hookimpl(tryfirst=True)  # the -m filter must see the scripts marker
 def pytest_collection_modifyitems(config, items):
-    """Auto-skip tests with opt-in markers unless explicitly requested via -m."""
+    """Auto-skip tests with opt-in markers unless explicitly requested via -m.
+
+    Tests under tests/scripts/ cover backend/scripts (measurement and release
+    tooling), including its product-module dependencies. They are marked
+    ``scripts`` and left out of the default run. Run them with ``-m scripts
+    tests/scripts`` when changing the tooling, its tests, or imported product modules.
+    """
     OPT_IN_MARKERS = {"api_key_matrix"}
 
-    # Check if any opt-in marker was explicitly requested via -m
     marker_expr = config.getoption("-m", default="")
+    scripts_requested = _scripts_requested(config)
+    selected, deselected = [], []
+    for item in items:
+        if SCRIPT_TESTS_DIR in item.path.parents:
+            item.add_marker(pytest.mark.scripts)
+            if not scripts_requested:
+                deselected.append(item)
+                continue
+        selected.append(item)
+    if deselected:
+        config.hook.pytest_deselected(items=deselected)
+        items[:] = selected
+
+    # Check if any opt-in marker was explicitly requested via -m
     requested = {m for m in OPT_IN_MARKERS if m in marker_expr}
 
     skip_markers = OPT_IN_MARKERS - requested

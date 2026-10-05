@@ -22,7 +22,7 @@ from pytest import CaptureFixture, MonkeyPatch, mark, raises
 
 from eneo.flows.runtime import docx_template_runtime
 
-SCRIPTS = Path(__file__).resolve().parents[4] / "scripts"
+SCRIPTS = Path(__file__).resolve().parents[2] / "scripts"
 FIXTURE_DIR = SCRIPTS / "fixtures" / "ai_builder_battle"
 SOURCE = {
     "catalogue_id": "UTB-10",

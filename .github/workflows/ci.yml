@@ -54,6 +54,7 @@ jobs:
       frontend: ${{ steps.scope.outputs.frontend }}
       frontend_e2e: ${{ steps.scope.outputs.frontend_e2e }}
       schema: ${{ steps.scope.outputs.schema }}
+      backend_scripts: ${{ steps.scope.outputs.backend_scripts }}
       scripts: ${{ steps.scope.outputs.scripts }}
       route_metadata: ${{ steps.scope.outputs.route_metadata }}
       docker_backend: ${{ steps.scope.outputs.docker_backend }}
@@ -86,9 +87,9 @@ jobs:
           files="$RUNNER_TEMP/changed-files.txt"
 
           if [[ -z "$base" || "$base" =~ ^0+$ ]]; then
-            git diff-tree --no-commit-id --name-only -r "$head" > "$files"
+            git diff-tree --no-renames --no-commit-id --name-only -r "$head" > "$files"
           else
-            git diff --name-only "$base" "$head" > "$files"
+            git diff --no-renames --name-only "$base" "$head" > "$files"
           fi
 
           echo "files=$files" >> "$GITHUB_OUTPUT"
@@ -291,6 +292,55 @@ jobs:
           ENEO_FILE_ICON_REHEARSAL_PROFILE: smoke
           TESTCONTAINERS_RYUK_DISABLED: "true"
           DOCKER_HOST: unix:///var/run/docker.sock
+
+  # Tooling tests also import product modules, so this job runs them for every backend change.
+  # The default pytest run leaves them out; this job selects the "scripts" marker explicitly.
+  backend-script-tests:
+    name: Backend script tests
+    needs: changes
+    if: github.event_name != 'pull_request' || needs.changes.outputs.backend_scripts == 'true'
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: backend
+    services:
+      redis:
+        image: redis:7-alpine
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@d0cc045d04ccac9d8b7881df0226f9e82c39688e # v6
+        with:
+          version: "0.8.22"
+          enable-cache: true
+
+      - name: Set up Python
+        run: |
+          for attempt in 1 2 3 4 5; do
+            if uv python install 3.11; then
+              exit 0
+            fi
+            echo "::warning::uv python install failed (attempt $attempt/5); retrying in $((attempt * 10))s"
+            sleep $((attempt * 10))
+          done
+          echo "::error::uv python install failed after 5 attempts"
+          exit 1
+
+      - name: Install dependencies
+        run: uv sync --python 3.11 --frozen --all-groups
+
+      - name: Run backend script tests
+        run: uv run pytest -v -n 4 --durations=25 -m scripts tests/scripts
 
   script-tests:
     name: Script tests
@@ -696,6 +746,7 @@ jobs:
       - branch-policy
       - backend-quality
       - backend-tests
+      - backend-script-tests
       - script-tests
       - route-metadata
       - user-facing
@@ -712,6 +763,7 @@ jobs:
           BRANCH_POLICY_RESULT: ${{ needs.branch-policy.result }}
           BACKEND_QUALITY_RESULT: ${{ needs.backend-quality.result }}
           BACKEND_TESTS_RESULT: ${{ needs.backend-tests.result }}
+          BACKEND_SCRIPT_TESTS_RESULT: ${{ needs.backend-script-tests.result }}
           SCRIPT_TESTS_RESULT: ${{ needs.script-tests.result }}
           ROUTE_METADATA_RESULT: ${{ needs.route-metadata.result }}
           USER_FACING_RESULT: ${{ needs.user-facing.result }}
@@ -742,6 +794,7 @@ jobs:
           check_result "Branch policy" "$BRANCH_POLICY_RESULT"
           check_result "Backend quality" "$BACKEND_QUALITY_RESULT"
           check_result "Backend tests" "$BACKEND_TESTS_RESULT"
+          check_result "Backend script tests" "$BACKEND_SCRIPT_TESTS_RESULT"
           check_result "Script tests" "$SCRIPT_TESTS_RESULT"
           check_result "Route metadata" "$ROUTE_METADATA_RESULT"
           check_result "User-facing section" "$USER_FACING_RESULT"

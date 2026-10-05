@@ -21,7 +21,7 @@ from typing import Any
 
 from pytest import MonkeyPatch, fixture, mark, raises
 
-from tests.unittests.flows.ai_builder.test_ai_builder_api_battle_harness import (
+from tests.scripts.test_ai_builder_api_battle_harness import (
     _applied_flow_from_plan,  # pyright: ignore[reportPrivateUsage]
     _awaiting_review_run,  # pyright: ignore[reportPrivateUsage]
     _battle_harness,  # pyright: ignore[reportPrivateUsage]
@@ -34,17 +34,17 @@ from tests.unittests.flows.ai_builder.test_ai_builder_api_battle_harness import 
     _review_policy_plan,  # pyright: ignore[reportPrivateUsage]
     _RuntimeApi,  # pyright: ignore[reportPrivateUsage]
 )
-from tests.unittests.flows.ai_builder.test_ai_builder_battle_compare import (
+from tests.scripts.test_ai_builder_battle_compare import (
     _compare_module,  # pyright: ignore[reportPrivateUsage]
     _row,  # pyright: ignore[reportPrivateUsage]
     _summary,  # pyright: ignore[reportPrivateUsage]
 )
-from tests.unittests.flows.ai_builder.test_ai_builder_forbidden_literal_output import (
+from tests.scripts.test_ai_builder_forbidden_literal_output import (
     _NO_DELIVERY,  # pyright: ignore[reportPrivateUsage]
     _scored_row,  # pyright: ignore[reportPrivateUsage]
 )
 
-_SCRIPTS = Path(__file__).resolve().parents[4] / "scripts"
+_SCRIPTS = Path(__file__).resolve().parents[2] / "scripts"
 if str(_SCRIPTS) not in sys.path:
     sys.path.insert(0, str(_SCRIPTS))
 

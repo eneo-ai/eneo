@@ -30,7 +30,7 @@ from eneo.flows.ai_builder.ai_builder_flow_schema_values import (
 from eneo.flows.ai_builder.ai_builder_slot_classification_contract import (
     SLOT_CLASSIFICATION_SCHEMA_VERSION,
 )
-from tests.unittests.flows.ai_builder.test_ai_builder_runtime_lineage import (
+from tests.scripts.test_ai_builder_runtime_lineage import (
     CONSUMED_SHA256,
     INPUT_STEP,
     completed_evidence,
@@ -46,7 +46,7 @@ _TEST_SESSION_ID = "00000000-0000-0000-0000-000000000001"
 
 def _battle_harness() -> ModuleType:
     module_path = (
-        Path(__file__).resolve().parents[4]
+        Path(__file__).resolve().parents[2]
         / "scripts"
         / "ai_builder_api_battle_test.py"
     )
@@ -2889,7 +2889,7 @@ def test_prompt_backed_case_field_contracts_use_exact_emitted_names(
 ) -> None:
     harness = _battle_harness()
     cases_path = (
-        Path(__file__).resolve().parents[4]
+        Path(__file__).resolve().parents[2]
         / "scripts"
         / "ai_builder_api_battle_cases.json"
     )
@@ -2938,7 +2938,7 @@ def test_no_leaf_field_name_satisfies_two_groups_of_one_case() -> None:
     """
     harness = _battle_harness()
     cases_path = (
-        Path(__file__).resolve().parents[4]
+        Path(__file__).resolve().parents[2]
         / "scripts"
         / "ai_builder_api_battle_cases.json"
     )
@@ -3076,7 +3076,7 @@ def test_leaf_retention_uses_terminal_json_but_keeps_document_analysis_fields() 
 def test_context_balance_pdf_case_sets_cleanup_cap() -> None:
     harness = _battle_harness()
     cases = harness._read_cases_file(
-        Path(__file__).resolve().parents[4]
+        Path(__file__).resolve().parents[2]
         / "scripts"
         / "ai_builder_api_context_balance_cases.json"
     )
@@ -6298,7 +6298,7 @@ def test_complex_first_pass_provenance_rejects_each_missing_or_amplified_fact(
         else "23fab2d4a638ef1411a4d5808981aa77cb17f59d",
     )
     cases_path = (
-        Path(__file__).resolve().parents[4]
+        Path(__file__).resolve().parents[2]
         / "scripts"
         / "ai_builder_api_battle_cases.json"
     )
@@ -8204,7 +8204,7 @@ def test_runtime_evidence_collection_uses_published_contract(
 def test_release_inventory_owns_required_dimensions_and_named_cases() -> None:
     harness = _battle_harness()
     cases_path = (
-        Path(__file__).resolve().parents[4]
+        Path(__file__).resolve().parents[2]
         / "scripts"
         / "ai_builder_api_battle_cases.json"
     )
@@ -8485,7 +8485,7 @@ def test_a_writer_after_the_reviewed_step_is_a_warning_not_a_failed_check() -> N
 def test_complex_authoring_case_enforces_first_pass_topology_independently() -> None:
     harness = _battle_harness()
     cases_path = (
-        Path(__file__).resolve().parents[4]
+        Path(__file__).resolve().parents[2]
         / "scripts"
         / "ai_builder_api_battle_cases.json"
     )
@@ -8676,7 +8676,7 @@ def test_release_expectation_typos_fail_closed(tmp_path: Path) -> None:
 def test_run_suite_rejects_case_selection_overrides() -> None:
     harness = _battle_harness()
     cases_path = (
-        Path(__file__).resolve().parents[4]
+        Path(__file__).resolve().parents[2]
         / "scripts"
         / "ai_builder_api_battle_cases.json"
     )
@@ -14078,7 +14078,7 @@ def test_a_case_note_describes_the_report_and_seals_nothing() -> None:
 def test_every_executed_edit_review_case_edits_its_review_target() -> None:
     harness = _battle_harness()
     cases_path = (
-        Path(__file__).resolve().parents[4]
+        Path(__file__).resolve().parents[2]
         / "scripts"
         / "ai_builder_api_municipal_cases.json"
     )
@@ -15467,7 +15467,7 @@ def test_the_edit_corpus_can_start_a_sealed_targeted_run() -> None:
     assert contract.require_clean_source is True
 
 
-_SCRIPTS_DIR = Path(__file__).resolve().parents[4] / "scripts"
+_SCRIPTS_DIR = Path(__file__).resolve().parents[2] / "scripts"
 _SEED_FIXTURES = sorted(
     path.name
     for prefix in ("edit_seed_", "edit_chain_")
@@ -16062,7 +16062,7 @@ def test_an_edit_observation_revalidates_its_session_attachment_identity() -> No
 
 def _compare_module() -> ModuleType:
     module_path = (
-        Path(__file__).resolve().parents[4] / "scripts" / "ai_builder_battle_compare.py"
+        Path(__file__).resolve().parents[2] / "scripts" / "ai_builder_battle_compare.py"
     )
     spec = importlib.util.spec_from_file_location("battle_compare", module_path)
     assert spec is not None and spec.loader is not None

@@ -20,7 +20,7 @@ from urllib.error import HTTPError
 from pytest import MonkeyPatch, mark, raises
 
 _SCRIPT = (
-    Path(__file__).resolve().parents[4] / "scripts" / "ai_builder_api_battle_test.py"
+    Path(__file__).resolve().parents[2] / "scripts" / "ai_builder_api_battle_test.py"
 )
 
 

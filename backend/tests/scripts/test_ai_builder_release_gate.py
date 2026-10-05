@@ -21,10 +21,10 @@ from typing import Any
 
 import pytest
 
-_SCRIPTS = Path(__file__).resolve().parents[4] / "scripts"
+_SCRIPTS = Path(__file__).resolve().parents[2] / "scripts"
 _MATRIX_STATE = _SCRIPTS / "ai_builder_release_matrix_state.json"
 _DERIVATION = (
-    Path(__file__).resolve().parents[4]
+    Path(__file__).resolve().parents[2]
     / "src"
     / "eneo"
     / "flows"

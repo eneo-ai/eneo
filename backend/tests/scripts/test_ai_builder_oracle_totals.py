@@ -17,7 +17,7 @@ from typing import Any
 
 import pytest
 
-_SCRIPTS = Path(__file__).resolve().parents[4] / "scripts"
+_SCRIPTS = Path(__file__).resolve().parents[2] / "scripts"
 if str(_SCRIPTS) not in sys.path:
     sys.path.insert(0, str(_SCRIPTS))
 
@@ -1464,7 +1464,7 @@ def head_tree_base(tmp_path_factory: pytest.TempPathFactory) -> Path:
     worktree."""
 
     stage = importlib.import_module("ai_builder_oracle_stage")
-    real = Path(__file__).resolve().parents[5]
+    real = Path(__file__).resolve().parents[3]
     tree = tmp_path_factory.mktemp("frozen-tree")
     for part in ("scripts", "src"):
         shutil.copytree(
@@ -1590,7 +1590,7 @@ def stub_scorer_identity(
     return identity
 
 
-CHECKOUT = Path(__file__).resolve().parents[5]
+CHECKOUT = Path(__file__).resolve().parents[3]
 
 
 def _load_code_from(monkeypatch: pytest.MonkeyPatch, tree: Path) -> None:

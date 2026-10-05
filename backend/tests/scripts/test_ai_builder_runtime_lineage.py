@@ -16,7 +16,7 @@ from typing import Any
 
 from pytest import mark
 
-_SCRIPTS = Path(__file__).resolve().parents[4] / "scripts"
+_SCRIPTS = Path(__file__).resolve().parents[2] / "scripts"
 if str(_SCRIPTS) not in sys.path:
     sys.path.insert(0, str(_SCRIPTS))
 

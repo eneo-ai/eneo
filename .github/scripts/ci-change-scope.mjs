@@ -1,7 +1,10 @@
 #!/usr/bin/env node
 
 import assert from "node:assert/strict";
+import { execFileSync } from "node:child_process";
 import fs from "node:fs";
+import os from "node:os";
+import path from "node:path";
 
 const outputNames = [
   "full",
@@ -9,6 +12,7 @@ const outputNames = [
   "frontend",
   "frontend_e2e",
   "schema",
+  "backend_scripts",
   "scripts",
   "route_metadata",
   "docker_backend",
@@ -53,6 +57,8 @@ function classify(rawFiles) {
     full || files.some(isShippedFrontendFile) || files.includes("scripts/check_whats_new.py");
   const frontendE2e = full || backend || frontend || files.some(isE2eFile);
   const schema = full || backend || files.some(isSchemaFile);
+  // Some script tests import product modules, so any backend change runs them (locally they run on a narrower trigger).
+  const backendScripts = backend;
   const scripts = full || whatsNewContract || files.some(isScriptTestFile);
   const routeMetadata = full || backend || files.includes("scripts/check_route_metadata.py");
   const dockerBackend = full || backend;
@@ -65,6 +71,7 @@ function classify(rawFiles) {
     frontend,
     frontend_e2e: frontendE2e,
     schema,
+    backend_scripts: backendScripts,
     scripts,
     route_metadata: routeMetadata,
     docker_backend: dockerBackend,
@@ -136,6 +143,7 @@ function getArgValue(name) {
 }
 
 function runSelfTest() {
+  assertOutboundRenameScope();
   assert.deepEqual(
     classify(["frontend/apps/docs-site/src/content/contributing/project-roadmap.mdx"]),
     {
@@ -144,6 +152,7 @@ function runSelfTest() {
       frontend: false,
       frontend_e2e: false,
       schema: false,
+      backend_scripts: false,
       scripts: false,
       route_metadata: false,
       docker_backend: false,
@@ -158,6 +167,17 @@ function runSelfTest() {
   assert.equal(classify(["backend/src/eneo/server/main.py"]).schema, true);
   assert.equal(classify(["backend/src/eneo/server/main.py"]).route_metadata, true);
   assert.equal(classify(["backend/src/eneo/server/main.py"]).docker_backend, true);
+
+  for (const file of [
+    "backend/src/eneo/server/main.py",
+    "backend/scripts/ai_builder_release_gate.py",
+    "backend/tests/scripts/test_ai_builder_release_gate.py",
+    "backend/tests/conftest.py",
+    "backend/pytest.ini",
+  ]) {
+    assert.equal(classify([file]).backend_scripts, true, `${file} should run the backend script tests`);
+  }
+  assert.equal(classify(["frontend/apps/web/src/routes/+page.svelte"]).backend_scripts, false);
 
   assert.equal(classify(["scripts/backend_test_shard.py"]).backend, true);
   assert.equal(classify(["scripts/backend_test_shard.py"]).scripts, true);
@@ -198,4 +218,76 @@ function runSelfTest() {
   }
 
   console.log("ci-change-scope self-test passed");
+}
+
+function assertOutboundRenameScope() {
+  // An outbound rename must still run tests of the removed backend code.
+  const lines = fs
+    .readFileSync(new URL("../workflows/ci.yml", import.meta.url), "utf8")
+    .split("\n");
+  const step = lines.findIndex((line) => line.trim() === "id: changed-files");
+  const run = lines.findIndex(
+    (line, index) => index > step && line.trim() === "run: |",
+  );
+  assert.ok(step >= 0 && run > step, "changed-file workflow step must exist");
+  const script = [];
+  for (const line of lines.slice(run + 1)) {
+    if (line.trim() && !line.startsWith("          ")) break;
+    script.push(line.slice(10));
+  }
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "eneo-ci-rename-"));
+  const env = {
+    PATH: process.env.PATH,
+    LANG: "C",
+    GIT_CONFIG_NOSYSTEM: "1",
+    GIT_CONFIG_GLOBAL: "/dev/null",
+  };
+  const git = (...args) =>
+    execFileSync("git", args, { cwd: root, env, timeout: 5000 });
+  const source = "backend/rename-fixture.py";
+  const destination =
+    "frontend/apps/docs-site/src/content/docs/rename-fixture.md";
+  try {
+    git("init", "-b", "feature/rename-fixture");
+    git("config", "user.name", "CCimen");
+    git("config", "user.email", "test@example.com");
+    git("config", "diff.renames", "true");
+    fs.mkdirSync(path.join(root, "backend"));
+    fs.writeFileSync(path.join(root, source), "Synthetic rename fixture\n");
+    git("add", "--", source);
+    git("commit", "-m", "Add synthetic backend fixture");
+    const base = git("rev-parse", "HEAD").toString().trim();
+    fs.mkdirSync(path.dirname(path.join(root, destination)), {
+      recursive: true,
+    });
+    fs.renameSync(path.join(root, source), path.join(root, destination));
+    git("add", "--", source, destination);
+    git("commit", "-m", "Move fixture to docs");
+    const head = git("rev-parse", "HEAD").toString().trim();
+    for (const before of [base, "0".repeat(40)]) {
+      execFileSync("bash", ["-c", script.join("\n")], {
+        cwd: root,
+        timeout: 5000,
+        env: {
+          ...env,
+          EVENT_NAME: "push",
+          BEFORE_SHA: before,
+          HEAD_SHA: head,
+          RUNNER_TEMP: root,
+          GITHUB_OUTPUT: path.join(root, "outputs"),
+          GITHUB_STEP_SUMMARY: path.join(root, "summary"),
+        },
+      });
+      const files = fs
+        .readFileSync(path.join(root, "changed-files.txt"), "utf8")
+        .split("\n");
+      assert.equal(
+        classify(files).backend_scripts,
+        true,
+        "outbound backend rename must run its tooling tests",
+      );
+    }
+  } finally {
+    fs.rmSync(root, { recursive: true });
+  }
 }

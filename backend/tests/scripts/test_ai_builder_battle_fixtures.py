@@ -12,7 +12,7 @@ from typing import Any
 
 from pytest import MonkeyPatch, raises
 
-BACKEND_ROOT = Path(__file__).resolve().parents[4]
+BACKEND_ROOT = Path(__file__).resolve().parents[2]
 CASES_PATH = BACKEND_ROOT / "scripts" / "ai_builder_api_battle_cases.json"
 GENERATOR_PATH = BACKEND_ROOT / "scripts" / "generate_battle_fixtures.py"
 FIXTURE_DIR = BACKEND_ROOT / "scripts" / "fixtures" / "ai_builder_battle"

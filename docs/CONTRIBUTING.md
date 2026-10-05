@@ -428,6 +428,13 @@ uv run pytest tests/unittests/assistants/
 uv run pytest tests/unittests/assistants/test_assistant.py::test_assistant_update_system_prompt
 ```
 
+The default run leaves out the tooling tests in `backend/tests/scripts/`. Run them explicitly when changing
+`backend/scripts/`, these tests, or the product modules they import. CI runs them for any backend change:
+
+```bash
+uv run pytest -m scripts tests/scripts
+```
+
 ### Frontend Testing
 
 **Component Testing:**

@@ -23,7 +23,7 @@ from eneo.flows.runtime.docx_template_runtime import (
 from eneo.main.exceptions import BadRequestException
 from tests.docx_template_fixtures import control_template_bytes
 
-_SCRIPTS = Path(__file__).resolve().parents[4] / "scripts"
+_SCRIPTS = Path(__file__).resolve().parents[2] / "scripts"
 SENTINEL = "ORACLE-SENTINEL-2b9c"
 
 

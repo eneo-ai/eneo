@@ -8,7 +8,7 @@ from types import ModuleType
 
 import pytest
 
-_SCRIPTS = Path(__file__).resolve().parents[4] / "scripts"
+_SCRIPTS = Path(__file__).resolve().parents[2] / "scripts"
 if str(_SCRIPTS) not in sys.path:
     sys.path.insert(0, str(_SCRIPTS))
 
@@ -94,7 +94,7 @@ def test_a_symlinked_checkout_is_the_same_tree(tmp_path: Path) -> None:
 def test_the_processs_own_code_is_found_and_belongs_to_this_checkout(
     tmp_path: Path,
 ) -> None:
-    checkout = Path(__file__).resolve().parents[5]
+    checkout = Path(__file__).resolve().parents[3]
 
     loaded = dict(identity.loaded_code())
 
@@ -151,7 +151,7 @@ def test_a_first_party_script_preloaded_from_elsewhere_is_foreign_by_name(
 def test_preloaded_foreign_scripts_are_refused_in_the_real_process_and_the_real_tree_passes(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    checkout = Path(__file__).resolve().parents[5]
+    checkout = Path(__file__).resolve().parents[3]
     identity.require_code_from_tree(checkout, what="A leg")  # the real tree passes
 
     site = tmp_path / "site-packages"

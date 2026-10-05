@@ -19,7 +19,7 @@ from typing import Any
 import pytest
 
 _SCRIPT = (
-    Path(__file__).resolve().parents[4] / "scripts" / "ai_builder_battle_compare.py"
+    Path(__file__).resolve().parents[2] / "scripts" / "ai_builder_battle_compare.py"
 )
 
 

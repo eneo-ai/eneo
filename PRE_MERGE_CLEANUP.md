@@ -10,11 +10,7 @@ Check what is still present:
 git ls-files -- PRE_MERGE_CLEANUP.md .beads docs/goals VERIFICATION-HANDOFF.md \
   'backend/scripts/ai_builder_*' backend/scripts/fixtures/ai_builder_battle \
   backend/scripts/check_flow_run_evidence_acceptance.py scripts/gate-local \
-  'backend/tests/unittests/flows/ai_builder/test_ai_builder_api_battle_harness.py' \
-  'backend/tests/unittests/flows/ai_builder/test_ai_builder_battle_*' \
-  'backend/tests/unittests/flows/ai_builder/test_ai_builder_edit_capability.py' \
-  'backend/tests/unittests/flows/ai_builder/test_ai_builder_edit_expectation.py' \
-  'backend/tests/unittests/flows/ai_builder/test_ai_builder_release_gate.py' | awk -F/ '{print $1"/"$2"/"$3}' | sort | uniq -c
+  backend/tests/scripts | awk -F/ '{print $1"/"$2"/"$3}' | sort | uniq -c
 ```
 
 ## Remove (program tracking, not product)
@@ -43,7 +39,7 @@ separate repository.
 | `backend/scripts/ai_builder_fixture_render.py`, `generate_battle_fixtures.py`, `fixtures/ai_builder_battle/specs/` and the documents rendered from those specs (+ `test_ai_builder_battle_fixture_specs.py`), and the `.gitignore` exception that tracks that `specs/` directory | Fixture content specs, one renderer per format, and the read-only drift check (`generate_battle_fixtures.py --check`). |
 | `backend/scripts/ai_builder_failure_summary.py` | Referenced by the docs-site `ai-builder.mdx`; update the page if it goes. |
 | `backend/scripts/check_flow_run_evidence_acceptance.py` | Evidence acceptance checker. |
-| `backend/tests/unittests/flows/ai_builder/test_ai_builder_api_battle_harness.py`, `test_ai_builder_battle_*`, `test_ai_builder_edit_capability.py`, `test_ai_builder_edit_expectation.py`, `test_ai_builder_release_gate.py` | Tests of the tooling; they follow the tooling's decision. |
+| `backend/tests/scripts/` (the 20 tooling test files) and everything that wires it: the `scripts` marker in `backend/pytest.ini`, the `tests/scripts` hook, helpers and summary line in `backend/tests/conftest.py`, the `backend-script-tests` job in `.github/workflows/ci.yml` with its `needs:` entry, `BACKEND_SCRIPT_TESTS_RESULT` env and `check_result` line in the `ci` aggregate, the `backend_scripts` output in `ci-change-scope.mjs` (outputNames, classify, self-test) and in the `changes` job outputs, and the paragraph in `docs/CONTRIBUTING.md` | Tests of the tooling; they follow the tooling's decision. Remove all pieces in one change: a dangling aggregate entry or marker leaves CI red. |
 
 ## Keep (product tooling; verify, then delete this section)
 

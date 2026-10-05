@@ -38,13 +38,13 @@ from eneo.flows.flow_authoring_spec import (
     StepSpec,
 )
 from tests.docx_template_fixtures import control_template_bytes
-from tests.unittests.flows.ai_builder.test_ai_builder_runtime_lineage import (
+from tests.scripts.test_ai_builder_runtime_lineage import (
     completed_evidence,
     failed_result_evidence,
     no_result_evidence,
 )
 
-_SCRIPTS = Path(__file__).resolve().parents[4] / "scripts"
+_SCRIPTS = Path(__file__).resolve().parents[2] / "scripts"
 
 
 def _load(name: str, filename: str) -> ModuleType:

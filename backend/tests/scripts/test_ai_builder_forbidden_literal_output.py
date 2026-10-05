@@ -19,7 +19,7 @@ from typing import Any
 
 from pytest import MonkeyPatch, fixture, mark
 
-from tests.unittests.flows.ai_builder.test_ai_builder_api_battle_harness import (
+from tests.scripts.test_ai_builder_api_battle_harness import (
     _battle_harness,  # pyright: ignore[reportPrivateUsage]
     _complete_live_case_bundle,  # pyright: ignore[reportPrivateUsage]
     _completed_text_run,  # pyright: ignore[reportPrivateUsage]
@@ -27,10 +27,10 @@ from tests.unittests.flows.ai_builder.test_ai_builder_api_battle_harness import 
     _execution,  # pyright: ignore[reportPrivateUsage]
     _RuntimeApi,  # pyright: ignore[reportPrivateUsage]
 )
-from tests.unittests.flows.ai_builder.test_ai_builder_battle_compare import (
+from tests.scripts.test_ai_builder_battle_compare import (
     _compare_module,  # pyright: ignore[reportPrivateUsage]
 )
-from tests.unittests.flows.ai_builder.test_ai_builder_edit_expectation import (
+from tests.scripts.test_ai_builder_edit_expectation import (
     E14,  # pyright: ignore[reportPrivateUsage]
     S2_EXPLICIT,  # pyright: ignore[reportPrivateUsage]
     A,  # pyright: ignore[reportPrivateUsage]
@@ -38,14 +38,14 @@ from tests.unittests.flows.ai_builder.test_ai_builder_edit_expectation import (
     _evidence,  # pyright: ignore[reportPrivateUsage]
     _plan,  # pyright: ignore[reportPrivateUsage]
 )
-from tests.unittests.flows.ai_builder.test_ai_builder_edit_outcomes import (
+from tests.scripts.test_ai_builder_edit_outcomes import (
     DECLARED,  # pyright: ignore[reportPrivateUsage]
     _edit,  # pyright: ignore[reportPrivateUsage]
     _observation,  # pyright: ignore[reportPrivateUsage]
     outcomes,  # pyright: ignore[reportPrivateUsage]
 )
 
-_SCRIPTS = Path(__file__).resolve().parents[4] / "scripts"
+_SCRIPTS = Path(__file__).resolve().parents[2] / "scripts"
 if str(_SCRIPTS) not in sys.path:
     sys.path.insert(0, str(_SCRIPTS))
 

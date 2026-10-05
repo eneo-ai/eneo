@@ -11,7 +11,7 @@ from typing import Any
 
 from pytest import mark, raises
 
-SCRIPTS = Path(__file__).resolve().parents[4] / "scripts"
+SCRIPTS = Path(__file__).resolve().parents[2] / "scripts"
 PDF = "01_protokoll_bun_2026_02_25.pdf"
 DOCX = "02_tjansteskrivelse_underlag.docx"
 SOURCE = {"catalogue_id": "BYG-01", "url": "https://e-tjanster.sundsvall.se/bygglov"}
