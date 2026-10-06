@@ -56785,6 +56785,7 @@ export interface operations {
         content: {
           /**
            * @example {
+           *       "code": "bad_request",
            *       "eneo_error_code": 9007,
            *       "message": "Stored HTTP step configuration is invalid."
            *     }
@@ -56819,6 +56820,7 @@ export interface operations {
         content: {
           /**
            * @example {
+           *       "code": "not_found",
            *       "eneo_error_code": 9000,
            *       "message": "Flow step not found."
            *     }
@@ -56843,6 +56845,7 @@ export interface operations {
         content: {
           /**
            * @example {
+           *       "code": "encryption_not_configured",
            *       "eneo_error_code": 9042,
            *       "message": "HTTP credential encryption is unavailable."
            *     }
