@@ -199,7 +199,16 @@ whenever a use disappears:
   uploads that were never attached, and a File removed from an Assistant or
   App that nothing else uses. The 24 hours protect uploads that are still on
   their way to a chat message or App run; they do not measure how long a File
-  has been unused.
+  has been unused. A chat message, App run or service call that names a File
+  deleted this way is refused with the missing file id (`400`), so the File is
+  uploaded again rather than silently left out.
+
+Knowledge is never part of this cleanup. Documents in a collection and the
+originals Eneo retains for them are not Files: they are stored as info blobs
+with their own content references, and a piece of content shared between a
+File and an info blob is only removed once both references are gone. A File
+attached to an Assistant or App stays in use for as long as the attachment
+exists.
 
 Deleting the File releases its content, and the object-content lifecycle
 removes the bytes, including audio recordings and transcriptions. Removal runs
