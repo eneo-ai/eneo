@@ -99,6 +99,7 @@ async def _log_required_run_file_access(
     extra: Mapping[str, object],
 ) -> None:
     user = container.user()
+    (file_info,) = await container.file_repo().get_infos_by_ids([file.id])
     await container.audit_service().log(
         tenant_id=user.tenant_id,
         user=user,
@@ -106,7 +107,9 @@ async def _log_required_run_file_access(
         entity_type=EntityType.FILE,
         entity_id=file.id,
         description=description,
-        metadata=AuditMetadata.standard(actor=user, target=file, extra=extra),
+        metadata=AuditMetadata.standard(
+            actor=user, target=file, extra={**extra, "size_bytes": file_info.size}
+        ),
         required=True,
     )
 
@@ -472,7 +475,6 @@ async def generate_flow_run_artifact_signed_url(
                     "download_purpose": "flow_run_artifact",
                     "artifact_name": file.name,
                     "mimetype": getattr(file, "mimetype", None),
-                    "size_bytes": getattr(file, "size", None),
                 },
             )
     except AuditLoggingUnavailableException:
@@ -607,7 +609,6 @@ async def generate_flow_run_input_file_signed_url(
                     "download_purpose": "flow_run_input",
                     "file_name": file.name,
                     "mimetype": getattr(file, "mimetype", None),
-                    "size_bytes": getattr(file, "size", None),
                     "content_disposition": signed_url_req.content_disposition.value,
                     "expires_in_seconds": signed_url_req.expires_in,
                 },

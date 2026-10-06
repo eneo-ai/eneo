@@ -21,7 +21,15 @@ import eneo.flows.application.flow_trace_audit as flow_trace_audit_module
 from eneo.actors.actors.space_actor import SpaceRole
 from eneo.audit.domain.action_types import ActionType
 from eneo.authentication.auth_dependencies import ScopeFilter
+from eneo.authentication.principal_types import PrincipalType
 from eneo.authentication.signed_urls import verify_signed_token
+from eneo.files.file_models import (
+    ContentDisposition,
+    FileInfo,
+    FileMetadata,
+    FileType,
+    SignedURLRequest,
+)
 from eneo.flows.api import flow_access_context as flow_access_context_module
 from eneo.flows.api.flow_run_contract_models import FlowFinalOutputContractPublic
 from eneo.flows.api.flow_run_evidence_router import (
@@ -1536,8 +1544,56 @@ async def test_list_flow_run_steps_fails_closed_when_required_audit_is_unavailab
 
 
 @pytest.mark.asyncio
-async def test_artifact_signed_url_delegates_to_service_and_audits(monkeypatch):
-    """Artifact endpoint calls service.get_run_artifact_file, generates signed URL, and audits."""
+@pytest.mark.parametrize(
+    (
+        "endpoint",
+        "service_method",
+        "file_name",
+        "file_type",
+        "mimetype",
+        "size",
+        "purpose",
+        "name_key",
+        "disposition",
+    ),
+    [
+        (
+            generate_flow_run_artifact_signed_url,
+            "get_run_artifact_file",
+            "report.docx",
+            FileType.TEXT,
+            "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+            2048,
+            "flow_run_artifact",
+            "artifact_name",
+            ContentDisposition.ATTACHMENT,
+        ),
+        (
+            generate_flow_run_input_file_signed_url,
+            "get_run_input_file",
+            "meeting.mp3",
+            FileType.AUDIO,
+            "audio/mpeg",
+            4096,
+            "flow_run_input",
+            "file_name",
+            ContentDisposition.INLINE,
+        ),
+    ],
+    ids=["artifact-size-from-content", "input-size-from-content"],
+)
+async def test_run_file_signed_url_uses_content_size_and_audits(
+    monkeypatch,
+    endpoint,
+    service_method,
+    file_name,
+    file_type,
+    mimetype,
+    size,
+    purpose,
+    name_key,
+    disposition,
+):
     container = MagicMock()
     flow_id = uuid4()
     run_id = uuid4()
@@ -1547,16 +1603,29 @@ async def test_artifact_signed_url_delegates_to_service_and_audits(monkeypatch):
     )
     container.user.return_value = user
     file_tenant_id = uuid4()
-
-    file_obj = SimpleNamespace(
+    now = datetime.now(timezone.utc)
+    file_obj = FileMetadata(
         id=file_id,
-        name="report.docx",
+        created_at=now,
+        updated_at=now,
+        name=file_name,
+        file_type=file_type,
         tenant_id=file_tenant_id,
-        mimetype="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
-        size=2048,
+        mimetype=mimetype,
+        owner_type=PrincipalType.USER,
+        owner_user_id=user.id,
+    )
+    file_info = FileInfo.model_validate(
+        {**file_obj.model_dump(), "size": size, "checksum": "0" * 64}
+    )
+    # Mutant: the audit reads the size of another file.
+    container.file_repo.return_value = AsyncMock(
+        get_infos_by_ids=AsyncMock(
+            side_effect=lambda ids: [file_info] if ids == [file_id] else []
+        )
     )
     run_service = AsyncMock()
-    run_service.get_run_artifact_file.return_value = file_obj
+    getattr(run_service, service_method).return_value = file_obj
     container.flow_run_evidence_service.return_value = run_service
     container.flow_service.return_value = AsyncMock()
     audit_service = AsyncMock()
@@ -1569,12 +1638,9 @@ async def test_artifact_signed_url_delegates_to_service_and_audits(monkeypatch):
         lambda _request: ScopeFilter(space_id=None),
     )
     _enable_space_access(container)
+    signed_req = SignedURLRequest(expires_in=300, content_disposition=disposition)
 
-    from eneo.files.file_models import SignedURLRequest
-
-    signed_req = SignedURLRequest(expires_in=300)
-
-    response = await generate_flow_run_artifact_signed_url(
+    response = await endpoint(
         id=flow_id,
         run_id=run_id,
         file_id=file_id,
@@ -1585,7 +1651,7 @@ async def test_artifact_signed_url_delegates_to_service_and_audits(monkeypatch):
         container=container,
     )
 
-    run_service.get_run_artifact_file.assert_awaited_once_with(
+    getattr(run_service, service_method).assert_awaited_once_with(
         run_id=run_id,
         flow_id=flow_id,
         file_id=file_id,
@@ -1598,6 +1664,7 @@ async def test_artifact_signed_url_delegates_to_service_and_audits(monkeypatch):
     payload = verify_signed_token(token)
     assert payload is not None
     assert payload["tenant_id"] == str(file_tenant_id)
+    assert payload["content_disposition"] == disposition.value
 
     audit_service.log.assert_awaited_once()
     call_kwargs = audit_service.log.call_args[1]
@@ -1608,92 +1675,14 @@ async def test_artifact_signed_url_delegates_to_service_and_audits(monkeypatch):
     assert call_kwargs["metadata"]["extra"]["flow_id"] == str(flow_id)
     assert call_kwargs["metadata"]["extra"]["run_id"] == str(run_id)
     assert call_kwargs["metadata"]["extra"]["file_id"] == str(file_id)
-    assert call_kwargs["metadata"]["extra"]["mimetype"] == (
-        "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
-    )
-    assert call_kwargs["metadata"]["extra"]["size_bytes"] == 2048
-    assert call_kwargs["metadata"]["extra"]["download_purpose"] == ("flow_run_artifact")
-
-
-@pytest.mark.asyncio
-async def test_input_file_signed_url_delegates_to_service_and_audits(monkeypatch):
-    """Input-file endpoint signs whatever the evidence service admits and audits it."""
-    container = MagicMock()
-    flow_id = uuid4()
-    run_id = uuid4()
-    file_id = uuid4()
-    user = SimpleNamespace(
-        id=uuid4(), tenant_id=uuid4(), username="tester", email="t@e.com"
-    )
-    container.user.return_value = user
-    file_tenant_id = uuid4()
-
-    file_obj = SimpleNamespace(
-        id=file_id,
-        name="meeting.mp3",
-        tenant_id=file_tenant_id,
-        mimetype="audio/mpeg",
-        size=4096,
-    )
-    run_service = AsyncMock()
-    run_service.get_run_input_file.return_value = file_obj
-    container.flow_run_evidence_service.return_value = run_service
-    container.flow_service.return_value = AsyncMock()
-    audit_service = AsyncMock()
-    container.audit_service.return_value = audit_service
-    _enable_explicit_transaction(container)
-
-    monkeypatch.setattr(
-        flow_access_context_module,
-        "get_scope_filter",
-        lambda _request: ScopeFilter(space_id=None),
-    )
-    _enable_space_access(container)
-
-    from eneo.files.file_models import ContentDisposition, SignedURLRequest
-
-    signed_req = SignedURLRequest(
-        expires_in=300, content_disposition=ContentDisposition.INLINE
-    )
-
-    response = await generate_flow_run_input_file_signed_url(
-        id=flow_id,
-        run_id=run_id,
-        file_id=file_id,
-        request=SimpleNamespace(
-            state=SimpleNamespace(), base_url="https://app.example.com/"
-        ),
-        signed_url_req=signed_req,
-        container=container,
-    )
-
-    run_service.get_run_input_file.assert_awaited_once_with(
-        run_id=run_id,
-        flow_id=flow_id,
-        file_id=file_id,
-        history=True,
-    )
-    assert response.url.startswith("https://app.example.com/api/v1/files/")
-    assert str(file_id) in response.url
-    token = response.url.split("token=", 1)[1]
-    payload = verify_signed_token(token)
-    assert payload is not None
-    assert payload["tenant_id"] == str(file_tenant_id)
-    assert payload["content_disposition"] == "inline"
-
-    audit_service.log.assert_awaited_once()
-    call_kwargs = audit_service.log.call_args[1]
-    assert call_kwargs["required"] is True
-    assert call_kwargs["action"] == ActionType.FILE_SIGNED_URL_MINTED
-    assert call_kwargs["user"] is user
-    assert call_kwargs["entity_id"] == file_id
-    assert call_kwargs["metadata"]["extra"]["flow_id"] == str(flow_id)
-    assert call_kwargs["metadata"]["extra"]["run_id"] == str(run_id)
-    assert call_kwargs["metadata"]["extra"]["file_id"] == str(file_id)
-    assert call_kwargs["metadata"]["extra"]["mimetype"] == "audio/mpeg"
-    assert call_kwargs["metadata"]["extra"]["size_bytes"] == 4096
-    assert call_kwargs["metadata"]["extra"]["content_disposition"] == "inline"
-    assert call_kwargs["metadata"]["extra"]["download_purpose"] == "flow_run_input"
+    assert call_kwargs["metadata"]["extra"]["mimetype"] == mimetype
+    assert call_kwargs["metadata"]["extra"]["size_bytes"] == size
+    assert call_kwargs["metadata"]["extra"]["download_purpose"] == purpose
+    assert call_kwargs["metadata"]["extra"][name_key] == file_name
+    if disposition is ContentDisposition.INLINE:
+        assert (
+            call_kwargs["metadata"]["extra"]["content_disposition"] == disposition.value
+        )
 
 
 @pytest.mark.asyncio
@@ -1718,12 +1707,25 @@ async def test_run_file_signed_url_is_not_minted_when_required_audit_fails(
     user = SimpleNamespace(
         id=uuid4(), tenant_id=uuid4(), username="tester", email="t@e.com"
     )
-    file_obj = SimpleNamespace(
+    now = datetime.now(timezone.utc)
+    file_obj = FileMetadata(
         id=file_id,
+        created_at=now,
+        updated_at=now,
         name="sensitive.bin",
+        file_type=FileType.TEXT,
         tenant_id=user.tenant_id,
         mimetype="application/octet-stream",
-        size=512,
+        owner_type=PrincipalType.USER,
+        owner_user_id=user.id,
+    )
+    file_info = FileInfo.model_validate(
+        {**file_obj.model_dump(), "size": 512, "checksum": "0" * 64}
+    )
+    container.file_repo.return_value = AsyncMock(
+        get_infos_by_ids=AsyncMock(
+            side_effect=lambda ids: [file_info] if ids == [file_id] else []
+        )
     )
     evidence_service = AsyncMock()
     getattr(evidence_service, service_method).return_value = file_obj
@@ -1770,4 +1772,5 @@ async def test_run_file_signed_url_is_not_minted_when_required_audit_fails(
         FlowApiErrorCode.RUN_FILE_ACCESS_AUDIT_UNAVAILABLE.value
     )
     assert exc_info.value.context == {"audit_required": True}
+    assert isinstance(exc_info.value.__cause__, RuntimeError)
     signed_url_builder.assert_not_called()

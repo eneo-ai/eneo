@@ -1846,9 +1846,12 @@ async def test_flow_run_public_projects_text_artifact_and_outbound_results(
         assert signed_url_response.json()["url"] not in repr(
             artifact_audit.log_metadata
         )
+        audited_size = artifact_audit.log_metadata["extra"].get("size_bytes")
     download_response = await client.get(signed_url_response.json()["url"])
     assert download_response.status_code == 200, download_response.text
     assert download_response.content == b"representative-pdf"
+    # Mutant: signed-download auditing reads absent FileMetadata.size.
+    assert audited_size == len(download_response.content)
     assert download_response.headers["content-type"] == "application/pdf"
     assert outbound_public["result"] == {
         "kind": "outbound_http",
