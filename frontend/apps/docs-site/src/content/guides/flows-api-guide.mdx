@@ -308,18 +308,19 @@ Run and step history uses dedicated hierarchical endpoints:
 | Space        | `GET /api/v1/settings/flow-run-retention-policy/spaces/{space_id}` | `PUT /api/v1/settings/flow-run-retention-policy/spaces/{space_id}` |
 | Flow         | `GET /api/v1/settings/flow-run-retention-policy/flows/{flow_id}`   | `PUT /api/v1/settings/flow-run-retention-policy/flows/{flow_id}`   |
 
-Each write replaces one complete local policy:
+Each write replaces the complete local run-history policy and the local transcription-audio choice. Both keys are required; use explicit `null` to inherit:
 
 ```json
 {
   "policy": {
     "mode": "review_required",
     "days": 60
-  }
+  },
+  "delete_transcription_audio_after_use": null
 }
 ```
 
-Send `{ "policy": null }` to clear the local value and inherit. Partial policies are invalid. `days` accepts `1..2555`; `mode` is `preserve` or `review_required`. The most specific complete Flow, Space, or Organization policy wins. A Flow can therefore use 90 days while its Space uses 60 and the Organization default remains 30.
+Send `{ "policy": null, "delete_transcription_audio_after_use": null }` to clear both local values and inherit. Partial policies are invalid. `days` accepts `1..2555`; `mode` is `preserve` or `review_required`. The most specific complete Flow, Space, or Organization policy wins. A Flow can therefore use 90 days while its Space uses 60 and the Organization default remains 30.
 
 `preserve` makes history eligible for an explicit administrator purge without a separate review requirement. `review_required` adds eligible terminal runs to the read-only retention review queue and excludes them from this purge action. Neither mode schedules or performs deletion by itself.
 

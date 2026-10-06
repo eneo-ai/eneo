@@ -3,7 +3,14 @@ from datetime import datetime
 from typing import Literal
 from uuid import UUID
 
-from pydantic import BaseModel, ConfigDict, Field, StrictInt, field_validator
+from pydantic import (
+    BaseModel,
+    ConfigDict,
+    Field,
+    StrictBool,
+    StrictInt,
+    field_validator,
+)
 from pydantic.config import JsonDict
 from pydantic.json_schema import SkipJsonSchema
 
@@ -1022,10 +1029,21 @@ class FlowRunRetentionPolicyReplaceRequest(BaseModel):
     model_config = ConfigDict(
         extra="forbid",
         json_schema_extra={
-            "example": {"policy": {"mode": "review_required", "days": 60}}
+            "example": {
+                "policy": {"mode": "review_required", "days": 60},
+                "delete_transcription_audio_after_use": None,
+            }
         },
     )
 
+    delete_transcription_audio_after_use: StrictBool | None = Field(
+        description=(
+            "Required nullable choice. Delete owned transcription source audio after a terminal run, subject to holds, "
+            "shared ownership and bounded collection. Null inherits, organization null means false. "
+            "Disabling the effective setting requires a reason and required audit. "
+            "Stored transcripts and run history keep their own retention policy."
+        ),
+    )
     policy: FlowRunRetentionPolicy | None = Field(
         description=(
             "Complete local policy, or null to clear this level and inherit its parent."
@@ -1037,7 +1055,8 @@ class FlowRunRetentionPolicyReplaceRequest(BaseModel):
             "Why the change stops or delays automatic deletion (1-512 characters). "
             "Required, with code flow_retention_reason_required, when the policy "
             "in force at this level was auto_delete and becomes another mode, is "
-            "cleared, or gets more days; recorded in the required audit event."
+            "cleared, or gets more days, or the effective audio-after-use setting "
+            "changes from true to false; recorded in the required audit event."
         ),
         json_schema_extra=_strip_json_schema_default,
     )

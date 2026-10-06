@@ -23605,6 +23605,7 @@ export interface components {
     /**
      * FlowRunRetentionPolicyReplaceRequest
      * @example {
+     *       "delete_transcription_audio_after_use": null,
      *       "policy": {
      *         "days": 60,
      *         "mode": "review_required"
@@ -23612,11 +23613,16 @@ export interface components {
      *     }
      */
     FlowRunRetentionPolicyReplaceRequest: {
+      /**
+       * Delete Transcription Audio After Use
+       * @description Required nullable choice. Delete owned transcription source audio after a terminal run, subject to holds, shared ownership and bounded collection. Null inherits, organization null means false. Disabling the effective setting requires a reason and required audit. Stored transcripts and run history keep their own retention policy.
+       */
+      delete_transcription_audio_after_use: boolean | null;
       /** @description Complete local policy, or null to clear this level and inherit its parent. */
       policy: components["schemas"]["FlowRunRetentionPolicy"] | null;
       /**
        * Reason
-       * @description Why the change stops or delays automatic deletion (1-512 characters). Required, with code flow_retention_reason_required, when the policy in force at this level was auto_delete and becomes another mode, is cleared, or gets more days; recorded in the required audit event.
+       * @description Why the change stops or delays automatic deletion (1-512 characters). Required, with code flow_retention_reason_required, when the policy in force at this level was auto_delete and becomes another mode, is cleared, or gets more days, or the effective audio-after-use setting changes from true to false; recorded in the required audit event.
        */
       reason?: string | null;
     };
@@ -23653,6 +23659,11 @@ export interface components {
      *       },
      *       "scope": "flow",
      *       "scope_id": "00000000-0000-0000-0000-000000000301",
+     *       "transcription_audio": {
+     *         "effective": false,
+     *         "inherited": false,
+     *         "local": null
+     *       },
      *       "write_rules": {
      *         "auto_delete_available": false,
      *         "max_days": 36500
@@ -23679,6 +23690,8 @@ export interface components {
        * @description Organization, Space, or Flow identifier.
        */
       scope_id: string;
+      /** @description Source audio follows this separate nullable setting; run history and transcripts keep their own policy. */
+      transcription_audio: components["schemas"]["TranscriptionAudioRetentionSettings"];
       /** @description Limits that apply when this policy is written. */
       write_rules: components["schemas"]["FlowRunRetentionWriteRules"];
     };
@@ -37533,6 +37546,24 @@ export interface components {
       start: number;
       /** Word */
       word: string;
+    };
+    /** TranscriptionAudioRetentionSettings */
+    TranscriptionAudioRetentionSettings: {
+      /**
+       * Effective
+       * @description Local choice if set, otherwise the parent setting.
+       */
+      effective: boolean;
+      /**
+       * Inherited
+       * @description Parent setting; false when no parent enables deletion.
+       */
+      inherited: boolean;
+      /**
+       * Local
+       * @description Delete source audio after use at this level; null inherits.
+       */
+      local: boolean | null;
     };
     /**
      * TranscriptionFailureKind

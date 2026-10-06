@@ -1,4 +1,5 @@
 import { page } from "@vitest/browser/context";
+import type { FlowRunRetentionMode, FlowRunRetentionPolicySettings } from "@eneo/eneo-js";
 import { render } from "vitest-browser-svelte";
 import { beforeEach, describe, expect, test, vi } from "vitest";
 
@@ -231,6 +232,7 @@ describe("flow settings page — mapped restore lifecycle", () => {
       scope_id: "tenant-1",
       local_policy: { mode: "review_required", days: 30 },
       inherited_policy: null,
+      transcription_audio: { local: null, inherited: false, effective: false },
       write_rules: { max_days: 36500, auto_delete_available: false },
       effective: {
         state: "configured",
@@ -252,11 +254,40 @@ describe("flow settings page — mapped restore lifecycle", () => {
     await page.getByRole("button", { name: "Spara policy för organisationen" }).click();
 
     expect(replaceOrganizationFlowRunRetentionPolicy).toHaveBeenCalledExactlyOnceWith({
+      deleteTranscriptionAudioAfterUse: null,
       policy: { mode: "review_required", days: 30 }
     });
     await expect
       .element(page.getByText("30 dagar · Granska före gallring · från Organisation"))
       .toBeVisible();
+  });
+
+  test.each([
+    { choice: "Behåll ljudet", local: false },
+    { choice: "Standard: behåll ljudet", local: null }
+  ])("asks why before source audio is kept ($local)", async ({ choice, local }) => {
+    // Kills a truthy-only local override or omission of the audio postpone guard.
+    const original = {
+      ...organizationRule("preserve", 30, false),
+      transcription_audio: { local: true, inherited: false, effective: true }
+    };
+    replaceOrganizationFlowRunRetentionPolicy.mockResolvedValue({
+      ...original,
+      transcription_audio: { local, inherited: false, effective: false }
+    });
+    renderWithRule(original);
+    await page.getByLabelText("Ljud för transkribering").click();
+    await page.getByRole("option", { name: choice, exact: true }).click();
+    await expect.element(reasonField()).toBeVisible();
+    await expect.element(save()).toBeDisabled();
+    await reasonField().fill("Keep recordings for the remaining work.");
+    await save().click();
+    expect(replaceOrganizationFlowRunRetentionPolicy).toHaveBeenCalledExactlyOnceWith({
+      policy: { mode: "preserve", days: 30 },
+      deleteTranscriptionAudioAfterUse: local,
+      reason: "Keep recordings for the remaining work."
+    });
+    await expect.element(save()).toBeDisabled();
   });
 
   test("offers automatic deletion only once the installation runs it", async () => {
@@ -270,13 +301,18 @@ describe("flow settings page — mapped restore lifecycle", () => {
   });
 
   // An Organization run-history rule as the API returns it.
-  function organizationRule(mode: string, days: number, autoDeleteAvailable: boolean) {
+  function organizationRule(
+    mode: FlowRunRetentionMode,
+    days: number,
+    autoDeleteAvailable: boolean
+  ): FlowRunRetentionPolicySettings {
     const policy = { mode, days };
     return {
       scope: "organization",
       scope_id: "tenant-1",
       local_policy: policy,
       inherited_policy: null,
+      transcription_audio: { local: null, inherited: false, effective: false },
       write_rules: { max_days: 36500, auto_delete_available: autoDeleteAvailable },
       effective: {
         state: "configured",
@@ -309,6 +345,7 @@ describe("flow settings page — mapped restore lifecycle", () => {
     await reasonField().fill("  Arkivleverans först  ");
     await save().click();
     expect(replaceOrganizationFlowRunRetentionPolicy).toHaveBeenCalledExactlyOnceWith({
+      deleteTranscriptionAudioAfterUse: null,
       policy: { mode: "preserve", days: 30 },
       reason: "Arkivleverans först"
     });
@@ -325,6 +362,7 @@ describe("flow settings page — mapped restore lifecycle", () => {
     expect(reasonField().query()).toBeNull();
     await save().click();
     expect(replaceOrganizationFlowRunRetentionPolicy).toHaveBeenCalledExactlyOnceWith({
+      deleteTranscriptionAudioAfterUse: null,
       policy: { mode: "auto_delete", days: 20 },
       reason: undefined
     });
@@ -358,6 +396,7 @@ describe("flow settings page — mapped restore lifecycle", () => {
       scope_id: "space-1",
       local_policy: null,
       inherited_policy: null,
+      transcription_audio: { local: null, inherited: false, effective: false },
       write_rules: { max_days: 36500, auto_delete_available: false },
       effective: {
         state: "off",
@@ -399,6 +438,7 @@ describe("flow settings page — mapped restore lifecycle", () => {
       scope_id: scopeId,
       local_policy: null,
       inherited_policy: null,
+      transcription_audio: { local: null, inherited: false, effective: false },
       write_rules: { max_days: 36500, auto_delete_available: false },
       effective: {
         state: "off",
@@ -451,6 +491,7 @@ describe("flow settings page — mapped restore lifecycle", () => {
       scope_id: "flow-held",
       local_policy: null,
       inherited_policy: null,
+      transcription_audio: { local: null, inherited: false, effective: false },
       write_rules: { max_days: 36500, auto_delete_available: false },
       effective: {
         state: "off",
@@ -526,6 +567,7 @@ describe("flow settings page — mapped restore lifecycle", () => {
       scope_id: "flow-200",
       local_policy: null,
       inherited_policy: null,
+      transcription_audio: { local: null, inherited: false, effective: false },
       write_rules: { max_days: 36500, auto_delete_available: false },
       effective: {
         state: "off",
@@ -601,6 +643,7 @@ describe("flow settings page — mapped restore lifecycle", () => {
       scope_id: "space-1",
       local_policy: null,
       inherited_policy: null,
+      transcription_audio: { local: null, inherited: false, effective: false },
       write_rules: { max_days: 36500, auto_delete_available: false },
       effective: {
         state: "off",

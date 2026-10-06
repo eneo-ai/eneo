@@ -7354,5 +7354,10 @@
   "flow_package_error_flow_package_export_template_bindings_incomplete": "Gå till Word-steget. Koppla alla fält i mallen och ta bort gamla fältkopplingar innan du exporterar igen.",
   "flow_package_error_flow_package_export_template_file_invalid": "Word-mallen saknas eller kan inte läsas. Ladda upp mallen igen i Word-steget och försök exportera på nytt.",
   "flow_list_refresh_failed": "Listan över flöden kunde inte uppdateras. Den tidigare listan visas och kan vara inaktuell. Försök igen.",
-  "flow_list_load_failed": "Listan över flöden kunde inte läsas in. Försök igen."
+  "flow_list_load_failed": "Listan över flöden kunde inte läsas in. Försök igen.",
+  "flow_audio_retention_label": "Ljud för transkribering",
+  "flow_audio_retention_default": "Standard: behåll ljudet",
+  "flow_audio_retention_enabled": "Radera efter användning",
+  "flow_audio_retention_disabled": "Behåll ljudet",
+  "flow_audio_retention_description": "Radera egna ljudfiler när körningen har avslutats. Spärrar och andra ägare skyddar filerna; transkriptioner och körningshistorik behålls enligt sina regler."
 }

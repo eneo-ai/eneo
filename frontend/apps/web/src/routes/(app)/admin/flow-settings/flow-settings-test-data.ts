@@ -26,6 +26,7 @@ export function pageData(
       scope_id: "tenant-1",
       local_policy: null,
       inherited_policy: null,
+      transcription_audio: { local: null, inherited: false, effective: false },
       write_rules: { max_days: 36500, auto_delete_available: false },
       effective: {
         state: "off",

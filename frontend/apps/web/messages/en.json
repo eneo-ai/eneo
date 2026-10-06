@@ -7354,5 +7354,10 @@
   "flow_package_error_flow_package_export_template_bindings_incomplete": "Open the Word step. Map every template field and remove obsolete mappings before exporting again.",
   "flow_package_error_flow_package_export_template_file_invalid": "The Word template is missing or cannot be read. Upload it again in the Word step, then retry the export.",
   "flow_list_refresh_failed": "The flow list could not be refreshed. The previous list is shown and may be out of date. Try again.",
-  "flow_list_load_failed": "The flow list could not be loaded. Try again."
+  "flow_list_load_failed": "The flow list could not be loaded. Try again.",
+  "flow_audio_retention_label": "Transcription source audio",
+  "flow_audio_retention_default": "Default: keep source audio",
+  "flow_audio_retention_enabled": "Delete after use",
+  "flow_audio_retention_disabled": "Keep source audio",
+  "flow_audio_retention_description": "Delete owned source audio after the run ends. Holds and other owners protect the files; transcripts and run history keep their own retention rules."
 }

@@ -25,6 +25,7 @@
   import { m } from "$lib/paraglide/messages";
 
   type PolicyChoice = "none" | FlowRunRetentionMode;
+  type AudioChoice = "inherit" | "enabled" | "disabled";
 
   type Props = {
     settings: FlowRunRetentionPolicySettings;
@@ -32,6 +33,7 @@
     description: string;
     onSave: (
       policy: FlowRunRetentionPolicy | null,
+      deleteAfterUse: boolean | null,
       reason: string | undefined
     ) => Promise<FlowRunRetentionPolicySettings>;
     onDirtyChange?: (dirty: boolean) => void;
@@ -44,6 +46,14 @@
   let savedPolicy = $state<FlowRunRetentionPolicy | null>(initialPolicy);
   let choice = $state<PolicyChoice>(initialPolicy?.mode ?? "none");
   let daysInput = $state<string | number>(String(fallbackDays));
+  const initialAudio = untrack(() => settings.transcription_audio.local);
+  let savedAudio = $state<boolean | null>(initialAudio);
+  let audioChoice = $state<AudioChoice>(
+    initialAudio === null ? "inherit" : initialAudio ? "enabled" : "disabled"
+  );
+  const proposedAudio = $derived<boolean | null>(
+    audioChoice === "inherit" ? null : audioChoice === "enabled"
+  );
   let saving = $state(false);
   let reason = $state("");
 
@@ -58,7 +68,7 @@
   );
   const dirty = $derived(
     choice === "none" || parsedDays !== null
-      ? !flowRunRetentionPoliciesEqual(savedPolicy, proposedPolicy)
+      ? !flowRunRetentionPoliciesEqual(savedPolicy, proposedPolicy) || savedAudio !== proposedAudio
       : true
   );
   const daysValid = $derived(
@@ -78,10 +88,12 @@
   const reasonNeeded = $derived(
     daysValid &&
       dirty &&
-      flowRunRetentionChangePostponesDeletion(
+      (flowRunRetentionChangePostponesDeletion(
         effectiveFlowRunRetentionPolicy(settings, savedPolicy),
         effectiveFlowRunRetentionPolicy(settings, proposedPolicy)
-      )
+      ) ||
+        ((savedAudio ?? settings.transcription_audio.inherited) &&
+          !(proposedAudio ?? settings.transcription_audio.inherited)))
   );
   const reasonMissing = $derived(reasonNeeded && reason.trim() === "");
   const valid = $derived(daysValid && !reasonMissing && !autoDeleteRefused);
@@ -180,9 +192,15 @@
     if (!dirty || !valid || saving) return;
     saving = true;
     try {
-      const updated = await onSave(proposedPolicy, reasonNeeded ? reason.trim() : undefined);
+      const updated = await onSave(
+        proposedPolicy,
+        proposedAudio,
+        reasonNeeded ? reason.trim() : undefined
+      );
       settings = updated;
       savedPolicy = updated.local_policy;
+      savedAudio = updated.transcription_audio.local;
+      audioChoice = savedAudio === null ? "inherit" : savedAudio ? "enabled" : "disabled";
       choice = updated.local_policy?.mode ?? "none";
       daysInput = String(
         updated.local_policy?.days ?? updated.inherited_policy?.days ?? parsedDays ?? 365
@@ -280,6 +298,48 @@
               max: maxDays
             })}
       </Field.Description>
+    </Field.Field>
+    <Field.Field class="col-span-full max-w-xl">
+      <Field.Label for={`flow-audio-retention-${settings.scope}`}>
+        {m.flow_audio_retention_label()}
+      </Field.Label>
+      <Select.Root type="single" bind:value={audioChoice} disabled={saving}>
+        <Select.Trigger id={`flow-audio-retention-${settings.scope}`} class="w-full">
+          <span
+            >{audioChoice === "inherit"
+              ? settings.scope === "organization"
+                ? m.flow_audio_retention_default()
+                : m.flow_run_retention_choice_inherit()
+              : audioChoice === "enabled"
+                ? m.flow_audio_retention_enabled()
+                : m.flow_audio_retention_disabled()}</span
+          >
+        </Select.Trigger>
+        <Select.Content>
+          <Select.Item
+            value="inherit"
+            label={settings.scope === "organization"
+              ? m.flow_audio_retention_default()
+              : m.flow_run_retention_choice_inherit()}
+          >
+            {settings.scope === "organization"
+              ? m.flow_audio_retention_default()
+              : m.flow_run_retention_choice_inherit()}
+          </Select.Item>
+          <Select.Item value="enabled" label={m.flow_audio_retention_enabled()}>
+            {m.flow_audio_retention_enabled()}
+          </Select.Item>
+          <Select.Item value="disabled" label={m.flow_audio_retention_disabled()}>
+            {m.flow_audio_retention_disabled()}
+          </Select.Item>
+        </Select.Content>
+      </Select.Root>
+      <Field.Description>{m.flow_audio_retention_description()}</Field.Description>
+      <p class="text-secondary text-sm">
+        {(proposedAudio ?? settings.transcription_audio.inherited)
+          ? m.flow_audio_retention_enabled()
+          : m.flow_audio_retention_disabled()}
+      </p>
     </Field.Field>
     {#if reasonNeeded}
       <Field.Field class="col-span-full max-w-xl" data-invalid={reasonMissing || undefined}>

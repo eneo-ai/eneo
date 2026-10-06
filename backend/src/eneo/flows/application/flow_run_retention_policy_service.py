@@ -112,6 +112,7 @@ class FlowRunRetentionPolicyService:
         self,
         *,
         policy: FlowRunRetentionPolicy | None,
+        delete_transcription_audio_after_use: bool | None,
         reason: str | None = None,
     ) -> FlowRunRetentionPolicySettings:
         require_retention_manage(self.user)
@@ -119,6 +120,7 @@ class FlowRunRetentionPolicyService:
         change = await self.repository.replace_organization(
             tenant_id=self.user.tenant_id,
             policy=policy,
+            delete_transcription_audio_after_use=delete_transcription_audio_after_use,
         )
         await self._audit_change(change, reason=reason)
         return change.after
@@ -135,6 +137,7 @@ class FlowRunRetentionPolicyService:
         *,
         space_id: UUID,
         policy: FlowRunRetentionPolicy | None,
+        delete_transcription_audio_after_use: bool | None,
         reason: str | None = None,
     ) -> FlowRunRetentionPolicySettings:
         require_retention_manage(self.user)
@@ -143,6 +146,7 @@ class FlowRunRetentionPolicyService:
             tenant_id=self.user.tenant_id,
             space_id=space_id,
             policy=policy,
+            delete_transcription_audio_after_use=delete_transcription_audio_after_use,
         )
         await self._audit_change(change, reason=reason)
         return change.after
@@ -159,6 +163,7 @@ class FlowRunRetentionPolicyService:
         *,
         flow_id: UUID,
         policy: FlowRunRetentionPolicy | None,
+        delete_transcription_audio_after_use: bool | None,
         reason: str | None = None,
     ) -> FlowRunRetentionPolicySettings:
         require_retention_manage(self.user)
@@ -167,6 +172,7 @@ class FlowRunRetentionPolicyService:
             tenant_id=self.user.tenant_id,
             flow_id=flow_id,
             policy=policy,
+            delete_transcription_audio_after_use=delete_transcription_audio_after_use,
         )
         await self._audit_change(change, reason=reason)
         return change.after
@@ -375,8 +381,15 @@ class FlowRunRetentionPolicyService:
             change.before.effective
         )
         effective_policy = effective_flow_run_retention_policy(after.effective)
-        if reason is None and flow_run_retention_change_postpones_deletion(
-            before=previous_effective, after=effective_policy
+        audio_disabled = (
+            change.before.transcription_audio.effective
+            and not after.transcription_audio.effective
+        )
+        if reason is None and (
+            audio_disabled
+            or flow_run_retention_change_postpones_deletion(
+                before=previous_effective, after=effective_policy
+            )
         ):
             raise BadRequestException(
                 "Give a reason for stopping or delaying automatic deletion.",
@@ -388,7 +401,7 @@ class FlowRunRetentionPolicyService:
             action=ActionType.FLOW_RUN_RETENTION_POLICY_CHANGED,
             entity_type=self._entity_type(after.scope),
             entity_id=after.scope_id,
-            description="Changed Flow run-history retention policy.",
+            description="Changed Flow retention policy.",
             metadata={
                 "scope": after.scope.value,
                 "scope_id": str(after.scope_id),
@@ -397,6 +410,8 @@ class FlowRunRetentionPolicyService:
                 "previous_effective_policy": self._audit_policy(previous_effective),
                 "effective_policy": self._audit_policy(effective_policy),
                 "effective_source": after.effective.source,
+                "previous_transcription_audio": change.before.transcription_audio.model_dump(),
+                "transcription_audio": after.transcription_audio.model_dump(),
                 "reason": reason,
             },
             required=True,

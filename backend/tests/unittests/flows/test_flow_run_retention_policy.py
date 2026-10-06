@@ -224,3 +224,103 @@ def test_the_deployment_maximum_stays_within_100_years() -> None:
     assert [
         getattr(item, "le", None) for item in field.metadata if hasattr(item, "le")
     ] == [36_500]
+
+
+@pytest.mark.parametrize(
+    "present,choice", [(True, None), (True, False), (True, True), (False, None)]
+)
+def test_audio_after_use_requires_an_explicit_nullable_scope_choice(
+    present: bool,
+    choice: bool | None,
+) -> None:
+    """Kills G5-P01: silently reset an omitted destructive choice to inheritance."""
+    from eneo.settings.settings import FlowRunRetentionPolicyReplaceRequest
+
+    payload: dict[str, object] = {"policy": None}
+    if present:
+        payload["delete_transcription_audio_after_use"] = choice
+        request = FlowRunRetentionPolicyReplaceRequest.model_validate(payload)
+        assert request.delete_transcription_audio_after_use is choice
+    else:
+        with pytest.raises(ValidationError) as error:
+            FlowRunRetentionPolicyReplaceRequest.model_validate(payload)
+        assert error.value.errors()[0]["loc"] == (
+            "delete_transcription_audio_after_use",
+        )
+        assert error.value.errors()[0]["type"] == "missing"
+
+
+@pytest.mark.parametrize(
+    "organization,space,flow,inherited,effective",
+    [
+        (None, None, None, False, False),
+        (True, None, None, True, True),
+        (True, False, None, False, False),
+        (False, True, None, True, True),
+        (True, True, False, True, False),
+        (False, False, True, False, True),
+    ],
+)
+def test_audio_after_use_projects_explicit_false_before_inheritance(
+    organization: bool | None,
+    space: bool | None,
+    flow: bool | None,
+    inherited: bool,
+    effective: bool,
+) -> None:
+    """Kills G5-P02/P05: reverse precedence or lose a parent in the read projection."""
+    from eneo.flows.domain.flow_run_retention_policy import (
+        FlowRunRetentionScope,
+        flow_run_retention_policy_settings,
+    )
+
+    settings = flow_run_retention_policy_settings(
+        scope=FlowRunRetentionScope.FLOW,
+        scope_id=UUID(int=1),
+        write_rules=FlowRunRetentionWriteRules(
+            max_days=36500, auto_delete_available=True
+        ),
+        organization_policy=None,
+        organization_audio=organization,
+        space_audio=space,
+        flow_audio=flow,
+    )
+    assert settings.transcription_audio.model_dump() == {
+        "local": flow,
+        "inherited": inherited,
+        "effective": effective,
+    }
+
+
+@pytest.mark.parametrize("direction", ["upgrade", "downgrade"])
+def test_audio_after_use_nullable_migration_emits_offline_ddl(direction: str) -> None:
+    """Kills missing scope DDL, eager data rewrite, or offline catalog inspection."""
+    import io
+    from pathlib import Path
+
+    from alembic import command
+    from alembic.config import Config
+
+    output = io.StringIO()
+    config = Config(
+        str(Path(__file__).parents[3] / "alembic.ini"), output_buffer=output
+    )
+    config.set_main_option(
+        "sqlalchemy.url", "postgresql://offline:offline@localhost/offline"
+    )
+    if direction == "upgrade":
+        command.upgrade(config, "202610061600:202610061700", sql=True)
+    else:
+        command.downgrade(config, "202610061700:202610061600", sql=True)
+    ddl = output.getvalue()
+    for table in ("tenants", "spaces", "flows"):
+        operation = "ADD COLUMN" if direction == "upgrade" else "DROP COLUMN"
+        assert (
+            f"ALTER TABLE {table} {operation} delete_transcription_audio_after_use"
+            in ddl
+        )
+    assert "BOOLEAN NOT NULL" not in ddl
+    assert "pg_index" not in ddl
+    assert "UPDATE tenants" not in ddl
+    assert "UPDATE spaces" not in ddl
+    assert "UPDATE flows" not in ddl

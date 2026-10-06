@@ -169,10 +169,12 @@
 
   async function saveOrganizationPolicy(
     policy: FlowRunRetentionPolicy | null,
+    deleteAfterUse: boolean | null,
     reason: string | undefined
   ): Promise<FlowRunRetentionPolicySettings> {
     const updated = await eneo.settings.replaceOrganizationFlowRunRetentionPolicy({
       policy,
+      deleteTranscriptionAudioAfterUse: deleteAfterUse,
       reason
     });
     organizationPolicy = updated;
@@ -183,6 +185,7 @@
 
   async function saveSpacePolicy(
     policy: FlowRunRetentionPolicy | null,
+    deleteAfterUse: boolean | null,
     reason: string | undefined
   ): Promise<FlowRunRetentionPolicySettings> {
     if (!selectedSpaceId) throw new Error("A Space must be selected before saving retention.");
@@ -190,6 +193,7 @@
     const updated = await eneo.settings.replaceSpaceFlowRunRetentionPolicy({
       spaceId: savedSpaceId,
       policy,
+      deleteTranscriptionAudioAfterUse: deleteAfterUse,
       reason
     });
     if (selectedSpaceId === savedSpaceId) {
@@ -202,6 +206,7 @@
 
   async function saveFlowPolicy(
     policy: FlowRunRetentionPolicy | null,
+    deleteAfterUse: boolean | null,
     reason: string | undefined
   ): Promise<FlowRunRetentionPolicySettings> {
     if (!selectedFlowId) throw new Error("A Flow must be selected before saving retention.");
@@ -209,6 +214,7 @@
     const updated = await eneo.settings.replaceFlowRunRetentionPolicy({
       flowId: savedFlowId,
       policy,
+      deleteTranscriptionAudioAfterUse: deleteAfterUse,
       reason
     });
     if (selectedFlowId === savedFlowId) flowPolicy = updated;

@@ -1011,7 +1011,9 @@ async def replace_organization_flow_run_retention_policy(
     container: FlowRetentionMutationContainer,
 ) -> FlowRunRetentionPolicySettings:
     return await container.flow_run_retention_policy_service().replace_organization(
-        policy=payload.policy, reason=payload.reason
+        policy=payload.policy,
+        reason=payload.reason,
+        delete_transcription_audio_after_use=payload.delete_transcription_audio_after_use,
     )
 
 
@@ -1230,6 +1232,7 @@ async def replace_space_flow_run_retention_policy(
     return await container.flow_run_retention_policy_service().replace_space(
         space_id=space_id,
         policy=payload.policy,
+        delete_transcription_audio_after_use=payload.delete_transcription_audio_after_use,
         reason=payload.reason,
     )
 
@@ -1295,6 +1298,7 @@ async def replace_flow_run_retention_policy(
     return await container.flow_run_retention_policy_service().replace_flow(
         flow_id=flow_id,
         policy=payload.policy,
+        delete_transcription_audio_after_use=payload.delete_transcription_audio_after_use,
         reason=payload.reason,
     )
 

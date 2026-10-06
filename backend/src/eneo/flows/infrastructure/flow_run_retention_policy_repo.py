@@ -59,7 +59,11 @@ class FlowRunRetentionPolicyChange:
 
     @property
     def changed(self) -> bool:
-        return self.before.local_policy != self.after.local_policy
+        return (
+            self.before.local_policy != self.after.local_policy
+            or self.before.transcription_audio.local
+            != self.after.transcription_audio.local
+        )
 
 
 def _hold_review_limit(
@@ -95,6 +99,7 @@ class FlowRunRetentionPolicyRepository:
                     Tenants.id,
                     Tenants.flow_run_history_retention_mode,
                     Tenants.flow_run_history_retention_days,
+                    Tenants.delete_transcription_audio_after_use,
                 ).where(Tenants.id == tenant_id)
             )
         ).one_or_none()
@@ -108,6 +113,7 @@ class FlowRunRetentionPolicyRepository:
                 mode=row.flow_run_history_retention_mode,
                 days=row.flow_run_history_retention_days,
             ),
+            organization_audio=row.delete_transcription_audio_after_use,
         )
 
     async def list_space_targets(
@@ -204,8 +210,12 @@ class FlowRunRetentionPolicyRepository:
                     Spaces.id,
                     Tenants.flow_run_history_retention_mode.label("organization_mode"),
                     Tenants.flow_run_history_retention_days.label("organization_days"),
+                    Tenants.delete_transcription_audio_after_use.label(
+                        "organization_audio"
+                    ),
                     Spaces.flow_run_history_retention_mode.label("space_mode"),
                     Spaces.flow_run_history_retention_days.label("space_days"),
+                    Spaces.delete_transcription_audio_after_use.label("space_audio"),
                 )
                 .join(Tenants, Tenants.id == Spaces.tenant_id)
                 .where(Spaces.id == space_id)
@@ -222,10 +232,12 @@ class FlowRunRetentionPolicyRepository:
                 mode=row.organization_mode,
                 days=row.organization_days,
             ),
+            organization_audio=row.organization_audio,
             space_policy=flow_run_retention_policy_from_storage(
                 mode=row.space_mode,
                 days=row.space_days,
             ),
+            space_audio=row.space_audio,
         )
 
     async def get_flow(
@@ -240,10 +252,15 @@ class FlowRunRetentionPolicyRepository:
                     Flows.id,
                     Tenants.flow_run_history_retention_mode.label("organization_mode"),
                     Tenants.flow_run_history_retention_days.label("organization_days"),
+                    Tenants.delete_transcription_audio_after_use.label(
+                        "organization_audio"
+                    ),
                     Spaces.flow_run_history_retention_mode.label("space_mode"),
                     Spaces.flow_run_history_retention_days.label("space_days"),
+                    Spaces.delete_transcription_audio_after_use.label("space_audio"),
                     Flows.flow_run_history_retention_mode.label("flow_mode"),
                     Flows.flow_run_history_retention_days.label("flow_days"),
+                    Flows.delete_transcription_audio_after_use.label("flow_audio"),
                 )
                 .join(
                     Spaces,
@@ -267,14 +284,17 @@ class FlowRunRetentionPolicyRepository:
                 mode=row.organization_mode,
                 days=row.organization_days,
             ),
+            organization_audio=row.organization_audio,
             space_policy=flow_run_retention_policy_from_storage(
                 mode=row.space_mode,
                 days=row.space_days,
             ),
+            space_audio=row.space_audio,
             flow_policy=flow_run_retention_policy_from_storage(
                 mode=row.flow_mode,
                 days=row.flow_days,
             ),
+            flow_audio=row.flow_audio,
         )
 
     async def replace_organization(
@@ -282,15 +302,22 @@ class FlowRunRetentionPolicyRepository:
         *,
         tenant_id: UUID,
         policy: FlowRunRetentionPolicy | None,
+        delete_transcription_audio_after_use: bool | None,
     ) -> FlowRunRetentionPolicyChange:
         await acquire_exclusive(self.session, RetentionSubject.FLOW_HISTORY)
         await self._lock_organization(tenant_id=tenant_id)
         before = await self.get_organization(tenant_id=tenant_id)
-        if before.local_policy != policy:
+        if (
+            before.local_policy != policy
+            or before.transcription_audio.local != delete_transcription_audio_after_use
+        ):
             await self.session.execute(
                 sa.update(Tenants)
                 .where(Tenants.id == tenant_id)
-                .values(**self._policy_values(policy))
+                .values(
+                    **self._policy_values(policy),
+                    delete_transcription_audio_after_use=delete_transcription_audio_after_use,
+                )
             )
         return FlowRunRetentionPolicyChange(
             before=before,
@@ -303,16 +330,23 @@ class FlowRunRetentionPolicyRepository:
         tenant_id: UUID,
         space_id: UUID,
         policy: FlowRunRetentionPolicy | None,
+        delete_transcription_audio_after_use: bool | None,
     ) -> FlowRunRetentionPolicyChange:
         await acquire_exclusive(self.session, RetentionSubject.FLOW_HISTORY)
         await self._lock_space(tenant_id=tenant_id, space_id=space_id)
         before = await self.get_space(tenant_id=tenant_id, space_id=space_id)
-        if before.local_policy != policy:
+        if (
+            before.local_policy != policy
+            or before.transcription_audio.local != delete_transcription_audio_after_use
+        ):
             await self.session.execute(
                 sa.update(Spaces)
                 .where(Spaces.id == space_id)
                 .where(Spaces.tenant_id == tenant_id)
-                .values(**self._policy_values(policy))
+                .values(
+                    **self._policy_values(policy),
+                    delete_transcription_audio_after_use=delete_transcription_audio_after_use,
+                )
             )
         return FlowRunRetentionPolicyChange(
             before=before,
@@ -325,16 +359,23 @@ class FlowRunRetentionPolicyRepository:
         tenant_id: UUID,
         flow_id: UUID,
         policy: FlowRunRetentionPolicy | None,
+        delete_transcription_audio_after_use: bool | None,
     ) -> FlowRunRetentionPolicyChange:
         await acquire_exclusive(self.session, RetentionSubject.FLOW_HISTORY)
         await self._lock_flow(tenant_id=tenant_id, flow_id=flow_id)
         before = await self.get_flow(tenant_id=tenant_id, flow_id=flow_id)
-        if before.local_policy != policy:
+        if (
+            before.local_policy != policy
+            or before.transcription_audio.local != delete_transcription_audio_after_use
+        ):
             await self.session.execute(
                 sa.update(Flows)
                 .where(Flows.id == flow_id)
                 .where(Flows.tenant_id == tenant_id)
-                .values(**self._policy_values(policy))
+                .values(
+                    **self._policy_values(policy),
+                    delete_transcription_audio_after_use=delete_transcription_audio_after_use,
+                )
             )
         return FlowRunRetentionPolicyChange(
             before=before,

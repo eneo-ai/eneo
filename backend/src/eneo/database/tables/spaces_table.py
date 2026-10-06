@@ -54,6 +54,9 @@ class Spaces(BasePublic):
     flow_run_history_retention_days: Mapped[Optional[int]] = mapped_column(
         nullable=True
     )
+    delete_transcription_audio_after_use: Mapped[Optional[bool]] = mapped_column(
+        nullable=True
+    )
 
     # Foreign keys
     tenant_id: Mapped[UUID] = mapped_column(ForeignKey(Tenants.id, ondelete="CASCADE"))

@@ -401,27 +401,39 @@ async def test_admin_replaces_and_clears_complete_hierarchical_policies(
 
     organization_response = await client.put(
         root_path,
-        json={"policy": {"mode": "preserve", "days": 30}},
+        json={
+            "delete_transcription_audio_after_use": None,
+            "policy": {"mode": "preserve", "days": 30},
+        },
         headers=admin_headers,
     )
     assert organization_response.status_code == 200, organization_response.text
     unchanged_organization_response = await client.put(
         root_path,
-        json={"policy": {"mode": "preserve", "days": 30}},
+        json={
+            "delete_transcription_audio_after_use": None,
+            "policy": {"mode": "preserve", "days": 30},
+        },
         headers=admin_headers,
     )
     assert unchanged_organization_response.status_code == 200
 
     space_response = await client.put(
         space_path,
-        json={"policy": {"mode": "review_required", "days": 60}},
+        json={
+            "delete_transcription_audio_after_use": None,
+            "policy": {"mode": "review_required", "days": 60},
+        },
         headers=admin_headers,
     )
     assert space_response.status_code == 200, space_response.text
 
     flow_response = await client.put(
         flow_path,
-        json={"policy": {"mode": "preserve", "days": 90}},
+        json={
+            "delete_transcription_audio_after_use": None,
+            "policy": {"mode": "preserve", "days": 90},
+        },
         headers=admin_headers,
     )
     assert flow_response.status_code == 200, flow_response.text
@@ -530,7 +542,7 @@ async def test_admin_replaces_and_clears_complete_hierarchical_policies(
 
     clear_response = await client.put(
         flow_path,
-        json={"policy": None},
+        json={"delete_transcription_audio_after_use": None, "policy": None},
         headers=admin_headers,
     )
     assert clear_response.status_code == 200, clear_response.text
@@ -553,7 +565,10 @@ async def test_admin_replaces_and_clears_complete_hierarchical_policies(
     forbidden_get = await client.get(flow_path, headers=regular_headers)
     forbidden_put = await client.put(
         flow_path,
-        json={"policy": {"mode": "preserve", "days": 10}},
+        json={
+            "delete_transcription_audio_after_use": None,
+            "policy": {"mode": "preserve", "days": 10},
+        },
         headers=regular_headers,
     )
     assert forbidden_get.status_code == 403, forbidden_get.text
@@ -593,6 +608,12 @@ async def test_admin_replaces_and_clears_complete_hierarchical_policies(
         "previous_effective_policy": {"mode": "preserve", "days": 90},
         "effective_policy": {"mode": "review_required", "days": 60},
         "effective_source": "space",
+        "previous_transcription_audio": {
+            "local": None,
+            "inherited": False,
+            "effective": False,
+        },
+        "transcription_audio": {"local": None, "inherited": False, "effective": False},
         "reason": None,
     }
 
@@ -607,7 +628,11 @@ async def test_partial_or_automatic_policy_is_rejected_without_mutation(
     path = f"/api/v1/settings/flow-run-retention-policy/flows/{flow_id}"
 
     for policy in ({"days": 30}, {"mode": "automatic", "days": 30}):
-        response = await client.put(path, json={"policy": policy}, headers=headers)
+        response = await client.put(
+            path,
+            json={"delete_transcription_audio_after_use": None, "policy": policy},
+            headers=headers,
+        )
         assert response.status_code == 422, response.text
 
     current = await client.get(path, headers=headers)
@@ -739,7 +764,10 @@ async def test_deleted_flow_with_history_stays_under_retention_administration(
     assert current.json()["local_policy"] is None
     replaced = await client.put(
         flow_path,
-        json={"policy": {"mode": "review_required", "days": 1}},
+        json={
+            "delete_transcription_audio_after_use": None,
+            "policy": {"mode": "review_required", "days": 1},
+        },
         headers=headers,
     )
     assert replaced.status_code == 200, replaced.text
@@ -750,7 +778,12 @@ async def test_deleted_flow_with_history_stays_under_retention_administration(
     assert [item["run_id"] for item in queue.json()["items"]] == [str(run_id)]
 
     preserved = await client.put(
-        flow_path, json={"policy": {"mode": "preserve", "days": 1}}, headers=headers
+        flow_path,
+        json={
+            "delete_transcription_audio_after_use": None,
+            "policy": {"mode": "preserve", "days": 1},
+        },
+        headers=headers,
     )
     assert preserved.status_code == 200, preserved.text
     preview = await client.post(f"{flow_path}/purge", json={}, headers=headers)
@@ -783,7 +816,10 @@ async def test_review_required_run_is_listed_but_never_selected_for_purge(
     flow_path = f"{root_path}/flows/{flow_id}"
     policy_response = await client.put(
         flow_path,
-        json={"policy": {"mode": "review_required", "days": 1}},
+        json={
+            "delete_transcription_audio_after_use": None,
+            "policy": {"mode": "review_required", "days": 1},
+        },
         headers=headers,
     )
     assert policy_response.status_code == 200, policy_response.text
@@ -869,6 +905,7 @@ async def test_review_required_run_is_listed_but_never_selected_for_purge(
 async def test_required_audit_failure_rolls_back_policy_change(
     client,
     admin_token,
+    admin_user,
     published_flow_ids,
     db_container,
     monkeypatch: pytest.MonkeyPatch,
@@ -876,6 +913,22 @@ async def test_required_audit_failure_rolls_back_policy_change(
     _, flow_id = published_flow_ids
     headers = {"Authorization": f"Bearer {admin_token}"}
     path = f"/api/v1/settings/flow-run-retention-policy/flows/{flow_id}"
+
+    # Required proof bypasses action filters and still aborts on insertion failure.
+    async with db_container() as container:
+        audit_config = container.audit_config_service()
+        await audit_config.update_action_config(
+            admin_user.tenant_id,
+            [
+                ActionUpdate(
+                    action=ActionType.FLOW_RUN_RETENTION_POLICY_CHANGED.value,
+                    enabled=False,
+                )
+            ],
+        )
+        assert not await audit_config.is_action_enabled(
+            admin_user.tenant_id, ActionType.FLOW_RUN_RETENTION_POLICY_CHANGED.value
+        )
 
     async def fail_audit_insert(
         _repository: AuditLogRepositoryImpl,
@@ -888,7 +941,10 @@ async def test_required_audit_failure_rolls_back_policy_change(
     with pytest.raises(RuntimeError, match="forced retention audit failure"):
         await client.put(
             path,
-            json={"policy": {"mode": "preserve", "days": 30}},
+            json={
+                "policy": {"mode": "preserve", "days": 30},
+                "delete_transcription_audio_after_use": True,
+            },
             headers=headers,
         )
 
@@ -898,10 +954,11 @@ async def test_required_audit_failure_rolls_back_policy_change(
                 sa.select(
                     Flows.flow_run_history_retention_mode,
                     Flows.flow_run_history_retention_days,
+                    Flows.delete_transcription_audio_after_use,
                 ).where(Flows.id == flow_id)
             )
         ).one()
-    assert stored == (None, None)
+    assert stored == (None, None, None)
 
 
 async def test_foreign_tenant_targets_are_not_visible_or_mutable(
@@ -968,7 +1025,10 @@ async def test_foreign_tenant_targets_are_not_visible_or_mutable(
     ):
         response = await client.put(
             path,
-            json={"policy": {"mode": "preserve", "days": 30}},
+            json={
+                "delete_transcription_audio_after_use": None,
+                "policy": {"mode": "preserve", "days": 30},
+            },
             headers=headers,
         )
         assert response.status_code == 404, (path, response.text)
@@ -1410,4 +1470,138 @@ async def test_purge_diagnostics_count_only_the_window_and_report_completeness(
         "legal_hold": 0,
         "counted_runs": 500,
         "complete": not extra_review_run,
+    }
+
+
+@pytest.mark.parametrize("scope", ["organization", "space", "flow"])
+async def test_audio_setting_is_persisted_and_disabling_requires_a_reason(
+    client, admin_token, admin_user, published_flow_ids, db_container, scope
+) -> None:
+    """Kills G5-P03/P04: omit a scope write, reason check or required audit metadata."""
+    space_id, flow_id = published_flow_ids
+    suffix = {
+        "organization": "",
+        "space": f"/spaces/{space_id}",
+        "flow": f"/flows/{flow_id}",
+    }[scope]
+    path = f"/api/v1/settings/flow-run-retention-policy{suffix}"
+    headers = {"Authorization": f"Bearer {admin_token}"}
+    enabled = await client.put(
+        path,
+        headers=headers,
+        json={
+            "policy": None,
+            "delete_transcription_audio_after_use": True,
+        },
+    )
+    assert enabled.status_code == 200, enabled.text
+    assert enabled.json()["transcription_audio"] == {
+        "local": True,
+        "inherited": False,
+        "effective": True,
+    }
+    refused = await client.put(
+        path,
+        headers=headers,
+        json={
+            "policy": None,
+            "delete_transcription_audio_after_use": False,
+        },
+    )
+    assert refused.status_code == 400, refused.text
+    assert refused.json()["code"] == "flow_retention_reason_required"
+    current = await client.get(path, headers=headers)
+    assert current.json()["transcription_audio"]["local"] is True
+    disabled = await client.put(
+        path,
+        headers=headers,
+        json={
+            "policy": None,
+            "delete_transcription_audio_after_use": False,
+            "reason": "Keep source recordings for the remaining work.",
+        },
+    )
+    assert disabled.status_code == 200, disabled.text
+    assert disabled.json()["transcription_audio"] == {
+        "local": False,
+        "inherited": False,
+        "effective": False,
+    }
+    async with db_container() as container:
+        audits = list(
+            await container.session().scalars(
+                sa.select(AuditLog.log_metadata)
+                .where(AuditLog.action == "flow_run_retention_policy_changed")
+                .order_by(AuditLog.timestamp)
+            )
+        )
+    assert len(audits) == 2
+    assert audits[-1]["previous_transcription_audio"]["effective"] is True
+    assert audits[-1]["transcription_audio"]["effective"] is False
+    assert audits[-1]["reason"] == "Keep source recordings for the remaining work."
+
+
+async def test_audio_inheritance_reads_and_nullable_changes_keep_the_reason_guard(
+    client,
+    admin_token,
+    published_flow_ids,
+) -> None:
+    """Kills G5-P05: ignore parent audio flags in reads or nullable disable decisions."""
+    space_id, flow_id = published_flow_ids
+    root = "/api/v1/settings/flow-run-retention-policy"
+    space = f"{root}/spaces/{space_id}"
+    flow = f"{root}/flows/{flow_id}"
+    headers = {"Authorization": f"Bearer {admin_token}"}
+
+    async def put(path, choice, reason=None):
+        return await client.put(
+            path,
+            headers=headers,
+            json={
+                "policy": None,
+                "delete_transcription_audio_after_use": choice,
+                "reason": reason,
+            },
+        )
+
+    assert (await put(root, True)).status_code == 200
+    inherited = await client.get(flow, headers=headers)
+    assert inherited.json()["transcription_audio"] == {
+        "local": None,
+        "inherited": True,
+        "effective": True,
+    }
+    omitted = await client.put(flow, headers=headers, json={"policy": None})
+    assert omitted.status_code == 422
+    refused = await put(flow, False)
+    assert refused.status_code == 400
+    assert refused.json()["code"] == "flow_retention_reason_required"
+    disabled = await put(flow, False, "Keep this run's source recordings.")
+    assert disabled.status_code == 200
+    assert disabled.json()["transcription_audio"] == {
+        "local": False,
+        "inherited": True,
+        "effective": False,
+    }
+    missing_false = await client.put(flow, headers=headers, json={"policy": None})
+    assert missing_false.status_code == 422
+    unchanged = await client.get(flow, headers=headers)
+    assert unchanged.json()["transcription_audio"]["local"] is False
+    assert (await put(space, False, "Keep space recordings.")).status_code == 200
+    assert (await client.get(flow, headers=headers)).json()["transcription_audio"] == {
+        "local": False,
+        "inherited": False,
+        "effective": False,
+    }
+    assert (await put(flow, True)).status_code == 200
+    clear_disabled = await put(flow, None)
+    assert clear_disabled.status_code == 400
+    assert clear_disabled.json()["code"] == "flow_retention_reason_required"
+    assert (await put(space, True)).status_code == 200
+    cleared = await put(flow, None)
+    assert cleared.status_code == 200
+    assert cleared.json()["transcription_audio"] == {
+        "local": None,
+        "inherited": True,
+        "effective": True,
     }

@@ -216,7 +216,12 @@ async def test_auto_delete_is_refused_until_the_deleting_task_is_registered(
         tuple(task for task in registered_tasks if task.name != FLOWS_HISTORY_TASK),
     )
     refused = await client.put(
-        ROOT, json={"policy": {"mode": "auto_delete", "days": 30}}, headers=headers
+        ROOT,
+        json={
+            "delete_transcription_audio_after_use": None,
+            "policy": {"mode": "auto_delete", "days": 30},
+        },
+        headers=headers,
     )
     assert refused.status_code == 400, refused.text
     assert refused.json()["code"] == "flow_retention_auto_delete_unavailable"
@@ -235,7 +240,12 @@ async def test_auto_delete_is_refused_until_the_deleting_task_is_registered(
     monkeypatch.setattr(get_settings(), "retention_flows_history_enabled", False)
 
     accepted = await client.put(
-        ROOT, json={"policy": {"mode": "auto_delete", "days": 30}}, headers=headers
+        ROOT,
+        json={
+            "delete_transcription_audio_after_use": None,
+            "policy": {"mode": "auto_delete", "days": 30},
+        },
+        headers=headers,
     )
     assert accepted.status_code == 200, accepted.text
     assert accepted.json()["local_policy"] == {"mode": "auto_delete", "days": 30}
@@ -250,10 +260,20 @@ async def test_the_maximum_applies_on_write_and_a_stored_longer_rule_still_appli
     flow_path = f"{ROOT}/flows/{scope['flow_id']}"
 
     above = await client.put(
-        flow_path, json={"policy": {"mode": "preserve", "days": 101}}, headers=headers
+        flow_path,
+        json={
+            "delete_transcription_audio_after_use": None,
+            "policy": {"mode": "preserve", "days": 101},
+        },
+        headers=headers,
     )
     at = await client.put(
-        flow_path, json={"policy": {"mode": "preserve", "days": 100}}, headers=headers
+        flow_path,
+        json={
+            "delete_transcription_audio_after_use": None,
+            "policy": {"mode": "preserve", "days": 100},
+        },
+        headers=headers,
     )
 
     assert above.status_code == 400, above.text
@@ -262,7 +282,11 @@ async def test_the_maximum_applies_on_write_and_a_stored_longer_rule_still_appli
     assert at.json()["write_rules"]["max_days"] == 100
     # A Space rule stored before the maximum was lowered keeps applying.
     await _set_policy(db_container, Spaces, scope["space_id"], "preserve", 40_000)
-    cleared = await client.put(flow_path, json={"policy": None}, headers=headers)
+    cleared = await client.put(
+        flow_path,
+        json={"delete_transcription_audio_after_use": None, "policy": None},
+        headers=headers,
+    )
     assert cleared.status_code == 200, cleared.text
     assert cleared.json()["effective"]["effective_days"] == 40_000
 
@@ -274,7 +298,10 @@ async def test_stopping_or_delaying_auto_delete_needs_a_recorded_reason(
     space_path = f"{ROOT}/spaces/{scope['space_id']}"
 
     async def put(path: str, policy: object, reason: str | None = None):
-        body: dict[str, object] = {"policy": policy}
+        body: dict[str, object] = {
+            "delete_transcription_audio_after_use": None,
+            "policy": policy,
+        }
         if reason is not None:
             body["reason"] = reason
         return await client.put(path, json=body, headers=headers)

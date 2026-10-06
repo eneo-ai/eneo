@@ -48,6 +48,9 @@ class Tenants(BasePublic):
     flow_run_history_retention_days: Mapped[Optional[int]] = mapped_column(
         nullable=True
     )
+    delete_transcription_audio_after_use: Mapped[Optional[bool]] = mapped_column(
+        nullable=True
+    )
     flow_run_history_retention_mode: Mapped[Optional[str]] = mapped_column(
         String(32), nullable=True
     )

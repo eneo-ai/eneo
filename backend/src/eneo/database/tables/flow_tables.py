@@ -216,6 +216,9 @@ class Flows(BasePublic):
     flow_run_history_retention_days: Mapped[Optional[int]] = mapped_column(
         nullable=True
     )
+    delete_transcription_audio_after_use: Mapped[Optional[bool]] = mapped_column(
+        nullable=True
+    )
     snapshot_allocation_high_water_mark: Mapped[int] = mapped_column(
         nullable=False, server_default="0"
     )

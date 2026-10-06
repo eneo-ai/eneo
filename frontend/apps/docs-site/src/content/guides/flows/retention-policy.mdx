@@ -120,6 +120,8 @@ large Organizations instead of downloading every Space and Flow into the
 browser when the settings page opens. Personal Spaces are outside this catalog,
 including direct Flow-target requests for a personal Space identifier.
 
+Replace both local settings in one request. `policy` and `delete_transcription_audio_after_use` are required, including when their value is `null`; omitting either is rejected (422). The audio setting is independent of history: `null` inherits, the organization default is `false`, and an explicit `false` overrides a parent `true`.
+
 Replace a local policy:
 
 ```json
@@ -127,7 +129,8 @@ Replace a local policy:
   "policy": {
     "mode": "review_required",
     "days": 60
-  }
+  },
+  "delete_transcription_audio_after_use": null
 }
 ```
 
@@ -135,18 +138,23 @@ Clear a Space or Flow override and inherit:
 
 ```json
 {
-  "policy": null
+  "policy": null,
+  "delete_transcription_audio_after_use": null
 }
 ```
 
 Partial policies and unrecognized modes are rejected (422). `days` is a whole number of at least 1; a write may not exceed the deployment maximum (operator setting `FLOW_RETENTION_MAX_DAYS`, 1-36500, default 36500). The maximum applies on write only: a stored policy above a later-lowered maximum keeps applying.
 
-A change that stops or delays automatic deletion needs a `reason` (1-512 characters), recorded in the audit event:
+A change that stops or delays automatic deletion, including changing effective audio-after-use deletion from `true` to `false`, needs a `reason` (1-512 characters), recorded in the audit event:
 
 ```json
 {
-  "policy": { "mode": "preserve", "days": 30 },
-  "reason": "Archive transfer to the records system first"
+  "policy": {
+    "mode": "preserve",
+    "days": 30
+  },
+  "reason": "Archive transfer to the records system first",
+  "delete_transcription_audio_after_use": null
 }
 ```
 

@@ -406,6 +406,7 @@ async def test_policy_replacement_waits_for_an_open_purge(
         async with db_container() as changing:
             return await changing.flow_run_retention_policy_service().replace_flow(
                 flow_id=flow_id,
+                delete_transcription_audio_after_use=None,
                 policy=FlowRunRetentionPolicy(
                     mode=FlowRunRetentionMode.REVIEW_REQUIRED, days=30
                 ),
@@ -945,7 +946,10 @@ async def test_rules_and_holds_need_their_own_retention_permission(
         for perms in (["retention_holds"], ["retention_manage"], ["admin"])
     ]
     rule_path = f"/api/v1/settings/flow-run-retention-policy/flows/{flow_id}"
-    rule = {"policy": {"mode": "preserve", "days": 30}}
+    rule = {
+        "delete_transcription_audio_after_use": None,
+        "policy": {"mode": "preserve", "days": 30},
+    }
     limit_path = "/api/v1/settings/flow-run-retention-policy/hold-review-limit"
     queue_path = "/api/v1/settings/flow-run-retention-policy/review-queue"
     hold_body = {
@@ -1121,7 +1125,10 @@ async def test_an_api_key_never_changes_or_stops_retention(
         ),
         await client.put(
             f"/api/v1/settings/flow-run-retention-policy/flows/{flow_id}",
-            json={"policy": {"mode": "preserve", "days": 30}},
+            json={
+                "delete_transcription_audio_after_use": None,
+                "policy": {"mode": "preserve", "days": 30},
+            },
             headers=headers,
         ),
         await client.get(HOLDS, headers=headers),

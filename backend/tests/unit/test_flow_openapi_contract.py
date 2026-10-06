@@ -1369,7 +1369,10 @@ def test_openapi_flow_retention_policy_is_default_off_and_strictly_bounded(
 
     replace_schema = schemas["FlowRunRetentionPolicyReplaceRequest"]
     assert replace_schema.get("additionalProperties") is False
-    assert replace_schema["required"] == ["policy"]
+    assert set(replace_schema["required"]) == {
+        "policy",
+        "delete_transcription_audio_after_use",
+    }
     assert _schema_allows_null(replace_schema["properties"]["policy"])
     # Stopping or delaying automatic deletion names why (1-512 characters).
     policy_reason = replace_schema["properties"]["reason"]

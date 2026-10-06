@@ -4,9 +4,11 @@
  * A policy replacement body; the reason is sent only when one is given.
  * @param {import('../types/resources').FlowRunRetentionPolicy | null} policy
  * @param {string | undefined} reason
+ * @param {boolean | null} deleteAfterUse
  */
-function policyBody(policy, reason) {
-  return reason === undefined ? { policy } : { policy, reason };
+function policyBody(policy, reason, deleteAfterUse) {
+  const body = { policy, delete_transcription_audio_after_use: deleteAfterUse };
+  return reason === undefined ? body : { ...body, reason };
 }
 
 /**
@@ -282,14 +284,20 @@ export function initSettings(client) {
     /**
      * Replace or clear the Organization default for Flow run-history retention.
      * A change that stops or delays automatic deletion needs a `reason`.
-     * @param {{policy: import('../types/resources').FlowRunRetentionPolicy | null, reason?: string}} params
+     * @param {{policy: import('../types/resources').FlowRunRetentionPolicy | null, deleteTranscriptionAudioAfterUse: boolean | null, reason?: string}} params
      * @throws {EneoError}
      * @returns {Promise<import('../types/resources').FlowRunRetentionPolicySettings>}
      */
-    replaceOrganizationFlowRunRetentionPolicy: async ({ policy, reason }) => {
+    replaceOrganizationFlowRunRetentionPolicy: async ({
+      policy,
+      reason,
+      deleteTranscriptionAudioAfterUse
+    }) => {
       return await client.fetch("/api/v1/settings/flow-run-retention-policy", {
         method: "put",
-        requestBody: { "application/json": policyBody(policy, reason) }
+        requestBody: {
+          "application/json": policyBody(policy, reason, deleteTranscriptionAudioAfterUse)
+        }
       });
     },
 
@@ -341,15 +349,22 @@ export function initSettings(client) {
     /**
      * Replace a Space override, or clear it to inherit the Organization default.
      * A change that stops or delays automatic deletion needs a `reason`.
-     * @param {{spaceId: string, policy: import('../types/resources').FlowRunRetentionPolicy | null, reason?: string}} params
+     * @param {{spaceId: string, policy: import('../types/resources').FlowRunRetentionPolicy | null, deleteTranscriptionAudioAfterUse: boolean | null, reason?: string}} params
      * @throws {EneoError}
      * @returns {Promise<import('../types/resources').FlowRunRetentionPolicySettings>}
      */
-    replaceSpaceFlowRunRetentionPolicy: async ({ spaceId, policy, reason }) => {
+    replaceSpaceFlowRunRetentionPolicy: async ({
+      spaceId,
+      policy,
+      reason,
+      deleteTranscriptionAudioAfterUse
+    }) => {
       return await client.fetch("/api/v1/settings/flow-run-retention-policy/spaces/{space_id}", {
         method: "put",
         params: { path: { space_id: spaceId } },
-        requestBody: { "application/json": policyBody(policy, reason) }
+        requestBody: {
+          "application/json": policyBody(policy, reason, deleteTranscriptionAudioAfterUse)
+        }
       });
     },
 
@@ -369,15 +384,22 @@ export function initSettings(client) {
     /**
      * Replace a Flow override, or clear it to inherit its Space or Organization policy.
      * A change that stops or delays automatic deletion needs a `reason`.
-     * @param {{flowId: string, policy: import('../types/resources').FlowRunRetentionPolicy | null, reason?: string}} params
+     * @param {{flowId: string, policy: import('../types/resources').FlowRunRetentionPolicy | null, deleteTranscriptionAudioAfterUse: boolean | null, reason?: string}} params
      * @throws {EneoError}
      * @returns {Promise<import('../types/resources').FlowRunRetentionPolicySettings>}
      */
-    replaceFlowRunRetentionPolicy: async ({ flowId, policy, reason }) => {
+    replaceFlowRunRetentionPolicy: async ({
+      flowId,
+      policy,
+      reason,
+      deleteTranscriptionAudioAfterUse
+    }) => {
       return await client.fetch("/api/v1/settings/flow-run-retention-policy/flows/{flow_id}", {
         method: "put",
         params: { path: { flow_id: flowId } },
-        requestBody: { "application/json": policyBody(policy, reason) }
+        requestBody: {
+          "application/json": policyBody(policy, reason, deleteTranscriptionAudioAfterUse)
+        }
       });
     },
 

@@ -133,6 +133,29 @@ class FlowRunRetentionWriteRules(BaseModel):
     )
 
 
+class TranscriptionAudioRetentionSettings(BaseModel):
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    local: bool | None = Field(
+        description="Delete source audio after use at this level; null inherits."
+    )
+    inherited: bool = Field(
+        description="Parent setting; false when no parent enables deletion."
+    )
+    effective: bool = Field(
+        description="Local choice if set, otherwise the parent setting."
+    )
+
+
+def resolve_transcription_audio_after_use(
+    *, organization: bool | None, space: bool | None = None, flow: bool | None = None
+) -> bool:
+    for choice in (flow, space, organization):
+        if choice is not None:
+            return choice
+    return False
+
+
 class FlowRunRetentionPolicySettings(BaseModel):
     model_config = ConfigDict(
         extra="forbid",
@@ -155,10 +178,18 @@ class FlowRunRetentionPolicySettings(BaseModel):
                     },
                 },
                 "write_rules": {"max_days": 36500, "auto_delete_available": False},
+                "transcription_audio": {
+                    "local": None,
+                    "inherited": False,
+                    "effective": False,
+                },
             }
         },
     )
 
+    transcription_audio: TranscriptionAudioRetentionSettings = Field(
+        description="Source audio follows this separate nullable setting; run history and transcripts keep their own policy."
+    )
     scope: FlowRunRetentionScope = Field(
         description="Level whose local policy is being inspected."
     )
@@ -474,6 +505,9 @@ def flow_run_retention_policy_settings(
     organization_policy: FlowRunRetentionPolicy | None,
     space_policy: FlowRunRetentionPolicy | None = None,
     flow_policy: FlowRunRetentionPolicy | None = None,
+    organization_audio: bool | None = None,
+    space_audio: bool | None = None,
+    flow_audio: bool | None = None,
 ) -> FlowRunRetentionPolicySettings:
     if scope is FlowRunRetentionScope.ORGANIZATION:
         local_policy = organization_policy
@@ -490,7 +524,25 @@ def flow_run_retention_policy_settings(
                 flow_policy=None,
             )
         )
+    local_audio = {
+        FlowRunRetentionScope.ORGANIZATION: organization_audio,
+        FlowRunRetentionScope.SPACE: space_audio,
+        FlowRunRetentionScope.FLOW: flow_audio,
+    }[scope]
+    inherited_audio = (
+        False
+        if scope is FlowRunRetentionScope.ORGANIZATION
+        else resolve_transcription_audio_after_use(
+            organization=organization_audio,
+            space=space_audio if scope is FlowRunRetentionScope.FLOW else None,
+        )
+    )
     return FlowRunRetentionPolicySettings(
+        transcription_audio=TranscriptionAudioRetentionSettings(
+            local=local_audio,
+            inherited=inherited_audio,
+            effective=local_audio if local_audio is not None else inherited_audio,
+        ),
         scope=scope,
         scope_id=scope_id,
         local_policy=local_policy,

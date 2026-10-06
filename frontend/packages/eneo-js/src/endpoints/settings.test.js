@@ -83,17 +83,33 @@ describe("settings flow policy endpoints", () => {
   });
 
   it("uses the hierarchical Flow run-retention settings routes", async () => {
+    // Kills omission or truthy-only forwarding of the nullable audio policy.
     const fetch = vi.fn(async () => ({ scope: "organization" }));
     const settings = initSettings({ fetch });
     const policy = { mode: "review_required", days: 60 };
 
     await settings.getOrganizationFlowRunRetentionPolicy();
-    await settings.replaceOrganizationFlowRunRetentionPolicy({ policy });
+    await settings.replaceOrganizationFlowRunRetentionPolicy({
+      policy,
+      deleteTranscriptionAudioAfterUse: true
+    });
     await settings.getSpaceFlowRunRetentionPolicy({ spaceId: "space-id" });
-    await settings.replaceSpaceFlowRunRetentionPolicy({ spaceId: "space-id", policy: null });
+    await settings.replaceSpaceFlowRunRetentionPolicy({
+      spaceId: "space-id",
+      policy: null,
+      deleteTranscriptionAudioAfterUse: null
+    });
     await settings.getFlowRunRetentionPolicy({ flowId: "flow-id" });
-    await settings.replaceFlowRunRetentionPolicy({ flowId: "flow-id", policy });
-    await settings.replaceOrganizationFlowRunRetentionPolicy({ policy: null, reason: "Why" });
+    await settings.replaceFlowRunRetentionPolicy({
+      flowId: "flow-id",
+      policy,
+      deleteTranscriptionAudioAfterUse: false
+    });
+    await settings.replaceOrganizationFlowRunRetentionPolicy({
+      policy: null,
+      deleteTranscriptionAudioAfterUse: null,
+      reason: "Why"
+    });
 
     expect(fetch.mock.calls).toEqual([
       ["/api/v1/settings/flow-run-retention-policy", { method: "get" }],
@@ -101,7 +117,9 @@ describe("settings flow policy endpoints", () => {
         "/api/v1/settings/flow-run-retention-policy",
         {
           method: "put",
-          requestBody: { "application/json": { policy } }
+          requestBody: {
+            "application/json": { policy, delete_transcription_audio_after_use: true }
+          }
         }
       ],
       [
@@ -116,7 +134,9 @@ describe("settings flow policy endpoints", () => {
         {
           method: "put",
           params: { path: { space_id: "space-id" } },
-          requestBody: { "application/json": { policy: null } }
+          requestBody: {
+            "application/json": { policy: null, delete_transcription_audio_after_use: null }
+          }
         }
       ],
       [
@@ -131,14 +151,22 @@ describe("settings flow policy endpoints", () => {
         {
           method: "put",
           params: { path: { flow_id: "flow-id" } },
-          requestBody: { "application/json": { policy } }
+          requestBody: {
+            "application/json": { policy, delete_transcription_audio_after_use: false }
+          }
         }
       ],
       [
         "/api/v1/settings/flow-run-retention-policy",
         {
           method: "put",
-          requestBody: { "application/json": { policy: null, reason: "Why" } }
+          requestBody: {
+            "application/json": {
+              policy: null,
+              delete_transcription_audio_after_use: null,
+              reason: "Why"
+            }
+          }
         }
       ]
     ]);
