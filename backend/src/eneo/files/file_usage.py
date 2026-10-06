@@ -19,7 +19,11 @@ from eneo.database.tables.files_table import Files
 from eneo.database.tables.questions_table import QuestionsFiles
 from eneo.files.file_models import FileUsageKind
 
-_USAGE_COLUMNS: tuple[tuple[FileUsageKind, InstrumentedAttribute[UUID]], ...] = (
+# Every link table that keeps a File in use. A foreign key to ``files.id`` that
+# is missing here would not fence deletion: the daily unused-file cleanup would
+# delete its Files. ``tests/unittests/files/test_file_usage_columns.py`` checks
+# the table metadata against this tuple.
+FILE_USAGE_COLUMNS: tuple[tuple[FileUsageKind, InstrumentedAttribute[UUID]], ...] = (
     (FileUsageKind.CHAT_ATTACHMENT, QuestionsFiles.file_id),
     (FileUsageKind.ASSISTANT_ATTACHMENT, AssistantsFiles.file_id),
     (FileUsageKind.APP_ATTACHMENT, AppsFiles.file_id),
@@ -138,7 +142,7 @@ class FileUsageRepository:
                 Files.created_at < sa.func.now() - older_than,
                 *(
                     ~sa.exists().where(file_id_column == Files.id)
-                    for _, file_id_column in _USAGE_COLUMNS
+                    for _, file_id_column in FILE_USAGE_COLUMNS
                 ),
             )
             .order_by(Files.id)
@@ -247,7 +251,7 @@ class FileUsageRepository:
         return sa.union_all(
             *(
                 cls._usage_select(kind, file_id_column, file_ids_parameter)
-                for kind, file_id_column in _USAGE_COLUMNS
+                for kind, file_id_column in FILE_USAGE_COLUMNS
             )
         ).subquery("file_product_usage")
 
