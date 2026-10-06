@@ -34,19 +34,39 @@ from eneo.main.exceptions import (
     UnauthorizedException,
 )
 from eneo.questions.question import ToolCallInfo
+from eneo.security_classifications.domain.entities.security_classification import (
+    SecurityClassification,
+)
 
 
-def _model(*, tool_calling=True, accessible=True, created=2026, name="m"):
+def _classification(level, *, enabled=True):
+    return SecurityClassification(
+        tenant_id=uuid4(),
+        name=f"level {level}",
+        security_level=level,
+        security_enabled=enabled,
+    )
+
+
+def _model(
+    *,
+    tool_calling=True,
+    accessible=True,
+    created=2026,
+    name="m",
+    classification=None,
+):
     return SimpleNamespace(
         id=uuid4(),
         name=name,
         can_access=accessible,
         supports_tool_calling=tool_calling,
+        security_classification=classification,
         created_at=datetime(created, 1, 1, tzinfo=timezone.utc),
     )
 
 
-def _space(*, models=(), default=None, in_space=True):
+def _space(*, models=(), default=None, in_space=True, classification=None):
     def get_default():
         if default is None:
             raise BadRequestException("no models")
@@ -55,6 +75,7 @@ def _space(*, models=(), default=None, in_space=True):
     return SimpleNamespace(
         id=uuid4(),
         completion_models=list(models),
+        security_classification=classification,
         get_default_completion_model=get_default,
         is_completion_model_in_space=lambda _id: in_space,
     )
@@ -116,6 +137,33 @@ class TestResolveModel:
         with pytest.raises(InsightsModelUnavailableError) as excinfo:
             self.resolve(SimpleNamespace(name="Team"), space)
         assert excinfo.value.code == "insights_model_unavailable"
+
+    def test_own_model_below_the_space_classification_is_skipped(self):
+        own = _model(classification=_classification(1))
+        cleared = _model(classification=_classification(2), created=2024)
+        space = _space(
+            models=[own, cleared], default=own, classification=_classification(2)
+        )
+
+        assert self.resolve(_assistant(own), space) is cleared
+
+    def test_unclassified_model_does_not_meet_a_classified_space(self):
+        space = _space(
+            models=[_model()], default=_model(), classification=_classification(1)
+        )
+
+        with pytest.raises(InsightsModelUnavailableError):
+            self.resolve(SimpleNamespace(name="Team"), space)
+
+    def test_classification_is_ignored_when_the_tenant_has_it_disabled(self):
+        own = _model()
+        space = _space(
+            models=[own],
+            default=own,
+            classification=_classification(2, enabled=False),
+        )
+
+        assert self.resolve(_assistant(own), space) is own
 
 
 class TestMergeToolCallChunk:

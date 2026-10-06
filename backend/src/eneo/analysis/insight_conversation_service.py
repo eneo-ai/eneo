@@ -471,18 +471,25 @@ class InsightConversationService:
     def _resolve_model(
         target: "Assistant | GroupChat", space: "Space"
     ) -> "CompletionModel":
-        """Pick the model that answers: it must be accessible and call tools.
+        """Pick the model that answers: it must be accessible, call tools and
+        meet the space's security classification, since the tools feed it the
+        space's conversations.
 
         Order: the assistant's own model when it qualifies and is in the
         space (group chats skip this), then the space default, then the
-        newest tool-capable model in the space.
+        newest qualifying model in the space.
         """
+        classification = space.security_classification
 
         def qualifies(model: "CompletionModel | None") -> bool:
             return (
                 model is not None
                 and model.can_access
                 and bool(model.supports_tool_calling)
+                and not (
+                    classification is not None
+                    and classification.is_greater_than(model.security_classification)
+                )
             )
 
         if isinstance(target, Assistant):

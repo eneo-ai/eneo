@@ -4111,7 +4111,7 @@
   "insights_chat_new_conversation": "Ny analys",
   "insights_chat_analyzing": "Går igenom konversationer…",
   "insights_chat_error": "Analysen kunde inte slutföras. Försök igen.",
-  "insights_chat_model_unavailable": "Ingen modell med verktygsanrop finns tillgänglig i det här utrymmet. Lägg till en i utrymmet eller aktivera verktygsanrop på assistentens modell.",
+  "insights_chat_model_unavailable": "Ingen modell i det här utrymmet både stöder verktygsanrop och uppfyller utrymmets säkerhetsklassning. Lägg till en sådan i utrymmet för att använda analysen.",
   "insights_tool_usage_summary": "Sammanställer användning",
   "insights_tool_usage_summary_done": "Sammanställde användning",
   "insights_tool_list_questions": "Läser frågor",
