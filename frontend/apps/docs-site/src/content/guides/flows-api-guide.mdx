@@ -1722,20 +1722,9 @@ The published runtime API is intentionally not “open to anyone who can see the
 
 ### Standard error envelope
 
-Flow endpoints use the platform's standard JSON error shape:
-
-```json
-{
-  "message": "Flow must be published before creating runs.",
-  "eneo_error_code": 9007,
-  "code": "flow_not_published",
-  "context": null,
-  "request_id": null,
-  "details": null
-}
-```
-
-The exact `eneo_error_code` depends on the endpoint, but the envelope shape stays the same.
+Use [The error envelope](/guides/flows/reference/errors#the-error-envelope) for the
+required fields, optional diagnostics, and JSON example. Branch on the string
+`code`; the legacy numeric category does not distinguish individual failures.
 
 ### Service-key authorization errors
 
@@ -1772,7 +1761,7 @@ Policy-layer denials such as `flow_service_key_principal_not_supported` may incl
 
 ### Flow error catalog
 
-The canonical consumer catalog for `FlowApiErrorCode` now lives in [Flow error reference](/guides/flows/reference/errors). Use that page for handling phase, recovery action, and exhaustive code coverage.
+The canonical consumer catalog for `FlowApiErrorCode` now lives in [Flow error reference](/guides/flows/reference/errors). Use that page for code-specific handling phases and recovery actions.
 
 ### Minimal end-to-end runtime example
 

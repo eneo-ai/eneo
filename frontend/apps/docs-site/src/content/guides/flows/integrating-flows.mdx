@@ -10,7 +10,7 @@ It is written to be complete on its own. Everything a client needs is stated exp
 
 Flows themselves are authored by people in the Eneo Builder. This page never asks you to create or edit a flow; it assumes someone has already published one.
 
-Use the reference for the full field catalog: [Flow Runtime API Reference](/guides/flows-api-guide). Use the [Flow error reference](/guides/flows/reference/errors) for the complete code catalog.
+Use the reference for the full field catalog: [Flow Runtime API Reference](/guides/flows-api-guide). Use the [Flow error reference](/guides/flows/reference/errors) for the Flow-specific code catalog.
 
 To give Codex or Claude Code this consumer workflow without exposing a private deployment's OpenAPI document, install the [Eneo Flows API Agent Skill](/guides/flows/agent-skill).
 
@@ -59,7 +59,7 @@ These are the parts of the contract that are easy to get subtly wrong. Read them
 10. **Artifact downloads are two calls.** Ask for a signed URL, then `GET` that URL **without** an authentication header; the tenant is bound into the signature.
 11. **Cancel is a no-op on a terminal run.** `POST .../cancel/` on a run that already finished returns `200` with the run unchanged and still `completed` or `failed`. Read `status` from the response instead of assuming it is now `cancelled`. On a live run the status flips before the response returns, but the worker stops asynchronously: a completion-model call in flight is aborted within seconds, while a transcription or outbound HTTP call runs to completion and is honored only at the next step boundary.
 12. **An out-of-scope resource returns `403`, not `404`.** Scope is checked before the resource is looked up, so a flow in another space is indistinguishable from one that does not exist. Both give `403 insufficient_scope` with `context.auth_layer: "api_key_scope"`.
-13. **`eneo_error_code` is not an identifier.** It is a legacy numeric category derived from the exception class, so unrelated failures share a value and it cannot tell two of them apart. The string `code` is the only field to branch on.
+13. **Branch on the string `code`.** Use [The error envelope](/guides/flows/reference/errors#the-error-envelope) for required fields and optional diagnostics.
 
 ## The run state machine
 
@@ -970,7 +970,7 @@ Contract coverage: These endpoints are contract-tested.
 
 Common errors in this sequence: `flow_not_published`, `flow_run_idempotency_conflict`, `flow_run_stale_version`.
 
-Use the [Flow error reference](/guides/flows/reference/errors) for the complete code catalog and recovery actions.
+Use the [Flow error reference](/guides/flows/reference/errors) for the Flow-specific code catalog and recovery actions.
 
 When the contract names file inputs, handle uploads before you create the run.
 
@@ -996,7 +996,7 @@ Contract coverage: These endpoints are contract-tested.
 
 Common errors in this sequence: `flow_run_required_step_input_missing`, `flow_run_step_input_max_files_exceeded`, `flow_run_step_input_file_too_large`, `flow_run_step_input_mimetype_rejected`, `flow_runtime_file_attached`.
 
-Use the [Flow error reference](/guides/flows/reference/errors) for the complete code catalog and recovery actions.
+Use the [Flow error reference](/guides/flows/reference/errors) for the Flow-specific code catalog and recovery actions.
 
 When a product needs explainability or cost visibility, read the evidence view and page provider calls without losing lifecycle state.
 
@@ -1021,7 +1021,7 @@ Contract coverage: These endpoints are contract-tested.
 
 Common errors in this sequence: `flow_provider_call_evidence_persistence_failed`, `flow_evidence_export_too_large`.
 
-Use the [Flow error reference](/guides/flows/reference/errors) for the complete code catalog and recovery actions.
+Use the [Flow error reference](/guides/flows/reference/errors) for the Flow-specific code catalog and recovery actions.
 
 After inputs are bound, plan how the UI behaves when a review-marked step pauses the run.
 
@@ -1055,7 +1055,7 @@ Contract coverage: These endpoints are contract-tested.
 
 Common errors in this sequence: `flow_review_stale_revision`, `flow_review_expired`, `flow_review_not_active`, `flow_review_idempotency_key_required`, `flow_review_reject_reason_required`.
 
-Use the [Flow error reference](/guides/flows/reference/errors) for the complete code catalog and recovery actions.
+Use the [Flow error reference](/guides/flows/reference/errors) for the Flow-specific code catalog and recovery actions.
 
 A review checkpoint can change text or structured output; it cannot attach a different input file. For different files, upload and bind them in a new run.
 
@@ -1085,7 +1085,7 @@ Contract coverage: These endpoints are contract-tested.
 
 Common errors in this sequence: `flow_review_not_active`.
 
-Use the [Flow error reference](/guides/flows/reference/errors) for the complete code catalog and recovery actions.
+Use the [Flow error reference](/guides/flows/reference/errors) for the Flow-specific code catalog and recovery actions.
 
 Once review is resolved, drive the result screen from the run's typed final result and open step details only when needed.
 
@@ -1116,7 +1116,7 @@ Contract coverage: These endpoints are contract-tested.
 
 Common errors in this sequence: `flow_run_artifact_not_found`, `flow_run_artifact_content_unavailable`, `flow_run_access_denied`.
 
-Use the [Flow error reference](/guides/flows/reference/errors) for the complete code catalog and recovery actions.
+Use the [Flow error reference](/guides/flows/reference/errors) for the Flow-specific code catalog and recovery actions.
 
 When a user needs to repeat completed work with corrected inputs, create a new
 run. The original run and its step-attempt evidence remain immutable and can be
@@ -1151,7 +1151,7 @@ Contract coverage: These endpoints are contract-tested.
 
 Common errors in this sequence: `flow_run_idempotency_conflict`, `flow_run_concurrency_limit_reached`, `flow_run_user_cancelled`, `flow_worker_stalled`.
 
-Use the [Flow error reference](/guides/flows/reference/errors) for the complete code catalog and recovery actions.
+Use the [Flow error reference](/guides/flows/reference/errors) for the Flow-specific code catalog and recovery actions.
 
 When a run or step fails, branch on typed codes and show the user the next action.
 
@@ -1174,7 +1174,7 @@ Contract coverage: These endpoints are contract-tested.
 
 Common errors in this sequence: `flow_task_failure`, `flow_step_execution_failed`, `typed_io_validation_failed`, `typed_io_output_parse_failed`.
 
-Use the [Flow error reference](/guides/flows/reference/errors) for the complete code catalog and recovery actions.
+Use the [Flow error reference](/guides/flows/reference/errors) for the Flow-specific code catalog and recovery actions.
 
 For backend integrations, finish by checking service-key scope and tenant isolation.
 
@@ -1199,7 +1199,7 @@ Contract coverage: These endpoints are contract-tested.
 
 Common errors in this sequence: `flow_run_access_denied`, `flow_run_evidence_forbidden`, `flow_service_key_admin_required`.
 
-Use the [Flow error reference](/guides/flows/reference/errors) for the complete code catalog and recovery actions.
+Use the [Flow error reference](/guides/flows/reference/errors) for the Flow-specific code catalog and recovery actions.
 
 ## Live text and speaker labels
 

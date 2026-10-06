@@ -6,14 +6,14 @@ Use this as the canonical consumer reference for `FlowApiErrorCode`. Task guides
 
 ## The error envelope
 
-Every `4xx` and `5xx` response from the Flow runtime API has the same JSON body:
+Eneo handles Flow runtime API errors with this JSON envelope:
 
 ```json
 {
-  "message": "Flow must be published before creating runs.",
+  "message": "Flow must be published before a run can be created.",
   "code": "flow_not_published",
   "eneo_error_code": 9007,
-  "context": { "step_ids": ["00000000-0000-0000-0000-000000000101"] },
+  "context": { "flow_id": "00000000-0000-0000-0000-000000000001" },
   "request_id": "7796bdacde5f9f7536cdbf3a7e50b5c4"
 }
 ```
@@ -21,11 +21,12 @@ Every `4xx` and `5xx` response from the Flow runtime API has the same JSON body:
 - **`code` is the contract.** It is a stable string, present on every error. Branch your client on this field and nothing else.
 - **`message` is for humans.** It is not stable and must not drive control flow.
 - **`context` carries recovery hints** for some codes, such as the `step_ids` that are missing a required upload, or `auth_layer` on an authentication or scope rejection.
+- **`details` carries code-specific structured diagnostics**, such as field validation errors. It is optional.
 - **`request_id` is for support.** Quote it, together with the run id, when reporting a problem.
 - **`error_id` appears on unexpected server errors** and points support at the originating exception log. Log it whenever it is present.
 - **`eneo_error_code` is a legacy numeric category, not an identifier.** It is derived from the exception class rather than from `code`, so it is many-to-one: most of the catalog below shares a single value, while a few codes carry a different one. It cannot distinguish two failures and must not drive control flow.
 
-Fields that carry no value are omitted rather than sent as `null`, so treat every field except `message` and `code` as optional.
+`message`, `code`, and `eneo_error_code` are required. The optional `context`, `request_id`, `error_id`, and `details` fields are omitted when they carry no value.
 
 For `flow_run_upload_pdf_exceeds_limit`, context contains `limit` (`pages`, `extracted_bytes`, or `seconds`), `measured`, and `ceiling`. The deployment settings `FLOW_PDF_MAX_PAGES`, `FLOW_PDF_MAX_EXTRACTED_BYTES`, and `FLOW_PDF_EXTRACTION_TIMEOUT_SECONDS` default to 2000 pages, 134217728 extracted UTF-8 bytes (128 MiB, including page markers and separators), and 900 seconds. See the [Flow limits table](/guides/flows/integrating-flows#execution-pdf-extraction-and-builder). These defaults are provisional pending measurement and have no tenant overrides. They apply only to flow runtime uploads; other PDF uploads keep their existing extraction behavior. The byte ceiling applies to extracted text, not the uploaded file. A timeout kills the extraction process, whose own deadline remains active if the request worker exits.
 
@@ -192,6 +193,7 @@ Structured output uses the inline byte ceiling for both single calls and mapped 
 | Flow access            | `flow_service_key_admin_required`                        | Request path                  | Use an admin service key or call the published runtime endpoint.                                                                                 |
 | Flow access            | `flow_service_key_principal_not_supported`               | Request path                  | Call with a user session or choose a service-key-supported runtime endpoint.                                                                     |
 | Flow access            | `flow_service_key_space_id_required`                     | Request path                  | Send space_id for the space the key is scoped to.                                                                                                |
+| Flow access            | `flow_managed_assistant`                                 | Request path                  | Remove or replace the step that uses the assistant, or retry after the unfinished run ends.                                                      |
 | Run input              | `flow_input_invalid_date`                                | Request path                  | Send the date in YYYY-MM-DD format.                                                                                                              |
 | Run input              | `flow_input_invalid_multiselect_type`                    | Request path                  | Send an array of strings or a comma-separated string.                                                                                            |
 | Run input              | `flow_input_invalid_multiselect_value`                   | Request path                  | Send every multiselect value as a string.                                                                                                        |
@@ -231,6 +233,8 @@ Structured output uses the inline byte ceiling for both single calls and mapped 
 | Run input              | `flow_run_upload_pdf_exceeds_limit`                       | Request path                  | Split the PDF or ask an administrator to review the PDF ceilings.                                                                                |
 | Run input              | `flow_runtime_file_attached`                             | Request path                  | Do not delete files that are bound to run history.                                                                                               |
 | Run input              | `flow_runtime_file_empty`                                | Request path                  | Reject empty files client-side before uploading when possible.                                                                                   |
+| Run input              | `flow_input_invalid_list_value`                          | Request path                  | Send every list value as a string.                                                                                                               |
+| Run input              | `flow_input_invalid_list_type`                           | Request path                  | Send an array of strings or a delimited string.                                                                                                  |
 | Run lifecycle          | `flow_dispatch_failed`                                   | Request path or run execution | Retry with backoff and alert an operator if dispatch keeps failing.                                                                              |
 | Run lifecycle          | `flow_missing_principal`                                 | Run execution                 | Check service-key ownership and tenant principal state before retrying.                                                                          |
 | Run lifecycle          | `flow_run_cancelled`                                     | Run execution                 | Stop polling and create a new run only if the user still needs output.                                                                           |
@@ -252,9 +256,17 @@ Structured output uses the inline byte ceiling for both single calls and mapped 
 | Evidence and artifacts | `flow_evidence_export_reason_required`                   | Request path                  | Collect and send a specific export reason with the request.                                                                                      |
 | Evidence and artifacts | `flow_evidence_export_too_large`                         | Request path                  | Use the section and limit context fields to page supported evidence or direct the caller to the bounded run view.                                |
 | Evidence and artifacts | `flow_run_artifact_content_unavailable`                  | Request path                  | Show retention-aware messaging and avoid retry loops for purged content.                                                                         |
+| Evidence and artifacts | `flow_run_input_file_not_found` | Request path | Only request file ids listed in a step result's runtime_input_file_ids. |
+| Evidence and artifacts | `flow_run_input_file_content_unavailable` | Request path | Show retention-aware messaging and avoid retry loops for purged content. |
 | Evidence and artifacts | `flow_run_artifact_not_found`                            | Request path                  | Refresh run evidence and only request listed artifact ids.                                                                                       |
 | Evidence and artifacts | `flow_run_evidence_forbidden`                            | Request path                  | Request evidence access with a principal allowed by run and policy checks.                                                                       |
 | Evidence and artifacts | `flow_run_evidence_raw_export_forbidden`                 | Request path                  | Use the allowed evidence view or request a policy change.                                                                                        |
+| Evidence and artifacts | `flow_run_file_access_audit_unavailable`                 | Request path                  | Retry later; the failed response contains no usable signed URL.                                                                                  |
+| Evidence and artifacts | `flow_transcript_corrections_stale_revision`             | Request path                  | Refetch the corrections and retry with the latest revision.                                                                                      |
+| Evidence and artifacts | `flow_transcript_corrections_segments_unavailable`       | Request path                  | Offer the transcript read-only when the step metadata has no segments.                                                                           |
+| Evidence and artifacts | `flow_transcript_corrections_invalid_occurrence`         | Request path                  | Rebuild the occurrence anchors from the current segments and retry.                                                                              |
+| Evidence and artifacts | `flow_transcript_corrections_invalid_speaker_edit`       | Request path                  | Rebuild the speaker-edit anchors from the current segments and retry.                                                                            |
+| Evidence and artifacts | `flow_package_export_audit_unavailable`                  | Request path                  | Retry later; the failed response contains no package bytes.                                                                                      |
 | Published definition   | `flow_assistant_model_provider_required`                 | Request path                  | Select a model connected to a provider before publishing the flow.                                                                               |
 | Published definition   | `flow_assistant_snapshot_republish_required`             | Request path or run execution | Republish the flow before starting another run.                                                                                                  |
 | Published definition   | `flow_assistant_snapshot_drift`                          | Run execution                 | Republish the flow so runtime dependencies match the stored snapshot.                                                                            |
@@ -271,6 +283,7 @@ Structured output uses the inline byte ceiling for both single calls and mapped 
 | Published definition   | `flow_step_limit_exceeded`                               | Request path                  | Remove steps or split the work into several flows, then send the request again.                                                                  |
 | Published definition   | `flow_step_output_classification_write_down`             | Request path                  | Raise the override to the `required_level` in the error context or remove it, then save again.                                                   |
 | Published definition   | `flow_step_security_classification_mismatch`             | Request path                  | Choose one of the `qualifying_model_ids` in the error context, or change what the step reads, then save again.                                    |
+| Published definition   | `flow_assistant_snapshot_resource_invalid`               | Run execution                 | Restore the pinned resource or republish the flow before starting another run.                                                                   |
 | Step runtime           | `flow_provider_call_evidence_persistence_failed`         | Run execution                 | Inspect the provider-call page and the evidence gap in the run error before deciding whether to repeat a call whose remote outcome may be known. |
 | Step runtime           | `flow_provider_rate_limited`                             | Run execution                 | Wait before submitting a new logical run; the runtime does not retry automatically.                                                              |
 | Step runtime           | `flow_provider_unavailable`                              | Run execution                 | Do not retry automatically; inspect provider-call evidence before deciding whether to start a new logical run.                                   |
@@ -326,6 +339,10 @@ Structured output uses the inline byte ceiling for both single calls and mapped 
 | Typed input/output     | `typed_io_unsupported_type`                              | Run execution                 | Change the input type and republish the flow.                                                                                                    |
 | Typed input/output     | `typed_io_validation_failed`                             | Run execution                 | Open step diagnostics and correct the input, schema, or configuration.                                                                           |
 | Typed input/output     | `typed_io_variable_resolution_failed`                    | Run execution                 | Use the precise run error to correct the variable path, then republish and start a new run.                                                                 |
+| Typed input/output     | `flow_model_capacity_undeclared`                         | Run execution                 | Stop retrying until an administrator configures both model token limits.                                                                         |
+| Typed input/output     | `flow_llm_output_truncated`                              | Run execution                 | Do not consume the incomplete output or automatically retry the completed provider call.                                                         |
+| Typed input/output     | `flow_llm_output_whitespace_abort`                       | Run execution                 | Inspect the retained partial output before retrying because the provider outcome is unknown and a new request can incur additional cost.         |
+| Typed input/output     | `flow_summarization_non_convergent`                      | Run execution                 | Inspect summarization rounds, records and bytes; reduce the input or request more concise records before starting a new run.                     |
 | Review checkpoint      | `flow_review_already_resumed`                            | Request path                  | Treat duplicate resume as completed and reload the run status.                                                                                   |
 | Review checkpoint      | `flow_review_cancelled`                                  | Request path                  | Reload the run and stop actions against the cancelled checkpoint.                                                                                |
 | Review checkpoint      | `flow_review_checkpoint_not_found`                       | Request path                  | Refetch run review links and use a current checkpoint id.                                                                                        |
@@ -345,6 +362,7 @@ Structured output uses the inline byte ceiling for both single calls and mapped 
 | Review checkpoint      | `flow_review_rejected`                                   | Request path or run execution | Stop resume attempts and show the rejection reason if available.                                                                                 |
 | Review checkpoint      | `flow_review_stale_revision`                             | Request path                  | Refetch the checkpoint and retry with the latest revision.                                                                                       |
 | Review checkpoint      | `flow_review_step_result_not_found`                      | Request path                  | Reload evidence and avoid editing or approving a missing result.                                                                                 |
+| Review checkpoint      | `flow_review_history_too_large`                          | Request path                  | Report the obstructing revision; reducing the row limit cannot make this comparison fit.                                                         |
 | Template asset         | `flow_template_control_duplicate`                        | Request path                  | Give every content control a unique tag in Word.                                                                                                 |
 | Template asset         | `flow_template_control_mapped`                           | Request path                  | Remove the control's XML data binding before uploading the template.                                                                             |
 | Template asset         | `flow_template_control_nested`                           | Request path                  | Move nested controls outside their parent content controls.                                                                                      |
@@ -361,5 +379,6 @@ Structured output uses the inline byte ceiling for both single calls and mapped 
 | Template asset         | `flow_template_not_accessible`                           | Request path                  | Use a template stored in the flow or space with the right permissions.                                                                           |
 | Template asset         | `flow_template_read_only`                                | Request path                  | Hide template replacement for read-only callers.                                                                                                 |
 | Template asset         | `flow_template_unsupported_extension`                    | Request path                  | Allow only DOCX files for template upload.                                                                                                       |
+| Template asset         | `flow_template_download_audit_unavailable`               | Request path                  | Retry later; do not treat the failed response as a usable download.                                                                              |
 
 Next: [Flow Runtime API Reference](/guides/flows-api-guide)
