@@ -52,14 +52,15 @@ To change input values or replace files, use `POST /flows/{flow_id}/runs/` with 
 
 ```json
 {
-  "message": "Flow must be published before creating runs.",
+  "message": "Flow must be published before a run can be created.",
   "code": "flow_not_published",
-  "context": null,
+  "eneo_error_code": 9007,
+  "context": { "flow_id": "00000000-0000-0000-0000-000000000001" },
   "request_id": "request-id-for-support"
 }
 ```
 
-`code` is the control-flow contract. `message` is for display, `context` can carry recovery hints, and `request_id` or optional `error_id` belongs in support logs. Optional fields can be omitted. Ignore numeric `eneo_error_code` for branching.
+`code` is the control-flow contract. `message` is for display, `context` can carry recovery hints, and `request_id` or optional `error_id` belongs in support logs. `context`, `request_id`, `error_id` and `details` are omitted when unset, never sent as `null`. Ignore numeric `eneo_error_code` for branching.
 
 Always keep an unknown-code branch that shows a generic failure, records the raw code and request ID, and refuses unsafe automatic retries.
 

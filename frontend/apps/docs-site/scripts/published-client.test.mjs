@@ -84,6 +84,66 @@ const fileBackedCheckpoint = {
 
 const viewOnlyCheckpoint = { ...editableCheckpoint, review_mode: "view" };
 
+const envelope = {
+  message: "Flow must be published before a run can be created.",
+  code: "flow_not_published",
+  eneo_error_code: 9007,
+};
+const envelopeWithDiagnostics = {
+  ...envelope,
+  context: { flow_id: "00000000-0000-0000-0000-000000000001" },
+  request_id: "7796bdacde5f9f7536cdbf3a7e50b5c4",
+  error_id: "err-1",
+  details: { errors: [] },
+};
+
+// [what was answered, status, status text, body text, the envelope the client must expose]
+test.each([
+  ["Eneo's envelope", 400, "Bad Request", JSON.stringify(envelope), envelope],
+  [
+    "Eneo's envelope with every optional field",
+    400,
+    "Bad Request",
+    JSON.stringify(envelopeWithDiagnostics),
+    envelopeWithDiagnostics,
+  ],
+  ["a framework detail body", 404, "Not Found", '{"detail":"Not Found"}', null],
+  ["an empty body", 503, "Unavailable", "", null],
+  ["an empty body and no status text", 503, "", "", null],
+  ["a body that is not JSON", 503, "Unavailable", "<html>503</html>", null],
+  ...[
+    { request_id: 42 },
+    { context: null },
+    { context: [] },
+    { error_id: { id: "err-1" } },
+    { details: [] },
+    { eneo_error_code: "9007" },
+  ].map((mistyped) => [
+    `an envelope with a mistyped field ${JSON.stringify(mistyped)}`,
+    400,
+    "Bad Request",
+    JSON.stringify({ ...envelope, ...mistyped }),
+    null,
+  ]),
+])(
+  "a failed call answered with %s keeps its status",
+  async (_name, status, statusText, text, exposed) => {
+    const { EneoFlows, EneoApiError } = await loadPublishedClient();
+    globalThis.fetch = async () => new Response(text, { status, statusText });
+
+    const client = new EneoFlows("https://eneo.example.se/api/v1", "sk_test");
+    const error = await client.runContract("flow-1").catch((caught) => caught);
+
+    expect(error).toBeInstanceOf(EneoApiError);
+    expect(error.status).toBe(status);
+    expect(error.body).toEqual(exposed ?? undefined);
+    expect(error.code).toBe(exposed ? exposed.code : "unknown");
+    expect(error.message).toBe(
+      exposed ? exposed.message : statusText || `HTTP ${status}`,
+    );
+  },
+);
+
 test("editCheckpoint sends the step's value and nothing else", async () => {
   const { EneoFlows } = await loadPublishedClient();
   const recorded = {};

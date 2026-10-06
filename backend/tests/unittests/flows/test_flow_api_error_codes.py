@@ -44,8 +44,14 @@ DOCS_FLOW_API_GUIDE = (
     / "guides"
     / "flows-api-guide.mdx"
 )
+DOCS_FLOW_ERROR_REFERENCE = (
+    DOCS_FLOW_API_GUIDE.parent / "flows" / "reference" / "errors.mdx"
+)
 FLOW_ERROR_CODE_PATTERN = re.compile(r"^flow_[a-z0-9_]+$")
 FLOW_GUIDE_BACKTICKED_TOKEN_PATTERN = re.compile(r"`((?:flow|typed_io)_[a-z0-9_]+)`")
+FLOW_ERROR_REFERENCE_ROW_CODE_PATTERN = re.compile(
+    r"^\|[^|]*\|\s*`((?:flow|typed_io)_[a-z0-9_]+)`\s*\|", re.MULTILINE
+)
 FLOW_GUIDE_NON_ERROR_CODE_TOKENS = {
     "flow_evidence": "resource permission name, not an error code",
     "flow_input": "step input source value, not an error code",
@@ -519,6 +525,14 @@ def test_flow_api_guide_backticked_flow_codes_are_cataloged() -> None:
 
     uncataloged_tokens = sorted(tokens - catalog_codes - allowlisted_tokens)
     assert uncataloged_tokens == []
+
+
+def test_flow_error_reference_has_one_row_per_catalog_code() -> None:
+    row_codes = FLOW_ERROR_REFERENCE_ROW_CODE_PATTERN.findall(
+        DOCS_FLOW_ERROR_REFERENCE.read_text(encoding="utf-8")
+    )
+
+    assert sorted(row_codes) == sorted(code.value for code in FLOW_API_ERROR_CODES)
 
 
 def test_checked_in_sdk_flow_api_error_codes_match_backend_source(
