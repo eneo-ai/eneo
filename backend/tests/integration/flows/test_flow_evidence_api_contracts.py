@@ -386,7 +386,7 @@ async def _seed_flow_run_contract_data(
                 "api_key": "super-secret",
                 "webhook_url": "https://example.org/hook?token=top-secret",
             },
-            output_payload_json={"summary": "Completed"},
+            output_payload_json={"structured": {"summary": "Completed"}},
         )
         session.add(run)
         await session.flush()
@@ -1762,10 +1762,7 @@ async def test_flow_run_evidence_export_returns_redacted_json_attachment(
             "has_transcription": False,
         }
     ]
-    assert (
-        payload["summary"]["step_overview"][0]["output_summary"]["preview"]
-        == "Looks good"
-    )
+    assert payload["summary"]["step_overview"][0]["output_summary"] is None
     assert payload["redaction"]["applied"] is True
     assert payload["redaction"]["policy_version"] == "flow-evidence-redaction.v3"
     assert payload["redaction"]["masked_fields_count"] >= 1
