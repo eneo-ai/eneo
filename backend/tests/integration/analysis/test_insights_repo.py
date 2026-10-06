@@ -7,11 +7,15 @@ operator's zone, exact-text grouping, and the hidden-session rule.
 from __future__ import annotations
 
 from datetime import datetime, timezone
+from uuid import uuid4
 
 import pytest
+import sqlalchemy as sa
 
 from eneo.analysis.insight_scope import InsightScope, InsightWindow
 from eneo.analysis.insights_repo import normalize_question_text
+from eneo.database.tables.mcp_tool_references_table import McpToolReference
+from eneo.database.tables.questions_table import Questions
 
 STOCKHOLM = "Europe/Stockholm"
 
@@ -243,6 +247,74 @@ async def test_transcript_returns_turns_in_order_and_none_for_hidden_or_foreign(
     assert transcript.turns[0].answer.startswith("answer to")
     assert transcript.turns[0].cited_passages == 0
     assert hidden is None and foreign is None
+
+
+async def test_knowledge_tool_passages_count_as_evidence(
+    db_container, admin_user, seed_insights
+):
+    async with db_container() as container:
+        seed = await seed_insights(container, admin_user)
+        blob_uri = f"eneo://info-blob/{uuid4()}"
+        await container.session().execute(
+            sa.insert(McpToolReference),
+            [
+                dict(
+                    question_id=seed["s1_q2"],
+                    uri=f"{blob_uri}#chunk-3",
+                    meta={"score": 0.42},
+                    order=0,
+                ),
+                # A contextual neighbour carries no score of its own.
+                dict(
+                    question_id=seed["s1_q2"],
+                    uri=f"{blob_uri}#chunk-4",
+                    meta={},
+                    order=1,
+                ),
+                # Another tool's reference is not knowledge.
+                dict(
+                    question_id=seed["s1_q1"],
+                    uri="https://example.com/page",
+                    meta={"score": 0.99},
+                    order=0,
+                ),
+            ],
+        )
+        repo = container.insights_repo()
+
+        transcript = await repo.get_transcript(_scope(seed), seed["s1"])
+        no_knowledge, _, median = await repo.find_no_knowledge(
+            _scope(seed), _window(), offset=0, limit=50
+        )
+
+    assert transcript is not None
+    opening, followup = transcript.turns
+    assert (opening.cited_passages, opening.best_score) == (0, None)
+    assert (followup.cited_passages, followup.best_score) == (2, 0.42)
+
+    assert median == 0.42
+    reasons = {row.question: row.reason for row in no_knowledge}
+    assert reasons["Hur ansöker jag om bygglov?"] == "answer cited no knowledge"
+    assert reasons.get("Vad kostar det?") != "answer cited no knowledge"
+
+
+async def test_gap_signals_accept_a_json_null_tool_call_list(
+    db_container, admin_user, seed_insights
+):
+    async with db_container() as container:
+        seed = await seed_insights(container, admin_user)
+        # What the ORM writes for a turn that made no tool calls.
+        await container.session().execute(
+            sa.update(Questions)
+            .where(Questions.id == seed["s3_q1"])
+            .values(tool_calls=sa.text("'null'::jsonb"))
+        )
+
+        _, total, _ = await container.insights_repo().find_no_knowledge(
+            _scope(seed), _window(), offset=0, limit=50
+        )
+
+    assert total == 8
 
 
 @pytest.mark.asyncio

@@ -193,6 +193,41 @@ class InsightsRepository:
             )
         )
 
+    @staticmethod
+    def _knowledge_passages() -> sa.Subquery:
+        """Knowledge passages per question, with the best score among them.
+
+        Knowledge reaches a turn two ways and both count as evidence:
+        injected passages are rows in ``info_blob_references``; passages the
+        model fetched through the knowledge tool are ``mcp_tool_references``
+        with an ``eneo://info-blob/`` URI and their score in ``meta``.
+        """
+        tool_score = McpToolReference.meta["score"]
+        passages = sa.union_all(
+            sa.select(
+                InfoBlobReferences.question_id.label("question_id"),
+                InfoBlobReferences.similarity_score.label("score"),
+            ),
+            sa.select(
+                McpToolReference.question_id.label("question_id"),
+                sa.case(
+                    (
+                        sa.func.jsonb_typeof(tool_score) == "number",
+                        tool_score.as_float(),
+                    )
+                ).label("score"),
+            ).where(McpToolReference.uri.like("eneo://info-blob/%")),
+        ).subquery("passages")
+        return (
+            sa.select(
+                passages.c.question_id,
+                sa.func.count().label("cited_passages"),
+                sa.func.max(passages.c.score).label("best_score"),
+            )
+            .group_by(passages.c.question_id)
+            .subquery("cited")
+        )
+
     def _scoped_questions(
         self, scope: InsightScope, window: InsightWindow
     ) -> sa.Select[Any]:
@@ -428,15 +463,7 @@ class InsightsRepository:
         if header is None:
             return None
 
-        cited = (
-            sa.select(
-                InfoBlobReferences.question_id.label("question_id"),
-                sa.func.count().label("cited_passages"),
-                sa.func.max(InfoBlobReferences.similarity_score).label("best_score"),
-            )
-            .group_by(InfoBlobReferences.question_id)
-            .subquery("cited")
-        )
+        cited = self._knowledge_passages()
         turns_stmt = (
             sa.select(
                 Questions.created_at,
@@ -525,26 +552,22 @@ class InsightsRepository:
         Three signals, weakest last: the knowledge tool reported no results;
         the answer cited no knowledge at all; or its best citation score is in
         the window's weakest quartile (relative, because score scales differ
-        per embedding model) or below :data:`KNOWLEDGE_SCORE_FLOOR`. Returns
-        ``(rows, total, window median score)``.
+        per embedding model) or below :data:`KNOWLEDGE_SCORE_FLOOR`. Passages
+        count whether they were injected or fetched through the knowledge
+        tool. Returns ``(rows, total, window median score)``.
         """
         scoped = self._scoped_questions(scope, window).subquery("scoped")
-        cited = (
-            sa.select(
-                InfoBlobReferences.question_id.label("question_id"),
-                sa.func.max(InfoBlobReferences.similarity_score).label("best_score"),
-            )
-            .group_by(InfoBlobReferences.question_id)
-            .subquery("cited")
-        )
-        knowledge_refs = sa.exists(
-            sa.select(McpToolReference.id).where(
-                McpToolReference.question_id == scoped.c.id,
-                McpToolReference.uri.like("eneo://info-blob/%"),
-            )
-        )
+        cited = self._knowledge_passages()
+        # Turns without tool calls hold SQL NULL or a JSON ``null``; only an
+        # array can be unnested.
         call = sa.func.jsonb_array_elements(
-            sa.func.coalesce(scoped.c.tool_calls, sa.text("'[]'::jsonb"))
+            sa.case(
+                (
+                    sa.func.jsonb_typeof(scoped.c.tool_calls) == "array",
+                    scoped.c.tool_calls,
+                ),
+                else_=sa.text("'[]'::jsonb"),
+            )
         ).table_valued("value")
         no_results = sa.exists(
             sa.select(sa.literal(1))
@@ -562,7 +585,7 @@ class InsightsRepository:
                 scoped.c.question,
                 cited.c.best_score,
                 no_results.label("no_results"),
-                sa.and_(cited.c.best_score.is_(None), ~knowledge_refs).label("uncited"),
+                cited.c.question_id.is_(None).label("uncited"),
             )
             .outerjoin(cited, cited.c.question_id == scoped.c.id)
             .subquery("scored")
