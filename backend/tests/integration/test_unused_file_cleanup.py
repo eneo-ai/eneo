@@ -13,9 +13,13 @@ from datetime import datetime, timedelta, timezone
 from uuid import UUID
 
 import pytest
+import sqlalchemy as sa
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from eneo.data_retention.infrastructure import (
+    data_retention_service as retention_module,
+)
 from eneo.data_retention.infrastructure.data_retention_service import (
     DataRetentionService,
 )
@@ -484,3 +488,48 @@ async def test_sweep_preview_counts_without_deleting(admin_user) -> None:
     assert result.files == 3
     for orphan_id in orphan_ids:
         assert not await _committed_file_exists(orphan_id)
+
+
+@pytest.mark.integration
+@pytest.mark.asyncio
+async def test_retention_commits_each_batch_on_its_own(
+    db_container,
+    admin_user,
+    completion_model_factory,
+    app_factory,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The nightly job releases each batch's locks before taking the next.
+
+    Files a batch keeps because something else still uses them are locked
+    too, so one transaction over the whole run would block every attach of
+    those Files until the run ends.
+    """
+    monkeypatch.setattr(retention_module, "RETENTION_BATCH_SIZE", 1)
+    async with db_container() as container:
+        session = container.session()
+        model = await completion_model_factory(session, "gpt-4")
+        app = await app_factory(
+            session, "Transcription App", model.id, data_retention_days=1
+        )
+        file_ids: list[UUID] = []
+        for index in range(3):
+            recording = await _create_file(session, admin_user, name=f"{index}.mp3")
+            await _create_app_run(session, app, days_old=2, file=recording)
+            file_ids.append(recording.id)
+
+    commits: list[None] = []
+    async with sessionmanager.session() as session:
+        sa.event.listen(
+            session.sync_session, "after_commit", lambda _session: commits.append(None)
+        )
+        deleted = await DataRetentionService(session).delete_old_app_runs(
+            commit_each_batch=True
+        )
+        assert not session.in_transaction()
+
+    assert deleted == 3
+    # One commit per batch of one run; the final empty page may add another.
+    assert len(commits) >= 3
+    for file_id in file_ids:
+        assert not await _committed_file_exists(file_id)

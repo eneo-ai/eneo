@@ -40,8 +40,10 @@ async def cleanup_old_data(container: Container) -> CleanupResults:
     Uses explicit sessionmanager.session() to avoid nested transaction issues
     when cron wrapper already has a transaction open.
 
-    Runs separate transactions for each deletion type to ensure partial
-    success is possible if one type fails.
+    Every deletion batch commits on its own, so the locks a batch takes on the
+    records and the Files they used are released at once, an error keeps the
+    progress made so far, and one deletion type failing does not stop the
+    others.
 
     Returns:
         Dictionary with deletion counts and any errors encountered
@@ -72,15 +74,14 @@ async def cleanup_old_data(container: Container) -> CleanupResults:
 
             # Delete old questions
             try:
-                async with session.begin():
-                    questions_count = (
-                        await data_retention_service.delete_old_questions()
+                questions_count = await data_retention_service.delete_old_questions(
+                    commit_each_batch=True
+                )
+                results["deleted"]["questions"] = questions_count
+                if questions_count > 0:
+                    logger.info(
+                        f"Deleted {questions_count} old questions based on retention policies"
                     )
-                    results["deleted"]["questions"] = questions_count
-                    if questions_count > 0:
-                        logger.info(
-                            f"Deleted {questions_count} old questions based on retention policies"
-                        )
             except Exception as e:
                 error_msg = f"Failed to delete old questions: {str(e)}"
                 logger.error(error_msg, exc_info=True)
@@ -89,13 +90,14 @@ async def cleanup_old_data(container: Container) -> CleanupResults:
 
             # Delete old app runs
             try:
-                async with session.begin():
-                    app_runs_count = await data_retention_service.delete_old_app_runs()
-                    results["deleted"]["app_runs"] = app_runs_count
-                    if app_runs_count > 0:
-                        logger.info(
-                            f"Deleted {app_runs_count} old app runs based on retention policies"
-                        )
+                app_runs_count = await data_retention_service.delete_old_app_runs(
+                    commit_each_batch=True
+                )
+                results["deleted"]["app_runs"] = app_runs_count
+                if app_runs_count > 0:
+                    logger.info(
+                        f"Deleted {app_runs_count} old app runs based on retention policies"
+                    )
             except Exception as e:
                 error_msg = f"Failed to delete old app runs: {str(e)}"
                 logger.error(error_msg, exc_info=True)
@@ -104,11 +106,12 @@ async def cleanup_old_data(container: Container) -> CleanupResults:
 
             # Delete old orphaned sessions
             try:
-                async with session.begin():
-                    sessions_count = await data_retention_service.delete_old_sessions()
-                    results["deleted"]["sessions"] = sessions_count
-                    if sessions_count > 0:
-                        logger.info(f"Deleted {sessions_count} orphaned sessions")
+                sessions_count = await data_retention_service.delete_old_sessions(
+                    commit_each_batch=True
+                )
+                results["deleted"]["sessions"] = sessions_count
+                if sessions_count > 0:
+                    logger.info(f"Deleted {sessions_count} orphaned sessions")
             except Exception as e:
                 error_msg = f"Failed to delete old sessions: {str(e)}"
                 logger.error(error_msg, exc_info=True)
