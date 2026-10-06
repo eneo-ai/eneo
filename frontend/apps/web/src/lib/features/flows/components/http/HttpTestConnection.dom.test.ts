@@ -150,7 +150,7 @@ describe("HttpTestConnection", () => {
     });
     await fireEvent.click(screen.getByRole("button", { name: m.http_test_button() }));
 
-    await screen.findByText(/Invalid URL format/);
+    await screen.findByText((text) => text.includes(m.http_url_invalid()));
     await screen.findByText(m.http_test_request_preview());
     await screen.findByText("POST");
     await screen.findByText("not-a-url/hook");
@@ -217,8 +217,61 @@ describe("HttpTestConnection", () => {
 
     await waitFor(() => {
       expect(screen.getByRole("status").textContent).toContain(
-        `${m.http_test_failed_prefix()}: boom`
+        `${m.http_test_failed_prefix()}: ${m.http_test_unknown_error()}`
       );
     });
+  });
+
+  it("keeps safe HTTP status and timing visible when a remote test fails", async () => {
+    // Mutant: render status and timing only for successful tests.
+    stubFetch({
+      success: false,
+      error_code: "HTTP_STATUS_ERROR",
+      status_code: 401,
+      duration_ms: 42,
+      error_message: "test-only-secret/internal-detail"
+    });
+    renderHttpTestConnection(
+      makeConfig({ url: "https://api.example.com/hook", body: { mode: "none" } })
+    );
+    await fireEvent.click(screen.getByRole("button", { name: m.http_test_button() }));
+    await waitFor(() => {
+      const status = screen.getByRole("status").textContent;
+      expect(status).toContain(m.flow_error_typed_io_http_non_success());
+      expect(status).toContain("401");
+      expect(status).toMatch(/42\s+ms/);
+      expect(status).not.toContain("test-only-secret");
+    });
+  });
+
+  it.each([
+    ["HTTP_BLOCKED_URL", m.flow_error_typed_io_http_ssrf_blocked()],
+    ["HTTP_INVALID_URL", m.http_url_invalid()]
+  ])("does not render backend detail text for typed failure %s", async (code, message) => {
+    // Mutant: display remote error_message, including credentials or internal details.
+    stubFetch({
+      success: false,
+      error_code: code,
+      error_message: "test-only-secret/internal-detail"
+    });
+    renderHttpTestConnection(
+      makeConfig({ url: "https://api.example.com/hook", body: { mode: "none" } })
+    );
+    await fireEvent.click(screen.getByRole("button", { name: m.http_test_button() }));
+    await waitFor(() => expect(screen.getByRole("status").textContent).toContain(message));
+    expect(screen.getByRole("status").textContent).not.toContain("test-only-secret");
+  });
+
+  it.each([400, 503])("does not render raw SDK failure details for status %s", async (status) => {
+    // Mutant: let the general SDK error fallback reveal remote message text.
+    stubFetch({ eneo_error_code: 9007, message: "test-only-secret/internal-detail" }, { status });
+    renderHttpTestConnection(
+      makeConfig({ url: "https://api.example.com/hook", body: { mode: "none" } })
+    );
+    await fireEvent.click(screen.getByRole("button", { name: m.http_test_button() }));
+    await waitFor(() =>
+      expect(screen.getByRole("status").textContent).toContain(m.http_test_unknown_error())
+    );
+    expect(screen.getByRole("status").textContent).not.toContain("test-only-secret");
   });
 });

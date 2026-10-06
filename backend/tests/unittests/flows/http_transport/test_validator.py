@@ -37,7 +37,9 @@ def _config(
 def _validate(
     cfg: HttpAuthoredConfig, *, method: str = "POST"
 ) -> list[HttpTransportError]:
-    return validate_authored_config(cfg, direction="output", method=method)
+    return validate_authored_config(
+        cfg, direction="output", method=method, max_timeout=120
+    )
 
 
 def test_authored_config_model_validate_accepts_json_contract_values() -> None:

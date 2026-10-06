@@ -4755,7 +4755,7 @@ export interface paths {
     put?: never;
     /**
      * Test HTTP Connection
-     * @description Send a test HTTP request using the submitted authored config snapshot and return a typed preview of the attempted request and response. This endpoint requires the saved step_id in this flow; stored credentials are resolved only from that step and the submitted direction. It does not persist the config or publish the flow; it is for authoring UIs that need to validate URL, auth, timeout, headers, body mode, and SSRF guard behavior before saving an HTTP input or output step. `test_variables` is the raw template context used for URL, header, auth, and body interpolation; callers can send flat keys such as `name` or runtime-shaped keys such as `flow_input` and `step_1`.
+     * @description Send a test HTTP request using the submitted authored config snapshot and return a typed preview of the attempted request and response. This endpoint requires the saved step_id in this flow; stored credentials are resolved only from that step and the submitted direction. A stored credential is reused only for the same scheme, host and effective port. Credential-bearing requests require a fixed HTTPS origin and active credential encryption. Declared secret headers are redacted in previews, and response bodies are not read or previewed for credential-bearing requests. It does not persist the config or publish the flow; it is for authoring UIs that need to validate URL, auth, timeout, headers, body mode, and SSRF guard behavior before saving an HTTP input or output step. `test_variables` is the raw template context used for URL, header, auth, and body interpolation; callers can send flat keys such as `name` or runtime-shaped keys such as `flow_input` and `step_1`.
      */
     post: operations["test_flow_http"];
     delete?: never;
@@ -27741,7 +27741,8 @@ export interface components {
       | "HTTP_CONNECTION_REFUSED"
       | "HTTP_BLOCKED_URL"
       | "HTTP_RESPONSE_TOO_LARGE"
-      | "HTTP_STATUS_ERROR";
+      | "HTTP_STATUS_ERROR"
+      | "HTTP_CREDENTIALS_REQUIRE_HTTPS";
     /** IconPublic */
     IconPublic: {
       /** Created At */
@@ -56831,6 +56832,21 @@ export interface operations {
           [name: string]: unknown;
         };
         content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Credential encryption is unavailable for authored secrets. */
+      503: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          /**
+           * @example {
+           *       "eneo_error_code": 9042,
+           *       "message": "HTTP credential encryption is unavailable."
+           *     }
+           */
           "application/json": components["schemas"]["GeneralError"];
         };
       };

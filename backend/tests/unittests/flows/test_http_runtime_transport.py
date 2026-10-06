@@ -1,11 +1,28 @@
 from __future__ import annotations
 
+from types import SimpleNamespace
+from unittest.mock import AsyncMock
+
 import httpx
 import pytest
+from cryptography.fernet import Fernet
 
+from eneo.flows.http_transport.authored_config import (
+    SECRET_SENTINEL,
+    CustomHeader,
+    HttpAuthBearer,
+    HttpAuthoredConfig,
+)
+from eneo.flows.http_transport.test_action import execute_http_test
 from eneo.flows.runtime import http_runtime as http_runtime_module
+from eneo.flows.runtime.http_orchestration import (
+    FlowHttpOrchestrationDeps,
+    deliver_webhook,
+)
 from eneo.flows.runtime.http_runtime import FlowHttpRuntimeHelper
+from eneo.flows.variable_resolver import FlowVariableResolver
 from eneo.main.exceptions import TypedIOValidationException
+from eneo.settings.encryption_service import EncryptionService
 
 
 class _Resolver:
@@ -21,6 +38,65 @@ def _build_helper(client_factory) -> FlowHttpRuntimeHelper:
         allow_private_networks=False,
         client_factory=client_factory,
     )
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("surface", ["http_test", "runtime_output"])
+@pytest.mark.parametrize("host_header", ["Host", "hOsT"])
+async def test_authored_host_cannot_redirect_a_saved_credential(surface, host_header):
+    # Mutant: preserve an authored Host that routes a stored credential to another vhost.
+    outgoing = []
+
+    def target(request):
+        outgoing.append(request)
+        return httpx.Response(200, content=b"ok")
+
+    helper = _build_helper(
+        lambda **_: httpx.AsyncClient(transport=httpx.MockTransport(target))
+    )
+    encryption = EncryptionService(Fernet.generate_key().decode())
+    config = HttpAuthoredConfig(
+        url="https://example.org:8443/api",
+        auth=HttpAuthBearer(token=encryption.encrypt("test-only-secret")),
+        custom_headers=[CustomHeader(name=host_header, value="other-vhost.example")],
+    )
+    if surface == "http_test":
+        result = await execute_http_test(
+            config=config.model_copy(
+                update={"auth": HttpAuthBearer(token=SECRET_SENTINEL)}
+            ),
+            stored_config=config,
+            encryption_service=encryption,
+            direction="output",
+            method="POST",
+            interpolate=lambda template, _context: template,
+            send_http_request=helper.send_request,
+            max_timeout=30,
+        )
+        assert result.success
+    else:
+        await deliver_webhook(
+            step=SimpleNamespace(
+                step_order=1,
+                step_id="step-1",
+                output_config=config.model_dump(mode="json"),
+            ),
+            text_payload="payload",
+            run=SimpleNamespace(id="run-1", flow_id="flow-1", tenant_id="tenant-1"),
+            context={},
+            deps=FlowHttpOrchestrationDeps(
+                encryption_service=encryption,
+                variable_resolver=FlowVariableResolver(),
+                resolve_timeout_seconds=helper.resolve_timeout_seconds,
+                read_response_text=helper.read_response_text,
+                send_http_request=helper.send_request,
+                audit_http_outbound=AsyncMock(),
+            ),
+            idempotency_key="run-1:step-1",
+        )
+    assert len(outgoing) == 1
+    assert outgoing[0].headers["Host"] == "example.org:8443"
+    assert outgoing[0].headers["Authorization"] == "Bearer test-only-secret"
 
 
 @pytest.mark.asyncio

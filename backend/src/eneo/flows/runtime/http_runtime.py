@@ -116,6 +116,8 @@ class FlowHttpRuntimeHelper:
             # counts raw bytes below.
             request_headers = httpx.Headers(headers)
             request_headers["Accept-Encoding"] = "identity"
+            # A shared ingress can route credentials by Host independently of TLS.
+            request_headers.pop("host", None)
             request = client.build_request(
                 method,
                 target.url,

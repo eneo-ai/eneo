@@ -24,7 +24,7 @@ def validate_authored_config(
     *,
     direction: str,
     method: str,
-    max_timeout: float = 120.0,
+    max_timeout: float,
 ) -> list[HttpTransportError]:
     """Validate authored config. Returns list of error codes (empty = valid)."""
     errors: list[HttpTransportError] = []

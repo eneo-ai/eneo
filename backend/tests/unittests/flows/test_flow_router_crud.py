@@ -9,6 +9,7 @@ from uuid import uuid4
 
 import httpx
 import pytest
+from cryptography.fernet import Fernet
 from fastapi import FastAPI
 from fastapi.routing import APIRoute
 from fastapi.testclient import TestClient
@@ -62,6 +63,7 @@ from eneo.main.exceptions import (
     UnauthorizedException,
 )
 from eneo.roles.permissions import Permission
+from eneo.settings.encryption_service import EncryptionService
 from tests.unit.api_key_test_utils import flatten_routes
 from tests.unittests.flows.test_flow_router import (
     _enable_space_access,
@@ -204,6 +206,7 @@ async def test_http_test_restored_first_step_secret_does_not_replace_selected_se
 ):
     # Mutant: restore the first HTTP config instead of the selected step's config.
     container = MagicMock()
+    encryption = EncryptionService(Fernet.generate_key().decode())
     flow_id = uuid4()
     user = _user()
     flow_service = AsyncMock()
@@ -217,7 +220,7 @@ async def test_http_test_restored_first_step_secret_does_not_replace_selected_se
                             "url": "https://example.org/api",
                             "auth": {
                                 "mode": "bearer_token",
-                                "token": "first-step-token",
+                                "token": encryption.encrypt("first-step-token"),
                             },
                             "body": {"mode": "auto"},
                             "custom_headers": [],
@@ -235,7 +238,10 @@ async def test_http_test_restored_first_step_secret_does_not_replace_selected_se
             "step_order": 2,
             f"{direction}_config": {
                 **getattr(first_step, f"{direction}_config"),
-                "auth": {"mode": "bearer_token", "token": "second-step-token"},
+                "auth": {
+                    "mode": "bearer_token",
+                    "token": encryption.encrypt("second-step-token"),
+                },
             },
         }
     )
@@ -245,7 +251,7 @@ async def test_http_test_restored_first_step_secret_does_not_replace_selected_se
     container.flow_service.return_value = flow_service
     container.audit_service.return_value = AsyncMock()
     container.user.return_value = user
-    container.encryption_service.return_value = None
+    container.encryption_service.return_value = encryption
     _enable_space_access(container)
 
     sent: dict[str, object] = {}
@@ -569,7 +575,7 @@ async def test_test_flow_http_returns_typed_failure_for_private_url(monkeypatch)
 
     assert response.success is False
     assert response.error_code == HttpTransportError.BLOCKED_URL
-    assert response.error_message == "HTTP URL blocked by SSRF policy."
+    assert response.error_message == "URL blocked by network policy"
     audit_service.log_async.assert_awaited_once()
     audit_event = audit_service.log_async.await_args.kwargs
     assert audit_event["outcome"] is Outcome.FAILURE

@@ -13,7 +13,10 @@
   import type { HttpAuthoredConfig, HttpDirection, HttpMethod } from "./httpConfigTypes";
   import { parseHttpTestVariables } from "./httpTestVariables";
   import { getEneo } from "$lib/core/Eneo";
-  import { getFlowRuntimeErrorMessage } from "$lib/features/flows/flowRuntimeErrorMapping";
+  import {
+    describeFlowApiError,
+    getFlowRuntimeErrorMessage
+  } from "$lib/features/flows/flowRuntimeErrorMapping";
 
   let {
     config,
@@ -35,6 +38,24 @@
   let testing = $state(false);
   let testVariablesText = $state("{}");
   let result: FlowHttpTestResponse | null = $state(null);
+  let localFailureMessage: string | null = $state(null);
+
+  const errorMessages: Record<NonNullable<FlowHttpTestResponse["error_code"]>, () => string> = {
+    HTTP_MISSING_URL: m.http_test_needs_url,
+    HTTP_INVALID_URL: m.http_url_invalid,
+    HTTP_VARIABLE_RESOLUTION_FAILED: m.http_test_variable_resolution_failed,
+    HTTP_UNRESOLVED_STORED_SECRET: m.http_test_saved_secret_unavailable,
+    HTTP_MISSING_AUTH: m.http_test_auth_missing,
+    HTTP_INVALID_BODY_JSON: m.http_test_body_invalid,
+    HTTP_BODY_NOT_ALLOWED_FOR_GET: m.http_test_body_not_allowed,
+    HTTP_TIMEOUT_OUT_OF_RANGE: m.http_test_timeout_invalid,
+    HTTP_TIMEOUT: m.flow_error_typed_io_http_timeout,
+    HTTP_CONNECTION_REFUSED: m.flow_error_typed_io_http_connection_error,
+    HTTP_BLOCKED_URL: m.flow_error_typed_io_http_ssrf_blocked,
+    HTTP_RESPONSE_TOO_LARGE: m.flow_error_typed_io_http_response_too_large,
+    HTTP_STATUS_ERROR: m.flow_error_typed_io_http_non_success,
+    HTTP_CREDENTIALS_REQUIRE_HTTPS: m.http_test_credentials_require_https
+  };
 
   const hasTemplateMarkers = $derived.by(() => JSON.stringify(config).includes("{{"));
 
@@ -51,6 +72,7 @@
 
     testing = true;
     result = null;
+    localFailureMessage = null;
 
     try {
       const body: FlowHttpTestRequest = {
@@ -62,14 +84,18 @@
       };
       result = await eneo.flows.httpTest({ id: flowId, request: body });
     } catch (err) {
-      result = localError(getFlowRuntimeErrorMessage(err, m.http_test_unknown_error()));
+      const fallback = m.http_test_unknown_error();
+      result = localError(
+        describeFlowApiError(err) ? getFlowRuntimeErrorMessage(err, fallback) : fallback
+      );
     } finally {
       testing = false;
     }
   }
 
   function localError(message: string): FlowHttpTestResponse {
-    return { success: false, error_message: message };
+    localFailureMessage = message;
+    return { success: false };
   }
 
   function formatPreviewHeaders(preview: FlowHttpRequestPreview): string {
@@ -121,14 +147,18 @@
           {#if result.success}
             <IconCheck class="size-3.5 shrink-0" />
             {m.http_test_success()}
-            ({result.status_code}{#if result.duration_ms},
-              {Math.round(result.duration_ms)}&nbsp;ms{/if})
           {:else}
             <IconXMark class="size-3.5 shrink-0" />
             <span class="min-w-0 break-words">
-              {m.http_test_failed_prefix()}: {result.error_message ??
-                result.error_code ??
+              {m.http_test_failed_prefix()}: {localFailureMessage ??
+                (result.error_code ? errorMessages[result.error_code]?.() : null) ??
                 m.http_test_unknown_error()}
+            </span>
+          {/if}
+          {#if result.status_code != null}
+            <span class="shrink-0">
+              ({result.status_code}{#if result.duration_ms != null},
+                {Math.round(result.duration_ms)}&nbsp;ms{/if})
             </span>
           {/if}
         </span>

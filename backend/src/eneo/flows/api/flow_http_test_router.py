@@ -47,6 +47,10 @@ router = APIRouter()
         "return a typed preview of the attempted request and response. This endpoint "
         "requires the saved step_id in this flow; stored credentials are resolved "
         "only from that step and the submitted direction. "
+        "A stored credential is reused only for the same scheme, host and effective "
+        "port. Credential-bearing requests require a fixed HTTPS origin and active credential "
+        "encryption. Declared secret headers are redacted in previews, and response "
+        "bodies are not read or previewed for credential-bearing requests. "
         "It does not persist the config or publish the flow; it is for authoring UIs that "
         "need to validate URL, auth, timeout, headers, body mode, and SSRF guard behavior "
         "before saving an HTTP input or output step. `test_variables` is the raw "
@@ -79,6 +83,11 @@ router = APIRouter()
             description="The flow or the selected saved step was not found.",
             message="Flow step not found.",
             eneo_error_code=ErrorCodes.NOT_FOUND,
+        ),
+        503: error_response(
+            description="Credential encryption is unavailable for authored secrets.",
+            message="HTTP credential encryption is unavailable.",
+            eneo_error_code=ErrorCodes.ENCRYPTION_NOT_CONFIGURED,
         ),
     },
 )

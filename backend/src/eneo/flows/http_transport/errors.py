@@ -3,6 +3,9 @@ from __future__ import annotations
 from dataclasses import dataclass
 from enum import Enum
 
+from eneo.flows.flow_api_error_code import FlowApiErrorCode
+from eneo.main.exceptions import TypedIOValidationException
+
 
 class HttpTransportError(str, Enum):
     MISSING_URL = "HTTP_MISSING_URL"
@@ -18,10 +21,19 @@ class HttpTransportError(str, Enum):
     BLOCKED_URL = "HTTP_BLOCKED_URL"
     RESPONSE_TOO_LARGE = "HTTP_RESPONSE_TOO_LARGE"
     STATUS_ERROR = "HTTP_STATUS_ERROR"
+    CREDENTIALS_REQUIRE_HTTPS = "HTTP_CREDENTIALS_REQUIRE_HTTPS"
 
 
 class HttpTemplateInterpolationError(Exception):
     """Raised when authored HTTP template interpolation cannot resolve a value."""
+
+
+class HttpCredentialTransportError(TypedIOValidationException):
+    def __init__(self) -> None:
+        super().__init__(
+            "HTTP credentials require a fixed HTTPS origin.",
+            code=FlowApiErrorCode.TYPED_IO_HTTP_INVALID_CONFIG.value,
+        )
 
 
 @dataclass(eq=False)

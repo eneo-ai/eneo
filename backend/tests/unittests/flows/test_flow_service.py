@@ -2083,6 +2083,35 @@ async def test_update_flow_keeps_stored_secret_behind_sentinel_when_inactive(use
 
 
 @pytest.mark.asyncio
+async def test_origin_change_refuses_save_without_claiming_the_credential_was_deleted(
+    user,
+):
+    # Mutant: restore across origins or describe a destination refusal as a deleted credential.
+    step_id = uuid4()
+    stored = _published_flow_for_update(
+        user, [_http_step_with_token("enc:stored-secret", step_id=step_id)]
+    )
+    flow_repo = AsyncMock()
+    flow_repo.get.return_value = stored
+    flow_repo.update.side_effect = lambda flow, **kwargs: flow
+    service = _service(
+        user=user,
+        flow_repo=flow_repo,
+        version_repo=AsyncMock(),
+        encryption_service=_FakeEncryptionService(),
+    )
+    incoming = _http_step_with_token(SECRET_SENTINEL, step_id=step_id)
+    incoming.input_config["url"] = "https://other.example.org/input"
+
+    with pytest.raises(BadRequestException) as excinfo:
+        await service.update_flow(flow_id=stored.id, steps=[incoming])
+
+    assert "unavailable for this destination" in str(excinfo.value)
+    assert "stored-secret" not in str(excinfo.value)
+    flow_repo.update.assert_not_awaited()
+
+
+@pytest.mark.asyncio
 async def test_create_flow_rejects_sentinel_that_can_resolve_to_nothing(user):
     flow_repo = AsyncMock()
     flow_repo.create.side_effect = lambda flow, tenant_id: flow

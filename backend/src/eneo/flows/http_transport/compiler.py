@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import base64
 import json
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Any, Callable, Protocol
 
 from eneo.flows.flow_api_error_code import FlowApiErrorCode
@@ -20,6 +20,11 @@ from eneo.flows.http_transport.authored_config import (
     HttpMethod,
     SecretValue,
 )
+from eneo.flows.http_transport.effective_url import (
+    InvalidHttpUrl,
+    parse_effective_http_url,
+)
+from eneo.flows.http_transport.errors import HttpCredentialTransportError
 from eneo.flows.variable_resolver import (
     FlowVariableContext,
     FlowVariableInterpolation,
@@ -44,10 +49,12 @@ class EffectiveHttpRequest:
 
     method: HttpMethod
     url: str
-    headers: dict[str, str]
+    headers: dict[str, str] = field(repr=False)
     body: bytes | None
     json_body: dict[str, Any] | list[Any] | None
     timeout: float
+    secret_header_names: frozenset[str]
+    secret_values: frozenset[str] = field(repr=False)
     resolved_input_edges: tuple[FlowResolvedInputEdge, ...] = ()
 
 
@@ -73,6 +80,8 @@ def compile_http_config(
         An ``EffectiveHttpRequest`` ready for the HTTP client.
     """
     headers: dict[str, str] = {}
+    secret_header_names: set[str] = set()
+    secret_values: set[str] = set()
     ctx = variables or {}
 
     def _interpolate(template: str) -> str:
@@ -99,16 +108,24 @@ def compile_http_config(
     # put run data into a header the destination reads.
     match authored.auth:
         case HttpAuthBearer(token=token):
-            headers["Authorization"] = (
-                f"Bearer {_credential_text(token, field='auth.token')}"
-            )
+            credential = _credential_text(token, field="auth.token")
+            headers["Authorization"] = f"Bearer {credential}"
+            secret_header_names.add("authorization")
+            secret_values.add(credential)
         case HttpAuthApiKey(header_name=name, key=key):
-            headers[_interpolate(name)] = _credential_text(key, field="auth.key")
+            header_name = _interpolate(name)
+            credential = _credential_text(key, field="auth.key")
+            headers[header_name] = credential
+            secret_header_names.add(header_name.lower())
+            secret_values.add(credential)
         case HttpAuthBasicAuth(username=user, password=pwd):
+            credential = _credential_text(pwd, field="auth.password")
             encoded = base64.b64encode(
-                f"{_interpolate(user)}:{_credential_text(pwd, field='auth.password')}".encode()
+                f"{_interpolate(user)}:{credential}".encode()
             ).decode()
             headers["Authorization"] = f"Basic {encoded}"
+            secret_header_names.add("authorization")
+            secret_values.update((credential, encoded))
         case HttpAuthNone():
             pass
 
@@ -118,6 +135,8 @@ def compile_http_config(
             headers[header.name] = _credential_text(
                 header.value, field=f"custom_headers[{index}].value"
             )
+            secret_header_names.add(header.name.lower())
+            secret_values.add(headers[header.name])
             custom_header_edges.pop(header.name, None)
             continue
         interpolation = _interpolate_evidenced(
@@ -127,11 +146,39 @@ def compile_http_config(
         headers[header.name] = interpolation.text
         custom_header_edges[header.name] = interpolation.edges
 
+    secret_values.update(
+        value for name, value in headers.items() if name.lower() in secret_header_names
+    )
+
     # URL interpolation
     url_interpolation = _interpolate_evidenced(
         authored.url,
         binding_ref="http.url",
     )
+
+    if secret_header_names:
+        try:
+            authored_destination = parse_effective_http_url(authored.url)
+        except InvalidHttpUrl as exc:
+            # Run inputs may fill a path or query, never choose a credential's origin.
+            raise HttpCredentialTransportError() from exc
+        try:
+            destination = parse_effective_http_url(url_interpolation.text)
+        except InvalidHttpUrl as exc:
+            raise TypedIOValidationException(
+                "Invalid HTTP URL.",
+                code=FlowApiErrorCode.TYPED_IO_HTTP_INVALID_URL.value,
+            ) from exc
+        if destination.scheme != "https" or (
+            destination.scheme,
+            destination.host,
+            destination.port,
+        ) != (
+            authored_destination.scheme,
+            authored_destination.host,
+            authored_destination.port,
+        ):
+            raise HttpCredentialTransportError()
 
     # Body -> payload
     body_bytes, json_body, body_edges = _compile_body(
@@ -147,6 +194,8 @@ def compile_http_config(
         body=body_bytes,
         json_body=json_body,
         timeout=float(authored.timeout_seconds),
+        secret_header_names=frozenset(secret_header_names),
+        secret_values=frozenset(value for value in secret_values if value),
         resolved_input_edges=merge_resolved_input_edges(
             url_interpolation.edges,
             *custom_header_edges.values(),
