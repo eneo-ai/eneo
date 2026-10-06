@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from itertools import product
 from typing import Any, Literal
 from uuid import uuid4
 
@@ -169,20 +170,28 @@ def test_edit_overlay_compiles_output_fields_into_the_contract_and_clears_on_emp
     assert cleared.steps[0].output_contract is None
 
 
-@pytest.mark.parametrize("action", ["restate", "change", "clear"])
 @pytest.mark.parametrize(
-    "saved_shape", ["plain", "optional", "enum", "legacy_array", "unicode"]
+    ("container", "open_saved", "saved_shape", "action"),
+    [
+        *product(
+            ("scalar", "object", "array"),
+            (False, True),
+            ("plain", "optional", "enum", "legacy_array", "unicode"),
+            ("restate", "change", "clear"),
+        ),
+        ("open_group", False, "plain", "restate"),
+        ("open_group", False, "plain", "change"),
+    ],
 )
-@pytest.mark.parametrize("open_saved", [False, True])
-@pytest.mark.parametrize("container", ["scalar", "object", "array"])
 def test_edit_output_restatement_keeps_schema_and_refuses_constraint_loss(
     action: Literal["restate", "change", "clear"],
     saved_shape: Literal["plain", "optional", "enum", "legacy_array", "unicode"],
     open_saved: bool,
-    container: Literal["scalar", "object", "array"],
+    container: Literal["scalar", "object", "array", "open_group"],
 ) -> None:
     # Mutants: recompiling a restatement drops the captured s17 enum;
     # accepting a different field tree silently discards its constraints.
+    # Dropping open-group parsing refuses Builder-created field trees.
     properties: dict[str, dict[str, object]] = {
         "omrade": {"type": "string"},
         "bedomning": {"type": "string"},
@@ -210,16 +219,22 @@ def test_edit_output_restatement_keeps_schema_and_refuses_constraint_loss(
     elif saved_shape == "unicode":
         properties["område"] = properties.pop("omrade")
         contract["required"] = ["område", "bedomning", "iakttagelser", "krav"]
+    if container == "open_group":
+        properties["bedomning"] = {"type": "object", "additionalProperties": True}
     if not open_saved:
         contract["additionalProperties"] = False
     fields = [
         StructuredFieldDraft(
             name=name,
             field_type=(
-                "array"
+                "object"
+                if container == "open_group" and name == "bedomning"
+                else "array"
                 if saved_shape == "legacy_array" and name == "krav"
                 else "string"
             ),
+            allow_additional_properties=container == "open_group"
+            and name == "bedomning",
             description=description,
             required=saved_shape != "optional",
             nullable=name == "krav" and saved_shape != "legacy_array",
@@ -231,7 +246,7 @@ def test_edit_output_restatement_keeps_schema_and_refuses_constraint_loss(
             ("krav", "Krav vid avvikelse"),
         )
     ]
-    if container != "scalar":
+    if container in {"object", "array"}:
         field = StructuredFieldDraft(
             name="description",
             field_type=container,
