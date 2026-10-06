@@ -16,8 +16,6 @@ from eneo.flows.ai_builder.ai_builder_discovery_signal_inference import (
 )
 from eneo.flows.ai_builder.ai_builder_discovery_text_matcher import (
     contains_any_phrase,
-    contains_any_token_prefix,
-    normalize_discovery_text,
 )
 from eneo.flows.ai_builder.ai_builder_domain_models import (
     ConversationMessage,
@@ -63,61 +61,7 @@ _PROFILE_DEFAULT_ANSWER_SOURCES: frozenset[SlotSource] = frozenset(
         "policy_default",
     }
 )
-_TASK_VERB_PREFIXES_SV = (
-    # Prefixes are intentional: Swedish/English user requests are often
-    # inflected, compounded, or phrased as "*-flöde" / "* flow"; matching is
-    # token-prefix based so unrelated substrings do not become workflow intent.
-    "sammanfatt",
-    "analyser",
-    "extraher",
-    "transkrib",
-    "jämför",
-    "jämförelse",
-    "jamfor",
-    "jamforelse",
-    "gransk",
-    "generer",
-    "bedom",
-    "bedöm",
-    "produc",
-    "klassificer",
-    "ocr",
-)
-_TASK_VERB_PREFIXES_EN = (
-    "summar",
-    "analy",
-    "extract",
-    "transcrib",
-    "compar",
-    "review",
-    "generat",
-    "assess",
-    "produc",
-    "triage",
-    "classif",
-    "categorize",
-    "draft",
-    "ocr",
-)
-_TASK_VERB_EXACT_TOKENS = (
-    "skriv",
-    "write",
-)
 
-_QUESTION_ACTION_MARKERS = (
-    "add",
-    "build",
-    "bygg",
-    "create",
-    "gör",
-    "gor",
-    "i want",
-    "jag vill",
-    "lägg till",
-    "lagg till",
-    "make",
-    "skapa",
-)
 
 _DOCUMENT_PACKAGE_PHRASES: tuple[str, ...] = (
     "dokumentpaket",
@@ -418,21 +362,6 @@ def _project_canonical_input_intent(
         # confidently: the user owns the choice until they make it.
         return resolved
     return canonical
-
-
-def expresses_task_intent(text: str) -> bool:
-    raw_text = text.casefold()
-    normalized = normalize_discovery_text(text)
-    # A bare question mark usually means the user is asking about the builder,
-    # not asking the builder to create or change a flow.
-    if "?" in raw_text and not contains_any_phrase(
-        normalized, _QUESTION_ACTION_MARKERS
-    ):
-        return False
-    return contains_any_token_prefix(
-        normalized,
-        (*_TASK_VERB_PREFIXES_SV, *_TASK_VERB_PREFIXES_EN),
-    ) or any(token in normalized.split() for token in _TASK_VERB_EXACT_TOKENS)
 
 
 def infer_discovery_language(text: str) -> DiscoveryLanguage:

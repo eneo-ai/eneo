@@ -1,19 +1,11 @@
 from __future__ import annotations
 
-import pytest
-
 import eneo.flows.ai_builder.ai_builder_discovery as discovery
 from eneo.flows.ai_builder.ai_builder_architecture_commit import (
     finalize_architecture_commit,
 )
 from eneo.flows.ai_builder.ai_builder_architecture_derivation import (
     derive_architecture_commit_draft,
-)
-from eneo.flows.ai_builder.ai_builder_discovery_issue_rules import (
-    ultra_vague_terminal_output_choice_is_vague,
-)
-from eneo.flows.ai_builder.ai_builder_discovery_profile_builder import (
-    build_discovery_profile,
 )
 from eneo.flows.ai_builder.ai_builder_discovery_questions import (
     comparison_scope_conflict_question,
@@ -24,47 +16,6 @@ from eneo.flows.ai_builder.planning_state import (
     PlanningState,
     ResolvedSlot,
 )
-
-
-def test_final_output_mode_builder_prefers_output_vague_message(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    monkeypatch.setattr(discovery, "_terminal_output_is_vague", lambda profile: True)
-    monkeypatch.setattr(
-        discovery, "_ultra_vague_terminal_output_choice_is_vague", lambda profile: True
-    )
-    conversation = [
-        ConversationMessage(
-            role="user",
-            content="Summarize uploaded documents.",
-            metadata={"ui_language": "en"},
-        )
-    ]
-    profile = build_discovery_profile(conversation)
-
-    issue = discovery._build_terminal_output_issue(conversation, profile)
-
-    assert issue is not None
-    assert issue.issue_id == "terminal_output"
-    assert issue.message == (
-        "The final output format is still too vague to design the flow confidently."
-    )
-
-
-def test_swedish_inflected_summary_request_reaches_terminal_output_clarification() -> (
-    None
-):
-    profile = build_discovery_profile(
-        [
-            ConversationMessage(
-                role="user",
-                content="Sammanfatta uppladdade dokument.",
-                metadata={"ui_language": "sv"},
-            )
-        ]
-    )
-
-    assert ultra_vague_terminal_output_choice_is_vague(profile) is True
 
 
 def test_json_comparison_request_does_not_ask_document_comparison_scope() -> None:
@@ -92,10 +43,9 @@ def test_json_comparison_request_does_not_ask_document_comparison_scope() -> Non
             metadata={"ui_language": "en"},
         )
     ]
-    profile = build_discovery_profile(conversation, planning_state=state)
+    analysis = discovery.analyze_discovery(conversation, planning_state=state)
 
-    assert profile.comparison_requested is True
-    assert discovery._build_comparison_scope_issue(conversation, profile) is None
+    assert "comparison_scope" not in analysis.selected_question_ids
 
 
 def test_fixed_discovery_questions_do_not_advertise_custom_answers() -> None:

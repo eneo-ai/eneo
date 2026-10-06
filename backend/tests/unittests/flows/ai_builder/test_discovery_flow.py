@@ -2961,16 +2961,18 @@ class TestExtendedClarificationHints:
         )  # text-only evidence is below commit grade: the slot is asked, not settled
 
     @pytest.mark.parametrize(
-        "prompt",
+        ("prompt", "unsupported"),
         [
-            "Jag vill kombinera API-data från olika dokument.",
-            "Anropa en intern API-katalog för referens.",
-            "Skicka resultatet till mig.",
+            ("Jag vill kombinera API-data från olika dokument.", False),
+            ("Anropa en intern API-katalog för referens.", False),
+            ("Skicka resultatet till mig.", False),
+            ("Skicka rapporten till ett externt API.", True),
         ],
     )
-    def test_external_delivery_followup_does_not_fire_for_near_misses(
+    def test_external_delivery_followup_respects_delivery_intent(
         self,
         prompt: str,
+        unsupported: bool,
     ) -> None:
         conversation = [
             ConversationMessage(
@@ -2982,9 +2984,9 @@ class TestExtendedClarificationHints:
 
         issues = analyze_discovery(conversation).issues
 
-        assert {issue.issue_id for issue in issues}.isdisjoint(
-            {"external_delivery_unsupported"}
-        )
+        assert (
+            "external_delivery_unsupported" in {issue.issue_id for issue in issues}
+        ) is unsupported
 
     def test_uploaded_word_template_fill_output_does_not_reask_output_mode(
         self,

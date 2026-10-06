@@ -7,18 +7,9 @@ from eneo.flows.ai_builder.ai_builder_discovery_families import (
     family_for_issue,
 )
 from eneo.flows.ai_builder.ai_builder_discovery_models import DiscoveryProfile
-from eneo.flows.ai_builder.ai_builder_discovery_profile_builder import (
-    expresses_task_intent,
-)
-from eneo.flows.ai_builder.ai_builder_discovery_signal_inference import (
-    infer_structured_io_contract,
-)
 from eneo.flows.ai_builder.ai_builder_discovery_text_matcher import (
     contains_any_phrase,
     contains_any_token_prefix,
-)
-from eneo.flows.ai_builder.ai_builder_framework_policy import (
-    mentions_output_change,
 )
 from eneo.flows.ai_builder.ai_builder_slot_classification_contract import (
     ResolvedSlotClassificationOutcome,
@@ -26,32 +17,6 @@ from eneo.flows.ai_builder.ai_builder_slot_classification_contract import (
 )
 
 EXTERNAL_DELIVERY_UNSUPPORTED_ISSUE_ID: Final = "external_delivery_unsupported"
-
-
-def implies_single_primary_document(text: str) -> bool:
-    if contains_any_phrase(
-        text,
-        (
-            "flera dokument",
-            "multiple documents",
-            "several documents",
-            "document package",
-            "dokumentpaket",
-        ),
-    ):
-        return False
-    return contains_any_phrase(
-        text,
-        (
-            "underlag som pdf",
-            "ett huvuddokument",
-            "ett dokument",
-            "en pdf",
-            "one document",
-            "one pdf",
-            "uploaded pdf",
-        ),
-    )
 
 
 def question_category(question_id: str) -> str:
@@ -101,114 +66,6 @@ def _family_inactive(profile: DiscoveryProfile, question_id: str) -> bool:
     if family is None:
         return False
     return family not in profile.edit_scope.active_families
-
-
-def primary_runtime_input_is_vague(profile: DiscoveryProfile) -> bool:
-    if _family_inactive(profile, "primary_runtime_input"):
-        return False
-    if "primary_runtime_input" in profile.answers:
-        return False
-    if profile.input_intent.needs_architecture_clarification:
-        return False
-    return profile.input_intent.primary_runtime_input == "unknown"
-
-
-def terminal_output_is_vague(profile: DiscoveryProfile) -> bool:
-    if _family_inactive(profile, "terminal_output"):
-        return False
-    text = profile.text
-    if profile.output_intent.terminal_output is not None:
-        return False
-    if external_delivery_requested(profile):
-        return False
-    if mentions_output_change(text):
-        return False
-    if profile.flow_defaults.get("terminal_output"):
-        return False
-    if (
-        profile.document_like_input
-        or profile.audio_like_input
-        or profile.final_output_text_or_docx
-    ):
-        return True
-    if "terminal_output" not in profile.answers and expresses_task_intent(text):
-        return True
-    return contains_any_phrase(
-        text,
-        (
-            "report",
-            "reports",
-            "rapport",
-            "rapporten",
-            "rapporter",
-            "rapporterna",
-            "summary",
-            "summaries",
-            "sammanfattning",
-            "sammanfattningen",
-            "sammanfattningar",
-            "output",
-            "outputs",
-            "resultat",
-            "resultatet",
-            "resultaten",
-            "slutresultat",
-            "slutresultatet",
-            "slutresultaten",
-            "generate",
-            "generates",
-            "generated",
-            "generating",
-            "generera",
-            "genererar",
-            "genererade",
-        ),
-    )
-
-
-def ultra_vague_terminal_output_choice_is_vague(profile: DiscoveryProfile) -> bool:
-    if _family_inactive(profile, "terminal_output"):
-        return False
-    if profile.output_intent.terminal_output is not None:
-        return False
-    if "terminal_output" in profile.answers:
-        return False
-    if profile.flow_defaults.get("terminal_output"):
-        return False
-    if profile.comparison_requested:
-        return False
-    if len(profile.text.split()) > 7:
-        return False
-    if contains_any_phrase(
-        profile.text,
-        (
-            "pdf",
-            "docx",
-            "word",
-            "json",
-            "rapport",
-            "report",
-            "text summary",
-            "textsammanfattning",
-            "sammanfattning som text",
-        ),
-    ):
-        return False
-    if not contains_any_token_prefix(
-        profile.text,
-        (
-            "sammanfatt",
-            "summarize",
-            "analysera",
-            "analyze",
-            "extrahera",
-            "extract",
-            "process",
-            "bearbeta",
-        ),
-    ):
-        return False
-    return profile.document_like_input or profile.audio_like_input
 
 
 def post_processing_goal_is_vague(
@@ -262,46 +119,10 @@ def _post_processing_goal_classifier_outage_requires_question(
     )
 
 
-def structured_io_contract_is_vague(profile: DiscoveryProfile) -> bool:
-    if _family_inactive(profile, "structured_io_contract"):
-        return False
-    if not _json_to_json_semantic_flow(profile):
-        return False
-    if profile.resolved_slot("structured_io_contract") is not None:
-        return False
-    if "structured_io_contract" in profile.answers:
-        return False
-    return infer_structured_io_contract(profile.text) is None
-
-
 def _json_to_json_semantic_flow(profile: DiscoveryProfile) -> bool:
     return (
         profile.input_intent.primary_runtime_input == "json"
         and profile.output_intent.terminal_output == "structured_json"
-    )
-
-
-def needs_docx_mode_choice(profile: DiscoveryProfile) -> bool:
-    if _family_inactive(profile, "docx_output_mode"):
-        return False
-    intent = profile.output_intent
-    if intent.terminal_output != "docx_document":
-        return False
-    if profile.planning_state.has_template_file_role():
-        docx_mode_slot = profile.resolved_slot("docx_output_mode")
-        return docx_mode_slot is None or docx_mode_slot.source == "policy_default"
-    if intent.docx_output_mode is not None:
-        return False
-    return contains_any_phrase(
-        profile.text,
-        (
-            "docx",
-            "word",
-            "word document",
-            "word-dokument",
-            "mall",
-            "template",
-        ),
     )
 
 
@@ -373,46 +194,6 @@ def has_same_run_comparison_contradiction(
         return False
 
     return says_single_file and says_same_run_compare
-
-
-def document_cardinality_is_vague(profile: DiscoveryProfile) -> bool:
-    if _family_inactive(profile, "document_material_scope"):
-        return False
-    if profile.resolved_slot("document_material_scope") is not None:
-        return False
-    answers = profile.answers
-    text = profile.text
-    if not profile.document_like_input or profile.audio_like_input:
-        return False
-    if "document_material_scope" in answers:
-        return False
-    if "document_material_scope" in profile.flow_defaults:
-        return False
-    if "primary_runtime_input" in answers and "text" in " ".join(
-        answers["primary_runtime_input"]
-    ):
-        return False
-    if "comparison_scope" in answers:
-        return False
-    if contains_any_phrase(
-        text,
-        (
-            "one document",
-            "single document",
-            "one pdf",
-            "ett dokument",
-            "en pdf",
-            "multiple documents",
-            "several documents",
-            "flera dokument",
-            "document package",
-            "dokumentpaket",
-        ),
-    ):
-        return False
-    if implies_single_primary_document(text):
-        return False
-    return profile.comparison_requested
 
 
 def mixed_input_architecture_is_vague(profile: DiscoveryProfile) -> bool:

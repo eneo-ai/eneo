@@ -4,17 +4,11 @@ from collections.abc import Callable
 from dataclasses import dataclass, replace
 from typing import Final
 
-from eneo.flows.ai_builder.ai_builder_aggregation_intent import (
-    comparison_scope_is_relevant,
-)
 from eneo.flows.ai_builder.ai_builder_discovery_decision_engine import (
     apply_discovery_decision_engine,
 )
 from eneo.flows.ai_builder.ai_builder_discovery_issue_rules import (
     EXTERNAL_DELIVERY_UNSUPPORTED_ISSUE_ID,
-)
-from eneo.flows.ai_builder.ai_builder_discovery_issue_rules import (
-    document_cardinality_is_vague as _document_cardinality_is_vague,
 )
 from eneo.flows.ai_builder.ai_builder_discovery_issue_rules import (
     external_delivery_requested as _external_delivery_requested,
@@ -26,28 +20,10 @@ from eneo.flows.ai_builder.ai_builder_discovery_issue_rules import (
     mixed_input_architecture_is_vague as _mixed_input_architecture_is_vague,
 )
 from eneo.flows.ai_builder.ai_builder_discovery_issue_rules import (
-    needs_docx_mode_choice as _needs_docx_mode_choice,
-)
-from eneo.flows.ai_builder.ai_builder_discovery_issue_rules import (
-    needs_pdf_generation_mode_choice as _needs_pdf_generation_mode_choice,
-)
-from eneo.flows.ai_builder.ai_builder_discovery_issue_rules import (
     post_processing_goal_is_vague as _post_processing_goal_is_vague,
 )
 from eneo.flows.ai_builder.ai_builder_discovery_issue_rules import (
-    primary_runtime_input_is_vague as _primary_runtime_input_is_vague,
-)
-from eneo.flows.ai_builder.ai_builder_discovery_issue_rules import (
     question_category as _question_category,
-)
-from eneo.flows.ai_builder.ai_builder_discovery_issue_rules import (
-    structured_io_contract_is_vague as _structured_io_contract_is_vague,
-)
-from eneo.flows.ai_builder.ai_builder_discovery_issue_rules import (
-    terminal_output_is_vague as _terminal_output_is_vague,
-)
-from eneo.flows.ai_builder.ai_builder_discovery_issue_rules import (
-    ultra_vague_terminal_output_choice_is_vague as _ultra_vague_terminal_output_choice_is_vague,
 )
 from eneo.flows.ai_builder.ai_builder_discovery_models import (
     BackendQuestion,
@@ -63,23 +39,13 @@ from eneo.flows.ai_builder.ai_builder_discovery_priority import (
 from eneo.flows.ai_builder.ai_builder_discovery_profile_builder import (
     build_discovery_profile as _build_discovery_profile,
 )
-from eneo.flows.ai_builder.ai_builder_discovery_profile_builder import (
-    expresses_task_intent as _expresses_task_intent,
-)
 from eneo.flows.ai_builder.ai_builder_discovery_questions import (
     comparison_scope_conflict_question,
-    comparison_scope_question,
-    document_material_scope_question,
-    docx_output_mode_question,
     external_delivery_internal_output_question,
     flow_input_architecture_question,
     localized_text,
-    pdf_generation_mode_question,
     post_processing_goal_question,
-    primary_runtime_input_question,
     question_suggestion_for_id,
-    structured_io_contract_question,
-    terminal_output_question,
 )
 from eneo.flows.ai_builder.ai_builder_domain_models import (
     ConversationMessage,
@@ -90,7 +56,6 @@ from eneo.flows.ai_builder.ai_builder_event_models import (
 )
 from eneo.flows.ai_builder.ai_builder_framework_policy import (
     canonical_question_id,
-    has_explicit_structured_answer,
 )
 from eneo.flows.ai_builder.ai_builder_slot_classification_contract import (
     SlotClassificationResult,
@@ -262,27 +227,6 @@ def _build_comparison_scope_conflict_issue(
     )
 
 
-def _build_primary_runtime_input_issue(
-    conversation: list[ConversationMessage],
-    profile: DiscoveryProfile,
-) -> DiscoveryIssue | None:
-    if not _primary_runtime_input_is_vague(profile):
-        return None
-    if not (profile.document_like_input or _expresses_task_intent(profile.text)):
-        return None
-    return DiscoveryIssue(
-        issue_id="primary_runtime_input",
-        category="input",
-        severity="blocking",
-        message=localized_text(
-            profile.language,
-            "Det är fortfarande oklart vilket material användaren ska lämna vid körning.",
-            "It is still unclear what kind of runtime material the user should provide.",
-        ),
-        suggestion=primary_runtime_input_question(profile.language),
-    )
-
-
 def _build_flow_input_architecture_issue(
     conversation: list[ConversationMessage],
     profile: DiscoveryProfile,
@@ -299,55 +243,6 @@ def _build_flow_input_architecture_issue(
             "The user appears to want both audio transcription and document upload in the same flow, but the input architecture is not resolved yet.",
         ),
         suggestion=flow_input_architecture_question(profile.language),
-    )
-
-
-def _build_document_material_scope_issue(
-    conversation: list[ConversationMessage],
-    profile: DiscoveryProfile,
-) -> DiscoveryIssue | None:
-    if not _document_cardinality_is_vague(profile):
-        return None
-    return DiscoveryIssue(
-        issue_id="document_material_scope",
-        category="input",
-        severity="blocking",
-        message=localized_text(
-            profile.language,
-            "Det är fortfarande oklart om varje körning normalt består av ett dokument eller ett dokumentpaket med flera filer.",
-            "It is still unclear whether one run normally contains one source document or a document package with several files.",
-        ),
-        suggestion=document_material_scope_question(profile.language),
-    )
-
-
-def _build_comparison_scope_issue(
-    conversation: list[ConversationMessage],
-    profile: DiscoveryProfile,
-) -> DiscoveryIssue | None:
-    primary_runtime_input = profile.input_intent.primary_runtime_input
-    if primary_runtime_input == "unknown":
-        primary_runtime_input = None
-    if not comparison_scope_is_relevant(
-        primary_runtime_input=primary_runtime_input,
-        unresolved_values_are_relevant=True,
-    ):
-        return None
-    if not profile.comparison_requested or profile.reference_source.status not in {
-        "missing",
-        "unclear",
-    }:
-        return None
-    return DiscoveryIssue(
-        issue_id="comparison_scope",
-        category="comparison",
-        severity="blocking",
-        message=localized_text(
-            profile.language,
-            "Det är fortfarande oklart hur jämförelsen mellan dokument ska fungera.",
-            "The comparison architecture is unresolved.",
-        ),
-        suggestion=comparison_scope_question(profile.language),
     )
 
 
@@ -369,25 +264,6 @@ def _build_external_delivery_unsupported_issue(
             "The user wants to send the result to an external API or system, but AI Builder cannot automatically create an outbound API delivery step in new flows yet.",
         ),
         suggestion=external_delivery_internal_output_question(profile.language),
-    )
-
-
-def _build_structured_io_contract_issue(
-    conversation: list[ConversationMessage],
-    profile: DiscoveryProfile,
-) -> DiscoveryIssue | None:
-    if not _structured_io_contract_is_vague(profile):
-        return None
-    return DiscoveryIssue(
-        issue_id="structured_io_contract",
-        category="outcome",
-        severity="blocking",
-        message=localized_text(
-            profile.language,
-            "Det är fortfarande oklart hur input-JSON ska omvandlas till output-JSON.",
-            "It is still unclear how input JSON should be transformed into output JSON.",
-        ),
-        suggestion=structured_io_contract_question(profile.language),
     )
 
 
@@ -415,86 +291,10 @@ def _build_post_processing_goal_issue(
     )
 
 
-def _build_terminal_output_issue(
-    conversation: list[ConversationMessage],
-    profile: DiscoveryProfile,
-) -> DiscoveryIssue | None:
-    if _terminal_output_is_vague(profile):
-        message = localized_text(
-            profile.language,
-            "Slutresultatet är fortfarande för vagt för att flödet ska kunna designas säkert.",
-            "The final output format is still too vague to design the flow confidently.",
-        )
-    elif _ultra_vague_terminal_output_choice_is_vague(profile):
-        message = localized_text(
-            profile.language,
-            "Det är fortfarande oklart vilket slutresultat flödet ska leverera.",
-            "The final output is still too vague to summarize safely.",
-        )
-    else:
-        return None
-    return DiscoveryIssue(
-        issue_id="terminal_output",
-        category="output",
-        severity="blocking",
-        message=message,
-        suggestion=terminal_output_question(profile.language),
-    )
-
-
-def _build_docx_output_mode_issue(
-    conversation: list[ConversationMessage],
-    profile: DiscoveryProfile,
-) -> DiscoveryIssue | None:
-    if not _needs_docx_mode_choice(profile):
-        return None
-    if has_explicit_structured_answer(conversation, "docx_output_mode"):
-        return None
-    return DiscoveryIssue(
-        issue_id="docx_output_mode",
-        category="output",
-        severity="blocking",
-        message=localized_text(
-            profile.language,
-            "DOCX efterfrågas, men det är fortfarande oklart hur dokumentet ska skapas.",
-            "DOCX output is requested, but the DOCX generation mode is unresolved.",
-        ),
-        suggestion=docx_output_mode_question(profile.language),
-    )
-
-
-def _build_pdf_generation_mode_issue(
-    conversation: list[ConversationMessage],
-    profile: DiscoveryProfile,
-) -> DiscoveryIssue | None:
-    if not _needs_pdf_generation_mode_choice(profile):
-        return None
-    if has_explicit_structured_answer(conversation, "pdf_generation_mode"):
-        return None
-    return DiscoveryIssue(
-        issue_id="pdf_generation_mode",
-        category="output",
-        severity="blocking",
-        message=localized_text(
-            profile.language,
-            "Användaren nämner PDF-mall, men det är fortfarande oklart om slutresultatet ska vara en vanlig genererad PDF eller om en fast mallförväntan måste hanteras uttryckligt.",
-            "The user mentions a PDF template, but it is still unclear whether the result should be a normal generated PDF or whether a fixed template expectation must be handled explicitly.",
-        ),
-        suggestion=pdf_generation_mode_question(profile.language),
-    )
-
-
 _DISCOVERY_ISSUE_BUILDERS: Final[tuple[DiscoveryIssueBuilder, ...]] = (
     _build_comparison_scope_conflict_issue,
-    _build_primary_runtime_input_issue,
     _build_flow_input_architecture_issue,
-    _build_document_material_scope_issue,
-    _build_comparison_scope_issue,
     _build_external_delivery_unsupported_issue,
-    _build_structured_io_contract_issue,
-    _build_terminal_output_issue,
-    _build_docx_output_mode_issue,
-    _build_pdf_generation_mode_issue,
 )
 
 

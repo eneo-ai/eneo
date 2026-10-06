@@ -125,7 +125,7 @@ def _issue_for_slot(slot_name: str, profile: DiscoveryProfile) -> DiscoveryIssue
     """
 
     suggestion = question_suggestion_for_id(slot_name, language=profile.language)
-    if suggestion is None:
+    if suggestion is None or suggestion.exposure != "user_requirement":
         return None
     return DiscoveryIssue(
         issue_id=slot_name,
