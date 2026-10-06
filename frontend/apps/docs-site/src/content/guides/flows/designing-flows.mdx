@@ -91,7 +91,7 @@ Use the [Flow error reference](/guides/flows/reference/errors) for the complete 
 
 ## Chaining steps
 
-Prefer targeted references such as `{{step_a.output.structured.fields}}` over broad all-previous-step prose.
+Prefer targeted references such as `{{step_1.output.structured.fields}}` over broad all-previous-step prose. Step references use `step_N`, where `N` is the referenced step's saved order.
 
 Use JSON steps when another step or your app needs stable fields. Use text steps for human-facing prose.
 
@@ -217,9 +217,9 @@ Goal: Turn an audio upload into structured sections and a filled DOCX template.
 | Step             | Input                | Output                          | Bindings                                | Knowledge      |
 | ---------------- | -------------------- | ------------------------------- | --------------------------------------- | -------------- |
 | Transcribe audio | Runtime audio upload | Text transcript                 | `step_inputs[transcribe].file_ids`      | None           |
-| Extract sections | Transcript text      | JSON section headers            | `{{step_a.output.text}}`                | None           |
-| Compose report   | Section JSON         | Report text                     | `{{step_b.output.structured.sections}}` | Step knowledge |
-| Fill template    | Report text          | DOCX artifact (`template_fill`) | `{{step_c.output.text}}`                | Template asset |
+| Extract sections | Transcript text      | JSON section headers            | `{{step_1.output.text}}`                | None           |
+| Compose report   | Section JSON         | Report text                     | `{{step_2.output.structured.sections}}` | Step knowledge |
+| Fill template    | Report text          | DOCX artifact (`template_fill`) | `{{step_3.output.text}}`                | Template asset |
 
 The flow keeps speech, structure, prose, and template rendering in separate steps so a failure can be traced to the stage that produced it.
 
@@ -227,13 +227,12 @@ The flow keeps speech, structure, prose, and template rendering in separate step
 
 Goal: Extract uploaded documents, pause for review, and produce a final artifact.
 
-| Step            | Input                   | Output                  | Bindings                        | Knowledge         |
-| --------------- | ----------------------- | ----------------------- | ------------------------------- | ----------------- |
-| Extract upload  | Runtime document upload | JSON fields             | `step_inputs[extract].file_ids` | None              |
-| Review fields   | Extracted JSON          | Approved or edited JSON | Review checkpoint               | Reviewer judgment |
-| Create artifact | Approved JSON           | DOCX artifact           | `{{reviewed_fields}}`           | Template asset    |
+| Step            | Input                   | Output        | Bindings                        | Knowledge      |
+| --------------- | ----------------------- | ------------- | ------------------------------- | -------------- |
+| Extract upload  | Runtime document upload | JSON fields   | `step_inputs[extract].file_ids` | None           |
+| Create artifact | Approved JSON           | DOCX artifact | `{{step_1.output.structured}}`  | Template asset |
 
-The review checkpoint freezes the extracted fields before the artifact step consumes them.
+Configure an `edit` review policy on the extract step. The checkpoint pauses after step 1; approval makes its reviewed or edited output available as `{{step_1.output.structured}}` before step 2 creates the artifact.
 
 ### Compare and decide
 
@@ -254,8 +253,8 @@ Goal: Use form fields to compose sections and generate a DOCX artifact.
 | Step                  | Input               | Output        | Bindings                 | Knowledge               |
 | --------------------- | ------------------- | ------------- | ------------------------ | ----------------------- |
 | Collect sections      | Runtime form fields | Draft text    | `input_payload_json`     | None                    |
-| Compose artifact body | Draft text          | Final text    | `{{step_a.output.text}}` | Optional step knowledge |
-| Fill template         | Final text          | DOCX artifact | `{{step_b.output.text}}` | Template asset          |
+| Compose artifact body | Draft text          | Final text    | `{{step_1.output.text}}` | Optional step knowledge |
+| Fill template         | Final text          | DOCX artifact | `{{step_2.output.text}}` | Template asset          |
 
 The form-only path avoids fake uploads and makes every caller-provided value explicit in the run payload.
 
