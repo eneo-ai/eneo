@@ -331,13 +331,6 @@ FLOW_ERROR_TAXONOMY: dict[FlowApiErrorCode, FlowErrorTaxonomyEntry] = {
         consumer_action="Retry the upload after a short wait.",
         user_action="Try the upload again in a moment.",
     ),
-    FlowApiErrorCode.RUN_AUDIO_LENGTH_UNKNOWN: _entry(
-        category="Run input",
-        surfaced_through="API error response",
-        cause="An audio file was uploaded before Eneo measured audio at upload.",
-        consumer_action="Upload the audio file again and use the new file id.",
-        user_action="Upload the audio file again.",
-    ),
     FlowApiErrorCode.RUN_STEP_INPUT_MIMETYPE_REJECTED: _entry(
         category="Run input",
         surfaced_through="API error response",
@@ -349,7 +342,7 @@ FLOW_ERROR_TAXONOMY: dict[FlowApiErrorCode, FlowErrorTaxonomyEntry] = {
         category="Run input",
         surfaced_through="API error response",
         cause="The run exceeds the total runtime-file count allowed across steps.",
-        consumer_action="Reduce the total attached files before creating or rerunning the run.",
+        consumer_action="Reduce the total attached files before creating a new run.",
         user_action="Remove files and try again.",
     ),
     FlowApiErrorCode.RUN_RESERVED_INPUT_PAYLOAD_KEY: _entry(
@@ -516,8 +509,8 @@ FLOW_ERROR_TAXONOMY: dict[FlowApiErrorCode, FlowErrorTaxonomyEntry] = {
         category="Run lifecycle",
         surfaced_through="Run error payload",
         cause="The worker task exceeded its execution deadline.",
-        consumer_action="Retry with smaller input or inspect worker capacity and timeout settings.",
-        user_action="Retry with smaller input or try again later.",
+        consumer_action="Inspect external effects and worker limits before creating a new run with smaller input.",
+        user_action="Check what ran before starting a new run with smaller input.",
     ),
     FlowApiErrorCode.RUN_TASK_FAILURE: _entry(
         category="Run lifecycle",
@@ -531,10 +524,10 @@ FLOW_ERROR_TAXONOMY: dict[FlowApiErrorCode, FlowErrorTaxonomyEntry] = {
         surfaced_through="Run error payload",
         cause="The worker stopped updating an active run within the recovery window.",
         consumer_action=(
-            "Inspect worker and run health, then use the capability-gated rerun path "
-            "or create a new run; escalate recurring stalls."
+            "Inspect worker health and earlier external effects before retrying an "
+            "eligible failed run or creating a new run; escalate recurring stalls."
         ),
-        user_action="Retry or contact support with the run ID.",
+        user_action="Check the run history or contact support before starting another run.",
     ),
     FlowApiErrorCode.RUN_ABANDONED: _entry(
         category="Run lifecycle",
@@ -601,22 +594,6 @@ FLOW_ERROR_TAXONOMY: dict[FlowApiErrorCode, FlowErrorTaxonomyEntry] = {
             "Show retention-aware messaging and avoid retry loops for purged content."
         ),
         user_action="The recording is no longer available; the transcript remains.",
-    ),
-    FlowApiErrorCode.AUDIT_OUTBOX_DELIVERY_NOT_FOUND: _entry(
-        category="Evidence and artifacts",
-        surfaced_through="API error response",
-        cause="The requested lifecycle audit delivery no longer exists.",
-        consumer_action=(
-            "List dead letters again and verify the environment before retrying."
-        ),
-        user_action="Ask an operator to refresh the dead-letter list.",
-    ),
-    FlowApiErrorCode.AUDIT_OUTBOX_REDRIVE_CONFLICT: _entry(
-        category="Evidence and artifacts",
-        surfaced_through="API error response",
-        cause="The lifecycle audit delivery state or dead-letter generation changed.",
-        consumer_action="List dead letters again and use the latest generation token.",
-        user_action="Ask an operator to refresh and verify the delivery state.",
     ),
     FlowApiErrorCode.DEFINITION_CHECKSUM_MISMATCH: _entry(
         category="Published definition",
@@ -797,11 +774,11 @@ FLOW_ERROR_TAXONOMY: dict[FlowApiErrorCode, FlowErrorTaxonomyEntry] = {
             "work may or may not have started in provider-calling modes."
         ),
         consumer_action=(
-            "Do not auto-retry provider-calling failures: reruns can repeat provider "
+            "Do not auto-retry provider-calling failures: another run can repeat provider "
             "work and spend; inspect step details first."
         ),
         user_action=(
-            "Open the failed step before rerunning; a rerun can repeat provider work "
+            "Open the failed step before starting another run; another run can repeat provider work "
             "and spend."
         ),
     ),
@@ -840,7 +817,7 @@ FLOW_ERROR_TAXONOMY: dict[FlowApiErrorCode, FlowErrorTaxonomyEntry] = {
             "Inspect the provider-call page and the evidence gap in the run error before "
             "deciding whether to repeat a call whose remote outcome may be known."
         ),
-        user_action="Contact support with the run ID before rerunning the step.",
+        user_action="Contact support with the run ID before starting another run.",
     ),
     FlowApiErrorCode.WEBHOOK_DELIVERY_FAILED: _entry(
         category="Step runtime",
@@ -940,7 +917,7 @@ FLOW_ERROR_TAXONOMY: dict[FlowApiErrorCode, FlowErrorTaxonomyEntry] = {
             "still have received or completed it."
         ),
         consumer_action=(
-            "Do not auto-retry: a rerun can duplicate provider work and spend; "
+            "Do not auto-retry: another run can duplicate provider work and spend; "
             "inspect the run before choosing smaller input or a faster model."
         ),
         user_action=(
@@ -991,7 +968,7 @@ FLOW_ERROR_TAXONOMY: dict[FlowApiErrorCode, FlowErrorTaxonomyEntry] = {
         category="Typed input/output",
         surfaced_through="API response and run error payload",
         cause="A submitted or generated value does not match the step output contract.",
-        consumer_action="Fix the JSON shape against the contract before saving or rerunning.",
+        consumer_action="Fix the JSON shape against the contract before saving or starting a new run.",
         user_action="Fix the structured output and save again.",
     ),
     FlowApiErrorCode.TYPED_IO_VALIDATION_FAILED: _entry(
@@ -999,20 +976,20 @@ FLOW_ERROR_TAXONOMY: dict[FlowApiErrorCode, FlowErrorTaxonomyEntry] = {
         surfaced_through="Run error payload",
         cause="The step input or output failed validation without a more specific code.",
         consumer_action="Open step diagnostics and correct the input, schema, or configuration.",
-        user_action="Open the step details, fix input or configuration, and rerun.",
+        user_action="Open the step details, fix input or configuration, and start a new run.",
     ),
     FlowApiErrorCode.TYPED_IO_VARIABLE_RESOLUTION_FAILED: _entry(
         category="Typed input/output",
         surfaced_through="Run error payload",
         cause="A runtime variable reference names a missing or invalid path.",
-        consumer_action="Use the precise run error to correct the variable path, then republish or rerun.",
+        consumer_action="Use the precise run error to correct the variable path, then republish and start a new run.",
         user_action="Ask a flow editor to correct the variable reference and republish.",
     ),
     FlowApiErrorCode.TYPED_IO_AUDIO_INVALID_FILE_TYPE: _entry(
         category="Typed input/output",
         surfaced_through="Run error payload",
         cause="An audio step received a file type it cannot transcribe.",
-        consumer_action="Validate accepted audio types before upload or rerun.",
+        consumer_action="Validate accepted audio types before upload or starting a new run.",
         user_action="Upload a supported audio file and start again.",
     ),
     FlowApiErrorCode.TYPED_IO_AUDIO_MISSING_FILE: _entry(
@@ -1062,7 +1039,7 @@ FLOW_ERROR_TAXONOMY: dict[FlowApiErrorCode, FlowErrorTaxonomyEntry] = {
         category="Typed input/output",
         surfaced_through="Run error payload",
         cause="Text extraction produced no readable content from the submitted file.",
-        consumer_action="Prompt the user for a readable file before rerunning.",
+        consumer_action="Prompt the user for a readable file before starting a new run.",
         user_action="Use a file with readable content and start again.",
     ),
     FlowApiErrorCode.TYPED_IO_FILE_NOT_FOUND: _entry(
@@ -1070,7 +1047,7 @@ FLOW_ERROR_TAXONOMY: dict[FlowApiErrorCode, FlowErrorTaxonomyEntry] = {
         surfaced_through="Run error payload",
         cause="A required runtime file could not be found during step execution.",
         consumer_action="Upload the file again and bind it through the current run contract.",
-        user_action="Upload the file again and rerun the step.",
+        user_action="Upload the file again and start a new run.",
     ),
     FlowApiErrorCode.TYPED_IO_FILE_SOURCE_UNSUPPORTED: _entry(
         category="Typed input/output",
@@ -1083,7 +1060,7 @@ FLOW_ERROR_TAXONOMY: dict[FlowApiErrorCode, FlowErrorTaxonomyEntry] = {
         category="Typed input/output",
         surfaced_through="Run error payload",
         cause="The HTTP step could not connect to the target service.",
-        consumer_action="Check target availability, DNS, and network allow rules before rerunning.",
+        consumer_action="Check target availability, DNS, and network allow rules before starting another run.",
         user_action="Check the target service and try again.",
     ),
     FlowApiErrorCode.TYPED_IO_HTTP_INVALID_CONFIG: _entry(
@@ -1132,49 +1109,49 @@ FLOW_ERROR_TAXONOMY: dict[FlowApiErrorCode, FlowErrorTaxonomyEntry] = {
         category="Typed input/output",
         surfaced_through="Run error payload",
         cause="The HTTP request exceeded the step timeout.",
-        consumer_action="Reduce the request scope or increase upstream responsiveness before rerun.",
+        consumer_action="Reduce the request scope or increase upstream responsiveness before starting another run.",
         user_action="Try again later or ask a flow editor to reduce the request.",
     ),
     FlowApiErrorCode.TYPED_IO_INPUT_EXCEEDS_MODEL_WINDOW: _entry(
         category="Typed input/output",
         surfaced_through="Run error payload",
         cause="The packaged step input exceeds the selected model context window.",
-        consumer_action="Use a larger-context model, split the source document, or reduce the step input before rerun.",
+        consumer_action="Use a larger-context model, split the source document, or reduce the step input before starting a new run.",
         user_action="Use a smaller source, split the document, or ask a flow editor to choose a larger-context model.",
     ),
     FlowApiErrorCode.SUMMARIZATION_NON_CONVERGENT: _entry(
         category="Typed input/output",
         surfaced_through="Run error payload",
         cause="Summarization did not reduce both record count and bytes, or cannot finish within its finite aggregate limits.",
-        consumer_action="Inspect summarization rounds, records and bytes; reduce the input or request more concise records before rerun.",
+        consumer_action="Inspect summarization rounds, records and bytes; reduce the input or request more concise records before starting a new run.",
         user_action="Use less material or ask the flow editor for more concise intermediate records.",
     ),
     FlowApiErrorCode.MAPPED_PROVIDER_CALL_LIMIT_EXCEEDED: _entry(
         category="Typed input/output",
         surfaced_through="Run error payload",
         cause="The mapped step may need more provider calls than the organization ceiling allows.",
-        consumer_action="Reduce mapped inputs or ask an administrator to raise the provider-call ceiling before rerun.",
+        consumer_action="Reduce mapped inputs or ask an administrator to raise the provider-call ceiling before starting a new run.",
         user_action="Use fewer items or files, or ask an administrator to raise the limit.",
     ),
     FlowApiErrorCode.TYPED_IO_INPUT_TOO_LARGE: _entry(
         category="Typed input/output",
         surfaced_through="Run error payload",
         cause="The step input exceeds the runtime processing limit.",
-        consumer_action="Reduce text, files, extracted content, or prompt context before rerun.",
+        consumer_action="Reduce text, files, extracted content, or prompt context before starting a new run.",
         user_action="Submit smaller input and try again.",
     ),
     FlowApiErrorCode.TYPED_IO_STRUCTURED_OUTPUT_EXCEEDS_LIMIT: _entry(
         category="Typed input/output",
         surfaced_through="Run error payload",
         cause="The enriched structured output exceeds the inline byte ceiling.",
-        consumer_action="Reduce the output or mapped item count before rerun; completed provider calls will repeat.",
+        consumer_action="Reduce the output or mapped item count before starting a new run; completed provider calls will repeat.",
         user_action="Request shorter output or process fewer items.",
     ),
     FlowApiErrorCode.TYPED_IO_INVALID_FILE_TYPE: _entry(
         category="Typed input/output",
         surfaced_through="Run error payload",
         cause="A runtime file has a type unsupported by the step.",
-        consumer_action="Validate file type against the step contract before upload or rerun.",
+        consumer_action="Validate file type against the step contract before upload or starting a new run.",
         user_action="Upload a compatible file and start again.",
     ),
     FlowApiErrorCode.TYPED_IO_INVALID_INPUT_SOURCE_COMBINATION: _entry(
@@ -1195,7 +1172,7 @@ FLOW_ERROR_TAXONOMY: dict[FlowApiErrorCode, FlowErrorTaxonomyEntry] = {
         category="Typed input/output",
         surfaced_through="Run error payload",
         cause="The step expected JSON but received invalid JSON input.",
-        consumer_action="Validate the JSON value before rerunning the step.",
+        consumer_action="Validate the JSON value before starting a new run.",
         user_action="Fix the JSON input and try again.",
     ),
     FlowApiErrorCode.TYPED_IO_INVALID_OUTPUT_MODE_COMBINATION: _entry(
@@ -1209,42 +1186,42 @@ FLOW_ERROR_TAXONOMY: dict[FlowApiErrorCode, FlowErrorTaxonomyEntry] = {
         category="Typed input/output",
         surfaced_through="Run error payload",
         cause="The step output schema is invalid.",
-        consumer_action="Fix the JSON schema and republish before rerunning.",
+        consumer_action="Fix the JSON schema and republish before starting a new run.",
         user_action="Ask a flow editor to fix the output schema.",
     ),
     FlowApiErrorCode.TYPED_IO_MISSING_REQUIRED_FILES: _entry(
         category="Typed input/output",
         surfaced_through="Run error payload",
         cause="A typed runtime step did not receive required files.",
-        consumer_action="Attach required files according to the step contract before rerun.",
+        consumer_action="Attach required files according to the step contract before starting a new run.",
         user_action="Attach the required files and start again.",
     ),
     FlowApiErrorCode.TYPED_IO_OUTPUT_PARSE_FAILED: _entry(
         category="Typed input/output",
         surfaced_through="Run error payload",
         cause="The model output could not be parsed into the expected JSON shape.",
-        consumer_action="Adjust prompt or schema, then rerun the failed step.",
+        consumer_action="Adjust the prompt or schema, republish, then start a new run.",
         user_action="Ask a flow editor to adjust the prompt or schema.",
     ),
     FlowApiErrorCode.TYPED_IO_RENDER_FAILED: _entry(
         category="Typed input/output",
         surfaced_through="Run error payload",
         cause="The generated document or rich output could not be rendered.",
-        consumer_action="Inspect output content and document settings before rerunning.",
+        consumer_action="Inspect output content and document settings before starting a new run.",
         user_action="Ask a flow editor to check output formatting.",
     ),
     FlowApiErrorCode.TYPED_IO_TEMPLATE_CHECKSUM_MISMATCH: _entry(
         category="Typed input/output",
         surfaced_through="Run error payload",
         cause="The DOCX template changed after the flow was published.",
-        consumer_action="Republish the flow with the current template before rerunning.",
+        consumer_action="Republish the flow with the current template before starting a new run.",
         user_action="Republish the flow with the current template.",
     ),
     FlowApiErrorCode.TYPED_IO_TEMPLATE_RENDER_FAILED: _entry(
         category="Typed input/output",
         surfaced_through="Run error payload",
         cause="The DOCX template could not be rendered with the step output.",
-        consumer_action="Check placeholders and referenced step outputs before rerunning.",
+        consumer_action="Check placeholders and referenced step outputs before starting a new run.",
         user_action="Ask a flow editor to fix the template placeholders.",
     ),
     FlowApiErrorCode.TYPED_IO_TRANSCRIPT_TOO_LARGE: _entry(
@@ -1258,14 +1235,14 @@ FLOW_ERROR_TAXONOMY: dict[FlowApiErrorCode, FlowErrorTaxonomyEntry] = {
         category="Typed input/output",
         surfaced_through="Run error payload",
         cause="The transcription step has invalid language or model settings.",
-        consumer_action="Fix transcription settings and republish before rerunning.",
+        consumer_action="Fix transcription settings and republish before starting a new run.",
         user_action="Ask a flow editor to fix transcription settings.",
     ),
     FlowApiErrorCode.TYPED_IO_TRANSCRIPTION_EMPTY: _entry(
         category="Typed input/output",
         surfaced_through="Run error payload",
         cause="Transcription completed but produced no text.",
-        consumer_action="Ask for audio with clear speech before rerunning.",
+        consumer_action="Ask for audio with clear speech before starting a new run.",
         user_action="Use an audio file with speech and start again.",
     ),
     FlowApiErrorCode.TYPED_IO_TRANSCRIPTION_FAILED: _entry(

@@ -1093,17 +1093,24 @@ directly rather than being retried behind your back.
 
 #### Audit-outbox dead letters (operators only)
 
-When a Flow audit delivery exhausts its own budget it is dead-lettered, and the
-recovery surface is a sysadmin one, not part of the consumer runtime:
+When a Flow audit delivery exhausts its own budget it is dead-lettered. Operators
+inspect and redrive it through `eneo.cli.flow_audit_outbox` in a trusted deployment
+shell:
 
-| Purpose                                  | Endpoint                                                        | Operation                                 |
-| ---------------------------------------- | --------------------------------------------------------------- | ----------------------------------------- |
-| List dead-lettered Flow audit deliveries | `GET /api/v1/sysadmin/flows/audit-outbox/dead-letters/`         | `list_flow_run_audit_outbox_dead_letters` |
-| Redrive one delivery                     | `POST /api/v1/sysadmin/flows/audit-outbox/{outbox_id}/redrive/` | `redrive_flow_run_audit_outbox_delivery`  |
+```sh
+uv run python -m eneo.cli.flow_audit_outbox list --limit 50
+uv run python -m eneo.cli.flow_audit_outbox dry-run OUTBOX_ID \
+  --expected-dead-lettered-at TIMESTAMP
+uv run python -m eneo.cli.flow_audit_outbox redrive OUTBOX_ID \
+  --expected-dead-lettered-at TIMESTAMP --reason "Storage recovered"
+```
 
-Redrive takes the generation token returned by the list response. A stale token
-returns `409` with code `flow_audit_outbox_redrive_conflict`; list again and
-retry with the current value.
+Use the exact timezone-aware `dead_lettered_at` generation token from the list.
+The deployment wrapper supplies the operator identity from its trusted identity
+source. Exit `10` means the row was not found, `11` means it is no longer
+dead-lettered, and `12` means the generation changed; list again and verify the
+current row before redrive. These are operator CLI outcomes, not consumer HTTP
+responses.
 
 #### Human review checkpoints
 

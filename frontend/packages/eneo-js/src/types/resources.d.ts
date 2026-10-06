@@ -358,10 +358,6 @@ export type FlowRunDebugRag = components["schemas"]["FlowRunDebugRag"];
 export type FlowRunDebugStep = components["schemas"]["FlowRunDebugStep"];
 export type FlowRunDebugAttempt = components["schemas"]["FlowRunDebugAttempt"];
 export type FlowRunDebugExport = components["schemas"]["FlowRunDebugExport"];
-export type FlowRunRerunOperation = components["schemas"]["FlowRunRerunOperationPublic"];
-export type FlowRunInputRevision = FlowRunRerunOperation["input_revision"];
-export type FlowRunRerunInvalidatedStep =
-  components["schemas"]["FlowRunRerunInvalidatedStepPublic"];
 export type FlowCitationSummary = components["schemas"]["FlowCitationSummaryPublic"];
 export type FlowCitationSource = components["schemas"]["FlowCitationSourcePublic"];
 export type FlowRunReviewCheckpoint = components["schemas"]["FlowRunReviewCheckpointPublic"];
