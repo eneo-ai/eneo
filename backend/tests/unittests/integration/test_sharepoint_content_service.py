@@ -317,7 +317,7 @@ class TestProcessInfoBlobSizeAccounting:
     async def test_updates_integration_knowledge_size_using_delta_for_existing_blob(
         self, service, mock_dependencies, mock_integration_knowledge
     ):
-        existing_blob = MagicMock()
+        existing_blob = MagicMock(source_metadata=None)
         existing_blob.size = 100
 
         updated_blob = MagicMock()
@@ -353,7 +353,7 @@ class TestProcessInfoBlobSizeAccounting:
     async def test_does_not_change_size_when_existing_blob_size_is_unchanged(
         self, service, mock_dependencies, mock_integration_knowledge
     ):
-        existing_blob = MagicMock()
+        existing_blob = MagicMock(source_metadata=None)
         existing_blob.size = 100
 
         updated_blob = MagicMock()
@@ -394,12 +394,11 @@ class TestProcessInfoBlobSizeAccounting:
         )
 
         text = "Identical content"
-        existing_blob = MagicMock()
+        existing_blob = MagicMock(source_metadata=None)
         existing_blob.id = uuid4()
         existing_blob.size = 100
         existing_blob.title = "Doc"  # metadata unchanged too
         existing_blob.url = "https://example.com"
-        existing_blob.source_metadata = None
         existing_blob.content_hash = hashlib.sha256(
             sanitize_text_for_db(text).encode("utf-8")
         ).digest()
@@ -442,7 +441,7 @@ class TestProcessInfoBlobSizeAccounting:
         )
 
         text = "Identical content"
-        existing_blob = MagicMock()
+        existing_blob = MagicMock(source_metadata=None)
         existing_blob.id = uuid4()
         existing_blob.size = 100
         existing_blob.title = "Old name.docx"
@@ -480,7 +479,7 @@ class TestProcessInfoBlobSizeAccounting:
     async def test_reembeds_when_content_hash_differs(
         self, service, mock_dependencies, mock_integration_knowledge
     ):
-        existing_blob = MagicMock()
+        existing_blob = MagicMock(source_metadata=None)
         existing_blob.size = 100
         existing_blob.content_hash = b"a-different-old-hash"
 
@@ -520,7 +519,7 @@ class TestProcessInfoBlobSizeAccounting:
             sanitize_text_for_db,
         )
 
-        existing_blob = MagicMock()
+        existing_blob = MagicMock(source_metadata=None)
         existing_blob.size = 100
         existing_blob.content_hash = b"old-hash"
 
@@ -559,7 +558,7 @@ class TestProcessInfoBlobSizeAccounting:
     async def test_embedding_failure_propagates_for_transaction_rollback(
         self, service, mock_dependencies, mock_integration_knowledge
     ):
-        existing_blob = MagicMock()
+        existing_blob = MagicMock(source_metadata=None)
         existing_blob.size = 100
         existing_blob.content_hash = b"old-hash"
 

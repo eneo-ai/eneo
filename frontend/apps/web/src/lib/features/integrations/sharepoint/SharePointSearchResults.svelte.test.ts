@@ -68,6 +68,17 @@ describe("SharePointSearchResults", () => {
     await expect.element(page.getByText(m.sharepoint_search_no_results())).toBeVisible();
 
     show({ truncated: true });
-    await expect.element(page.getByText(/Visar de första 1/)).toBeVisible();
+    await expect
+      .element(page.getByText(m.sharepoint_search_truncated({ count: "1" })))
+      .toBeVisible();
+  });
+
+  it("reports an incomplete search even when no files were found", async () => {
+    show({ items: [], truncated: true });
+
+    await expect.element(page.getByText(m.sharepoint_search_no_results())).toBeVisible();
+    await expect
+      .element(page.getByText(m.sharepoint_search_truncated({ count: "0" })))
+      .toBeVisible();
   });
 });

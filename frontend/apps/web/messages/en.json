@@ -4470,7 +4470,7 @@
   "sharepoint_searching": "Searching…",
   "sharepoint_search_results_one": "{count} match across the site",
   "sharepoint_search_results_other": "{count} matches across the site",
-  "sharepoint_search_truncated": "Showing the first {count}. Narrow the search to see more.",
+  "sharepoint_search_truncated": "Search incomplete. Showing {count} matches. Narrow the search to see more.",
   "sharepoint_search_no_results": "No files match the search.",
   "sharepoint_search_error": "The search could not be completed.",
   "sharepoint_search_results_label": "Search results",

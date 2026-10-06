@@ -283,9 +283,9 @@ Document libraries often carry metadata columns beside each file, for example _D
 
 Above the folder tree, the import dialog has a search that covers the whole site, not only the folders you have opened. Free text matches file names, file contents and document properties. Beside it, one drop-down per filterable column lets you pick a value instead of typing it: yes/no columns and choice columns with a fixed list of values, for example _Dokumenttyp: Policy_ or _Extern publicering: Ja_. Text and filters combine.
 
-Hits are listed with the folder they live in and their properties, and the part the search matched is highlighted. **Select all matches** ticks every hit in one press; a hit that already sits under a selected folder is shown as covered. Clearing the search returns to the folder tree. A search shows at most 200 files; narrow it to see more.
+Hits are listed with the folder they live in and their properties, and matching visible text is highlighted. **Select all matches** ticks every hit in one press; a hit that already sits under a selected folder is shown as covered. Clearing the search returns to the folder tree. A search shows at most 200 files and has a scan budget of 2,000 SharePoint results. If either limit leaves the search incomplete, a notice asks you to narrow it, even when no matching files were found.
 
-Column filters are evaluated by Microsoft Graph, which needs the column to be indexed in SharePoint for libraries above the list view threshold (5,000 items). Free text alone uses Graph's drive search, which also looks inside documents.
+Free text uses Graph's drive search, which also looks inside documents. When combined with column filters, Eneo checks the column values on those search hits. Column filters used without free text are evaluated by Microsoft Graph, which needs the column to be indexed in SharePoint for libraries above the list view threshold (5,000 items).
 
 Which columns are included follows the library's own column settings:
 
@@ -293,9 +293,9 @@ Which columns are included follows the library's own column settings:
 - Hidden and read-only columns, and SharePoint's own file-record columns (created, modified, author, file name, version, compliance and media columns), are left out.
 - Person and lookup columns are left out, because Microsoft Graph only exposes their numeric identifiers for a file.
 
-Values are stored as text in the library's column order, with each value capped at 500 characters and at most 40 columns per document. Multi-value columns keep each value. A change to a column value alone is picked up by the next synchronization or webhook notification, like a change to the file's contents, and re-indexes the document.
+Values are stored as text in the library's column order, with each value capped at 500 characters and at most 40 columns per document. Multi-value columns keep each value. A change to a column value alone is picked up by the next synchronization or webhook notification, like a change to the file's contents, and re-indexes the document. Renaming a document with properties also updates its indexed source title.
 
-Documents imported before this feature gain their properties the next time they change in SharePoint or when a full synchronization runs for the imported item. SharePoint pages and OneDrive files without a backing list carry no properties. Reading the columns needs no Microsoft Entra permission beyond `Sites.Read.All` / `Files.Read.All`; if a library's columns cannot be read, its documents are still imported, only without properties.
+Documents imported before this feature gain their properties the next time they change in SharePoint or when a full synchronization runs for the imported item. SharePoint pages and OneDrive files without a backing list carry no properties. Reading the columns needs no Microsoft Entra permission beyond `Sites.Read.All` / `Files.Read.All`. If the columns or a file's property values cannot be read, synchronization preserves previously imported properties; a new document is still imported without them. A successful read with no remaining properties clears the previously stored values.
 
 ### Import Limits and Quotas
 

@@ -190,7 +190,7 @@ class SharePointContentClient(BaseClient):
             raise
 
     # Rows Graph is asked for before a search gives up on finding more matches
-    # when a local check (free text on a column query) discards most of them.
+    # when file or column checks discard most of the returned rows.
     MAX_SCANNED_ROWS = 2000
 
     async def _get_paged_items_capped(
@@ -199,7 +199,7 @@ class SharePointContentClient(BaseClient):
         *,
         max_items: int,
         headers: Optional[dict[str, str]] = None,
-        accept: Optional[Callable[[dict[str, Any]], bool]] = None,
+        accept: Optional[Callable[[dict[str, object]], bool]] = None,
     ) -> tuple[list[dict[str, Any]], bool]:
         """Pages until ``max_items`` accepted rows are in hand.
 
@@ -234,7 +234,7 @@ class SharePointContentClient(BaseClient):
         odata_filter: Optional[str],
         *,
         max_items: int,
-        accept: Optional[Callable[[dict[str, Any]], bool]] = None,
+        accept: Optional[Callable[[dict[str, object]], bool]] = None,
     ) -> tuple[list[dict[str, Any]], bool]:
         """List items of a library with their columns and drive item.
 
@@ -261,7 +261,12 @@ class SharePointContentClient(BaseClient):
             raise
 
     async def search_drive_items(
-        self, drive_id: str, text: str, *, max_items: int
+        self,
+        drive_id: str,
+        text: str,
+        *,
+        max_items: int,
+        accept: Optional[Callable[[dict[str, object]], bool]] = None,
     ) -> tuple[list[dict[str, Any]], bool]:
         """Drive items whose name or content matches ``text``, with list item columns when enabled."""
         # Percent-encoded inside the path segment, so quotes, &, # and spaces
@@ -271,15 +276,21 @@ class SharePointContentClient(BaseClient):
             f"v1.0/drives/{drive_id}/root/search(q='{quoted}')"
         )
         try:
-            return await self._get_paged_items_capped(endpoint, max_items=max_items)
+            return await self._get_paged_items_capped(
+                endpoint, max_items=max_items, accept=accept
+            )
         except aiohttp.ClientResponseError as e:
             if self._disable_item_expand_after(e):
                 return await self._get_paged_items_capped(
-                    _strip_query_param(endpoint, "$expand"), max_items=max_items
+                    _strip_query_param(endpoint, "$expand"),
+                    max_items=max_items,
+                    accept=accept,
                 )
             if e.status == 401 and self.token_refresh_callback and self.token_id:
                 await self.refresh_token()
-                return await self._get_paged_items_capped(endpoint, max_items=max_items)
+                return await self._get_paged_items_capped(
+                    endpoint, max_items=max_items, accept=accept
+                )
             raise
 
     async def get_list_columns(self, drive_id: str) -> list[dict[str, Any]]:

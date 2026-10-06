@@ -3,10 +3,14 @@
 from unittest.mock import AsyncMock, MagicMock, patch
 from uuid import uuid4
 
+import aiohttp
 import pytest
 
 from eneo.integration.domain.entities.oauth_token import SharePointToken
 from eneo.integration.domain.value_objects import IntegrationType
+from eneo.integration.infrastructure.clients.sharepoint_content_client import (
+    SharePointContentClient,
+)
 from eneo.integration.infrastructure.content_service.sharepoint_metadata import (
     SharePointColumnCatalog,
 )
@@ -186,7 +190,7 @@ def test_search_text_is_trimmed_cleaned_and_capped():
 
 
 class TestSearchLibrary:
-    async def test_column_filters_query_the_list_and_text_narrows_the_rows(self):
+    async def test_column_filters_alone_query_the_list_for_files(self):
         client, context = _client()
         raw_rows = [
             {
@@ -196,6 +200,10 @@ class TestSearchLibrary:
             {
                 "fields": {"Dokumenttyp": "Rutin"},
                 "driveItem": {"id": "2", "name": "Brand.docx", "file": {}},
+            },
+            {
+                "fields": {"Dokumenttyp": "Rutin"},
+                "driveItem": {"id": "folder", "name": "Rutiner", "folder": {}},
             },
         ]
 
@@ -208,16 +216,17 @@ class TestSearchLibrary:
             f"{tree_module.__name__}.SharePointContentClient", return_value=context
         ):
             result = await SharePointTreeService().search_library(
-                _token(), site_id="s1", text="larm", filters={"Dokumenttyp": "Rutin"}
+                _token(), site_id="s1", filters={"Dokumenttyp": "Rutin"}
             )
 
         call = client.get_list_items_filtered.await_args
         assert call.args == ("d1", "fields/Dokumenttyp eq 'Rutin'")
         assert call.kwargs["max_items"] == 200
-        assert [row["name"] for row in result["items"]] == ["Larm.docx"]
+        assert [row["name"] for row in result["items"]] == ["Larm.docx", "Brand.docx"]
         assert result["truncated"] is True
 
-    async def test_a_column_graph_cannot_compare_is_rejected(self):
+    @pytest.mark.parametrize("text", ["", "larm"])
+    async def test_a_column_graph_cannot_compare_is_rejected(self, text):
         client, context = _client()
         client.get_list_items_filtered = AsyncMock()
         with patch(
@@ -225,7 +234,7 @@ class TestSearchLibrary:
         ):
             with pytest.raises(ValueError, match="Unknown filter column: Ansvarig"):
                 await SharePointTreeService().search_library(
-                    _token(), site_id="s1", filters={"Ansvarig": "Anna"}
+                    _token(), site_id="s1", text=text, filters={"Ansvarig": "Anna"}
                 )
         client.get_list_items_filtered.assert_not_awaited()
 
@@ -241,8 +250,116 @@ class TestSearchLibrary:
                 _token(), drive_id="d1", text="larm"
             )
 
-        client.search_drive_items.assert_awaited_once_with("d1", "larm", max_items=200)
+        call = client.search_drive_items.await_args
+        assert call.args == ("d1", "larm")
+        assert call.kwargs["max_items"] == 200
         assert [row["name"] for row in result["items"]] == ["Larm.docx"]
+
+    @pytest.mark.parametrize(
+        "external, expected", [("ja", "1"), ("false", "3"), ("nej", "3")]
+    )
+    @pytest.mark.parametrize("document_type", ["Rutin", "rutin", ["Rutin", "Policy"]])
+    async def test_text_with_filters_preserves_content_only_search_hits(
+        self, external, expected, document_type
+    ):
+        client, context = _client()
+        # Graph matched "larm" in the body; it is absent from the visible row.
+        raw_rows = [
+            {
+                "id": "1",
+                "name": "Handbok.docx",
+                "file": {},
+                "listItem": {"fields": {"Dokumenttyp": document_type, "Extern": True}},
+            },
+            {
+                "id": "2",
+                "name": "Policy.docx",
+                "file": {},
+                "listItem": {"fields": {"Dokumenttyp": "Policy", "Extern": True}},
+            },
+            {
+                "id": "3",
+                "name": "Intern.docx",
+                "file": {},
+                "listItem": {"fields": {"Dokumenttyp": document_type, "Extern": False}},
+            },
+        ]
+
+        async def search(drive_id, text, *, max_items, accept):
+            return [raw for raw in raw_rows if accept(raw)], False
+
+        async def filtered(drive_id, odata_filter, *, max_items, accept):
+            return [
+                raw
+                for item in raw_rows
+                if accept(
+                    raw := {"fields": item["listItem"]["fields"], "driveItem": item}
+                )
+            ], False
+
+        client.search_drive_items = AsyncMock(side_effect=search)
+        client.get_list_items_filtered = AsyncMock(side_effect=filtered)
+        with patch(
+            f"{tree_module.__name__}.SharePointContentClient", return_value=context
+        ):
+            result = await SharePointTreeService().search_library(
+                _token(),
+                drive_id="d1",
+                text="larm",
+                filters={"Dokumenttyp": "Rutin", "Extern": external},
+            )
+
+        assert [row["id"] for row in result["items"]] == [expected]
+        assert client.search_drive_items.await_args.args == ("d1", "larm")
+        client.get_list_items_filtered.assert_not_awaited()
+
+    async def test_filter_values_are_read_before_metadata_display_limits(self):
+        client, context = _client()
+        columns = [{"name": f"C{i}", "text": {}} for i in range(40)] + COLUMNS
+        client.get_list_columns.return_value = columns
+        raw = {
+            "id": "1",
+            "name": "Handbok.docx",
+            "file": {},
+            "listItem": {
+                "fields": {**{f"C{i}": "v" for i in range(40)}, "Dokumenttyp": "Rutin"}
+            },
+        }
+
+        async def search(drive_id, text, *, max_items, accept):
+            return [raw] if accept(raw) else [], False
+
+        client.search_drive_items = AsyncMock(side_effect=search)
+        client.get_list_items_filtered = AsyncMock(return_value=([], False))
+        with patch(
+            f"{tree_module.__name__}.SharePointContentClient", return_value=context
+        ):
+            result = await SharePointTreeService().search_library(
+                _token(), drive_id="d1", text="larm", filters={"Dokumenttyp": "Rutin"}
+            )
+
+        assert [row["id"] for row in result["items"]] == ["1"]
+        assert len(result["items"][0]["source_metadata"]) == 40
+
+    async def test_missing_fields_fail_explicitly_when_column_filters_are_active(self):
+        client, context = _client()
+
+        async def search(drive_id, text, *, max_items, accept):
+            accept({"id": "1", "name": "Handbok.docx", "file": {}})
+            return [], False
+
+        client.search_drive_items = AsyncMock(side_effect=search)
+        client.get_list_items_filtered = AsyncMock(return_value=([], False))
+        with patch(
+            f"{tree_module.__name__}.SharePointContentClient", return_value=context
+        ):
+            with pytest.raises(ValueError, match="Could not read column values"):
+                await SharePointTreeService().search_library(
+                    _token(),
+                    drive_id="d1",
+                    text="larm",
+                    filters={"Dokumenttyp": "Rutin"},
+                )
 
     async def test_empty_search_asks_graph_nothing(self):
         client, context = _client()
@@ -254,6 +371,186 @@ class TestSearchLibrary:
             )
         assert result["items"] == []
         client.get_list_columns.assert_not_awaited()
+
+
+def _paged_graph_client(responses):
+    transport = MagicMock()
+    transport.get = AsyncMock(side_effect=[{"value": COLUMNS}, *responses])
+    transport.close = AsyncMock()
+    with patch(
+        "eneo.libs.clients.base_clients.WrappedAiohttpClient", return_value=transport
+    ):
+        client = SharePointContentClient(
+            base_url="https://graph.microsoft.com",
+            api_token="token",
+            token_id=uuid4(),
+            token_refresh_callback=AsyncMock(
+                return_value={"access_token": "new-token"}
+            ),
+            include_list_item_fields=True,
+            max_download_bytes=1,
+        )
+    return client
+
+
+class TestSearchPagination:
+    @pytest.mark.parametrize("text", ["", "larm"])
+    async def test_token_refresh_mid_query_does_not_duplicate_accepted_files(
+        self, text
+    ):
+        first = {
+            "value": [
+                {
+                    "fields": {"Dokumenttyp": "Rutin"},
+                    "driveItem": {"id": "1", "name": "A.docx", "file": {}},
+                }
+            ],
+            "@odata.nextLink": "https://graph.microsoft.com/p2",
+        }
+        last = {
+            "value": [
+                {
+                    "fields": {"Dokumenttyp": "Rutin"},
+                    "driveItem": {"id": "2", "name": "B.docx", "file": {}},
+                }
+            ]
+        }
+        unauthorized = aiohttp.ClientResponseError(
+            request_info=MagicMock(), history=(), status=401
+        )
+        if text:
+            for page in [first, last]:
+                for row in page["value"]:
+                    row["driveItem"]["listItem"] = {"fields": row["fields"]}
+                page["value"] = [row["driveItem"] for row in page["value"]]
+        client = _paged_graph_client([first, unauthorized, first, last])
+
+        with patch(
+            f"{tree_module.__name__}.SharePointContentClient", return_value=client
+        ):
+            result = await SharePointTreeService().search_library(
+                _token(),
+                drive_id="d1",
+                text=text,
+                filters={"Dokumenttyp": "Rutin"},
+                max_items=2,
+            )
+
+        assert [row["id"] for row in result["items"]] == ["1", "2"]
+        assert result["truncated"] is False
+        assert client.api_token == "new-token"
+
+    @pytest.mark.parametrize("expansion_rejected", [False, True])
+    async def test_folder_hits_do_not_consume_the_file_result_limit(
+        self, expansion_rejected
+    ):
+        folders = [
+            {"id": f"folder-{i}", "name": "Larm", "folder": {}} for i in range(200)
+        ]
+        files = [
+            {"id": f"file-{i}", "name": f"Larm {i}.docx", "file": {}}
+            for i in range(201)
+        ]
+        responses = [
+            {"value": folders, "@odata.nextLink": "https://graph.microsoft.com/p2"},
+            {"value": files},
+        ]
+        if expansion_rejected:
+            responses.insert(
+                0,
+                aiohttp.ClientResponseError(
+                    request_info=MagicMock(), history=(), status=400
+                ),
+            )
+        client = _paged_graph_client(responses)
+
+        with patch(
+            f"{tree_module.__name__}.SharePointContentClient", return_value=client
+        ):
+            result = await SharePointTreeService().search_library(
+                _token(), drive_id="d1", text="larm"
+            )
+
+        assert len(result["items"]) == 200
+        assert [row["id"] for row in result["items"]] == [
+            f"file-{i}" for i in range(200)
+        ]
+        assert result["truncated"] is True
+
+    async def test_a_folder_only_search_stops_at_the_scan_budget_and_reports_truncation(
+        self,
+    ):
+        page = {
+            "value": [{"id": str(i), "name": "Larm", "folder": {}} for i in range(500)],
+            "@odata.nextLink": "https://graph.microsoft.com/p2",
+        }
+        client = _paged_graph_client([page] * 5)
+
+        with patch(
+            f"{tree_module.__name__}.SharePointContentClient", return_value=client
+        ):
+            result = await SharePointTreeService().search_library(
+                _token(), drive_id="d1", text="larm"
+            )
+
+        assert result["items"] == []
+        assert result["truncated"] is True
+        assert client.client.get.await_count == 5  # columns + four pages of 500
+
+    async def test_column_filters_keep_paging_past_nonmatching_content_hits(self):
+        rejected = [
+            {
+                "id": str(i),
+                "name": "Larm.docx",
+                "file": {},
+                "listItem": {"fields": {"Dokumenttyp": "Policy"}},
+            }
+            for i in range(200)
+        ]
+        match = {
+            "id": "match",
+            "name": "Handbok.docx",
+            "file": {},
+            "listItem": {"fields": {"Dokumenttyp": "Rutin"}},
+        }
+        client = _paged_graph_client(
+            [
+                {
+                    "value": rejected,
+                    "@odata.nextLink": "https://graph.microsoft.com/p2",
+                },
+                {"value": [match]},
+            ]
+        )
+
+        with patch(
+            f"{tree_module.__name__}.SharePointContentClient", return_value=client
+        ):
+            result = await SharePointTreeService().search_library(
+                _token(), drive_id="d1", text="larm", filters={"Dokumenttyp": "Rutin"}
+            )
+
+        assert [row["id"] for row in result["items"]] == ["match"]
+        assert result["truncated"] is False
+
+    async def test_rejected_expansion_does_not_silently_discard_filtered_hits(self):
+        rejected = aiohttp.ClientResponseError(
+            request_info=MagicMock(), history=(), status=400
+        )
+        client = _paged_graph_client(
+            [rejected, {"value": [{"id": "1", "name": "Handbok.docx", "file": {}}]}]
+        )
+
+        with patch(
+            f"{tree_module.__name__}.SharePointContentClient", return_value=client
+        ):
+            with pytest.raises(ValueError, match="Could not read column values"):
+                await SharePointTreeService().search_library(
+                    _token(),
+                    drive_id="d1",
+                    text="larm",
+                    filters={"Dokumenttyp": "Rutin"},
+                )
 
 
 class TestFixtureSearch:

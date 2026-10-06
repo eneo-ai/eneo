@@ -13,10 +13,10 @@ from eneo.integration.infrastructure.preview_service.sharepoint_search import (
     MAX_SEARCH_RESULTS,
     build_odata_filter,
     clean_search_text,
+    drive_item_matches_filters,
     filter_columns,
     row_from_drive_item,
     row_from_list_item,
-    row_matches,
 )
 from eneo.main.logging import get_logger
 
@@ -262,10 +262,9 @@ class SharePointTreeService:
     ) -> Dict[str, Any]:
         """Files anywhere in the library matching ``text`` and column ``filters``.
 
-        Column filters go to Graph as a list query so the whole library is
-        covered without browsing it. Free text alone uses Graph's drive search,
-        which also looks inside documents. With both, the column query runs and
-        the text is checked against the rows that come back.
+        Free text always uses Graph's drive search, including document content.
+        Column filters refine those hits using their expanded fields. Filters
+        alone use Graph's list query. Only accepted files count toward the cap.
         """
         if not site_id and not drive_id:
             raise ValueError("Either site_id or drive_id must be provided")
@@ -303,31 +302,31 @@ class SharePointTreeService:
 
             rows: List[Dict[str, Any]] = []
             truncated = False
-            if filters:
-                # The free text is checked locally on the column query's rows;
-                # the client keeps paging until enough rows pass, so a match
-                # past the first page is not lost.
-                accepted: List[Dict[str, Any]] = []
+            if text:
 
-                def accept(raw: Dict[str, Any]) -> bool:
-                    row = row_from_list_item(raw, catalog)
-                    if row is None or not row_matches(row, text, {}):
-                        return False
-                    accepted.append(row)
-                    return True
+                def accept_drive_item(raw: dict[str, object]) -> bool:
+                    return row_from_drive_item(
+                        raw, catalog
+                    ) is not None and drive_item_matches_filters(raw, catalog, filters)
 
-                _, truncated = await content_client.get_list_items_filtered(
-                    actual_drive_id, odata_filter, max_items=max_items, accept=accept
-                )
-                rows = accepted[:max_items]
-            else:
                 raw_rows, truncated = await content_client.search_drive_items(
-                    actual_drive_id, text, max_items=max_items
+                    actual_drive_id, text, max_items=max_items, accept=accept_drive_item
                 )
-                for raw in raw_rows:
-                    row = row_from_drive_item(raw, catalog)
-                    if row:
-                        rows.append(row)
+            else:
+                raw_rows, truncated = await content_client.get_list_items_filtered(
+                    actual_drive_id,
+                    odata_filter,
+                    max_items=max_items,
+                    accept=lambda raw: row_from_list_item(raw, catalog) is not None,
+                )
+            for raw in raw_rows:
+                row = (
+                    row_from_drive_item(raw, catalog)
+                    if text
+                    else row_from_list_item(raw, catalog)
+                )
+                if row is not None:
+                    rows.append(row)
 
             logger.info(
                 "SharePoint library search done",

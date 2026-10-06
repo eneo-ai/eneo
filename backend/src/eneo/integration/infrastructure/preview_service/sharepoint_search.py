@@ -43,6 +43,10 @@ def _odata_string(value: str) -> str:
     return "'" + value.replace("'", "''") + "'"
 
 
+def _boolean_filter_value(value: str) -> bool:
+    return value.lower() in ("true", "yes", "ja", "1")
+
+
 def build_odata_filter(
     catalog: SharePointColumnCatalog, filters: dict[str, str]
 ) -> tuple[str | None, dict[str, str]]:
@@ -60,11 +64,45 @@ def build_odata_filter(
             residual[name] = value
             continue
         if column.kind == "boolean":
-            truthy = value.lower() in ("true", "yes", "ja", "1")
+            truthy = _boolean_filter_value(value)
             clauses.append(f"fields/{name} eq {'true' if truthy else 'false'}")
         else:
             clauses.append(f"fields/{name} eq {_odata_string(value)}")
     return (" and ".join(clauses) or None), residual
+
+
+def drive_item_matches_filters(
+    drive_item: dict[str, object],
+    catalog: SharePointColumnCatalog,
+    filters: dict[str, str],
+) -> bool:
+    """Compare raw column values on a Graph text hit, before display limits.
+
+    The caller validates filterability through build_odata_filter. Missing
+    fields mean the filter cannot be evaluated, rather than no matching files.
+    """
+    if not filters:
+        return True
+    list_item = drive_item.get("listItem")
+    if not isinstance(list_item, dict):
+        raise ValueError("Could not read column values for filtered search")
+    fields = cast(dict[str, object], list_item).get("fields")
+    if not isinstance(fields, dict):
+        raise ValueError("Could not read column values for filtered search")
+    fields = cast(dict[str, object], fields)
+    for name, wanted in filters.items():
+        value = fields.get(name)
+        if catalog.columns[name].kind == "boolean":
+            if not isinstance(value, bool) or value != _boolean_filter_value(wanted):
+                return False
+        else:
+            values = cast(list[object], value) if isinstance(value, list) else [value]
+            if not any(
+                isinstance(entry, str) and entry.casefold() == wanted.casefold()
+                for entry in values
+            ):
+                return False
+    return True
 
 
 def library_path(parent_reference: dict[str, Any] | None, name: str) -> str:

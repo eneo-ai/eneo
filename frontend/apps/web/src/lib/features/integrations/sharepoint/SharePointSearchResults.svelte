@@ -127,10 +127,10 @@
         </li>
       {/each}
     </ul>
-    {#if truncated}
-      <p class="text-muted-foreground px-4 py-3 text-xs" role="status">
-        {m.sharepoint_search_truncated({ count: String(items.length) })}
-      </p>
-    {/if}
+  {/if}
+  {#if truncated && !loading && !error}
+    <p class="text-muted-foreground px-4 py-3 text-xs" role="status">
+      {m.sharepoint_search_truncated({ count: String(items.length) })}
+    </p>
   {/if}
 </div>

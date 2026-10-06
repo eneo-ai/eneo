@@ -157,6 +157,21 @@ class TestFingerprint:
         a = [SourceMetadataEntry(name="t", label="T", value="Rutin", kind="choice")]
         b = [SourceMetadataEntry(name="t", label="T", value="Policy", kind="choice")]
 
-        assert source_metadata_fingerprint(a) == source_metadata_fingerprint(list(a))
-        assert source_metadata_fingerprint(a) != source_metadata_fingerprint(b)
-        assert len(source_metadata_fingerprint(a)) == 16
+        assert source_metadata_fingerprint(
+            a, title="Doc"
+        ) == source_metadata_fingerprint(list(a), title="Doc")
+        assert source_metadata_fingerprint(
+            a, title="Doc"
+        ) != source_metadata_fingerprint(b, title="Doc")
+        assert len(source_metadata_fingerprint(a, title="Doc")) == 16
+
+    def test_title_uses_the_same_whitespace_normalization_as_the_header(self):
+        entries = [
+            SourceMetadataEntry(name="t", label="T", value="Rutin", kind="choice")
+        ]
+        assert source_metadata_fingerprint(
+            entries, title=" Doc "
+        ) == source_metadata_fingerprint(entries, title="Doc")
+        assert source_metadata_fingerprint(
+            entries, title="Doc"
+        ) != source_metadata_fingerprint(entries, title="Renamed")

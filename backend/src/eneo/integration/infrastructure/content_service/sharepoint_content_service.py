@@ -184,9 +184,9 @@ class SharePointContentService:
         # loop does not GC them before they run.
         self._pending_change_key_tasks: set["asyncio.Task[None]"] = set()
         # Library column definitions per drive, fetched once per service
-        # instance (one sync job). An empty catalog is cached too, so a drive
+        # instance (one sync job). Failed reads are cached as None so a drive
         # whose columns cannot be read is asked only once.
-        self._column_catalogs: dict[str, SharePointColumnCatalog] = {}
+        self._column_catalogs: dict[str, Optional[SharePointColumnCatalog]] = {}
 
     async def _refresh_service_account_access_token(
         self, tenant_app: TenantSharePointApp
@@ -592,13 +592,13 @@ class SharePointContentService:
                     item_id = item.get("id")
                     is_deleted = has_graph_facet(item, "deleted")
                     is_folder = has_graph_facet(item, "folder")
-                    source_metadata: list[SourceMetadataEntry] = []
+                    source_metadata: Optional[list[SourceMetadataEntry]] = []
                     if not is_deleted and not is_folder:
                         source_metadata = await self._source_metadata_for(
                             content_client, actual_drive_id, item
                         )
                     change_key = self._change_key_with_metadata(
-                        item.get("cTag"), source_metadata
+                        item.get("cTag"), source_metadata, title=item_name
                     )
 
                     logger.debug(
@@ -1181,29 +1181,29 @@ class SharePointContentService:
 
     async def _column_catalog(
         self, client: SharePointContentClient, drive_id: Optional[str]
-    ) -> SharePointColumnCatalog:
+    ) -> Optional[SharePointColumnCatalog]:
         """The drive's admitted columns, read once per sync.
 
         Source metadata is enrichment: a library whose columns cannot be read
         (OneDrive roots, Sites.Selected grants without list access, a Graph
-        hiccup) still syncs its documents, just without properties.
+        hiccup) still syncs its documents. None means unread, so existing
+        properties survive; an empty catalog means no admitted columns remain.
         """
         if not drive_id or not client.list_item_fields_enabled:
-            return SharePointColumnCatalog()
-        cached = self._column_catalogs.get(drive_id)
-        if cached is not None:
-            return cached
+            return None
+        if drive_id in self._column_catalogs:
+            return self._column_catalogs[drive_id]
         try:
             definitions = await client.get_list_columns(drive_id)
             catalog = SharePointColumnCatalog.from_graph(definitions)
         except Exception as e:  # noqa: BLE001 - enrichment must never fail a sync
             logger.warning(
-                "Could not read library columns for drive %s; syncing without "
+                "Could not read library columns for drive %s; keeping existing "
                 "source metadata: %s",
                 drive_id,
                 e,
             )
-            catalog = SharePointColumnCatalog()
+            catalog = None
         self._column_catalogs[drive_id] = catalog
         return catalog
 
@@ -1212,8 +1212,18 @@ class SharePointContentService:
         client: SharePointContentClient,
         drive_id: Optional[str],
         item: SharePointItem,
-    ) -> list[SourceMetadataEntry]:
+    ) -> Optional[list[SourceMetadataEntry]]:
+        """None is an unavailable read; [] is a successful read with no values."""
         catalog = await self._column_catalog(client, drive_id)
+        if catalog is None:
+            return None
+        if catalog.is_empty:
+            return []
+        list_item = item.get("listItem")
+        if not isinstance(list_item, dict) or not isinstance(
+            list_item.get("fields"), dict
+        ):
+            return None
         try:
             return extract_source_metadata(cast(dict[str, object], item), catalog)
         except Exception as e:  # noqa: BLE001 - malformed payload must not fail a sync
@@ -1222,36 +1232,47 @@ class SharePointContentService:
                 item.get("id"),
                 e,
             )
-            return []
+            return None
 
     @staticmethod
     def _content_hash(
-        sanitized_text: str, source_metadata: list[SourceMetadataEntry]
+        sanitized_text: str, source_metadata: list[SourceMetadataEntry], *, title: str
     ) -> bytes:
-        """Digest of what gets embedded: the text, and the properties if any.
+        """Digest of what gets embedded: the text, and the source header if any.
 
         The properties are part of the embedded header, so a changed column
-        value must re-embed. Documents without properties keep the plain text
-        digest, so existing rows are not all re-embedded after the upgrade.
+        value or title must re-embed. Documents without properties keep the
+        plain text digest, so existing rows are not all re-embedded on upgrade.
         """
         digest = hashlib.sha256(sanitized_text.encode("utf-8"))
         if source_metadata:
             digest.update(b"\x00source_metadata:")
-            digest.update(source_metadata_fingerprint(source_metadata).encode("ascii"))
+            digest.update(
+                source_metadata_fingerprint(source_metadata, title=title).encode(
+                    "ascii"
+                )
+            )
         return digest.digest()
 
     @staticmethod
     def _change_key_with_metadata(
-        change_key: Optional[str], source_metadata: list[SourceMetadataEntry]
+        change_key: Optional[str],
+        source_metadata: Optional[list[SourceMetadataEntry]],
+        *,
+        title: str,
     ) -> Optional[str]:
-        """Graph's cTag only moves on content changes; fold the properties in.
+        """Graph's cTag only moves on content changes; fold the source header in.
 
-        Otherwise editing a column value in SharePoint would be skipped as a
-        duplicate by the ChangeKey cache and never reach the index.
+        Column edits and renames must reach the index. An unavailable metadata
+        read cannot establish that an item is unchanged, so bypass deduplication.
         """
+        if source_metadata is None:
+            return None
         if not change_key or not source_metadata:
             return change_key
-        return f"{change_key}#{source_metadata_fingerprint(source_metadata)}"
+        return (
+            f"{change_key}#{source_metadata_fingerprint(source_metadata, title=title)}"
+        )
 
     async def _process_info_blob(
         self,
@@ -1277,8 +1298,11 @@ class SharePointContentService:
         previous_blob_size = safe_int(existing_blob.size) if existing_blob else 0
 
         sanitized_text = sanitize_text_for_db(text)
-        source_metadata = source_metadata or []
-        content_hash = self._content_hash(sanitized_text, source_metadata)
+        if source_metadata is None:
+            source_metadata = (
+                (existing_blob.source_metadata or []) if existing_blob else []
+            )
+        content_hash = self._content_hash(sanitized_text, source_metadata, title=title)
 
         # Skip the (expensive) re-chunk + re-embed when the content is byte-for-byte
         # unchanged. SharePoint emits delta changes for metadata edits, moves and

@@ -274,10 +274,15 @@ def _normalise_value(raw: Any) -> str | list[str] | None:
     return _normalise_scalar(raw)
 
 
-def source_metadata_fingerprint(entries: list[SourceMetadataEntry]) -> str:
-    """Short, stable digest of the entries, for change detection."""
+def source_metadata_fingerprint(
+    entries: list[SourceMetadataEntry], *, title: str
+) -> str:
+    """Short, stable digest of the source header's title and properties."""
     canonical = json.dumps(
-        [entry.model_dump() for entry in entries],
+        {
+            "title": title.strip(),
+            "properties": [entry.model_dump() for entry in entries],
+        },
         ensure_ascii=False,
         sort_keys=True,
         separators=(",", ":"),

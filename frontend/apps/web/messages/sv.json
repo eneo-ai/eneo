@@ -4470,7 +4470,7 @@
   "sharepoint_searching": "Söker…",
   "sharepoint_search_results_one": "{count} träff i hela webbplatsen",
   "sharepoint_search_results_other": "{count} träffar i hela webbplatsen",
-  "sharepoint_search_truncated": "Visar de första {count}. Förfina sökningen för att se fler.",
+  "sharepoint_search_truncated": "Sökningen är ofullständig. Visar {count} träffar. Förfina sökningen för att se fler.",
   "sharepoint_search_no_results": "Inga filer matchar sökningen.",
   "sharepoint_search_error": "Sökningen kunde inte genomföras.",
   "sharepoint_search_results_label": "Sökträffar",
