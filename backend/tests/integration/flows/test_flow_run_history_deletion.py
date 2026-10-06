@@ -112,7 +112,7 @@ OLD = datetime.now(timezone.utc) - timedelta(days=3)
 
 @pytest.fixture(autouse=True)
 def row_budget_not_wall_clock(monkeypatch):
-    monkeypatch.setattr(get_settings(), "gallring_family_gather_seconds", 60.0)
+    monkeypatch.setattr(get_settings(), "retention_family_gather_seconds", 60.0)
 
 
 async def _auto_delete(flow_id: UUID, days: int = 1, mode: str = "auto_delete") -> None:
@@ -599,7 +599,7 @@ async def test_the_nightly_task_deletes_a_fully_loaded_run_with_its_files(scope)
         assert items == set(loaded.files.values())
         audit = await session.scalar(
             sa.select(AuditLogTable).where(
-                AuditLogTable.action == ActionType.GALLRING_APPLIED.value,
+                AuditLogTable.action == ActionType.RETENTION_APPLIED.value,
                 AuditLogTable.log_metadata["task"].astext == FLOWS_HISTORY_TASK,
             )
         )
@@ -1118,7 +1118,7 @@ async def test_explicit_statement_timeout_rolls_back_its_unit(
     """Mutants explicit_timeout_removed, explicit_timeout_savepoint_removed."""
     tenant_id, user_id, _, flow_id = scope
     run_id = await _bare_run(tenant_id, user_id, flow_id)
-    monkeypatch.setattr(get_settings(), "gallring_chunk_statement_timeout_ms", 500)
+    monkeypatch.setattr(get_settings(), "retention_chunk_statement_timeout_ms", 500)
     repository = (
         FlowRunHistoryDueRepository if diagnostic else FlowRunDeletionRepository
     )
@@ -1169,8 +1169,8 @@ async def test_explicit_guard_obeys_the_configured_lock_limit(scope, monkeypatch
     """Mutants explicit_guard_removed, retention_lock_fixed_timeout."""
     tenant_id, user_id, _, flow_id = scope
     run_id = await _bare_run(tenant_id, user_id, flow_id)
-    monkeypatch.setattr(get_settings(), "gallring_chunk_lock_timeout_ms", 200)
-    monkeypatch.setattr(get_settings(), "gallring_chunk_statement_timeout_ms", 2000)
+    monkeypatch.setattr(get_settings(), "retention_chunk_lock_timeout_ms", 200)
+    monkeypatch.setattr(get_settings(), "retention_chunk_statement_timeout_ms", 2000)
     async with _committed() as holder:
         await acquire_exclusive(holder, RetentionSubject.FLOW_HISTORY)
         async with _committed() as session:

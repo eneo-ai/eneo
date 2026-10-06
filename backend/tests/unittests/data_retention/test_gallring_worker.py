@@ -5,6 +5,7 @@ from types import SimpleNamespace
 from typing import Any
 
 import pytest
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from eneo.data_retention.application.conversation_history_retention_task import (
     CONVERSATION_HISTORY_TASK,
@@ -55,11 +56,12 @@ async def test_nightly_run_executes_an_enabled_task_and_records_a_disabled_one(
     runner = _Runner()
     settings = test_settings.model_copy(
         update={
-            "gallring_flows_housekeeping_enabled": enabled,
+            "retention_flows_housekeeping_enabled": enabled,
             "retention_flows_history_enabled": not enabled,
             "retention_chats_history_enabled": enabled,
             "retention_builder_client_errors_enabled": not enabled,
             "retention_chats_max_unit_rows": 100_001,
+            "retention_max_family_rows": 4096,
         }
     )
     monkeypatch.setattr(retention_worker, "get_settings", lambda: settings)
@@ -70,9 +72,11 @@ async def test_nightly_run_executes_an_enabled_task_and_records_a_disabled_one(
         return runner
 
     monkeypatch.setattr(retention_worker, "retention_runner", build_runner)
-    container = SimpleNamespace(session=lambda: object())
-
-    reports = await inspect.unwrap(retention_worker.run_retention)(container=container)
+    async with AsyncSession() as session:
+        container = SimpleNamespace(session=lambda: session)
+        reports = await inspect.unwrap(retention_worker.run_retention)(
+            container=container
+        )
 
     # Kills a global-budget handoff: the chat builder also rejects its smaller cap.
     assert [budget.rows for budget in budgets] == [50_000, 50_000, 250_000, 50_000]
@@ -94,6 +98,8 @@ async def test_nightly_run_executes_an_enabled_task_and_records_a_disabled_one(
     )
     if enabled:
         assert first == "run" and isinstance(housekeeping, FlowHousekeepingTask)
+        # Kills Q01: ignore the worker's resolved operator snapshot for admission.
+        assert housekeeping.steps()[0].max_batch == 4096
         # The emergency switch never stops gallring silently.
         assert (second, history) == ("skip", FLOWS_HISTORY_TASK)
         assert third == "run" and isinstance(chats, ConversationHistoryRetentionTask)
@@ -101,6 +107,7 @@ async def test_nightly_run_executes_an_enabled_task_and_records_a_disabled_one(
     else:
         assert (first, housekeeping) == ("skip", FLOWS_HOUSEKEEPING_TASK)
         assert second == "run" and isinstance(history, FlowRunHistoryRetentionTask)
+        assert history.steps()[0].max_batch == 4096
         assert (third, chats) == ("skip", CONVERSATION_HISTORY_TASK)
         assert fourth == "run" and isinstance(errors, BuilderClientErrorRetentionTask)
     # Kills G1b-H01: omit reporting metadata or include a disabled reporter.
@@ -114,13 +121,13 @@ def test_the_family_cap_never_exceeds_one_executions_budget(
     test_settings, family_rows, accepted
 ) -> None:
     # Default budgets: 50 000 rows and 10 000 files per execution.
-    values = {**test_settings.model_dump(), "gallring_max_family_rows": family_rows}
+    values = {**test_settings.model_dump(), "retention_max_family_rows": family_rows}
     if accepted:
-        assert type(test_settings).model_validate(values).gallring_max_family_rows == (
+        assert type(test_settings).model_validate(values).retention_max_family_rows == (
             family_rows
         )
     else:
-        with pytest.raises(ValueError, match="GALLRING_MAX_FAMILY_ROWS"):
+        with pytest.raises(ValueError, match="RETENTION_MAX_FAMILY_ROWS"):
             type(test_settings).model_validate(values)
 
 

@@ -258,7 +258,7 @@ async def test_deadline_stores_rotate_before_aged_session_housekeeping(
     for name, value in (
         ("retention_chats_max_rows_per_run", 4),
         ("retention_chats_max_unit_rows", 1),
-        ("gallring_chunk_rows", 4),
+        ("retention_chunk_rows", 4),
     ):
         monkeypatch.setattr(get_settings(), name, value)
     report = await run_conversation_history(async_session, now=now)

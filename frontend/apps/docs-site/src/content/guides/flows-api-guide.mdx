@@ -298,7 +298,7 @@ PATCH requests distinguish omission from null: omit a field to preserve it, or s
 - `run_debug_evidence_days`
 - `flow_runtime_upload_abandonment_days`
 
-The inputs are nullable integers in the range `1..2555`. `flow_runtime_upload_abandonment_days` is how many days a runtime upload never attached to a run input (and a live transcript never bound to a run) is kept before the nightly Flow gallring job deletes it, counted from creation; a new value applies to existing items too, and `null` means the 30-day default. Debug-evidence eligibility remains independently configured. Saving either value deletes nothing by itself; see [Nightly Flow gallring](/guides/data-retention#nightly-flow-gallring).
+The inputs are nullable integers in the range `1..2555`. `flow_runtime_upload_abandonment_days` is how many days a runtime upload never attached to a run input (and a live transcript never bound to a run) is kept before the nightly Flow retention job deletes it, counted from creation; a new value applies to existing items too, and `null` means the 30-day default. Debug-evidence eligibility remains independently configured. Saving either value deletes nothing by itself; see [Nightly Flow retention](/guides/data-retention#nightly-flow-retention).
 
 Run and step history uses dedicated hierarchical endpoints:
 
@@ -320,9 +320,9 @@ Each write replaces the complete local run-history policy and the local transcri
 }
 ```
 
-Send `{ "policy": null, "delete_transcription_audio_after_use": null }` to clear both local values and inherit. Partial policies are invalid. `days` accepts `1..2555`; `mode` is `preserve` or `review_required`. The most specific complete Flow, Space, or Organization policy wins. A Flow can therefore use 90 days while its Space uses 60 and the Organization default remains 30.
+Send `{ "policy": null, "delete_transcription_audio_after_use": null }` to clear both local values and inherit. Partial policies are invalid. `days` is at least 1 and may not exceed `write_rules.max_days` (operator setting `FLOW_RETENTION_MAX_DAYS`, default 36500). A stored policy above a later-lowered maximum keeps applying. `mode` is `preserve`, `review_required` or `auto_delete`. The most specific complete Flow, Space, or Organization policy wins. A Flow can therefore use 90 days while its Space uses 60 and the Organization default remains 30.
 
-`preserve` makes history eligible for an explicit administrator purge without a separate review requirement. `review_required` adds eligible terminal runs to the read-only retention review queue and excludes them from this purge action. Neither mode schedules or performs deletion by itself.
+`preserve` makes history eligible for an explicit administrator purge without a separate review requirement. `review_required` adds eligible terminal runs to the read-only retention review queue and excludes them from this purge action. `auto_delete` makes the nightly `flows.history` task delete due terminal runs, subject to holds and budgets. An installation without that task refuses the mode. Saving any policy deletes nothing in the request.
 
 Queue reads are available at the Organization route ending in `/review-queue` and equivalent Space and Flow routes. They accept a bounded `limit` and an opaque keyset `cursor`, omit run inputs and outputs, and cannot approve or delete data. When `has_more` is true, pass `next_cursor` unchanged as the next request's `cursor`.
 

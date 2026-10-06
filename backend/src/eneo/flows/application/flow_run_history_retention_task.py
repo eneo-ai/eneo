@@ -78,7 +78,12 @@ class FlowRunHistoryRetentionTask:
         self._now = now
         self._session = session
         self._settings = settings if settings is not None else get_settings()
-        self._deletion = FlowRunHistoryDeletion(session, family_rows=family_rows)
+        self._deletion = FlowRunHistoryDeletion(
+            session,
+            family_rows=family_rows
+            if family_rows is not None
+            else self._settings.retention_max_family_rows,
+        )
 
     @property
     def name(self) -> str:
@@ -105,7 +110,7 @@ class FlowRunHistoryRetentionTask:
     async def overdue(self) -> RetentionOverdue:
         overdue = await FlowRunHistoryDueRepository(self._session).overdue(
             now=self._now(),
-            window=timedelta(days=self._settings.gallring_overdue_window_days),
+            window=timedelta(days=self._settings.retention_overdue_window_days),
             cap=self._settings.retention_overdue_max_rows,
         )
         return RetentionOverdue(
@@ -138,20 +143,20 @@ class FlowRunHistoryRetentionTask:
 
             return RetentionKeyset(at=receipt.started_at, id=receipt.id), handle
 
-        settings = get_settings()
+        settings = self._settings
         return await gather_retention_units(
             next_candidate,
             out,
             max_rows=batch.rows,
             max_files=batch.files,
             cursor=batch.cursor,
-            chunk_rows=settings.gallring_chunk_rows,
-            gather_seconds=settings.gallring_family_gather_seconds,
+            chunk_rows=settings.retention_chunk_rows,
+            gather_seconds=settings.retention_family_gather_seconds,
         )
 
     async def _runs(self, batch: RetentionBatch) -> RetentionStepResult:
         out = RetentionEffects()
-        settings = get_settings()
+        settings = self._settings
         selection = RunHistorySelection()
         return await gather_retention_units(
             self._deletion.due_candidates(
@@ -166,7 +171,7 @@ class FlowRunHistoryRetentionTask:
             max_rows=batch.rows,
             max_files=batch.files,
             cursor=batch.cursor,
-            chunk_rows=settings.gallring_chunk_rows,
-            gather_seconds=settings.gallring_family_gather_seconds,
+            chunk_rows=settings.retention_chunk_rows,
+            gather_seconds=settings.retention_family_gather_seconds,
             min_candidate_rows=2,
         )

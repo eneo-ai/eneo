@@ -1,7 +1,7 @@
 """Bounded statements of the nightly flows housekeeping (staging and waste data).
 
 Every selection is a keyset page with a LIMIT over an index whose range a
-literal cutoff bounds, after the step's durable cursor (GallringKeyset), so rows
+literal cutoff bounds, after the step's durable cursor (RetentionKeyset), so rows
 that must stay are passed once per pass instead of starving the rows behind
 them. Cutoffs use the deployment's settings
 (docs/adr/single-tenant-assumption.md).

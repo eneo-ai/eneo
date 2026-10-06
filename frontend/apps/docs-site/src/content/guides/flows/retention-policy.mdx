@@ -160,12 +160,25 @@ A change that stops or delays automatic deletion, including changing effective a
 
 Typed refusals (400, nothing changed): `flow_retention_auto_delete_unavailable` (`auto_delete` in an installation without `flows.history`), `flow_retention_days_above_maximum` and `flow_retention_reason_required`.
 
-Every policy response separates four facts:
+Every policy response separates five facts:
 
 - `local_policy`: the complete policy stored at the requested level, or `null`;
 - `inherited_policy`: the nearest complete parent policy, or `null`;
 - `effective`: the resolved result, including its source and all contributors;
-- `write_rules`: `max_days` and `auto_delete_available`, the limits a write must meet.
+- `write_rules`: `max_days` and `auto_delete_available`, the limits a write must meet;
+- `transcription_audio`: the independent `local`, `inherited` and `effective` audio-after-use choices.
+
+### Audio after use
+
+`delete_transcription_audio_after_use` defaults to `false`. A Flow choice overrides its Space, which overrides the Organization. `null` inherits; an explicit `false` keeps audio even if its parent enables deletion. Changing this choice deletes nothing in the settings request.
+
+When enabled, the nightly `flows.housekeeping` task considers audio inputs from completed, failed and cancelled runs. It reads the run's published input definition. A completed transcription step must have its canonical transcript before its source audio can be released. An unfinished transcription step in a failed or cancelled run does not require a transcript that was never produced. Active runs, legal holds and file families still used elsewhere keep their audio. A live recording keeps its audio while a bound live-transcript record refers to the file, including the source run's own record.
+
+Each audio unit is checked again under locks and must fit the family and execution budgets before any input link or file is removed. A blocked unit pauses with a typed reason; one that does not fit the remaining execution budget waits for a later pass. Enabling the setting applies to existing eligible inputs too, so it does not guarantee deletion on a particular night.
+
+The run, its transcript and its history remain. Run detail exposes `released_inputs` with the step and file identifiers, `released_at` and reason `transcription_audio_after_use`; the evidence view shows the deletion date. This state survives file deletion and is removed with the run itself. File bytes leave through the content store after their final file reference is removed.
+
+A retry can reuse a completed transcription prefix and regenerate following steps without the original audio. If the retry must execute a step whose audio was released, it refuses with `409 flow_run_source_audio_deleted` and creates no child run. Replaying an already accepted retry's idempotency key keeps the existing result.
 
 ### Review-queue endpoints
 
@@ -186,14 +199,16 @@ administrator-facing date shown for each result.
 
 `GET /settings/flow-run-retention-policy/status` (either retention permission) returns, without any run, Flow or Space name:
 
-- `tasks`: every registered nightly gallring task with its emergency switch (`enabled`), `stale`, the last completed time and the newest execution (outcome, counts, blocked counts, error code);
-- `overdue`: terminal runs under `auto_delete` still stored more than the overdue window (operator setting `GALLRING_OVERDUE_WINDOW_DAYS`, default 1 day) after their deadline, counted live up to 1000 (`complete` says whether the count covers all), split into `undelivered_audit`, `unresolved_webhook` and `not_yet_deleted`; runs under a legal hold past the same window are counted apart as `held` up to the same cap;
+- `tasks`: every registered nightly retention task with its emergency switch (`enabled`), `stale`, the last completed time and the newest execution (outcome, counts, blocked counts, error code);
+- `overdue`: terminal runs under `auto_delete` still stored more than the overdue window (operator setting `RETENTION_OVERDUE_WINDOW_DAYS`, default 1 day) after their deadline, counted live up to 1000 (`complete` says whether the count covers all), split into `undelivered_audit`, `unresolved_webhook` and `not_yet_deleted`; runs under a legal hold past the same window are counted apart as `held` up to the same cap;
 - `receipts`: run deletions started and not finished, and the oldest finished deletion whose file content is not yet confirmed gone;
 - `auto_delete_available` and `overdue_window_days`.
 
 A run whose deletion has started (it is fenced) answers as if it were deleted in run reads and run lists, the review queue, the explicit purge and its blocked counts, and when a legal hold names it by id (`flow_retention_hold_run_not_in_flow`, like a missing run). Replaying the `Idempotency-Key` that created it returns `409 flow_run_idempotency_run_deleted`: the run is neither returned nor created again.
 
-The cap bounds returned results, not rows examined by eligibility scans. Each status statement is subject to `GALLRING_CHUNK_STATEMENT_TIMEOUT_MS`. The served OpenAPI specification documents the status route’s error responses.
+The cap bounds returned results, not rows examined by eligibility scans. Each status statement is subject to `RETENTION_CHUNK_STATEMENT_TIMEOUT_MS`. The served OpenAPI specification documents the status route’s error responses.
+
+Temporary statement or lock timeouts during an explicit purge return `503 retention_purge_unavailable`; retry the request. A permanent database error remains an internal error and is logged with its cause.
 
 ## How a run is deleted
 
@@ -203,11 +218,11 @@ The nightly `flows.history` task and the explicit purge delete a run with the sa
 2. **Files.** Each of the run's file families (its result files and consumed uploads, with every file derived from them) is settled in one transaction: the run's links to it go, every member is checked afresh for another owner, and the family's (file, content) pairs are recorded in the receipt's manifest. A family nobody else uses is then deleted with the upload's binding and the live transcripts bound to it; a family another owner keeps (another run, an assistant, a published version) is kept and recorded as shared, and the run is deleted anyway. The manifest is written after the fence, which releases nothing, and before any content reference is released.
 3. **Rows.** The run's rows (steps, attempts, provider calls, transcripts and corrections, reviews, deliveries) go in bounded batches, the run row last. The receipt is then complete.
 
-A run that does not fit one night's budget continues the next night where it stopped; it stays hidden in between. Once a run is fenced, a later policy change does not take it back: what was decided under the rule in force at selection is finished. Only an active legal hold pauses it (receipt reason `legal_hold`); it continues when the hold is released. A file family larger than `GALLRING_MAX_FAMILY_ROWS` pauses the run with `family_exceeds_budget` until the operator raises the cap. Paused and unfinished runs are listed in the deletion status.
+A run that does not fit one night's budget continues the next night where it stopped; it stays hidden in between. Once a run is fenced, a later policy change does not take it back: what was decided under the rule in force at selection is finished. Only an active legal hold pauses it (receipt reason `legal_hold`); it continues when the hold is released. A file family larger than `RETENTION_MAX_FAMILY_ROWS` pauses the run with `family_exceeds_budget` until the operator raises the cap. Paused and unfinished runs are listed in the deletion status.
 
 The receipt records the rule at selection (level, the Organization, Space or Flow it belongs to, mode, days and the deadline), the run's anchor, the rows and files deleted, and for an explicit purge the person who started it.
 
-The explicit purge admits due runs under `preserve` or `auto_delete`, taking Flows in id order and each Flow's runs oldest first, and deletes them within the deployment's per-run budgets (`GALLRING_MAX_ROWS_PER_RUN`, `GALLRING_MAX_FILES_PER_RUN`) in the request. A run the budget cuts short is returned in `pending_receipt_ids` (`pending_count`); it remains stored but is already hidden. The enabled nightly `flows.history` task continues the deletion on behalf of that receipt, subject to holds and execution caps. While `RETENTION_FLOWS_HISTORY_ENABLED=false`, it stays unfinished.
+The explicit purge admits due runs under `preserve` or `auto_delete`, taking Flows in id order and each Flow's runs oldest first, and deletes them within the deployment's per-run budgets (`RETENTION_MAX_ROWS_PER_RUN`, `RETENTION_MAX_FILES_PER_RUN`) in the request. A run the budget cuts short is returned in `pending_receipt_ids` (`pending_count`); it remains stored but is already hidden. The enabled nightly `flows.history` task continues the deletion on behalf of that receipt, subject to holds and execution caps. While `RETENTION_FLOWS_HISTORY_ENABLED=false`, it stays unfinished.
 
 `selection_complete` is true only when the candidate scan exhausted scope before reaching the requested limit or budgets. A false value means more candidates may remain; each request starts selection again. Empty Flows and blocked runs are excluded in SQL. A complete candidate scan can still leave the separately reported deletion receipts unfinished. Reaching the requested limit is conservatively incomplete.
 
@@ -233,7 +248,7 @@ when it is reviewed and until when.
 - **Review date:** required. It must be in the future and at most
   the review limit ahead (default 365 days; see below). Passing it does **not** end the hold: the hold stays active, is
   marked **review overdue**, and Flow runtime health reports
-  `GALLRING_HOLD_REVIEW_OVERDUE` until someone moves the review date later (with
+  `RETENTION_HOLD_REVIEW_OVERDUE` until someone moves the review date later (with
   a reason) or releases the hold.
 - **End date:** optional. The hold stops by itself when it passes; nothing has
   to run for that. An ended or released hold stays listed as part of the record.
@@ -323,7 +338,7 @@ The audit metadata records the scope, scope identifier, old and new local policy
 
 Flow run-history policy is separate from:
 
-- never-attached runtime uploads (deleted by the nightly Flow gallring job after the Organization window);
+- never-attached runtime uploads (deleted by the nightly Flow retention job after the Organization window);
 - debug evidence eligibility;
 - conversation and App history;
 - Flow AI Builder conversation sessions;
@@ -333,5 +348,3 @@ Flow run-history policy is separate from:
 Some of those data classes have automatic cleanup when their own policy is configured. See [Data retention and deletion](/guides/data-retention) before making a production claim about the whole workflow.
 
 Next: [Data retention and deletion](/guides/data-retention).
-
-The served OpenAPI specification documents the status route error responses.

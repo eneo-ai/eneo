@@ -45,10 +45,6 @@ class _Session:
         self.failure = failure
         self.statements: list[str] = []
 
-    async def scalar(self, statement):
-        self.statements.append(_sql(statement))
-        return "0"
-
     async def execute(self, statement):
         sql = _sql(statement)
         self.statements.append(sql)
@@ -62,7 +58,7 @@ async def test_a_lock_timeout_is_refused_as_a_typed_conflict() -> None:
     with pytest.raises(retention_lock.RetentionLockBusy) as refused:
         await retention_lock.acquire_exclusive(session, SUBJECT)  # type: ignore[arg-type]
     assert refused.value.code == "flow_retention_lock_busy"
-    configured_ms = get_settings().gallring_chunk_lock_timeout_ms
+    configured_ms = get_settings().retention_chunk_lock_timeout_ms
     assert (
         f"set_config('lock_timeout', '{configured_ms}ms', true)"
         in session.statements[1]

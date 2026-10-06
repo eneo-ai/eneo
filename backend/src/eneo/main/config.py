@@ -358,40 +358,40 @@ class Settings(BaseSettings):
     # this ceiling to the global limit; existing work is not stopped.
     crawl_job_tenant_concurrency_limit: int | None = Field(default=4, gt=0)
     flow_max_concurrent_runs_per_tenant: int = 4
-    # Gallring (scheduled deletion) on the general worker: every registered task
+    # Scheduled retention on the general worker: every registered task
     # runs daily at this time, one execution at a time, within these budgets.
-    gallring_cron_hour: int = Field(default=3, ge=0, le=23)
-    gallring_cron_minute: int = Field(default=30, ge=0, le=59)
-    gallring_flows_housekeeping_enabled: bool = True
+    retention_cron_hour: int = Field(default=3, ge=0, le=23)
+    retention_cron_minute: int = Field(default=30, ge=0, le=59)
+    retention_flows_housekeeping_enabled: bool = True
     # Emergency switch of the nightly flows.history task (auto_delete of run
     # history); rules can still be set while it is off.
     retention_flows_history_enabled: bool = True
     retention_chats_history_enabled: bool = True
     retention_builder_client_errors_enabled: bool = True
     # A due auto_delete run still stored this many days after its deadline is
-    # overdue (health flag GALLRING_OVERDUE).
-    gallring_overdue_window_days: int = Field(default=1, ge=1, le=365)
+    # overdue (health flag RETENTION_OVERDUE).
+    retention_overdue_window_days: int = Field(default=1, ge=1, le=365)
     retention_overdue_max_rows: int = Field(default=1000, gt=0)
     # Largest number of days a Flow run-history retention policy write may set;
     # checked on write only, stored longer policies keep applying. At most 100
     # years, so every cutoff stays a valid timestamp.
     flow_retention_max_days: int = Field(default=36_500, ge=1, le=36_500)
-    gallring_max_rows_per_run: int = Field(default=50_000, gt=0)
+    retention_max_rows_per_run: int = Field(default=50_000, gt=0)
     retention_chats_max_rows_per_run: int = Field(default=250_000, gt=0)
     # A complete conversation cascade plus its bounded discovery/proof fits
     # an execution; oversized roots remain intact.
     retention_chats_max_unit_rows: int = Field(default=5000, gt=0)
-    gallring_max_files_per_run: int = Field(default=10_000, gt=0)
-    gallring_max_seconds_per_run: int = Field(default=1800, gt=0)
-    gallring_chunk_rows: int = Field(default=500, gt=0, le=2000)
-    gallring_family_gather_seconds: float = Field(default=1.0, gt=0)
+    retention_max_files_per_run: int = Field(default=10_000, gt=0)
+    retention_max_seconds_per_run: int = Field(default=1800, gt=0)
+    retention_chunk_rows: int = Field(default=500, gt=0, le=2000)
+    retention_family_gather_seconds: float = Field(default=1.0, gt=0)
     # One file family is reclaimed in one transaction; a family needing more
     # rows than this is paused instead. At most one execution's budget.
-    gallring_max_family_rows: int = Field(default=5000, gt=0, le=100_000)
-    gallring_chunk_statement_timeout_ms: int = Field(default=30_000, gt=0)
-    gallring_chunk_lock_timeout_ms: int = Field(default=2_000, gt=0)
+    retention_max_family_rows: int = Field(default=5000, gt=0, le=100_000)
+    retention_chunk_statement_timeout_ms: int = Field(default=30_000, gt=0)
+    retention_chunk_lock_timeout_ms: int = Field(default=2_000, gt=0)
     # A running execution whose heartbeat is older than this may be taken over.
-    gallring_stale_after_seconds: int = Field(default=3600, gt=0)
+    retention_stale_after_seconds: int = Field(default=3600, gt=0)
     # Platform task runtime capacity classes. Each queue is consumed by its own
     # ARQ worker process with an independent max_jobs budget.
     task_execution_queue: str = "tasks:execution"
@@ -761,12 +761,12 @@ class Settings(BaseSettings):
     @model_validator(mode="after")
     def validate_retention_unit_budgets(self):
         """An admitted atomic unit must fit with its discovery and proof work."""
-        if self.gallring_max_family_rows > min(
-            self.gallring_max_rows_per_run, self.gallring_max_files_per_run
+        if self.retention_max_family_rows > min(
+            self.retention_max_rows_per_run, self.retention_max_files_per_run
         ):
             raise ValueError(
-                "GALLRING_MAX_FAMILY_ROWS must not exceed GALLRING_MAX_ROWS_PER_RUN "
-                "or GALLRING_MAX_FILES_PER_RUN."
+                "RETENTION_MAX_FAMILY_ROWS must not exceed RETENTION_MAX_ROWS_PER_RUN "
+                "or RETENTION_MAX_FILES_PER_RUN."
             )
         validate_conversation_unit_budget(
             unit_rows=self.retention_chats_max_unit_rows,

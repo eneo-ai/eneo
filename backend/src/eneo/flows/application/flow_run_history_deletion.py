@@ -26,7 +26,7 @@ carries the work across transactions:
 Once fenced, only an active legal hold pauses the work (reason legal_hold; it
 resumes on release); a later policy change does not. A family larger than the
 family cap pauses it (family_exceeds_budget) until the operator raises
-GALLRING_MAX_FAMILY_ROWS; one nested deeper than the traversal bound pauses it
+RETENTION_MAX_FAMILY_ROWS; one nested deeper than the traversal bound pauses it
 (family_depth_exceeded). Examined rows and deleted child rows count against the
 row budget; manifest items, released references, file rows, bindings and bound
 transcripts against the file budget.
@@ -204,11 +204,11 @@ class FlowRunHistoryDeletion:
         self.rules = FlowRunHistoryDueRepository(session)
         self.families = FlowFileFamilyRepository(session)
         self.housekeeping = FlowHousekeepingRepository(session)
-        # The largest family settled in one transaction (GALLRING_MAX_FAMILY_ROWS).
+        # The largest family settled in one transaction (RETENTION_MAX_FAMILY_ROWS).
         self.family_rows = (
             family_rows
             if family_rows is not None
-            else get_settings().gallring_max_family_rows
+            else get_settings().retention_max_family_rows
         )
 
     async def lock(self) -> None:

@@ -714,12 +714,12 @@ const ACTION_MESSAGES = {
     description: m.audit_action_retention_policy_applied_description
   },
   gallring_applied: {
-    name: m.audit_action_gallring_applied,
-    description: m.audit_action_gallring_applied_description
+    name: m.audit_action_retention_applied,
+    description: m.audit_action_retention_applied_description
   },
   gallring_skipped: {
-    name: m.audit_action_gallring_skipped,
-    description: m.audit_action_gallring_skipped_description
+    name: m.audit_action_retention_skipped,
+    description: m.audit_action_retention_skipped_description
   },
   encryption_key_rotated: {
     name: m.audit_action_encryption_key_rotated,

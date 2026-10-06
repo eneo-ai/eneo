@@ -59,10 +59,9 @@ class FlowRunRetentionPolicyChange:
 
     @property
     def changed(self) -> bool:
-        return (
-            self.before.local_policy != self.after.local_policy
-            or self.before.transcription_audio.local
-            != self.after.transcription_audio.local
+        return self.before.differs_from(
+            policy=self.after.local_policy,
+            transcription_audio=self.after.transcription_audio.local,
         )
 
 
@@ -307,9 +306,9 @@ class FlowRunRetentionPolicyRepository:
         await acquire_exclusive(self.session, RetentionSubject.FLOW_HISTORY)
         await self._lock_organization(tenant_id=tenant_id)
         before = await self.get_organization(tenant_id=tenant_id)
-        if (
-            before.local_policy != policy
-            or before.transcription_audio.local != delete_transcription_audio_after_use
+        if before.differs_from(
+            policy=policy,
+            transcription_audio=delete_transcription_audio_after_use,
         ):
             await self.session.execute(
                 sa.update(Tenants)
@@ -335,9 +334,9 @@ class FlowRunRetentionPolicyRepository:
         await acquire_exclusive(self.session, RetentionSubject.FLOW_HISTORY)
         await self._lock_space(tenant_id=tenant_id, space_id=space_id)
         before = await self.get_space(tenant_id=tenant_id, space_id=space_id)
-        if (
-            before.local_policy != policy
-            or before.transcription_audio.local != delete_transcription_audio_after_use
+        if before.differs_from(
+            policy=policy,
+            transcription_audio=delete_transcription_audio_after_use,
         ):
             await self.session.execute(
                 sa.update(Spaces)
@@ -364,9 +363,9 @@ class FlowRunRetentionPolicyRepository:
         await acquire_exclusive(self.session, RetentionSubject.FLOW_HISTORY)
         await self._lock_flow(tenant_id=tenant_id, flow_id=flow_id)
         before = await self.get_flow(tenant_id=tenant_id, flow_id=flow_id)
-        if (
-            before.local_policy != policy
-            or before.transcription_audio.local != delete_transcription_audio_after_use
+        if before.differs_from(
+            policy=policy,
+            transcription_audio=delete_transcription_audio_after_use,
         ):
             await self.session.execute(
                 sa.update(Flows)

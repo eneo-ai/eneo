@@ -1411,6 +1411,36 @@ def test_openapi_flow_retention_descriptions_require_explicit_admin_purge(
             "put",
         ),
     )
+    # Kills replacing the typed retention503 bodies with description-only responses.
+    for path, method, code in (
+        (
+            "/api/v1/settings/flow-run-retention-policy/status",
+            "get",
+            "retention_status_unavailable",
+        ),
+        (
+            "/api/v1/settings/flow-run-retention-policy/purge",
+            "post",
+            "retention_purge_unavailable",
+        ),
+        (
+            "/api/v1/settings/flow-run-retention-policy/spaces/{space_id}/purge",
+            "post",
+            "retention_purge_unavailable",
+        ),
+        (
+            "/api/v1/settings/flow-run-retention-policy/flows/{flow_id}/purge",
+            "post",
+            "retention_purge_unavailable",
+        ),
+    ):
+        response = _get_operation(openapi_spec, path, method)["responses"]["503"]
+        assert "content" in response
+        body = response["content"]["application/json"]
+        assert body["schema"]["$ref"] == "#/components/schemas/GeneralError"
+        assert body["example"]["code"] == code
+        assert body["example"]["eneo_error_code"] == int(ErrorCodes.RESOURCE_NOT_READY)
+
     descriptions = "\n".join(
         str(operation.get("description", "")) for operation in operations
     )
@@ -1440,10 +1470,10 @@ def test_openapi_flow_retention_descriptions_require_explicit_admin_purge(
         properties = schemas[schema_name]["properties"]
         debug = properties["run_debug_evidence_days"]["description"].lower()
         assert "purge eligibility" in debug
-        # Unused uploads are staging data: the nightly gallring job deletes them
+        # Unused uploads are staging data: the nightly retention job deletes them
         # after the window, and an unset window means the 30-day default.
         uploads = properties["flow_runtime_upload_abandonment_days"]["description"]
-        assert "nightly gallring job deletes it" in uploads.lower()
+        assert "nightly retention job deletes it" in uploads.lower()
         assert "30-day default" in uploads.lower()
 
     projection_descriptions = [

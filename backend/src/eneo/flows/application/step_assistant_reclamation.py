@@ -1,4 +1,4 @@
-"""Flow-managed assistant reclamation, as a thin gallring task adopter.
+"""Flow-managed assistant reclamation, as a thin retention task adopter.
 
 The shared engine owns discovery collection, cursors, budgets and audit.
 Each unit locks its flow and assistant before fresh ownership/reference checks.
@@ -11,9 +11,7 @@ and uses the assistants' canonical deletion owner in one savepoint.
 from __future__ import annotations
 
 import functools
-import time
-from collections import Counter
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from datetime import timedelta
 from enum import StrEnum
 from uuid import UUID
@@ -53,7 +51,7 @@ from eneo.flows.infrastructure.step_assistant_reclamation_repo import (
     StepAssistantReclamationRepository,
 )
 from eneo.icons.icon_repo import IconRepository
-from eneo.main.config import get_settings
+from eneo.main.config import Settings
 from eneo.main.exceptions import BadRequestException
 from eneo.main.logging import get_logger
 
@@ -92,12 +90,8 @@ STEP_ASSISTANT_BLOCKED_KEYS = frozenset(
 )
 
 
-def unattached_grace() -> timedelta:
-    return timedelta(hours=get_settings().flow_step_assistant_unattached_grace_hours)
-
-
 async def flow_history_held(session: AsyncSession, *, flow_id: UUID) -> bool:
-    """The task holds the shared gallring lock before this fresh hold check."""
+    """The task holds the shared retention lock before this fresh hold check."""
     return bool(await session.scalar(sa.select(flow_has_active_hold(flow_id))))
 
 
@@ -114,34 +108,27 @@ class _Charge:
     rows: int = 1
 
 
-@dataclass
-class ReclamationInventory:
-    """Content-free decisions for each assistant, without row locks."""
-
-    reclaimed: Counter[str] = field(default_factory=Counter[str])
-    kept: Counter[str] = field(default_factory=Counter[str])
-    assistants: int = 0
-    complete: bool = False
-
-
 class StepAssistantReclamation:
     def __init__(
         self,
         session: AsyncSession,
         *,
+        settings: Settings,
         family_rows: int | None = None,
         chunk_rows: int | None = None,
     ) -> None:
-        settings = get_settings()
+        self._unattached_grace = timedelta(
+            hours=settings.flow_step_assistant_unattached_grace_hours
+        )
         self._cap = (
             family_rows
             if family_rows is not None
-            else settings.gallring_max_family_rows
+            else settings.retention_max_family_rows
         )
         self._chunk_rows = (
-            chunk_rows if chunk_rows is not None else settings.gallring_chunk_rows
+            chunk_rows if chunk_rows is not None else settings.retention_chunk_rows
         )
-        self._gather_seconds = settings.gallring_family_gather_seconds
+        self._gather_seconds = settings.retention_family_gather_seconds
         self.session = session
         self.flow_repo = FlowRepository(session=session)
         self.repo = StepAssistantReclamationRepository(session)
@@ -217,19 +204,17 @@ class StepAssistantReclamation:
         candidate: CandidateAssistant,
         *,
         unknown: bool,
-        lock: bool,
         charge: _Charge,
     ) -> _Decision | None:
         flow = await self.flow_repo.flow_row_for_step_assistant_reclamation(
             flow_id=candidate.flow_id,
             tenant_id=candidate.tenant_id,
-            lock=lock,
         )
         charge.rows += 1
         if flow is None:
             return None
         assistant = await self.repo.assistant_row(
-            candidate, lock=lock, created_within=unattached_grace()
+            candidate, created_within=self._unattached_grace
         )
         charge.rows += 1
         if assistant is None:
@@ -268,7 +253,6 @@ class StepAssistantReclamation:
         unknown: bool,
         out: RetentionEffects,
         charge: _Charge,
-        apply: bool = True,
     ) -> RetentionUnitUsage:
         def done(reason: KeepReason | str | None = None) -> RetentionUnitUsage:
             if reason is not None:
@@ -287,9 +271,7 @@ class StepAssistantReclamation:
             return done(KeepReason.EXCEEDS_BUDGET)
         if rows < 5:
             return not_now()
-        decision = await self._decide(
-            candidate, unknown=unknown, lock=apply, charge=charge
-        )
+        decision = await self._decide(candidate, unknown=unknown, charge=charge)
         if decision is None:
             return done("lock_deferred")
         if isinstance(decision.reason, KeepReason):
@@ -333,9 +315,6 @@ class StepAssistantReclamation:
             history and charge.rows + 2 > self._cap
         ):
             return done(KeepReason.EXCEEDS_BUDGET)
-        if not apply:
-            out.add(candidate.tenant_id, _RECLAIMED_KEY[decision.reason])
-            return done()
         if history:
             count = min((rows - charge.rows) // 2, max(1, self._chunk_rows // 2))
             if count < 1:
@@ -397,41 +376,3 @@ class StepAssistantReclamation:
             revoke_api_keys=revoke,
         )
         return steps
-
-    async def inventory(
-        self,
-        *,
-        max_assistants: int = 10_000,
-        max_seconds: float = 60.0,
-    ) -> ReclamationInventory:
-        report = ReclamationInventory()
-        deadline = time.monotonic() + max_seconds
-        cursor: RetentionKeyset | None = None
-        async with self.session.begin():
-            unknown = bool(await self.repo.unknown_assistant_foreign_keys())
-        while report.assistants < max_assistants and time.monotonic() < deadline:
-            async with self.session.begin():
-                candidate = await self.repo.next_assistant(
-                    after=(cursor.at, cursor.id) if cursor is not None else None,
-                )
-                if candidate is None:
-                    report.complete = True
-                    return report
-                effects = RetentionEffects()
-                await self._reclaim(
-                    candidate,
-                    rows=self._cap,
-                    unknown=unknown,
-                    out=effects,
-                    charge=_Charge(),
-                    apply=False,
-                )
-                report.kept.update(effects.blocked)
-                counts = effects.counts.get(candidate.tenant_id)
-                if counts is not None:
-                    for reason, key in _RECLAIMED_KEY.items():
-                        if count := counts.get(key, 0):
-                            report.reclaimed[reason] += count
-                report.assistants += 1
-                cursor = RetentionKeyset(at=candidate.created_at, id=candidate.id)
-        return report

@@ -41,10 +41,10 @@ from eneo.users.user import UserInDB
 class FlowRetentionHoldService:
     """Places, lists, extends the review of, and releases legal holds.
 
-    Every stop of gallring names who, why, when and until when: a hold needs a
+    Every stop of retention names who, why, when and until when: a hold needs a
     reason and a review date, a release or extension needs a reason, and each
     change writes one required audit row in its transaction. Changes take the
-    gallring lock EXCLUSIVE before reading anything, so they wait for open
+    retention lock EXCLUSIVE before reading anything, so they wait for open
     deletions and a deletion never runs on an older hold state.
     """
 

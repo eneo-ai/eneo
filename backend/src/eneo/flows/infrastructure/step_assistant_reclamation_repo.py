@@ -192,7 +192,7 @@ class StepAssistantReclamationRepository:
         )
 
     async def assistant_row(
-        self, candidate: CandidateAssistant, *, lock: bool, created_within: timedelta
+        self, candidate: CandidateAssistant, *, created_within: timedelta
     ) -> sa.Row[tuple[datetime, UUID | None, bool]] | None:
         """FOR UPDATE freezes FK growth before reference checks and measurement."""
         query = (
@@ -206,9 +206,8 @@ class StepAssistantReclamationRepository:
             .where(Assistants.id == candidate.id)
             .where(Assistants.origin == AssistantOrigin.FLOW_MANAGED.value)
             .where(Assistants.managing_flow_id == candidate.flow_id)
+            .with_for_update(skip_locked=True)
         )
-        if lock:
-            query = query.with_for_update(skip_locked=True)
         return (await self.session.execute(query)).one_or_none()
 
     async def configuration_rows(

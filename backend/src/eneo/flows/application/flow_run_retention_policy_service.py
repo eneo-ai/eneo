@@ -23,9 +23,12 @@ from eneo.flows.application.flow_retention_authz import (
 )
 from eneo.flows.application.flow_run_history_deletion import PurgeScope
 from eneo.flows.application.flow_run_history_purge import FlowRunHistoryExplicitPurge
+from eneo.flows.domain.flow_retention_errors import (
+    FlowRetentionPurgeUnavailableError,
+    FlowRetentionStatusUnavailableError,
+)
 from eneo.flows.domain.flow_retention_hold import FlowRetentionHoldReviewLimit
 from eneo.flows.domain.flow_run_history_deletion_status import (
-    FlowRetentionStatusUnavailableError,
     FlowRunHistoryDeletionStatus,
     FlowRunHistoryOverdueStatus,
     FlowRunHistoryReceiptStatus,
@@ -242,108 +245,115 @@ class FlowRunRetentionPolicyService:
         require_retention_manage(self.user)
         settings_ = get_settings()
         session = self.repository.session
-        async with retention_request_sql_limits(
-            session,
-            statement_timeout_ms=settings_.gallring_chunk_statement_timeout_ms,
-            lock_timeout_ms=settings_.gallring_chunk_lock_timeout_ms,
-        ):
-            if flow_id is not None:
-                settings = await self.repository.get_flow(
-                    tenant_id=self.user.tenant_id, flow_id=flow_id
+        try:
+            async with retention_request_sql_limits(
+                session,
+                statement_timeout_ms=settings_.retention_chunk_statement_timeout_ms,
+                lock_timeout_ms=settings_.retention_chunk_lock_timeout_ms,
+            ):
+                if flow_id is not None:
+                    settings = await self.repository.get_flow(
+                        tenant_id=self.user.tenant_id, flow_id=flow_id
+                    )
+                elif space_id is not None:
+                    settings = await self.repository.get_space(
+                        tenant_id=self.user.tenant_id, space_id=space_id
+                    )
+                else:
+                    settings = await self.repository.get_organization(
+                        tenant_id=self.user.tenant_id
+                    )
+                now = datetime.now(timezone.utc)
+                purge = FlowRunHistoryExplicitPurge(session)
+                scope = PurgeScope(
+                    tenant_id=self.user.tenant_id, space_id=space_id, flow_id=flow_id
                 )
-            elif space_id is not None:
-                settings = await self.repository.get_space(
-                    tenant_id=self.user.tenant_id, space_id=space_id
+                blocked = await purge.blocked(scope, now=now)
+                result = await purge.run(
+                    scope,
+                    now=now,
+                    limit=limit,
+                    dry_run=dry_run,
+                    triggered_by_user_id=self.user.id,
+                    max_rows=settings_.retention_max_rows_per_run,
+                    max_files=settings_.retention_max_files_per_run,
                 )
-            else:
-                settings = await self.repository.get_organization(
-                    tenant_id=self.user.tenant_id
-                )
-            now = datetime.now(timezone.utc)
-            purge = FlowRunHistoryExplicitPurge(session)
-            scope = PurgeScope(
-                tenant_id=self.user.tenant_id, space_id=space_id, flow_id=flow_id
-            )
-            blocked = await purge.blocked(scope, now=now)
-            result = await purge.run(
-                scope,
-                now=now,
-                limit=limit,
-                dry_run=dry_run,
-                triggered_by_user_id=self.user.id,
-                max_rows=settings_.gallring_max_rows_per_run,
-                max_files=settings_.gallring_max_files_per_run,
-            )
-            transcripts = await LiveTranscriptRepository(
-                session
-            ).delete_expired_unbound(
-                tenant_id=self.user.tenant_id,
-                now=now,
-                limit=limit,
-                dry_run=dry_run,
-                space_id=space_id,
-                flow_id=flow_id,
-            )
-            response = FlowRunHistoryPurgePublic(
-                dry_run=dry_run,
-                scope=settings.scope,
-                candidate_count=result.candidate_count,
-                selection_complete=result.selection_complete,
-                purged_count=len(result.purged_run_ids),
-                purged_run_ids=list(result.purged_run_ids),
-                pending_count=len(result.pending_receipt_ids),
-                pending_receipt_ids=list(result.pending_receipt_ids),
-                transcript_candidate_count=transcripts.candidate_count,
-                transcript_purged_count=transcripts.purged_count,
-                blocked=FlowRunHistoryPurgeBlockedPublic(
-                    undelivered_audit=blocked.undelivered_audit,
-                    unresolved_webhook=blocked.unresolved_webhook,
-                    review_required=blocked.review_required,
-                    legal_hold=blocked.legal_hold,
-                    counted_runs=blocked.counted_runs,
-                    complete=blocked.complete,
-                ),
-            )
-            if not dry_run:
-                await self.audit_service.log(
+                transcripts = await LiveTranscriptRepository(
+                    session
+                ).delete_expired_unbound(
                     tenant_id=self.user.tenant_id,
-                    user=self.user,
-                    action=ActionType.FLOW_RUN_HISTORY_PURGED,
-                    entity_type=self._entity_type(settings.scope),
-                    entity_id=settings.scope_id,
-                    description="Purged due Flow run history and expired unbound live transcripts.",
-                    metadata={
-                        "scope": settings.scope.value,
-                        "scope_id": str(settings.scope_id),
-                        "tenant_id": str(self.user.tenant_id),
-                        "space_id": str(space_id) if space_id is not None else None,
-                        "flow_id": str(flow_id) if flow_id is not None else None,
-                        "limit": limit,
-                        "selection_complete": response.selection_complete,
-                        "purged_count": response.purged_count,
-                        "purged_run_ids": [
-                            str(run_id) for run_id in result.purged_run_ids
-                        ],
-                        "pending_receipt_ids": [
-                            str(receipt_id) for receipt_id in result.pending_receipt_ids
-                        ],
-                        "retention_effects": [
-                            {
-                                "counts": effect.counts,
-                                "receipt_ids": [
-                                    str(receipt_id) for receipt_id in effect.receipt_ids
-                                ],
-                            }
-                            for effect in result.effects
-                        ],
-                        "retention_blocked": result.blocked,
-                        "transcript_candidate_count": response.transcript_candidate_count,
-                        "transcript_purged_count": response.transcript_purged_count,
-                        "blocked": response.blocked.model_dump(),
-                    },
-                    required=True,
+                    now=now,
+                    limit=limit,
+                    dry_run=dry_run,
+                    space_id=space_id,
+                    flow_id=flow_id,
                 )
-            return response
+                response = FlowRunHistoryPurgePublic(
+                    dry_run=dry_run,
+                    scope=settings.scope,
+                    candidate_count=result.candidate_count,
+                    selection_complete=result.selection_complete,
+                    purged_count=len(result.purged_run_ids),
+                    purged_run_ids=list(result.purged_run_ids),
+                    pending_count=len(result.pending_receipt_ids),
+                    pending_receipt_ids=list(result.pending_receipt_ids),
+                    transcript_candidate_count=transcripts.candidate_count,
+                    transcript_purged_count=transcripts.purged_count,
+                    blocked=FlowRunHistoryPurgeBlockedPublic(
+                        undelivered_audit=blocked.undelivered_audit,
+                        unresolved_webhook=blocked.unresolved_webhook,
+                        review_required=blocked.review_required,
+                        legal_hold=blocked.legal_hold,
+                        counted_runs=blocked.counted_runs,
+                        complete=blocked.complete,
+                    ),
+                )
+                if not dry_run:
+                    await self.audit_service.log(
+                        tenant_id=self.user.tenant_id,
+                        user=self.user,
+                        action=ActionType.FLOW_RUN_HISTORY_PURGED,
+                        entity_type=self._entity_type(settings.scope),
+                        entity_id=settings.scope_id,
+                        description="Purged due Flow run history and expired unbound live transcripts.",
+                        metadata={
+                            "scope": settings.scope.value,
+                            "scope_id": str(settings.scope_id),
+                            "tenant_id": str(self.user.tenant_id),
+                            "space_id": str(space_id) if space_id is not None else None,
+                            "flow_id": str(flow_id) if flow_id is not None else None,
+                            "limit": limit,
+                            "selection_complete": response.selection_complete,
+                            "purged_count": response.purged_count,
+                            "purged_run_ids": [
+                                str(run_id) for run_id in result.purged_run_ids
+                            ],
+                            "pending_receipt_ids": [
+                                str(receipt_id)
+                                for receipt_id in result.pending_receipt_ids
+                            ],
+                            "retention_effects": [
+                                {
+                                    "counts": effect.counts,
+                                    "receipt_ids": [
+                                        str(receipt_id)
+                                        for receipt_id in effect.receipt_ids
+                                    ],
+                                }
+                                for effect in result.effects
+                            ],
+                            "retention_blocked": result.blocked,
+                            "transcript_candidate_count": response.transcript_candidate_count,
+                            "transcript_purged_count": response.transcript_purged_count,
+                            "blocked": response.blocked.model_dump(),
+                        },
+                        required=True,
+                    )
+                return response
+        except DBAPIError as error:
+            if not is_retention_timeout(error):
+                raise
+            raise FlowRetentionPurgeUnavailableError() from error
 
     def _require_writable(self, policy: FlowRunRetentionPolicy | None) -> None:
         """The deployment's write limits, checked on the requested local policy
@@ -430,7 +440,7 @@ class FlowRunRetentionPolicyService:
                     sa.select(
                         sa.func.set_config(
                             "statement_timeout",
-                            f"{get_settings().gallring_chunk_statement_timeout_ms}ms",
+                            f"{get_settings().retention_chunk_statement_timeout_ms}ms",
                             True,
                         )
                     )
@@ -475,14 +485,14 @@ class FlowRunRetentionPolicyService:
                     )
                 overdue = await due.overdue(
                     now=now,
-                    window=timedelta(days=settings.gallring_overdue_window_days),
+                    window=timedelta(days=settings.retention_overdue_window_days),
                     cap=settings.retention_overdue_max_rows,
                     tenant_id=self.user.tenant_id,
                 )
                 receipts = await due.receipts()
                 result = FlowRunHistoryDeletionStatus(
                     auto_delete_available=self.repository.write_rules.auto_delete_available,
-                    overdue_window_days=settings.gallring_overdue_window_days,
+                    overdue_window_days=settings.retention_overdue_window_days,
                     tasks=tasks,
                     overdue=FlowRunHistoryOverdueStatus(
                         count=overdue.count,

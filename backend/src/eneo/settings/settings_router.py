@@ -15,6 +15,10 @@ from eneo.flows.application.flow_retention_authz import (
     RETENTION_PERMISSION_REQUIRED_CODE,
     RETENTION_PERSON_REQUIRED_CODE,
 )
+from eneo.flows.domain.flow_retention_errors import (
+    FlowRetentionPurgeUnavailableError,
+    FlowRetentionStatusUnavailableError,
+)
 from eneo.flows.domain.flow_retention_hold import (
     FLOW_RETENTION_HOLD_ALREADY_RELEASED_CODE,
     FLOW_RETENTION_HOLD_END_NOT_IN_FUTURE_CODE,
@@ -233,6 +237,20 @@ def _flow_retention_not_found_response(entity: str) -> dict[str, object]:
 
 
 _FLOW_RETENTION_LOCK_BUSY_CODE = RetentionSubject.FLOW_HISTORY.busy_code
+
+
+def _flow_retention_unavailable_response(
+    failure: type[
+        FlowRetentionStatusUnavailableError | FlowRetentionPurgeUnavailableError
+    ],
+) -> dict[str, object]:
+    message = str(failure())
+    return _settings_error_response(
+        description=message,
+        message=message,
+        eneo_error_code=ErrorCodes.RESOURCE_NOT_READY,
+        code=failure.code,
+    )
 
 
 def _flow_retention_lock_busy_response() -> dict[str, object]:
@@ -904,7 +922,7 @@ async def update_flow_evidence_policy(
     description=(
         "Return the eligibility window for stored Flow debug evidence and the keep "
         "window for runtime uploads never attached to a run (and unbound live "
-        "transcripts), which the nightly gallring job deletes after it; null means "
+        "transcripts), which the nightly retention job deletes after it; null means "
         "the 30-day default. Flow run-history retention is configured "
         "through the dedicated hierarchical policy endpoints. Reading this endpoint "
         "never previews, deletes, or redacts Flow data."
@@ -933,7 +951,7 @@ async def get_flow_retention_policy(
         "window for runtime uploads never attached to a run. Omitted fields are "
         "unchanged and null removes the tenant input (uploads then use the 30-day "
         "default). Saving these values never deletes or redacts Flow data; the "
-        "nightly gallring job applies the upload window. The upload window is a "
+        "nightly retention job applies the upload window. The upload window is a "
         "retention decision: changing it also needs retention_manage in a "
         f"signed-in session (`{RETENTION_PERMISSION_REQUIRED_CODE}`, "
         f"`{RETENTION_PERSON_REQUIRED_CODE}`), a longer window needs a reason "
@@ -1023,20 +1041,20 @@ async def replace_organization_flow_run_retention_policy(
     operation_id="get_flow_run_history_deletion_status",
     summary="Get the status of scheduled Flow run-history deletion",
     description=(
-        "Every registered nightly gallring task with its switch, staleness and "
+        "Every registered nightly retention task with its switch, staleness and "
         "newest execution (outcome, counts, blocked counts, error code); Flow runs "
         "under auto_delete still stored past the overdue window after their "
         "deadline (a live count capped at 1000, by blocker, legal holds counted "
         "apart); and unfinished run deletions. The cap bounds returned results, "
         "not examined rows. Each statement uses "
-        "GALLRING_CHUNK_STATEMENT_TIMEOUT_MS; statement or lock timeouts return 503 with "
+        "RETENTION_CHUNK_STATEMENT_TIMEOUT_MS; statement or lock timeouts return 503 with "
         "code retention_status_unavailable. Ids, "
         "counts, timestamps and codes only. Readable with retention_manage or "
         "retention_holds."
     ),
     responses={
         403: _retention_forbidden_response("view"),
-        503: {"description": "Retention status timed out; retry shortly."},
+        503: _flow_retention_unavailable_response(FlowRetentionStatusUnavailableError),
     },
 )
 @endpoint_access(
@@ -1322,6 +1340,7 @@ async def replace_flow_run_retention_policy(
     responses={
         403: _retention_forbidden_response("manage"),
         409: _flow_retention_lock_busy_response(),
+        503: _flow_retention_unavailable_response(FlowRetentionPurgeUnavailableError),
     },
 )
 @endpoint_access(
@@ -1357,6 +1376,7 @@ async def purge_organization_flow_run_history(
         403: _retention_forbidden_response("manage"),
         404: _flow_retention_not_found_response("Space"),
         409: _flow_retention_lock_busy_response(),
+        503: _flow_retention_unavailable_response(FlowRetentionPurgeUnavailableError),
     },
 )
 @endpoint_access(
@@ -1394,6 +1414,7 @@ async def purge_space_flow_run_history(
         403: _retention_forbidden_response("manage"),
         404: _flow_retention_not_found_response("Flow"),
         409: _flow_retention_lock_busy_response(),
+        503: _flow_retention_unavailable_response(FlowRetentionPurgeUnavailableError),
     },
 )
 @endpoint_access(

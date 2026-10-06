@@ -84,7 +84,7 @@
   };
 
   let evidence: EvidencePayload | null = $state(null);
-  let releasedInputs = $derived(evidence?.released_inputs ?? []);
+  let releasedInputs = $derived.by(() => evidence?.released_inputs ?? []);
   let loading = $state(true);
   let loadError = $state(false);
   let expandedSteps: number[] = $state([]);

@@ -562,7 +562,7 @@ _FLOW_RUN_STATUS_COLUMNS = (
     FlowRuns.updated_at,
 )
 
-# A run whose deletion has started (gallring receipt set) reads as deleted.
+# A run whose deletion has started (retention receipt set) reads as deleted.
 FLOW_RUN_NOT_FENCED = FlowRuns.retention_receipt_id.is_(None)
 
 

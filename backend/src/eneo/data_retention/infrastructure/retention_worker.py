@@ -3,12 +3,12 @@
 from __future__ import annotations
 
 import logging
-from typing import cast
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from eneo.data_retention.application.retention_runner import (
     RetentionChunkLimits,
+    RetentionContractError,
     RetentionRunner,
     RetentionRunReport,
 )
@@ -38,10 +38,10 @@ def retention_runner(
         audit_service=container.audit_service(),
         budget=budget,
         limits=RetentionChunkLimits(
-            rows=settings.gallring_chunk_rows,
-            statement_timeout_ms=settings.gallring_chunk_statement_timeout_ms,
-            lock_timeout_ms=settings.gallring_chunk_lock_timeout_ms,
-            stale_after_seconds=settings.gallring_stale_after_seconds,
+            rows=settings.retention_chunk_rows,
+            statement_timeout_ms=settings.retention_chunk_statement_timeout_ms,
+            lock_timeout_ms=settings.retention_chunk_lock_timeout_ms,
+            stale_after_seconds=settings.retention_stale_after_seconds,
         ),
     )
 
@@ -50,14 +50,16 @@ _settings = get_settings()
 
 
 @worker.cron_job(
-    hour=_settings.gallring_cron_hour,
-    minute=_settings.gallring_cron_minute,
+    hour=_settings.retention_cron_hour,
+    minute=_settings.retention_cron_minute,
     manages_own_session=True,
 )
 async def run_retention(container: Container) -> list[RetentionRunReport]:
     """Run each enabled task once; each task commits chunk by chunk."""
     settings = get_settings()
-    session = cast(AsyncSession, container.session())
+    session = container.session()
+    if not isinstance(session, AsyncSession):
+        raise RetentionContractError("Retention cron requires an AsyncSession.")
     reports: list[RetentionRunReport] = []
     for registration in RETENTION_TASKS:
         budget = registration.budget(settings)

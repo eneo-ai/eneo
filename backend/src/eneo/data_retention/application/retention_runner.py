@@ -441,7 +441,7 @@ class RetentionRunner:
 
         The deletions already committed stand on their own; a snapshot that is
         not written leaves the newest one to age. Health reports overdue_unknown
-        (GALLRING_OVERDUE) once that snapshot passes its freshness threshold."""
+        (RETENTION_OVERDUE) once that snapshot passes its freshness threshold."""
         try:
             async with self._transaction():
                 overdue = await reporter.overdue()
@@ -473,7 +473,7 @@ class RetentionRunner:
                 ),
                 tenant_id=tenant_id,
                 actor_type=ActorType.SYSTEM,
-                action=ActionType.GALLRING_SKIPPED,
+                action=ActionType.RETENTION_SKIPPED,
                 entity_type=EntityType.TENANT_SETTINGS,
                 entity_id=tenant_id,
                 description=(
@@ -604,7 +604,7 @@ class RetentionRunner:
             ),
             tenant_id=tenant_id,
             actor_type=ActorType.SYSTEM,
-            action=ActionType.GALLRING_APPLIED,
+            action=ActionType.RETENTION_APPLIED,
             entity_type=EntityType.TENANT_SETTINGS,
             entity_id=tenant_id,
             description=f"Scheduled retention {task} ran its {step} step.",

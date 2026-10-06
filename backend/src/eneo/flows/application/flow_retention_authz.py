@@ -1,9 +1,9 @@
-"""Who may change, stop or postpone gallring (retention deletion) of Flow run history.
+"""Who may change, stop or postpone retention deletion of Flow run history.
 
 The one owner of retention authorization; every retention route and service
 path calls it. Only signed-in people decide: a request authenticated with any
 API key (user-owned or service) is refused whatever its permissions, because
-stopping or changing gallring must always name a person.
+stopping or changing retention must always name a person.
 
 - retention_manage: rules at Organization/Space/Flow level, the review queue
   and the explicit purge.

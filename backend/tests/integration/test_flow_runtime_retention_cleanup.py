@@ -186,7 +186,7 @@ async def _create_durable_file(
 @pytest.fixture(autouse=True)
 def row_budget_not_wall_clock(monkeypatch: pytest.MonkeyPatch) -> None:
     # These cases observe file and row ownership, independently of host load.
-    monkeypatch.setattr(get_settings(), "gallring_family_gather_seconds", 60.0)
+    monkeypatch.setattr(get_settings(), "retention_family_gather_seconds", 60.0)
 
 
 @pytest.fixture

@@ -40,15 +40,15 @@ class RetentionTaskStatus(BaseModel):
     enabled: bool = Field(
         description=(
             "False when the deployment's emergency switch turned the task off "
-            "(health flag GALLRING_DISABLED); each suppressed run is audited."
+            "(health flag RETENTION_DISABLED); each suppressed run is audited."
         )
     )
     stale: bool = Field(
         description=(
             "The task is enabled and has no completed execution within twice the "
-            "daily cadence (health flag GALLRING_JOB_STALE); a task that never ran "
+            "daily cadence (health flag RETENTION_JOB_STALE); a task that never ran "
             "is not stale, and a task the switch turned off never is (it raises "
-            "GALLRING_DISABLED)."
+            "RETENTION_DISABLED)."
         )
     )
     last_completed_at: datetime | None = Field(
@@ -162,23 +162,14 @@ class FlowRunHistoryDeletionStatus(BaseModel):
     )
     overdue_window_days: int = Field(
         description=(
-            "Operator setting GALLRING_OVERDUE_WINDOW_DAYS: how long past its "
+            "Operator setting RETENTION_OVERDUE_WINDOW_DAYS: how long past its "
             "deadline a due run may stay before it is overdue."
         )
     )
     tasks: list[RetentionTaskStatus] = Field(
-        description="Every registered nightly gallring task, in run order."
+        description="Every registered nightly retention task, in run order."
     )
     overdue: FlowRunHistoryOverdueStatus = Field(
         description="Live, capped count over the caller's Organization."
     )
     receipts: FlowRunHistoryReceiptStatus
-
-
-class FlowRetentionStatusUnavailableError(Exception):
-    """Status reads failed; a partial count must never look healthy."""
-
-    code = "retention_status_unavailable"
-
-    def __init__(self) -> None:
-        super().__init__("Retention status is temporarily unavailable. Retry shortly.")

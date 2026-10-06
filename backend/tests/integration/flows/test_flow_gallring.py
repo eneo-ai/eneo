@@ -492,7 +492,7 @@ async def _gallring_audits(tenant_id: UUID) -> list[AuditLogTable]:
                 sa.select(AuditLogTable)
                 .where(
                     AuditLogTable.tenant_id == tenant_id,
-                    AuditLogTable.action == ActionType.GALLRING_APPLIED.value,
+                    AuditLogTable.action == ActionType.RETENTION_APPLIED.value,
                 )
                 .order_by(AuditLogTable.timestamp)
             )
@@ -929,7 +929,7 @@ async def test_family_gathering_respects_the_operator_time_budget(
     for _ in range(2):
         await _abandoned_upload(tenant_id, user_id, flow_id, children=0)
     settings = test_settings.model_copy(
-        update={"gallring_family_gather_seconds": seconds}
+        update={"retention_family_gather_seconds": seconds}
     )
     ticks = count(step=2)
     monkeypatch.setattr(flow_housekeeping_task, "get_settings", lambda: settings)
@@ -1195,7 +1195,7 @@ async def test_the_current_window_applies_to_existing_transcripts_and_uploads(
 
 async def test_health_flags_a_task_without_a_recent_completion() -> None:
     policy = build_flow_runtime_health_policy(
-        task_timeout_seconds=3600, gallring_tasks=(FLOWS_HOUSEKEEPING_TASK,)
+        task_timeout_seconds=3600, retention_tasks=(FLOWS_HOUSEKEEPING_TASK,)
     )
 
     async def stale_tasks() -> tuple[str, ...]:
@@ -1203,7 +1203,7 @@ async def test_health_flags_a_task_without_a_recent_completion() -> None:
             snapshot = await load_flow_runtime_health_snapshot(
                 session=session, now=datetime.now(timezone.utc), policy=policy
             )
-        return snapshot.stale_gallring_tasks
+        return snapshot.stale_retention_tasks
 
     async def execution(outcome: RetentionJobOutcome, *, hours_ago: int) -> None:
         async with _committed() as session:

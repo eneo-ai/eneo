@@ -10,6 +10,7 @@ names the mutant it kills (.lane/mutants.py).
 from __future__ import annotations
 
 import logging
+from dataclasses import replace
 from datetime import datetime, timedelta, timezone
 from uuid import UUID, uuid4
 
@@ -505,7 +506,7 @@ async def test_a_task_the_switch_turned_off_is_never_reported_stale(
     client, headers, db_container, monkeypatch
 ) -> None:
     """Mutant stale_when_disabled."""
-    monkeypatch.setattr(get_settings(), "gallring_flows_housekeeping_enabled", False)
+    monkeypatch.setattr(get_settings(), "retention_flows_housekeeping_enabled", False)
     at = datetime.now(timezone.utc) - timedelta(days=5)
     async with db_container() as container:
         container.session().add(
@@ -576,10 +577,10 @@ async def test_health_flags_overdue_from_the_newest_fresh_complete_snapshot(
                     overdue_oldest_due_at=at - timedelta(days=3) if overdue else None,
                 )
             )
-    monkeypatch.setattr(get_settings(), "gallring_overdue_window_days", window_days)
+    monkeypatch.setattr(get_settings(), "retention_overdue_window_days", window_days)
     policy = build_flow_runtime_health_policy(
         task_timeout_seconds=600,
-        gallring_tasks=(FLOWS_HISTORY_TASK,) if registered else (),
+        retention_tasks=(FLOWS_HISTORY_TASK,) if registered else (),
         retention_overdue_tasks=(FLOWS_HISTORY_TASK,),
     )
     async with db_container() as container:
@@ -595,8 +596,8 @@ async def test_health_flags_overdue_from_the_newest_fresh_complete_snapshot(
         ),
     )
 
-    assert (FlowRuntimeHealthFlag.GALLRING_OVERDUE in health.status_flags) is flagged
-    assert (health.gallring.overdue_count, health.gallring.overdue_unknown) == (
+    assert (FlowRuntimeHealthFlag.RETENTION_OVERDUE in health.status_flags) is flagged
+    assert (health.retention.overdue_count, health.retention.overdue_unknown) == (
         count,
         unknown,
     )
@@ -622,19 +623,21 @@ async def test_health_flags_overdue_from_the_newest_fresh_complete_snapshot(
         ),
     ],
 )
-async def test_status_database_errors_keep_their_failure_contract(
-    app, headers, monkeypatch, caplog, statement, status, code
+@pytest.mark.parametrize("operation", ["status", "purge"])
+async def test_retention_database_errors_keep_their_failure_contract(
+    app, headers, monkeypatch, caplog, statement, status, code, operation
 ) -> None:
-    """Mutants status_timeout_removed, permanent_error_mapped_to_unavailable."""
-    monkeypatch.setattr(get_settings(), "gallring_chunk_statement_timeout_ms", 500)
-    original = FlowRunHistoryDueRepository.overdue
+    """Kills removed timeout mapping and permanent errors reported as transient."""
+    monkeypatch.setattr(get_settings(), "retention_chunk_statement_timeout_ms", 500)
+    method = "overdue" if operation == "status" else "diagnostics"
+    original = getattr(FlowRunHistoryDueRepository, method)
 
     async def observed(self, **kwargs):
         if statement is not None:
             await self.session.execute(statement)
         return await original(self, **kwargs)
 
-    monkeypatch.setattr(FlowRunHistoryDueRepository, "overdue", observed)
+    monkeypatch.setattr(FlowRunHistoryDueRepository, method, observed)
     server_logger.addHandler(caplog.handler)
     try:
         async with AsyncClient(
@@ -642,10 +645,16 @@ async def test_status_database_errors_keep_their_failure_contract(
             base_url="http://test.local",
         ) as client:
             with caplog.at_level(logging.ERROR):
-                response = await client.get(f"{ROOT}/status", headers=headers)
+                response = (
+                    await client.get(f"{ROOT}/status", headers=headers)
+                    if operation == "status"
+                    else await client.post(f"{ROOT}/purge", headers=headers, json={})
+                )
     finally:
         server_logger.removeHandler(caplog.handler)
     assert response.status_code == status, response.text
+    if operation == "purge" and status == 503:
+        code = "retention_purge_unavailable"
     if code is not None:
         assert response.json()["code"] == code
     if status == 500:
@@ -714,16 +723,18 @@ async def test_the_due_index_serves_the_generic_plan_of_the_prepared_query(
 
 
 @pytest.mark.parametrize(
-    "flow_snapshot,chat_snapshot,chat_enabled,count,complete,oldest_days,observed_hours,unknown",
+    "flow_snapshot,chat_snapshot,chat_enabled,count,complete,oldest_days,observed_hours,unknown,freshness_hours",
     [
-        ((1, 4, True, 3), (2, 0, True, None), True, 4, True, 3, 2, False),
-        ((1, 4, True, 3), (2, 6, True, 4), True, 10, True, 4, 2, False),
-        ((1, 4, True, 3), (2, 6, False, 4), True, 10, False, 4, 2, False),
-        ((1, 4, True, 3), None, True, None, None, None, 1, True),
-        ((1, 4, True, 3), (49, 0, True, None), True, None, None, None, 49, True),
-        ((1, 4, True, 3), (2, 0, False, None), True, None, None, None, 2, True),
-        ((1, 4, True, 3), (49, 6, True, 4), False, 4, True, 3, 1, False),
-        (None, (2, None, None, None), True, None, None, None, None, True),
+        ((1, 4, True, 3), (2, 0, True, None), True, 4, True, 3, 2, False, 48),
+        ((1, 4, True, 3), (2, 6, True, 4), True, 10, True, 4, 2, False, 48),
+        ((1, 4, True, 3), (2, 6, False, 4), True, 10, False, 4, 2, False, 48),
+        ((1, 4, True, 3), None, True, None, None, None, 1, True, 48),
+        ((1, 4, True, 3), (49, 0, True, None), True, None, None, None, 49, True, 48),
+        ((1, 4, True, 3), (2, 0, False, None), True, None, None, None, 2, True, 48),
+        ((1, 4, True, 3), (49, 6, True, 4), False, 4, True, 3, 1, False, 48),
+        (None, (2, None, None, None), True, None, None, None, None, True, 48),
+        ((1, 4, True, 3), (49, 0, True, None), True, 4, True, 3, 49, False, 72),
+        ((1, 4, True, 3), (25, 0, True, None), True, None, None, None, 25, True, 24),
     ],
     ids=[
         "zero",
@@ -734,6 +745,8 @@ async def test_the_due_index_serves_the_generic_plan_of_the_prepared_query(
         "incomplete-zero",
         "disabled",
         "only-second-reporter-finished",
+        "extended-shared-freshness",
+        "shortened-shared-freshness",
     ],
 )
 async def test_health_folds_only_enabled_reporting_tasks(
@@ -746,8 +759,9 @@ async def test_health_folds_only_enabled_reporting_tasks(
     oldest_days,
     observed_hours,
     unknown,
+    freshness_hours,
 ):
-    """Kills G1b-H02/H03/H04: Flow-only fold, newest observation, missing as zero."""
+    """Kills G1b-H02/H03/H04 fold errors and Q01 ignoring shared freshness."""
     now = datetime.now(timezone.utc)
     records = [(FLOWS_HISTORY_TASK, flow_snapshot)] if flow_snapshot is not None else []
     if chat_snapshot is not None:
@@ -773,9 +787,10 @@ async def test_health_folds_only_enabled_reporting_tasks(
     )
     policy = build_flow_runtime_health_policy(
         task_timeout_seconds=600,
-        gallring_tasks=tasks,
+        retention_tasks=tasks,
         retention_overdue_tasks=(FLOWS_HISTORY_TASK, "chats.history"),
     )
+    policy = replace(policy, retention_stale_after=timedelta(hours=freshness_hours))
     async with db_container() as container:
         snapshot = await load_flow_runtime_health_snapshot(
             session=container.session(), now=now, policy=policy
@@ -788,15 +803,15 @@ async def test_health_folds_only_enabled_reporting_tasks(
             db_query_ok=True, execution_worker_ready=True, maintenance_worker_ready=True
         ),
     )
-    assert health.gallring.overdue_tasks == list(tasks)
+    assert health.retention.overdue_tasks == list(tasks)
     assert (
-        health.gallring.overdue_count,
-        health.gallring.overdue_complete,
-        health.gallring.overdue_unknown,
+        health.retention.overdue_count,
+        health.retention.overdue_complete,
+        health.retention.overdue_unknown,
     ) == (count, complete, unknown)
-    assert snapshot.gallring_overdue_observed_at == (
+    assert snapshot.retention_overdue_observed_at == (
         now - timedelta(hours=observed_hours) if observed_hours is not None else None
     )
-    assert snapshot.oldest_gallring_overdue_due_at == (
+    assert snapshot.oldest_retention_overdue_due_at == (
         now - timedelta(days=oldest_days) if oldest_days else None
     )

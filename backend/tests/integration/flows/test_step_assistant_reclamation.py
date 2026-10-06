@@ -50,7 +50,6 @@ from eneo.flows.infrastructure.flow_version_repo import FlowVersionRepository
 from eneo.flows.infrastructure.step_assistant_reclamation_repo import (
     StepAssistantReclamationRepository,
 )
-from eneo.flows.runtime.tasks import inventory_flow_step_assistants
 from eneo.main.config import Settings, get_settings
 from eneo.main.exceptions import BadRequestException
 from eneo.prompts.api.prompt_models import PromptCreate
@@ -500,22 +499,18 @@ async def test_reclaims_or_keeps_by_reason(
     scenario, client, db_container, admin_user, patch_auth_service_jwt, monkeypatch
 ):
     """The truth table; kills M1 (version check), M3 (hold), M5 (external
-    reference), M9 (grace), M10/M11 (a deleted flow's own steps); the dry run
-    writes nothing (the assistant survives it)."""
+    reference), M9 (grace), M10/M11 (a deleted flow's own steps)."""
     _ = patch_auth_service_jwt
     _, space_id = await _admin_token_and_space(client, db_container, admin_user)
     assistant_id, reason = await _SCENARIOS[scenario](
         db_container, space_id, admin_user, monkeypatch
     )
 
-    inventory = await inventory_flow_step_assistants()
-    assert await _existing(db_container, [assistant_id]) == {assistant_id}
     report = await _reclaim()
 
     reclaimed = reason in _RECLAIMED
-    for counts in (inventory, report):
-        assert dict(counts.reclaimed if reclaimed else counts.kept) == {reason: 1}
-        assert dict(counts.kept if reclaimed else counts.reclaimed) == {}
+    assert dict(report.reclaimed if reclaimed else report.kept) == {reason: 1}
+    assert dict(report.kept if reclaimed else report.reclaimed) == {}
     assert await _existing(db_container, [assistant_id]) == (
         set() if reclaimed else {assistant_id}
     )
@@ -622,35 +617,16 @@ async def test_the_unattached_grace_is_an_operator_setting_of_at_least_one_hour(
             .values(created_at=sa.func.now() - sa.text("interval '2 hours'"))
         )
 
-    default = await inventory_flow_step_assistants()
+    default = await _reclaim()
+    assert dict(default.kept) == {"recently_created": 1}
+    assert await _existing(db_container, [spare]) == {spare}
     monkeypatch.setattr(get_settings(), "flow_step_assistant_unattached_grace_hours", 1)
     shorter = await _reclaim()
 
-    assert dict(default.kept) == {"recently_created": 1}
     assert dict(shorter.reclaimed) == {"removed_step": 1}
     assert await _existing(db_container, [spare]) == set()
     with pytest.raises(ValidationError):
         Settings(flow_step_assistant_unattached_grace_hours=0)
-
-
-async def test_a_dry_run_takes_no_row_lock(
-    client, db_container, admin_user, patch_auth_service_jwt
-):
-    """Kills M15 (the inventory locks the flow row). An edit holding the flow row does not hold up the inventory."""
-    _ = patch_auth_service_jwt
-    _, space_id = await _admin_token_and_space(client, db_container, admin_user)
-    flow_id, _, (spare,) = await _flow(db_container, space_id, attached=1, spare=1)
-    await _age(db_container, [spare])
-
-    async with db_container() as container:
-        await container.session().execute(
-            sa.select(Flows.id).where(Flows.id == flow_id).with_for_update()
-        )
-        inventory = await asyncio.wait_for(
-            inventory_flow_step_assistants(), timeout=_TIMEOUT
-        )
-
-    assert dict(inventory.reclaimed) == {"removed_step": 1}
 
 
 # --- What a reclamation writes -------------------------------------------------
@@ -927,7 +903,7 @@ async def test_atomic_cap_protects_configuration_and_history(
                     is_selected=False,
                 )
             )
-    settings = get_settings().model_copy(update={"gallring_max_family_rows": cap})
+    settings = get_settings().model_copy(update={"retention_max_family_rows": cap})
     monkeypatch.setattr(housekeeping, "get_settings", lambda: settings)
     night = await _reclaim(chunk_rows=6, budget_rows=30)
     assert night.complete
@@ -977,7 +953,7 @@ async def test_scoped_keys_are_filtered_and_bounded_before_reclamation(
                 )
             else:
                 live_ids.append(key.id)
-    settings = get_settings().model_copy(update={"gallring_max_family_rows": 10})
+    settings = get_settings().model_copy(update={"retention_max_family_rows": 10})
     monkeypatch.setattr(housekeeping, "get_settings", lambda: settings)
     night = await _reclaim()
     deleted = live_count == 1

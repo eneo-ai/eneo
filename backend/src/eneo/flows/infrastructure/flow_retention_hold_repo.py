@@ -78,7 +78,7 @@ def flow_runless_data_held_predicate(
     *, flow_id: sa.ColumnElement[UUID] | Any
 ) -> sa.Exists:
     """flow_run_held_predicate for data of the Flow that belongs to no run (an
-    unused upload or live transcript, a gallring receipt): only a Flow hold
+    unused upload or live transcript, a retention receipt): only a Flow hold
     covers it."""
     return flow_run_held_predicate(run_id=_NO_RUN, flow_id=flow_id)
 

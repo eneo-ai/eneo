@@ -24,7 +24,7 @@ _FLOW_MANAGED_ASSISTANT_ORIGIN = "flow_managed"
 
 async def space_has_flow_delete_blockers(session: AsyncSession, space_id: UUID) -> bool:
     # Soft-deleted Flows count here: retained children can still block raw cascades.
-    # Deleting a Space deletes Flow history, so it takes the gallring lock: a
+    # Deleting a Space deletes Flow history, so it takes the retention lock: a
     # legal hold committed after this check cannot be cascaded away unseen.
     await acquire_shared(session, RetentionSubject.FLOW_HISTORY)
     stmt = sa.select(

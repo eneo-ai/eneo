@@ -24,9 +24,9 @@ bypass those controls.
 
 A required event may also carry a deterministic id (`log(audit_id=...)`): writing
 the same id again returns the stored entry instead of a duplicate. The nightly
-Flow gallring job uses it for its `gallring_applied` event per committed
+Flow retention job uses it for its `gallring_applied` event per committed
 batch and Organization, written in the deleting transaction (ids and counts only;
-see [Data retention and deletion](/guides/data-retention#nightly-flow-gallring)).
+see [Data retention and deletion](/guides/data-retention#nightly-flow-retention)).
 These Flow events no longer record content: the runtime upload event (no file
 name), the HTTP step events (host only, no URL path, step description or error
 text; a typed error code instead), and the delivered audit outbox events (no

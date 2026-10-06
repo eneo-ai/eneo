@@ -272,8 +272,8 @@ async def _audits() -> list[AuditLogTable]:
                 .where(
                     AuditLogTable.action.in_(
                         [
-                            ActionType.GALLRING_APPLIED.value,
-                            ActionType.GALLRING_SKIPPED.value,
+                            ActionType.RETENTION_APPLIED.value,
+                            ActionType.RETENTION_SKIPPED.value,
                         ]
                     )
                 )
@@ -640,7 +640,7 @@ async def test_budget_stops_the_run_and_the_next_run_resumes(test_tenant) -> Non
             audit_id=replayed.id,
             tenant_id=test_tenant.id,
             actor_type=ActorType.SYSTEM,
-            action=ActionType.GALLRING_APPLIED,
+            action=ActionType.RETENTION_APPLIED,
             entity_type=EntityType.TENANT_SETTINGS,
             entity_id=test_tenant.id,
             description="replay",
@@ -1650,8 +1650,8 @@ async def test_gallring_audits_carry_only_allowlisted_metadata(test_tenant) -> N
     audits = await _audits()
 
     assert {audit.action for audit in audits} == {
-        ActionType.GALLRING_APPLIED.value,
-        ActionType.GALLRING_SKIPPED.value,
+        ActionType.RETENTION_APPLIED.value,
+        ActionType.RETENTION_SKIPPED.value,
     }
     allowed = {"task", "step", "job_run_id", "batch_seq", "counts", "blocked"}
     allowed |= {"receipt_ids"}

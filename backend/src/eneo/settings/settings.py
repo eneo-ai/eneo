@@ -827,7 +827,7 @@ FLOW_DEBUG_EVIDENCE_ELIGIBILITY_DESCRIPTION = (
 )
 FLOW_RUNTIME_UPLOAD_ELIGIBILITY_DESCRIPTION = (
     "Days a Flow runtime upload that was never bound to a run input (and an "
-    "unbound live transcript) is kept before the nightly gallring job deletes it, "
+    "unbound live transcript) is kept before the nightly retention job deletes it, "
     "counted from creation; a new value applies to existing items too. Null means "
     "the 30-day default. Saving a value deletes nothing by itself. Changing it "
     "needs retention_manage in a signed-in session (no API key), and a longer "
@@ -975,7 +975,8 @@ class FlowRunHistoryPurgePublic(BaseModel):
     candidate_count: int = Field(
         ge=0,
         description=(
-            "Due runs admitted in scope (preserve or auto_delete; held, review and "
+            "Due runs selected by a dry run or admitted by a real purge in scope "
+            "(preserve or auto_delete; held, review and "
             "delivery-blocked runs excluded), at most the limit: Flows in id order, "
             "each Flow's runs oldest first."
         ),
@@ -990,9 +991,10 @@ class FlowRunHistoryPurgePublic(BaseModel):
     pending_count: int = Field(
         ge=0,
         description=(
-            "Admitted runs whose deletion did not finish within this request's "
-            "budget (operator settings GALLRING_MAX_ROWS_PER_RUN and "
-            "GALLRING_MAX_FILES_PER_RUN). A pending run remains stored but its "
+            "Admitted runs whose deletion remains unfinished because of a pause, "
+            "fresh refusal or this request's "
+            "budget (operator settings RETENTION_MAX_ROWS_PER_RUN and "
+            "RETENTION_MAX_FILES_PER_RUN). A pending run remains stored but its "
             "deletion fence hides it from this request's commit. The enabled "
             "nightly flows.history task continues its deletion, subject to legal "
             "holds and execution caps. RETENTION_FLOWS_HISTORY_ENABLED=false "

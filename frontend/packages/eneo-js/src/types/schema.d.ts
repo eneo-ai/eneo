@@ -53,7 +53,7 @@ export interface paths {
     };
     /**
      * Flow Runtime Health
-     * @description Return super-key-protected Flow runtime readiness signals derived from persisted run, review, data-integrity, audit-outbox, webhook-outbox, gallring job, and platform task worker readiness. GALLRING_JOB_STALE (UNHEALTHY) means an enabled nightly gallring task has not completed within twice its daily cadence; GALLRING_DISABLED (UNHEALTHY) means the deployment's emergency switch turned a gallring task off; GALLRING_OVERDUE (UNHEALTHY) means a named reporting task still has work past its deletion deadline and overdue window, or that a required snapshot is missing or older than twice the daily cadence (overdue_unknown).
+     * @description Return super-key-protected Flow runtime readiness signals derived from persisted run, review, data-integrity, audit-outbox, webhook-outbox, retention job, and platform task worker readiness. RETENTION_JOB_STALE (UNHEALTHY) means an enabled nightly retention task has not completed within twice its daily cadence; RETENTION_DISABLED (UNHEALTHY) means the deployment's emergency switch turned a retention task off; RETENTION_OVERDUE (UNHEALTHY) means a named reporting task still has work past its deletion deadline and overdue window, or that a required snapshot is missing or older than twice the daily cadence (overdue_unknown).
      */
     get: operations["flow_runtime_health_api_healthz_flows_get"];
     put?: never;
@@ -7867,7 +7867,7 @@ export interface paths {
     };
     /**
      * Get flow retention policy
-     * @description Return the eligibility window for stored Flow debug evidence and the keep window for runtime uploads never attached to a run (and unbound live transcripts), which the nightly gallring job deletes after it; null means the 30-day default. Flow run-history retention is configured through the dedicated hierarchical policy endpoints. Reading this endpoint never previews, deletes, or redacts Flow data.
+     * @description Return the eligibility window for stored Flow debug evidence and the keep window for runtime uploads never attached to a run (and unbound live transcripts), which the nightly retention job deletes after it; null means the 30-day default. Flow run-history retention is configured through the dedicated hierarchical policy endpoints. Reading this endpoint never previews, deletes, or redacts Flow data.
      */
     get: operations["get_flow_retention_policy"];
     put?: never;
@@ -7877,7 +7877,7 @@ export interface paths {
     head?: never;
     /**
      * Update flow retention policy
-     * @description Update the eligibility window for stored Flow debug evidence and the keep window for runtime uploads never attached to a run. Omitted fields are unchanged and null removes the tenant input (uploads then use the 30-day default). Saving these values never deletes or redacts Flow data; the nightly gallring job applies the upload window. The upload window is a retention decision: changing it also needs retention_manage in a signed-in session (`retention_permission_required`, `retention_person_required`), a longer window needs a reason (`flow_retention_reason_required`), and a change writes the required audit action flow_run_retention_policy_changed with the previous and new value and the reason in the same transaction. It waits for an open history deletion to finish.
+     * @description Update the eligibility window for stored Flow debug evidence and the keep window for runtime uploads never attached to a run. Omitted fields are unchanged and null removes the tenant input (uploads then use the 30-day default). Saving these values never deletes or redacts Flow data; the nightly retention job applies the upload window. The upload window is a retention decision: changing it also needs retention_manage in a signed-in session (`retention_permission_required`, `retention_person_required`), a longer window needs a reason (`flow_retention_reason_required`), and a change writes the required audit action flow_run_retention_policy_changed with the previous and new value and the reason in the same transaction. It waits for an open history deletion to finish.
      */
     patch: operations["update_flow_retention_policy"];
     trace?: never;
@@ -8107,7 +8107,7 @@ export interface paths {
     };
     /**
      * Get the status of scheduled Flow run-history deletion
-     * @description Every registered nightly gallring task with its switch, staleness and newest execution (outcome, counts, blocked counts, error code); Flow runs under auto_delete still stored past the overdue window after their deadline (a live count capped at 1000, by blocker, legal holds counted apart); and unfinished run deletions. The cap bounds returned results, not examined rows. Each statement uses GALLRING_CHUNK_STATEMENT_TIMEOUT_MS; statement or lock timeouts return 503 with code retention_status_unavailable. Ids, counts, timestamps and codes only. Readable with retention_manage or retention_holds.
+     * @description Every registered nightly retention task with its switch, staleness and newest execution (outcome, counts, blocked counts, error code); Flow runs under auto_delete still stored past the overdue window after their deadline (a live count capped at 1000, by blocker, legal holds counted apart); and unfinished run deletions. The cap bounds returned results, not examined rows. Each statement uses RETENTION_CHUNK_STATEMENT_TIMEOUT_MS; statement or lock timeouts return 503 with code retention_status_unavailable. Ids, counts, timestamps and codes only. Readable with retention_manage or retention_holds.
      */
     get: operations["get_flow_run_history_deletion_status"];
     put?: never;
@@ -20322,7 +20322,7 @@ export interface components {
     FlowRetentionPolicyPublic: {
       /**
        * Flow Runtime Upload Abandonment Days
-       * @description Days a Flow runtime upload that was never bound to a run input (and an unbound live transcript) is kept before the nightly gallring job deletes it, counted from creation; a new value applies to existing items too. Null means the 30-day default. Saving a value deletes nothing by itself. Changing it needs retention_manage in a signed-in session (no API key), and a longer window needs a reason.
+       * @description Days a Flow runtime upload that was never bound to a run input (and an unbound live transcript) is kept before the nightly retention job deletes it, counted from creation; a new value applies to existing items too. Null means the 30-day default. Saving a value deletes nothing by itself. Changing it needs retention_manage in a signed-in session (no API key), and a longer window needs a reason.
        */
       flow_runtime_upload_abandonment_days: number | null;
       /**
@@ -20341,7 +20341,7 @@ export interface components {
     FlowRetentionPolicyUpdate: {
       /**
        * Flow Runtime Upload Abandonment Days
-       * @description Days a Flow runtime upload that was never bound to a run input (and an unbound live transcript) is kept before the nightly gallring job deletes it, counted from creation; a new value applies to existing items too. Null means the 30-day default. Saving a value deletes nothing by itself. Changing it needs retention_manage in a signed-in session (no API key), and a longer window needs a reason.
+       * @description Days a Flow runtime upload that was never bound to a run input (and an unbound live transcript) is kept before the nightly retention job deletes it, counted from creation; a new value applies to existing items too. Null means the 30-day default. Saving a value deletes nothing by itself. Changing it needs retention_manage in a signed-in session (no API key), and a longer window needs a reason.
        */
       flow_runtime_upload_abandonment_days?: number | null;
       /**
@@ -23020,13 +23020,13 @@ export interface components {
       overdue: components["schemas"]["FlowRunHistoryOverdueStatus"];
       /**
        * Overdue Window Days
-       * @description Operator setting GALLRING_OVERDUE_WINDOW_DAYS: how long past its deadline a due run may stay before it is overdue.
+       * @description Operator setting RETENTION_OVERDUE_WINDOW_DAYS: how long past its deadline a due run may stay before it is overdue.
        */
       overdue_window_days: number;
       receipts: components["schemas"]["FlowRunHistoryReceiptStatus"];
       /**
        * Tasks
-       * @description Every registered nightly gallring task, in run order.
+       * @description Every registered nightly retention task, in run order.
        */
       tasks: components["schemas"]["RetentionTaskStatus"][];
     };
@@ -23119,14 +23119,14 @@ export interface components {
       blocked: components["schemas"]["FlowRunHistoryPurgeBlockedPublic"];
       /**
        * Candidate Count
-       * @description Due runs admitted in scope (preserve or auto_delete; held, review and delivery-blocked runs excluded), at most the limit: Flows in id order, each Flow's runs oldest first.
+       * @description Due runs selected by a dry run or admitted by a real purge in scope (preserve or auto_delete; held, review and delivery-blocked runs excluded), at most the limit: Flows in id order, each Flow's runs oldest first.
        */
       candidate_count: number;
       /** Dry Run */
       dry_run: boolean;
       /**
        * Pending Count
-       * @description Admitted runs whose deletion did not finish within this request's budget (operator settings GALLRING_MAX_ROWS_PER_RUN and GALLRING_MAX_FILES_PER_RUN). A pending run remains stored but its deletion fence hides it from this request's commit. The enabled nightly flows.history task continues its deletion, subject to legal holds and execution caps. RETENTION_FLOWS_HISTORY_ENABLED=false leaves that work unfinished.
+       * @description Admitted runs whose deletion remains unfinished because of a pause, fresh refusal or this request's budget (operator settings RETENTION_MAX_ROWS_PER_RUN and RETENTION_MAX_FILES_PER_RUN). A pending run remains stored but its deletion fence hides it from this request's commit. The enabled nightly flows.history task continues its deletion, subject to legal holds and execution caps. RETENTION_FLOWS_HISTORY_ENABLED=false leaves that work unfinished.
        */
       pending_count: number;
       /**
@@ -25257,50 +25257,6 @@ export interface components {
        */
       terminal_runs_with_open_attempts_count?: number;
     };
-    /** FlowRuntimeGallringSummary */
-    FlowRuntimeGallringSummary: {
-      /**
-       * Disabled Tasks
-       * @description Gallring tasks turned off by the deployment's emergency switch. Each suppressed nightly run is audited; any entry raises GALLRING_DISABLED (UNHEALTHY).
-       */
-      disabled_tasks?: string[];
-      /**
-       * Oldest Overdue Age Seconds
-       * @description Seconds since the earliest overdue deadline across named tasks.
-       */
-      oldest_overdue_age_seconds?: number | null;
-      /**
-       * Overdue Complete
-       * @description True only when every named snapshot covers all its overdue work.
-       */
-      overdue_complete?: boolean | null;
-      /**
-       * Overdue Count
-       * @description Sum of overdue root counts from the newest valid snapshot of each named reporting task. Each task applies its own deletion deadline and the operator's GALLRING_OVERDUE_WINDOW_DAYS (default 1 day). Flow auto_delete runs under legal holds are excluded. A positive count raises GALLRING_OVERDUE (UNHEALTHY). Null when snapshots are missing or invalid, or no reporting task is enabled.
-       */
-      overdue_count?: number | null;
-      /**
-       * Overdue Snapshot Age Seconds
-       * @description Seconds since the oldest observation across named tasks.
-       */
-      overdue_snapshot_age_seconds?: number | null;
-      /**
-       * Overdue Tasks
-       * @description Enabled reporting tasks whose snapshots the overdue fields fold.
-       */
-      overdue_tasks?: string[];
-      /**
-       * Overdue Unknown
-       * @description True when a required named snapshot is missing, older than twice the daily cadence, or counts zero without covering all work. A deployment where no reporting task has run is not judged. Raises GALLRING_OVERDUE.
-       * @default false
-       */
-      overdue_unknown?: boolean;
-      /**
-       * Stale Tasks
-       * @description Enabled gallring tasks (for example flows.housekeeping) whose last completed execution is older than twice the daily cadence, or that started but never completed within it. Any entry raises GALLRING_JOB_STALE (UNHEALTHY). A task that never ran is not listed.
-       */
-      stale_tasks?: string[];
-    };
     /**
      * FlowRuntimeHealthFlag
      * @enum {string}
@@ -25321,21 +25277,21 @@ export interface components {
       | "WEBHOOK_OUTBOX_DELIVERY_BACKLOG"
       | "WEBHOOK_OUTBOX_EXPIRED_CLAIMS"
       | "WEBHOOK_OUTBOX_DEAD_LETTERS"
-      | "GALLRING_HOLD_REVIEW_OVERDUE"
-      | "GALLRING_JOB_STALE"
-      | "GALLRING_DISABLED"
-      | "GALLRING_OVERDUE";
+      | "RETENTION_HOLD_REVIEW_OVERDUE"
+      | "RETENTION_JOB_STALE"
+      | "RETENTION_DISABLED"
+      | "RETENTION_OVERDUE";
     /** FlowRuntimeHealthResponse */
     FlowRuntimeHealthResponse: {
       audit_outbox?: components["schemas"]["FlowRuntimeAuditOutboxSummary"];
       data_integrity?: components["schemas"]["FlowRuntimeDataIntegrity"];
-      gallring?: components["schemas"]["FlowRuntimeGallringSummary"];
       probe: components["schemas"]["FlowRuntimeProbe"];
       /**
        * Response Timestamp Utc
        * Format: date-time
        */
       response_timestamp_utc: string;
+      retention?: components["schemas"]["FlowRuntimeRetentionSummary"];
       retention_holds?: components["schemas"]["FlowRuntimeRetentionHoldSummary"];
       review?: components["schemas"]["FlowRuntimeReviewSummary"];
       runs?: components["schemas"]["FlowRuntimeRunSummary"];
@@ -25685,10 +25641,54 @@ export interface components {
       oldest_review_overdue_age_seconds?: number | null;
       /**
        * Review Overdue Count
-       * @description Active legal holds whose review date has passed. They still stop deletion; any positive count raises GALLRING_HOLD_REVIEW_OVERDUE (DEGRADED) until each is extended or released.
+       * @description Active legal holds whose review date has passed. They still stop deletion; any positive count raises RETENTION_HOLD_REVIEW_OVERDUE (DEGRADED) until each is extended or released.
        * @default 0
        */
       review_overdue_count?: number;
+    };
+    /** FlowRuntimeRetentionSummary */
+    FlowRuntimeRetentionSummary: {
+      /**
+       * Disabled Tasks
+       * @description Retention tasks turned off by the deployment's emergency switch. Each suppressed nightly run is audited; any entry raises RETENTION_DISABLED (UNHEALTHY).
+       */
+      disabled_tasks?: string[];
+      /**
+       * Oldest Overdue Age Seconds
+       * @description Seconds since the earliest overdue deadline across named tasks.
+       */
+      oldest_overdue_age_seconds?: number | null;
+      /**
+       * Overdue Complete
+       * @description True only when every named snapshot covers all its overdue work.
+       */
+      overdue_complete?: boolean | null;
+      /**
+       * Overdue Count
+       * @description Sum of overdue root counts from the newest valid snapshot of each named reporting task. Each task applies its own deletion deadline and the operator's RETENTION_OVERDUE_WINDOW_DAYS (default 1 day). Flow auto_delete runs under legal holds are excluded. A positive count raises RETENTION_OVERDUE (UNHEALTHY). Null when snapshots are missing or invalid, or no reporting task is enabled.
+       */
+      overdue_count?: number | null;
+      /**
+       * Overdue Snapshot Age Seconds
+       * @description Seconds since the oldest observation across named tasks.
+       */
+      overdue_snapshot_age_seconds?: number | null;
+      /**
+       * Overdue Tasks
+       * @description Enabled reporting tasks whose snapshots the overdue fields fold.
+       */
+      overdue_tasks?: string[];
+      /**
+       * Overdue Unknown
+       * @description True when a required named snapshot is missing, older than twice the daily cadence, or counts zero without covering all work. A deployment where no reporting task has run is not judged. Raises RETENTION_OVERDUE.
+       * @default false
+       */
+      overdue_unknown?: boolean;
+      /**
+       * Stale Tasks
+       * @description Enabled retention tasks (for example flows.housekeeping) whose last completed execution is older than twice the daily cadence, or that started but never completed within it. Any entry raises RETENTION_JOB_STALE (UNHEALTHY). A task that never ran is not listed.
+       */
+      stale_tasks?: string[];
     };
     /** FlowRuntimeReviewSummary */
     FlowRuntimeReviewSummary: {
@@ -33117,7 +33117,7 @@ export interface components {
     RetentionTaskStatus: {
       /**
        * Enabled
-       * @description False when the deployment's emergency switch turned the task off (health flag GALLRING_DISABLED); each suppressed run is audited.
+       * @description False when the deployment's emergency switch turned the task off (health flag RETENTION_DISABLED); each suppressed run is audited.
        */
       enabled: boolean;
       /**
@@ -33134,7 +33134,7 @@ export interface components {
       name: string;
       /**
        * Stale
-       * @description The task is enabled and has no completed execution within twice the daily cadence (health flag GALLRING_JOB_STALE); a task that never ran is not stale, and a task the switch turned off never is (it raises GALLRING_DISABLED).
+       * @description The task is enabled and has no completed execution within twice the daily cadence (health flag RETENTION_JOB_STALE); a task that never ran is not stale, and a task the switch turned off never is (it raises RETENTION_DISABLED).
        */
       stale: boolean;
     };
@@ -68218,6 +68218,22 @@ export interface operations {
           "application/json": components["schemas"]["GeneralError"];
         };
       };
+      /** @description Retention purge timed out. Retry shortly. */
+      503: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          /**
+           * @example {
+           *       "code": "retention_purge_unavailable",
+           *       "eneo_error_code": 9038,
+           *       "message": "Retention purge timed out. Retry shortly."
+           *     }
+           */
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
     };
   };
   list_flow_run_retention_review_queue: {
@@ -68464,6 +68480,22 @@ export interface operations {
           [name: string]: unknown;
         };
         content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Retention purge timed out. Retry shortly. */
+      503: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          /**
+           * @example {
+           *       "code": "retention_purge_unavailable",
+           *       "eneo_error_code": 9038,
+           *       "message": "Retention purge timed out. Retry shortly."
+           *     }
+           */
           "application/json": components["schemas"]["GeneralError"];
         };
       };
@@ -68777,6 +68809,22 @@ export interface operations {
           "application/json": components["schemas"]["GeneralError"];
         };
       };
+      /** @description Retention purge timed out. Retry shortly. */
+      503: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          /**
+           * @example {
+           *       "code": "retention_purge_unavailable",
+           *       "eneo_error_code": 9038,
+           *       "message": "Retention purge timed out. Retry shortly."
+           *     }
+           */
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
     };
   };
   list_space_flow_run_retention_review_queue: {
@@ -68896,12 +68944,21 @@ export interface operations {
           "application/json": components["schemas"]["GeneralError"];
         };
       };
-      /** @description Retention status timed out; retry shortly. */
+      /** @description Retention status is temporarily unavailable. Retry shortly. */
       503: {
         headers: {
           [name: string]: unknown;
         };
-        content?: never;
+        content: {
+          /**
+           * @example {
+           *       "code": "retention_status_unavailable",
+           *       "eneo_error_code": 9038,
+           *       "message": "Retention status is temporarily unavailable. Retry shortly."
+           *     }
+           */
+          "application/json": components["schemas"]["GeneralError"];
+        };
       };
     };
   };

@@ -1140,7 +1140,7 @@ class SettingService:
                 code=FLOW_SETTINGS_INVALID_PAYLOAD_CODE,
             )
         if upload_supplied:
-            # The upload window decides when gallring deletes: a retention
+            # The upload window decides when retention deletes: a retention
             # decision by a signed-in person with retention_manage, serialized
             # with open deletions before the tenant row is locked.
             require_retention_manage(self.user)

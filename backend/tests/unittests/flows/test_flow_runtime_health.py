@@ -405,20 +405,22 @@ def test_a_legal_hold_past_its_review_date_degrades_health_without_ending() -> N
     )
 
     assert response.status == FlowRuntimeHealthStatus.DEGRADED
-    assert response.status_flags == [FlowRuntimeHealthFlag.GALLRING_HOLD_REVIEW_OVERDUE]
+    assert response.status_flags == [
+        FlowRuntimeHealthFlag.RETENTION_HOLD_REVIEW_OVERDUE
+    ]
     assert response.retention_holds.review_overdue_count == 2
     assert response.retention_holds.oldest_review_overdue_age_seconds == 3600
 
 
-def test_a_stale_gallring_task_makes_flow_runtime_unhealthy() -> None:
+def test_a_stale_retention_task_makes_flow_runtime_unhealthy() -> None:
     now = datetime(2026, 10, 4, 12, 0, tzinfo=timezone.utc)
     policy = build_flow_runtime_health_policy(
-        task_timeout_seconds=14400, gallring_tasks=("flows.housekeeping",)
+        task_timeout_seconds=14400, retention_tasks=("flows.housekeeping",)
     )
 
     response = classify_flow_runtime_health(
         snapshot=FlowRuntimeHealthSnapshot(
-            database_observed_at=now, stale_gallring_tasks=("flows.housekeeping",)
+            database_observed_at=now, stale_retention_tasks=("flows.housekeeping",)
         ),
         now=now,
         policy=policy,
@@ -427,16 +429,16 @@ def test_a_stale_gallring_task_makes_flow_runtime_unhealthy() -> None:
         ),
     )
 
-    assert response.status_flags == [FlowRuntimeHealthFlag.GALLRING_JOB_STALE]
+    assert response.status_flags == [FlowRuntimeHealthFlag.RETENTION_JOB_STALE]
     assert response.status == FlowRuntimeHealthStatus.UNHEALTHY
-    assert response.gallring.stale_tasks == ["flows.housekeeping"]
-    assert policy.gallring_stale_after == timedelta(days=2)
+    assert response.retention.stale_tasks == ["flows.housekeeping"]
+    assert policy.retention_stale_after == timedelta(days=2)
 
 
 def test_a_task_off_by_the_emergency_switch_is_never_silent() -> None:
     now = datetime(2026, 10, 4, 12, 0, tzinfo=timezone.utc)
     policy = build_flow_runtime_health_policy(
-        task_timeout_seconds=14400, gallring_disabled_tasks=("flows.housekeeping",)
+        task_timeout_seconds=14400, retention_disabled_tasks=("flows.housekeeping",)
     )
 
     response = classify_flow_runtime_health(
@@ -448,6 +450,6 @@ def test_a_task_off_by_the_emergency_switch_is_never_silent() -> None:
         ),
     )
 
-    assert response.status_flags == [FlowRuntimeHealthFlag.GALLRING_DISABLED]
+    assert response.status_flags == [FlowRuntimeHealthFlag.RETENTION_DISABLED]
     assert response.status == FlowRuntimeHealthStatus.UNHEALTHY
-    assert response.gallring.disabled_tasks == ["flows.housekeeping"]
+    assert response.retention.disabled_tasks == ["flows.housekeeping"]

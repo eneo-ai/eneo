@@ -16,7 +16,7 @@ from eneo.main.config import Settings, get_settings
 
 def flows_history_task_registered() -> bool:
     """The activation gate of auto_delete: the deleting task is in the code list
-    of registered gallring tasks (its emergency switch does not matter here)."""
+    of registered retention tasks (its emergency switch does not matter here)."""
     # Imported here: the task registry imports flows application modules.
     from eneo.data_retention.infrastructure.retention_tasks import RETENTION_TASKS
 

@@ -211,6 +211,17 @@ class FlowRunRetentionPolicySettings(BaseModel):
         description="Limits that apply when this policy is written."
     )
 
+    def differs_from(
+        self,
+        *,
+        policy: FlowRunRetentionPolicy | None,
+        transcription_audio: bool | None,
+    ) -> bool:
+        return (
+            self.local_policy != policy
+            or self.transcription_audio.local != transcription_audio
+        )
+
 
 class FlowRunRetentionSpaceTarget(BaseModel):
     model_config = ConfigDict(extra="forbid", frozen=True, from_attributes=True)
@@ -541,7 +552,13 @@ def flow_run_retention_policy_settings(
         transcription_audio=TranscriptionAudioRetentionSettings(
             local=local_audio,
             inherited=inherited_audio,
-            effective=local_audio if local_audio is not None else inherited_audio,
+            effective=resolve_transcription_audio_after_use(
+                organization=organization_audio,
+                space=space_audio
+                if scope is not FlowRunRetentionScope.ORGANIZATION
+                else None,
+                flow=flow_audio if scope is FlowRunRetentionScope.FLOW else None,
+            ),
         ),
         scope=scope,
         scope_id=scope_id,

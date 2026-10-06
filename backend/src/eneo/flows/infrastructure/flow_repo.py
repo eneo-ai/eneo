@@ -486,19 +486,15 @@ class FlowRepository:
         ).published_version
 
     async def flow_row_for_step_assistant_reclamation(
-        self, *, flow_id: UUID, tenant_id: UUID, lock: bool
+        self, *, flow_id: UUID, tenant_id: UUID
     ) -> sa.Row[tuple[datetime | None]] | None:
-        """``deleted_at`` of a live or deleted flow. With ``lock`` it takes the
-        row lock `_lock_flow_row` takes, SKIP LOCKED: None while another
-        transaction (an edit, publish, run start or delete) holds the row.
-        Without it a plain read (an inventory that never blocks a writer)."""
+        """Lock a live or deleted flow, skipping concurrent edits and runs."""
         query = (
             sa.select(Flows.deleted_at)
             .where(Flows.id == flow_id)
             .where(Flows.tenant_id == tenant_id)
+            .with_for_update(key_share=True, skip_locked=True)
         )
-        if lock:
-            query = query.with_for_update(key_share=True, skip_locked=True)
         return (await self.session.execute(query)).one_or_none()
 
     async def _lock_flow_row(

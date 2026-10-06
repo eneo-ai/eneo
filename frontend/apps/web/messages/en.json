@@ -2330,8 +2330,8 @@
   "audit_action_api_key_expiration_extended": "API Key Expiration Changed",
   "audit_action_api_key_purged": "API Key Permanently Deleted",
   "audit_action_retention_policy_applied": "Retention Policy Applied",
-  "audit_action_gallring_applied": "Scheduled Deletion Applied",
-  "audit_action_gallring_skipped": "Scheduled Deletion Skipped",
+  "audit_action_retention_applied": "Scheduled Retention Applied",
+  "audit_action_retention_skipped": "Scheduled Retention Skipped",
   "audit_action_role_created": "Role Created",
   "audit_action_role_deleted": "Role Deleted",
   "audit_action_assistant_transferred": "Assistant Transferred",
@@ -3802,8 +3802,8 @@
   "audit_action_module_auth_token_refreshed_description": "Logs when a module renews a module user token inside the session ceiling",
   "audit_action_permission_changed_description": "Logs changes to user permissions",
   "audit_action_retention_policy_applied_description": "Logs when old audit logs are purged",
-  "audit_action_gallring_applied_description": "The nightly scheduled deletion removed data past its retention window; the event lists counts and receipt ids only.",
-  "audit_action_gallring_skipped_description": "The nightly scheduled deletion did not run because the deployment setting turned it off.",
+  "audit_action_retention_applied_description": "The nightly retention job examined or removed data. The event includes counts and receipt identifiers without document content.",
+  "audit_action_retention_skipped_description": "The nightly retention job did not run because the deployment setting turned it off.",
   "audit_action_role_created_description": "Logs when a new role is created",
   "audit_action_role_deleted_description": "Logs when a role is removed",
   "audit_action_role_modified_description": "Logs changes to role permissions",
@@ -7361,5 +7361,5 @@
   "flow_audio_retention_default": "Default: keep source audio",
   "flow_audio_retention_enabled": "Delete after use",
   "flow_audio_retention_disabled": "Keep source audio",
-  "flow_audio_retention_description": "Delete owned source audio after the run ends. Holds and other owners protect the files; transcripts and run history keep their own retention rules."
+  "flow_audio_retention_description": "Delete owned source audio after the run ends. Holds, shared files (including audio reused by retry runs) and bound live recordings keep their audio. Transcripts and run history keep their own retention rules."
 }

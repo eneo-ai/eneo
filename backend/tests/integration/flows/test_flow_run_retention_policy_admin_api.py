@@ -143,7 +143,7 @@ async def test_admin_explicit_purge_defaults_to_preview_and_audits_deletion(
     row_budget,
 ) -> None:
     """M143/M144 omit required proof; M151/M152 pending work; M155/M156 false selection completeness."""
-    monkeypatch.setattr(get_settings(), "gallring_max_rows_per_run", row_budget)
+    monkeypatch.setattr(get_settings(), "retention_max_rows_per_run", row_budget)
     pending = row_budget == 8
     _, flow_id = published_flow_ids
     old = datetime.now(timezone.utc) - timedelta(days=3)

@@ -184,8 +184,8 @@ class TestCategoryMappings:
         """Verify system action types are correctly mapped."""
         system_actions = [
             ActionType.RETENTION_POLICY_APPLIED,
-            ActionType.GALLRING_APPLIED,
-            ActionType.GALLRING_SKIPPED,
+            ActionType.RETENTION_APPLIED,
+            ActionType.RETENTION_SKIPPED,
             ActionType.ENCRYPTION_KEY_ROTATED,
             ActionType.SYSTEM_MAINTENANCE,
             ActionType.FLOW_RUN_HISTORY_PURGED,
@@ -283,8 +283,8 @@ class TestActionMessageCatalog:
         for action in ActionType:
             for locale, messages in locales.items():
                 for key in (
-                    f"audit_action_{action.value}",
-                    f"audit_action_{action.value}_description",
+                    f"audit_action_{action.name.lower()}",
+                    f"audit_action_{action.name.lower()}_description",
                 ):
                     if not messages.get(key):
                         missing_or_empty.append(f"{locale}:{key}")

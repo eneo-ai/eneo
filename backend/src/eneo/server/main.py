@@ -820,11 +820,11 @@ def get_application():
         description=(
             "Return super-key-protected Flow runtime readiness signals derived from "
             "persisted run, review, data-integrity, audit-outbox, webhook-outbox, "
-            "gallring job, and platform task worker readiness. GALLRING_JOB_STALE "
-            "(UNHEALTHY) means an enabled nightly gallring task has not completed "
-            "within twice its daily cadence; GALLRING_DISABLED (UNHEALTHY) means the "
-            "deployment's emergency switch turned a gallring task off; "
-            "GALLRING_OVERDUE (UNHEALTHY) means a named reporting task still has "
+            "retention job, and platform task worker readiness. RETENTION_JOB_STALE "
+            "(UNHEALTHY) means an enabled nightly retention task has not completed "
+            "within twice its daily cadence; RETENTION_DISABLED (UNHEALTHY) means the "
+            "deployment's emergency switch turned a retention task off; "
+            "RETENTION_OVERDUE (UNHEALTHY) means a named reporting task still has "
             "work past its deletion deadline and overdue window, or that a required "
             "snapshot is missing or older than twice the daily cadence "
             "(overdue_unknown)."
@@ -850,8 +850,8 @@ def get_application():
         settings = get_settings()
         policy = build_flow_runtime_health_policy(
             task_timeout_seconds=settings.task_execution_timeout_seconds,
-            gallring_tasks=enabled_retention_tasks(settings),
-            gallring_disabled_tasks=disabled_retention_tasks(settings),
+            retention_tasks=enabled_retention_tasks(settings),
+            retention_disabled_tasks=disabled_retention_tasks(settings),
             retention_overdue_tasks=overdue_retention_tasks(settings),
         )
         worker_readiness = await load_task_worker_readiness(timeout_seconds=1.0)

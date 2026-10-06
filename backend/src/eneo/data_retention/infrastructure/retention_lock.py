@@ -1,4 +1,4 @@
-"""The advisory locks that serialize retention (retention deletion) with retention decisions.
+"""Serialize retention deletion with policy and legal-hold changes.
 
 One lock per subject of retention. Every transaction that deletes a subject's
 history takes the subject's lock SHARED, so deletions run side by side. Every
@@ -90,7 +90,7 @@ async def _acquire(
             )
         )
     ).scalar_one()
-    configured_ms = get_settings().gallring_chunk_lock_timeout_ms
+    configured_ms = get_settings().retention_chunk_lock_timeout_ms
     timeout_ms = min(previous_ms, configured_ms) if previous_ms else configured_ms
     await session.execute(
         sa.select(sa.func.set_config("lock_timeout", f"{timeout_ms}ms", True))

@@ -15,7 +15,8 @@ from eneo.files.file_models import (
     FileInUseError,
     FileOriginalNotFoundError,
 )
-from eneo.flows.domain.flow_run_history_deletion_status import (
+from eneo.flows.domain.flow_retention_errors import (
+    FlowRetentionPurgeUnavailableError,
     FlowRetentionStatusUnavailableError,
 )
 from eneo.info_blobs.info_blob import InfoBlobOriginalUnavailableError
@@ -316,6 +317,7 @@ DOMAIN_EXCEPTION_MAP: dict[type[Exception], tuple[int, str | None, ErrorCodes]] 
     ),
     # --- Object content and files ---
     FlowRetentionStatusUnavailableError: (503, None, ErrorCodes.RESOURCE_NOT_READY),
+    FlowRetentionPurgeUnavailableError: (503, None, ErrorCodes.RESOURCE_NOT_READY),
     ObjectContentUnavailableError: (503, None, ErrorCodes.RESOURCE_NOT_READY),
     ObjectContentIntegrityError: (503, None, ErrorCodes.RESOURCE_NOT_READY),
     ObjectContentIdempotencyConflictError: (409, None, ErrorCodes.UNIQUE_ERROR),

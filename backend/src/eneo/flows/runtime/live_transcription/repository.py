@@ -216,7 +216,7 @@ class LiveTranscriptRepository:
     async def expired_unbound_page(
         self, *, now: datetime, after: RetentionKeyset | None, limit: int
     ) -> list[ExpiredLiveTranscript]:
-        """Scheduled gallring: the next expired unbound transcripts, locked.
+        """Scheduled retention: the next expired unbound transcripts, locked.
 
         The deployment's current window gives one literal cutoff on the
         (created_at, id) index of unbound rows; rows another transaction holds

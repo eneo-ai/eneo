@@ -511,7 +511,7 @@ async def test_expired_client_errors_are_deleted_through_budgeted_runner_pages(
             )
 
     async with sessionmanager.session() as worker_session:
-        settings = get_settings().model_copy(update={"gallring_chunk_rows": 2})
+        settings = get_settings().model_copy(update={"retention_chunk_rows": 2})
         report = await retention_runner(
             session=worker_session,
             container=Container(session=providers.Object(worker_session)),
@@ -527,7 +527,7 @@ async def test_expired_client_errors_are_deleted_through_budgeted_runner_pages(
             await session.scalars(
                 select(AuditLogTable)
                 .where(
-                    AuditLogTable.action == ActionType.GALLRING_APPLIED.value,
+                    AuditLogTable.action == ActionType.RETENTION_APPLIED.value,
                     AuditLogTable.log_metadata["job_run_id"].astext
                     == str(report.job_run_id),
                 )

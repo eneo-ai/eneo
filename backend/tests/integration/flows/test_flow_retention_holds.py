@@ -434,7 +434,7 @@ async def test_a_busy_retention_lock_is_refused_typed_and_writes_nothing(
 ):
     flow_id = history["flow_id"]
     await _add_run(db_container, admin_user, flow_id)
-    monkeypatch.setattr(get_settings(), "gallring_chunk_lock_timeout_ms", 100)
+    monkeypatch.setattr(get_settings(), "retention_chunk_lock_timeout_ms", 100)
     async with db_container() as purging:
         await purging.flow_run_retention_policy_service().purge_due_history(
             dry_run=False, limit=10, flow_id=flow_id
@@ -802,7 +802,7 @@ async def test_an_overdue_review_keeps_the_hold_and_raises_the_health_flag(
             maintenance_worker_ready=True,
         ),
     )
-    assert FlowRuntimeHealthFlag.GALLRING_HOLD_REVIEW_OVERDUE in health.status_flags
+    assert FlowRuntimeHealthFlag.RETENTION_HOLD_REVIEW_OVERDUE in health.status_flags
     assert health.retention_holds.review_overdue_count == 1
     assert health.retention_holds.oldest_review_overdue_age_seconds >= 3600
 

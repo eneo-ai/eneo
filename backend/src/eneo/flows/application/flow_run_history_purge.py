@@ -64,8 +64,8 @@ class FlowRunHistoryExplicitPurge:
         settings = get_settings()
         async with retention_request_sql_limits(
             self.session,
-            statement_timeout_ms=settings.gallring_chunk_statement_timeout_ms,
-            lock_timeout_ms=settings.gallring_chunk_lock_timeout_ms,
+            statement_timeout_ms=settings.retention_chunk_statement_timeout_ms,
+            lock_timeout_ms=settings.retention_chunk_lock_timeout_ms,
         ):
             return await self.deletion.rules.diagnostics(
                 modes=_DIAGNOSED_MODES,
@@ -91,8 +91,8 @@ class FlowRunHistoryExplicitPurge:
         settings = get_settings()
         async with retention_request_sql_limits(
             self.session,
-            statement_timeout_ms=settings.gallring_chunk_statement_timeout_ms,
-            lock_timeout_ms=settings.gallring_chunk_lock_timeout_ms,
+            statement_timeout_ms=settings.retention_chunk_statement_timeout_ms,
+            lock_timeout_ms=settings.retention_chunk_lock_timeout_ms,
         ):
             if not dry_run:
                 await self.deletion.lock()
@@ -115,7 +115,7 @@ class FlowRunHistoryExplicitPurge:
                 max_files=max_files,
                 cursor=None,
                 chunk_rows=max_rows,
-                gather_seconds=get_settings().gallring_family_gather_seconds,
+                gather_seconds=get_settings().retention_family_gather_seconds,
                 min_candidate_rows=2,
             )
             return ExplicitPurgeResult(

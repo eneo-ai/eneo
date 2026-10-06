@@ -2363,8 +2363,8 @@
   "audit_action_api_key_expiration_extended": "API-nyckelns utgång ändrad",
   "audit_action_api_key_purged": "API-nyckel permanent borttagen",
   "audit_action_retention_policy_applied": "Lagringspolicy tillämpades",
-  "audit_action_gallring_applied": "Schemalagd gallring utförd",
-  "audit_action_gallring_skipped": "Schemalagd gallring hoppades över",
+  "audit_action_retention_applied": "Schemalagd gallring utförd",
+  "audit_action_retention_skipped": "Schemalagd gallring hoppades över",
   "audit_action_role_created": "Roll skapad",
   "audit_action_role_deleted": "Roll borttagen",
   "audit_action_assistant_transferred": "Assistent flyttad till annan yta",
@@ -3802,8 +3802,8 @@
   "audit_action_module_auth_token_refreshed_description": "Loggar när en modul förnyar en modulanvändartoken inom sessionstaket",
   "audit_action_permission_changed_description": "Loggar ändringar av användarbehörigheter",
   "audit_action_retention_policy_applied_description": "Loggar när gamla granskningsloggar rensas",
-  "audit_action_gallring_applied_description": "Den nattliga gallringen tog bort data vars lagringstid gått ut; händelsen innehåller bara antal och kvitto-id.",
-  "audit_action_gallring_skipped_description": "Den nattliga gallringen kördes inte eftersom driftinställningen stängt av den.",
+  "audit_action_retention_applied_description": "Den nattliga gallringen granskade eller tog bort data. Händelsen innehåller antal och kvitto-id utan dokumentinnehåll.",
+  "audit_action_retention_skipped_description": "Den nattliga gallringen kördes inte eftersom driftinställningen stängt av den.",
   "audit_action_role_created_description": "Loggar när en ny roll skapas",
   "audit_action_role_deleted_description": "Loggar när en roll tas bort",
   "audit_action_role_modified_description": "Loggar ändringar av rollbehörigheter",
@@ -7361,5 +7361,5 @@
   "flow_audio_retention_default": "Standard: behåll ljudet",
   "flow_audio_retention_enabled": "Radera efter användning",
   "flow_audio_retention_disabled": "Behåll ljudet",
-  "flow_audio_retention_description": "Radera egna ljudfiler när körningen har avslutats. Spärrar och andra ägare skyddar filerna; transkriptioner och körningshistorik behålls enligt sina regler."
+  "flow_audio_retention_description": "Radera egna ljudfiler när körningen har avslutats. Spärrar, delade filer (även ljud som återanvänds vid omförsök) och bundna liveinspelningar behåller sitt ljud. Transkriptioner och körningshistorik följer sina egna lagringsregler."
 }

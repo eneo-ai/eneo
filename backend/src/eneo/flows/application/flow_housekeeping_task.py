@@ -6,8 +6,9 @@ Unfinished family receipts repeat the complete ownership proof each time.
 
 The shared runner owns transactions, progress, required audit and execution
 budgets. Each family reuses bounded preparation and deepest-first guarded file
-deletion. A unit either completes atomically, pauses with a reason, or defers
-with its cursor before the candidate. Every step first takes the shared history
+deletion. A unit that does not fit retains its cursor before the candidate;
+busy, held and ineligible units advance to be revisited on the next pass.
+Every step first takes the shared history
 lock so policy/hold changes cannot overlap its FRESH checks and deletion.
 """
 
@@ -90,7 +91,7 @@ from eneo.flows.infrastructure.flow_run_released_input_repo import (
 from eneo.flows.infrastructure.flow_version_repo import FlowVersionRepository
 from eneo.flows.published_runtime import load_published_definition
 from eneo.flows.runtime.live_transcription.repository import LiveTranscriptRepository
-from eneo.main.config import get_settings
+from eneo.main.config import Settings, get_settings
 from eneo.main.exceptions import BadRequestException, NotFoundException
 
 logger = logging.getLogger(__name__)
@@ -165,19 +166,20 @@ class FlowHousekeepingTask:
         now: Callable[[], datetime] = _utcnow,
         family_rows: int | None = None,
         chunk_rows: int | None = None,
+        settings: Settings | None = None,
     ) -> None:
-        settings = get_settings()
+        settings = settings if settings is not None else get_settings()
         self._now = now
         self._session = session
         self._family_rows = (
             family_rows
             if family_rows is not None
-            else settings.gallring_max_family_rows
+            else settings.retention_max_family_rows
         )
         self._chunk_rows = (
-            chunk_rows if chunk_rows is not None else settings.gallring_chunk_rows
+            chunk_rows if chunk_rows is not None else settings.retention_chunk_rows
         )
-        self._gather_seconds = settings.gallring_family_gather_seconds
+        self._gather_seconds = settings.retention_family_gather_seconds
         self._receipts = RetentionReceiptService(RetentionReceiptRepository(session))
         self._job_runs = RetentionJobRunRepository(session)
         self._families = FlowFileFamilyRepository(session)
@@ -187,7 +189,10 @@ class FlowHousekeepingTask:
         self._released_inputs = FlowRunReleasedInputRepository(session)
         self._transcripts = LiveTranscriptRepository(session)
         self._step_assistants = StepAssistantReclamation(
-            session, family_rows=self._family_rows, chunk_rows=self._chunk_rows
+            session,
+            family_rows=self._family_rows,
+            chunk_rows=self._chunk_rows,
+            settings=settings,
         )
 
     @property

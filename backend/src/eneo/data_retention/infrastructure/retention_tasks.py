@@ -38,7 +38,7 @@ class RetentionTaskRegistration:
     enabled: Callable[[Settings], bool]
     build: Callable[[AsyncSession, RetentionBudget, Settings], RetentionTask]
     budget_rows: Callable[[Settings], int] = (
-        lambda settings: settings.gallring_max_rows_per_run
+        lambda settings: settings.retention_max_rows_per_run
     )
 
     reports_overdue: bool = False
@@ -46,8 +46,8 @@ class RetentionTaskRegistration:
     def budget(self, settings: Settings) -> RetentionBudget:
         return RetentionBudget(
             rows=self.budget_rows(settings),
-            files=settings.gallring_max_files_per_run,
-            seconds=settings.gallring_max_seconds_per_run,
+            files=settings.retention_max_files_per_run,
+            seconds=settings.retention_max_seconds_per_run,
         )
 
 
@@ -62,11 +62,11 @@ def build_conversation_history_task(
         session,
         allocation=conversation_page_allocation(
             unit_rows=settings.retention_chats_max_unit_rows,
-            chunk_rows=settings.gallring_chunk_rows,
+            chunk_rows=settings.retention_chunk_rows,
             execution_rows=budget.rows,
         ),
         now=now if now is not None else datetime.now(timezone.utc),
-        overdue_window=timedelta(days=settings.gallring_overdue_window_days),
+        overdue_window=timedelta(days=settings.retention_overdue_window_days),
         overdue_rows=settings.retention_overdue_max_rows,
     )
 
@@ -76,8 +76,10 @@ def build_conversation_history_task(
 RETENTION_TASKS: tuple[RetentionTaskRegistration, ...] = (
     RetentionTaskRegistration(
         name=FLOWS_HOUSEKEEPING_TASK,
-        enabled=lambda settings: settings.gallring_flows_housekeeping_enabled,
-        build=lambda session, _budget, _settings: FlowHousekeepingTask(session),
+        enabled=lambda settings: settings.retention_flows_housekeeping_enabled,
+        build=lambda session, _budget, settings: FlowHousekeepingTask(
+            session, settings=settings
+        ),
     ),
     RetentionTaskRegistration(
         name=FLOWS_HISTORY_TASK,
