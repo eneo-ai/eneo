@@ -16,7 +16,7 @@ stateDiagram-v2
   running --> failed: terminalization
   running --> cancelled: cancellation or recovery
   awaiting_review --> queued: approved checkpoint resumed
-  awaiting_review --> failed: rejected or expired
+  awaiting_review --> cancelled: rejected or expired
   awaiting_review --> cancelled: owner cancels
 ```
 
