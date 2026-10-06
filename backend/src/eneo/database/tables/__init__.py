@@ -25,6 +25,7 @@ _TABLE_MODULES = (
     "eneo.database.tables.icons_table",
     "eneo.database.tables.info_blob_chunk_table",
     "eneo.database.tables.info_blobs_table",
+    "eneo.database.tables.insight_conversations_table",
     "eneo.database.tables.integration_table",
     "eneo.database.tables.job_table",
     "eneo.database.tables.logging_table",

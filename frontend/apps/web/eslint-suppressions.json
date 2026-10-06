@@ -284,11 +284,6 @@
       "count": 10
     }
   },
-  "src/routes/(app)/spaces/[spaceId]/chat/insights/InsightsPage.svelte": {
-    "eneo/no-raw-color": {
-      "count": 1
-    }
-  },
   "src/routes/(app)/spaces/[spaceId]/knowledge/integrations/IntegrationSyncStatusCell.svelte": {
     "eneo/no-raw-color": {
       "count": 4

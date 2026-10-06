@@ -78,14 +78,18 @@ type EneoStreamingEndpoints =
   | "/api/v1/assistants/{id}/sessions/"
   | "/api/v1/analysis/assistants/{assistant_id}/"
   | "/api/v1/conversations/"
-  | "/api/v1/analysis/conversation-insights/";
+  | "/api/v1/analysis/conversation-insights/"
+  | "/api/v1/analysis/conversation-insights/chat/"
+  | "/api/v1/analysis/conversation-insights/chat/{session_id}/";
 
 type EneoStreamFunction = <Endpoint extends EneoStreamingEndpoints>(
   endpoint: Endpoint,
-  args: {
-    params: EneoParams<Endpoint, "post">;
-    requestBody: EneoRequestBody<Endpoint, "post">;
-  },
+  args: EneoParams<Endpoint, "post"> extends never
+    ? { params?: never; requestBody: EneoRequestBody<Endpoint, "post"> }
+    : {
+        params: EneoParams<Endpoint, "post">;
+        requestBody: EneoRequestBody<Endpoint, "post">;
+      },
   callbacks: {
     onOpen?: (response: Response) => Promise<void>;
     onClose?: () => void;

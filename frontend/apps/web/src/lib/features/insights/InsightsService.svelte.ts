@@ -38,15 +38,7 @@ class InsightsService {
   /** Currently previewed conversation */
   previewedConversation = $state<Conversation | null>(null);
   previewLoadError = $state<string | null>(null);
-  // Handling to ask some stuff
-  question = $state("");
-  answer = $state("");
-  analysisJobId = $state<string | null>(null);
-  analysisJobStatus = $state<"queued" | "processing" | "completed" | "failed" | null>(null);
-  analysisJobError = $state<string | null>(null);
-
   #previewRequestId = 0;
-  #analysisPollRequestId = 0;
   #conversationsRequestId = 0;
   #statisticsRequestId = 0;
   #lastStatisticsKey = $state<string | null>(null);
@@ -85,18 +77,12 @@ class InsightsService {
       }
 
       this.#previewRequestId += 1;
-      this.#analysisPollRequestId += 1;
       this.#statisticsRequestId += 1;
       this.#conversationsRequestId += 1;
       this.previewedConversation = null;
       this.previewLoadError = null;
-      this.answer = "";
-      this.question = "";
       this.conversationFilter = "";
       this.conversationListError = null;
-      this.analysisJobId = null;
-      this.analysisJobStatus = null;
-      this.analysisJobError = null;
       this.statistics = null;
       this.statisticsLoading = false;
       this.statisticsError = null;
@@ -321,82 +307,6 @@ class InsightsService {
     }
     this.previewedConversation = loadedConversation;
   });
-
-  askQuestion = createAsyncState(async (question: string) => {
-    const requestId = ++this.#analysisPollRequestId;
-    this.answer = "";
-    this.question = question;
-    this.analysisJobId = null;
-    this.analysisJobStatus = null;
-    this.analysisJobError = null;
-
-    let response;
-    try {
-      response = await this.#eneo.analytics.insights.ask({
-        startDate: this.#activeDateRange.start?.toString(),
-        // We add one day so the end day includes the whole day. otherwise this would be interpreted as 00:00
-        endDate: this.#activeDateRange.end?.add({ days: 1 }).toString(),
-        chatPartner: this.#chatPartner,
-        question,
-        processingMode: "auto",
-        onAnswer: (answer) => {
-          this.answer += answer;
-        }
-      });
-    } catch (error) {
-      this.analysisJobStatus = "failed";
-      this.analysisJobError = "failed";
-      return;
-    }
-
-    if (requestId !== this.#analysisPollRequestId) {
-      return;
-    }
-
-    if (response?.isAsync && response?.jobId) {
-      this.analysisJobId = response.jobId;
-      this.analysisJobStatus = response.status ?? "queued";
-      await this.#pollAnalysisJob(response.jobId, requestId);
-      return;
-    }
-
-    this.analysisJobStatus = response?.status ?? "completed";
-    this.answer = response.answer;
-  });
-
-  async #pollAnalysisJob(jobId: string, requestId: number): Promise<void> {
-    for (let attempt = 0; attempt < 120; attempt += 1) {
-      if (requestId !== this.#analysisPollRequestId) {
-        return;
-      }
-
-      let status;
-      try {
-        status = await this.#eneo.analytics.insights.getJobStatus({ jobId });
-      } catch (error) {
-        this.analysisJobStatus = "failed";
-        this.analysisJobError = "failed";
-        return;
-      }
-      this.analysisJobStatus = status.status ?? "processing";
-
-      if (status.status === "completed") {
-        this.answer = status.answer ?? "";
-        this.analysisJobError = null;
-        return;
-      }
-
-      if (status.status === "failed") {
-        this.analysisJobError = status.error ?? "Failed to generate insights.";
-        return;
-      }
-
-      await new Promise((resolve) => setTimeout(resolve, 1000));
-    }
-
-    this.analysisJobStatus = "failed";
-    this.analysisJobError = "Insights generation timed out. Please try again.";
-  }
 }
 
 export const [getInsightsService, initInsightsService] = createClassContext(
