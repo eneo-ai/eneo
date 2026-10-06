@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import sys
 from copy import deepcopy
 from dataclasses import replace
 from typing import Any, cast
@@ -49,6 +50,7 @@ from eneo.flows.runtime.step_handlers.mapped_outputs import (
 from eneo.flows.runtime.step_handlers.summarize import (
     admit_round,
     fold_section_records,
+    persist_summarization,
     section_records,
 )
 from eneo.flows.runtime.step_handlers.text_sections import (
@@ -155,6 +157,7 @@ async def execute_section_completion(
         total_items=total,
     )
     folding = False
+    execution_succeeded = False
     extensions: dict[str, Any] = {
         "section_manifest": sections.manifest.model_dump(mode="json")
     }
@@ -240,7 +243,7 @@ async def execute_section_completion(
             run=run,
             step=step,
         )
-        return StepExecutionResult(
+        result = StepExecutionResult(
             output=replace(
                 outputs[-1] if summarize else outputs[0],
                 input_text=base.prepared.step_input.text,
@@ -266,44 +269,44 @@ async def execute_section_completion(
                 output_payload_extensions=extensions,
             )
         )
-    except BaseException as exc:
-        if (
-            budget is not None
-            and not folding
-            and base.deps.persist_summarization is not None
-        ):
-            await base.deps.persist_summarization(
-                SummarizationProvenance(
-                    rounds=0,
-                    sources=sections.manifest.sources,
-                    records=tuple(section_records(records, outputs)),
+        execution_succeeded = True
+        return result
+    finally:
+        if not execution_succeeded and (exc := sys.exception()) is not None:
+            completed_items = min(len(outputs), total)
+            scope = current_step_deadline_scope()
+            if folding and scope is not None:
+                completed_items = scope.completed_items or 0
+                total = scope.total_items or 0
+            if isinstance(exc, TypedIOValidationException):
+                exc.context = {
+                    **(exc.context or {}),
+                    "completed_items": completed_items,
+                    "total_items": total,
+                }
+                if not folding:
+                    output_budget.set_failure_progress(
+                        exc, completed_items=completed_items + 1
+                    )
+                    completed_items = exc.context["completed_items"]
+                attach_typed_failure_context(
+                    exc,
+                    input_payload_for_result=base.prepared.input_payload_for_result,
+                    effective_prompt=base.prepared.effective_prompt,
                 )
-            )
-        completed_items = min(len(outputs), total)
-        scope = current_step_deadline_scope()
-        if folding and scope is not None:
-            completed_items = scope.completed_items or 0
-            total = scope.total_items or 0
-        if isinstance(exc, TypedIOValidationException):
-            exc.context = {
-                **(exc.context or {}),
-                "completed_items": completed_items,
-                "total_items": total,
-            }
-            if not folding:
-                output_budget.set_failure_progress(
-                    exc, completed_items=completed_items + 1
+            setattr(exc, "completed_items", completed_items)
+            setattr(exc, "total_items", total)
+            evidence.admit(getattr(exc, "rag_metadata", None))
+            partial = evidence.partial_payload()
+            if partial is not None:
+                setattr(exc, "rag_metadata", partial)
+            if budget is not None and not folding:
+                await persist_summarization(
+                    base=base,
+                    provenance=SummarizationProvenance(
+                        rounds=0,
+                        sources=sections.manifest.sources,
+                        records=tuple(section_records(records, outputs)),
+                    ),
+                    execution_error=exc,
                 )
-                completed_items = exc.context["completed_items"]
-            attach_typed_failure_context(
-                exc,
-                input_payload_for_result=base.prepared.input_payload_for_result,
-                effective_prompt=base.prepared.effective_prompt,
-            )
-        setattr(exc, "completed_items", completed_items)
-        setattr(exc, "total_items", total)
-        evidence.admit(getattr(exc, "rag_metadata", None))
-        partial = evidence.partial_payload()
-        if partial is not None:
-            setattr(exc, "rag_metadata", partial)
-        raise

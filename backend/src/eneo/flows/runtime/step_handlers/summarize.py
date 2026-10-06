@@ -6,6 +6,8 @@ and their intermediate and terminal descendants carry none.
 
 from __future__ import annotations
 
+import logging
+import sys
 from dataclasses import replace
 from hashlib import sha256
 from typing import Any, cast
@@ -34,6 +36,32 @@ from eneo.flows.runtime.structured_output_budget import (
     structured_output_json,
 )
 from eneo.main.exceptions import TypedIOValidationException
+
+logger = logging.getLogger(__name__)
+
+
+async def persist_summarization(
+    *,
+    base: PreparedAssistantStep,
+    provenance: SummarizationProvenance,
+    execution_error: BaseException | None,
+) -> None:
+    persist = base.deps.persist_summarization
+    if persist is None:
+        return
+    try:
+        await persist(provenance)
+    except Exception as persistence_error:
+        if execution_error is None:
+            raise
+        # Storage exceptions can include statement parameters or provider payloads.
+        diagnostic = RuntimeError("Summarization provenance persistence failed.")
+        logger.error(
+            "flow_summarization.evidence_persistence_failed type=%s",
+            type(persistence_error).__name__,
+            exc_info=(RuntimeError, diagnostic, persistence_error.__traceback__),
+        )
+        raise execution_error from persistence_error
 
 
 def record_bytes(records: list[TextProcessingRecord]) -> int:
@@ -94,6 +122,7 @@ async def fold_section_records(
     lineage = list(records)
     outputs: list[StepExecutionOutput] = []
     round_no = 0
+    execution_succeeded = False
     try:
         while len(records) > 1:
             budget.rounds = round_no
@@ -248,13 +277,15 @@ async def fold_section_records(
             ):
                 raise budget.refusal()
             records = next_records
+        execution_succeeded = True
     finally:
-        if base.deps.persist_summarization is not None:
-            await base.deps.persist_summarization(
-                SummarizationProvenance(
-                    rounds=round_no,
-                    sources=manifest.sources,
-                    records=tuple(lineage),
-                )
-            )
+        await persist_summarization(
+            base=base,
+            provenance=SummarizationProvenance(
+                rounds=round_no,
+                sources=manifest.sources,
+                records=tuple(lineage),
+            ),
+            execution_error=None if execution_succeeded else sys.exception(),
+        )
     return records[0], outputs

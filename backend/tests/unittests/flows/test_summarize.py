@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import json
 import runpy
 from contextlib import asynccontextmanager
@@ -444,6 +445,62 @@ async def test_fallback_attempts_share_the_finite_call_and_token_budget(user):
     assert receipt.reserved_input_tokens == sum(
         call["prepared_request"].input_reserve.tokens for call in attempts
     )
+
+
+@pytest.mark.parametrize(
+    "stage,failure_type",
+    [
+        ("section", TypedIOValidationException),
+        ("fold", TypedIOValidationException),
+        ("section", asyncio.CancelledError),
+        ("fold", asyncio.CancelledError),
+        ("fold", None),
+    ],
+)
+async def test_summarization_keeps_execution_error_when_persistence_fails(
+    user, caplog, stage, failure_type
+):
+    executor, _, assistant, run, state, step, _, _ = _fold_case(user)
+    primary = (
+        TypedIOValidationException(
+            "Rejected", code=FlowApiErrorCode.TYPED_IO_CONTRACT_VIOLATION.value
+        )
+        if failure_type is TypedIOValidationException
+        else asyncio.CancelledError()
+        if failure_type is asyncio.CancelledError
+        else None
+    )
+    storage_error = RuntimeError("DO_NOT_LOG_STORAGE_DETAILS")
+    executor._persist_summarization.side_effect = storage_error
+    respond = assistant.get_response.side_effect
+
+    async def fail_execution(**kwargs):
+        if primary is not None and kwargs["question"].startswith('{"records":') == (
+            stage == "fold"
+        ):
+            raise primary
+        return await respond(**kwargs)
+
+    assistant.get_response.side_effect = fail_execution
+    expected = primary if primary is not None else storage_error
+    try:
+        raise ValueError("Unrelated caller error")
+    except ValueError:
+        with pytest.raises(type(expected)) as caught:
+            await executor._execute_step(step=step, run=run, state=state, attempt_no=1)
+    assert caught.value is expected
+    assert getattr(caught.value, "total_items", 0) > 0
+    if primary is not None:
+        assert getattr(caught.value, "completed_items", None) == 0
+        if isinstance(primary, TypedIOValidationException):
+            assert primary.context is not None
+            assert primary.context["completed_items"] == 0
+        assert caught.value.__cause__ is storage_error
+        assert any(
+            record.exc_info and record.exc_info[2] is storage_error.__traceback__
+            for record in caplog.records
+        )
+        assert "DO_NOT_LOG_STORAGE_DETAILS" not in caplog.text
 
 
 async def test_fold_failure_reports_progress_within_the_current_round(user):
