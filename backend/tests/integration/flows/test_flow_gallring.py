@@ -621,7 +621,7 @@ async def test_a_paused_family_completes_once_released_with_its_current_referenc
     assert (await _receipt(file_ids[0])).reason == (
         ReceiptReason.DERIVED_FILE_REFERENCED_ELSEWHERE.value
     )
-    assert paused.blocked == {"abandoned_uploads.derived_file_referenced_elsewhere": 1}
+    assert paused.blocked["abandoned_uploads.derived_file_referenced_elsewhere"] == 1
     assert await _existing_files(file_ids) == set(file_ids)
 
     # While paused, the upload gets one more content reference, then the other

@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import re
 from collections.abc import Sequence
 from dataclasses import dataclass, replace
 from typing import Literal, assert_never
@@ -541,12 +540,7 @@ def _assemble_create_intent(
 
     terminal_semantic_output_type = _terminal_semantic_output_type(final_output_type)
     planned_steps: list[PlannedStep] = []
-    semantic_steps = _semantic_steps_without_terminal_document_render_helper(
-        intent.steps,
-        final_output_type=final_output_type,
-        document_artifact_requested=document_artifact_requested,
-        ui_language=ui_language,
-    )
+    semantic_steps = tuple(intent.steps)
     semantic_origin_eligibility = (True,) * len(semantic_steps)
     per_source_runtime = (
         runtime_input_type in _FILE_INPUT_TYPES
@@ -914,64 +908,6 @@ def _provider_source_output_collision_names(
     )
 
 
-def _semantic_steps_without_terminal_document_render_helper(
-    steps: Sequence[SemanticStepIntent],
-    *,
-    final_output_type: OutputType,
-    document_artifact_requested: bool,
-    ui_language: str | None,
-) -> tuple[SemanticStepIntent, ...]:
-    semantic_steps = tuple(steps)
-    if (
-        not document_artifact_requested
-        or final_output_type not in _DOCUMENT_OUTPUT_TYPES
-        or len(semantic_steps) < 2
-    ):
-        return semantic_steps
-
-    previous_step = semantic_steps[-2]
-    helper_candidate = semantic_steps[-1]
-    previous_output_type = _linear_step_output_type(
-        output_type=previous_step.output_type,
-        output_fields=previous_step.output_fields,
-        final_output_type=OutputType.TEXT,
-        is_terminal=False,
-    )
-    if previous_output_type != OutputType.TEXT:
-        return semantic_steps
-    if helper_candidate.output_type not in {None, OutputType.TEXT, final_output_type}:
-        return semantic_steps
-    if not _looks_like_terminal_document_render_helper(
-        helper_candidate,
-        final_output_type=final_output_type,
-    ):
-        return semantic_steps
-
-    # The step before the helper writes the document, so it keeps the
-    # helper's field meanings and the run-form values the helper reads.
-    retained_steps = (
-        *semantic_steps[:-2],
-        previous_step.with_folded_form_field_reads(helper_candidate).model_copy(
-            update={
-                "instructions": append_terminal_helper_output_fields(
-                    previous_step.instructions,
-                    helper_candidate.output_fields or (),
-                    ui_language=ui_language,
-                ),
-            }
-        ),
-    )
-
-    logger.info(
-        "ai_builder_terminal_document_render_helper_dropped",
-        extra={
-            "step_name": helper_candidate.name,
-            "final_output_type": final_output_type.value,
-        },
-    )
-    return retained_steps
-
-
 def _semantic_steps_with_terminal_text_fields_folded(
     steps: Sequence[SemanticStepIntent],
     *,
@@ -1210,31 +1146,6 @@ def _complete_result_contract_output_fields(
             continue
         completed_fields.append(required_field)
     return tuple(completed_fields)
-
-
-def _looks_like_terminal_document_render_helper(
-    step: SemanticStepIntent,
-    *,
-    final_output_type: OutputType,
-) -> bool:
-    if step.knowledge_refs or step.citations_requested:
-        return False
-    return _mentions_output_artifact_type(
-        f"{step.name} {step.instructions}",
-        final_output_type=final_output_type,
-    )
-
-
-def _mentions_output_artifact_type(
-    text: str,
-    *,
-    final_output_type: OutputType,
-) -> bool:
-    artifact_type = re.escape(final_output_type.value)
-    return (
-        re.search(rf"(?<![a-z0-9]){artifact_type}(?![a-z0-9])", text.casefold())
-        is not None
-    )
 
 
 def _assemble_docx_template_fill(
@@ -1795,7 +1706,7 @@ def _declared_form_field_reads(
 ) -> tuple[DeclaredFormFieldRead, ...]:
     reads: list[DeclaredFormFieldRead] = []
     for field_name in step.uses_form_fields:
-        proposal_step = step.form_field_read_step(field_name)
+        proposal_step = step.proposal_step
         if proposal_step is None:
             raise ValueError(
                 f"Backend step {step.name!r} declares form-field read {field_name!r}."

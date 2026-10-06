@@ -64,6 +64,13 @@ def parse_effective_http_url(value: str) -> EffectiveHttpUrl:
     return EffectiveHttpUrl(url=url, scheme=scheme, host=host, port=port)
 
 
+def parse_credential_http_url(value: str) -> EffectiveHttpUrl:
+    destination = parse_effective_http_url(value)
+    if destination.scheme != "https":
+        raise InvalidHttpUrl("HTTP credentials require a fixed HTTPS origin.")
+    return destination
+
+
 def _is_plain_host(host: str) -> bool:
     if ":" in host:
         # An IPv6 literal. A zone identifier names a local interface and has no

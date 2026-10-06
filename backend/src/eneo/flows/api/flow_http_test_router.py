@@ -1,10 +1,10 @@
 from __future__ import annotations
 
-import logging
-from typing import Annotated, Any, cast
+from typing import Annotated, Any, Literal
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, Path, Request, status
+from pydantic import ValidationError
 
 from eneo.audit.application.audit_metadata import AuditMetadata
 from eneo.audit.domain.action_types import ActionType
@@ -18,6 +18,7 @@ from eneo.authentication.endpoint_access import (
 from eneo.flows.api import flow_http_test_models
 from eneo.flows.api.flow_api_common import error_response
 from eneo.flows.api.flow_definition_access import require_flow_edit_access
+from eneo.flows.domain.flow import Flow
 from eneo.flows.flow_access_policy import FlowApiAction, flow_action_access_reason
 from eneo.flows.http_transport import (
     HttpAuthoredConfig,
@@ -29,11 +30,10 @@ from eneo.flows.runtime.http_runtime import FlowHttpRuntimeHelper
 from eneo.flows.variable_resolver import FlowVariableResolver
 from eneo.main.config import get_settings
 from eneo.main.container.container import Container
-from eneo.main.exceptions import BadRequestException, ErrorCodes
+from eneo.main.exceptions import BadRequestException, ErrorCodes, NotFoundException
 from eneo.server.dependencies.container import get_container
 
 router = APIRouter()
-logger = logging.getLogger(__name__)
 
 
 @router.post(
@@ -45,7 +45,13 @@ logger = logging.getLogger(__name__)
     description=(
         "Send a test HTTP request using the submitted authored config snapshot and "
         "return a typed preview of the attempted request and response. This endpoint "
-        "does not persist the config or publish the flow; it is for authoring UIs that "
+        "requires the saved step_id in this flow; stored credentials are resolved "
+        "only from that step and the submitted direction. "
+        "A stored credential is reused only for the same scheme, host and effective "
+        "port. Credential-bearing requests require a fixed HTTPS origin and active credential "
+        "encryption. Declared secret headers are redacted in previews, and response "
+        "bodies are not read or previewed for credential-bearing requests. "
+        "It does not persist the config or publish the flow; it is for authoring UIs that "
         "need to validate URL, auth, timeout, headers, body mode, and SSRF guard behavior "
         "before saving an HTTP input or output step. `test_variables` is the raw "
         "template context used for URL, header, auth, and body interpolation; callers "
@@ -61,12 +67,27 @@ logger = logging.getLogger(__name__)
                 "secret that cannot be resolved."
             ),
         },
+        400: error_response(
+            description="The selected saved step has an invalid authored HTTP config.",
+            message="Stored HTTP step configuration is invalid.",
+            eneo_error_code=ErrorCodes.BAD_REQUEST,
+        ),
         403: error_response(
             description="Caller lacks permission to edit this flow.",
             message="Insufficient permissions.",
             eneo_error_code=ErrorCodes.UNAUTHORIZED,
             code="insufficient_scope",
             context={"auth_layer": "space_membership"},
+        ),
+        404: error_response(
+            description="The flow or the selected saved step was not found.",
+            message="Flow step not found.",
+            eneo_error_code=ErrorCodes.NOT_FOUND,
+        ),
+        503: error_response(
+            description="Credential encryption is unavailable for authored secrets.",
+            message="HTTP credential encryption is unavailable.",
+            eneo_error_code=ErrorCodes.ENCRYPTION_NOT_CONFIGURED,
         ),
     },
 )
@@ -83,13 +104,12 @@ async def test_flow_http(
         get_container(with_user=True, with_module_user=True)
     ),
 ):
-    await require_flow_edit_access(request, container, flow_id=id)
+    access_context = await require_flow_edit_access(request, container, flow_id=id)
     settings = get_settings()
 
     config = body.config
-    flow_service = container.flow_service()
-    flow = await flow_service.get_flow(id)
-    stored_config = find_stored_http_config(flow, body.direction)
+    flow = access_context.flow
+    stored_config = find_stored_http_config(flow, body.step_id, body.direction)
     encryption_service = (
         container.encryption_service()
         if hasattr(container, "encryption_service")
@@ -135,6 +155,7 @@ async def test_flow_http(
             target=flow,
             extra={
                 "flow_id": str(id),
+                "step_id": str(body.step_id),
                 "test_direction": body.direction,
                 "test_success": result.success,
                 "status_code": result.status_code,
@@ -156,34 +177,24 @@ async def test_flow_http(
     )
 
 
-def find_stored_http_config(flow: Any, direction: str) -> HttpAuthoredConfig | None:
-    for step in flow.steps:
-        raw_config = step.output_config if direction == "output" else step.input_config
-        if isinstance(raw_config, dict):
-            config = cast(dict[str, Any], raw_config)
-        else:
-            config = None
-        if config is not None and is_authored_config(config):
-            try:
-                return HttpAuthoredConfig.model_validate(config)
-            except Exception:
-                logger.warning(
-                    "Failed to parse stored HTTP config for flow step during http-test secret merge",
-                    extra={
-                        "flow_id": (
-                            str(getattr(flow, "id", ""))
-                            if getattr(flow, "id", None) is not None
-                            else None
-                        ),
-                        "step_id": (
-                            str(getattr(step, "id", ""))
-                            if getattr(step, "id", None) is not None
-                            else None
-                        ),
-                        "direction": direction,
-                    },
-                )
-    return None
+def find_stored_http_config(
+    flow: Flow, step_id: UUID, direction: Literal["input", "output"]
+) -> HttpAuthoredConfig | None:
+    step = next((step for step in flow.steps if step.id == step_id), None)
+    if step is None:
+        raise NotFoundException(
+            "Flow step not found.", context={"step_id": str(step_id)}
+        )
+    config = step.output_config if direction == "output" else step.input_config
+    if config is None or not is_authored_config(config):
+        return None
+    try:
+        return HttpAuthoredConfig.model_validate(config)
+    except ValidationError as exc:
+        raise BadRequestException(
+            "Stored HTTP step configuration is invalid.",
+            context={"step_id": str(step_id)},
+        ) from exc
 
 
 __all__ = ["router"]

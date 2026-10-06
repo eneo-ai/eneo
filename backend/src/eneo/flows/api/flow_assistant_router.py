@@ -20,6 +20,7 @@ from eneo.authentication.endpoint_access import (
 )
 from eneo.flows.api import flow_access_context
 from eneo.flows.api.flow_api_common import error_response
+from eneo.flows.api.flow_definition_access import require_flow_edit_access
 from eneo.flows.api.flow_models import (
     FlowAssistantCreateRequest,
     FlowAssistantPatchRequest,
@@ -55,6 +56,15 @@ _MUTATING_CONTAINER = get_container(
     with_user=True, with_module_user=True, transaction_scope="function"
 )
 
+_DRAFT_OWNERSHIP_DESCRIPTION = (
+    " The caller must own the draft; tenant admins and space owners may override "
+    "draft ownership. Existing action, space permission and API-key scope checks apply."
+)
+_MUTATION_FORBIDDEN_DESCRIPTION = (
+    "Caller lacks permission, API-key scope, or draft ownership to manage assistants "
+    "for this flow. Tenant admins and space owners may override draft ownership."
+)
+
 _FLOW_ASSISTANT_PUBLIC_EXAMPLE: dict[str, object] = {
     "id": "00000000-0000-0000-0000-000000000201",
     "name": "Flow Step Assistant",
@@ -83,7 +93,7 @@ _FLOW_ASSISTANT_PUBLIC_EXAMPLE: dict[str, object] = {
 }
 
 
-async def require_flow_assistant_access(
+async def require_flow_assistant_read_access(
     request: Request,
     container: Container,
     *,
@@ -116,6 +126,7 @@ async def require_flow_assistant_access(
         "more steps instead of reusing an existing assistant. The created assistant is "
         "returned with the caller's effective permissions and can then be referenced by "
         "step `assistant_id` values in flow create/update payloads."
+        + _DRAFT_OWNERSHIP_DESCRIPTION
     ),
     responses={
         201: {
@@ -127,7 +138,7 @@ async def require_flow_assistant_access(
             },
         },
         403: error_response(
-            description="Caller lacks permission or API key scope to manage assistants for this flow.",
+            description=_MUTATION_FORBIDDEN_DESCRIPTION,
             message="API key space scope does not match requested flow.",
             eneo_error_code=ErrorCodes.UNAUTHORIZED,
             code="insufficient_scope",
@@ -157,7 +168,7 @@ async def create_flow_assistant(
     assistant_in: FlowAssistantCreateRequest,
     container: Container = Depends(_MUTATING_CONTAINER),
 ):
-    await require_flow_assistant_access(request, container, flow_id=id)
+    await require_flow_edit_access(request, container, flow_id=id)
     flow_service = container.flow_service()
     assistant_assembler = container.assistant_assembler()
     user = container.user()
@@ -238,7 +249,7 @@ async def get_flow_assistant(
         get_container(with_user=True, with_module_user=True)
     ),
 ):
-    await require_flow_assistant_access(request, container, flow_id=id)
+    await require_flow_assistant_read_access(request, container, flow_id=id)
     flow_service = container.flow_service()
     assistant_assembler = container.assistant_assembler()
     assistant, permissions = await flow_service.get_flow_assistant(
@@ -263,7 +274,7 @@ async def get_flow_assistant(
         "with the flow authoring experience, not for updating unrelated shared assistants. "
         "The assistant is part of the flow's draft: the update advances the flow's "
         "`draft_revision` by one and returns it, fenced on `expected_revision` like a "
-        "flow update."
+        "flow update." + _DRAFT_OWNERSHIP_DESCRIPTION
     ),
     responses={
         200: {
@@ -296,7 +307,7 @@ async def get_flow_assistant(
             },
         ),
         403: error_response(
-            description="Caller lacks permission or API key scope to update assistants for this flow.",
+            description=_MUTATION_FORBIDDEN_DESCRIPTION,
             message="API key space scope does not match requested flow.",
             eneo_error_code=ErrorCodes.UNAUTHORIZED,
             code="insufficient_scope",
@@ -327,7 +338,7 @@ async def update_flow_assistant(
     assistant_in: FlowAssistantPatchRequest,
     container: Container = Depends(_MUTATING_CONTAINER),
 ):
-    await require_flow_assistant_access(request, container, flow_id=id)
+    await require_flow_edit_access(request, container, flow_id=id)
     flow_service = container.flow_service()
     assistant_assembler = container.assistant_assembler()
     user = container.user()
@@ -380,6 +391,7 @@ async def update_flow_assistant(
         "be deleted (400 `flow_managed_assistant`); `context.reason` is "
         "`step_reference` (remove or replace that step) or `unfinished_run_reference` "
         "(retry after the run of `context.flow_version` finishes)."
+        + _DRAFT_OWNERSHIP_DESCRIPTION
     ),
     responses={
         400: error_response(
@@ -403,7 +415,7 @@ async def update_flow_assistant(
             },
         ),
         403: error_response(
-            description="Caller lacks permission or API key scope to delete assistants for this flow.",
+            description=_MUTATION_FORBIDDEN_DESCRIPTION,
             message="API key space scope does not match requested flow.",
             eneo_error_code=ErrorCodes.UNAUTHORIZED,
             code="insufficient_scope",
@@ -433,7 +445,7 @@ async def delete_flow_assistant(
     request: Request,
     container: Container = Depends(_MUTATING_CONTAINER),
 ):
-    await require_flow_assistant_access(request, container, flow_id=id)
+    await require_flow_edit_access(request, container, flow_id=id)
     flow_service = container.flow_service()
     user = container.user()
     assistant, _ = await flow_service.get_flow_assistant(

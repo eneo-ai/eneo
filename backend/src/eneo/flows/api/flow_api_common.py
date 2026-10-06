@@ -90,6 +90,7 @@ def error_response(
     example: dict[str, Any] = {
         "message": message,
         "eneo_error_code": int(eneo_error_code),
+        "code": eneo_error_code.name.lower(),
     }
     if code is not None:
         example["code"] = code.value if isinstance(code, FlowApiErrorCode) else code

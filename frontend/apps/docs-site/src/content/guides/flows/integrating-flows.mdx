@@ -1841,6 +1841,45 @@ export class EneoFlows {
 }
 ```
 
+## Testing an authored HTTP step
+
+`POST /api/v1/flows/{id}/http-test` requires the saved `step_id` and authored
+`config` snapshot. `direction` defaults to `output` and `method` to `POST`;
+`input` selects the step's HTTP input configuration. The caller
+must have draft edit access. The test neither saves the configuration nor
+publishes the Flow.
+
+Stored credential references resolve only from that step and direction, and
+only for the same URL scheme, hostname and effective port. Changing the origin
+requires entering the credential again. Credential-bearing requests require a
+fixed HTTPS origin; variables may fill the path or query, but cannot choose the
+server, scheme or port. Anonymous requests may still use HTTP and dynamic URLs.
+Saving or publishing refuses a credential configuration without a fixed HTTPS origin.
+
+New authored credentials use the same encryption owner as saved configurations;
+an unavailable encryption key returns `503`. A missing or wrong key cannot
+resolve a stored credential and no request is sent. Stored auth credentials and
+headers marked secret are encrypted with authenticated Fernet encryption; public
+Flow configurations expose stored-secret references instead of the values.
+
+The test returns status, elapsed time and a request preview with whole secret
+header values redacted. Credential-bearing tests do not read or preview the
+response body, because a target can echo credentials in arbitrary encodings.
+Anonymous response previews remain bounded. Typed test failures are translated
+in the web UI; backend exception text is not displayed.
+
+The transport derives the `Host` header from the URL. An authored `Host` header
+does not change the destination authority; the preview describes the authored
+payload, while transport-managed headers are set by the sender.
+
+The common Flow HTTP client verifies TLS certificates, does not follow redirects
+or use proxy environment variables, and connects to vetted IP addresses to
+prevent DNS rebinding. Private networks are denied by default; the operator
+setting can allow private ranges, while loopback and metadata endpoints remain
+denied. Production deployments must also serve browser-to-API credential requests
+over HTTPS. Keep credentials in the typed auth fields or headers marked secret,
+not in URLs, ordinary headers or request bodies.
+
 ## Reading outputs by type
 
 A finished run exposes its output in two places, and which one you use depends on the shape the flow was designed to produce.

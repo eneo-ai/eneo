@@ -4676,7 +4676,7 @@ export interface paths {
     put?: never;
     /**
      * Create Flow Assistant
-     * @description Create a flow-managed assistant owned by the specified draft flow. Use this authoring endpoint when a flow editor needs a dedicated assistant for one or more steps instead of reusing an existing assistant. The created assistant is returned with the caller's effective permissions and can then be referenced by step `assistant_id` values in flow create/update payloads.
+     * @description Create a flow-managed assistant owned by the specified draft flow. Use this authoring endpoint when a flow editor needs a dedicated assistant for one or more steps instead of reusing an existing assistant. The created assistant is returned with the caller's effective permissions and can then be referenced by step `assistant_id` values in flow create/update payloads. The caller must own the draft; tenant admins and space owners may override draft ownership. Existing action, space permission and API-key scope checks apply.
      */
     post: operations["create_flow_assistant"];
     delete?: never;
@@ -4701,14 +4701,14 @@ export interface paths {
     post?: never;
     /**
      * Delete Flow Assistant
-     * @description Delete a flow-managed assistant from the specified draft flow. The assistant id must belong to this flow. Deleting it removes the assistant, revokes the API keys scoped to it, deletes its icon when the icon is the tenant's own and nothing else uses it, and writes an audit event in the same transaction, so the assistant is never deleted without its audit row. An assistant that a step of the flow still uses, or that a run which has not finished still uses, cannot be deleted (400 `flow_managed_assistant`); `context.reason` is `step_reference` (remove or replace that step) or `unfinished_run_reference` (retry after the run of `context.flow_version` finishes).
+     * @description Delete a flow-managed assistant from the specified draft flow. The assistant id must belong to this flow. Deleting it removes the assistant, revokes the API keys scoped to it, deletes its icon when the icon is the tenant's own and nothing else uses it, and writes an audit event in the same transaction, so the assistant is never deleted without its audit row. An assistant that a step of the flow still uses, or that a run which has not finished still uses, cannot be deleted (400 `flow_managed_assistant`); `context.reason` is `step_reference` (remove or replace that step) or `unfinished_run_reference` (retry after the run of `context.flow_version` finishes). The caller must own the draft; tenant admins and space owners may override draft ownership. Existing action, space permission and API-key scope checks apply.
      */
     delete: operations["delete_flow_assistant"];
     options?: never;
     head?: never;
     /**
      * Update Flow Assistant
-     * @description Update a flow-managed assistant that belongs to the specified draft flow. Only fields accepted by `FlowAssistantPatchRequest` are applied; omitted fields are left unchanged. Use this endpoint for assistant details that should travel with the flow authoring experience, not for updating unrelated shared assistants. The assistant is part of the flow's draft: the update advances the flow's `draft_revision` by one and returns it, fenced on `expected_revision` like a flow update.
+     * @description Update a flow-managed assistant that belongs to the specified draft flow. Only fields accepted by `FlowAssistantPatchRequest` are applied; omitted fields are left unchanged. Use this endpoint for assistant details that should travel with the flow authoring experience, not for updating unrelated shared assistants. The assistant is part of the flow's draft: the update advances the flow's `draft_revision` by one and returns it, fenced on `expected_revision` like a flow update. The caller must own the draft; tenant admins and space owners may override draft ownership. Existing action, space permission and API-key scope checks apply.
      */
     patch: operations["update_flow_assistant"];
     trace?: never;
@@ -4755,7 +4755,7 @@ export interface paths {
     put?: never;
     /**
      * Test HTTP Connection
-     * @description Send a test HTTP request using the submitted authored config snapshot and return a typed preview of the attempted request and response. This endpoint does not persist the config or publish the flow; it is for authoring UIs that need to validate URL, auth, timeout, headers, body mode, and SSRF guard behavior before saving an HTTP input or output step. `test_variables` is the raw template context used for URL, header, auth, and body interpolation; callers can send flat keys such as `name` or runtime-shaped keys such as `flow_input` and `step_1`.
+     * @description Send a test HTTP request using the submitted authored config snapshot and return a typed preview of the attempted request and response. This endpoint requires the saved step_id in this flow; stored credentials are resolved only from that step and the submitted direction. A stored credential is reused only for the same scheme, host and effective port. Credential-bearing requests require a fixed HTTPS origin and active credential encryption. Declared secret headers are redacted in previews, and response bodies are not read or previewed for credential-bearing requests. It does not persist the config or publish the flow; it is for authoring UIs that need to validate URL, auth, timeout, headers, body mode, and SSRF guard behavior before saving an HTTP input or output step. `test_variables` is the raw template context used for URL, header, auth, and body interpolation; callers can send flat keys such as `name` or runtime-shaped keys such as `flow_input` and `step_1`.
      */
     post: operations["test_flow_http"];
     delete?: never;
@@ -27679,6 +27679,7 @@ export interface components {
      *       },
      *       "direction": "output",
      *       "method": "POST",
+     *       "step_id": "e0388e4a-699d-43d9-a216-43c3f50b9be3",
      *       "test_variables": {
      *         "base_url": "https://webhook.example.com",
      *         "flow_input": {
@@ -27702,6 +27703,11 @@ export interface components {
        * @enum {string}
        */
       method?: "GET" | "POST";
+      /**
+       * Step Id
+       * Format: uuid
+       */
+      step_id: string;
       /** Test Variables */
       test_variables?: {
         [key: string]: unknown;
@@ -27758,7 +27764,8 @@ export interface components {
       | "HTTP_CONNECTION_REFUSED"
       | "HTTP_BLOCKED_URL"
       | "HTTP_RESPONSE_TOO_LARGE"
-      | "HTTP_STATUS_ERROR";
+      | "HTTP_STATUS_ERROR"
+      | "HTTP_CREDENTIALS_REQUIRE_HTTPS";
     /** IconPublic */
     IconPublic: {
       /** Created At */
@@ -56312,7 +56319,7 @@ export interface operations {
           "application/json": components["schemas"]["FlowAssistantPublic"];
         };
       };
-      /** @description Caller lacks permission or API key scope to manage assistants for this flow. */
+      /** @description Caller lacks permission, API-key scope, or draft ownership to manage assistants for this flow. Tenant admins and space owners may override draft ownership. */
       403: {
         headers: {
           [name: string]: unknown;
@@ -56507,7 +56514,7 @@ export interface operations {
           "application/json": components["schemas"]["GeneralError"];
         };
       };
-      /** @description Caller lacks permission or API key scope to delete assistants for this flow. */
+      /** @description Caller lacks permission, API-key scope, or draft ownership to manage assistants for this flow. Tenant admins and space owners may override draft ownership. */
       403: {
         headers: {
           [name: string]: unknown;
@@ -56636,7 +56643,7 @@ export interface operations {
           "application/json": components["schemas"]["GeneralError"];
         };
       };
-      /** @description Caller lacks permission or API key scope to update assistants for this flow. */
+      /** @description Caller lacks permission, API-key scope, or draft ownership to manage assistants for this flow. Tenant admins and space owners may override draft ownership. */
       403: {
         headers: {
           [name: string]: unknown;
@@ -56793,6 +56800,22 @@ export interface operations {
           "application/json": components["schemas"]["HttpTestResponse"];
         };
       };
+      /** @description The selected saved step has an invalid authored HTTP config. */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          /**
+           * @example {
+           *       "code": "bad_request",
+           *       "eneo_error_code": 9007,
+           *       "message": "Stored HTTP step configuration is invalid."
+           *     }
+           */
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
       /** @description Caller lacks permission to edit this flow. */
       403: {
         headers: {
@@ -56812,12 +56835,44 @@ export interface operations {
           "application/json": components["schemas"]["GeneralError"];
         };
       };
+      /** @description The flow or the selected saved step was not found. */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          /**
+           * @example {
+           *       "code": "not_found",
+           *       "eneo_error_code": 9000,
+           *       "message": "Flow step not found."
+           *     }
+           */
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
       /** @description Validation Error */
       422: {
         headers: {
           [name: string]: unknown;
         };
         content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Credential encryption is unavailable for authored secrets. */
+      503: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          /**
+           * @example {
+           *       "code": "encryption_not_configured",
+           *       "eneo_error_code": 9042,
+           *       "message": "HTTP credential encryption is unavailable."
+           *     }
+           */
           "application/json": components["schemas"]["GeneralError"];
         };
       };

@@ -105,6 +105,12 @@ class HttpAuthoredConfig(BaseModel):
     custom_headers: list[CustomHeader] = Field(default_factory=_default_custom_headers)
     response_format: HttpResponseFormat | None = None
 
+    @property
+    def has_declared_credentials(self) -> bool:
+        return not isinstance(self.auth, HttpAuthNone) or any(
+            header.secret for header in self.custom_headers
+        )
+
     def interpolated_template_sites(self) -> list[tuple[ConfigPath, str]]:
         """Where the request compiler fills run variables, and what it reads
         there: each string and its path in this config object.

@@ -1,6 +1,11 @@
 import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/svelte";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { m } from "$lib/paraglide/messages";
+import { createEneo } from "@eneo/eneo-js";
+
+vi.mock("$lib/core/Eneo", () => ({
+  getEneo: () => createEneo({ baseUrl: "https://eneo.example", token: "test-user-token" })
+}));
 
 import HttpTestConnection from "./HttpTestConnection.svelte";
 import type { HttpAuthoredConfig } from "./httpConfigTypes";
@@ -17,30 +22,26 @@ function makeConfig(overrides: Partial<HttpAuthoredConfig> = {}): HttpAuthoredCo
   };
 }
 
-function renderHttpTestConnection(config = makeConfig()) {
+function renderHttpTestConnection(config = makeConfig(), stepId: string | null = "step-2") {
   return render(HttpTestConnection, {
     props: {
       config,
       direction: "output",
       method: "POST",
       flowId: "flow-1",
+      stepId,
       isPublished: false
     }
   });
 }
 
-function stubFetch(
-  payload: unknown,
-  options: { ok?: boolean; status?: number; statusText?: string } = {}
-) {
-  const response = {
-    ok: options.ok ?? true,
-    status: options.status ?? 200,
-    statusText: options.statusText ?? "OK",
-    json: vi.fn(async () => payload)
-  };
+function stubFetch(payload: unknown, options: { status?: number; statusText?: string } = {}) {
   const fetchMock = vi.fn(async (_input: RequestInfo | URL, _init?: RequestInit) => {
-    return response as unknown as Response;
+    return new Response(JSON.stringify(payload), {
+      status: options.status ?? 200,
+      statusText: options.statusText ?? "OK",
+      headers: { "Content-Type": "application/json" }
+    });
   });
   vi.stubGlobal("fetch", fetchMock);
   return fetchMock;
@@ -73,6 +74,7 @@ describe("HttpTestConnection", () => {
       direction: "output",
       method: "POST",
       flowId: "flow-1",
+      stepId: "step-2",
       isPublished: false
     });
     await fireEvent.click(screen.getByRole("button", { name: m.http_test_button() }));
@@ -87,7 +89,7 @@ describe("HttpTestConnection", () => {
     expect(body.test_variables).toEqual({});
   });
 
-  it("submits parsed test variables with the authored HTTP config", async () => {
+  it("sends auth and the selected step after raw fetch is removed", async () => {
     const fetchMock = stubFetch({ success: true, status_code: 204 });
     renderHttpTestConnection();
 
@@ -103,7 +105,10 @@ describe("HttpTestConnection", () => {
     if (!init) throw new Error("Expected HTTP test fetch init");
     const body = JSON.parse(String(init.body));
 
+    // Mutant: bypass the authenticated SDK or omit the selected credential owner.
+    expect(new Headers(init.headers).get("Authorization")).toBe("Bearer test-user-token");
     expect(body).toEqual({
+      step_id: "step-2",
       config: makeConfig(),
       direction: "output",
       method: "POST",
@@ -145,7 +150,7 @@ describe("HttpTestConnection", () => {
     });
     await fireEvent.click(screen.getByRole("button", { name: m.http_test_button() }));
 
-    await screen.findByText(/Invalid URL format/);
+    await screen.findByText((text) => text.includes(m.http_url_invalid()));
     await screen.findByText(m.http_test_request_preview());
     await screen.findByText("POST");
     await screen.findByText("not-a-url/hook");
@@ -153,13 +158,36 @@ describe("HttpTestConnection", () => {
     await screen.findByText("hello Alex");
   });
 
-  it("handles non-OK API envelopes instead of rendering a generic result", async () => {
-    stubFetch({ detail: "Not allowed" }, { ok: false, status: 403, statusText: "Forbidden" });
+  it("maps typed permission errors after bespoke envelope parsing is removed", async () => {
+    // Mutant: bypass the SDK error envelope and show its raw message.
+    stubFetch(
+      {
+        code: "flow_owner_required",
+        message: "Raw server permission error",
+        eneo_error_code: 9006
+      },
+      { status: 403, statusText: "Forbidden" }
+    );
     renderHttpTestConnection();
 
     await fireEvent.click(screen.getByRole("button", { name: m.http_test_button() }));
 
-    await screen.findByText(/403: Not allowed/);
+    await screen.findByText(new RegExp(m.flow_error_flow_owner_required()));
+  });
+
+  it("prevents an unsaved step from testing another step's credentials", async () => {
+    // Mutant: omit the saved-step prerequisite and send an ownerless HTTP test.
+    const fetchMock = stubFetch({ success: true });
+    renderHttpTestConnection(
+      makeConfig({ url: "https://api.example.com", body: { mode: "none" } }),
+      null
+    );
+
+    const button = screen.getByRole("button", { name: m.http_test_button() });
+    expect(button.hasAttribute("disabled")).toBe(true);
+    expect(screen.getByText(m.http_test_saved_step_required())).toBeTruthy();
+    await fireEvent.click(button);
+    expect(fetchMock).not.toHaveBeenCalled();
   });
 
   it("announces the result in a live status region", async () => {
@@ -189,8 +217,61 @@ describe("HttpTestConnection", () => {
 
     await waitFor(() => {
       expect(screen.getByRole("status").textContent).toContain(
-        `${m.http_test_failed_prefix()}: boom`
+        `${m.http_test_failed_prefix()}: ${m.http_test_unknown_error()}`
       );
     });
+  });
+
+  it("keeps safe HTTP status and timing visible when a remote test fails", async () => {
+    // Mutant: render status and timing only for successful tests.
+    stubFetch({
+      success: false,
+      error_code: "HTTP_STATUS_ERROR",
+      status_code: 401,
+      duration_ms: 42,
+      error_message: "test-only-secret/internal-detail"
+    });
+    renderHttpTestConnection(
+      makeConfig({ url: "https://api.example.com/hook", body: { mode: "none" } })
+    );
+    await fireEvent.click(screen.getByRole("button", { name: m.http_test_button() }));
+    await waitFor(() => {
+      const status = screen.getByRole("status").textContent;
+      expect(status).toContain(m.flow_error_typed_io_http_non_success());
+      expect(status).toContain("401");
+      expect(status).toMatch(/42\s+ms/);
+      expect(status).not.toContain("test-only-secret");
+    });
+  });
+
+  it.each([
+    ["HTTP_BLOCKED_URL", m.flow_error_typed_io_http_ssrf_blocked()],
+    ["HTTP_INVALID_URL", m.http_url_invalid()]
+  ])("does not render backend detail text for typed failure %s", async (code, message) => {
+    // Mutant: display remote error_message, including credentials or internal details.
+    stubFetch({
+      success: false,
+      error_code: code,
+      error_message: "test-only-secret/internal-detail"
+    });
+    renderHttpTestConnection(
+      makeConfig({ url: "https://api.example.com/hook", body: { mode: "none" } })
+    );
+    await fireEvent.click(screen.getByRole("button", { name: m.http_test_button() }));
+    await waitFor(() => expect(screen.getByRole("status").textContent).toContain(message));
+    expect(screen.getByRole("status").textContent).not.toContain("test-only-secret");
+  });
+
+  it.each([400, 503])("does not render raw SDK failure details for status %s", async (status) => {
+    // Mutant: let the general SDK error fallback reveal remote message text.
+    stubFetch({ eneo_error_code: 9007, message: "test-only-secret/internal-detail" }, { status });
+    renderHttpTestConnection(
+      makeConfig({ url: "https://api.example.com/hook", body: { mode: "none" } })
+    );
+    await fireEvent.click(screen.getByRole("button", { name: m.http_test_button() }));
+    await waitFor(() =>
+      expect(screen.getByRole("status").textContent).toContain(m.http_test_unknown_error())
+    );
+    expect(screen.getByRole("status").textContent).not.toContain("test-only-secret");
   });
 });

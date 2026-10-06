@@ -1,12 +1,15 @@
 from __future__ import annotations
 
 import hashlib
+import traceback
 from dataclasses import dataclass
 from typing import Any
 from unittest.mock import AsyncMock
 
+import h11
 import httpx
 import pytest
+from cryptography.fernet import Fernet
 
 from eneo.flows.runtime.http_orchestration import (
     WebhookDeliveryError,
@@ -16,6 +19,7 @@ from eneo.flows.runtime.http_orchestration import (
 from eneo.flows.runtime.http_runtime import FlowHttpRuntimeHelper
 from eneo.flows.variable_resolver import FlowVariableResolver
 from eneo.main.exceptions import BadRequestException, TypedIOValidationException
+from eneo.settings.encryption_service import EncryptionService
 
 
 @dataclass
@@ -349,44 +353,102 @@ async def test_deliver_webhook_timeout_maps_to_delivery_error_and_audits() -> No
 
 
 @pytest.mark.asyncio
-async def test_deliver_webhook_audits_a_code_not_the_transport_error() -> None:
+@pytest.mark.parametrize("direction", ["input", "output"])
+@pytest.mark.parametrize("failure", ["invalid-header", "timeout", "connection"])
+@pytest.mark.parametrize(
+    "audit_fails", [False, True], ids=["audit-success", "audit-failure"]
+)
+async def test_http_transport_failures_do_not_disclose_credentials_to_run_audit_or_logs(
+    direction: str, failure: str, audit_fails: bool
+) -> None:
+    # Mutant: publish raw HTTP errors or retain their credential-bearing traceback chain.
+    canary = "synthetic-value-canary"
+    encryption = EncryptionService(Fernet.generate_key().decode())
+    config = {
+        "url": "https://example.org/webhook",
+        "auth": {"mode": "none"},
+        "custom_headers": [
+            {
+                "name": "X-Integration-Value",
+                "value": encryption.encrypt(canary + "\n"),
+                "secret": True,
+            }
+        ],
+    }
     step = _Step(
         step_order=44,
         step_id="step-44",
         input_type="text",
-        input_source="flow_input",
-        output_config={
-            "url": "https://example.org/webhook",
-            "auth": {"mode": "none"},
-        },
+        input_source="http_get" if direction == "input" else "flow_input",
+        input_config=config if direction == "input" else None,
+        output_config=config if direction == "output" else None,
     )
     run = _Run(id="run-44", flow_id="flow-1", tenant_id="tenant-1")
-    request = httpx.Request("POST", "https://example.org/webhook")
-    send_http_request = AsyncMock(
-        side_effect=httpx.ConnectError(
-            "POST https://user:pass@example.org/hook?token=secret-value failed",
-            request=request,
-        )
-    )
-    deps = _make_deps(send_http_request=send_http_request)
 
-    with pytest.raises(WebhookDeliveryError) as exc:
-        await deliver_webhook(
-            step=step,
-            text_payload="payload",
-            run=run,
-            context={},
-            deps=deps,
-            idempotency_key="run-44:step-44:1:webhook",
+    async def fail_transport(**kwargs):
+        if failure == "connection":
+            raise httpx.ConnectError(
+                f"POST https://user:pass@example.org/hook?token={canary} failed"
+            )
+        if failure == "timeout":
+            raise httpx.TimeoutException(canary)
+        try:
+            h11.Request(
+                method=kwargs["method"],
+                target="/webhook",
+                headers=[("Host", "example.org"), *kwargs["headers"].items()],
+            )
+        except h11.LocalProtocolError as exc:
+            raise httpx.LocalProtocolError(str(exc)) from exc
+        raise AssertionError("h11 should refuse the credential's newline")
+
+    deps = _make_deps(send_http_request=fail_transport, encryption_service=encryption)
+    if audit_fails:
+        deps.audit_http_outbound.side_effect = RuntimeError(
+            "Audit recorder unavailable"
+        )
+        error_type = RuntimeError
+    else:
+        error_type = (
+            TypedIOValidationException if direction == "input" else WebhookDeliveryError
         )
 
-    assert "user:pass" not in str(exc.value)
-    assert "secret-value" not in str(exc.value)
-    # The audit gets a code, never the transport error text.
+    with pytest.raises(error_type) as exc:
+        if direction == "input":
+            await resolve_http_input_source_text(
+                step=step,
+                run=run,
+                context=FlowVariableResolver().build_context_with_evidence({}, []),
+                deps=deps,
+            )
+        else:
+            await deliver_webhook(
+                step=step,
+                text_payload="payload",
+                run=run,
+                context={},
+                deps=deps,
+                idempotency_key="run-44:step-44:1:webhook",
+            )
+
+    assert canary not in str(exc.value)
     audit_kwargs = deps.audit_http_outbound.await_args.kwargs
-    assert audit_kwargs["error_code"] == "typed_io_http_connection_error"
-    assert "user:pass" not in repr(audit_kwargs)
-    assert "secret-value" not in repr(audit_kwargs)
+    expected_code = (
+        "typed_io_http_timeout"
+        if failure == "timeout"
+        else "typed_io_http_connection_error"
+    )
+    assert audit_kwargs.get("error_code") == expected_code
+    assert "error_message" not in audit_kwargs
+    assert canary not in repr(audit_kwargs)
+    assert canary not in "".join(traceback.format_exception(exc.value))
+    if audit_fails:
+        assert str(exc.value) == "Audit recorder unavailable"
+    elif direction == "input":
+        assert exc.value.code == expected_code
+    else:
+        assert exc.value.code.value == expected_code
+        assert exc.value.status_code is None
 
 
 @pytest.mark.parametrize("status_code", [408, 429, 400, 422, 503])

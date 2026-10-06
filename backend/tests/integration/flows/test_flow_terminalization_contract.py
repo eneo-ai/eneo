@@ -36,6 +36,10 @@ from eneo.flows.domain.flow import (
 from eneo.flows.domain.flow_run_recovery_policy import (
     flow_stale_running_reconcile_after_seconds,
 )
+from eneo.flows.domain.flow_webhook_delivery import (
+    WebhookDeliveryIntent,
+    WebhookPayloadRef,
+)
 from eneo.flows.enums import FlowRunLifecycleSource
 from eneo.flows.flow_api_error_code import FlowApiErrorCode
 from eneo.flows.flow_run_error import FlowRunError
@@ -50,10 +54,6 @@ from eneo.flows.infrastructure.flow_run_webhook_delivery_repo import (
 from eneo.flows.infrastructure.flow_version_repo import FlowVersionRepository
 from eneo.flows.runtime import tasks as flow_runtime_tasks
 from eneo.flows.runtime.generated_file_names import GeneratedFileNames
-from eneo.flows.runtime.step_execution_result import (
-    WebhookDeliveryIntent,
-    WebhookPayloadRef,
-)
 from eneo.main.config import get_settings
 from eneo.main.container.container import Container
 from tests.flow_snapshot_fixtures import assistant_snapshot

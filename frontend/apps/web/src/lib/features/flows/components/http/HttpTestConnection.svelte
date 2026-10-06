@@ -12,29 +12,55 @@
   } from "@eneo/eneo-js";
   import type { HttpAuthoredConfig, HttpDirection, HttpMethod } from "./httpConfigTypes";
   import { parseHttpTestVariables } from "./httpTestVariables";
+  import { getEneo } from "$lib/core/Eneo";
+  import {
+    describeFlowApiError,
+    getFlowRuntimeErrorMessage
+  } from "$lib/features/flows/flowRuntimeErrorMapping";
 
   let {
     config,
     direction,
     method,
     flowId,
+    stepId,
     isPublished
   }: {
     config: HttpAuthoredConfig;
     direction: HttpDirection;
     method: HttpMethod;
     flowId: string;
+    stepId?: string | null;
     isPublished: boolean;
   } = $props();
 
+  const eneo = getEneo();
   let testing = $state(false);
   let testVariablesText = $state("{}");
   let result: FlowHttpTestResponse | null = $state(null);
+  let localFailureMessage: string | null = $state(null);
+
+  const errorMessages: Record<NonNullable<FlowHttpTestResponse["error_code"]>, () => string> = {
+    HTTP_MISSING_URL: m.http_test_needs_url,
+    HTTP_INVALID_URL: m.http_url_invalid,
+    HTTP_VARIABLE_RESOLUTION_FAILED: m.http_test_variable_resolution_failed,
+    HTTP_UNRESOLVED_STORED_SECRET: m.http_test_saved_secret_unavailable,
+    HTTP_MISSING_AUTH: m.http_test_auth_missing,
+    HTTP_INVALID_BODY_JSON: m.http_test_body_invalid,
+    HTTP_BODY_NOT_ALLOWED_FOR_GET: m.http_test_body_not_allowed,
+    HTTP_TIMEOUT_OUT_OF_RANGE: m.http_test_timeout_invalid,
+    HTTP_TIMEOUT: m.flow_error_typed_io_http_timeout,
+    HTTP_CONNECTION_REFUSED: m.flow_error_typed_io_http_connection_error,
+    HTTP_BLOCKED_URL: m.flow_error_typed_io_http_ssrf_blocked,
+    HTTP_RESPONSE_TOO_LARGE: m.flow_error_typed_io_http_response_too_large,
+    HTTP_STATUS_ERROR: m.flow_error_typed_io_http_non_success,
+    HTTP_CREDENTIALS_REQUIRE_HTTPS: m.http_test_credentials_require_https
+  };
 
   const hasTemplateMarkers = $derived.by(() => JSON.stringify(config).includes("{{"));
 
   async function runTest() {
-    if (!config.url.trim()) return;
+    if (!stepId || !config.url.trim()) return;
 
     const parsedVariables = hasTemplateMarkers
       ? parseHttpTestVariables(testVariablesText)
@@ -46,54 +72,30 @@
 
     testing = true;
     result = null;
+    localFailureMessage = null;
 
     try {
       const body: FlowHttpTestRequest = {
+        step_id: stepId,
         config,
         direction,
         method,
         test_variables: parsedVariables.value
       };
-      const response = await fetch(`/api/v1/flows/${flowId}/http-test`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(body)
-      });
-      if (!response.ok) {
-        const payload: unknown = await response.json().catch(() => null);
-        result = localError(apiEnvelopeMessage(response, payload));
-        return;
-      }
-
-      const payload: FlowHttpTestResponse = await response.json();
-      result = payload;
+      result = await eneo.flows.httpTest({ id: flowId, request: body });
     } catch (err) {
-      result = localError(err instanceof Error ? err.message : m.http_test_unknown_error());
+      const fallback = m.http_test_unknown_error();
+      result = localError(
+        describeFlowApiError(err) ? getFlowRuntimeErrorMessage(err, fallback) : fallback
+      );
     } finally {
       testing = false;
     }
   }
 
   function localError(message: string): FlowHttpTestResponse {
-    return { success: false, error_message: message };
-  }
-
-  function apiEnvelopeMessage(response: Response, payload: unknown): string {
-    const envelopeMessage = readEnvelopeMessage(payload);
-    if (envelopeMessage) return `${response.status}: ${envelopeMessage}`;
-    if (response.statusText) return `${response.status} ${response.statusText}`;
-    return m.http_test_request_failed({ status: response.status });
-  }
-
-  function readEnvelopeMessage(payload: unknown): string | null {
-    if (!isRecord(payload)) return null;
-    if (typeof payload.detail === "string") return payload.detail;
-    if (typeof payload.message === "string") return payload.message;
-    return null;
-  }
-
-  function isRecord(value: unknown): value is Record<string, unknown> {
-    return typeof value === "object" && value !== null && !Array.isArray(value);
+    localFailureMessage = message;
+    return { success: false };
   }
 
   function formatPreviewHeaders(preview: FlowHttpRequestPreview): string {
@@ -121,7 +123,7 @@
     <Button
       variant="outline"
       size="sm"
-      disabled={isPublished || testing || !config.url.trim()}
+      disabled={isPublished || testing || !stepId || !config.url.trim()}
       onclick={runTest}
     >
       {#if testing}
@@ -132,6 +134,8 @@
     </Button>
     {#if !isPublished && !config.url.trim()}
       <span class="text-muted text-xs">{m.http_test_needs_url()}</span>
+    {:else if !isPublished && !stepId}
+      <span class="text-muted text-xs">{m.http_test_saved_step_required()}</span>
     {/if}
     <div role="status" aria-live="polite" class="min-w-0">
       {#if result}
@@ -143,14 +147,18 @@
           {#if result.success}
             <IconCheck class="size-3.5 shrink-0" />
             {m.http_test_success()}
-            ({result.status_code}{#if result.duration_ms},
-              {Math.round(result.duration_ms)}&nbsp;ms{/if})
           {:else}
             <IconXMark class="size-3.5 shrink-0" />
             <span class="min-w-0 break-words">
-              {m.http_test_failed_prefix()}: {result.error_message ??
-                result.error_code ??
+              {m.http_test_failed_prefix()}: {localFailureMessage ??
+                (result.error_code ? errorMessages[result.error_code]?.() : null) ??
                 m.http_test_unknown_error()}
+            </span>
+          {/if}
+          {#if result.status_code != null}
+            <span class="shrink-0">
+              ({result.status_code}{#if result.duration_ms != null},
+                {Math.round(result.duration_ms)}&nbsp;ms{/if})
             </span>
           {/if}
         </span>

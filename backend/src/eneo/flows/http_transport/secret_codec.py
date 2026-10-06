@@ -15,6 +15,10 @@ from eneo.flows.http_transport.authored_config import (
     SecretValue,
     is_secret_sentinel,
 )
+from eneo.flows.http_transport.effective_url import (
+    InvalidHttpUrl,
+    parse_effective_http_url,
+)
 from eneo.flows.http_transport.errors import AuthoredSecretEncryptionUnavailableError
 from eneo.flows.http_transport.normalizer import is_authored_config
 from eneo.flows.http_transport.step_configs import sent_step_http_configs
@@ -377,11 +381,19 @@ def merge_secrets_on_update(
     incoming: HttpAuthoredConfig,
     stored: HttpAuthoredConfig,
 ) -> HttpAuthoredConfig:
-    """Preserve stored encrypted values when incoming field contains sentinel.
-
-    If the incoming field equals the sentinel, the stored encrypted value is kept.
-    If the incoming field is a new plain-text value, it passes through for encryption.
-    """
+    """Restore stored credentials only within the same concrete HTTP origin."""
+    try:
+        destination = parse_effective_http_url(incoming.url)
+        source = parse_effective_http_url(stored.url)
+    except InvalidHttpUrl:
+        # A template in the authority cannot prove where the credential goes.
+        return incoming
+    if (destination.scheme, destination.host, destination.port) != (
+        source.scheme,
+        source.host,
+        source.port,
+    ):
+        return incoming
 
     def _merge_field(
         incoming_value: SecretValue,

@@ -18,6 +18,10 @@ from eneo.flows.domain.flow_step_attempt_input import (
     FlowStepAttemptStart,
     parse_flow_step_attempt_input,
 )
+from eneo.flows.domain.flow_webhook_delivery import (
+    WebhookDeliveryIntent,
+    WebhookPayloadRef,
+)
 from eneo.flows.domain.runtime import RuntimeStep, StepDiagnostic, StepExecutionOutput
 from eneo.flows.flow_api_error_code import FlowApiErrorCode
 from eneo.flows.flow_run_provenance import (
@@ -33,11 +37,7 @@ from eneo.flows.runtime.step_attempt_runtime import (
     build_typed_failure_plan,
     build_typed_failure_run_error_message,
 )
-from eneo.flows.runtime.step_execution_result import (
-    StepExecutionResult,
-    WebhookDeliveryIntent,
-    WebhookPayloadRef,
-)
+from eneo.flows.runtime.step_execution_result import StepExecutionResult
 from eneo.flows.runtime.step_result_builder import (
     build_activated_attempt_input,
     build_attempt_provenance,

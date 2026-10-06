@@ -50,6 +50,8 @@ same outcome compile to the same Flow mechanics. Supported create shapes are:
 The final renderer, transcriber, and template-fill steps make no model calls;
 model work happens in the preparation steps before them.
 
+In generated PDF/DOCX create flows, mentioning the artifact type in a step's name or instructions does not remove that step. The fixed renderer follows the final content writer.
+
 In edit sessions, changes to a step's input source, input type, or selected form/previous fields are semantic changes. The backend re-derives the compiled input bindings, input contract, and runtime input configuration from those choices.
 
 Existing Flow steps are preserved unless the approved edit proposal explicitly includes a modified version of the step or lists the step for removal.

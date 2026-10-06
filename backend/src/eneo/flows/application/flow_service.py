@@ -1064,8 +1064,8 @@ class FlowService:
                 if unresolved:
                     raise FlowStepValidationError(
                         f"Step {step.step_order}: {label} keeps stored HTTP "
-                        f"credentials ({', '.join(unresolved)}) that no longer "
-                        "exist. Re-enter the credentials before saving this step.",
+                        f"credentials ({', '.join(unresolved)}) that are unavailable "
+                        "for this destination. Re-enter the credentials before saving this step.",
                         step_order=step.step_order,
                     )
 

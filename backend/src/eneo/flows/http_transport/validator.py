@@ -14,6 +14,7 @@ from eneo.flows.http_transport.authored_config import (
 from eneo.flows.http_transport.effective_url import (
     HTTP_URL_SCHEMES,
     InvalidHttpUrl,
+    parse_credential_http_url,
     parse_effective_http_url,
 )
 from eneo.flows.http_transport.errors import HttpTransportError
@@ -24,7 +25,7 @@ def validate_authored_config(
     *,
     direction: str,
     method: str,
-    max_timeout: float = 120.0,
+    max_timeout: float,
 ) -> list[HttpTransportError]:
     """Validate authored config. Returns list of error codes (empty = valid)."""
     errors: list[HttpTransportError] = []
@@ -32,6 +33,12 @@ def validate_authored_config(
     url_error = authored_url_error(config.url)
     if url_error is not None:
         errors.append(url_error)
+
+    if config.has_declared_credentials:
+        try:
+            parse_credential_http_url(config.url)
+        except InvalidHttpUrl:
+            errors.append(HttpTransportError.CREDENTIALS_REQUIRE_HTTPS)
 
     # Auth credentials validation (skip sentinel values — already stored)
     match config.auth:

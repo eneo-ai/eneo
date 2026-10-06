@@ -13,7 +13,6 @@ class FeatureFlag:
         is_enabled_globally: bool = False,
         description: str | None = None,
     ) -> None:
-        super().__init__()
         self.feature_id = feature_id
         self.name = name
         self.tenant_ids: set[UUID] = tenant_ids if tenant_ids is not None else set()

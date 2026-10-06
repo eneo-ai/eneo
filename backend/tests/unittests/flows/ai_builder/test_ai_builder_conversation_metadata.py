@@ -1299,6 +1299,7 @@ def test_slot_classification_metadata_rejects_missing_evidence() -> None:
 
 
 def test_slot_classification_writer_bounds_reason_text() -> None:
+    """Kill m225: a 501st choice character must not enter persisted metadata."""
     result = slot_classification_result(
         slots=(
             ClassifiedSlot(
@@ -1313,13 +1314,26 @@ def test_slot_classification_writer_bounds_reason_text() -> None:
     classification = slot_classification_metadata_from_attempt(
         SlotClassificationAttempt(outcome="resolved", result=result),
         prompt_hash="a" * 64,
-        classification_input=_classification_input("user asked for a report"),
+        classification_input=SlotClassificationInput(
+            sources=(
+                *_classification_input("user asked for a report").sources,
+                SlotClassificationSource(
+                    source_id="structured_answer:user-2:primary_runtime_input",
+                    kind="structured_answer",
+                    text="A selected choice",
+                    message_id="user-2",
+                    question_id="primary_runtime_input",
+                    selected_value="v" * 500 + "overflow",
+                ),
+            ),
+        ),
         model="openai/gpt-test",
         provider="openai",
     )
 
     assert classification is not None
     assert len(classification.slots[0].reason) == 500
+    assert classification.source_inventory[1].selected_value == "v" * 500
     assert classification.slots[0].evidence[0].model_dump() == {
         "source_id": _CLASSIFICATION_SOURCE_ID,
         "quote": "user asked for a report",

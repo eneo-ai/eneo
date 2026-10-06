@@ -1,16 +1,20 @@
 from __future__ import annotations
 
 from types import SimpleNamespace
+from unittest.mock import MagicMock
 from uuid import UUID, uuid4
 
 import pytest
 
+from eneo.ai_models.completion_models.completion_model import ModelKwargs
 from eneo.assistants.assistant import AssistantOrigin
+from eneo.assistants.assistant_factory import AssistantFactory
 from eneo.flows.assistant_execution_snapshot import (
     assistant_execution_surface_hash,
     build_assistant_execution_snapshot,
     validate_assistant_execution_snapshot,
 )
+from eneo.integration.domain.entities.integration_knowledge import IntegrationKnowledge
 from eneo.main.exceptions import BadRequestException
 
 
@@ -63,10 +67,40 @@ def _snapshot() -> tuple[dict[str, object], SimpleNamespace]:
     return snapshot, assistant
 
 
-def test_published_snapshot_builder_writes_v2():
-    assistant = _assistant()
+@pytest.mark.parametrize("with_integration_knowledge", [False, True])
+def test_published_snapshot_builder_writes_v2(user, with_integration_knowledge):
+    prototype = _assistant()
+    space_id = uuid4()
+    knowledge = IntegrationKnowledge(
+        id=uuid4(),
+        name="Case material",
+        user_integration=MagicMock(),
+        embedding_model=MagicMock(),
+        tenant_id=user.tenant_id,
+        space_id=space_id,
+    )
+    assistant = AssistantFactory(
+        prompt_factory=MagicMock(), assistant_template_factory=MagicMock()
+    ).create_assistant(
+        name="Flow step",
+        user=user,
+        space_id=space_id,
+        prompt=prototype.prompt,
+        completion_model=prototype.completion_model,
+        completion_model_kwargs=ModelKwargs(**prototype.completion_model_kwargs),
+        integration_knowledge_list=[knowledge] if with_integration_knowledge else [],
+        origin=AssistantOrigin.FLOW_MANAGED,
+        managing_flow_id=uuid4(),
+    )
+    assistant.id = prototype.id
+    assistant.inline_file_text = prototype.inline_file_text
     snapshot = build_assistant_execution_snapshot(assistant=assistant)
 
+    assert snapshot["knowledge_refs"] == (
+        [{"kind": "integration_knowledge", "id": str(knowledge.id)}]
+        if with_integration_knowledge
+        else []
+    )
     assert snapshot["schema_version"] == 2
     assert snapshot["completion_model"]["resolved_route"] == "openai/gpt-5.4-nano"
     assert snapshot["execution_surface_hash"] == assistant_execution_surface_hash(

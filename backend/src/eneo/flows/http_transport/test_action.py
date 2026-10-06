@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import re
 import time
 from dataclasses import dataclass
 from typing import Any, Awaitable, Callable
@@ -17,6 +18,8 @@ from eneo.flows.http_transport.compiler import (
     compile_http_config,
 )
 from eneo.flows.http_transport.errors import (
+    AuthoredSecretEncryptionUnavailableError,
+    HttpCredentialTransportError,
     HttpTemplateInterpolationError,
     HttpTransportError,
 )
@@ -25,12 +28,18 @@ from eneo.flows.http_transport.secret_codec import (
     SupportsEncryption,
     decrypt_authored_config,
     merge_secrets_on_update,
+    protect_authored_secrets,
+    unprotected_stored_secret_fields,
+    unresolved_secret_sentinel_fields,
 )
 from eneo.flows.http_transport.validator import (
     validate_authored_config,
     validate_http_url,
 )
-from eneo.main.exceptions import TypedIOValidationException
+from eneo.main.exceptions import (
+    EncryptionNotConfiguredException,
+    TypedIOValidationException,
+)
 
 
 @dataclass(frozen=True)
@@ -54,13 +63,27 @@ async def execute_http_test(
     encryption_service: SupportsEncryption | None = None,
     interpolate: Callable[[str, dict[str, Any]], str],
     send_http_request: Callable[..., Awaitable[httpx.Response]],
-    max_timeout: float = 120.0,
+    max_timeout: float,
 ) -> HttpTestResult:
     """Execute a draft-safe HTTP test without persisting authored config."""
 
-    merged = config
+    try:
+        merged = protect_authored_secrets(config, encryption_service)
+    except AuthoredSecretEncryptionUnavailableError as exc:
+        raise EncryptionNotConfiguredException(
+            "HTTP credential encryption is unavailable."
+        ) from exc
     if stored_config is not None:
-        merged = merge_secrets_on_update(config, stored_config)
+        merged = merge_secrets_on_update(merged, stored_config)
+
+    if set(unresolved_secret_sentinel_fields(config)).intersection(
+        unprotected_stored_secret_fields(merged, encryption_service)
+    ):
+        return HttpTestResult(
+            success=False,
+            error_code=HttpTransportError.UNRESOLVED_STORED_SECRET,
+            error_message=_error_message(HttpTransportError.UNRESOLVED_STORED_SECRET),
+        )
 
     decrypted = decrypt_authored_config(merged, encryption_service)
     if contains_secret_sentinel(decrypted.model_dump(mode="json")):
@@ -77,7 +100,7 @@ async def execute_http_test(
         return HttpTestResult(
             success=False,
             error_code=errors[0],
-            error_message=_error_message(errors[0]),
+            error_message=_error_message(errors[0], max_timeout=max_timeout),
         )
 
     try:
@@ -88,12 +111,17 @@ async def execute_http_test(
             variables=test_variables,
             interpolate=interpolate,
         )
-    except (HttpTemplateInterpolationError, TypedIOValidationException) as exc:
+    except HttpCredentialTransportError:
+        return HttpTestResult(
+            success=False,
+            error_code=HttpTransportError.CREDENTIALS_REQUIRE_HTTPS,
+            error_message=_error_message(HttpTransportError.CREDENTIALS_REQUIRE_HTTPS),
+        )
+    except (HttpTemplateInterpolationError, TypedIOValidationException):
         return HttpTestResult(
             success=False,
             error_code=HttpTransportError.VARIABLE_RESOLUTION_FAILED,
-            error_message=str(exc)
-            or _error_message(HttpTransportError.VARIABLE_RESOLUTION_FAILED),
+            error_message=_error_message(HttpTransportError.VARIABLE_RESOLUTION_FAILED),
             request_preview=None,
         )
 
@@ -116,6 +144,7 @@ async def execute_http_test(
             timeout_seconds=effective.timeout,
             body_bytes=effective.body,
             json_body=effective.json_body,
+            read_response_body=not bool(effective.secret_header_names),
         )
     except httpx.TimeoutException:
         duration_ms = (time.monotonic() - start) * 1000
@@ -143,27 +172,23 @@ async def execute_http_test(
             success=False,
             duration_ms=duration_ms,
             error_code=error_code,
-            error_message=str(exc) or _error_message(error_code),
+            error_message=_error_message(error_code),
             request_preview=request_preview,
         )
-    except httpx.HTTPError as exc:
+    except httpx.HTTPError:
         duration_ms = (time.monotonic() - start) * 1000
         return HttpTestResult(
             success=False,
             duration_ms=duration_ms,
             error_code=HttpTransportError.CONNECTION_REFUSED,
-            error_message=f"Connection failed: {exc}",
+            error_message=_error_message(HttpTransportError.CONNECTION_REFUSED),
             request_preview=request_preview,
         )
 
     duration_ms = (time.monotonic() - start) * 1000
 
-    response_preview = None
-    try:
-        text = response.text[:2000]
-        response_preview = text
-    except Exception:
-        pass
+    # An authenticated target can echo credentials in arbitrary encodings.
+    response_preview = None if effective.secret_header_names else response.text[:2000]
 
     success = response.status_code < 400
     error_code = None
@@ -183,37 +208,52 @@ async def execute_http_test(
     )
 
 
-def _mask_sensitive_headers(headers: dict[str, str]) -> dict[str, str]:
-    sensitive = {"authorization", "x-api-key"}
-    masked: dict[str, str] = {}
-    for key, value in headers.items():
-        if key.lower() in sensitive:
-            masked[key] = value[:10] + "..." if len(value) > 10 else value
-        else:
-            masked[key] = value
-    return masked
-
-
 def _request_preview(effective: EffectiveHttpRequest) -> HttpRequestPreview:
+    body = _body_preview(effective)
     return HttpRequestPreview(
         method=effective.method,
-        url=effective.url,
-        headers=_mask_sensitive_headers(effective.headers),
-        body_preview=_body_preview(effective),
+        url=_redact_preview(effective.url, effective.secret_values),
+        headers={
+            name: "[REDACTED]"
+            if name.lower() in effective.secret_header_names
+            else _redact_preview(value, effective.secret_values)
+            for name, value in effective.headers.items()
+        },
+        body_preview=(
+            _redact_preview(body, effective.secret_values)[:500]
+            if body is not None
+            else None
+        ),
     )
+
+
+def _redact_preview(text: str, secrets: frozenset[str]) -> str:
+    if not secrets:
+        return text
+    # Literal values, longest first, are replaced once before preview truncation.
+    pattern = "|".join(
+        re.escape(value) for value in sorted(secrets, key=len, reverse=True)
+    )
+    return re.sub(pattern, "[REDACTED]", text)
 
 
 def _body_preview(effective: EffectiveHttpRequest) -> str | None:
     if effective.json_body is not None:
         import json
 
-        return json.dumps(effective.json_body, ensure_ascii=False)[:500]
+        return json.dumps(effective.json_body, ensure_ascii=False)
     if effective.body is not None:
-        return effective.body.decode("utf-8", errors="replace")[:500]
+        return effective.body.decode("utf-8", errors="replace")
     return None
 
 
-def _error_message(error: HttpTransportError) -> str:
+def _error_message(
+    error: HttpTransportError, *, max_timeout: float | None = None
+) -> str:
+    if error == HttpTransportError.TIMEOUT_OUT_OF_RANGE:
+        if max_timeout is None:
+            raise ValueError("HTTP timeout diagnostic requires the configured limit.")
+        return f"Timeout must be between 1 and {max_timeout:g} seconds"
     messages = {
         HttpTransportError.MISSING_URL: "URL required for HTTP delivery",
         HttpTransportError.INVALID_URL: "Invalid URL format",
@@ -222,11 +262,11 @@ def _error_message(error: HttpTransportError) -> str:
         HttpTransportError.MISSING_AUTH_CREDENTIALS: "Authentication credentials missing",
         HttpTransportError.INVALID_BODY_JSON: "Invalid JSON in request template",
         HttpTransportError.BODY_NOT_ALLOWED_FOR_GET: "GET requests cannot have a body",
-        HttpTransportError.TIMEOUT_OUT_OF_RANGE: "Timeout must be between 1 and 120 seconds",
         HttpTransportError.TIMEOUT: "Connection timed out",
         HttpTransportError.CONNECTION_REFUSED: "Could not connect to server",
         HttpTransportError.BLOCKED_URL: "URL blocked by network policy",
         HttpTransportError.RESPONSE_TOO_LARGE: "HTTP response is too large to preview",
         HttpTransportError.STATUS_ERROR: "Server responded with error",
+        HttpTransportError.CREDENTIALS_REQUIRE_HTTPS: "HTTP credentials require a fixed HTTPS origin",
     }
     return messages.get(error, error.value)
