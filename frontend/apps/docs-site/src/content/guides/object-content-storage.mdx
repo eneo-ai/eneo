@@ -183,7 +183,9 @@ flowchart LR
 Preview is advisory. Eneo repeats the same check while holding database locks
 before deletion, so a concurrent attachment cannot be silently removed.
 Removing a File from a chat or Assistant only removes that use; the reusable
-File remains until its owner deletes it. Organization or user offboarding keeps
+File remains until its owner deletes it. When conversation retention deletes a
+question or App run, it applies the same check to the Files attached to it and
+deletes those that nothing else uses. Organization or user offboarding keeps
 its existing database-cascade behavior.
 
 ## Choose the right deployment

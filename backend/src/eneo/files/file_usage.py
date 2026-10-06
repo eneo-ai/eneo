@@ -109,6 +109,72 @@ class FileUsageRepository:
 
         return family_ids
 
+    async def lock_unused_root_families(
+        self,
+        candidate_file_ids: Iterable[UUID],
+    ) -> list[UUID]:
+        """Lock candidate root Files and return those whose family has no usage.
+
+        Data retention calls this after deleting the records that used the
+        candidates. Derived candidates are skipped, since they belong to their
+        root's family. A family that still has any product usage, or that
+        crosses a tenant boundary, is left intact. Rows are locked root first
+        and then level by level, matching ``lock_family``, so a concurrent
+        attach either commits first and is seen here or waits for the delete.
+        """
+        candidates = sorted(set(candidate_file_ids))
+        if not candidates:
+            return []
+
+        roots = (
+            await self._session.execute(
+                sa.select(Files.id, Files.tenant_id)
+                .where(
+                    Files.id == sa.any_(self._file_ids_parameter("candidate_ids")),
+                    Files.parent_file_id.is_(None),
+                )
+                .order_by(Files.id)
+                .with_for_update(of=Files),
+                {"candidate_ids": candidates},
+            )
+        ).all()
+        root_tenant = {row.id: row.tenant_id for row in roots}
+        root_of = {root_id: root_id for root_id in root_tenant}
+        kept: set[UUID] = set()
+
+        frontier: list[UUID] = list(root_tenant)
+        while frontier:
+            rows = (
+                await self._session.execute(
+                    sa.select(Files.id, Files.parent_file_id, Files.tenant_id)
+                    .where(
+                        Files.parent_file_id
+                        == sa.any_(self._file_ids_parameter("frontier_ids"))
+                    )
+                    .order_by(Files.id)
+                    .with_for_update(of=Files),
+                    {"frontier_ids": frontier},
+                )
+            ).all()
+            frontier = []
+            for row in rows:
+                if row.id in root_of:
+                    continue
+                root_id = root_of[row.parent_file_id]
+                root_of[row.id] = root_id
+                if row.tenant_id != root_tenant[root_id]:
+                    kept.add(root_id)
+                frontier.append(row.id)
+
+        used_ids = (
+            await self._session.scalars(
+                sa.select(self._usage_union("family_ids").c.file_id).distinct(),
+                {"family_ids": list(root_of)},
+            )
+        ).all()
+        kept.update(root_of[file_id] for file_id in used_ids)
+        return [root_id for root_id in root_tenant if root_id not in kept]
+
     async def count_product_usage(
         self,
         file_ids: list[UUID],
@@ -116,32 +182,7 @@ class FileUsageRepository:
         if not file_ids:
             return []
 
-        file_ids_parameter = sa.bindparam(
-            "file_usage_ids",
-            type_=ARRAY(PostgreSQLUUID(as_uuid=True)),
-        )
-        usage = sa.union_all(
-            self._usage_select(
-                FileUsageKind.CHAT_ATTACHMENT,
-                QuestionsFiles.file_id,
-                file_ids_parameter,
-            ),
-            self._usage_select(
-                FileUsageKind.ASSISTANT_ATTACHMENT,
-                AssistantsFiles.file_id,
-                file_ids_parameter,
-            ),
-            self._usage_select(
-                FileUsageKind.APP_ATTACHMENT,
-                AppsFiles.file_id,
-                file_ids_parameter,
-            ),
-            self._usage_select(
-                FileUsageKind.APP_RUN_INPUT,
-                AppRunsFiles.file_id,
-                file_ids_parameter,
-            ),
-        ).subquery("file_product_usage")
+        usage = self._usage_union("file_usage_ids")
         rows = (
             await self._session.execute(
                 sa.select(
@@ -160,6 +201,36 @@ class FileUsageRepository:
             )
             for row in rows
         ]
+
+    @classmethod
+    def _usage_union(cls, parameter_name: str) -> sa.Subquery:
+        file_ids_parameter = cls._file_ids_parameter(parameter_name)
+        return sa.union_all(
+            cls._usage_select(
+                FileUsageKind.CHAT_ATTACHMENT,
+                QuestionsFiles.file_id,
+                file_ids_parameter,
+            ),
+            cls._usage_select(
+                FileUsageKind.ASSISTANT_ATTACHMENT,
+                AssistantsFiles.file_id,
+                file_ids_parameter,
+            ),
+            cls._usage_select(
+                FileUsageKind.APP_ATTACHMENT,
+                AppsFiles.file_id,
+                file_ids_parameter,
+            ),
+            cls._usage_select(
+                FileUsageKind.APP_RUN_INPUT,
+                AppRunsFiles.file_id,
+                file_ids_parameter,
+            ),
+        ).subquery("file_product_usage")
+
+    @staticmethod
+    def _file_ids_parameter(name: str) -> BindParameter[Sequence[UUID]]:
+        return sa.bindparam(name, type_=ARRAY(PostgreSQLUUID(as_uuid=True)))
 
     @staticmethod
     def _usage_select(
