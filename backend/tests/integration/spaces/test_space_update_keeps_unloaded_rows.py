@@ -4,7 +4,10 @@ The space loader leaves out assistants whose stored row fails validation (for
 example a non-numeric completion_model_kwargs temperature). The space update
 re-synchronises the assistant and group chat lists and deletes rows that are
 absent, so without the recorded skip any save of the space, such as a rename,
-would permanently delete that assistant and drop it from its group chats."""
+would permanently delete that assistant and drop it from its group chats.
+
+The one exception is an explicit member-list replacement on a group chat: the
+submitted list is the whole membership, so a skipped member's seat goes too."""
 
 from __future__ import annotations
 
@@ -150,3 +153,55 @@ async def test_deleting_a_loaded_assistant_still_works_and_spares_the_skipped_on
         assert ids["corrupt_id"] in await _mapping_assistant_ids(
             session, ids["group_chat_id"]
         )
+
+
+@pytest.mark.integration
+@pytest.mark.asyncio
+async def test_clearing_a_group_chats_assistants_also_unseats_the_skipped_one(
+    db_container, space_with_skipped_assistant
+):
+    """PATCH tools.assistants=[] reaches the service as current_assistants=[]
+    and means clear-all. The skipped sibling is hidden from the response, so
+    keeping its seat would leave the stored membership out of step with it."""
+    ids = space_with_skipped_assistant
+
+    async with db_container() as container:
+        updated = await container.group_chat_service().update_group_chat(
+            id=ids["group_chat_id"], current_assistants=[]
+        )
+        assert updated.assistants == []
+
+    async with db_container() as container:
+        session = container.session()
+        assert await session.get(GroupChatsTable, ids["group_chat_id"]) is not None
+        assert await _mapping_assistant_ids(session, ids["group_chat_id"]) == set()
+        # Only the seat is gone. The skipped row itself is still untouched.
+        corrupt_row = await session.get(Assistants, ids["corrupt_id"])
+        assert corrupt_row is not None
+        assert corrupt_row.completion_model_kwargs == CORRUPT_KWARGS
+        assert await session.get(Assistants, ids["valid_id"]) is not None
+
+
+@pytest.mark.integration
+@pytest.mark.asyncio
+async def test_renaming_a_group_chat_keeps_the_skipped_members_seat(
+    db_container, space_with_skipped_assistant
+):
+    """A group chat save that leaves the member list alone (current_assistants
+    omitted) is not a replacement, so the skipped member keeps its seat."""
+    ids = space_with_skipped_assistant
+
+    async with db_container() as container:
+        await container.group_chat_service().update_group_chat(
+            id=ids["group_chat_id"], name="Renamed chat"
+        )
+
+    async with db_container() as container:
+        session = container.session()
+        chat_row = await session.get(GroupChatsTable, ids["group_chat_id"])
+        assert chat_row is not None
+        assert chat_row.name == "Renamed chat"
+        assert await _mapping_assistant_ids(session, ids["group_chat_id"]) == {
+            ids["valid_id"],
+            ids["corrupt_id"],
+        }

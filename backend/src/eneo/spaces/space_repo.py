@@ -712,11 +712,13 @@ class SpaceRepository:
 
             # Delete all group chat assistants, except memberships of
             # assistants the loader skipped: the entity dropped them on load,
-            # so they are not in `group_chat.assistants` to be re-added.
+            # so they are not in `group_chat.assistants` to be re-added. When
+            # the member list was replaced explicitly, the new list is the
+            # whole membership and every other seat goes, skipped or not.
             stmt = sa.delete(GroupChatsAssistantsMapping).where(
                 GroupChatsAssistantsMapping.group_chat_id == group_chat.id
             )
-            if unloaded_assistant_ids:
+            if unloaded_assistant_ids and not group_chat.assistants_replaced:
                 stmt = stmt.where(
                     GroupChatsAssistantsMapping.assistant_id.notin_(
                         list(unloaded_assistant_ids)

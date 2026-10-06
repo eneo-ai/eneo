@@ -69,6 +69,11 @@ class GroupChat(Entity):
         self.type = "group-chat"
         self._metadata_json = metadata_json
         self.icon_id = icon_id
+        # Set when `update` replaces the member list. The space loader drops
+        # members whose assistant row failed validation, and a save keeps their
+        # seats unless the list was replaced explicitly. See
+        # SpaceRepository._set_group_chats.
+        self.assistants_replaced = False
 
     @overload
     @classmethod
@@ -162,6 +167,7 @@ class GroupChat(Entity):
             self.published = published
         if new_assistants is not None:
             self.assistants = new_assistants
+            self.assistants_replaced = True
         if insight_enabled is not None:
             self.insight_enabled = insight_enabled
         if is_provided(metadata_json):
