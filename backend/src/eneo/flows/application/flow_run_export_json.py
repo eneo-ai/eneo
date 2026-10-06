@@ -43,6 +43,7 @@ from eneo.flows.domain.rag_evidence import (
     iter_retrieved_source_payloads,
     iter_step_rag_payloads,
 )
+from eneo.flows.domain.step_output import interpret_rejected_output
 from eneo.flows.enums import FlowInputSource, FlowRunReviewCheckpointState
 from eneo.flows.flow_run_provenance import (
     FLOW_ATTEMPT_PROVENANCE_SCHEMA_VERSION,
@@ -620,9 +621,7 @@ def _build_final_output_summary(
     resolved_artifact_details = artifact_details or []
     artifact_names = _collect_artifact_names(resolved_artifact_details)
     text_present = isinstance(text_value, str) and text_value.strip() != ""
-    structured_present = structured_value is not None or _has_structured_payload(
-        payload
-    )
+    structured_present = structured_value is not None
     artifact_count = len(resolved_artifact_details)
     kind_flags = [text_present, structured_present, artifact_count > 0]
     if sum(kind_flags) > 1:
@@ -915,60 +914,11 @@ def _build_step_output_summary(payload: Any) -> dict[str, Any] | None:
         except TypeError:
             serialized = str(structured_value)
         return normalize_text_preview(serialized, max_bytes=512).model_dump(mode="json")
-    meaningful_payload = _strip_artifact_wrapper_keys(payload_dict)
-    if not meaningful_payload:
-        return None
-    preferred_summary = _resolve_preferred_summary_value(meaningful_payload)
-    if preferred_summary is not None:
-        return normalize_text_preview(preferred_summary, max_bytes=512).model_dump(
+    rejected = interpret_rejected_output(payload_dict)
+    if rejected is not None:
+        return normalize_text_preview(rejected.text, max_bytes=512).model_dump(
             mode="json"
         )
-    if len(meaningful_payload) == 1:
-        only_value = next(iter(meaningful_payload.values()))
-        scalar_preview = _stringify_scalar_preview(only_value)
-        if scalar_preview is not None:
-            return normalize_text_preview(scalar_preview, max_bytes=512).model_dump(
-                mode="json"
-            )
-    try:
-        serialized = json.dumps(meaningful_payload, ensure_ascii=False)
-    except TypeError:
-        serialized = str(meaningful_payload)
-    return normalize_text_preview(serialized, max_bytes=512).model_dump(mode="json")
-
-
-def _strip_artifact_wrapper_keys(payload: dict[str, Any]) -> dict[str, Any]:
-    return {
-        key: value
-        for key, value in payload.items()
-        if key
-        not in {
-            "text",
-            "structured",
-            "artifacts",
-            "generated_file_ids",
-            "webhook_delivered",
-            "webhook_error",
-        }
-    }
-
-
-def _stringify_scalar_preview(value: Any) -> str | None:
-    if isinstance(value, str):
-        stripped = value.strip()
-        return stripped or None
-    if isinstance(value, (int, float, bool)):
-        return str(value)
-    return None
-
-
-def _resolve_preferred_summary_value(payload: dict[str, Any]) -> str | None:
-    for key in ("summary", "message", "result", "output", "content"):
-        if key not in payload:
-            continue
-        scalar_preview = _stringify_scalar_preview(payload.get(key))
-        if scalar_preview is not None:
-            return scalar_preview
     return None
 
 
@@ -1154,15 +1104,6 @@ def _resolve_rag_source_key(reference: dict[str, Any], name: str | None) -> str 
     if isinstance(name, str) and name.strip():
         return name.strip()
     return None
-
-
-def _has_structured_payload(payload: dict[str, Any]) -> bool:
-    if not payload:
-        return False
-    for key in ("structured",):
-        if payload.get(key) is not None:
-            return True
-    return bool(_strip_artifact_wrapper_keys(payload))
 
 
 def _sum_attempt_durations(attempts: list[dict[str, Any]]) -> int | None:
