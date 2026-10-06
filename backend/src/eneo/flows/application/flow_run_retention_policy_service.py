@@ -46,6 +46,7 @@ from eneo.flows.domain.flow_run_retention_policy import (
     flow_run_retention_change_postpones_deletion,
 )
 from eneo.flows.infrastructure.flow_run_history_due_repo import (
+    FLOW_RUN_HISTORY_OVERDUE_CAP,
     FlowRunHistoryDueRepository,
 )
 from eneo.flows.infrastructure.flow_run_retention_policy_repo import (
@@ -59,9 +60,6 @@ from eneo.settings.settings import (
     FlowRunHistoryPurgePublic,
 )
 from eneo.users.user import UserInDB
-
-# The status route counts at most this many overdue runs per request.
-FLOW_RUN_HISTORY_STATUS_OVERDUE_CAP = 1000
 
 
 class FlowRunRetentionPolicyService:
@@ -420,7 +418,7 @@ class FlowRunRetentionPolicyService:
                 overdue = await due.overdue(
                     now=now,
                     window=timedelta(days=settings.gallring_overdue_window_days),
-                    cap=FLOW_RUN_HISTORY_STATUS_OVERDUE_CAP,
+                    cap=FLOW_RUN_HISTORY_OVERDUE_CAP,
                     tenant_id=self.user.tenant_id,
                 )
                 receipts = await due.receipts()

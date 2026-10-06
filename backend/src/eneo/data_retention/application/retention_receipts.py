@@ -199,16 +199,29 @@ class RetentionReceiptService:
         target: ReceiptPhase,
         *,
         files_deleted: int = 0,
+        rows_deleted: int = 0,
     ) -> RetentionReceipt:
         return await self._save(
-            receipt, receipt.state.advance(target), files_deleted=files_deleted
+            receipt,
+            receipt.state.advance(target),
+            files_deleted=files_deleted,
+            rows_deleted=rows_deleted,
         )
 
     async def record(
-        self, receipt: RetentionReceipt, *, files_deleted: int
+        self,
+        receipt: RetentionReceipt,
+        *,
+        files_deleted: int = 0,
+        rows_deleted: int = 0,
     ) -> RetentionReceipt:
         """Add a chunk's deletions without a phase change."""
-        return await self._save(receipt, receipt.state, files_deleted=files_deleted)
+        return await self._save(
+            receipt,
+            receipt.state,
+            files_deleted=files_deleted,
+            rows_deleted=rows_deleted,
+        )
 
     async def pause(
         self, receipt: RetentionReceipt, reason: ReceiptReason
@@ -334,6 +347,7 @@ class RetentionReceiptService:
         manifest_after: ManifestPosition | None = None,
         files_deleted: int = 0,
         manifest_complete: bool = False,
+        rows_deleted: int = 0,
     ) -> RetentionReceipt:
         complete = receipt.manifest_complete or manifest_complete
         if state.phase == ReceiptPhase.COMPLETED and not complete:
@@ -343,6 +357,7 @@ class RetentionReceiptService:
             manifest_after=manifest_after or receipt.manifest_after,
             files_deleted=receipt.files_deleted + files_deleted,
             manifest_complete=complete,
+            rows_deleted=receipt.rows_deleted + rows_deleted,
         )
         await self.store.save(receipt.id, update)
         return replace(
@@ -351,4 +366,5 @@ class RetentionReceiptService:
             manifest_after=update.manifest_after,
             files_deleted=update.files_deleted,
             manifest_complete=complete,
+            rows_deleted=update.rows_deleted,
         )

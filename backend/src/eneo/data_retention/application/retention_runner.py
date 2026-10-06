@@ -45,7 +45,6 @@ from dataclasses import dataclass, field
 from typing import Protocol, cast, runtime_checkable
 from uuid import UUID
 
-from sqlalchemy import text
 from sqlalchemy.exc import DBAPIError
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -53,6 +52,7 @@ from eneo.audit.application.audit_service import AuditService
 from eneo.audit.domain.action_types import ActionType
 from eneo.audit.domain.actor_types import ActorType
 from eneo.audit.domain.entity_types import EntityType
+from eneo.data_retention.application.retention_sql_limits import set_retention_timeouts
 from eneo.data_retention.domain.retention import (
     RetentionBudget,
     RetentionErrorCode,
@@ -266,14 +266,10 @@ class RetentionRunner:
     async def _transaction(self) -> AsyncGenerator[None]:
         """A retention transaction; its first statements bound every wait in it."""
         async with self.session.begin():
-            await self.session.execute(
-                text(f"SET LOCAL lock_timeout = {int(self.limits.lock_timeout_ms)}")
-            )
-            await self.session.execute(
-                text(
-                    "SET LOCAL statement_timeout = "
-                    f"{int(self.limits.statement_timeout_ms)}"
-                )
+            await set_retention_timeouts(
+                self.session,
+                statement_timeout_ms=self.limits.statement_timeout_ms,
+                lock_timeout_ms=self.limits.lock_timeout_ms,
             )
             yield
 

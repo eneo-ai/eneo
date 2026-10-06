@@ -29,6 +29,7 @@ from eneo.data_retention.domain.retention import (
     RetentionCategory,
     RetentionKeyset,
     RetentionReceipt,
+    RetentionTrigger,
 )
 from eneo.data_retention.infrastructure.retention_sql import (
     deployment_audit_retention_days,
@@ -72,6 +73,8 @@ def _receipt(row: RetentionReceipts) -> RetentionReceipt:
         files_deleted=row.files_deleted,
         manifest_complete=row.manifest_completed_at is not None,
         started_at=row.started_at,
+        rows_deleted=row.rows_deleted,
+        trigger=RetentionTrigger(row.trigger),
     )
 
 
@@ -108,6 +111,9 @@ class RetentionReceiptRepository:
                     else None
                 ),
                 policy_days=receipt.policy_days,
+                policy_scope_id=receipt.policy_scope_id,
+                policy_mode=receipt.policy_mode,
+                triggered_by_user_id=receipt.triggered_by_user_id,
                 anchor_at=receipt.anchor_at,
                 due_at=receipt.due_at,
                 phase=ReceiptPhase.PENDING.value,
@@ -192,6 +198,7 @@ class RetentionReceiptRepository:
             "manifest_after_variant": after.variant if after else None,
             "manifest_after_ordinal": after.ordinal if after else None,
             "files_deleted": update.files_deleted,
+            "rows_deleted": update.rows_deleted,
             "chunk_count": RetentionReceipts.chunk_count + 1,
             "updated_at": now,
         }

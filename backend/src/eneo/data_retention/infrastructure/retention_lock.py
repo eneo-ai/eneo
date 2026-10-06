@@ -20,9 +20,9 @@ import sqlalchemy as sa
 from sqlalchemy.exc import DBAPIError
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from eneo.main.config import get_settings
 from eneo.main.exceptions import ConflictException
 
-RETENTION_LOCK_TIMEOUT: Final = "5s"
 _LOCK_NOT_AVAILABLE_SQLSTATE: Final = "55P03"
 
 
@@ -82,9 +82,18 @@ async def _acquire(
     subject: RetentionSubject,
     statement: sa.Select[tuple[object]],
 ) -> None:
-    previous = await session.scalar(sa.select(sa.func.current_setting("lock_timeout")))
+    settings = sa.table("pg_settings", sa.column("name"), sa.column("setting"))
+    previous_ms = (
+        await session.execute(
+            sa.select(sa.cast(settings.c.setting, sa.Integer)).where(
+                settings.c.name == "lock_timeout"
+            )
+        )
+    ).scalar_one()
+    configured_ms = get_settings().gallring_chunk_lock_timeout_ms
+    timeout_ms = min(previous_ms, configured_ms) if previous_ms else configured_ms
     await session.execute(
-        sa.select(sa.func.set_config("lock_timeout", RETENTION_LOCK_TIMEOUT, True))
+        sa.select(sa.func.set_config("lock_timeout", f"{timeout_ms}ms", True))
     )
     try:
         await session.execute(statement)
@@ -93,7 +102,9 @@ async def _acquire(
             raise RetentionLockBusy(subject) from exc
         raise
     # Restore the caller's setting so row locks taken later wait as before.
-    await session.execute(sa.select(sa.func.set_config("lock_timeout", previous, True)))
+    await session.execute(
+        sa.select(sa.func.set_config("lock_timeout", f"{previous_ms}ms", True))
+    )
 
 
 def _is_lock_not_available(error: DBAPIError) -> bool:

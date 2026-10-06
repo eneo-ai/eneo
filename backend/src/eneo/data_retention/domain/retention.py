@@ -244,9 +244,20 @@ class NewRetentionReceipt:
     anchor_at: datetime | None = None
     due_at: datetime | None = None
     trigger: RetentionTrigger = RetentionTrigger.SCHEDULED
+    # The applied rule, fixed at selection: its level's id and its mode.
+    policy_scope_id: UUID | None = None
+    policy_mode: str | None = None
+    # The person who started an explicit deletion.
+    triggered_by_user_id: UUID | None = None
 
     def __post_init__(self) -> None:
         retention_name(self.task)
+        if self.policy_mode is not None:
+            retention_name(self.policy_mode)
+        if self.triggered_by_user_id is not None and (
+            self.trigger != RetentionTrigger.EXPLICIT
+        ):
+            raise ValueError("Only an explicit deletion names who started it.")
 
 
 @dataclass(frozen=True, slots=True)
@@ -281,6 +292,8 @@ class RetentionReceipt:
     files_deleted: int
     manifest_complete: bool
     started_at: datetime
+    rows_deleted: int = 0
+    trigger: RetentionTrigger = RetentionTrigger.SCHEDULED
 
 
 @dataclass(frozen=True, slots=True)
@@ -289,6 +302,7 @@ class ReceiptUpdate:
     manifest_after: ManifestPosition | None = None
     files_deleted: int = 0
     manifest_complete: bool = False
+    rows_deleted: int = 0
 
     def __post_init__(self) -> None:
         # The resume point is typed; a name or any other value is refused.
@@ -296,7 +310,7 @@ class ReceiptUpdate:
             cast(object, self.manifest_after), ManifestPosition
         ):
             raise TypeError("A receipt's resume point is a manifest position.")
-        if self.files_deleted < 0:
+        if self.files_deleted < 0 or self.rows_deleted < 0:
             raise ValueError("A receipt cannot count negative deletions.")
 
 
@@ -341,6 +355,8 @@ class RetentionKeyset:
     at: datetime
     id: UUID
     item: int | None = None
+    # A step that pages within groups (for example per Flow) names the group.
+    group: UUID | None = None
 
     def __post_init__(self) -> None:
         if not isinstance(cast(object, self.at), datetime) or self.at.tzinfo is None:
@@ -352,6 +368,8 @@ class RetentionKeyset:
             not isinstance(item, int) or isinstance(item, bool) or item < 0
         ):
             raise TypeError("An item position is a non-negative number.")
+        if self.group is not None and not isinstance(cast(object, self.group), UUID):
+            raise TypeError("A keyset group is an id.")
 
 
 @dataclass(frozen=True, slots=True)

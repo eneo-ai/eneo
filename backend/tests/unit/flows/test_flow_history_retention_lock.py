@@ -1,6 +1,8 @@
-"""The Flow-history gallring lock's SQL and its refusal on a busy lock (two-session waits: integration)."""
+"""The Flow-history retention lock's SQL and its refusal on a busy lock (two-session waits: integration)."""
 
 from __future__ import annotations
+
+from types import SimpleNamespace
 
 import pytest
 from sqlalchemy.dialects import postgresql
@@ -8,6 +10,7 @@ from sqlalchemy.exc import DBAPIError
 
 from eneo.data_retention.infrastructure import retention_lock
 from eneo.data_retention.infrastructure.retention_lock import RetentionSubject
+from eneo.main.config import get_settings
 
 SUBJECT = RetentionSubject.FLOW_HISTORY
 
@@ -51,6 +54,7 @@ class _Session:
         self.statements.append(sql)
         if "pg_advisory" in sql:
             raise self.failure
+        return SimpleNamespace(scalar_one=lambda: 0)
 
 
 async def test_a_lock_timeout_is_refused_as_a_typed_conflict() -> None:
@@ -58,7 +62,11 @@ async def test_a_lock_timeout_is_refused_as_a_typed_conflict() -> None:
     with pytest.raises(retention_lock.RetentionLockBusy) as refused:
         await retention_lock.acquire_exclusive(session, SUBJECT)  # type: ignore[arg-type]
     assert refused.value.code == "flow_retention_lock_busy"
-    assert "set_config('lock_timeout', '5s', true)" in session.statements[1]
+    configured_ms = get_settings().gallring_chunk_lock_timeout_ms
+    assert (
+        f"set_config('lock_timeout', '{configured_ms}ms', true)"
+        in session.statements[1]
+    )
 
 
 async def test_other_database_errors_are_not_reported_as_busy() -> None:

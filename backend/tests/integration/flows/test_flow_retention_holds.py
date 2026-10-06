@@ -47,6 +47,7 @@ from eneo.flows.runtime.flow_runtime_health import (
     classify_flow_runtime_health,
     load_flow_runtime_health_snapshot,
 )
+from eneo.main.config import get_settings
 from eneo.main.exceptions import ConflictException
 from eneo.settings.settings import FlowRetentionPolicyUpdate
 from tests.fixtures import mint_v2_api_key
@@ -440,7 +441,7 @@ async def test_a_busy_retention_lock_is_refused_typed_and_writes_nothing(
 ):
     flow_id = history["flow_id"]
     await _add_run(db_container, admin_user, flow_id)
-    monkeypatch.setattr(retention_lock, "RETENTION_LOCK_TIMEOUT", "100ms")
+    monkeypatch.setattr(get_settings(), "gallring_chunk_lock_timeout_ms", 100)
     async with db_container() as purging:
         await purging.flow_run_retention_policy_service().purge_due_history(
             dry_run=False, limit=10, flow_id=flow_id

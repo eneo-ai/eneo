@@ -6,6 +6,7 @@ runs, while physical scans remain bounded by the caller's statement timeout.
 
 from __future__ import annotations
 
+from collections.abc import Sequence
 from dataclasses import dataclass
 from datetime import datetime, timedelta
 from uuid import UUID
@@ -17,6 +18,7 @@ from sqlalchemy.sql.selectable import LateralFromClause
 from eneo.data_retention.domain.retention import (
     NON_FINAL_RECEIPT_PHASES,
     ReceiptPhase,
+    RetentionPolicySource,
 )
 from eneo.database.tables.flow_tables import FlowRetentionHolds, FlowRuns, Flows
 from eneo.database.tables.retention_tables import RetentionReceipts
@@ -25,6 +27,8 @@ from eneo.database.tables.tenant_table import Tenants
 from eneo.flows.domain.flow_run_retention_policy import (
     FLOWS_HISTORY_TASK,
     FlowRunRetentionMode,
+    FlowRunRetentionPolicyStorageError,
+    flow_run_retention_policy_from_storage,
 )
 from eneo.flows.enums import TERMINAL_FLOW_RUN_STATUS_VALUES
 from eneo.flows.infrastructure.flow_retention_hold_repo import (
@@ -40,6 +44,10 @@ from eneo.flows.infrastructure.flow_run_retention_policy_query import (
     effective_flow_run_retention_policy_sql,
     flow_run_history_eligible_since_sql,
 )
+
+# The status route and nightly snapshot share one result cap.
+FLOW_RUN_HISTORY_OVERDUE_CAP = 1000
+FLOW_RUN_HISTORY_DIAGNOSTIC_WINDOW = 500
 
 FLOW_RUN_RETENTION_ANCHOR: sa.ColumnElement[datetime] = sa.func.coalesce(
     FlowRuns.finished_at, FlowRuns.created_at
@@ -74,7 +82,16 @@ _RuleRow = tuple[UUID, UUID, UUID, str | None, int | None, str | None, bool]
 
 
 def auto_delete_flows() -> sa.Select[_RuleRow]:
-    """Effective auto_delete Flows; retired Flows keep their history rule."""
+    """Flows whose effective rule is auto_delete, with the rule's days and level.
+
+    Retired Flows are included: their run history keeps its rule.
+    """
+    return flow_history_rules(modes=(FlowRunRetentionMode.AUTO_DELETE,))
+
+
+def flow_history_rules(*, modes: Sequence[FlowRunRetentionMode]) -> sa.Select[_RuleRow]:
+    """Flows whose effective rule has one of `modes`, with the rule (mode, days,
+    level and the id of the level that set it)."""
     effective = effective_flow_run_retention_policy_sql(
         organization_mode=Tenants.flow_run_history_retention_mode.__clause_element__(),
         organization_days=Tenants.flow_run_history_retention_days.__clause_element__(),
@@ -98,7 +115,51 @@ def auto_delete_flows() -> sa.Select[_RuleRow]:
             sa.and_(Spaces.id == Flows.space_id, Spaces.tenant_id == Flows.tenant_id),
         )
         .join(Tenants, Tenants.id == Flows.tenant_id)
-        .where(effective.mode == FlowRunRetentionMode.AUTO_DELETE.value)
+        .where(effective.mode.in_([mode.value for mode in modes]))
+    )
+
+
+@dataclass(frozen=True, slots=True)
+class FlowHistoryRule:
+    """The rule in force for one Flow's run history, at selection."""
+
+    flow_id: UUID
+    tenant_id: UUID
+    space_id: UUID
+    mode: FlowRunRetentionMode
+    days: int
+    source: RetentionPolicySource
+    # A legal hold on the whole Flow: none of its runs is deleted.
+    held: bool
+
+    @property
+    def scope_id(self) -> UUID:
+        """The Organization, Space or Flow whose rule this is."""
+        if self.source is RetentionPolicySource.FLOW:
+            return self.flow_id
+        if self.source is RetentionPolicySource.SPACE:
+            return self.space_id
+        return self.tenant_id
+
+    def cutoff(self, now: datetime) -> datetime:
+        return now - timedelta(days=self.days)
+
+
+def _rule(row: sa.Row[_RuleRow]) -> FlowHistoryRule:
+    flow_id, tenant_id, space_id, mode, days, source, held = row
+    policy = flow_run_retention_policy_from_storage(mode=mode, days=days)
+    if policy is None or source is None:
+        raise FlowRunRetentionPolicyStorageError(
+            "An effective Flow run-history rule lacks its mode, days or level."
+        )
+    return FlowHistoryRule(
+        flow_id=flow_id,
+        tenant_id=tenant_id,
+        space_id=space_id,
+        mode=policy.mode,
+        days=policy.days,
+        source=RetentionPolicySource(source),
+        held=held,
     )
 
 
@@ -126,9 +187,126 @@ class FlowRunHistoryReceiptSummary:
     oldest_physical_pending_completed_at: datetime | None
 
 
+@dataclass(frozen=True, slots=True)
+class FlowRunHistoryBlockedCounts:
+    undelivered_audit: int
+    unresolved_webhook: int
+    review_required: int
+    legal_hold: int
+    counted_runs: int
+    complete: bool
+
+
 class FlowRunHistoryDueRepository:
     def __init__(self, session: AsyncSession) -> None:
         self.session = session
+
+    async def rules(
+        self,
+        *,
+        modes: Sequence[FlowRunRetentionMode],
+        after: UUID | None,
+        limit: int,
+        tenant_id: UUID | None = None,
+        space_id: UUID | None = None,
+        flow_id: UUID | None = None,
+        inclusive: bool = True,
+    ) -> list[FlowHistoryRule]:
+        """One current rule range; exclusive after a completed Flow."""
+        stmt = flow_history_rules(modes=modes).order_by(Flows.id).limit(limit)
+        if after is not None:
+            stmt = stmt.where(Flows.id >= after if inclusive else Flows.id > after)
+        if tenant_id is not None:
+            stmt = stmt.where(Flows.tenant_id == tenant_id)
+        if space_id is not None:
+            stmt = stmt.where(Flows.space_id == space_id)
+        if flow_id is not None:
+            stmt = stmt.where(Flows.id == flow_id)
+        return [_rule(row) for row in await self.session.execute(stmt)]
+
+    async def diagnostics(
+        self,
+        *,
+        modes: Sequence[FlowRunRetentionMode],
+        now: datetime,
+        window: int,
+        tenant_id: UUID,
+        space_id: UUID | None,
+        flow_id: UUID | None,
+    ) -> FlowRunHistoryBlockedCounts:
+        """Two global queries with separate sentinel windows for held and other runs.
+
+        The statement timeout bounds eligibility scans. Held runs cannot displace
+        other blocked runs from the diagnostic window.
+        """
+        rules = flow_history_rules(modes=modes).where(Flows.tenant_id == tenant_id)
+        if space_id is not None:
+            rules = rules.where(Flows.space_id == space_id)
+        if flow_id is not None:
+            rules = rules.where(Flows.id == flow_id)
+        flows = rules.subquery("diagnostic_flows")
+        cutoff = sa.cast(
+            sa.literal(now), sa.TIMESTAMP(timezone=True)
+        ) - sa.func.make_interval(0, 0, 0, flows.c.days)
+        held = sa.or_(
+            flows.c.flow_held,
+            flow_run_held_predicate(run_id=FlowRuns.id, flow_id=FlowRuns.flow_id),
+        )
+        due = (
+            sa.select(
+                FlowRuns.id.label("run_id"),
+                flows.c.mode,
+                FLOW_RUN_RETENTION_ANCHOR.label("anchor"),
+            )
+            .select_from(flows)
+            .join(FlowRuns, FlowRuns.flow_id == flows.c.flow_id)
+            .where(*flow_run_k4_due_predicates(flow_id=flows.c.flow_id, cutoff=cutoff))
+        )
+        held_count = int(
+            await self.session.scalar(
+                sa.select(sa.func.count()).select_from(
+                    due.where(held).limit(window + 1).subquery()
+                )
+            )
+            or 0
+        )
+        window_runs = (
+            due.where(sa.not_(held))
+            .order_by(FLOW_RUN_RETENTION_ANCHOR, FlowRuns.id)
+            .limit(window + 1)
+            .subquery("diagnostic_runs")
+        )
+        rows = (
+            await self.session.execute(
+                sa.select(
+                    window_runs.c.mode,
+                    flow_run_undelivered_audit_exists(window_runs.c.run_id).label(
+                        "audit"
+                    ),
+                    flow_run_unresolved_webhook_exists(window_runs.c.run_id).label(
+                        "webhook"
+                    ),
+                ).order_by(window_runs.c.anchor, window_runs.c.run_id)
+            )
+        ).all()
+        page = rows[:window]
+        review = audit = webhook = 0
+        for row in page:
+            mode = FlowRunRetentionMode(row.mode)
+            if mode is FlowRunRetentionMode.REVIEW_REQUIRED:
+                review += 1
+            elif row.audit:
+                audit += 1
+            elif row.webhook:
+                webhook += 1
+        return FlowRunHistoryBlockedCounts(
+            undelivered_audit=audit,
+            unresolved_webhook=webhook,
+            review_required=review,
+            legal_hold=min(held_count, window),
+            counted_runs=len(page),
+            complete=len(rows) <= window and held_count <= window,
+        )
 
     async def overdue(
         self,

@@ -41,6 +41,7 @@ def _stored_cursors(cursors: Mapping[str, RetentionKeyset]) -> dict[str, Any]:
             "at": keyset.at.isoformat(),
             "id": str(keyset.id),
             **({"item": keyset.item} if keyset.item is not None else {}),
+            **({"group": str(keyset.group)} if keyset.group is not None else {}),
         }
         for step, keyset in cursors.items()
     }
@@ -55,10 +56,12 @@ def _read_cursors(stored: object) -> dict[str, RetentionKeyset]:
     for step, value in cast(dict[object, object], stored).items():
         try:
             entry = cast(dict[str, Any], value)
+            group = entry.get("group")
             cursors[retention_name(cast(str, step))] = RetentionKeyset(
                 at=datetime.fromisoformat(entry["at"]),
                 id=UUID(entry["id"]),
                 item=entry.get("item"),
+                group=UUID(group) if group is not None else None,
             )
         except (KeyError, TypeError, ValueError):
             continue
