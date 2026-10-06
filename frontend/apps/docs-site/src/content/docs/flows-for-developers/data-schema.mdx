@@ -4,19 +4,19 @@ Use this page to understand ownership and invariants before changing Flow
 persistence. It is intentionally a hand-maintained map, not a copy of every
 SQLAlchemy column. The ORM and Alembic revisions remain authoritative.
 
-## Final migration chain
+## Migration lineage
 
-Flows contributes two linear revisions after the current `develop` head:
+The initial Flow schema and platform integration revisions are `202608201000`
+and `202608201100`; `202608201200` introduces Builder sessions, plans, and
+session-file attachments. Later revisions extend these schemas, including
+Builder client-error persistence, and merge with platform migration heads. The
+current lineage is in `backend/alembic/versions`; it is not limited to those
+initial revisions.
 
-1. `202608201000` creates the final core schema.
-2. `202608201100` integrates Flow ownership with existing platform tables.
-
-The stacked AI Builder PR adds `202608201200`. It creates only
-`builder_sessions`, `builder_plans`, and `builder_session_files` and extends the
-resource-binding source vocabulary with `ai_builder`.
-
-Private pre-release revision IDs are unsupported. Existing development
-databases must be rebuilt rather than migrated through the deleted history.
+Before an upgrade, check the database revision against that lineage. Follow the
+repository migration guidelines in `docs/CONTRIBUTING.md`: review generated
+revisions, test upgrade and downgrade behavior, and create a new revision rather
+than editing an applied one.
 
 ## Core aggregates
 
@@ -45,8 +45,8 @@ terminalization.
   principal. Review checkpoints apply the same rule to requester and decider.
 - Runtime files must belong to the run's tenant and authorized principal before
   they can be bound.
-- Builder session-file rows use composite tenant foreign keys on the stacked
-  branch; a session cannot attach another tenant's file.
+- Builder session-file rows use composite tenant foreign keys; a session cannot
+  attach another tenant's file.
 
 These are database constraints as well as service-layer checks. Do not replace a
 composite ownership constraint with an application-only assertion.
@@ -122,7 +122,8 @@ When adding or changing JSONB:
 ## Source of truth
 
 - ORM: `backend/src/eneo/database/tables/flow_tables.py`
-- Core schema: `backend/alembic/versions/202608201000_create_final_flow_schema.py`
-- Core integration: `backend/alembic/versions/202608201100_integrate_final_flow_schema.py`
-- Builder schema: `backend/alembic/versions/202608201200_create_final_flow_ai_builder_schema.py`
+- Migration lineage: `backend/alembic/versions/`
+- Initial core schema: `backend/alembic/versions/202608201000_create_final_flow_schema.py`
+- Initial core integration: `backend/alembic/versions/202608201100_integrate_final_flow_schema.py`
+- Initial Builder schema: `backend/alembic/versions/202608201200_create_final_flow_ai_builder_schema.py`
 - Migration behavior tests: `backend/tests/integration/migrations/test_final_flow_schema_migrations.py`

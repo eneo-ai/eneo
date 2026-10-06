@@ -1,18 +1,19 @@
 # Key decisions
 
-These decisions describe the final launch architecture. Historical planning
+These decisions describe the current architecture. Historical planning
 documents may describe deleted pre-release features; this page and the current
 implementation take precedence for maintainer work.
 
-## 1. Core and Builder are stacked PRs
+## 1. Builder uses the shared Flow authoring boundary
 
-The core PR owns manual authoring, publication, execution, review, packages,
-evidence, retention, and platform integration. It contains no Builder routes,
-UI, settings, translations, or tables.
+`eneo.flows.ai_builder` owns conversational authoring. The Flow API router
+registers its routes alongside manual authoring and run APIs. Builder compiles
+proposals into `FlowDraftSpecCore` and applies them through
+`FlowAuthoringCommandService`, also used by package installation. It writes
+normal Flow drafts and does not own a separate runtime.
 
-The stacked Builder PR restores conversational authoring and adds exactly three
-tables. Builder compiles into the normal core draft-validation boundary and
-does not own a separate runtime.
+Builder session, plan, attachment, and client-error persistence is declared in
+`flow_tables.py`; the current ORM and Alembic lineage define the schema.
 
 ## 2. Published versions are immutable runtime truth
 

@@ -48,14 +48,15 @@ The generated Eneo SDK owns API types. `src/lib/features/flows` owns Flow
 state/presentation helpers and components. SvelteKit routes assemble those
 components for manual authoring and run/review views.
 
-The stacked Builder PR additionally owns:
+Builder frontend owners include:
 
 - `src/lib/features/flows/ai-builder`;
 - the `flows/ai-builder` route subtree;
-- Builder-only settings, permissions, translations, and tests.
+- Builder settings and permission controls, translations, and tests.
 
-Core manual authoring does not import Builder code. Builder commits through the
-same backend draft-validation/materialization boundary as manual authoring.
+Builder applies compiled proposals through `FlowAuthoringCommandService`, which
+prepares and materializes normal Flow drafts. Package installation uses the
+same command service.
 
 ## Persistence boundaries
 
@@ -68,7 +69,7 @@ same backend draft-validation/materialization boundary as manual authoring.
   them; some older payload columns are stored as plain dictionaries.
 
 See [The data schema](/docs/flows-for-developers/data-schema) for aggregate
-ownership and the final three-revision stacked migration shape.
+ownership and the authoritative ORM and Alembic lineage.
 
 ## Process model
 
@@ -79,10 +80,11 @@ saturation cannot consume maintenance capacity.
 
 ## Source guards
 
-Architecture tests enforce meaningful boundaries: domain import direction,
-portable-package independence, runtime ownership, and Builder absence from the
-core branch. They do not require developer prose to match generated output or
-freeze schema details already covered by migration/repository behavior tests.
+Import contracts in `backend/.importlinter` keep engine and package modules
+independent of Builder internals; `flow_ai_builder_router` is the explicit
+exception for Builder imports. Runtime ownership guards keep webhook delivery out of
+the executor. These checks protect dependencies and behavior, rather than a
+historical branch split or generated developer prose.
 
 ## Related
 
