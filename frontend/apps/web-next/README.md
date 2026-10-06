@@ -1,7 +1,11 @@
 # @eneo/web-next
 
-The optional Next.js (App Router) frontend for Eneo. The existing SvelteKit
-app remains the default. Both apps share the backend, accounts and data.
+The optional React/Next.js (App Router) beta with Astryx for Eneo. SvelteKit in
+`frontend/apps/web` is the primary frontend and the default for frontend
+development. Implement ordinary frontend fixes and new features in Svelte;
+work here must be explicitly intended for the beta. See
+[the frontend development policy](../../../AGENTS.md#frontend-development).
+Both apps share the backend, accounts and data.
 
 For deployment, callback registration, the opt-in banner and rollback, use
 [the deployment guide](../docs-site/src/content/guides/deployment.mdx#run-the-next-beta-alongside-the-existing-app).

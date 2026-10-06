@@ -70,6 +70,13 @@ docker compose up -d
 
 ### For Developers
 
+**SvelteKit in `frontend/apps/web` is the primary frontend and the default for
+frontend development.** React/Next.js with Astryx in `frontend/apps/web-next`
+is an optional beta. Implement ordinary frontend fixes and new features in
+Svelte; work in web-next must be explicitly intended for the beta.
+See [the frontend development policy](AGENTS.md#frontend-development) and
+[frontend setup](frontend/README.md).
+
 Set up your development environment with VS Code DevContainer:
 
 ```bash

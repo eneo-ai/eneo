@@ -4,6 +4,12 @@ Rules for humans and AI agents working in `frontend/apps/web-next`. The repo
 root [AGENTS.md](../../../AGENTS.md) still applies (documentation and release
 changes).
 
+This app is the optional React/Next.js beta with Astryx. SvelteKit remains the
+primary frontend and the default for frontend development; work here must be
+explicitly intended for the beta. See
+[the frontend development policy](../../../AGENTS.md#frontend-development).
+The UI rules below apply to web-next.
+
 ## In short
 
 - **New UI uses [Astryx](https://github.com/facebook/astryx)** (`@astryxdesign/core`)

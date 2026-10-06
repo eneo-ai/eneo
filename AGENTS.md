@@ -1,3 +1,13 @@
+# Frontend development
+
+SvelteKit in `frontend/apps/web` is the primary frontend and the default for
+frontend development. Implement ordinary frontend fixes and new features there.
+React/Next.js with Astryx in `frontend/apps/web-next` is an optional beta;
+work there must be explicitly intended for the beta.
+
+The web-next UI and component rules apply within that app. Follow the existing
+Svelte components and patterns when working in `frontend/apps/web`.
+
 # Documentation and release changes
 
 Before changing documented behaviour or documentation, read

@@ -1,9 +1,15 @@
 # Eneo Frontend
 
+**SvelteKit in `apps/web` is the primary frontend and the default for frontend
+development.** React/Next.js with Astryx in `apps/web-next` is an optional beta.
+Implement ordinary frontend fixes and new features in Svelte; work in web-next
+must be explicitly intended for the beta. See
+[the frontend development policy](../AGENTS.md#frontend-development).
+
 Multirepo containing:
 
-- The Eneo Web GUI, a SvelteKit app in `/apps/web`
-- The React/Next.js Web GUI in `/apps/web-next`
+- The primary Eneo Web GUI, a SvelteKit app in `/apps/web`
+- The optional React/Next.js beta with Astryx in `/apps/web-next`
 - The Eneo.js API client, a plain JS client wrapping all Eneo endpoints used in the Web GUI in `packages/eneo.js`
 - The Eneo design tokens, themes and icons shared by the frontend apps in `packages/ui` (UI components live in `apps/web` on shadcn-svelte)
 
@@ -42,9 +48,14 @@ The stop and restart commands only signal a Vite process that is verified to bel
 checkout. If another application owns port 3000, they report the conflict and leave it running.
 Production build and runtime commands do not use this development lifecycle.
 
-To start the React/Next.js migration app separately on port 3100, run `bun run dev:web-next`.
+For work explicitly targeting the React/Next.js beta, start it separately on port
+3100 with `bun run dev:web-next`.
 
 ### Formatting & Linting
+
+Workspace-wide `build`, `check`, `lint` and `test` commands include both frontend
+apps so shared changes are validated in both. Svelte remains the default for
+frontend development.
 
 Prettier is configured for this project, you can format your code before committing either through a format action in your code editor, or by running:
 
