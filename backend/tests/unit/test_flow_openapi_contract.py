@@ -1360,16 +1360,29 @@ def test_openapi_flow_retention_policy_is_default_off_and_strictly_bounded(
     assert policy_schema.get("additionalProperties") is False
     assert set(policy_schema["required"]) == {"mode", "days"}
     assert policy_schema["properties"]["days"]["minimum"] == 1
-    assert policy_schema["properties"]["days"]["maximum"] == 2555
+    # The deployment maximum is a write rule (write_rules.max_days), not schema.
+    assert "maximum" not in policy_schema["properties"]["days"]
     mode_schema = _resolve_component_ref(
         openapi_spec, policy_schema["properties"]["mode"]
     )
-    assert set(mode_schema["enum"]) == {"preserve", "review_required"}
+    assert set(mode_schema["enum"]) == {"preserve", "review_required", "auto_delete"}
 
     replace_schema = schemas["FlowRunRetentionPolicyReplaceRequest"]
     assert replace_schema.get("additionalProperties") is False
     assert replace_schema["required"] == ["policy"]
     assert _schema_allows_null(replace_schema["properties"]["policy"])
+    # Stopping or delaying automatic deletion names why (1-512 characters).
+    policy_reason = replace_schema["properties"]["reason"]
+    reason_string = next(
+        option for option in policy_reason["anyOf"] if option.get("type") == "string"
+    )
+    assert (reason_string["minLength"], reason_string["maxLength"]) == (1, 512)
+    assert "default" not in policy_reason
+    assert "flow_retention_reason_required" in policy_reason["description"]
+
+    rules = schemas["FlowRunRetentionWriteRules"]
+    assert set(rules["required"]) == {"max_days", "auto_delete_available"}
+    assert "write_rules" in schemas["FlowRunRetentionPolicySettings"]["required"]
 
 
 def test_openapi_flow_retention_descriptions_require_explicit_admin_purge(
@@ -1403,11 +1416,21 @@ def test_openapi_flow_retention_descriptions_require_explicit_admin_purge(
     assert "complete space override" in normalized
     assert "complete flow override" in normalized
     assert "organization" in normalized
-    assert "explicit administrator" in normalized
     assert "saving" in normalized
-    assert "never deletes" in normalized or "never schedules deletion" in normalized
-    assert "automatic deletion" not in normalized
-    assert "scheduled pass" not in normalized
+    assert "never deletes" in normalized
+    # auto_delete is the only mode the nightly task deletes; writes name its limits.
+    assert "auto_delete lets the nightly flows.history task delete" in normalized
+    assert "write_rules.auto_delete_available" in normalized
+    assert "write_rules.max_days" in normalized
+    assert "needs a reason" in normalized
+    for put in operations[3:]:
+        refused = str(put["responses"]["400"]["description"])
+        for code in (
+            "flow_retention_auto_delete_unavailable",
+            "flow_retention_days_above_maximum",
+            "flow_retention_reason_required",
+        ):
+            assert code in refused
 
     schemas = openapi_spec["components"]["schemas"]
     for schema_name in ("FlowRetentionPolicyPublic", "FlowRetentionPolicyUpdate"):
@@ -1427,7 +1450,9 @@ def test_openapi_flow_retention_descriptions_require_explicit_admin_purge(
     for description in projection_descriptions:
         normalized_description = description.lower()
         assert "explicit administrator purge" in normalized_description
-        assert "automatic flow run-history deletion" not in normalized_description
+        assert (
+            "auto_delete lets the nightly flows.history task" in normalized_description
+        )
         assert "matching classification" not in normalized_description
         assert "minimum/no-purge" not in normalized_description
 
@@ -3258,10 +3283,9 @@ def test_openapi_flow_retention_days_documents_public_range(
     policy_schema = schemas["FlowRunRetentionPolicy"]
     integer_schema = _integer_schema_option(policy_schema["properties"]["days"])
     assert integer_schema.get("minimum") == 1
-    assert integer_schema.get("maximum") == 2555
-    assert (
-        "eligibility alone never deletes data"
-        in str(integer_schema.get("description", "")).lower()
+    assert "maximum" not in integer_schema
+    assert "flow_retention_days_above_maximum" in str(
+        integer_schema.get("description", "")
     )
 
     for schema_name in (

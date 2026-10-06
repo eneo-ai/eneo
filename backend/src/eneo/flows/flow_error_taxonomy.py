@@ -231,6 +231,13 @@ FLOW_ERROR_TAXONOMY: dict[FlowApiErrorCode, FlowErrorTaxonomyEntry] = {
         consumer_action="Retry with the original payload or choose a new idempotency key.",
         user_action="Start a new run or retry the exact original request.",
     ),
+    FlowApiErrorCode.RUN_IDEMPOTENCY_RUN_DELETED: _entry(
+        category="Run input",
+        surfaced_through="API error response",
+        cause="The retry key belongs to a run that retention is deleting.",
+        consumer_action="Start a new run with a new idempotency key.",
+        user_action="Start a new run.",
+    ),
     FlowApiErrorCode.RUN_CONCURRENCY_LIMIT_REACHED: _entry(
         category="Run input",
         surfaced_through="API error response",

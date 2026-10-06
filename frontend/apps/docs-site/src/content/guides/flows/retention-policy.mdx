@@ -2,13 +2,13 @@ import { Callout } from "nextra/components";
 
 # Flow run-history retention
 
-This page explains how retention eligibility for Flow runs, steps, and their run-owned history is set, reviewed, purged and put on legal hold. It covers the policy hierarchy, the two safe modes, the read-only review queue, legal holds, and who may do what.
+This page explains how retention eligibility for Flow runs, steps, and their run-owned history is set, reviewed, purged and put on legal hold. It covers the policy hierarchy, manual and guarded automatic modes, the read-only review queue, legal holds, and who may do what.
 
 <Callout type="warning">
 
 **Saving a Flow run-history policy does not delete data.**
 
-There is no automatic Flow run-history deletion mode. History is deleted only by the explicit purge (an API call that needs `retention_manage`), and the purge skips every run under a legal hold. The admin UI has no purge button; the review queue is read-only.
+The `auto_delete` mode is unavailable until the nightly history task is registered. While that gate is closed, history is deleted only by the explicit purge (an API call that needs `retention_manage`), which skips every run under a legal hold. The admin UI has no purge button; the review queue is read-only.
 
 </Callout>
 
@@ -44,6 +44,12 @@ The Organization value is a default, not a hard maximum or minimum. This support
 | Litigation hold intake Flow | Manual purge eligibility after 90 days | This Flow only                          |
 
 The litigation Flow uses 90 days. Other Flows in Legal use 60 days. Flows in other Spaces use 30 days. The administrator does not need to raise the Organization default to 90 days.
+
+The run-history mode also accepts `auto_delete`, subject to the deployment's
+`write_rules.auto_delete_available` gate. Until the nightly history task is
+registered, policy writes selecting that mode are refused. The deployment's
+`write_rules.max_days` limits new policy writes; stored longer policies keep
+applying. Stopping or delaying an automatic deletion policy requires a reason.
 
 ## Choose a mode
 
@@ -136,7 +142,7 @@ Clear a Space or Flow override and inherit:
 }
 ```
 
-Partial policies are rejected. `days` accepts whole numbers from 1 through 2555. An unrecognized mode, including an automatic-deletion value, is rejected.
+Partial policies are rejected. `days` accepts whole numbers of at least 1; new writes must also fit `write_rules.max_days` (the deployment default is 36500). Stored longer policies keep applying. Unrecognized modes are rejected, and selecting `auto_delete` requires `write_rules.auto_delete_available`.
 
 Every policy response separates three facts:
 

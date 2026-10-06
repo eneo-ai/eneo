@@ -79,8 +79,7 @@ class Tenants(BasePublic):
     __table_args__ = (
         CheckConstraint(
             "flow_run_history_retention_days IS NULL OR "
-            f"(flow_run_history_retention_days >= {MIN_RETENTION_DAYS} AND "
-            f"flow_run_history_retention_days <= {MAX_RETENTION_DAYS})",
+            f"flow_run_history_retention_days >= {MIN_RETENTION_DAYS}",
             name="ck_tenants_flow_run_history_retention_days_range",
         ),
         CheckConstraint(

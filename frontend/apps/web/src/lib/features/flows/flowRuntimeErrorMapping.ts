@@ -70,6 +70,7 @@ const FLOW_API_ERROR_MESSAGES = {
   flow_run_runtime_input_disabled: m.flow_error_flow_run_runtime_input_disabled,
   flow_run_top_level_file_ids_not_supported: m.flow_error_flow_run_top_level_file_ids_not_supported,
   flow_run_idempotency_conflict: m.flow_error_flow_run_idempotency_conflict,
+  flow_run_idempotency_run_deleted: m.flow_error_flow_run_idempotency_run_deleted,
   flow_run_concurrency_limit_reached: m.flow_error_flow_run_concurrency_limit_reached,
   flow_run_redispatch_conflict: m.flow_error_flow_run_redispatch_conflict,
   flow_run_redispatch_audit_unavailable: m.flow_error_flow_run_redispatch_audit_unavailable,

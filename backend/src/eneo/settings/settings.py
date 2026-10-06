@@ -990,6 +990,16 @@ class FlowRunRetentionPolicyReplaceRequest(BaseModel):
             "Complete local policy, or null to clear this level and inherit its parent."
         )
     )
+    reason: FlowRetentionHoldReason | None = Field(
+        default=None,
+        description=(
+            "Why the change stops or delays automatic deletion (1-512 characters). "
+            "Required, with code flow_retention_reason_required, when the policy "
+            "in force at this level was auto_delete and becomes another mode, is "
+            "cleared, or gets more days; recorded in the required audit event."
+        ),
+        json_schema_extra=_strip_json_schema_default,
+    )
 
 
 class SkillExecutionBlockUpdate(BaseModel):

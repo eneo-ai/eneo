@@ -148,7 +148,9 @@ FLOW_RUN_RETENTION_PROJECTION_DESCRIPTION = (
     "Effective Flow run-history retention policy. A complete Flow policy overrides "
     "its complete Space policy, and Space overrides the Organization default. "
     "Preserve requires an explicit administrator purge; review_required requires "
-    "human approval. Off means no eligibility policy is configured."
+    "human approval; auto_delete lets the nightly flows.history task delete "
+    "terminal runs once they are older than the days. Off means no eligibility "
+    "policy is configured."
 )
 FLOW_SPARSE_STEP_COUNT_DESCRIPTION = (
     "Number of steps in the flow's current step definitions. This reflects "

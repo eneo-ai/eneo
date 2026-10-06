@@ -504,8 +504,10 @@ async def test_admin_replaces_and_clears_complete_hierarchical_policies(
         "scope_id": str(flow_id),
         "previous_local_policy": {"mode": "preserve", "days": 90},
         "new_local_policy": None,
+        "previous_effective_policy": {"mode": "preserve", "days": 90},
         "effective_policy": {"mode": "review_required", "days": 60},
         "effective_source": "space",
+        "reason": None,
     }
 
 

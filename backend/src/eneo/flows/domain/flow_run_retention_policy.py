@@ -17,13 +17,22 @@ from pydantic import (
     field_validator,
 )
 
-from eneo.data_retention.constants import MAX_RETENTION_DAYS, MIN_RETENTION_DAYS
+from eneo.data_retention.constants import MIN_RETENTION_DAYS
 from eneo.flows.enums import FlowRunStatus
+
+# The scheduled task that deletes run history under auto_delete (flows.history).
+FLOWS_HISTORY_TASK = "flows.history"
+
+# Typed refusals of a policy write.
+FLOW_RETENTION_REASON_REQUIRED_CODE = "flow_retention_reason_required"
+FLOW_RETENTION_DAYS_ABOVE_MAXIMUM_CODE = "flow_retention_days_above_maximum"
+FLOW_RETENTION_AUTO_DELETE_UNAVAILABLE_CODE = "flow_retention_auto_delete_unavailable"
 
 
 class FlowRunRetentionMode(StrEnum):
     PRESERVE = "preserve"
     REVIEW_REQUIRED = "review_required"
+    AUTO_DELETE = "auto_delete"
 
 
 FLOW_RUN_RETENTION_MODE_VALUES = tuple(mode.value for mode in FlowRunRetentionMode)
@@ -40,17 +49,20 @@ class FlowRunRetentionPolicy(BaseModel):
         description=(
             "Preserve makes records eligible only for an explicit administrator "
             "purge. Review_required additionally requires human approval before "
-            "that purge. Neither mode schedules automatic deletion."
+            "that purge. Auto_delete makes the nightly flows.history task delete "
+            "terminal runs once they are older than the days. A deployment accepts "
+            "auto_delete only once that task is installed (auto_delete_available)."
         )
     )
     days: Annotated[
         StrictInt,
         Field(
             ge=MIN_RETENTION_DAYS,
-            le=MAX_RETENTION_DAYS,
             description=(
-                "Age in days after which completed Flow run history becomes eligible "
-                "under this policy. Eligibility alone never deletes data."
+                "Age in days after which terminal Flow run history becomes eligible "
+                "under this policy. A write may not exceed the deployment's maximum "
+                "(max_days, code flow_retention_days_above_maximum); a stored value "
+                "above a later-lowered maximum stays in force."
             ),
         ),
     ]
@@ -99,6 +111,28 @@ class FlowRunRetentionScope(StrEnum):
     FLOW = "flow"
 
 
+class FlowRunRetentionWriteRules(BaseModel):
+    """What a policy write may contain in this deployment."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    max_days: int = Field(
+        ge=MIN_RETENTION_DAYS,
+        description=(
+            "Largest number of days a policy write may set (operator setting "
+            "FLOW_RETENTION_MAX_DAYS, default 36500). Stored policies above a "
+            "later-lowered maximum keep applying."
+        ),
+    )
+    auto_delete_available: bool = Field(
+        description=(
+            "Whether this deployment accepts the auto_delete mode: true once the "
+            "nightly flows.history task is installed. Otherwise a write of "
+            "auto_delete is refused with flow_retention_auto_delete_unavailable."
+        )
+    )
+
+
 class FlowRunRetentionPolicySettings(BaseModel):
     model_config = ConfigDict(
         extra="forbid",
@@ -120,6 +154,7 @@ class FlowRunRetentionPolicySettings(BaseModel):
                         "flow": {"mode": "preserve", "days": 90},
                     },
                 },
+                "write_rules": {"max_days": 36500, "auto_delete_available": False},
             }
         },
     )
@@ -140,6 +175,9 @@ class FlowRunRetentionPolicySettings(BaseModel):
         description=(
             "Resolved policy after applying Flow, Space, then Organization precedence."
         )
+    )
+    write_rules: FlowRunRetentionWriteRules = Field(
+        description="Limits that apply when this policy is written."
     )
 
 
@@ -411,10 +449,28 @@ def effective_flow_run_retention_policy(
     )
 
 
+def flow_run_retention_change_postpones_deletion(
+    *,
+    before: FlowRunRetentionPolicy | None,
+    after: FlowRunRetentionPolicy | None,
+) -> bool:
+    """Whether replacing the effective policy `before` by `after` stops or delays
+    automatic deletion: auto_delete removed, replaced by another mode, or given
+    more days. Such a change needs a reason."""
+    if before is None or before.mode is not FlowRunRetentionMode.AUTO_DELETE:
+        return False
+    return (
+        after is None
+        or after.mode is not FlowRunRetentionMode.AUTO_DELETE
+        or after.days > before.days
+    )
+
+
 def flow_run_retention_policy_settings(
     *,
     scope: FlowRunRetentionScope,
     scope_id: UUID,
+    write_rules: FlowRunRetentionWriteRules,
     organization_policy: FlowRunRetentionPolicy | None,
     space_policy: FlowRunRetentionPolicy | None = None,
     flow_policy: FlowRunRetentionPolicy | None = None,
@@ -444,4 +500,5 @@ def flow_run_retention_policy_settings(
             space_policy=space_policy,
             flow_policy=flow_policy,
         ),
+        write_rules=write_rules,
     )

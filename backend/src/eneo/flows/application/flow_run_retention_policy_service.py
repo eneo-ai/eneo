@@ -15,7 +15,11 @@ from eneo.flows.application.flow_retention_authz import (
 )
 from eneo.flows.domain.flow_retention_hold import FlowRetentionHoldReviewLimit
 from eneo.flows.domain.flow_run_retention_policy import (
+    FLOW_RETENTION_AUTO_DELETE_UNAVAILABLE_CODE,
+    FLOW_RETENTION_DAYS_ABOVE_MAXIMUM_CODE,
+    FLOW_RETENTION_REASON_REQUIRED_CODE,
     FlowRunRetentionFlowTargetPage,
+    FlowRunRetentionMode,
     FlowRunRetentionPolicy,
     FlowRunRetentionPolicySettings,
     FlowRunRetentionReviewCursor,
@@ -23,16 +27,21 @@ from eneo.flows.domain.flow_run_retention_policy import (
     FlowRunRetentionScope,
     FlowRunRetentionSpaceTargetPage,
     effective_flow_run_retention_policy,
+    flow_run_retention_change_postpones_deletion,
 )
 from eneo.flows.infrastructure.flow_run_retention_policy_repo import (
     FlowRunRetentionPolicyChange,
     FlowRunRetentionPolicyRepository,
 )
+from eneo.main.exceptions import BadRequestException
 from eneo.settings.settings import (
     FlowRunHistoryPurgeBlockedPublic,
     FlowRunHistoryPurgePublic,
 )
 from eneo.users.user import UserInDB
+
+# The status route counts at most this many overdue runs per request.
+FLOW_RUN_HISTORY_STATUS_OVERDUE_CAP = 1000
 
 
 class FlowRunRetentionPolicyService:
@@ -83,13 +92,15 @@ class FlowRunRetentionPolicyService:
         self,
         *,
         policy: FlowRunRetentionPolicy | None,
+        reason: str | None = None,
     ) -> FlowRunRetentionPolicySettings:
         require_retention_manage(self.user)
+        self._require_writable(policy)
         change = await self.repository.replace_organization(
             tenant_id=self.user.tenant_id,
             policy=policy,
         )
-        await self._audit_change(change)
+        await self._audit_change(change, reason=reason)
         return change.after
 
     async def get_space(self, *, space_id: UUID) -> FlowRunRetentionPolicySettings:
@@ -104,14 +115,16 @@ class FlowRunRetentionPolicyService:
         *,
         space_id: UUID,
         policy: FlowRunRetentionPolicy | None,
+        reason: str | None = None,
     ) -> FlowRunRetentionPolicySettings:
         require_retention_manage(self.user)
+        self._require_writable(policy)
         change = await self.repository.replace_space(
             tenant_id=self.user.tenant_id,
             space_id=space_id,
             policy=policy,
         )
-        await self._audit_change(change)
+        await self._audit_change(change, reason=reason)
         return change.after
 
     async def get_flow(self, *, flow_id: UUID) -> FlowRunRetentionPolicySettings:
@@ -126,14 +139,16 @@ class FlowRunRetentionPolicyService:
         *,
         flow_id: UUID,
         policy: FlowRunRetentionPolicy | None,
+        reason: str | None = None,
     ) -> FlowRunRetentionPolicySettings:
         require_retention_manage(self.user)
+        self._require_writable(policy)
         change = await self.repository.replace_flow(
             tenant_id=self.user.tenant_id,
             flow_id=flow_id,
             policy=policy,
         )
-        await self._audit_change(change)
+        await self._audit_change(change, reason=reason)
         return change.after
 
     async def list_organization_review_queue(
@@ -263,11 +278,49 @@ class FlowRunRetentionPolicyService:
             )
         return response
 
-    async def _audit_change(self, change: FlowRunRetentionPolicyChange) -> None:
+    def _require_writable(self, policy: FlowRunRetentionPolicy | None) -> None:
+        """The deployment's write limits, checked on the requested local policy
+        before anything is written."""
+        if policy is None:
+            return
+        rules = self.repository.write_rules
+        if (
+            policy.mode is FlowRunRetentionMode.AUTO_DELETE
+            and not rules.auto_delete_available
+        ):
+            raise BadRequestException(
+                "Automatic deletion is not available in this deployment yet.",
+                code=FLOW_RETENTION_AUTO_DELETE_UNAVAILABLE_CODE,
+            )
+        if policy.days > rules.max_days:
+            raise BadRequestException(
+                f"A retention policy may keep run history at most {rules.max_days} "
+                "days.",
+                code=FLOW_RETENTION_DAYS_ABOVE_MAXIMUM_CODE,
+            )
+
+    async def _audit_change(
+        self, change: FlowRunRetentionPolicyChange, *, reason: str | None
+    ) -> None:
+        """The required record of a change, from the locked before-state.
+
+        A change that stops or delays automatic deletion at this level needs a
+        reason; the exception rolls the change back with the request.
+        """
         if not change.changed:
             return
         after = change.after
+        previous_effective = effective_flow_run_retention_policy(
+            change.before.effective
+        )
         effective_policy = effective_flow_run_retention_policy(after.effective)
+        if reason is None and flow_run_retention_change_postpones_deletion(
+            before=previous_effective, after=effective_policy
+        ):
+            raise BadRequestException(
+                "Give a reason for stopping or delaying automatic deletion.",
+                code=FLOW_RETENTION_REASON_REQUIRED_CODE,
+            )
         await self.audit_service.log(
             tenant_id=self.user.tenant_id,
             user=self.user,
@@ -280,8 +333,10 @@ class FlowRunRetentionPolicyService:
                 "scope_id": str(after.scope_id),
                 "previous_local_policy": self._audit_policy(change.before.local_policy),
                 "new_local_policy": self._audit_policy(after.local_policy),
+                "previous_effective_policy": self._audit_policy(previous_effective),
                 "effective_policy": self._audit_policy(effective_policy),
                 "effective_source": after.effective.source,
+                "reason": reason,
             },
             required=True,
         )

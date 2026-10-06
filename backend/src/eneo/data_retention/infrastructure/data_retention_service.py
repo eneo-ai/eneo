@@ -595,6 +595,9 @@ class DataRetentionService:
             .join(Tenants, FlowRuns.tenant_id == Tenants.id)
             .where(
                 terminal,
+                # A run whose deletion has started is neither a candidate nor
+                # counted as blocked.
+                FlowRuns.gallring_receipt_id.is_(None),
                 *flow_run_history_due_predicates(
                     now=now, anchor=anchor, effective_days=effective_policy.days
                 ),

@@ -7896,7 +7896,7 @@ export interface paths {
     get: operations["get_organization_flow_run_retention_policy"];
     /**
      * Replace the Organization Flow run-history retention policy
-     * @description Replace the complete Organization policy or clear it. The initial modes either preserve eligible data for explicit administrator purge or require human review; neither mode deletes data automatically. The change waits for an open history deletion to finish.
+     * @description Replace the complete Organization policy or clear it. The change waits for an open history deletion to finish. Modes: preserve and review_required keep history until an explicit purge; auto_delete lets the nightly flows.history task delete terminal runs once they are older than the days, and is accepted only when write_rules.auto_delete_available is true. Days may not exceed write_rules.max_days. A change that stops or delays automatic deletion at this level (auto_delete becomes another mode, is cleared, or gets more days) needs a reason, which the required audit event records with the previous and new policy.
      */
     put: operations["replace_organization_flow_run_retention_policy"];
     post?: never;
@@ -7920,7 +7920,7 @@ export interface paths {
     get: operations["get_flow_run_retention_policy"];
     /**
      * Replace a Flow run-history retention policy
-     * @description Replace the complete Flow override or clear it to inherit. Operational retention remains editable after a Flow definition is published because it does not mutate the published definition. The initial modes require a later explicit administrator action; saving this policy never schedules deletion. A deleted Flow is accepted. The change waits for an open history deletion to finish.
+     * @description Replace the complete Flow override or clear it to inherit. Operational retention remains editable after a Flow definition is published because it does not mutate the published definition. A deleted Flow is accepted. The change waits for an open history deletion to finish. Modes: preserve and review_required keep history until an explicit purge; auto_delete lets the nightly flows.history task delete terminal runs once they are older than the days, and is accepted only when write_rules.auto_delete_available is true. Days may not exceed write_rules.max_days. A change that stops or delays automatic deletion at this level (auto_delete becomes another mode, is cleared, or gets more days) needs a reason, which the required audit event records with the previous and new policy.
      */
     put: operations["replace_flow_run_retention_policy"];
     post?: never;
@@ -8048,7 +8048,7 @@ export interface paths {
     get: operations["get_space_flow_run_retention_policy"];
     /**
      * Replace a Space Flow run-history retention policy
-     * @description Replace the complete Space override or clear it to inherit the Organization policy. The mode and day count move together, preventing ambiguous mixed inheritance. This setting controls Flow run history only: it does not change conversation or AI Builder retention, and it never schedules deletion. The change waits for an open history deletion to finish.
+     * @description Replace the complete Space override or clear it to inherit the Organization policy. The mode and day count move together, preventing ambiguous mixed inheritance. This setting controls Flow run history only: it does not change conversation or AI Builder retention. The change waits for an open history deletion to finish. Modes: preserve and review_required keep history until an explicit purge; auto_delete lets the nightly flows.history task delete terminal runs once they are older than the days, and is accepted only when write_rules.auto_delete_available is true. Days may not exceed write_rules.max_days. A change that stops or delays automatic deletion at this level (auto_delete becomes another mode, is cleared, or gets more days) needs a reason, which the required audit event records with the previous and new policy.
      */
     put: operations["replace_space_flow_run_retention_policy"];
     post?: never;
@@ -17766,6 +17766,7 @@ export interface components {
       | "flow_run_runtime_input_disabled"
       | "flow_run_top_level_file_ids_not_supported"
       | "flow_run_idempotency_conflict"
+      | "flow_run_idempotency_run_deleted"
       | "flow_run_concurrency_limit_reached"
       | "flow_run_redispatch_conflict"
       | "flow_run_redispatch_audit_unavailable"
@@ -19680,7 +19681,7 @@ export interface components {
       published_version?: number | null;
       /**
        * Run History Retention
-       * @description Effective Flow run-history retention policy. A complete Flow policy overrides its complete Space policy, and Space overrides the Organization default. Preserve requires an explicit administrator purge; review_required requires human approval. Off means no eligibility policy is configured.
+       * @description Effective Flow run-history retention policy. A complete Flow policy overrides its complete Space policy, and Space overrides the Organization default. Preserve requires an explicit administrator purge; review_required requires human approval; auto_delete lets the nightly flows.history task delete terminal runs once they are older than the days. Off means no eligibility policy is configured.
        */
       run_history_retention:
         | components["schemas"]["FlowRunRetentionOff"]
@@ -23404,7 +23405,7 @@ export interface components {
      * FlowRunRetentionMode
      * @enum {string}
      */
-    FlowRunRetentionMode: "preserve" | "review_required";
+    FlowRunRetentionMode: "preserve" | "review_required" | "auto_delete";
     /** FlowRunRetentionOff */
     FlowRunRetentionOff: {
       contributors: components["schemas"]["FlowRunRetentionContributors"];
@@ -23434,10 +23435,10 @@ export interface components {
     FlowRunRetentionPolicy: {
       /**
        * Days
-       * @description Age in days after which completed Flow run history becomes eligible under this policy. Eligibility alone never deletes data.
+       * @description Age in days after which terminal Flow run history becomes eligible under this policy. A write may not exceed the deployment's maximum (max_days, code flow_retention_days_above_maximum); a stored value above a later-lowered maximum stays in force.
        */
       days: number;
-      /** @description Preserve makes records eligible only for an explicit administrator purge. Review_required additionally requires human approval before that purge. Neither mode schedules automatic deletion. */
+      /** @description Preserve makes records eligible only for an explicit administrator purge. Review_required additionally requires human approval before that purge. Auto_delete makes the nightly flows.history task delete terminal runs once they are older than the days. A deployment accepts auto_delete only once that task is installed (auto_delete_available). */
       mode: components["schemas"]["FlowRunRetentionMode"];
     };
     /**
@@ -23452,6 +23453,11 @@ export interface components {
     FlowRunRetentionPolicyReplaceRequest: {
       /** @description Complete local policy, or null to clear this level and inherit its parent. */
       policy: components["schemas"]["FlowRunRetentionPolicy"] | null;
+      /**
+       * Reason
+       * @description Why the change stops or delays automatic deletion (1-512 characters). Required, with code flow_retention_reason_required, when the policy in force at this level was auto_delete and becomes another mode, is cleared, or gets more days; recorded in the required audit event.
+       */
+      reason?: string | null;
     };
     /**
      * FlowRunRetentionPolicySettings
@@ -23485,7 +23491,11 @@ export interface components {
      *         "mode": "preserve"
      *       },
      *       "scope": "flow",
-     *       "scope_id": "00000000-0000-0000-0000-000000000301"
+     *       "scope_id": "00000000-0000-0000-0000-000000000301",
+     *       "write_rules": {
+     *         "auto_delete_available": false,
+     *         "max_days": 36500
+     *       }
      *     }
      */
     FlowRunRetentionPolicySettings: {
@@ -23508,6 +23518,8 @@ export interface components {
        * @description Organization, Space, or Flow identifier.
        */
       scope_id: string;
+      /** @description Limits that apply when this policy is written. */
+      write_rules: components["schemas"]["FlowRunRetentionWriteRules"];
     };
     /** FlowRunRetentionReviewItem */
     FlowRunRetentionReviewItem: {
@@ -23651,6 +23663,22 @@ export interface components {
       has_more: boolean;
       /** Items */
       items: components["schemas"]["FlowRunRetentionSpaceTarget"][];
+    };
+    /**
+     * FlowRunRetentionWriteRules
+     * @description What a policy write may contain in this deployment.
+     */
+    FlowRunRetentionWriteRules: {
+      /**
+       * Auto Delete Available
+       * @description Whether this deployment accepts the auto_delete mode: true once the nightly flows.history task is installed. Otherwise a write of auto_delete is refused with flow_retention_auto_delete_unavailable.
+       */
+      auto_delete_available: boolean;
+      /**
+       * Max Days
+       * @description Largest number of days a policy write may set (operator setting FLOW_RETENTION_MAX_DAYS, default 36500). Stored policies above a later-lowered maximum keep applying.
+       */
+      max_days: number;
     };
     /**
      * FlowRunRetryPublic
@@ -25727,7 +25755,7 @@ export interface components {
       published_version?: number | null;
       /**
        * Run History Retention
-       * @description Effective Flow run-history retention policy. A complete Flow policy overrides its complete Space policy, and Space overrides the Organization default. Preserve requires an explicit administrator purge; review_required requires human approval. Off means no eligibility policy is configured.
+       * @description Effective Flow run-history retention policy. A complete Flow policy overrides its complete Space policy, and Space overrides the Organization default. Preserve requires an explicit administrator purge; review_required requires human approval; auto_delete lets the nightly flows.history task delete terminal runs once they are older than the days. Off means no eligibility policy is configured.
        */
       run_history_retention:
         | components["schemas"]["FlowRunRetentionOff"]
@@ -57319,7 +57347,7 @@ export interface operations {
     parameters: {
       query?: never;
       header?: {
-        /** @description Optional caller-supplied idempotency key of 1 to 255 characters after trimming; a longer or blank key returns `400` with code `flow_run_invalid_idempotency_key`. That bound is enforced as a typed error rather than as a schema `maxLength`, so a validator generated from this document will not catch it. Reusing the same key with the same request payload returns the existing run payload. Reusing the same key with a different payload returns `400` with code `flow_run_idempotency_conflict`. Replay is available while the matching run row is retained; once retention removes the row the key no longer matches and the same request creates a new run, so keep the returned run id as the durable polling handle. */
+        /** @description Optional caller-supplied idempotency key of 1 to 255 characters after trimming; a longer or blank key returns `400` with code `flow_run_invalid_idempotency_key`. That bound is enforced as a typed error rather than as a schema `maxLength`, so a validator generated from this document will not catch it. Reusing the same key with the same request payload returns the existing run payload. Reusing the same key with a different payload returns `400` with code `flow_run_idempotency_conflict`. Replay is available while the matching run row is retained. While retention is deleting that run the key returns `409` with code `flow_run_idempotency_run_deleted` (the run is neither returned nor created again); once the row is gone the key no longer matches and the same request creates a new run, so keep the returned run id as the durable polling handle. */
         "Idempotency-Key"?: string | null;
       };
       path: {
@@ -57394,7 +57422,7 @@ export interface operations {
           "application/json": components["schemas"]["GeneralError"];
         };
       };
-      /** @description The live transcript is already bound to another file. */
+      /** @description The live transcript is already bound to another file (`flow_run_live_transcript_already_bound`), or the Idempotency-Key belongs to a run retention is deleting (`flow_run_idempotency_run_deleted`). */
       409: {
         headers: {
           [name: string]: unknown;
@@ -58347,7 +58375,7 @@ export interface operations {
           "application/json": components["schemas"]["GeneralError"];
         };
       };
-      /** @description Source is not failed, its version is stale, or its prefix cannot be reused. */
+      /** @description Source is not failed, its version is stale, or its prefix cannot be reused; or the Idempotency-Key belongs to a run retention is deleting (`flow_run_idempotency_run_deleted`). */
       409: {
         headers: {
           [name: string]: unknown;
@@ -59693,6 +59721,22 @@ export interface operations {
            *       "code": "not_found",
            *       "eneo_error_code": 9000,
            *       "message": "The source flow, run or transcript is unavailable in tenant scope."
+           *     }
+           */
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description The Idempotency-Key belongs to a run retention is deleting (`flow_run_idempotency_run_deleted`); start with a new key. */
+      409: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          /**
+           * @example {
+           *       "code": "flow_run_idempotency_run_deleted",
+           *       "eneo_error_code": 9057,
+           *       "message": "The run created with this idempotency key is being deleted."
            *     }
            */
           "application/json": components["schemas"]["GeneralError"];
@@ -67544,6 +67588,22 @@ export interface operations {
           "application/json": components["schemas"]["FlowRunRetentionPolicySettings"];
         };
       };
+      /** @description The policy cannot be written: auto_delete before this deployment offers it (`flow_retention_auto_delete_unavailable`), more days than the deployment's maximum (`flow_retention_days_above_maximum`; write_rules.max_days), or a change that stops or delays automatic deletion without a reason (`flow_retention_reason_required`). Nothing changed. */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          /**
+           * @example {
+           *       "code": "flow_retention_auto_delete_unavailable",
+           *       "eneo_error_code": 9007,
+           *       "message": "Automatic deletion is not available in this deployment yet."
+           *     }
+           */
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
       /** @description Caller lacks retention_manage (`retention_permission_required`), or used an API key: retention is changed or stopped by signed-in people only (`retention_person_required`). */
       403: {
         headers: {
@@ -67672,6 +67732,22 @@ export interface operations {
         };
         content: {
           "application/json": components["schemas"]["FlowRunRetentionPolicySettings"];
+        };
+      };
+      /** @description The policy cannot be written: auto_delete before this deployment offers it (`flow_retention_auto_delete_unavailable`), more days than the deployment's maximum (`flow_retention_days_above_maximum`; write_rules.max_days), or a change that stops or delays automatic deletion without a reason (`flow_retention_reason_required`). Nothing changed. */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          /**
+           * @example {
+           *       "code": "flow_retention_auto_delete_unavailable",
+           *       "eneo_error_code": 9007,
+           *       "message": "Automatic deletion is not available in this deployment yet."
+           *     }
+           */
+          "application/json": components["schemas"]["GeneralError"];
         };
       };
       /** @description Caller lacks retention_manage (`retention_permission_required`), or used an API key: retention is changed or stopped by signed-in people only (`retention_person_required`). */
@@ -68215,6 +68291,22 @@ export interface operations {
         };
         content: {
           "application/json": components["schemas"]["FlowRunRetentionPolicySettings"];
+        };
+      };
+      /** @description The policy cannot be written: auto_delete before this deployment offers it (`flow_retention_auto_delete_unavailable`), more days than the deployment's maximum (`flow_retention_days_above_maximum`; write_rules.max_days), or a change that stops or delays automatic deletion without a reason (`flow_retention_reason_required`). Nothing changed. */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          /**
+           * @example {
+           *       "code": "flow_retention_auto_delete_unavailable",
+           *       "eneo_error_code": 9007,
+           *       "message": "Automatic deletion is not available in this deployment yet."
+           *     }
+           */
+          "application/json": components["schemas"]["GeneralError"];
         };
       };
       /** @description Caller lacks retention_manage (`retention_permission_required`), or used an API key: retention is changed or stopped by signed-in people only (`retention_person_required`). */

@@ -12,11 +12,13 @@
   import * as Field from "$lib/components/ui/field/index.js";
   import { Input } from "$lib/components/ui/input/index.js";
   import * as Select from "$lib/components/ui/select/index.js";
+  import { Textarea } from "$lib/components/ui/textarea/index.js";
   import { toast } from "$lib/components/toast";
   import { toastError } from "$lib/core/errors";
   import {
-    FLOW_RETENTION_MAX_DAYS,
     FLOW_RETENTION_MIN_DAYS,
+    effectiveFlowRunRetentionPolicy,
+    flowRunRetentionChangePostponesDeletion,
     flowRunRetentionPoliciesEqual,
     parseFlowRunRetentionDays
   } from "$lib/features/flows/flowRunRetentionPolicy";
@@ -28,7 +30,10 @@
     settings: FlowRunRetentionPolicySettings;
     title: string;
     description: string;
-    onSave: (policy: FlowRunRetentionPolicy | null) => Promise<FlowRunRetentionPolicySettings>;
+    onSave: (
+      policy: FlowRunRetentionPolicy | null,
+      reason: string | undefined
+    ) => Promise<FlowRunRetentionPolicySettings>;
     onDirtyChange?: (dirty: boolean) => void;
   };
 
@@ -40,15 +45,46 @@
   let choice = $state<PolicyChoice>(initialPolicy?.mode ?? "none");
   let daysInput = $state<string | number>(String(fallbackDays));
   let saving = $state(false);
+  let reason = $state("");
 
-  const parsedDays = $derived(parseFlowRunRetentionDays(daysInput));
-  const valid = $derived(choice === "none" || parsedDays !== null);
+  const maxDays = $derived(settings.write_rules.max_days);
+  // A rule stored before the maximum was lowered still reads as saved; only a
+  // change has to fit the current maximum.
+  const parsedDays = $derived(
+    parseFlowRunRetentionDays(daysInput, Math.max(maxDays, savedPolicy?.days ?? 0))
+  );
   const proposedPolicy = $derived<FlowRunRetentionPolicy | null>(
     choice === "none" || parsedDays === null ? null : { mode: choice, days: parsedDays }
   );
   const dirty = $derived(
-    valid ? !flowRunRetentionPoliciesEqual(savedPolicy, proposedPolicy) : choice !== "none"
+    choice === "none" || parsedDays !== null
+      ? !flowRunRetentionPoliciesEqual(savedPolicy, proposedPolicy)
+      : true
   );
+  const daysValid = $derived(
+    choice === "none" || (parsedDays !== null && (parsedDays <= maxDays || !dirty))
+  );
+  // The API refuses every auto_delete write until the installation runs it.
+  const autoDeleteRefused = $derived(
+    dirty && choice === "auto_delete" && !settings.write_rules.auto_delete_available
+  );
+  // Automatic deletion is offered once the deployment runs it; a level that
+  // already has it keeps the option so the current value stays visible.
+  const autoDeleteSelectable = $derived(
+    settings.write_rules.auto_delete_available || savedPolicy?.mode === "auto_delete"
+  );
+  // Stopping or delaying automatic deletion needs a reason (the API refuses
+  // without one); the field appears only for such a change.
+  const reasonNeeded = $derived(
+    daysValid &&
+      dirty &&
+      flowRunRetentionChangePostponesDeletion(
+        effectiveFlowRunRetentionPolicy(settings, savedPolicy),
+        effectiveFlowRunRetentionPolicy(settings, proposedPolicy)
+      )
+  );
+  const reasonMissing = $derived(reasonNeeded && reason.trim() === "");
+  const valid = $derived(daysValid && !reasonMissing && !autoDeleteRefused);
 
   $effect(() => {
     onDirtyChange?.(dirty);
@@ -73,25 +109,33 @@
   }
 
   function choiceLabel(value: PolicyChoice): string {
-    if (value === "none") {
-      return settings.scope === "organization"
-        ? m.flow_run_retention_choice_no_policy()
-        : m.flow_run_retention_choice_inherit();
+    switch (value) {
+      case "none":
+        return settings.scope === "organization"
+          ? m.flow_run_retention_choice_no_policy()
+          : m.flow_run_retention_choice_inherit();
+      case "preserve":
+        return m.flow_run_retention_mode_preserve();
+      case "review_required":
+        return m.flow_run_retention_mode_review();
+      case "auto_delete":
+        return m.flow_run_retention_mode_auto_delete();
     }
-    return value === "preserve"
-      ? m.flow_run_retention_mode_preserve()
-      : m.flow_run_retention_mode_review();
   }
 
   function modeDescription(value: PolicyChoice): string {
-    if (value === "none") {
-      return settings.scope === "organization"
-        ? m.flow_run_retention_no_policy_description()
-        : m.flow_run_retention_inherit_description();
+    switch (value) {
+      case "none":
+        return settings.scope === "organization"
+          ? m.flow_run_retention_no_policy_description()
+          : m.flow_run_retention_inherit_description();
+      case "preserve":
+        return m.flow_run_retention_mode_preserve_description();
+      case "review_required":
+        return m.flow_run_retention_mode_review_description();
+      case "auto_delete":
+        return m.flow_run_retention_mode_auto_delete_description();
     }
-    return value === "preserve"
-      ? m.flow_run_retention_mode_preserve_description()
-      : m.flow_run_retention_mode_review_description();
   }
 
   const LEVELS = ["organization", "space", "flow"] as const;
@@ -136,13 +180,14 @@
     if (!dirty || !valid || saving) return;
     saving = true;
     try {
-      const updated = await onSave(proposedPolicy);
+      const updated = await onSave(proposedPolicy, reasonNeeded ? reason.trim() : undefined);
       settings = updated;
       savedPolicy = updated.local_policy;
       choice = updated.local_policy?.mode ?? "none";
       daysInput = String(
         updated.local_policy?.days ?? updated.inherited_policy?.days ?? parsedDays ?? 365
       );
+      reason = "";
       toast.success(m.saved_successfully());
     } catch (error) {
       toastError(error);
@@ -188,12 +233,27 @@
           <Select.Item value="review_required" label={choiceLabel("review_required")}>
             {choiceLabel("review_required")}
           </Select.Item>
+          <Select.Item
+            value="auto_delete"
+            label={choiceLabel("auto_delete")}
+            disabled={!autoDeleteSelectable}
+            aria-disabled={!autoDeleteSelectable || undefined}
+          >
+            <span class="flex flex-col gap-0.5">
+              <span>{choiceLabel("auto_delete")}</span>
+              {#if !autoDeleteSelectable}
+                <span class="text-muted text-xs">
+                  {m.flow_run_retention_mode_auto_delete_unavailable()}
+                </span>
+              {/if}
+            </span>
+          </Select.Item>
         </Select.Content>
       </Select.Root>
       <Field.Description>{modeDescription(choice)}</Field.Description>
     </Field.Field>
 
-    <Field.Field data-invalid={!valid || undefined}>
+    <Field.Field data-invalid={!daysValid || undefined}>
       <Field.Label for={`flow-retention-days-${settings.scope}`}>
         {m.flow_run_retention_days_label()}
       </Field.Label>
@@ -203,24 +263,40 @@
           class="tabular-nums"
           type="number"
           min={FLOW_RETENTION_MIN_DAYS}
-          max={FLOW_RETENTION_MAX_DAYS}
+          max={maxDays}
           step="1"
           bind:value={daysInput}
           disabled={choice === "none" || saving}
-          aria-invalid={!valid}
+          aria-invalid={!daysValid}
           aria-describedby={`flow-retention-days-help-${settings.scope}`}
         />
         <span class="text-secondary text-sm">{m.flow_retention_days_suffix()}</span>
       </div>
       <Field.Description id={`flow-retention-days-help-${settings.scope}`}>
-        {valid
+        {daysValid
           ? m.flow_run_retention_days_description()
           : m.flow_run_retention_days_error({
               min: FLOW_RETENTION_MIN_DAYS,
-              max: FLOW_RETENTION_MAX_DAYS
+              max: maxDays
             })}
       </Field.Description>
     </Field.Field>
+    {#if reasonNeeded}
+      <Field.Field class="col-span-full max-w-xl" data-invalid={reasonMissing || undefined}>
+        <Field.Label for={`flow-retention-reason-${settings.scope}`}>
+          {m.flow_run_retention_reason_label()}
+        </Field.Label>
+        <Textarea
+          id={`flow-retention-reason-${settings.scope}`}
+          bind:value={reason}
+          maxlength={512}
+          rows={2}
+          disabled={saving}
+          aria-invalid={reasonMissing}
+        />
+        <Field.Description>{m.flow_run_retention_reason_hint()}</Field.Description>
+      </Field.Field>
+    {/if}
     {#if chain.length > 1}
       <div class="col-span-full">
         <p class="text-secondary text-xs font-medium">{m.flow_run_retention_chain_title()}</p>
@@ -250,7 +326,11 @@
   -->
   <Card.Footer class="border-default justify-between gap-3">
     <p class="text-secondary text-xs">
-      {#if !dirty}{m.flow_run_retention_no_changes()}{/if}
+      {#if !dirty}
+        {m.flow_run_retention_no_changes()}
+      {:else if autoDeleteRefused}
+        {m.flow_run_retention_auto_delete_refused_hint()}
+      {/if}
     </p>
     <Button type="button" disabled={!dirty || !valid || saving} onclick={save}>
       {saving

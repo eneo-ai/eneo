@@ -16,6 +16,8 @@ from uuid import UUID, uuid5
 
 # Every registered task runs once a day; health compares against this cadence.
 RETENTION_CADENCE = timedelta(days=1)
+# A task without a completed execution for this long is stale.
+RETENTION_STALE_AFTER = 2 * RETENTION_CADENCE
 
 # Namespace for deterministic batch audit ids (uuid5 over the batch identity).
 _RETENTION_AUDIT_NAMESPACE = UUID("6f1d3a0e-7c55-4a8e-9a43-0b7f3a6c2d11")
@@ -67,6 +69,24 @@ class RetentionUsage:
 
     def plus(self, *, rows: int, files: int) -> RetentionUsage:
         return RetentionUsage(rows=self.rows + rows, files=self.files + files)
+
+
+@dataclass(frozen=True, slots=True)
+class RetentionOverdue:
+    """A task's count of due work still stored past its deadline and window.
+
+    `count` is capped; `complete` says whether the cap covered all of it.
+    """
+
+    count: int
+    complete: bool
+    oldest_due_at: datetime | None = None
+
+    def __post_init__(self) -> None:
+        if self.count < 0:
+            raise ValueError("An overdue count is not negative.")
+        if (self.count == 0) != (self.oldest_due_at is None):
+            raise ValueError("Only overdue work has an oldest deadline.")
 
 
 @dataclass(frozen=True, slots=True)
@@ -123,6 +143,11 @@ class ReceiptReason(StrEnum):
     FAMILY_DEPTH_EXCEEDED = "family_depth_exceeded"
     # The family needs more rows than one execution may spend on a family.
     FAMILY_EXCEEDS_BUDGET = "family_exceeds_budget"
+    # An active legal hold covers the entity; the work resumes on release.
+    LEGAL_HOLD = "legal_hold"
+    # The entity still has audit events or webhook deliveries to hand over.
+    UNDELIVERED_AUDIT = "undelivered_audit"
+    UNRESOLVED_WEBHOOK = "unresolved_webhook"
 
 
 class InvalidReceiptTransition(ValueError):
@@ -180,16 +205,24 @@ class ReceiptState:
 class RetentionEntityKind(StrEnum):
     # A root file and every file derived from it (files.parent_file_id).
     FILE_FAMILY = "file_family"
+    # One Flow run with its child rows and its file families.
+    FLOW_RUN = "flow_run"
 
 
 class RetentionCategory(StrEnum):
     ABANDONED_UPLOAD = "abandoned_upload"
     TEMPLATE_ASSET = "template_asset"
+    # The whole run record (K4).
+    RUN_RECORD = "run_record"
 
 
 class RetentionPolicySource(StrEnum):
     TENANT = "tenant"
     DEFAULT = "default"
+    # The level of the Flow run-history rule that applied.
+    ORGANIZATION = "organization"
+    SPACE = "space"
+    FLOW = "flow"
 
 
 class RetentionTrigger(StrEnum):

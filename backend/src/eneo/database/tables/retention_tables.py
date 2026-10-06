@@ -32,6 +32,7 @@ from eneo.data_retention.domain.retention import (
     RetentionTrigger,
 )
 from eneo.database.tables.base_class import BaseWithTableName, IdMixin
+from eneo.flows.domain.flow_run_retention_policy import FlowRunRetentionMode
 
 
 def _sql_values(values: Any) -> str:
@@ -75,6 +76,16 @@ class RetentionJobRuns(IdMixin, BaseWithTableName):
         JSONB, nullable=False, server_default=sa.text("'{}'::jsonb")
     )
     error_code: Mapped[Optional[str]] = mapped_column(sa.String(64))
+    # The task's overdue snapshot, written when the execution ends (every
+    # outcome); all four are set together or none.
+    overdue_observed_at: Mapped[Optional[datetime]] = mapped_column(
+        sa.TIMESTAMP(timezone=True)
+    )
+    overdue_count: Mapped[Optional[int]] = mapped_column(sa.Integer)
+    overdue_complete: Mapped[Optional[bool]] = mapped_column(sa.Boolean)
+    overdue_oldest_due_at: Mapped[Optional[datetime]] = mapped_column(
+        sa.TIMESTAMP(timezone=True)
+    )
 
     __table_args__ = (
         sa.CheckConstraint(
@@ -92,6 +103,14 @@ class RetentionJobRuns(IdMixin, BaseWithTableName):
         sa.CheckConstraint(_TASK_NAME_SQL, name="ck_gallring_job_runs_task"),
         sa.CheckConstraint(
             "jsonb_typeof(cursors) = 'object'", name="ck_gallring_job_runs_cursors"
+        ),
+        sa.CheckConstraint(
+            "(overdue_observed_at IS NULL) = (overdue_count IS NULL) "
+            "AND (overdue_observed_at IS NULL) = (overdue_complete IS NULL) "
+            "AND (overdue_count IS NULL OR overdue_count >= 0) "
+            "AND COALESCE(overdue_count > 0, false) = "
+            "(overdue_oldest_due_at IS NOT NULL)",
+            name="ck_gallring_job_runs_overdue",
         ),
         # At most one active execution per task: a second claim conflicts here.
         sa.Index(
@@ -134,6 +153,9 @@ class RetentionReceipts(IdMixin, BaseWithTableName):
     space_id: Mapped[Optional[UUID]] = mapped_column()
     flow_id: Mapped[Optional[UUID]] = mapped_column()
     policy_source: Mapped[Optional[str]] = mapped_column(sa.String(32))
+    # The Organization, Space or Flow whose rule applied (with policy_source).
+    policy_scope_id: Mapped[Optional[UUID]] = mapped_column()
+    policy_mode: Mapped[Optional[str]] = mapped_column(sa.String(32))
     policy_days: Mapped[Optional[int]] = mapped_column(sa.Integer)
     anchor_at: Mapped[Optional[datetime]] = mapped_column(sa.TIMESTAMP(timezone=True))
     due_at: Mapped[Optional[datetime]] = mapped_column(sa.TIMESTAMP(timezone=True))
@@ -150,6 +172,12 @@ class RetentionReceipts(IdMixin, BaseWithTableName):
     files_deleted: Mapped[int] = mapped_column(
         sa.Integer, nullable=False, server_default=sa.text("0")
     )
+    # Rows of the entity's own tables deleted (a run: its child rows and root).
+    rows_deleted: Mapped[int] = mapped_column(
+        sa.Integer, nullable=False, server_default=sa.text("0")
+    )
+    # The person who started an explicit deletion; None for scheduled work.
+    triggered_by_user_id: Mapped[Optional[UUID]] = mapped_column()
     started_at: Mapped[datetime] = mapped_column(
         sa.TIMESTAMP(timezone=True), nullable=False
     )
@@ -206,6 +234,16 @@ class RetentionReceipts(IdMixin, BaseWithTableName):
             name="ck_gallring_receipts_policy_source",
         ),
         sa.CheckConstraint("files_deleted >= 0", name="ck_gallring_receipts_files"),
+        sa.CheckConstraint("rows_deleted >= 0", name="ck_gallring_receipts_rows"),
+        sa.CheckConstraint(
+            "policy_mode IS NULL OR policy_mode IN "
+            f"({_sql_values(FlowRunRetentionMode)})",
+            name="ck_gallring_receipts_policy_mode",
+        ),
+        sa.CheckConstraint(
+            "triggered_by_user_id IS NULL OR trigger = 'explicit'",
+            name="ck_gallring_receipts_triggered_by",
+        ),
         sa.CheckConstraint(
             "(manifest_after_file_id IS NULL) = (manifest_after_variant IS NULL) "
             "AND (manifest_after_file_id IS NULL) = (manifest_after_ordinal IS NULL)",

@@ -16,7 +16,7 @@ from sqlalchemy.dialects.postgresql import ARRAY, JSONB
 from sqlalchemy.orm import Mapped, mapped_column
 
 from eneo.authentication.principal_types import PrincipalType
-from eneo.data_retention.constants import MAX_RETENTION_DAYS, MIN_RETENTION_DAYS
+from eneo.data_retention.constants import MIN_RETENTION_DAYS
 from eneo.database.tables.assistant_table import Assistants
 from eneo.database.tables.base_class import (
     BaseCrossReference,
@@ -80,10 +80,10 @@ FLOW_STEP_OUTPUT_MODE_VALUES = FLOW_OUTPUT_MODE_VALUES
 FLOW_STEP_OUTPUT_TYPE_VALUES = FLOW_OUTPUT_TYPE_VALUES
 FLOW_RUN_STATUS_VALUES = tuple(item.value for item in FlowRunStatus)
 FLOW_RUN_LIFECYCLE_SOURCE_VALUES = tuple(item.value for item in FlowRunLifecycleSource)
+# Only a lower bound: the deployment's maximum applies on write.
 FLOW_RUN_HISTORY_RETENTION_DAYS_RANGE_CHECK = (
     "flow_run_history_retention_days IS NULL OR "
-    f"(flow_run_history_retention_days >= {MIN_RETENTION_DAYS} "
-    f"AND flow_run_history_retention_days <= {MAX_RETENTION_DAYS})"
+    f"flow_run_history_retention_days >= {MIN_RETENTION_DAYS}"
 )
 FLOW_RUN_REVIEW_CHECKPOINT_STATE_VALUES = tuple(
     item.value for item in FlowRunReviewCheckpointState
@@ -158,6 +158,11 @@ def _index_values(values: tuple[str, ...]) -> str:
 
 FLOW_RUN_TERMINAL_RETENTION_ANCHOR_INDEX_PREDICATE = (
     f"status IN ({_index_values(TERMINAL_FLOW_RUN_STATUS_VALUES)})"
+)
+# Terminal runs whose automatic deletion has not started (K4 due selection).
+FLOW_RUN_GALLRING_DUE_INDEX_PREDICATE = (
+    f"{FLOW_RUN_TERMINAL_RETENTION_ANCHOR_INDEX_PREDICATE} "
+    "AND gallring_receipt_id IS NULL"
 )
 
 
@@ -936,6 +941,10 @@ class FlowRuns(BasePublic):
         ForeignKey(Jobs.id, ondelete="SET NULL"),
         nullable=True,
     )
+    # Public run lookup, status/list, review-queue and idempotent-replay queries
+    # exclude this fence, as do hold placement and history-purge selection.
+    # No foreign key: the deletion receipt outlives the run.
+    gallring_receipt_id: Mapped[Optional[UUID]] = mapped_column(nullable=True)
 
     __table_args__ = (
         CheckConstraint(
@@ -1070,6 +1079,14 @@ class FlowRuns(BasePublic):
             postgresql_where=sa.text(
                 FLOW_RUN_TERMINAL_RETENTION_ANCHOR_INDEX_PREDICATE
             ),
+        ),
+        # K4 due selection per Flow, oldest anchor first, from a literal cutoff.
+        Index(
+            "ix_flow_runs_flow_gallring_due",
+            "flow_id",
+            sa.text("coalesce(finished_at, created_at)"),
+            "id",
+            postgresql_where=sa.text(FLOW_RUN_GALLRING_DUE_INDEX_PREDICATE),
         ),
         _principal_fk_index("flow_runs", "principal_user_id"),
         _principal_fk_index("flow_runs", "principal_service_id"),

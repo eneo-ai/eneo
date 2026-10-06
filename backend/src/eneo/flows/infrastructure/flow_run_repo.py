@@ -45,6 +45,7 @@ from eneo.flows.domain.flow import (
 )
 from eneo.flows.domain.flow_run_exceptions import (
     FlowExecutionOwnershipLost,
+    FlowRunIdempotencyRunDeletedError,
     FlowRunNotFoundError,
     FlowRunPersistenceInvariantError,
 )
@@ -561,6 +562,9 @@ _FLOW_RUN_STATUS_COLUMNS = (
     FlowRuns.updated_at,
 )
 
+# A run whose deletion has started (gallring receipt set) reads as deleted.
+FLOW_RUN_NOT_FENCED = FlowRuns.gallring_receipt_id.is_(None)
+
 
 class FlowRunRepository:
     """Tenant-scoped repository for flow run lifecycle and run evidence.
@@ -803,6 +807,7 @@ class FlowRunRepository:
             sa.select(FlowRuns)
             .where(FlowRuns.id == run_id)
             .where(FlowRuns.tenant_id == tenant_id)
+            .where(FLOW_RUN_NOT_FENCED)
         )
         if flow_id is not None:
             stmt = stmt.where(FlowRuns.flow_id == flow_id)
@@ -827,6 +832,7 @@ class FlowRunRepository:
             sa.select(*_FLOW_RUN_STATUS_COLUMNS)
             .where(FlowRuns.id == run_id)
             .where(FlowRuns.tenant_id == tenant_id)
+            .where(FLOW_RUN_NOT_FENCED)
         )
         if flow_id is not None:
             stmt = stmt.where(FlowRuns.flow_id == flow_id)
@@ -864,6 +870,8 @@ class FlowRunRepository:
         row = await self.session.scalar(stmt)
         if row is None:
             return None
+        if row.gallring_receipt_id is not None:
+            raise FlowRunIdempotencyRunDeletedError
         return FlowRun.model_validate(row), row.request_fingerprint
 
     async def count_active_runs(self, *, tenant_id: UUID) -> int:
@@ -908,6 +916,7 @@ class FlowRunRepository:
         stmt = (
             sa.select(*_FLOW_RUN_STATUS_COLUMNS)
             .where(FlowRuns.tenant_id == tenant_id)
+            .where(FLOW_RUN_NOT_FENCED)
             .order_by(FlowRuns.created_at.desc(), FlowRuns.id.desc())
         )
         if flow_id is not None:

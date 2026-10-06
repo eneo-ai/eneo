@@ -56,4 +56,5 @@ def test_database_constraints_reject_partial_and_unsupported_policies() -> None:
         assert "flow_run_history_retention_days IS NOT NULL" in complete_sql
         assert "'preserve'" in mode_sql
         assert "'review_required'" in mode_sql
+        assert "'auto_delete'" in mode_sql
         assert "'automatic'" not in mode_sql

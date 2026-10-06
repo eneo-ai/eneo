@@ -111,9 +111,10 @@ _FLOW_RUN_IDEMPOTENCY_HEADER_DESCRIPTION = (
     "with the same request payload returns the existing run payload. Reusing the same "
     "key with a different payload returns `400` with code "
     "`flow_run_idempotency_conflict`. Replay is available while the matching run row is "
-    "retained; once retention removes the row the key no longer matches and the same "
-    "request creates a new run, so keep the returned run id as the durable polling "
-    "handle."
+    "retained. While retention is deleting that run the key returns `409` with code "
+    "`flow_run_idempotency_run_deleted` (the run is neither returned nor created "
+    "again); once the row is gone the key no longer matches and the same request "
+    "creates a new run, so keep the returned run id as the durable polling handle."
 )
 
 _FLOW_RUN_CAPACITY_DESCRIPTION = """
@@ -398,7 +399,12 @@ async def get_flow_run_capacity(
             code="not_found",
         ),
         409: error_response(
-            description="The live transcript is already bound to another file.",
+            description=(
+                "The live transcript is already bound to another file "
+                "(`flow_run_live_transcript_already_bound`), or the Idempotency-Key "
+                "belongs to a run retention is deleting "
+                "(`flow_run_idempotency_run_deleted`)."
+            ),
             message="Live transcript is already bound to another file.",
             eneo_error_code=ErrorCodes.CONFLICT,
             code=FlowApiErrorCode.RUN_LIVE_TRANSCRIPT_ALREADY_BOUND,

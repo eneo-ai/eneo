@@ -25,6 +25,7 @@ class FlowApiErrorCode(str, Enum):
     RUN_RUNTIME_INPUT_DISABLED = "flow_run_runtime_input_disabled"
     RUN_TOP_LEVEL_FILE_IDS_NOT_SUPPORTED = "flow_run_top_level_file_ids_not_supported"
     RUN_IDEMPOTENCY_CONFLICT = "flow_run_idempotency_conflict"
+    RUN_IDEMPOTENCY_RUN_DELETED = "flow_run_idempotency_run_deleted"
     RUN_CONCURRENCY_LIMIT_REACHED = "flow_run_concurrency_limit_reached"
     RUN_REDISPATCH_CONFLICT = "flow_run_redispatch_conflict"
     RUN_REDISPATCH_AUDIT_UNAVAILABLE = "flow_run_redispatch_audit_unavailable"

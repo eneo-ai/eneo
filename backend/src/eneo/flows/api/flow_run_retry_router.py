@@ -85,7 +85,11 @@ shared input files remain available while the child references them.
             code="not_found",
         ),
         409: error_response(
-            description="Source is not failed, its version is stale, or its prefix cannot be reused.",
+            description=(
+                "Source is not failed, its version is stale, or its prefix cannot be "
+                "reused; or the Idempotency-Key belongs to a run retention is "
+                "deleting (`flow_run_idempotency_run_deleted`)."
+            ),
             message="Source is not failed, its version is stale, or its prefix cannot be reused.",
             eneo_error_code=ErrorCodes.CONFLICT,
             code=FlowApiErrorCode.RUN_RETRY_SOURCE_NOT_FAILED,

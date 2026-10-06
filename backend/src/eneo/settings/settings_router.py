@@ -34,6 +34,9 @@ from eneo.flows.domain.flow_retention_hold import (
     FlowRetentionHoldStatusFilter,
 )
 from eneo.flows.domain.flow_run_retention_policy import (
+    FLOW_RETENTION_AUTO_DELETE_UNAVAILABLE_CODE,
+    FLOW_RETENTION_DAYS_ABOVE_MAXIMUM_CODE,
+    FLOW_RETENTION_REASON_REQUIRED_CODE,
     FlowRunRetentionFlowTargetPage,
     FlowRunRetentionPolicySettings,
     FlowRunRetentionReviewCursor,
@@ -239,6 +242,33 @@ def _flow_retention_lock_busy_response() -> dict[str, object]:
         eneo_error_code=ErrorCodes.CONFLICT,
         code=_FLOW_RETENTION_LOCK_BUSY_CODE,
     )
+
+
+def _flow_retention_policy_write_refused_response() -> dict[str, object]:
+    return _settings_error_response(
+        description=(
+            "The policy cannot be written: auto_delete before this deployment "
+            f"offers it (`{FLOW_RETENTION_AUTO_DELETE_UNAVAILABLE_CODE}`), more days "
+            f"than the deployment's maximum (`{FLOW_RETENTION_DAYS_ABOVE_MAXIMUM_CODE}`"
+            "; write_rules.max_days), or a change that stops or delays automatic "
+            f"deletion without a reason (`{FLOW_RETENTION_REASON_REQUIRED_CODE}`). "
+            "Nothing changed."
+        ),
+        message="Automatic deletion is not available in this deployment yet.",
+        eneo_error_code=ErrorCodes.BAD_REQUEST,
+        code=FLOW_RETENTION_AUTO_DELETE_UNAVAILABLE_CODE,
+    )
+
+
+_FLOW_RETENTION_WRITE_RULES_TEXT = (
+    " Modes: preserve and review_required keep history until an explicit purge; "
+    "auto_delete lets the nightly flows.history task delete terminal runs once "
+    "they are older than the days, and is accepted only when write_rules."
+    "auto_delete_available is true. Days may not exceed write_rules.max_days. A "
+    "change that stops or delays automatic deletion at this level (auto_delete "
+    "becomes another mode, is cleared, or gets more days) needs a reason, which "
+    "the required audit event records with the previous and new policy."
+)
 
 
 def _flow_settings_invalid_payload_response(
@@ -904,7 +934,7 @@ async def get_flow_retention_policy(
         "retention decision: changing it also needs retention_manage in a "
         f"signed-in session (`{RETENTION_PERMISSION_REQUIRED_CODE}`, "
         f"`{RETENTION_PERSON_REQUIRED_CODE}`), a longer window needs a reason "
-        "(`flow_retention_reason_required`), and a change writes the required "
+        f"(`{FLOW_RETENTION_REASON_REQUIRED_CODE}`), and a change writes the required "
         "audit action flow_run_retention_policy_changed with the previous and new "
         "value and the reason in the same transaction. It waits for an open "
         "history deletion to finish."
@@ -959,12 +989,11 @@ async def get_organization_flow_run_retention_policy(
     operation_id="replace_organization_flow_run_retention_policy",
     summary="Replace the Organization Flow run-history retention policy",
     description=(
-        "Replace the complete Organization policy or clear it. The initial modes "
-        "either preserve eligible data for explicit administrator purge or require "
-        "human review; neither mode deletes data automatically. The change waits "
-        "for an open history deletion to finish."
+        "Replace the complete Organization policy or clear it. The change waits "
+        "for an open history deletion to finish." + _FLOW_RETENTION_WRITE_RULES_TEXT
     ),
     responses={
+        400: _flow_retention_policy_write_refused_response(),
         403: _retention_forbidden_response("manage"),
         409: _flow_retention_lock_busy_response(),
     },
@@ -979,7 +1008,7 @@ async def replace_organization_flow_run_retention_policy(
     container: FlowRetentionMutationContainer,
 ) -> FlowRunRetentionPolicySettings:
     return await container.flow_run_retention_policy_service().replace_organization(
-        policy=payload.policy
+        policy=payload.policy, reason=payload.reason
     )
 
 
@@ -1142,10 +1171,11 @@ async def get_space_flow_run_retention_policy(
         "Replace the complete Space override or clear it to inherit the Organization "
         "policy. The mode and day count move together, preventing ambiguous mixed "
         "inheritance. This setting controls Flow run history only: it does not change "
-        "conversation or AI Builder retention, and it never schedules deletion. "
-        "The change waits for an open history deletion to finish."
+        "conversation or AI Builder retention. The change waits for an open history "
+        "deletion to finish." + _FLOW_RETENTION_WRITE_RULES_TEXT
     ),
     responses={
+        400: _flow_retention_policy_write_refused_response(),
         403: _retention_forbidden_response("manage"),
         404: _flow_retention_not_found_response("Space"),
         409: _flow_retention_lock_busy_response(),
@@ -1164,6 +1194,7 @@ async def replace_space_flow_run_retention_policy(
     return await container.flow_run_retention_policy_service().replace_space(
         space_id=space_id,
         policy=payload.policy,
+        reason=payload.reason,
     )
 
 
@@ -1204,12 +1235,12 @@ async def get_flow_run_retention_policy(
     description=(
         "Replace the complete Flow override or clear it to inherit. Operational "
         "retention remains editable after a Flow definition is published because it "
-        "does not mutate the published definition. The initial modes require a later "
-        "explicit administrator action; saving this policy never schedules deletion."
-        " A deleted Flow is accepted. The change waits for an open history deletion "
-        "to finish."
+        "does not mutate the published definition. A deleted Flow is accepted. The "
+        "change waits for an open history deletion to finish."
+        + _FLOW_RETENTION_WRITE_RULES_TEXT
     ),
     responses={
+        400: _flow_retention_policy_write_refused_response(),
         403: _retention_forbidden_response("manage"),
         404: _flow_retention_not_found_response("Flow"),
         409: _flow_retention_lock_busy_response(),
@@ -1228,6 +1259,7 @@ async def replace_flow_run_retention_policy(
     return await container.flow_run_retention_policy_service().replace_flow(
         flow_id=flow_id,
         policy=payload.policy,
+        reason=payload.reason,
     )
 
 

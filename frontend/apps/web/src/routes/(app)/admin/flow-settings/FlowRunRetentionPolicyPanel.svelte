@@ -2,6 +2,7 @@
   import type {
     FlowRetentionHoldPage,
     FlowRunRetentionFlowTarget,
+    FlowRunRetentionMode,
     FlowRunRetentionPolicy,
     FlowRunRetentionPolicySettings,
     FlowRunRetentionReviewPage,
@@ -149,10 +150,15 @@
     return dateFormatter.format(new Date(value));
   }
 
-  function policyModeLabel(mode: "preserve" | "review_required"): string {
-    return mode === "preserve"
-      ? m.flow_run_retention_mode_preserve()
-      : m.flow_run_retention_mode_review();
+  function policyModeLabel(mode: FlowRunRetentionMode): string {
+    switch (mode) {
+      case "preserve":
+        return m.flow_run_retention_mode_preserve();
+      case "review_required":
+        return m.flow_run_retention_mode_review();
+      case "auto_delete":
+        return m.flow_run_retention_mode_auto_delete();
+    }
   }
 
   function sourceLabel(source: "organization" | "space" | "flow"): string {
@@ -162,9 +168,13 @@
   }
 
   async function saveOrganizationPolicy(
-    policy: FlowRunRetentionPolicy | null
+    policy: FlowRunRetentionPolicy | null,
+    reason: string | undefined
   ): Promise<FlowRunRetentionPolicySettings> {
-    const updated = await eneo.settings.replaceOrganizationFlowRunRetentionPolicy({ policy });
+    const updated = await eneo.settings.replaceOrganizationFlowRunRetentionPolicy({
+      policy,
+      reason
+    });
     organizationPolicy = updated;
     await refreshSelectedPolicyProjections();
     await loadReviewPage(undefined, 0, []);
@@ -172,13 +182,15 @@
   }
 
   async function saveSpacePolicy(
-    policy: FlowRunRetentionPolicy | null
+    policy: FlowRunRetentionPolicy | null,
+    reason: string | undefined
   ): Promise<FlowRunRetentionPolicySettings> {
     if (!selectedSpaceId) throw new Error("A Space must be selected before saving retention.");
     const savedSpaceId = selectedSpaceId;
     const updated = await eneo.settings.replaceSpaceFlowRunRetentionPolicy({
       spaceId: savedSpaceId,
-      policy
+      policy,
+      reason
     });
     if (selectedSpaceId === savedSpaceId) {
       spacePolicy = updated;
@@ -189,13 +201,15 @@
   }
 
   async function saveFlowPolicy(
-    policy: FlowRunRetentionPolicy | null
+    policy: FlowRunRetentionPolicy | null,
+    reason: string | undefined
   ): Promise<FlowRunRetentionPolicySettings> {
     if (!selectedFlowId) throw new Error("A Flow must be selected before saving retention.");
     const savedFlowId = selectedFlowId;
     const updated = await eneo.settings.replaceFlowRunRetentionPolicy({
       flowId: savedFlowId,
-      policy
+      policy,
+      reason
     });
     if (selectedFlowId === savedFlowId) flowPolicy = updated;
     await loadReviewPage(undefined, 0, []);

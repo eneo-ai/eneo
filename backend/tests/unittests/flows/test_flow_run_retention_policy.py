@@ -15,6 +15,8 @@ from eneo.flows.domain.flow_run_retention_policy import (
     FlowRunRetentionPolicy,
     FlowRunRetentionPolicyStorageError,
     FlowRunRetentionReviewCursor,
+    FlowRunRetentionWriteRules,
+    flow_run_retention_change_postpones_deletion,
     flow_run_retention_policy_from_storage,
     resolve_flow_run_retention_policy,
 )
@@ -118,10 +120,47 @@ def test_automatic_mode_cannot_be_persisted_before_safe_execution_exists() -> No
         FlowRunRetentionPolicy.model_validate({"mode": "automatic", "days": 30})
 
 
-@pytest.mark.parametrize("days", [0, 2556])
-def test_policy_days_follow_the_existing_retention_bounds(days: int) -> None:
+@pytest.mark.parametrize("days", [0, -1])
+def test_policy_days_are_at_least_one(days: int) -> None:
     with pytest.raises(ValidationError):
         FlowRunRetentionPolicy(mode=FlowRunRetentionMode.PRESERVE, days=days)
+
+
+AUTO = FlowRunRetentionMode.AUTO_DELETE
+KEEP = FlowRunRetentionMode.PRESERVE
+REVIEW = FlowRunRetentionMode.REVIEW_REQUIRED
+
+
+@pytest.mark.parametrize(
+    ("before", "after", "postpones"),
+    [
+        ((AUTO, 30), None, True),
+        ((AUTO, 30), (KEEP, 30), True),
+        ((AUTO, 30), (REVIEW, 10), True),
+        ((AUTO, 30), (AUTO, 31), True),
+        ((AUTO, 30), (AUTO, 30), False),
+        ((AUTO, 30), (AUTO, 29), False),
+        (None, (AUTO, 30), False),
+        ((KEEP, 30), None, False),
+        ((KEEP, 30), (KEEP, 90), False),
+        ((REVIEW, 30), (KEEP, 300), False),
+        (None, None, False),
+    ],
+)
+def test_only_a_change_that_stops_or_delays_auto_delete_postpones_deletion(
+    before: tuple[FlowRunRetentionMode, int] | None,
+    after: tuple[FlowRunRetentionMode, int] | None,
+    postpones: bool,
+) -> None:
+    def policy(value: tuple[FlowRunRetentionMode, int] | None):
+        return None if value is None else _policy(mode=value[0], days=value[1])
+
+    assert (
+        flow_run_retention_change_postpones_deletion(
+            before=policy(before), after=policy(after)
+        )
+        is postpones
+    )
 
 
 def test_review_cursor_round_trips_the_total_order_position() -> None:
@@ -136,7 +175,12 @@ def test_review_cursor_round_trips_the_total_order_position() -> None:
 @pytest.mark.asyncio
 async def test_review_queue_seeks_in_the_retention_anchor_index_order() -> None:
     session = _RecordingSession()
-    repository = FlowRunRetentionPolicyRepository(cast(AsyncSession, session))
+    repository = FlowRunRetentionPolicyRepository(
+        cast(AsyncSession, session),
+        write_rules=FlowRunRetentionWriteRules(
+            max_days=36_500, auto_delete_available=False
+        ),
+    )
     cursor = FlowRunRetentionReviewCursor(
         retention_anchor=datetime(2026, 8, 1, 12, 0, tzinfo=timezone.utc),
         run_id=UUID("00000000-0000-0000-0000-000000000123"),
@@ -170,3 +214,13 @@ async def test_review_queue_seeks_in_the_retention_anchor_index_order() -> None:
 def test_review_cursor_rejects_malformed_values(value: str) -> None:
     with pytest.raises(ValueError, match="Invalid Flow retention review cursor"):
         FlowRunRetentionReviewCursor.deserialize(value)
+
+
+def test_the_deployment_maximum_stays_within_100_years() -> None:
+    # Every cutoff `now - days` must stay a valid timestamp.
+    from eneo.main.config import Settings
+
+    field = Settings.model_fields["flow_retention_max_days"]
+    assert [
+        getattr(item, "le", None) for item in field.metadata if hasattr(item, "le")
+    ] == [36_500]

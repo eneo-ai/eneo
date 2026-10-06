@@ -137,6 +137,15 @@ Poll the returned run using the existing run endpoint.
             eneo_error_code=ErrorCodes.NOT_FOUND,
             code="not_found",
         ),
+        409: error_response(
+            description=(
+                "The Idempotency-Key belongs to a run retention is deleting "
+                "(`flow_run_idempotency_run_deleted`); start with a new key."
+            ),
+            message="The run created with this idempotency key is being deleted.",
+            eneo_error_code=ErrorCodes.CONFLICT,
+            code=FlowApiErrorCode.RUN_IDEMPOTENCY_RUN_DELETED,
+        ),
         429: error_response(
             description="Concurrent flow run limit reached.",
             message="Concurrent flow run limit reached.",

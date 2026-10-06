@@ -625,3 +625,51 @@ def test_housekeeping_index_revision_emits_static_concurrent_ddl_offline():
         assert f"CREATE INDEX CONCURRENTLY IF NOT EXISTS {name}" in emitted
     assert "pg_index" not in emitted  # no catalog read offline
     assert "UPDATE alembic_version SET version_num='202610041300'" in emitted
+
+
+def _offline_upgrade(span: str) -> str:
+    backend = Path(__file__).parents[2]
+    config = Config(str(backend / "alembic.ini"))
+    config.set_main_option("script_location", str(backend / "alembic"))
+    config.set_main_option("sqlalchemy.url", "postgresql://offline@localhost/offline")
+    output = io.StringIO()
+    config.output_buffer = output
+    command.upgrade(config, span, sql=True)
+    return output.getvalue()
+
+
+def test_auto_delete_vocabulary_revision_emits_static_ddl_offline():
+    emitted = _offline_upgrade("202610060100:202610051000")
+
+    for table in ("tenants", "spaces", "flows"):
+        assert (
+            f'ADD CONSTRAINT "ck_{table}_flow_run_history_retention_mode" CHECK '
+            "(flow_run_history_retention_mode IS NULL OR "
+            "flow_run_history_retention_mode IN ('auto_delete', 'preserve', "
+            "'review_required')) NOT VALID" in emitted
+        )
+        assert (
+            f'VALIDATE CONSTRAINT "ck_{table}_flow_run_history_retention_days_range"'
+            in emitted
+        )
+    assert "ALTER TABLE gallring_job_runs ADD COLUMN overdue_count INTEGER" in emitted
+    assert "ALTER TABLE gallring_receipts ADD COLUMN rows_deleted INTEGER" in emitted
+    assert emitted.count("COMMIT;") == 1  # one transaction: atomic, re-runnable
+    assert "UPDATE alembic_version SET version_num='202610051000'" in emitted
+
+
+def test_fence_revision_emits_static_concurrent_ddl_offline():
+    emitted = _offline_upgrade("202610051000:202610051010")
+
+    assert (
+        "ALTER TABLE flow_runs ADD COLUMN IF NOT EXISTS gallring_receipt_id uuid"
+        in emitted
+    )
+    assert (
+        "CREATE INDEX CONCURRENTLY IF NOT EXISTS ix_flow_runs_flow_gallring_due ON "
+        "flow_runs (flow_id, coalesce(finished_at, created_at), id) WHERE status IN "
+        "('completed', 'failed', 'cancelled') AND gallring_receipt_id IS NULL"
+        in emitted
+    )
+    assert "pg_index" not in emitted  # no catalog read offline
+    assert "UPDATE alembic_version SET version_num='202610051010'" in emitted

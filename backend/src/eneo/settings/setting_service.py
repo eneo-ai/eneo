@@ -28,6 +28,9 @@ from eneo.flows.ai_builder.ai_builder_settings import (
 )
 from eneo.flows.ai_builder.planning_state import PLANNING_STATE_PAYLOAD_CAP_BYTES
 from eneo.flows.application.flow_retention_authz import require_retention_manage
+from eneo.flows.domain.flow_run_retention_policy import (
+    FLOW_RETENTION_REASON_REQUIRED_CODE,
+)
 from eneo.flows.domain.mapped_execution_policy import (
     FlowMappedExecutionPolicy,
     apply_flow_mapped_execution_policy_patch,
@@ -130,7 +133,6 @@ if TYPE_CHECKING:
 logger = get_logger(__name__)
 
 FLOW_SETTINGS_INVALID_PAYLOAD_CODE = "flow_settings_invalid_payload"
-FLOW_RETENTION_REASON_REQUIRED_CODE = "flow_retention_reason_required"
 
 
 def _upload_window_days(days: int | None) -> int:

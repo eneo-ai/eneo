@@ -235,8 +235,10 @@ FLOW_ROUTE_AUDIT_CONTRACTS: dict[str, FlowAuditContract] = {
                 "scope_id",
                 "previous_local_policy",
                 "new_local_policy",
+                "previous_effective_policy",
                 "effective_policy",
                 "effective_source",
+                "reason",
             ),
             idempotency="an unchanged replacement emits no event",
         )

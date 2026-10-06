@@ -29,6 +29,7 @@ from eneo.flows.domain.flow_run_retention_policy import (
     FlowRunRetentionScope,
     FlowRunRetentionSpaceTarget,
     FlowRunRetentionSpaceTargetPage,
+    FlowRunRetentionWriteRules,
     flow_run_retention_policy_from_storage,
     flow_run_retention_policy_settings,
 )
@@ -43,6 +44,9 @@ from eneo.flows.infrastructure.flow_run_retention_policy_query import (
     effective_flow_run_retention_policy_sql,
     flow_run_history_due_predicates,
     flow_run_history_eligible_since_sql,
+)
+from eneo.flows.infrastructure.flow_run_retention_write_rules import (
+    flow_run_retention_write_rules,
 )
 from eneo.main.exceptions import NotFoundException
 from eneo.tenants.tenant_repo import update_tenant_flow_settings
@@ -69,8 +73,16 @@ def _hold_review_limit(
 
 
 class FlowRunRetentionPolicyRepository:
-    def __init__(self, session: AsyncSession) -> None:
+    def __init__(
+        self,
+        session: AsyncSession,
+        *,
+        write_rules: FlowRunRetentionWriteRules | None = None,
+    ) -> None:
         self.session = session
+        self.write_rules = (
+            write_rules if write_rules is not None else flow_run_retention_write_rules()
+        )
 
     async def get_organization(
         self,
@@ -91,6 +103,7 @@ class FlowRunRetentionPolicyRepository:
         return flow_run_retention_policy_settings(
             scope=FlowRunRetentionScope.ORGANIZATION,
             scope_id=row.id,
+            write_rules=self.write_rules,
             organization_policy=flow_run_retention_policy_from_storage(
                 mode=row.flow_run_history_retention_mode,
                 days=row.flow_run_history_retention_days,
@@ -204,6 +217,7 @@ class FlowRunRetentionPolicyRepository:
         return flow_run_retention_policy_settings(
             scope=FlowRunRetentionScope.SPACE,
             scope_id=row.id,
+            write_rules=self.write_rules,
             organization_policy=flow_run_retention_policy_from_storage(
                 mode=row.organization_mode,
                 days=row.organization_days,
@@ -248,6 +262,7 @@ class FlowRunRetentionPolicyRepository:
         return flow_run_retention_policy_settings(
             scope=FlowRunRetentionScope.FLOW,
             scope_id=row.id,
+            write_rules=self.write_rules,
             organization_policy=flow_run_retention_policy_from_storage(
                 mode=row.organization_mode,
                 days=row.organization_days,
@@ -414,6 +429,8 @@ class FlowRunRetentionPolicyRepository:
             .join(Tenants, FlowRuns.tenant_id == Tenants.id)
             .where(FlowRuns.tenant_id == tenant_id)
             .where(FlowRuns.status.in_(TERMINAL_FLOW_RUN_STATUS_VALUES))
+            # A run whose deletion has started is never offered for review.
+            .where(FlowRuns.gallring_receipt_id.is_(None))
             .where(effective_policy.mode == FlowRunRetentionMode.REVIEW_REQUIRED.value)
             .where(
                 *flow_run_history_due_predicates(

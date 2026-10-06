@@ -152,7 +152,9 @@ def test_only_one_running_execution_per_task(round_trip_db):
 
 
 def test_orm_tables_match_the_reflected_columns(round_trip_db):
-    _, _, engine = round_trip_db
+    _, cfg, engine = round_trip_db
+    # The ORM describes the newest schema; later revisions add columns.
+    command.upgrade(cfg, "head")
     inspector = sa.inspect(engine)
     for table in _TABLES:
         reflected = {

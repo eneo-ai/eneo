@@ -1,6 +1,10 @@
 import { describe, expect, it } from "vitest";
 
-import { flowRunRetentionPoliciesEqual, parseFlowRunRetentionDays } from "./flowRunRetentionPolicy";
+import {
+  flowRunRetentionChangePostponesDeletion,
+  flowRunRetentionPoliciesEqual,
+  parseFlowRunRetentionDays
+} from "./flowRunRetentionPolicy";
 
 describe("Flow run-retention policy form rules", () => {
   it("accepts only bare integers inside the public range", () => {
@@ -12,6 +16,27 @@ describe("Flow run-retention policy form rules", () => {
     expect(parseFlowRunRetentionDays("0")).toBeNull();
     expect(parseFlowRunRetentionDays("2556")).toBeNull();
     expect(parseFlowRunRetentionDays("")).toBeNull();
+  });
+
+  it("checks run-history days against the deployment maximum it is given", () => {
+    expect(parseFlowRunRetentionDays("36500", 36500)).toBe(36500);
+    expect(parseFlowRunRetentionDays("36501", 36500)).toBeNull();
+    expect(parseFlowRunRetentionDays("101", 100)).toBeNull();
+  });
+
+  it("asks for a reason only when automatic deletion stops or gets later", () => {
+    const auto = (days: number) => ({ mode: "auto_delete" as const, days });
+    expect(flowRunRetentionChangePostponesDeletion(auto(30), null)).toBe(true);
+    expect(flowRunRetentionChangePostponesDeletion(auto(30), { mode: "preserve", days: 30 })).toBe(
+      true
+    );
+    expect(flowRunRetentionChangePostponesDeletion(auto(30), auto(31))).toBe(true);
+    expect(flowRunRetentionChangePostponesDeletion(auto(30), auto(30))).toBe(false);
+    expect(flowRunRetentionChangePostponesDeletion(auto(30), auto(10))).toBe(false);
+    expect(flowRunRetentionChangePostponesDeletion(null, auto(10))).toBe(false);
+    expect(flowRunRetentionChangePostponesDeletion({ mode: "preserve", days: 30 }, null)).toBe(
+      false
+    );
   });
 
   it("compares the complete mode-and-days policy", () => {

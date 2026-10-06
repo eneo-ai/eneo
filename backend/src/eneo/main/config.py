@@ -362,6 +362,10 @@ class Settings(BaseSettings):
     gallring_cron_hour: int = Field(default=3, ge=0, le=23)
     gallring_cron_minute: int = Field(default=30, ge=0, le=59)
     gallring_flows_housekeeping_enabled: bool = True
+    # Largest number of days a Flow run-history retention policy write may set;
+    # checked on write only, stored longer policies keep applying. At most 100
+    # years, so every cutoff stays a valid timestamp.
+    flow_retention_max_days: int = Field(default=36_500, ge=1, le=36_500)
     gallring_max_rows_per_run: int = Field(default=50_000, gt=0)
     gallring_max_files_per_run: int = Field(default=10_000, gt=0)
     gallring_max_seconds_per_run: int = Field(default=1800, gt=0)

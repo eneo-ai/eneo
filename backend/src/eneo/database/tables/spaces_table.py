@@ -34,10 +34,10 @@ SPACE_DATA_RETENTION_DAYS_RANGE_CHECK = (
     f"(data_retention_days >= {MIN_RETENTION_DAYS} "
     f"AND data_retention_days <= {MAX_RETENTION_DAYS})"
 )
+# Only a lower bound: the deployment's maximum applies on write.
 SPACE_FLOW_RUN_RETENTION_DAYS_RANGE_CHECK = (
     "flow_run_history_retention_days IS NULL OR "
-    f"(flow_run_history_retention_days >= {MIN_RETENTION_DAYS} "
-    f"AND flow_run_history_retention_days <= {MAX_RETENTION_DAYS})"
+    f"flow_run_history_retention_days >= {MIN_RETENTION_DAYS}"
 )
 
 

@@ -22,6 +22,7 @@ from eneo.database.tables.retention_tables import (
 # A JSONB column is a map keyed by declared step or count names: counts, or
 # step cursors of an aware timestamp and an id.
 ID, TIME, NUMBER, CODE, NAME_MAP = "id", "time", "number", "code", "name-keyed map"
+FLAG = "flag"
 
 _ALLOWED = {
     RetentionJobRuns: {
@@ -36,6 +37,10 @@ _ALLOWED = {
         "blocked": NAME_MAP,
         "cursors": NAME_MAP,
         "error_code": CODE,
+        "overdue_observed_at": TIME,
+        "overdue_count": NUMBER,
+        "overdue_complete": FLAG,
+        "overdue_oldest_due_at": TIME,
     },
     RetentionReceipts: {
         "id": ID,
@@ -48,6 +53,8 @@ _ALLOWED = {
         "space_id": ID,
         "flow_id": ID,
         "policy_source": CODE,
+        "policy_scope_id": ID,
+        "policy_mode": CODE,
         "policy_days": NUMBER,
         "anchor_at": TIME,
         "due_at": TIME,
@@ -59,6 +66,8 @@ _ALLOWED = {
         "manifest_after_ordinal": NUMBER,
         "chunk_count": NUMBER,
         "files_deleted": NUMBER,
+        "rows_deleted": NUMBER,
+        "triggered_by_user_id": ID,
         "started_at": TIME,
         "updated_at": TIME,
         "manifest_completed_at": TIME,
@@ -89,6 +98,8 @@ def _kind(column: sa.Column[object]) -> str:
         return CODE
     if isinstance(column_type, postgresql.JSONB):
         return NAME_MAP
+    if isinstance(column_type, sa.Boolean):
+        return FLAG
     return repr(column_type)
 
 

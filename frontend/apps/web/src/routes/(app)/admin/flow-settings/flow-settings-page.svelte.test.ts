@@ -231,6 +231,7 @@ describe("flow settings page — mapped restore lifecycle", () => {
       scope_id: "tenant-1",
       local_policy: { mode: "review_required", days: 30 },
       inherited_policy: null,
+      write_rules: { max_days: 36500, auto_delete_available: false },
       effective: {
         state: "configured",
         mode: "review_required",
@@ -258,12 +259,106 @@ describe("flow settings page — mapped restore lifecycle", () => {
       .toBeVisible();
   });
 
+  test("offers automatic deletion only once the installation runs it", async () => {
+    render(FlowSettingsPage, pageProps());
+
+    await page.getByLabelText("Gallringsbeteende för Organisation").click();
+
+    const option = page.getByRole("option", { name: "Gallra automatiskt", exact: false });
+    await expect.element(option).toHaveAttribute("aria-disabled", "true");
+    await expect.element(page.getByText("Finns inte i den här installationen ännu.")).toBeVisible();
+  });
+
+  // An Organization run-history rule as the API returns it.
+  function organizationRule(mode: string, days: number, autoDeleteAvailable: boolean) {
+    const policy = { mode, days };
+    return {
+      scope: "organization",
+      scope_id: "tenant-1",
+      local_policy: policy,
+      inherited_policy: null,
+      write_rules: { max_days: 36500, auto_delete_available: autoDeleteAvailable },
+      effective: {
+        state: "configured",
+        mode,
+        effective_days: days,
+        source: "organization",
+        contributors: { organization: policy, space: null, flow: null }
+      }
+    };
+  }
+
+  function renderWithRule(rule: ReturnType<typeof organizationRule>) {
+    render(FlowSettingsPage, { data: { ...pageData(), flowRunRetentionPolicy: rule } as never });
+  }
+
+  const save = () => page.getByRole("button", { name: "Spara policy för organisationen" });
+  const reasonField = () => page.getByLabelText("Varför stoppa eller skjuta upp gallringen?");
+
+  test("asks why before a change stops automatic deletion", async () => {
+    replaceOrganizationFlowRunRetentionPolicy.mockResolvedValue(
+      organizationRule("preserve", 30, true)
+    );
+    renderWithRule(organizationRule("auto_delete", 30, true));
+
+    await page.getByLabelText("Gallringsbeteende för Organisation").click();
+    await page.getByRole("option", { name: "Kan gallras manuellt" }).click();
+
+    await expect.element(reasonField()).toBeVisible();
+    await expect.element(save()).toBeDisabled();
+    await reasonField().fill("  Arkivleverans först  ");
+    await save().click();
+    expect(replaceOrganizationFlowRunRetentionPolicy).toHaveBeenCalledExactlyOnceWith({
+      policy: { mode: "preserve", days: 30 },
+      reason: "Arkivleverans först"
+    });
+  });
+
+  test("allows shortening automatic deletion without a reason", async () => {
+    replaceOrganizationFlowRunRetentionPolicy.mockResolvedValue(
+      organizationRule("auto_delete", 20, true)
+    );
+    renderWithRule(organizationRule("auto_delete", 30, true));
+
+    await page.getByLabelText("Kan gallras efter").fill("20");
+
+    expect(reasonField().query()).toBeNull();
+    await save().click();
+    expect(replaceOrganizationFlowRunRetentionPolicy).toHaveBeenCalledExactlyOnceWith({
+      policy: { mode: "auto_delete", days: 20 },
+      reason: undefined
+    });
+  });
+
+  test("keeps a stored rule above a lowered maximum as saved", async () => {
+    renderWithRule(organizationRule("preserve", 40000, false));
+
+    const days = page.getByLabelText("Kan gallras efter");
+    await expect.element(days).not.toHaveAttribute("aria-invalid", "true");
+    await expect.element(page.getByText("Inga ändringar att spara.")).toBeVisible();
+    await days.fill("40001");
+    await expect.element(days).toHaveAttribute("aria-invalid", "true");
+    await expect.element(save()).toBeDisabled();
+  });
+
+  test("says why an automatic deletion change cannot be saved yet", async () => {
+    renderWithRule(organizationRule("auto_delete", 30, false));
+
+    await page.getByLabelText("Kan gallras efter").fill("20");
+
+    const why =
+      "Automatisk gallring finns inte i den här installationen ännu, så ändringen kan inte sparas.";
+    await expect.element(page.getByText(why)).toBeVisible();
+    await expect.element(save()).toBeDisabled();
+  });
+
   test("does not discard an unsaved Space policy when scope switching is cancelled", async () => {
     getSpaceFlowRunRetentionPolicy.mockResolvedValue({
       scope: "space",
       scope_id: "space-1",
       local_policy: null,
       inherited_policy: null,
+      write_rules: { max_days: 36500, auto_delete_available: false },
       effective: {
         state: "off",
         mode: null,
@@ -304,6 +399,7 @@ describe("flow settings page — mapped restore lifecycle", () => {
       scope_id: scopeId,
       local_policy: null,
       inherited_policy: null,
+      write_rules: { max_days: 36500, auto_delete_available: false },
       effective: {
         state: "off",
         mode: null,
@@ -355,6 +451,7 @@ describe("flow settings page — mapped restore lifecycle", () => {
       scope_id: "flow-held",
       local_policy: null,
       inherited_policy: null,
+      write_rules: { max_days: 36500, auto_delete_available: false },
       effective: {
         state: "off",
         mode: null,
@@ -429,6 +526,7 @@ describe("flow settings page — mapped restore lifecycle", () => {
       scope_id: "flow-200",
       local_policy: null,
       inherited_policy: null,
+      write_rules: { max_days: 36500, auto_delete_available: false },
       effective: {
         state: "off",
         mode: null,
@@ -503,6 +601,7 @@ describe("flow settings page — mapped restore lifecycle", () => {
       scope_id: "space-1",
       local_policy: null,
       inherited_policy: null,
+      write_rules: { max_days: 36500, auto_delete_available: false },
       effective: {
         state: "off",
         mode: null,
