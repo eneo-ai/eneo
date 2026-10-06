@@ -1,10 +1,15 @@
 import logging
+from dataclasses import asdict
 from datetime import datetime, timezone
+from typing import Any, cast
 
 from dependency_injector import providers
+from sqlalchemy.ext.asyncio import AsyncSession
 from typing_extensions import TypedDict
 
 from eneo.database.database import sessionmanager
+from eneo.files.unused_file_cleanup import sweep_unused_files
+from eneo.main.config import get_settings
 from eneo.main.container.container import Container
 from eneo.worker.worker import Worker
 
@@ -143,3 +148,27 @@ async def cleanup_old_data(container: Container) -> CleanupResults:
         )
 
     return results
+
+
+@worker.cron_job(hour=3, minute=30, manages_own_session=True)
+async def delete_unused_files(container: Container) -> dict[str, Any]:
+    """Daily deletion of uploaded files that nothing uses anymore.
+
+    Runs after the retention cleanup so that files its deleted records used
+    are already released. Catches files left unused by cascades (deleting an
+    assistant, app, space or group chat), uploads never attached, and files
+    left behind before this cleanup existed. Each page commits on its own.
+    """
+    if not get_settings().unused_file_cleanup_enabled:
+        logger.info("Unused file cleanup is disabled")
+        return {"skipped": True}
+
+    result = await sweep_unused_files(
+        cast(AsyncSession, container.session()), dry_run=False
+    )
+    logger.info(
+        f"Unused file cleanup deleted {result.files} files "
+        f"({result.managed_bytes} managed bytes) across "
+        f"{len(result.files_by_tenant)} tenants"
+    )
+    return asdict(result)

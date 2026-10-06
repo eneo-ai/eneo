@@ -1,7 +1,8 @@
-"""Integration tests for files attached to records removed by data retention.
+"""Integration tests for deleting uploaded files nothing uses anymore.
 
-Retention removes a Question or AppRun together with the files it used, as long
-as nothing else still uses them. The stored bytes, including audio originals and
+Retention and manual deletion remove a Question or AppRun together with the
+files it used, as long as nothing else still uses them; the daily sweep removes
+every other unused file family. The stored bytes, including audio originals and
 transcriptions, are released for the object-content reconciler.
 """
 
@@ -18,7 +19,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from eneo.data_retention.infrastructure.data_retention_service import (
     DataRetentionService,
 )
-from eneo.database.tables.app_table import AppRuns, AppRunsFiles, Apps
+from eneo.database.database import sessionmanager
+from eneo.database.tables.app_table import AppRuns, AppRunsFiles, Apps, AppsFiles
 from eneo.database.tables.assistant_table import Assistants, AssistantsFiles
 from eneo.database.tables.files_table import Files
 from eneo.database.tables.object_content_table import (
@@ -28,6 +30,7 @@ from eneo.database.tables.object_content_table import (
 from eneo.database.tables.questions_table import Questions, QuestionsFiles
 from eneo.database.tables.sessions_table import Sessions
 from eneo.files.file_models import FileType
+from eneo.files.unused_file_cleanup import sweep_unused_files
 from eneo.object_content.configuration import ObjectContentCoreSettings
 from eneo.object_content.content import (
     ContentAccessClass,
@@ -85,7 +88,9 @@ async def _create_file(
     *,
     name: str = "recording.mp3",
     parent_file_id: UUID | None = None,
+    days_old: int = 0,
 ) -> Files:
+    created_at = datetime.now(timezone.utc) - timedelta(days=days_old)
     file = Files(
         name=name,
         mimetype="audio/mpeg",
@@ -93,6 +98,8 @@ async def _create_file(
         tenant_id=admin_user.tenant_id,
         user_id=admin_user.id,
         parent_file_id=parent_file_id,
+        created_at=created_at,
+        updated_at=created_at,
     )
     session.add(file)
     await session.flush()
@@ -207,6 +214,16 @@ async def _file_exists(session: AsyncSession, file_id: UUID) -> bool:
     return (
         await session.scalar(select(Files.id).where(Files.id == file_id))
     ) is not None
+
+
+async def _committed_file_exists(file_id: UUID) -> bool:
+    async with sessionmanager.session() as session, session.begin():
+        return await _file_exists(session, file_id)
+
+
+async def _sweep(*, dry_run: bool = False, page_size: int = 1000):
+    async with sessionmanager.session() as session:
+        return await sweep_unused_files(session, dry_run=dry_run, page_size=page_size)
 
 
 @pytest.mark.integration
@@ -332,3 +349,138 @@ async def test_retention_keeps_root_when_a_derived_file_is_still_used(
 
     assert await _file_exists(async_session, root.id)
     assert await _file_exists(async_session, derived.id)
+
+
+@pytest.mark.integration
+@pytest.mark.asyncio
+async def test_deleting_an_app_run_deletes_its_unused_input_files(
+    db_container,
+    admin_user,
+    completion_model_factory,
+    app_factory,
+) -> None:
+    async with db_container() as container:
+        session = container.session()
+        model = await completion_model_factory(session, "gpt-4")
+        app = await app_factory(session, "Transcription App", model.id)
+        recording = await _create_file(session, admin_user)
+        shared = await _create_file(session, admin_user, name="shared.mp3")
+        run = await _create_app_run(session, app, days_old=0, file=recording)
+        session.add(AppRunsFiles(app_run_id=run.id, file_id=shared.id))
+        await _create_app_run(session, app, days_old=0, file=shared)
+        run_id, recording_id, shared_id = run.id, recording.id, shared.id
+
+    async with db_container() as container:
+        await container.app_run_repo().delete(run_id)
+
+    assert not await _committed_file_exists(recording_id)
+    assert await _committed_file_exists(shared_id)
+
+
+@pytest.mark.integration
+@pytest.mark.asyncio
+async def test_sweep_deletes_old_unused_families_and_releases_content(
+    admin_user,
+) -> None:
+    async with sessionmanager.session() as session, session.begin():
+        orphan = await _create_file(session, admin_user, days_old=30)
+        transcription_id = await _add_transcription(session, admin_user, orphan)
+        derived = await _create_file(
+            session, admin_user, name="page-1.png", parent_file_id=orphan.id
+        )
+        fresh = await _create_file(session, admin_user, name="fresh.mp3")
+        orphan_id, derived_id, fresh_id = orphan.id, derived.id, fresh.id
+
+    result = await _sweep()
+
+    assert result.files == 1
+    assert result.files_by_tenant == {str(admin_user.tenant_id): 1}
+    assert result.managed_bytes == len(b"Transcribed meeting notes")
+    assert not await _committed_file_exists(orphan_id)
+    assert not await _committed_file_exists(derived_id)
+    # Younger than the minimum age: may still be on its way to a chat or run.
+    assert await _committed_file_exists(fresh_id)
+    async with sessionmanager.session() as session, session.begin():
+        state = await session.scalar(
+            select(ObjectContents.state).where(ObjectContents.id == transcription_id)
+        )
+    assert state == ContentState.DELETE_PENDING.value
+
+
+@pytest.mark.integration
+@pytest.mark.asyncio
+async def test_sweep_keeps_every_file_family_still_in_use(
+    admin_user,
+    completion_model_factory,
+    app_factory,
+    assistant_factory,
+    space_factory,
+) -> None:
+    async with sessionmanager.session() as session, session.begin():
+        model = await completion_model_factory(session, "gpt-4")
+        app = await app_factory(session, "Sweep App", model.id)
+        space = await space_factory(session, "Sweep Space")
+        assistant = await assistant_factory(
+            session, "Sweep Assistant", model.id, space_id=space.id
+        )
+        in_chat = await _create_file(session, admin_user, days_old=30)
+        in_assistant = await _create_file(session, admin_user, days_old=30)
+        in_app = await _create_file(session, admin_user, days_old=30)
+        in_run = await _create_file(session, admin_user, days_old=30)
+        with_used_child = await _create_file(session, admin_user, days_old=30)
+        used_child = await _create_file(
+            session, admin_user, parent_file_id=with_used_child.id, days_old=30
+        )
+        await _create_question(session, assistant, admin_user, days_old=0, file=in_chat)
+        session.add_all(
+            [
+                AssistantsFiles(assistant_id=assistant.id, file_id=in_assistant.id),
+                AppsFiles(app_id=app.id, file_id=in_app.id),
+            ]
+        )
+        await _create_app_run(session, app, days_old=0, file=in_run)
+        await _create_app_run(session, app, days_old=0, file=used_child)
+        file_ids = [
+            file.id
+            for file in (
+                in_chat,
+                in_assistant,
+                in_app,
+                in_run,
+                with_used_child,
+                used_child,
+            )
+        ]
+
+    result = await _sweep()
+
+    assert result.files == 0
+    for file_id in file_ids:
+        assert await _committed_file_exists(file_id)
+
+
+@pytest.mark.integration
+@pytest.mark.asyncio
+async def test_sweep_preview_counts_without_deleting(admin_user) -> None:
+    async with sessionmanager.session() as session, session.begin():
+        orphan_ids = [
+            (
+                await _create_file(
+                    session, admin_user, name=f"{index}.mp3", days_old=30
+                )
+            ).id
+            for index in range(3)
+        ]
+
+    preview = await _sweep(dry_run=True, page_size=2)
+
+    assert preview.dry_run is True
+    assert preview.files == 3
+    for orphan_id in orphan_ids:
+        assert await _committed_file_exists(orphan_id)
+
+    result = await _sweep(page_size=2)
+
+    assert result.files == 3
+    for orphan_id in orphan_ids:
+        assert not await _committed_file_exists(orphan_id)

@@ -1,5 +1,4 @@
 import logging
-from collections.abc import Sequence
 from typing import Any, cast
 from uuid import UUID
 
@@ -11,11 +10,10 @@ from eneo.database.affected_rows import affected_row_count
 from eneo.database.tables.app_table import AppRuns, AppRunsFiles, Apps
 from eneo.database.tables.assistant_table import Assistants
 from eneo.database.tables.audit_retention_policy_table import AuditRetentionPolicy
-from eneo.database.tables.files_table import Files
 from eneo.database.tables.questions_table import Questions, QuestionsFiles
 from eneo.database.tables.sessions_table import Sessions
 from eneo.database.tables.spaces_table import Spaces
-from eneo.files.file_usage import FileUsageRepository
+from eneo.files.unused_file_cleanup import delete_unused_root_files
 
 logger = logging.getLogger(__name__)
 
@@ -149,7 +147,7 @@ class DataRetentionService:
             query = sa.delete(record_table).where(record_table.id.in_(batch_ids))  # type: ignore[attr-defined]
             result = await self.session.execute(query)
             batch_deleted = affected_row_count(result)
-            files_deleted = await self._delete_unused_files(file_ids)
+            files_deleted = await delete_unused_root_files(self.session, file_ids)
 
             total_deleted += batch_deleted
             total_files_deleted += files_deleted
@@ -167,23 +165,6 @@ class DataRetentionService:
             logger.debug(f"No old {record_type} to delete based on retention policies")
 
         return total_deleted
-
-    async def _delete_unused_files(self, file_ids: Sequence[UUID]) -> int:
-        """Delete root files, with their derived files, that nothing uses anymore.
-
-        Deleting the Files row releases its content references, so the
-        object-content reconciler removes the stored bytes, including audio
-        originals and transcriptions.
-        """
-        unused_ids = await FileUsageRepository(self.session).lock_unused_root_families(
-            file_ids
-        )
-        if not unused_ids:
-            return 0
-        result = await self.session.execute(
-            sa.delete(Files).where(Files.id.in_(unused_ids))
-        )
-        return affected_row_count(result)
 
     async def delete_old_questions(self) -> int:
         """

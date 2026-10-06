@@ -1,8 +1,8 @@
-"""Deleting a session removes the generated files only its answers owned.
+"""Deleting a session removes the files only its questions used.
 
-Uploads stay: the user manages those. A generated image (a tool result
-persisted as a file) has no owner surface besides the conversation, so it
-goes with the session unless another question still references it.
+Uploads and generated images (tool results persisted as files) go with the
+conversation unless another question, Assistant, App or App run still uses
+them.
 """
 
 from uuid import UUID
@@ -21,9 +21,7 @@ async def _file_exists(file_id: UUID) -> bool:
         ) is not None
 
 
-async def test_delete_session_removes_generated_files_and_keeps_uploads(
-    db_container, admin_user
-):
+async def test_delete_session_removes_files_only_it_used(db_container, admin_user):
     async with db_container() as container:
         file_service = container.file_service()
         upload = await file_service.save_image_from_bytes(
@@ -34,6 +32,9 @@ async def test_delete_session_removes_generated_files_and_keeps_uploads(
         )
         shared = await file_service.save_image_from_bytes(
             b"\x89PNG-shared", name="generated_image.png", mimetype="image/png"
+        )
+        shared_upload = await file_service.save_image_from_bytes(
+            b"\x89PNG-shared-upload", name="shared-upload.png", mimetype="image/png"
         )
 
         session_service = container.session_service()
@@ -50,7 +51,7 @@ async def test_delete_session_removes_generated_files_and_keeps_uploads(
                 tenant_id=admin_user.tenant_id,
                 session_id=doomed.id,
             ),
-            files=[upload],
+            files=[upload, shared_upload],
             generated_files=[generated, shared],
         )
         await question_repo.add(
@@ -62,6 +63,7 @@ async def test_delete_session_removes_generated_files_and_keeps_uploads(
                 tenant_id=admin_user.tenant_id,
                 session_id=survivor.id,
             ),
+            files=[shared_upload],
             generated_files=[shared],
         )
 
@@ -69,6 +71,7 @@ async def test_delete_session_removes_generated_files_and_keeps_uploads(
         await container.session_service().delete(doomed.id)
 
     assert not await _file_exists(generated.id)
-    assert await _file_exists(upload.id)
-    # Still referenced by the surviving session's answer.
+    assert not await _file_exists(upload.id)
+    # Still referenced by the surviving session's question.
     assert await _file_exists(shared.id)
+    assert await _file_exists(shared_upload.id)

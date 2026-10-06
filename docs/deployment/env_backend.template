@@ -424,6 +424,11 @@ EXPORT_MAX_CONCURRENT_PER_TENANT=2
 # Files older than this are automatically cleaned up by daily cron job (03:00 UTC)
 EXPORT_MAX_AGE_HOURS=24
 
+# [OPTIONAL] Delete uploaded files that no chat, assistant, app or app run uses
+# anymore (default: true). Runs daily at 03:30 UTC for files older than 24 hours.
+# Preview first with: python -m eneo.files.unused_file_cleanup preview
+UNUSED_FILE_CLEANUP_ENABLED=true
+
 # ----------------------------------------------------------------------------
 # Internal MCP Loopback URL
 # ----------------------------------------------------------------------------

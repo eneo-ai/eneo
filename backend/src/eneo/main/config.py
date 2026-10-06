@@ -352,6 +352,9 @@ class Settings(BaseSettings):
     export_max_concurrent_per_tenant: int = 2  # Max concurrent exports per tenant
     export_progress_interval: int = 5000  # Update progress every N records
 
+    # Daily deletion of uploaded files no chat, assistant, app or app run uses.
+    unused_file_cleanup_enabled: bool = True
+
     # Federation feature flag. Supports both single-tenant and multi-tenant setups.
     federation_enabled: bool = False
     federation_per_tenant_enabled: Optional[bool] = Field(
