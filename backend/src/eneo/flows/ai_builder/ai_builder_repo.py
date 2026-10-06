@@ -213,6 +213,20 @@ class ClientErrorRecord:
     first_action: str | None
 
 
+@dataclass(frozen=True, slots=True)
+class BuilderSessionListRow:
+    """Listing must remain available when unrelated session JSON is invalid."""
+
+    id: UUID
+    space_id: UUID
+    status: SessionStatus
+    target_kind: TargetKind
+    flow_id: UUID | None
+    latest_plan_id: UUID | None
+    created_at: datetime | None
+    updated_at: datetime | None
+
+
 class AIBuilderRepository:
     """Persistence layer for builder sessions and plans."""
 
@@ -462,7 +476,7 @@ class AIBuilderRepository:
         target_kind: TargetKind | None = None,
         drafts_only: bool = False,
         limit: int = 20,
-    ) -> list[tuple[BuilderSession, str | None]]:
+    ) -> list[tuple[BuilderSessionListRow, str | None]]:
         """List the caller's sessions, newest first.
 
         ``drafts_only`` keeps only unfinished sessions the user has actually
@@ -486,9 +500,8 @@ class AIBuilderRepository:
                 ),
                 else_=sa.null(),
             )
-            draft_title_label = sa.func.coalesce(
-                plan_flow_name,
-                first_user_message,
+            draft_title_label = sa.type_coerce(
+                sa.func.coalesce(plan_flow_name, first_user_message), sa.String
             ).label("draft_title")
             editable_membership = _space_role_membership_exists(
                 actor_user_id=actor_user_id,
@@ -502,9 +515,15 @@ class AIBuilderRepository:
             )
             stmt = (
                 select(
-                    BuilderSessions,
-                    draft_title_label,
-                    sa.func.clock_timestamp(),
+                    BuilderSessions.id,
+                    BuilderSessions.space_id,
+                    BuilderSessions.status,
+                    BuilderSessions.target_kind,
+                    BuilderSessions.flow_id,
+                    BuilderSessions.latest_plan_id,
+                    sa.Nullable(draft_title_label),
+                    BuilderSessions.created_at,
+                    BuilderSessions.updated_at,
                 )
                 .outerjoin(
                     BuilderPlans,
@@ -571,16 +590,32 @@ class AIBuilderRepository:
                 )
                 .limit(limit)
             )
-            rows = (await self.session.execute(stmt)).all()
+            rows = (await self.session.execute(stmt)).tuples().all()
             return [
                 (
-                    _session_from_row(
-                        session_row,
-                        database_now=cast(datetime, database_now),
+                    BuilderSessionListRow(
+                        id=session_id,
+                        space_id=space_id,
+                        status=SessionStatus(status),
+                        target_kind=TargetKind(stored_target_kind),
+                        flow_id=flow_id,
+                        latest_plan_id=latest_plan_id,
+                        created_at=created_at,
+                        updated_at=updated_at,
                     ),
-                    cast(str | None, draft_title_value),
+                    draft_title_value,
                 )
-                for session_row, draft_title_value, database_now in rows
+                for (
+                    session_id,
+                    space_id,
+                    status,
+                    stored_target_kind,
+                    flow_id,
+                    latest_plan_id,
+                    draft_title_value,
+                    created_at,
+                    updated_at,
+                ) in rows
             ]
 
     async def cancel_session(
