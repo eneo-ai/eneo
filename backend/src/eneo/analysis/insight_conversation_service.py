@@ -104,6 +104,10 @@ _FORWARDED_RESPONSE_TYPES = frozenset(
 )
 
 
+# Status of a tool call that had not returned when its turn's stream stopped.
+TOOL_CALL_INTERRUPTED = "interrupted"
+
+
 @dataclass
 class InsightTurn:
     """Result of one insights chat turn, for the router to render."""
@@ -177,6 +181,15 @@ def merge_tool_call_chunk(tool_calls: list[ToolCallInfo], chunk: Completion) -> 
         meta = getattr(tc, "meta", None)
         if meta is not None:
             existing.meta = meta
+
+
+def mark_unfinished_tool_calls(tool_calls: list[ToolCallInfo]) -> None:
+    """Flag the calls that were still being written or executed when the
+    stream stopped, so a reopened turn does not show them as having run.
+    Calls with a result keep it and replay on later turns as usual."""
+    for call in tool_calls:
+        if call.result is None and call.result_status in (None, "pending", "approved"):
+            call.result_status = TOOL_CALL_INTERRUPTED
 
 
 class InsightConversationService:
@@ -568,8 +581,9 @@ class InsightConversationService:
 
         Tool calls are accumulated so later turns can replay them. If the
         stream does not reach normal completion (client abort, provider
-        error), whatever text or reasoning already streamed is saved through
-        a fresh DB session, since the request-scoped one may be gone.
+        error), whatever already streamed (text, reasoning, and the tool
+        calls with their results, which are the turn's evidence) is saved
+        through a fresh DB session, since the request-scoped one may be gone.
         """
         completion = response.completion
         if isinstance(completion, str) or completion is None:
@@ -640,7 +654,8 @@ class InsightConversationService:
                 ),
             )
         finally:
-            if not completed and (answer or reasoning):
+            if not completed and (answer or reasoning or tool_calls):
+                mark_unfinished_tool_calls(tool_calls)
                 schedule_background_save(
                     persist_partial_question_answer(
                         tenant_id=self.user.tenant_id,
@@ -649,6 +664,7 @@ class InsightConversationService:
                         num_tokens_answer=safe_count_tokens(answer, model.name),
                         completion_model_id=model.id,
                         reasoning=reasoning or None,
+                        tool_calls=tool_calls or None,
                     )
                 )
                 logger.info(
@@ -656,5 +672,6 @@ class InsightConversationService:
                     extra={
                         "question_id": str(question_id),
                         "answer_chars": len(answer),
+                        "tool_calls": len(tool_calls),
                     },
                 )

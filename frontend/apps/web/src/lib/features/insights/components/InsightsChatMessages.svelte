@@ -44,7 +44,8 @@
     answerStarted: boolean
   ): StepStatus {
     if (call.approved === false || call.result_status === "denied") return "denied";
-    if (call.result_status === "failed") return "failed";
+    // "interrupted" = the turn's stream stopped before the call returned.
+    if (call.result_status === "failed" || call.result_status === "interrupted") return "failed";
     // "pending" = the model is still writing the arguments; "approved" = the
     // call is executing. A pending call on a turn that is no longer streaming
     // never ran, so it is shown as failed rather than spinning forever.

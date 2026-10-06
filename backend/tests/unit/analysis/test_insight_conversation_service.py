@@ -569,13 +569,27 @@ class TestStreaming:
         assert harness.completed == []
         assert "scheduled" in saved
 
-    @pytest.mark.asyncio
-    async def test_abort_before_any_text_persists_nothing(self, monkeypatch):
-        scheduled = []
-        monkeypatch.setattr(module, "schedule_background_save", scheduled.append)
+    async def test_abort_after_tool_calls_saves_them_without_any_text(
+        self, monkeypatch
+    ):
+        saved = {}
+
+        def fake_persist(**kwargs):
+            saved.update(kwargs)
+
+        monkeypatch.setattr(module, "persist_partial_question_answer", fake_persist)
+        monkeypatch.setattr(module, "schedule_background_save", lambda _: None)
         stream = _chunks(
             Completion(
                 response_type=ResponseType.TOOL_CALL, tool_calls_metadata=[_tool_call()]
+            ),
+            Completion(
+                response_type=ResponseType.TOOL_CALL,
+                tool_calls_metadata=[
+                    _tool_call(
+                        tool_call_id="call-2", result=None, result_status="pending"
+                    )
+                ],
             ),
             Completion(response_type=ResponseType.TEXT, text="x"),
         )
@@ -586,7 +600,36 @@ class TestStreaming:
         turn = await harness.start(stream=True)
         generator = turn.answer
         await generator.__anext__()
+        await generator.__anext__()
         await generator.aclose()
+
+        assert harness.completed == []
+        assert saved["answer"] == ""
+        finished, unfinished = saved["tool_calls"]
+        assert finished.result == "Usage for assistant 'Bygg' ..."
+        assert finished.result_status == "success"
+        assert unfinished.result is None
+        assert unfinished.result_status == "interrupted"
+
+    async def test_provider_error_before_anything_streamed_persists_nothing(
+        self, monkeypatch
+    ):
+        scheduled = []
+        monkeypatch.setattr(module, "schedule_background_save", scheduled.append)
+
+        async def failing():
+            raise RuntimeError("provider down")
+            yield  # pragma: no cover
+
+        harness = _Harness(
+            response=SimpleNamespace(
+                completion=failing(), usage=None, total_token_count=1
+            )
+        )
+
+        turn = await harness.start(stream=True)
+        with pytest.raises(RuntimeError):
+            await turn.answer.__anext__()
 
         assert scheduled == []
         assert harness.completed == []

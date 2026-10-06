@@ -88,6 +88,7 @@ async def persist_partial_question_answer(
     num_tokens_answer: int,
     completion_model_id: UUID | None = None,
     reasoning: str | None = None,
+    tool_calls: list[ToolCallInfo] | None = None,
     skill_provenance: Sequence[SkillExecutionReference] | None = None,
     skill_activation: SkillActivationEvidenceV1 | None = None,
 ) -> None:
@@ -109,6 +110,7 @@ async def persist_partial_question_answer(
                 num_tokens_answer=num_tokens_answer,
                 completion_model_id=completion_model_id,
                 reasoning=reasoning,
+                tool_calls=tool_calls,
                 skill_provenance=skill_provenance,
                 skill_activation=skill_activation,
             )
