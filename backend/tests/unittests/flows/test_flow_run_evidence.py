@@ -49,7 +49,10 @@ from eneo.flows.domain.flow_step_attempt_input import (
     FlowStepAttemptExecutionInput,
     FlowStepAttemptInput,
 )
-from eneo.flows.domain.step_output import FileBackedStepText
+from eneo.flows.domain.step_output import (
+    FileBackedStepText,
+    build_rejected_output_payload,
+)
 from eneo.flows.domain.transcript_corrections import FlowTranscriptCorrectionRevision
 from eneo.flows.enums import (
     FlowOutputType,
@@ -62,6 +65,7 @@ from eneo.flows.flow_run_provenance import (
     FLOW_ATTEMPT_PROVENANCE_MARKER_SCHEMA_VERSION,
     FLOW_ATTEMPT_PROVENANCE_SCHEMA_VERSION,
     FlowResolvedInputEdges,
+    FlowResolvedInputJsonPath,
     normalize_attempt_provenance,
     normalize_rag_payload,
     parse_attempt_provenance,
@@ -2658,20 +2662,56 @@ def test_evidence_export_summary_is_single_typed_contract() -> None:
 
 
 @pytest.mark.parametrize(
-    ("mirror_key", "mirror_value"),
+    ("output_payload", "expected_kind", "expected_preview"),
     [
-        ("webhook_delivered", False),
-        ("webhook_error", "HTTP 503 Service Unavailable"),
+        ({"text": "done", "webhook_delivered": False}, "text", "done"),
+        (
+            {"text": "done", "webhook_error": "HTTP 503 Service Unavailable"},
+            "text",
+            "done",
+        ),
+        (
+            {
+                "text": "done",
+                "text_source_selector": FlowResolvedInputJsonPath(
+                    kind="json_path", path=("input", "text")
+                ).model_dump(mode="json"),
+                "template_fill_debug": {
+                    "rendered_docx_text_raw": "diagnostic text",
+                    "summary_mode": "resolved_bindings",
+                    "placeholder_count": 1,
+                },
+                "future_extension": {"summary": "diagnostic summary"},
+            },
+            "text",
+            "done",
+        ),
+        (
+            {"structured": {"answer": 1}, "summary": "metadata"},
+            "structured",
+            '{"answer": 1}',
+        ),
+        ({"structured": False}, "structured", "false"),
+        ({"structured": 0}, "structured", "0"),
+        ({"text": "done", "structured": {}}, "mixed", "done"),
+        (
+            build_rejected_output_payload("refused output", max_inline_bytes=64),
+            "empty",
+            "refused output",
+        ),
+        ({"structured": None, "summary": "diagnostic only"}, "empty", None),
     ],
 )
-def test_evidence_export_ignores_legacy_webhook_delivery_payload_mirror(
-    mirror_key: str,
-    mirror_value: bool | str,
+def test_evidence_export_classifies_typed_output_and_previews_no_extension_metadata(
+    output_payload: dict[str, object],
+    expected_kind: str,
+    expected_preview: str | None,
 ) -> None:
+    # Mutants: infer structured output from extension keys, use truthiness,
+    # or preview metadata instead of the typed rejected-output envelope.
     run, _ = _evidence_run_and_version()
     step_id = uuid4()
     version = _evidence_version_with_steps(run, step_ids=[step_id])
-    output_payload = {"text": "done", mirror_key: mirror_value}
     export = _render_raw_export(
         run.model_copy(update={"output_payload_json": output_payload}),
         version,
@@ -2689,8 +2729,16 @@ def test_evidence_export_ignores_legacy_webhook_delivery_payload_mirror(
         ],
     )
 
-    assert export["summary"]["final_output"]["kind"] == "text"
-    assert export["summary"]["step_overview"][0]["result_output_kind"] == "text"
+    assert export["summary"]["final_output"]["kind"] == expected_kind
+    overview = export["summary"]["step_overview"][0]
+    assert overview["result_output_kind"] == expected_kind
+    if expected_preview is None:
+        assert overview["output_summary"] is None
+    else:
+        assert overview["output_summary"] is not None
+        assert overview["output_summary"]["preview"] == expected_preview
+        assert overview["output_summary"]["truncated"] is False
+    assert export["bundle"]["step_results"][0]["output_payload_json"] == output_payload
 
 
 def test_evidence_export_summary_shared_fields_use_typed_normalization() -> None:
