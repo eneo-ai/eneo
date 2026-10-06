@@ -2601,6 +2601,7 @@ def test_template_fill_publish_accepts_a_required_field_of_one_type(
                     "template_asset_id": str(uuid4()),
                     "bindings": {
                         "title": "{{step_1.output.structured.details.title}}",
+                        "title_with_spaces": "{{step_1.output.structured.details . title}}",
                         "count": "{{step_1.output.structured.count}}",
                         "body": "{{step_1.output.text}}",
                         "date": "{{datum}}",
@@ -2649,6 +2650,19 @@ def _template_fill_over_contract(contract: dict, *, binding: str) -> list[FlowSt
             },
         ),
     ]
+
+
+@pytest.mark.parametrize("path", ["details..title", ".details.title", "details.title."])
+def test_publish_refuses_an_empty_template_path_segment(path: str) -> None:
+    contract = _nested({"type": "string"})
+    details = contract["properties"]["details"]
+    details["properties"][""] = _nested({"type": "string"})["properties"]["details"]
+    details["required"].append("")
+    binding = "{{step_1.output.structured." + path + "}}"
+    steps = _template_fill_over_contract(contract, binding=binding)
+    validate_steps(steps)
+    with pytest.raises(FlowStepValidationError):
+        validate_steps(steps, require_complete_template_fill_config=True)
 
 
 # The `$ref`s of the fixtures below are local: they must resolve, or the contract is

@@ -159,6 +159,13 @@ A whole JSON object is marked **Invalid** rather than ready to run. Choose text
 from a previous step, or use a single text field from structured data in an
 advanced expression. The renderer checks the resolved value when the flow runs.
 
+Dots separate structured field-path segments, such as `details.title`. Each
+segment must be non-empty: leading, trailing, or repeated dots prevent
+publication. A property with an empty name cannot be selected by a dotted
+expression, even if the output contract declares it. Whitespace surrounding
+a segment is ignored, as it is at runtime. You can still save an unfinished
+mapping as a draft.
+
 Word for Mac can use prepared content controls, but its Developer tab does not
 offer the same tools to create them or change their tags. Keep the example's
 prepared control, or prepare new fields in Word for Windows. Mac's legacy form

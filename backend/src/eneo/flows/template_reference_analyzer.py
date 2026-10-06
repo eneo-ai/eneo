@@ -28,6 +28,7 @@ class TemplateReferenceKind(str, Enum):
 
 TemplateReferencePathErrorCode = Literal[
     "invalid_step_reference_format",
+    "structured_path_empty_segment",
     "runtime_scalar_nested_access",
     "runtime_sequence_non_numeric_index",
     "step_input_key_required",
@@ -173,10 +174,14 @@ def _build_step_reference(
     step_order: int,
 ) -> TemplateReference:
     structured_path: tuple[str, ...] | None = None
+    path_error_code: TemplateReferencePathErrorCode | None = None
     if tail.startswith("output.structured."):
+        # Keep empty segments so publication cannot validate a different runtime path.
         structured_path = tuple(
-            part for part in tail.removeprefix("output.structured.").split(".") if part
+            variable_path_segments(tail.removeprefix("output.structured."))
         )
+        if not all(structured_path):
+            path_error_code = "structured_path_empty_segment"
     return TemplateReference(
         expression=expression,
         head=head,
@@ -185,6 +190,7 @@ def _build_step_reference(
         step_ref=step_ref,
         step_order=step_order,
         structured_path=structured_path,
+        path_error_code=path_error_code,
     )
 
 
