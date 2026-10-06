@@ -25,6 +25,7 @@ from eneo.database.tables.base_class import BaseWithTableName
 from eneo.database.tables.flow_tables import (
     FlowProviderCalls,
     FlowRunAuditOutbox,
+    FlowRunReleasedInputs,
     FlowRunReviewCheckpointEdits,
     FlowRunReviewCheckpoints,
     FlowRuns,
@@ -76,6 +77,7 @@ def _corrections_of(run_id: UUID) -> sa.Select[tuple[UUID]]:
 FLOW_RUN_CHILD_TABLES: tuple[
     tuple[type[BaseWithTableName], Callable[[UUID], sa.ColumnElement[bool]]], ...
 ] = (
+    (FlowRunReleasedInputs, _of_run(FlowRunReleasedInputs.run_id)),
     (FlowRunWebhookDeliveries, _of_run(FlowRunWebhookDeliveries.flow_run_id)),
     (FlowRunAuditOutbox, _of_run(FlowRunAuditOutbox.flow_run_id)),
     (FlowRunReviewCheckpointEdits, _of_run(FlowRunReviewCheckpointEdits.flow_run_id)),

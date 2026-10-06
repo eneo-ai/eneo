@@ -55,6 +55,9 @@ from eneo.flows.flow_run_input_envelope import (
 )
 from eneo.flows.flow_run_redaction import redact_payload
 from eneo.flows.flow_run_step_result_file import FlowRunStepResultFile
+from eneo.flows.infrastructure.flow_run_released_input_repo import (
+    FlowRunReleasedInputRepository,
+)
 from eneo.main.container.container import Container
 from eneo.main.exceptions import (
     AuditLoggingUnavailableException,
@@ -226,6 +229,12 @@ async def get_flow_run_evidence(
                 else None
             )
             payload["run"] = run_payload
+            payload["released_inputs"] = [
+                item.model_dump(mode="json")
+                for item in await FlowRunReleasedInputRepository(
+                    evidence_service.flow_run_repo.session
+                ).list_for_run(run_id=run_id, tenant_id=user.tenant_id)
+            ]
             response = FlowRunEvidenceResponse.model_validate(payload)
             await log_flow_trace_audit_or_raise(
                 container=container,

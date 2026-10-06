@@ -152,6 +152,8 @@ class RetentionReceipts(IdMixin, BaseWithTableName):
     tenant_id: Mapped[UUID] = mapped_column(nullable=False)
     space_id: Mapped[Optional[UUID]] = mapped_column()
     flow_id: Mapped[Optional[UUID]] = mapped_column()
+    # No FK: the proof remains after run-history deletion.
+    source_run_id: Mapped[Optional[UUID]] = mapped_column()
     policy_source: Mapped[Optional[str]] = mapped_column(sa.String(32))
     # The Organization, Space or Flow whose rule applied (with policy_source).
     policy_scope_id: Mapped[Optional[UUID]] = mapped_column()
@@ -227,6 +229,10 @@ class RetentionReceipts(IdMixin, BaseWithTableName):
         sa.CheckConstraint(
             f"category IN ({_sql_values(RetentionCategory)})",
             name="ck_gallring_receipts_category",
+        ),
+        sa.CheckConstraint(
+            "category <> 'audio_after_use' OR source_run_id IS NOT NULL",
+            name="ck_retention_receipts_audio_source",
         ),
         sa.CheckConstraint(
             "policy_source IS NULL OR policy_source IN "

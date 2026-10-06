@@ -36,6 +36,7 @@ from eneo.flows.ai_builder.ai_builder_domain_models import PlanStatus, SessionSt
 from eneo.flows.domain.flow_retention_hold import (
     MAX_FLOW_RETENTION_HOLD_REASON_LENGTH,
 )
+from eneo.flows.domain.flow_run_released_input import FlowRunInputReleaseReason
 from eneo.flows.domain.flow_run_retention_policy import FLOW_RUN_RETENTION_MODE_VALUES
 from eneo.flows.domain.provider_call import (
     PROVIDER_CALL_KIND_VALUES,
@@ -1862,6 +1863,28 @@ class FlowRunReviewCheckpoints(BasePublic):
     )
 
 
+class FlowRunReleasedInputs(BaseWithTableName):
+    """Content-free release evidence; its file may be gone while its run remains."""
+
+    run_id: Mapped[UUID] = mapped_column(
+        ForeignKey("flow_runs.id", ondelete="CASCADE"), primary_key=True
+    )
+    step_id: Mapped[UUID] = mapped_column(primary_key=True)
+    # A file FK would remove the evidence precisely when reclamation needs it.
+    file_id: Mapped[UUID] = mapped_column(primary_key=True)
+    released_at: Mapped[datetime] = mapped_column(
+        sa.DateTime(timezone=True), nullable=False
+    )
+    reason: Mapped[str] = mapped_column(sa.String(32), nullable=False)
+
+    __table_args__ = (
+        CheckConstraint(
+            f"reason IN ({_check_values(tuple(item.value for item in FlowRunInputReleaseReason))})",
+            name="ck_flow_run_released_inputs_reason",
+        ),
+    )
+
+
 class FlowRunStepInputFiles(BasePublic):
     """Stores files bound as step inputs for a run attempt. Writer: FlowRunRepository. Purpose: make runtime file override intent relational and auditable."""
 
@@ -1945,6 +1968,11 @@ class FlowRunStepInputFiles(BasePublic):
             "ix_flow_run_step_input_files_flow_step",
             "flow_id",
             "step_id",
+        ),
+        Index(
+            "ix_flow_run_step_input_files_created_id",
+            "created_at",
+            "id",
         ),
     )
 

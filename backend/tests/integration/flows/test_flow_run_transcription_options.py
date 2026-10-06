@@ -10,14 +10,22 @@ from __future__ import annotations
 
 from collections.abc import Iterator, Mapping
 from contextlib import contextmanager
+from datetime import datetime, timezone
 from uuid import UUID, uuid4
 
 import pytest
 import sqlalchemy as sa
 from httpx import AsyncClient, Response
 
-from eneo.database.tables.flow_tables import FlowRuns, FlowStepResults
+from eneo.database.tables.files_table import Files
+from eneo.database.tables.flow_tables import (
+    FlowRuns,
+    FlowRunStepInputFiles,
+    FlowRuntimeUploadedFiles,
+    FlowStepResults,
+)
 from eneo.files.file_content_loader import FileContentLoader
+from eneo.files.file_models import FileType
 from eneo.flows.api import (
     flow_run_lifecycle_router,
     flow_run_retry_router,
@@ -33,6 +41,11 @@ from eneo.flows.domain.transcript_corrections import segments_content_hash
 from eneo.flows.enums import FlowRunLifecycleSource
 from eneo.flows.flow_api_error_code import FlowApiErrorCode
 from eneo.flows.flow_run_error import FlowRunError
+from eneo.flows.flow_runtime_upload_repo import FlowRuntimeUploadRepository
+from eneo.flows.infrastructure.flow_run_released_input_repo import (
+    FlowRunReleasedInputRepository,
+)
+from eneo.flows.principal import FlowPrincipal
 from eneo.main.config import get_settings, set_settings
 from eneo.object_content.content import ObjectContentUnavailableError
 from tests.integration.flows.test_flow_live_transcription_session import (
@@ -570,13 +583,14 @@ async def test_a_speaker_count_the_run_cannot_use_creates_no_run(
 
 
 @pytest.mark.parametrize(
-    ("choice", "form_count", "replay_service_mode"),
+    ("choice", "form_count", "replay_service_mode", "released_audio"),
     [
-        ({"speaker_labels": False}, None, None),
-        ({"max_speakers": 3}, None, None),
-        ({"max_speakers": None}, None, None),
-        ({"max_speakers": 3}, 0, "diarize"),
-        ({"max_speakers": None}, 0, "diarize"),
+        ({"speaker_labels": False}, None, None, False),
+        ({"max_speakers": 3}, None, None, False),
+        ({"max_speakers": None}, None, None, False),
+        ({"max_speakers": 3}, 0, "diarize", False),
+        ({"max_speakers": None}, 0, "diarize", False),
+        ({"speaker_labels": False}, None, None, True),
     ],
 )
 async def test_retry_and_regeneration_keep_the_source_speaker_decision(
@@ -588,23 +602,58 @@ async def test_retry_and_regeneration_keep_the_source_speaker_decision(
     choice: dict[str, object],
     form_count: int | None,
     replay_service_mode: str | None,
+    released_audio: bool,
 ):
     headers = dict(flow_process_auth_headers)
     flow = await _published_flow(
         client,
         headers,
         db_container,
-        input_required=False,
+        input_required=released_audio,
         summarize=True,
         speaker_mapping=form_count is not None,
     )
     body = dict(choice)
     if form_count is not None:
         body["input_payload_json"] = {"antal_talare": form_count}
+    audio_file_ids: list[UUID] = []
+    if released_audio:
+        # Kills requiring source audio again for a completed transcription prefix.
+        async with db_container(user=admin_user) as container:
+            for _ in range(2):
+                file = await container.file_service().save_generated_file(
+                    payload=b"Source audio is not decoded by a seeded child.",
+                    name="source.wav",
+                    mimetype="audio/wav",
+                    file_type=FileType.AUDIO,
+                )
+                await FlowRuntimeUploadRepository(container.session()).create(
+                    file_id=file.id,
+                    flow_id=UUID(flow.flow_id),
+                    tenant_id=admin_user.tenant_id,
+                    uploaded_for_step_id=UUID(flow.step_id),
+                    principal=FlowPrincipal.from_user(admin_user),
+                )
+                audio_file_ids.append(file.id)
     with _deployment(service_mode="diarize"):
         created = [
-            await _create_run(client, headers, flow.flow_id, body) for _ in range(2)
+            await _create_run(
+                client,
+                headers,
+                flow.flow_id,
+                {
+                    **body,
+                    **(
+                        {"step_inputs": {flow.step_id: {"file_ids": [str(file_id)]}}}
+                        if file_id is not None
+                        else {}
+                    ),
+                },
+            )
+            for file_id in (audio_file_ids if released_audio else [None, None])
         ]
+    for run in created:
+        assert run.status_code == 201, run.text
     failed_id, completed_id = (UUID(run.json()["id"]) for run in created)
     async with db_container() as container:
         session = container.session()
@@ -675,6 +724,30 @@ async def test_retry_and_regeneration_keep_the_source_speaker_decision(
         completed_revision = await session.scalar(
             sa.select(FlowRuns.revision).where(FlowRuns.id == completed_id)
         )
+        if released_audio:
+            for run_id, file_id in zip(
+                (failed_id, completed_id), audio_file_ids, strict=True
+            ):
+                assert (
+                    await FlowRunReleasedInputRepository(session).record(
+                        run_id=run_id,
+                        bindings=[(UUID(flow.step_id), file_id)],
+                        at=datetime.now(timezone.utc),
+                    )
+                    == 1
+                )
+                await session.execute(
+                    sa.delete(FlowRunStepInputFiles).where(
+                        FlowRunStepInputFiles.flow_run_id == run_id,
+                        FlowRunStepInputFiles.file_id == file_id,
+                    )
+                )
+                await session.execute(
+                    sa.delete(FlowRuntimeUploadedFiles).where(
+                        FlowRuntimeUploadedFiles.file_id == file_id
+                    )
+                )
+                await session.execute(sa.delete(Files).where(Files.id == file_id))
 
     with _deployment(service_mode=replay_service_mode):
         retried = await client.post(

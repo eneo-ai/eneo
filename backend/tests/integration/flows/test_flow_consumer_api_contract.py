@@ -233,6 +233,7 @@ async def _create_published_flow(
         "input_payload_json",
         "effective_prompt",
         "model_parameters_json",
+        "released_audio",
     ],
 )
 async def test_retry_failed_run_reuses_prefix_and_replays_after_commit(
@@ -300,6 +301,27 @@ async def test_retry_failed_run_reuses_prefix_and_replays_after_commit(
         )
     url = f"/api/v1/flows/{flow_id}/runs/{source_id}/retry/"
     retry_headers = {**headers, "Idempotency-Key": "retry-consumer"}
+    if failure == "released_audio":
+        from eneo.flows.infrastructure.flow_run_released_input_repo import (
+            FlowRunReleasedInputRepository,
+        )
+
+        async with db_container() as container:
+            await FlowRunReleasedInputRepository(container.session()).record(
+                run_id=UUID(source_id),
+                bindings=[(UUID(flow["steps"][1]["id"]), uuid4())],
+                at=datetime.now(timezone.utc),
+            )
+        refused = await client.post(url, headers=retry_headers)
+        assert refused.status_code == 409, refused.text
+        assert refused.json()["code"] == "flow_run_source_audio_deleted"
+        assert refused.json()["context"] == {"step_ids": [flow["steps"][1]["id"]]}
+        assert (
+            await _flow_run_first_page_count(client, flow_id=flow_id, token=admin_token)
+            == 1
+        )
+        assert dispatched == []
+        return
     if failure == "audit":
 
         async def unavailable(self, audit_log):

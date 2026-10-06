@@ -4925,6 +4925,8 @@
   "flow_error_flow_run_retry_source_version_stale": "Reload the flow and start a new run.",
   "flow_error_flow_run_retry_nothing_to_reuse": "No completed steps can be reused. Start a new run.",
   "flow_error_flow_run_retry_prefix_unsupported": "The completed steps cannot be reused. Start a new run.",
+  "flow_error_flow_run_source_audio_deleted": "The source audio needed for this retry was deleted after use. Upload the audio again in a new run.",
+  "flow_run_audio_deleted_after_use": "Source audio deleted after use {date}",
   "flow_error_flow_run_step_input_file_too_large": "One or more attached files exceed the current step limit. Choose smaller files.",
   "flow_error_flow_run_step_input_max_files_exceeded": "Too many files were attached to a step. Remove some files and try again.",
   "flow_error_flow_run_step_input_mimetype_rejected": "One or more attached files use a file type this step does not accept. Choose a compatible file.",

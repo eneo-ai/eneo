@@ -1740,6 +1740,17 @@ class FlowRunRepository:
             for run_id, step_id, raw_edges in rows
         ]
 
+    async def list_released_input_step_ids(
+        self, *, run_id: UUID, tenant_id: UUID
+    ) -> frozenset[UUID]:
+        from eneo.flows.infrastructure.flow_run_released_input_repo import (
+            FlowRunReleasedInputRepository,
+        )
+
+        return await FlowRunReleasedInputRepository(self.session).step_ids(
+            run_id=run_id, tenant_id=tenant_id
+        )
+
     async def list_step_result_identities(
         self, *, run_id: UUID, tenant_id: UUID
     ) -> list[FlowStepResultIdentity]:

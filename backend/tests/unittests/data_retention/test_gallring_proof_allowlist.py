@@ -52,6 +52,7 @@ _ALLOWED = {
         "tenant_id": ID,
         "space_id": ID,
         "flow_id": ID,
+        "source_run_id": ID,
         "policy_source": CODE,
         "policy_scope_id": ID,
         "policy_mode": CODE,

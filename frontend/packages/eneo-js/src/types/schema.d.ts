@@ -17782,6 +17782,7 @@ export interface components {
       | "flow_run_retry_source_version_stale"
       | "flow_run_retry_nothing_to_reuse"
       | "flow_run_retry_prefix_unsupported"
+      | "flow_run_source_audio_deleted"
       | "flow_run_required_step_input_missing"
       | "flow_run_runtime_input_disabled"
       | "flow_run_top_level_file_ids_not_supported"
@@ -21455,6 +21456,7 @@ export interface components {
      *       },
      *       "job_id": "00000000-0000-0000-0000-000000000401",
      *       "purpose": "production",
+     *       "released_inputs": [],
      *       "result_files": [],
      *       "revision": 1,
      *       "run_label": "Case 123",
@@ -21570,6 +21572,11 @@ export interface components {
        * @enum {string}
        */
       purpose: "production" | "test";
+      /**
+       * Released Inputs
+       * @description Content-free source-file identifiers released after use, with their step, timestamp and typed reason. Retained until the run is deleted.
+       */
+      released_inputs: components["schemas"]["FlowRunReleasedInput"][];
       /**
        * Result
        * @description Typed successful final result. Null while the run is incomplete or when it ended without a successful final result.
@@ -22763,6 +22770,7 @@ export interface components {
      *         "next_after_event_id": "00000000-0000-0000-0000-000000000801",
      *         "total_count": 2
      *       },
+     *       "released_inputs": [],
      *       "result_files": [
      *         {
      *           "attempt_no": 1,
@@ -22927,6 +22935,11 @@ export interface components {
        */
       knowledge_traces?: components["schemas"]["FlowRunStepKnowledgeTrace"][];
       provider_calls: components["schemas"]["ProviderCallEvidencePage"];
+      /**
+       * Released Inputs
+       * @description Content-free source inputs released after use, retained until the run is deleted.
+       */
+      released_inputs: components["schemas"]["FlowRunReleasedInput"][];
       /** Result Files */
       result_files: components["schemas"]["FlowRunStepResultFile"][];
       /** Review Checkpoints */
@@ -23195,6 +23208,11 @@ export interface components {
        */
       text: string;
     };
+    /**
+     * FlowRunInputReleaseReason
+     * @enum {string}
+     */
+    FlowRunInputReleaseReason: "transcription_audio_after_use";
     /**
      * FlowRunLifecycleSource
      * @enum {string}
@@ -23481,6 +23499,25 @@ export interface components {
       /** Redispatched Count */
       redispatched_count: number;
       run: components["schemas"]["FlowRunPublic"];
+    };
+    /** FlowRunReleasedInput */
+    FlowRunReleasedInput: {
+      /**
+       * File Id
+       * Format: uuid
+       */
+      file_id: string;
+      reason: components["schemas"]["FlowRunInputReleaseReason"];
+      /**
+       * Released At
+       * Format: date-time
+       */
+      released_at: string;
+      /**
+       * Step Id
+       * Format: uuid
+       */
+      step_id: string;
     };
     /** FlowRunRetentionConfigured */
     FlowRunRetentionConfigured: {
@@ -58666,7 +58703,7 @@ export interface operations {
           "application/json": components["schemas"]["GeneralError"];
         };
       };
-      /** @description Source is not failed, its version is stale, or its prefix cannot be reused; or the Idempotency-Key belongs to a run retention is deleting (`flow_run_idempotency_run_deleted`). */
+      /** @description Source is not failed, its version is stale, or its prefix cannot be reused, source audio required by an executing step was deleted after use; or the Idempotency-Key belongs to a run retention is deleting (`flow_run_idempotency_run_deleted`). */
       409: {
         headers: {
           [name: string]: unknown;

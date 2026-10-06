@@ -66,6 +66,7 @@ const FLOW_API_ERROR_MESSAGES = {
   flow_run_retry_source_version_stale: m.flow_error_flow_run_retry_source_version_stale,
   flow_run_retry_nothing_to_reuse: m.flow_error_flow_run_retry_nothing_to_reuse,
   flow_run_retry_prefix_unsupported: m.flow_error_flow_run_retry_prefix_unsupported,
+  flow_run_source_audio_deleted: m.flow_error_flow_run_source_audio_deleted,
   flow_run_required_step_input_missing: m.flow_error_flow_run_required_step_input_missing,
   flow_run_runtime_input_disabled: m.flow_error_flow_run_runtime_input_disabled,
   flow_run_top_level_file_ids_not_supported: m.flow_error_flow_run_top_level_file_ids_not_supported,

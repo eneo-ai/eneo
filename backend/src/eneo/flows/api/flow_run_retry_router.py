@@ -87,7 +87,7 @@ shared input files remain available while the child references them.
         409: error_response(
             description=(
                 "Source is not failed, its version is stale, or its prefix cannot be "
-                "reused; or the Idempotency-Key belongs to a run retention is "
+                "reused, source audio required by an executing step was deleted after use; or the Idempotency-Key belongs to a run retention is "
                 "deleting (`flow_run_idempotency_run_deleted`)."
             ),
             message="Source is not failed, its version is stale, or its prefix cannot be reused.",

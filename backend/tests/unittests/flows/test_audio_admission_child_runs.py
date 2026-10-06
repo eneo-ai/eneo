@@ -68,14 +68,21 @@ CHILD_KINDS = ("reused_prefix", "reviewed_transcript_snapshot")
 class _AudioCase(SimpleNamespace):
     """A two-step flow whose `audio_step_order` step takes an audio recording."""
 
-    async def create(self, *, prefix_seed: FlowRunPrefixSeed | None = None):
+    async def create(
+        self,
+        *,
+        prefix_seed: FlowRunPrefixSeed | None = None,
+        audio_present: bool = True,
+    ):
         return await self.service.create_run(
             flow_id=self.flow.id,
             expected_flow_version=1,
             input_payload_json={"x": "y"},
-            step_inputs={
-                self.audio_step.id: FlowRunStepInputFiles(file_ids=(self.file_id,))
-            },
+            step_inputs=(
+                {self.audio_step.id: FlowRunStepInputFiles(file_ids=(self.file_id,))}
+                if audio_present
+                else {}
+            ),
             prefix_seed=prefix_seed,
         )
 
@@ -243,15 +250,24 @@ def _assert_refused_as_too_long(refused: pytest.ExceptionInfo[FlowBadRequestExce
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("kind", CHILD_KINDS)
-async def test_a_child_run_reusing_the_audio_step_is_created_for_audio_of_unknown_length(
-    user, kind
+@pytest.mark.parametrize(
+    ("kind", "audio_present"),
+    [
+        ("reused_prefix", True),
+        ("reused_prefix", False),
+        ("reviewed_transcript_snapshot", True),
+        ("reviewed_transcript_snapshot", False),
+    ],
+)
+async def test_a_child_run_reusing_the_audio_step_does_not_require_source_audio(
+    user, kind, audio_present
 ):
-    # Uploaded before Eneo measured length: a retry cannot upload it again.
+    # Kills required-input validation of a seeded step after source audio is released.
     case = _audio_case(user, audio_step_order=1, measured_seconds=None)
 
     created = await case.create(
         prefix_seed=case.seed(kind, reusing_step_order=1),
+        audio_present=audio_present,
     )
 
     assert created.created is True

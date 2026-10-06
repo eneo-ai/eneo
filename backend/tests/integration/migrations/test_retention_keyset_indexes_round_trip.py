@@ -24,6 +24,7 @@ from eneo.database.tables.flow_tables import (
     FlowLiveTranscripts,
     FlowRunAuditOutbox,
     FlowRuns,
+    FlowRunStepInputFiles,
 )
 from eneo.database.tables.questions_table import Questions
 from eneo.database.tables.sessions_table import Sessions
@@ -31,6 +32,15 @@ from eneo.database.tables.sessions_table import Sessions
 pytestmark = [pytest.mark.integration, pytest.mark.migration_isolation]
 
 _REVISIONS = [
+    pytest.param(
+        (
+            "202610061900",
+            "202610062000",
+            {"ix_flow_run_step_input_files_created_id": FlowRunStepInputFiles},
+            {},
+        ),
+        id="audio-input-full-keyset",
+    ),
     pytest.param(
         (
             "202610051020",

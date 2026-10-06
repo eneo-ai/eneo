@@ -202,6 +202,34 @@ class FlowFileFamilyRepository:
         ).subquery()
         return await self._bounded_count(sa.select(links.c.file_id), limit)
 
+    async def input_links(
+        self, members: Sequence[FamilyMember], *, run_id: UUID, limit: int
+    ) -> Bounded[tuple[UUID, UUID]]:
+        rows = (
+            (
+                await self.session.execute(
+                    sa.select(
+                        FlowRunStepInputFiles.step_id, FlowRunStepInputFiles.file_id
+                    )
+                    .where(
+                        FlowRunStepInputFiles.flow_run_id == run_id,
+                        uuid_in(
+                            FlowRunStepInputFiles.file_id,
+                            [member.file_id for member in members],
+                        ),
+                    )
+                    .order_by(FlowRunStepInputFiles.id)
+                    .limit(limit + 1)
+                )
+            )
+            .tuples()
+            .all()
+        )
+        items = [(step_id, file_id) for step_id, file_id in rows]
+        return Bounded(
+            items=items if len(items) <= limit else None, examined=len(items)
+        )
+
     async def count_bound_transcripts(self, root_id: UUID, *, limit: int) -> int:
         return await self._bounded_count(
             sa.select(FlowLiveTranscripts.id).where(

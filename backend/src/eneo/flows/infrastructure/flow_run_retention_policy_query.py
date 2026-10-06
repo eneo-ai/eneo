@@ -5,6 +5,7 @@ from datetime import datetime
 from typing import cast
 
 import sqlalchemy as sa
+from sqlalchemy.orm import InstrumentedAttribute
 
 from eneo.data_retention.constants import MIN_RETENTION_DAYS
 
@@ -14,6 +15,15 @@ class EffectiveFlowRunRetentionPolicySql:
     mode: sa.ColumnElement[str | None]
     days: sa.ColumnElement[int | None]
     source: sa.ColumnElement[str | None]
+
+
+def effective_transcription_audio_after_use_sql(
+    *,
+    organization: sa.ColumnElement[bool | None] | InstrumentedAttribute[bool | None],
+    space: sa.ColumnElement[bool | None] | InstrumentedAttribute[bool | None],
+    flow: sa.ColumnElement[bool | None] | InstrumentedAttribute[bool | None],
+) -> sa.ColumnElement[bool]:
+    return sa.cast(sa.func.coalesce(flow, space, organization, False), sa.Boolean())
 
 
 def effective_flow_run_retention_policy_sql(

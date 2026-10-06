@@ -9,6 +9,7 @@ is one transaction: a failed upgrade leaves nothing and re-runs.
 from __future__ import annotations
 
 from pathlib import Path
+from uuid import uuid4
 
 import psycopg2
 import pytest
@@ -163,6 +164,42 @@ def test_orm_tables_match_the_reflected_columns(round_trip_db):
         }
         declared = {column.name: column.nullable for column in table.__table__.columns}
         assert reflected == declared, table.__tablename__
+
+
+def test_an_audio_proof_prevents_a_downgrade_that_loses_its_source(round_trip_db):
+    """Kills G5-M03: erase audio proof context before restoring the closed category check."""
+    conn, cfg, _ = round_trip_db
+    command.upgrade(cfg, "202610061900")
+    proof_id, source_id = uuid4(), uuid4()
+    with conn.cursor() as cursor:
+        cursor.execute("SELECT version_num FROM alembic_version")
+        before_revision = cursor.fetchone()[0]
+        cursor.execute(
+            "INSERT INTO gallring_receipts "
+            "(id, task, entity_kind, entity_id, category, trigger, tenant_id, "
+            "source_run_id, phase, started_at, updated_at) "
+            "VALUES (%s, 'flows.housekeeping', 'file_family', %s, 'audio_after_use', "
+            "'scheduled', %s, %s, 'pending', now(), now())",
+            tuple(str(value) for value in (proof_id, uuid4(), uuid4(), source_id)),
+        )
+    try:
+        with pytest.raises(sa.exc.IntegrityError):
+            command.downgrade(cfg, "202610061800")
+        with conn.cursor() as cursor:
+            cursor.execute(
+                "SELECT source_run_id FROM gallring_receipts WHERE id = %s",
+                (str(proof_id),),
+            )
+            assert str(cursor.fetchone()[0]) == str(source_id)
+            cursor.execute("SELECT version_num FROM alembic_version")
+            assert cursor.fetchone()[0] == before_revision
+    finally:
+        with conn.cursor() as cursor:
+            cursor.execute(
+                "DELETE FROM gallring_receipts WHERE id = %s", (str(proof_id),)
+            )
+    command.downgrade(cfg, "202610061800")
+    command.upgrade(cfg, "202610061900")
 
 
 def test_a_failed_upgrade_leaves_nothing_and_re_runs(round_trip_db):

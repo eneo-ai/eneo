@@ -47,6 +47,7 @@ from eneo.flows.domain.flow import (
     FlowStep,
     FlowStepResult,
 )
+from eneo.flows.domain.flow_run_released_input import FlowRunReleasedInput
 from eneo.flows.domain.step_output import (
     FileBackedStepText,
     StepOutputMetadataError,
@@ -188,6 +189,7 @@ class FlowAssembler:
         transcription_usage: FlowRunTranscriptionUsage | None = None,
         final_output: FlowFinalOutputContractPublic | None = None,
         webhook_deliveries: Sequence[FlowRunWebhookDeliveryRead] = (),
+        released_inputs: Sequence[FlowRunReleasedInput] = (),
     ) -> FlowRunDetailPublic:
         run_payload = self.to_run_public(
             run,
@@ -199,6 +201,7 @@ class FlowAssembler:
         return FlowRunDetailPublic.model_validate(
             {
                 **run_payload,
+                "released_inputs": list(released_inputs),
                 "webhook_deliveries": [
                     FlowRunWebhookDeliveryPublic.model_validate(delivery)
                     for delivery in webhook_deliveries

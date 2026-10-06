@@ -2,9 +2,10 @@ import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/sv
 import { writable } from "svelte/store";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-import type { Eneo, FlowRunEvidenceWithTypedSteps } from "@eneo/eneo-js";
+import type { components, Eneo, FlowRunEvidenceWithTypedSteps } from "@eneo/eneo-js";
 
 import { m } from "$lib/paraglide/messages";
+import { formatDateTime } from "$lib/core/formatting/dateTime";
 import FlowRunEvidence from "./FlowRunEvidence.svelte";
 
 vi.mock("$lib/features/flows/FlowUserMode", () => ({
@@ -26,6 +27,7 @@ function evidenceWithCorruptPassageAggregates(
     step_results: [],
     step_attempts: [],
     result_files: [],
+    released_inputs: [],
     review_checkpoints: [],
     webhook_deliveries: [],
     provider_calls: {},
@@ -70,11 +72,15 @@ function evidenceWithBoundedSections(): FlowRunEvidenceWithTypedSteps {
   return evidence;
 }
 
-function eneoReturning(evidence: FlowRunEvidenceWithTypedSteps): Eneo {
+function eneoReturning(
+  evidence: FlowRunEvidenceWithTypedSteps,
+  releasedInputs: components["schemas"]["FlowRunReleasedInput"][] = []
+): Eneo {
   return {
     flows: {
       runs: {
-        evidence: vi.fn().mockResolvedValue(evidence)
+        evidence: vi.fn().mockResolvedValue({ ...evidence, released_inputs: releasedInputs }),
+        get: vi.fn().mockResolvedValue({ released_inputs: releasedInputs })
       }
     }
   } as unknown as Eneo;
@@ -90,7 +96,9 @@ describe("FlowRunEvidence", () => {
     render(FlowRunEvidence, {
       runId: "run-1",
       flowId: "flow-1",
-      eneo: { flows: { runs: { evidence } } } as unknown as Eneo,
+      eneo: {
+        flows: { runs: { evidence, get: vi.fn().mockResolvedValue({ released_inputs: [] }) } }
+      } as unknown as Eneo,
       runStatus: "completed"
     });
 
@@ -151,30 +159,55 @@ describe("FlowRunEvidence", () => {
     ).toBeTruthy();
   });
 
-  it("reports every section omitted from the bounded view", async () => {
-    render(FlowRunEvidence, {
-      runId: "run-1",
-      flowId: "flow-1",
-      eneo: eneoReturning(evidenceWithBoundedSections()),
-      runStatus: "completed"
-    });
+  it.each([false, true])(
+    "reports bounded sections and durable audio deletion (released=%s)",
+    async (released) => {
+      const eneo = eneoReturning(
+        evidenceWithBoundedSections(),
+        released
+          ? [
+              {
+                step_id: "step-1",
+                file_id: "file-1",
+                released_at: "2026-10-06T12:34:00Z",
+                reason: "transcription_audio_after_use"
+              }
+            ]
+          : []
+      );
+      render(FlowRunEvidence, {
+        runId: "run-1",
+        flowId: "flow-1",
+        eneo,
+        runStatus: released ? "failed" : "completed"
+      });
 
-    expect(await screen.findByTestId("evidence-view-omissions")).toBeTruthy();
-    expect(
-      screen.getByText(
-        m.flow_run_evidence_view_rows_omitted({
-          section: m.flow_run_evidence_section_step_results(),
-          count: "≥3"
-        })
-      )
-    ).toBeTruthy();
-    expect(
-      screen.getByText(
-        m.flow_run_evidence_view_bytes_omitted({
-          section: m.flow_run_evidence_section_result_files(),
-          count: "2"
-        })
-      )
-    ).toBeTruthy();
-  });
+      // Kills omitting the durable release state or displaying deletion for a retained file.
+      await screen.findByTestId("evidence-view-omissions");
+      // Kills G5-E02: a second detail request creates a duplicate required read audit.
+      expect(eneo.flows.runs.evidence).toHaveBeenCalledTimes(1);
+      expect(eneo.flows.runs.get).not.toHaveBeenCalled();
+      const deletionLabel = m.flow_run_audio_deleted_after_use({
+        date: formatDateTime("2026-10-06T12:34:00Z")
+      });
+      expect(screen.queryByText(deletionLabel) !== null).toBe(released);
+      expect(await screen.findByTestId("evidence-view-omissions")).toBeTruthy();
+      expect(
+        screen.getByText(
+          m.flow_run_evidence_view_rows_omitted({
+            section: m.flow_run_evidence_section_step_results(),
+            count: "≥3"
+          })
+        )
+      ).toBeTruthy();
+      expect(
+        screen.getByText(
+          m.flow_run_evidence_view_bytes_omitted({
+            section: m.flow_run_evidence_section_result_files(),
+            count: "2"
+          })
+        )
+      ).toBeTruthy();
+    }
+  );
 });

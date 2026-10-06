@@ -4925,6 +4925,8 @@
   "flow_error_flow_run_retry_source_version_stale": "Läs om flödet och starta en ny körning.",
   "flow_error_flow_run_retry_nothing_to_reuse": "Inga slutförda steg kan återanvändas. Starta en ny körning.",
   "flow_error_flow_run_retry_prefix_unsupported": "De slutförda stegen kan inte återanvändas. Starta en ny körning.",
+  "flow_error_flow_run_source_audio_deleted": "Ljudet som behövs för detta återförsök har raderats efter användning. Ladda upp ljudet igen i en ny körning.",
+  "flow_run_audio_deleted_after_use": "Källjud raderat efter användning {date}",
   "flow_error_flow_run_step_input_file_too_large": "En eller flera kopplade filer överskrider stegets aktuella gräns. Välj mindre filer.",
   "flow_error_flow_run_step_input_max_files_exceeded": "För många filer kopplades till ett steg. Ta bort några filer och försök igen.",
   "flow_error_flow_run_step_input_mimetype_rejected": "En eller flera kopplade filer har en filtyp som steget inte accepterar. Välj en kompatibel fil.",

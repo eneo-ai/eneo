@@ -79,6 +79,7 @@ from eneo.flows.domain.flow import (
     FlowStepRetrievalPolicy,
     parse_flow_step_retrieval_policy,
 )
+from eneo.flows.domain.flow_run_released_input import FlowRunReleasedInput
 from eneo.flows.domain.flow_run_retention_policy import FlowRunRetentionProjection
 from eneo.flows.domain.flow_step_attempt_input import (
     FlowStepAttemptInput,
@@ -1379,10 +1380,17 @@ class FlowRunDetailPublic(FlowRunPublic):
             "example": {
                 **FLOW_RUN_PUBLIC_EXAMPLE,
                 "webhook_deliveries": [FLOW_RUN_WEBHOOK_DELIVERY_EXAMPLE],
+                "released_inputs": [],
             }
         },
     )
 
+    released_inputs: list[FlowRunReleasedInput] = Field(
+        description=(
+            "Content-free source-file identifiers released after use, with their step, "
+            "timestamp and typed reason. Retained until the run is deleted."
+        ),
+    )
     webhook_deliveries: list[FlowRunWebhookDeliveryPublic] = Field(
         description=(
             "Secret-free outbound HTTP delivery attempts for this run. The field is always "
@@ -2452,6 +2460,7 @@ class FlowRunEvidenceResponse(BaseModel):
                 "step_results": [FLOW_RUN_STEP_PUBLIC_EXAMPLE],
                 "step_attempts": [],
                 "result_files": [FLOW_RUN_RESULT_FILE_EXAMPLE],
+                "released_inputs": [],
                 "review_checkpoints": [FLOW_RUN_REVIEW_CHECKPOINT_EVIDENCE_EXAMPLE],
                 "webhook_deliveries": [FLOW_RUN_WEBHOOK_DELIVERY_EXAMPLE],
                 "provider_calls": PROVIDER_CALL_EVIDENCE_PAGE_EXAMPLE,
@@ -2466,6 +2475,9 @@ class FlowRunEvidenceResponse(BaseModel):
     step_results: list[FlowRunStepPublic]
     step_attempts: list[FlowStepAttemptPublic]
     result_files: list[FlowRunStepResultFile]
+    released_inputs: list[FlowRunReleasedInput] = Field(
+        description="Content-free source inputs released after use, retained until the run is deleted.",
+    )
     review_checkpoints: list[FlowRunReviewCheckpointEvidencePublic]
     transcript_correction_revisions: list[FlowTranscriptCorrectionRevisionPublic] = (
         Field(default_factory=list[FlowTranscriptCorrectionRevisionPublic])

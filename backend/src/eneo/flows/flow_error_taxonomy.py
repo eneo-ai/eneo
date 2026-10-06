@@ -196,6 +196,13 @@ FLOW_ERROR_TAXONOMY: dict[FlowApiErrorCode, FlowErrorTaxonomyEntry] = {
         consumer_action="Create a new run; no completed prefix can be reused.",
         user_action="Start a new run because no completed steps can be reused.",
     ),
+    FlowApiErrorCode.RUN_SOURCE_AUDIO_DELETED: _entry(
+        category="Run lifecycle",
+        surfaced_through="API error response",
+        cause="A retry needs transcription source audio that was deleted after use.",
+        consumer_action="Upload source audio in a new run; retries that only reuse the completed prefix can continue.",
+        user_action="Upload the audio again in a new run.",
+    ),
     FlowApiErrorCode.RUN_RETRY_PREFIX_UNSUPPORTED: _entry(
         category="Run lifecycle",
         surfaced_through="API error response",

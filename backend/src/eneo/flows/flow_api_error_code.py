@@ -21,6 +21,7 @@ class FlowApiErrorCode(str, Enum):
     RUN_RETRY_SOURCE_VERSION_STALE = "flow_run_retry_source_version_stale"
     RUN_RETRY_NOTHING_TO_REUSE = "flow_run_retry_nothing_to_reuse"
     RUN_RETRY_PREFIX_UNSUPPORTED = "flow_run_retry_prefix_unsupported"
+    RUN_SOURCE_AUDIO_DELETED = "flow_run_source_audio_deleted"
     RUN_REQUIRED_STEP_INPUT_MISSING = "flow_run_required_step_input_missing"
     RUN_RUNTIME_INPUT_DISABLED = "flow_run_runtime_input_disabled"
     RUN_TOP_LEVEL_FILE_IDS_NOT_SUPPORTED = "flow_run_top_level_file_ids_not_supported"

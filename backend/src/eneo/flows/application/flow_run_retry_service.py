@@ -170,6 +170,18 @@ class FlowRunRetryService:
             if step.step_order != len(prefix) + 1:
                 _unsupported(step_order=step.step_order, reason="non_contiguous_prefix")
             prefix.append(step)
+        released = await self.run_repo.list_released_input_step_ids(
+            run_id=source.id, tenant_id=self.user.tenant_id
+        )
+        required_audio = released - {step.step_id for step in prefix}
+        if required_audio:
+            raise ConflictException(
+                "The source audio needed by this retry was deleted after use.",
+                code=FlowApiErrorCode.RUN_SOURCE_AUDIO_DELETED.value,
+                context={
+                    "step_ids": [str(step_id) for step_id in sorted(required_audio)]
+                },
+            )
         if not prefix:
             raise ConflictException(
                 "The source run has no completed prefix to reuse. Create a new run.",

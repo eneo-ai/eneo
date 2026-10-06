@@ -1295,14 +1295,21 @@ async def test_a_manifest_larger_than_the_budget_is_pruned_across_chunks(
     assert pruned == [(receipt_id, test_tenant.id)]
 
 
+@pytest.mark.parametrize(
+    "category", [RetentionCategory.ABANDONED_UPLOAD, RetentionCategory.AUDIO_AFTER_USE]
+)
 async def test_a_withdrawn_receipt_stops_covering_its_entity_and_is_pruned(
     test_tenant,
+    category,
 ) -> None:
     family = NewRetentionReceipt(
         task=_TASK,
         entity_kind=RetentionEntityKind.FILE_FAMILY,
         entity_id=uuid4(),
-        category=RetentionCategory.ABANDONED_UPLOAD,
+        category=category,
+        source_run_id=uuid4()
+        if category is RetentionCategory.AUDIO_AFTER_USE
+        else None,
         tenant_id=test_tenant.id,
     )
     async with _committed() as session:
@@ -1313,6 +1320,8 @@ async def test_a_withdrawn_receipt_stops_covering_its_entity_and_is_pruned(
             manifest_after=ManifestPosition(file_id=uuid4(), variant="file", ordinal=0),
             complete=False,
         )
+        # Kills losing the source-run proof while retaining the existing family identity.
+        assert receipt.source_run_id == family.source_run_id
         await service.withdraw(receipt)
 
     async with _committed() as session:

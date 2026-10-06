@@ -284,7 +284,10 @@ class FlowHousekeepingRepository:
     def receipt_held() -> sa.ColumnElement[bool]:
         """A held Flow or a remaining run's fence keeps the receipt's proof."""
         return sa.or_(
-            flow_runless_data_held_predicate(flow_id=RetentionReceipts.flow_id),
+            flow_run_held_predicate(
+                run_id=RetentionReceipts.source_run_id,
+                flow_id=RetentionReceipts.flow_id,
+            ),
             sa.exists(
                 sa.select(FlowRuns.id).where(
                     FlowRuns.retention_receipt_id == RetentionReceipts.id

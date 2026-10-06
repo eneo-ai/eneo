@@ -294,6 +294,7 @@ async def validate_submitted_step_inputs(
     principal: FlowPrincipal,
     tenant_id: UUID,
     inline_payload: object = None,
+    reused_step_ids: frozenset[UUID] = frozenset(),
 ) -> None:
     step_by_id = {step.step_id: step for step in steps}
     aggregate_count = 0
@@ -457,6 +458,7 @@ async def validate_submitted_step_inputs(
         str(step_id)
         for step_id, spec in specs.items()
         if spec.runtime_input.required
+        and step_id not in reused_step_ids
         and len(normalized_step_inputs.get(step_id, [])) == 0
     ]
     if required_missing:

@@ -73,6 +73,7 @@ def context(monkeypatch):
     )
     run_repo.list_step_orders_with_result_files.return_value = set()
     run_repo.list_current_step_input_file_ids_by_step_result_id.return_value = files
+    run_repo.list_released_input_step_ids.return_value = frozenset()
     flow_repo = AsyncMock()
     flow_repo.get.return_value = SimpleNamespace(published_version=2)
     access = AsyncMock()
@@ -573,3 +574,24 @@ async def test_retry_keeps_the_steps_that_hold_one_recording(context):
     args = context.service.run_service.create_run.await_args.kwargs
     assert args["step_inputs"][failed.step_id].single_recording is True
     assert args["step_inputs"][completed.step_id].single_recording is False
+
+
+@pytest.mark.parametrize("released_order,refused", [(1, False), (3, True)])
+async def test_released_audio_only_refuses_steps_that_retry_will_execute(
+    context, released_order, refused
+):
+    """Kills G5-D01: missing release admission or refusing an imported prefix."""
+    released = context.results[released_order - 1]
+    context.service.run_repo.list_released_input_step_ids.return_value = frozenset(
+        {released.step_id}
+    )
+    context.files.pop(released.id)
+    if refused:
+        with pytest.raises(ConflictException) as error:
+            await context.service.retry_from_failed_step(**context.request)
+        assert error.value.code == "flow_run_source_audio_deleted"
+        assert error.value.context == {"step_ids": [str(released.step_id)]}
+    else:
+        result = await context.service.retry_from_failed_step(**context.request)
+        assert result.first_executed_step_order == 3
+        assert result.reused_step_orders == (1, 2)

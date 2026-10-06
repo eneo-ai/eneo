@@ -212,6 +212,7 @@ class RetentionEntityKind(StrEnum):
 class RetentionCategory(StrEnum):
     ABANDONED_UPLOAD = "abandoned_upload"
     TEMPLATE_ASSET = "template_asset"
+    AUDIO_AFTER_USE = "audio_after_use"
     # The whole run record (K4).
     RUN_RECORD = "run_record"
 
@@ -255,9 +256,16 @@ class NewRetentionReceipt:
     policy_mode: str | None = None
     # The person who started an explicit deletion.
     triggered_by_user_id: UUID | None = None
+    # A file-family proof needs its source run to repeat eligibility after a pause.
+    source_run_id: UUID | None = None
 
     def __post_init__(self) -> None:
         retention_name(self.task)
+        if (
+            self.category is RetentionCategory.AUDIO_AFTER_USE
+            and self.source_run_id is None
+        ):
+            raise ValueError("An audio-after-use proof identifies its source run.")
         if self.policy_mode is not None:
             retention_name(self.policy_mode)
         if self.triggered_by_user_id is not None and (
@@ -300,6 +308,7 @@ class RetentionReceipt:
     started_at: datetime
     rows_deleted: int = 0
     trigger: RetentionTrigger = RetentionTrigger.SCHEDULED
+    source_run_id: UUID | None = None
 
 
 @dataclass(frozen=True, slots=True)

@@ -10,7 +10,9 @@ import pytest
 import sqlalchemy as sa
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from eneo.audit.domain.action_types import ActionType
 from eneo.database.database import sessionmanager
+from eneo.database.tables.audit_log_table import AuditLog
 from eneo.database.tables.flow_tables import (
     FlowProviderCalls,
     FlowStepAttemptResolvedInputs,
@@ -29,6 +31,9 @@ from eneo.flows.domain.flow import Flow
 from eneo.flows.domain.provider_call import ProviderCallEvidencePage
 from eneo.flows.infrastructure.flow_provider_call_repo import (
     FlowProviderCallRepository,
+)
+from eneo.flows.infrastructure.flow_run_released_input_repo import (
+    FlowRunReleasedInputRepository,
 )
 from eneo.flows.infrastructure.flow_run_repo import (
     FlowRunRepository,
@@ -431,6 +436,7 @@ async def test_evidence_view_route_uses_one_repeatable_read_snapshot(
     admin_user,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    """Kills G5-E01: release state is omitted or read outside the evidence snapshot."""
     _ = setup_database
     async with sessionmanager.session() as seed_session, seed_session.begin():
         seed = await _seed_snapshot_run(
@@ -448,6 +454,7 @@ async def test_evidence_view_route_uses_one_repeatable_read_snapshot(
 
     preflight_attempt_counts: list[int] = []
     observed_isolation: list[str] = []
+    released_file_id = uuid4()
     original_measure = FlowRunRepository.measure_step_attempt_evidence
 
     async def measure_then_mutate(
@@ -475,6 +482,11 @@ async def test_evidence_view_route_uses_one_repeatable_read_snapshot(
                 mutation_session.begin(),
             ):
                 mutation_session.add(_attempt(seed, attempt_no=2))
+                await FlowRunReleasedInputRepository(mutation_session).record(
+                    run_id=seed.run_id,
+                    bindings=[(seed.step_id, released_file_id)],
+                    at=datetime.now(timezone.utc),
+                )
         return measurement
 
     monkeypatch.setattr(
@@ -499,6 +511,22 @@ async def test_evidence_view_route_uses_one_repeatable_read_snapshot(
         2,
     ]
     assert _summary_attempt_count(after_payload) == 2
+    assert before_payload["released_inputs"] == []
+    assert [
+        (item["step_id"], item["file_id"]) for item in after_payload["released_inputs"]
+    ] == [(str(seed.step_id), str(released_file_id))]
+    assert "released_inputs" not in after_payload["debug_export"]
+    async with sessionmanager.session() as audit_session, audit_session.begin():
+        assert (
+            await audit_session.scalar(
+                sa.select(sa.func.count(AuditLog.id)).where(
+                    AuditLog.action == ActionType.FLOW_EVIDENCE_VIEWED.value,
+                    AuditLog.entity_id == seed.run_id,
+                    AuditLog.tenant_id == seed.tenant_id,
+                )
+            )
+            == 2
+        )
 
 
 @pytest.mark.asyncio

@@ -35,6 +35,7 @@ from eneo.flows.domain.flow_run_exceptions import (
     FlowRunConcurrencyLimitReachedError,
     FlowRunNotFoundError,
 )
+from eneo.flows.domain.flow_run_released_input import FlowRunReleasedInput
 from eneo.flows.domain.mapped_execution_policy import (
     resolve_flow_mapped_execution_policy_from_source,
 )
@@ -103,6 +104,9 @@ from eneo.flows.infrastructure.flow_provider_call_repo import (
     FlowRunUsage,
 )
 from eneo.flows.infrastructure.flow_repo import FlowRepository
+from eneo.flows.infrastructure.flow_run_released_input_repo import (
+    FlowRunReleasedInputRepository,
+)
 from eneo.flows.infrastructure.flow_run_repo import (
     FlowRunRepository,
     PreseedStep,
@@ -235,6 +239,7 @@ class FlowRunWithResultFilesAndUsage:
 @dataclass(frozen=True, slots=True)
 class FlowRunDetailView(FlowRunWithResultFilesAndUsage):
     webhook_deliveries: Sequence[FlowRunWebhookDeliveryRead] = ()
+    released_inputs: Sequence[FlowRunReleasedInput] = ()
 
 
 @dataclass(frozen=True)
@@ -649,6 +654,7 @@ class FlowRunService:
                 steps=runtime_steps,
                 specs=runtime_specs,
                 normalized_step_inputs=normalized_step_inputs,
+                reused_step_ids=reused_step_ids,
                 inline_payload=normalized_inline_payload,
                 file_repo=self.file_repo,
                 runtime_upload_repo=self.runtime_upload_repo,
@@ -1011,6 +1017,9 @@ class FlowRunService:
             token_usage=run_view.token_usage,
             final_output=run_view.final_output,
             webhook_deliveries=tuple(webhook_deliveries),
+            released_inputs=await FlowRunReleasedInputRepository(
+                self.flow_run_repo.session
+            ).list_for_run(run_id=run_id, tenant_id=self.user.tenant_id),
         )
 
     async def enrich_run_with_result_files_and_usage(

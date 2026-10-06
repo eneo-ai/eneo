@@ -75,6 +75,7 @@ def _receipt(row: RetentionReceipts) -> RetentionReceipt:
         started_at=row.started_at,
         rows_deleted=row.rows_deleted,
         trigger=RetentionTrigger(row.trigger),
+        source_run_id=row.source_run_id,
     )
 
 
@@ -105,6 +106,7 @@ class RetentionReceiptRepository:
                 tenant_id=receipt.tenant_id,
                 space_id=receipt.space_id,
                 flow_id=receipt.flow_id,
+                source_run_id=receipt.source_run_id,
                 policy_source=(
                     receipt.policy_source.value
                     if receipt.policy_source is not None

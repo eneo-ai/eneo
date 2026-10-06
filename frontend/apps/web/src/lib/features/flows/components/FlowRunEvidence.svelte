@@ -17,6 +17,7 @@
     serializeEvidencePayload
   } from "./flowRunEvidenceActions";
   import { m } from "$lib/paraglide/messages";
+  import { formatDateTime } from "$lib/core/formatting/dateTime";
   import { getFlowUserMode } from "$lib/features/flows/FlowUserMode";
   import {
     getRuntimeInputSummary,
@@ -83,6 +84,7 @@
   };
 
   let evidence: EvidencePayload | null = $state(null);
+  let releasedInputs = $derived(evidence?.released_inputs ?? []);
   let loading = $state(true);
   let loadError = $state(false);
   let expandedSteps: number[] = $state([]);
@@ -509,6 +511,15 @@
       resultFiles={evidence.result_files ?? []}
       onDownloadResultFile={downloadArtifact}
     />
+    {#each releasedInputs as input (`${input.step_id}-${input.file_id}`)}
+      <Alert.Root role="status">
+        <Alert.Description>
+          {m.flow_run_audio_deleted_after_use({
+            date: formatDateTime(input.released_at)
+          })}
+        </Alert.Description>
+      </Alert.Root>
+    {/each}
     {#if $mode === "power_user"}
       <FlowRunEvidenceToolbar
         debugExport={evidence.debug_export}

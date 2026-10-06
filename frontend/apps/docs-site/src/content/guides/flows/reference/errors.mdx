@@ -239,6 +239,7 @@ Structured output uses the inline byte ceiling for both single calls and mapped 
 | Run lifecycle | `flow_run_retry_source_version_stale` | Request path | Create a new run against the current published version. |
 | Run lifecycle | `flow_run_retry_nothing_to_reuse` | Request path | Create a new run; no completed prefix can be reused. |
 | Run lifecycle | `flow_run_retry_prefix_unsupported` | Request path | Inspect the step order and reason in the error context, then create a new run if the prefix cannot be reused. |
+| Run lifecycle | `flow_run_source_audio_deleted` | Request path | Upload source audio in a new run; retries that only reuse the completed prefix can continue. |
 | Run lifecycle          | `flow_run_redispatch_conflict`                           | Request path                  | Refresh the run and retry with its current dispatch_exhausted_at value.                                                                          |
 | Run lifecycle          | `flow_run_user_cancelled`                                | Run execution                 | Treat the terminal state as intentional and do not auto-retry.                                                                                   |
 | Run lifecycle          | `flow_runtime_actor_invalid`                             | Run execution                 | Refresh service-key or owner configuration before retrying.                                                                                      |

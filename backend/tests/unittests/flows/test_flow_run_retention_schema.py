@@ -58,3 +58,27 @@ def test_database_constraints_reject_partial_and_unsupported_policies() -> None:
         assert "'review_required'" in mode_sql
         assert "'auto_delete'" in mode_sql
         assert "'automatic'" not in mode_sql
+
+
+def test_released_audio_state_outlives_its_file_and_dies_with_the_run() -> None:
+    """Kills G5-R01: omit durable state, point at the deleted file, or lose run cascade."""
+    from eneo.database.tables.flow_tables import FlowRuns
+
+    assert "flow_run_released_inputs" in FlowRuns.metadata.tables
+    table = FlowRuns.metadata.tables["flow_run_released_inputs"]
+    assert {column.name for column in table.columns} == {
+        "run_id",
+        "step_id",
+        "file_id",
+        "released_at",
+        "reason",
+    }
+    assert {column.name for column in table.primary_key} == {
+        "run_id",
+        "step_id",
+        "file_id",
+    }
+    assert not table.c.file_id.foreign_keys
+    foreign = list(table.c.run_id.foreign_keys)
+    assert len(foreign) == 1 and foreign[0].target_fullname == "flow_runs.id"
+    assert foreign[0].ondelete == "CASCADE"

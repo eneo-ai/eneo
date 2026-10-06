@@ -607,7 +607,28 @@ def test_gallring_tables_revision_emits_static_ddl_offline():
     assert "UPDATE alembic_version SET version_num='202610041200'" in emitted
 
 
-def test_housekeeping_index_revision_emits_static_concurrent_ddl_offline():
+@pytest.mark.parametrize(
+    ("span", "revision", "indexes"),
+    [
+        (
+            "202610041200:202610041300",
+            "202610041300",
+            (
+                "ix_flow_live_transcripts_unbound_created",
+                "ix_flow_run_audit_outbox_delivered",
+            ),
+        ),
+        (
+            "202610061900:202610062000",
+            "202610062000",
+            ("ix_flow_run_step_input_files_created_id",),
+        ),
+    ],
+)
+def test_housekeeping_index_revision_emits_static_concurrent_ddl_offline(
+    span, revision, indexes
+):
+    """Kills G5-M01: read the index catalog when generating offline SQL."""
     backend = Path(__file__).parents[2]
     config = Config(str(backend / "alembic.ini"))
     config.set_main_option("script_location", str(backend / "alembic"))
@@ -615,16 +636,13 @@ def test_housekeeping_index_revision_emits_static_concurrent_ddl_offline():
     output = io.StringIO()
     config.output_buffer = output
 
-    command.upgrade(config, "202610041200:202610041300", sql=True)
+    command.upgrade(config, span, sql=True)
 
     emitted = output.getvalue()
-    for name in (
-        "ix_flow_live_transcripts_unbound_created",
-        "ix_flow_run_audit_outbox_delivered",
-    ):
+    for name in indexes:
         assert f"CREATE INDEX CONCURRENTLY IF NOT EXISTS {name}" in emitted
     assert "pg_index" not in emitted  # no catalog read offline
-    assert "UPDATE alembic_version SET version_num='202610041300'" in emitted
+    assert f"UPDATE alembic_version SET version_num='{revision}'" in emitted
 
 
 def _offline_upgrade(span: str) -> str:
@@ -636,6 +654,19 @@ def _offline_upgrade(span: str) -> str:
     config.output_buffer = output
     command.upgrade(config, span, sql=True)
     return output.getvalue()
+
+
+def test_audio_family_proof_revision_emits_static_atomic_ddl_offline():
+    """Kills G5-M02: skip source identity or allow audio proof without its source."""
+    emitted = _offline_upgrade("202610061800:202610061900")
+
+    assert "ALTER TABLE gallring_receipts ADD COLUMN source_run_id UUID" in emitted
+    assert "category <> 'audio_after_use' OR source_run_id IS NOT NULL" in emitted
+    assert "ADD CONSTRAINT ck_gallring_receipts_category CHECK" in emitted
+    assert "'audio_after_use'" in emitted
+    assert "REFERENCES flow_runs" not in emitted
+    assert emitted.count("COMMIT;") == 1
+    assert "UPDATE alembic_version SET version_num='202610061900'" in emitted
 
 
 def test_auto_delete_vocabulary_revision_emits_static_ddl_offline():
