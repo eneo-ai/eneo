@@ -11,7 +11,7 @@
 
 <script lang="ts">
   import { m } from "$lib/paraglide/messages";
-  import { Markdown } from "@eneo/ui";
+  import { Markdown } from "$lib/components/markdown/index.js";
   import InternalToolStep from "$lib/features/chat/components/conversation/InternalToolStep.svelte";
   import ReasoningTrace from "$lib/features/chat/components/conversation/ReasoningTrace.svelte";
   import TypingIndicator from "$lib/features/chat/components/conversation/TypingIndicator.svelte";

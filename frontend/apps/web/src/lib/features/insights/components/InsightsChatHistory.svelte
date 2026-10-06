@@ -9,11 +9,11 @@
 
 <script lang="ts">
   import { m } from "$lib/paraglide/messages";
-  import { Button, Table } from "@eneo/ui";
+  import * as Table from "$lib/components/resource-table/index.js";
+  import { Button } from "$lib/components/ui/button/index.js";
+  import { formatDateTime } from "$lib/core/formatting/dateTime";
   import { IconLoadingSpinner } from "@eneo/icons/loading-spinner";
-  import { createRender } from "svelte-headless-table";
   import { toStore } from "svelte/store";
-  import dayjs from "dayjs";
   import { getInsightsChatService } from "../InsightsChatService.svelte";
   import InsightsChatHistoryActions from "./InsightsChatHistoryActions.svelte";
 
@@ -32,7 +32,7 @@
       header: m.name(),
       value: (item) => item.name,
       cell: (item) =>
-        createRender(Table.ButtonCell, {
+        Table.renderComponent(Table.ButtonCell, {
           label: item.value.name,
           onclick() {
             onOpen(item.value);
@@ -44,13 +44,14 @@
       header: m.created(),
       accessor: "created_at",
       cell: (item) =>
-        createRender(Table.FormattedCell, {
-          value: item.value ? dayjs(item.value).format("YYYY-MM-DD HH:mm") : "",
+        Table.renderComponent(Table.FormattedCell, {
+          value: formatDateTime(item.value),
           monospaced: true
         })
     }),
     table.columnActions({
-      cell: (item) => createRender(InsightsChatHistoryActions, { conversation: item.value })
+      cell: (item) =>
+        Table.renderComponent(InsightsChatHistoryActions, { conversation: item.value })
     })
   ]);
 </script>
@@ -71,7 +72,7 @@
     ></Table.Root>
     {#if chat.hasMoreHistory}
       <Button
-        variant="outlined"
+        variant="outline"
         class="self-start"
         disabled={chat.loadHistory.isLoading}
         onclick={() => chat.loadHistory(true)}>{m.insights_chat_load_more()}</Button

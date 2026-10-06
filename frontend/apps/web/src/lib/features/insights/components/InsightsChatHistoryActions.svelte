@@ -5,12 +5,13 @@
 
     Row actions of the previous-analyses table: delete, with the same
     confirmation dialog as the chat history. Legacy component syntax on
-    purpose: svelte-headless-table's createRender needs a class component.
+    purpose: the table renders its cells as Svelte 4 components.
 -->
 
 <script lang="ts">
   import { IconTrash } from "@eneo/icons/trash";
-  import { Button, Dialog } from "@eneo/ui";
+  import ConfirmDialog from "$lib/components/ConfirmDialog.svelte";
+  import { Button } from "$lib/components/ui/button/index.js";
   import { m } from "$lib/paraglide/messages";
   import {
     getInsightsChatService,
@@ -23,35 +24,24 @@
 </script>
 
 <div class="flex items-center justify-end gap-2">
-  <Dialog.Root alert>
-    <Dialog.Trigger asFragment let:trigger>
+  <ConfirmDialog
+    title={m.insights_chat_delete_conversation()}
+    confirmLabel={m.delete()}
+    onConfirm={() => chat.deleteConversation(conversation)}
+  >
+    {#snippet trigger({ props })}
       <Button
+        {...props}
         variant="destructive"
-        is={trigger}
-        label={m.insights_chat_delete_conversation()}
-        padding="icon"
+        size="icon"
+        aria-label={m.insights_chat_delete_conversation()}
       >
         <IconTrash />
       </Button>
-    </Dialog.Trigger>
-
-    <Dialog.Content width="small">
-      <Dialog.Title>{m.insights_chat_delete_conversation()}</Dialog.Title>
-      <Dialog.Description>
-        {m.do_you_really_want_to_delete()}
-        <span class="italic">{conversation.name.slice(0, 200)}</span>?
-      </Dialog.Description>
-
-      <Dialog.Controls let:close>
-        <Button is={close}>{m.cancel()}</Button>
-        <Button
-          is={close}
-          variant="destructive"
-          on:click={() => chat.deleteConversation(conversation)}
-        >
-          {m.delete()}
-        </Button>
-      </Dialog.Controls>
-    </Dialog.Content>
-  </Dialog.Root>
+    {/snippet}
+    {#snippet description()}
+      {m.do_you_really_want_to_delete()}
+      <span class="italic">{conversation.name.slice(0, 200)}</span>?
+    {/snippet}
+  </ConfirmDialog>
 </div>
