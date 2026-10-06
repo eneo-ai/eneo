@@ -106,12 +106,6 @@ export type AIBuilderSavedFlowStepEditContext = Extract<
 
 export type AIBuilderPlanEditScope = AIBuilderPlanEditContext["scope"];
 
-export interface AIBuilderSuggestChangeIntent {
-  placeholder?: string;
-  prefill?: string;
-  editContext?: AIBuilderPlanEditContext | null;
-}
-
 /** The part of a saved step the editor's "Ändra med AI" menu asked to change:
  *  the server's own vocabulary, sent with the turn it launched. */
 export type AIBuilderStepIntent = NonNullable<AIBuilderSendMessageRequest["edit_intent"]>;
@@ -906,35 +900,37 @@ export function parseAIBuilderPublicErrorPayload(
   return result.success ? result.data : null;
 }
 
+export class AIBuilderStreamContractError extends Error {
+  constructor() {
+    super("AI Builder stream event violates its contract.");
+  }
+}
+
 export function parseAIBuilderStreamEvent(
   rawEvent: AIBuilderStreamEvent
 ): AIBuilderParsedStreamEvent {
   switch (rawEvent.event) {
     case "text":
-      return { event: "text", data: parseEventData("text", rawEvent.data, eventDataSchemas.text) };
+      return { event: "text", data: parseEventData(rawEvent.data, eventDataSchemas.text) };
     case "status":
       return {
         event: "status",
-        data: parseEventData("status", rawEvent.data, eventDataSchemas.status)
+        data: parseEventData(rawEvent.data, eventDataSchemas.status)
       };
     case "question":
       return {
         event: "question",
-        data: parseEventData("question", rawEvent.data, eventDataSchemas.question)
+        data: parseEventData(rawEvent.data, eventDataSchemas.question)
       };
     case "requirements_summary":
       return {
         event: "requirements_summary",
-        data: parseEventData(
-          "requirements_summary",
-          rawEvent.data,
-          eventDataSchemas.requirements_summary
-        )
+        data: parseEventData(rawEvent.data, eventDataSchemas.requirements_summary)
       };
     case "plan":
       return {
         event: "plan",
-        data: parseEventData("plan", rawEvent.data, eventDataSchemas.plan)
+        data: parseEventData(rawEvent.data, eventDataSchemas.plan)
       };
     case "usage":
       return {
@@ -944,38 +940,31 @@ export function parseAIBuilderStreamEvent(
     case "error":
       return {
         event: "error",
-        data: parseEventData("error", rawEvent.data, eventDataSchemas.error)
+        data: parseEventData(rawEvent.data, eventDataSchemas.error)
       };
     case "done":
       if (rawEvent.data !== "") {
-        throw new Error("AI Builder done event must have an empty data frame.");
+        throw new AIBuilderStreamContractError();
       }
       return { event: "done", data: "" };
     default:
-      throw new Error(`Unknown AI Builder stream event: ${rawEvent.event}`);
+      throw new AIBuilderStreamContractError();
   }
 }
-
-function parseEventData<T>(event: string, data: string, schema: z.ZodType<T>): T {
+function parseEventData<T>(data: string, schema: z.ZodType<T>): T {
   let parsed: unknown;
   try {
-    parsed = JSON.parse(data) as unknown;
-  } catch (cause) {
-    throw new Error(`Invalid AI Builder ${event} event payload: malformed JSON.`, { cause });
+    parsed = JSON.parse(data);
+  } catch {
+    throw new AIBuilderStreamContractError();
   }
   const result = schema.safeParse(parsed);
-  if (!result.success) {
-    const issue = result.error.issues[0];
-    const location = issue?.path.length ? ` at ${issue.path.map(String).join(".")}` : "";
-    throw new Error(
-      `Invalid AI Builder ${event} event payload${location}: ${issue?.message ?? "schema mismatch"}.`
-    );
-  }
+  if (!result.success) throw new AIBuilderStreamContractError();
   return result.data;
 }
 
 function parseTelemetryEventData(data: string): AIBuilderUsageEventData {
-  const parsed = parseEventData("usage", data, eventDataSchemas.usage);
+  const parsed = parseEventData(data, eventDataSchemas.usage);
   return {
     planner_request_count: parsed.planner_request_count ?? 0,
     clarification_question_count: parsed.clarification_question_count ?? 0,

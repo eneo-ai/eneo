@@ -7,7 +7,7 @@ import type {
   AIBuilderErrorDetailValue,
   AIBuilderPublicErrorPayload
 } from "./protocol";
-import { parseAIBuilderPublicErrorPayload } from "./protocol";
+import { AIBuilderStreamContractError, parseAIBuilderPublicErrorPayload } from "./protocol";
 
 interface ParseAIBuilderErrorInput {
   transport: "apply" | "sse";
@@ -142,6 +142,13 @@ function parseSsePayload(payload: unknown, fallbackMessage: string): AIBuilderEr
 }
 
 function parseApplyPayload(payload: unknown, fallbackMessage: string): AIBuilderError {
+  if (payload instanceof AIBuilderStreamContractError) {
+    return clientError({
+      code: "stream_contract_violation",
+      category: "internal",
+      message: fallbackMessage
+    });
+  }
   const body = responseBody(payload);
   const publicError = body ? publicErrorFromRecord(body) : null;
   if (publicError) return publicError;

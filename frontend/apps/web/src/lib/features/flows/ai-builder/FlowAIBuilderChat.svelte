@@ -4,7 +4,6 @@
   import FlowAIBuilderInput from "./FlowAIBuilderInput.svelte";
   import { getAIBuilderService } from "./FlowAIBuilderService.svelte.ts";
   import { buildAnswerLabels } from "./aiBuilderAnswerLabel";
-  import type { AIBuilderPlanEditContext, AIBuilderSuggestChangeIntent } from "./protocol";
 
   interface Props {
     /** Reopen an answered question on the phase screen. */
@@ -20,11 +19,10 @@
   const answerLabelByQuestionId = $derived(buildAnswerLabels(service.messages));
 
   let inputRef = $state<FlowAIBuilderInput | undefined>();
-  let pendingEditContext = $state<AIBuilderPlanEditContext | null>(null);
-  const activeEditContext = $derived(pendingEditContext ?? service.activeStepTransportContext);
+  const activeEditContext = $derived(service.activeStepTransportContext);
   const savedFlowStepScopeLabel = $derived.by(() => {
     const scope = service.activeStepScope;
-    if (!scope || pendingEditContext) return null;
+    if (!scope) return null;
     return m.ai_builder_edit_context_step({ step: scope.stepNumber, name: scope.stepName });
   });
 
@@ -38,41 +36,17 @@
           : m.ai_builder_generating()
   );
 
-  export function focusInput(intent?: string | AIBuilderSuggestChangeIntent) {
-    if (typeof intent === "string") {
-      pendingEditContext = null;
-      inputRef?.focus(intent ? { placeholder: intent } : undefined);
-      return;
-    }
-    pendingEditContext = intent?.editContext ?? null;
-    inputRef?.focus(
-      intent ? { placeholder: intent.placeholder, prefill: intent.prefill } : undefined
-    );
+  export function focusInput() {
+    inputRef?.focus();
   }
 
   export function focusAttachControl() {
     inputRef?.focusAttachControl();
   }
 
-  function clearPendingEditContext() {
-    pendingEditContext = null;
-  }
-
   function clearActiveEditContext() {
-    if (pendingEditContext) {
-      clearPendingEditContext();
-    } else {
-      service.clearActiveStepScope();
-    }
+    service.clearActiveStepScope();
   }
-
-  $effect(() => {
-    if (!pendingEditContext) return;
-    const currentPlanId = service.currentPlan?.plan_id ?? null;
-    if (!service.hasSession || (currentPlanId && currentPlanId !== pendingEditContext.plan_id)) {
-      clearPendingEditContext();
-    }
-  });
 
   let scrollContainer = $state<HTMLDivElement | undefined>();
 
@@ -159,7 +133,7 @@
           bind:this={inputRef}
           editContext={activeEditContext}
           editContextLabel={savedFlowStepScopeLabel}
-          editContextLocked={!pendingEditContext && service.activeStepScopeLocked}
+          editContextLocked={service.activeStepScopeLocked}
           oncleareditcontext={clearActiveEditContext}
           refinement={service.currentPlan !== null}
           placeholder={service.currentPlan === null && service.messages.length > 0

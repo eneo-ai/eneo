@@ -19,7 +19,7 @@ import {
   type SegmentDetails,
   type SpeakerEdit
 } from "$lib/features/flows/transcriptRuns";
-import { effectiveSpeaker } from "./speakerReview";
+import { effectiveSpeaker, type EffectiveSpeaker } from "./speakerReview";
 import type { TranscriptSegment } from "$lib/features/flows/transcriptSegments";
 
 /** A stored word placed inside one part, in the part's own display text. */
@@ -63,8 +63,7 @@ export type TurnPart = {
 export type TranscriptTurn = {
   /** Stable ordinal for keying. */
   index: number;
-  /** Effective raw speaker label, or null for an unlabelled transcript. */
-  speaker: string | null;
+  speaker: EffectiveSpeaker;
   fileIndex: number;
   /** Seconds: the first part's start. */
   start: number;
@@ -128,7 +127,10 @@ export function computeTurns(
       const start = runStart(segment, run.rawStart);
       if (
         !current ||
-        current.speaker !== effective ||
+        current.speaker.kind !== effective.kind ||
+        (current.speaker.kind === "named" &&
+          effective.kind === "named" &&
+          current.speaker.label !== effective.label) ||
         current.fileIndex !== segment.fileIndex ||
         current.reviewKey !== reviewKey
       ) {

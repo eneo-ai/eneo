@@ -3452,6 +3452,7 @@ describe("FlowAIBuilder confirm, build and review", () => {
     primary: () => string;
     secondary: (() => string) | null;
     records: string;
+    focusesComposer?: boolean;
   }[] = [
     {
       name: "a connection this client lost while the turn still runs",
@@ -3527,6 +3528,7 @@ describe("FlowAIBuilder confirm, build and review", () => {
       },
       latestTurn: "committed",
       kind: "invalid_proposal",
+      focusesComposer: true,
       heading: () => m.ai_builder_failure_heading_invalid_proposal(),
       cause: () => m.ai_builder_failure_cause_invalid_proposal(),
       primary: () => m.ai_builder_failure_action_clarify(),
@@ -3651,7 +3653,17 @@ describe("FlowAIBuilder confirm, build and review", () => {
 
   it.each(generationFailures)(
     "shows one assistive failure card for $name",
-    async ({ error, latestTurn, kind, heading, cause, primary, secondary, records }) => {
+    async ({
+      error,
+      latestTurn,
+      kind,
+      heading,
+      cause,
+      primary,
+      secondary,
+      records,
+      focusesComposer
+    }) => {
       const { reports } = await driveGenerationFailure(error, latestTurn);
 
       // The skeleton must never hide a failed generation: exactly one surface
@@ -3682,6 +3694,11 @@ describe("FlowAIBuilder confirm, build and review", () => {
       expect(observed).not.toHaveProperty("message");
 
       await fireEvent.click(within(card).getByRole("button", { name: primary() }));
+      if (focusesComposer) {
+        // Mutant: the clarify action opens the conversation without focusing its composer.
+        await screen.findByRole("heading", { name: m.ai_builder_conversation_title() });
+        await waitFor(() => expect(document.activeElement).toBe(screen.getByRole("textbox")));
+      }
       // The same envelope again, with the first selection, and nothing else:
       // the retained turn is not shown or observed again while its retry
       // is in flight.
@@ -4057,34 +4074,41 @@ describe("FlowAIBuilder edit host contract", () => {
     });
   });
 
-  it("scopes the next message to the focused saved Flow step", async () => {
-    const { fetch } = makeFetch({ created: editSession() });
-    const { stream, calls } = makeStream();
-    const { service, builder } = renderShell({
-      fetch,
-      stream,
-      targetKind: "edit",
-      flowId: "flow-1"
-    });
+  it.each(["task", "conversation"] as const)(
+    "scopes the next message to the focused saved Flow step (%s)",
+    async (view) => {
+      const { fetch } = makeFetch({ created: editSession() });
+      const { stream, calls } = makeStream();
+      const { service, builder } = renderShell({
+        fetch,
+        stream,
+        targetKind: "edit",
+        flowId: "flow-1"
+      });
 
-    await waitFor(() => expect(service().hasSession).toBe(true));
-    await waitFor(() => expect(builder()).toBeDefined());
-    await builder().focusSavedFlowStep(SAVED_STEP_SCOPE);
+      await waitFor(() => expect(service().hasSession).toBe(true));
+      await waitFor(() => expect(builder()).toBeDefined());
+      await builder().focusSavedFlowStep(SAVED_STEP_SCOPE);
+      if (view === "conversation") {
+        await fireEvent.click(button(new RegExp(escape(m.ai_builder_conversation_button()))));
+        await screen.findByRole("heading", { name: m.ai_builder_conversation_title() });
+      }
 
-    expect(await screen.findByText(SAVED_STEP_LABEL)).toBeTruthy();
-    const input = screen.getByRole("textbox", {
-      name: m.ai_builder_saved_step_prompt_placeholder()
-    }) as HTMLTextAreaElement;
-    await waitFor(() => expect(document.activeElement).toBe(input));
-    await fireEvent.input(input, { target: { value: "Ändra bara det här steget" } });
-    await fireEvent.keyDown(input, { key: "Enter" });
+      expect(await screen.findByText(SAVED_STEP_LABEL)).toBeTruthy();
+      // Mutant: the conversation stops forwarding the service-owned scope to send.
+      const input = screen.getByRole("textbox") as HTMLTextAreaElement;
+      if (view === "task") await waitFor(() => expect(document.activeElement).toBe(input));
+      else input.focus();
+      await fireEvent.input(input, { target: { value: "Ändra bara det här steget" } });
+      await fireEvent.keyDown(input, { key: "Enter" });
 
-    await waitFor(() => expect(calls).toHaveLength(1));
-    expect(calls[0]!.body).toMatchObject({
-      message: "Ändra bara det här steget",
-      edit_context: SAVED_STEP_SCOPE.editContext
-    });
-  });
+      await waitFor(() => expect(calls).toHaveLength(1));
+      expect(calls[0]!.body).toMatchObject({
+        message: "Ändra bara det här steget",
+        edit_context: SAVED_STEP_SCOPE.editContext
+      });
+    }
+  );
 
   it("says a generation failed when the phase falls back to the composer", async () => {
     // A step-scoped edit confirms no requirements summary, so a failed
@@ -4210,37 +4234,49 @@ describe("FlowAIBuilder edit host contract", () => {
     );
   });
 
-  it("drops the saved-step placeholder with the context when the chip is dismissed", async () => {
-    const { fetch } = makeFetch({ created: editSession() });
-    const { stream } = makeStream();
-    const { service, builder } = renderShell({
-      fetch,
-      stream,
-      targetKind: "edit",
-      flowId: "flow-1"
-    });
+  it.each(["task", "conversation"] as const)(
+    "drops the saved-step placeholder with the context when the chip is dismissed (%s)",
+    async (view) => {
+      const { fetch } = makeFetch({ created: editSession() });
+      const { stream } = makeStream();
+      const { service, builder } = renderShell({
+        fetch,
+        stream,
+        targetKind: "edit",
+        flowId: "flow-1"
+      });
 
-    await waitFor(() => expect(service().hasSession).toBe(true));
-    await waitFor(() => expect(builder()).toBeDefined());
-    await builder().focusSavedFlowStep(SAVED_STEP_SCOPE);
-    expect(await screen.findByText(SAVED_STEP_LABEL)).toBeTruthy();
-    screen.getByRole("textbox", { name: m.ai_builder_saved_step_prompt_placeholder() });
-    screen.getByRole("heading", { name: m.ai_builder_task_title_edit_step() });
-    // The flow header already says "Utkast" about the flow; the edit is not a draft.
-    expect(screen.getByText(m.ai_builder_saved_state_new_edit())).toBeTruthy();
-    expect(screen.queryByText(m.ai_builder_saved_state_new())).toBeNull();
+      await waitFor(() => expect(service().hasSession).toBe(true));
+      await waitFor(() => expect(builder()).toBeDefined());
+      await builder().focusSavedFlowStep(SAVED_STEP_SCOPE);
+      if (view === "conversation") {
+        await fireEvent.click(button(new RegExp(escape(m.ai_builder_conversation_button()))));
+        await screen.findByRole("heading", { name: m.ai_builder_conversation_title() });
+      }
+      expect(await screen.findByText(SAVED_STEP_LABEL)).toBeTruthy();
+      if (view === "task") {
+        screen.getByRole("textbox", { name: m.ai_builder_saved_step_prompt_placeholder() });
+        screen.getByRole("heading", { name: m.ai_builder_task_title_edit_step() });
+        // The flow header already says "Utkast" about the flow; the edit is not a draft.
+        expect(screen.getByText(m.ai_builder_saved_state_new_edit())).toBeTruthy();
+        expect(screen.queryByText(m.ai_builder_saved_state_new())).toBeNull();
+      }
 
-    await fireEvent.click(
-      screen.getByRole("button", { name: m.ai_builder_edit_context_clear_short() })
-    );
+      await fireEvent.click(
+        screen.getByRole("button", { name: m.ai_builder_edit_context_clear_short() })
+      );
 
-    await waitFor(() => expect(screen.queryByText(SAVED_STEP_LABEL)).toBeNull());
-    screen.getByRole("heading", { name: m.ai_builder_task_title_edit() });
-    expect(
-      screen.queryByRole("textbox", { name: m.ai_builder_saved_step_prompt_placeholder() })
-    ).toBeNull();
-    expect(service().savedFlowStepScope).toBeNull();
-  });
+      await waitFor(() => expect(screen.queryByText(SAVED_STEP_LABEL)).toBeNull());
+      // Mutant: the conversation's clear action leaves the current scope selected.
+      if (view === "task") {
+        screen.getByRole("heading", { name: m.ai_builder_task_title_edit() });
+        expect(
+          screen.queryByRole("textbox", { name: m.ai_builder_saved_step_prompt_placeholder() })
+        ).toBeNull();
+      }
+      expect(service().savedFlowStepScope).toBeNull();
+    }
+  );
 
   it("delivers a cold saved-step launch to the composer once the session exists", async () => {
     // The flow editor calls in right after mounting the host, before the

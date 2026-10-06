@@ -7096,6 +7096,7 @@
   "flow_transcript_download": "Ladda ner transkript",
   "flow_transcript_review_choose": "Bekräfta eller ändra talare",
   "flow_transcript_review_unresolved": "Talare går inte att avgöra",
+  "flow_transcript_review_provisional": "Överlappande tal – osäker talare",
   "flow_transcript_review_details": "Granskningsdetaljer",
   "flow_transcript_review_model_suggestion": "Modellförslag: {speaker}",
   "flow_transcript_review_no_suggestion": "Ingen talare",
@@ -7337,5 +7338,7 @@
   "flow_package_template_replacement_help": "Originalfilen är utelämnad. Välj en mall med fälten nedan; kopplingarna från paketet används.",
   "flow_package_template_expected_fields": "Taggar i Word: {fields}",
   "flow_package_error_flow_package_export_template_bindings_incomplete": "Gå till Word-steget. Koppla alla fält i mallen och ta bort gamla fältkopplingar innan du exporterar igen.",
-  "flow_package_error_flow_package_export_template_file_invalid": "Word-mallen saknas eller kan inte läsas. Ladda upp mallen igen i Word-steget och försök exportera på nytt."
+  "flow_package_error_flow_package_export_template_file_invalid": "Word-mallen saknas eller kan inte läsas. Ladda upp mallen igen i Word-steget och försök exportera på nytt.",
+  "flow_list_refresh_failed": "Listan över flöden kunde inte uppdateras. Den tidigare listan visas och kan vara inaktuell. Försök igen.",
+  "flow_list_load_failed": "Listan över flöden kunde inte läsas in. Försök igen."
 }

@@ -30,7 +30,7 @@
   // Flows manager consumes the initial data payload once; downstream reactivity lives
   // inside its own stores, so we untrack to silence the initial-reference warning.
   const {
-    state: { flows },
+    state: { flows, refreshError, refreshing },
     refreshFlows
   } = untrack(() =>
     initFlowsManager({
@@ -101,6 +101,9 @@
     <div class="flex w-full flex-col gap-4 py-4 pr-4 pl-2 sm:py-6">
       <FlowsTable
         flows={$flows}
+        refreshFailed={$refreshError !== null}
+        refreshing={$refreshing}
+        onretry={refreshFlows}
         {drafts}
         draftsUnavailable={data.aiDrafts.status === "unavailable"}
         canCreate={canManage}
