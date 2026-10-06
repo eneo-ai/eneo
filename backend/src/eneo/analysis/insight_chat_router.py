@@ -31,6 +31,11 @@ from eneo.audit.domain.action_types import ActionType
 from eneo.audit.domain.entity_types import EntityType
 from eneo.authentication.auth_dependencies import require_user_for_creation
 from eneo.authentication.auth_models import audit_actor_for
+from eneo.authentication.endpoint_access import (
+    Authentication,
+    Authorization,
+    endpoint_access,
+)
 from eneo.main.container.container import Container
 from eneo.main.exceptions import NotFoundException
 from eneo.main.logging import get_logger
@@ -46,6 +51,14 @@ from eneo.sessions.session import (
     ToolCallResultPublic,
 )
 from eneo.sessions.session_protocol import to_session_public
+
+_TARGET_INSIGHTS_ACCESS_REASON = (
+    "InsightConversationService checks insight access to the requested "
+    "assistant or group chat."
+)
+_OWN_CONVERSATION_ACCESS_REASON = (
+    "InsightConversationService admits only the caller's own insights conversation."
+)
 
 logger = get_logger(__name__)
 
@@ -106,6 +119,11 @@ def to_turn_response(
         "chat. Streams Server-Sent Events when stream is true."
     ),
     responses=responses.streaming_response(AskChatResponse, [400, 403, 404]),
+)
+@endpoint_access(
+    authentication=Authentication.USER,
+    authorization=Authorization.AUTHENTICATED,
+    reason=_TARGET_INSIGHTS_ACCESS_REASON,
 )
 async def start_insight_conversation(
     body: InsightChatStartRequest,
@@ -173,6 +191,11 @@ async def start_insight_conversation(
     ),
     responses=responses.get_responses([400, 403, 404]),
 )
+@endpoint_access(
+    authentication=Authentication.USER,
+    authorization=Authorization.AUTHENTICATED,
+    reason=_TARGET_INSIGHTS_ACCESS_REASON,
+)
 async def list_insight_conversations(
     container: Annotated[Container, Depends(get_container(with_user=True))],
     assistant_id: Optional[UUID] = None,
@@ -202,6 +225,11 @@ async def list_insight_conversations(
     description="One of the caller's insights conversations with all its turns.",
     responses=responses.get_responses([403, 404]),
 )
+@endpoint_access(
+    authentication=Authentication.USER,
+    authorization=Authorization.AUTHENTICATED,
+    reason=_OWN_CONVERSATION_ACCESS_REASON,
+)
 async def get_insight_conversation(
     session_id: UUID,
     container: Annotated[Container, Depends(get_container(with_user=True))],
@@ -217,6 +245,11 @@ async def get_insight_conversation(
     response_model=ToolCallResultPublic,
     description="Lazy-load one tool call's result text from an insights conversation.",
     responses=responses.get_responses([403, 404]),
+)
+@endpoint_access(
+    authentication=Authentication.USER,
+    authorization=Authorization.AUTHENTICATED,
+    reason=_OWN_CONVERSATION_ACCESS_REASON,
 )
 async def get_insight_tool_call_result(
     session_id: UUID,
@@ -246,6 +279,11 @@ async def get_insight_tool_call_result(
     ),
     responses=responses.streaming_response(AskChatResponse, [400, 403, 404]),
 )
+@endpoint_access(
+    authentication=Authentication.USER,
+    authorization=Authorization.AUTHENTICATED,
+    reason=_OWN_CONVERSATION_ACCESS_REASON,
+)
 async def continue_insight_conversation(
     session_id: UUID,
     body: InsightChatContinueRequest,
@@ -274,6 +312,11 @@ async def continue_insight_conversation(
     status_code=204,
     description="Delete one of the caller's insights conversations.",
     responses=responses.get_responses([403, 404]),
+)
+@endpoint_access(
+    authentication=Authentication.USER,
+    authorization=Authorization.AUTHENTICATED,
+    reason=_OWN_CONVERSATION_ACCESS_REASON,
 )
 async def delete_insight_conversation(
     session_id: UUID,
