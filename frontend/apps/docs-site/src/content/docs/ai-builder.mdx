@@ -15,6 +15,14 @@ Use AI Builder when you know the outcome you want but do not want to assemble ev
   in the standard 403 Builder error envelope and makes no draft change.
 </Callout>
 
+## Permissions
+
+Builder session and plan operations require the role permissions `flows_manage`
+and `flows_ai_builder`, together with Flow edit access in the session's space.
+Requesting Builder run-review findings also requires `flows_ai_builder_review`.
+Resource scope, session ownership and plan-state checks still apply; for example,
+only the session creator can request a structured plan revision.
+
 ## When to use AI Builder
 
 AI Builder is a good fit for:
@@ -74,8 +82,18 @@ When you ask to check and correct a structured (JSON) result before the flow con
 2. Describe the flow in plain language.
 3. Answer clarification questions about input, output, runtime fields, and external tools.
 4. Review the generated plan.
-5. Approve the plan to apply it to a draft Flow.
+5. For a new Flow, approve and create the draft. For an edit, approve the plan and then apply it to the saved Flow.
 6. Publish the Flow when the draft is ready to run.
+
+The API separates these actions. Paths below are relative to
+`/api/v1/flows/ai-builder`; use the prefix from your deployment's OpenAPI contract.
+
+| Action                     | Request                                                                         | Effect                                                                                                                                |
+| -------------------------- | ------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------- |
+| Create a new Flow          | `POST /plans/{plan_id}/create`                                                  | Approves a proposed create-mode plan and creates its draft Flow in one transaction; an already-approved create plan is also accepted. |
+| Approve an edit            | `POST /plans/{plan_id}/approve`                                                 | Changes a proposed plan to `approved`; this action does not write the Flow.                                                           |
+| Apply the approved edit    | `POST /plans/{plan_id}/apply`                                                   | Applies the approved plan to its target Flow.                                                                                         |
+| Keep the saved description | `POST /plans/{plan_id}/revise` with `type: "keep_current_description"` | Replaces a proposed plan with a new proposed revision that keeps the current description.                                             |
 
 The requirements card summarises what the Builder understood. Its wording is never read back as if you had written it.
 
@@ -257,14 +275,14 @@ For Builder-generated intermediate JSON, field names are stable machine keys and
 
 ## Underlag till steget
 
-The Flow editor uses the Swedish label **"Underlag till steget"** for the material text a step receives.
+The Flow editor calls the material a step receives **Underlag** in Swedish and **Material** in English.
 
 That is different from instructions:
 
-| Concept              | Purpose                                                     |
-| -------------------- | ----------------------------------------------------------- |
-| Instructions         | Tell the model what to do                                   |
-| Underlag till steget | Controls the text or structured material the model works on |
+| Concept      | Purpose                                                     |
+| ------------ | ----------------------------------------------------------- |
+| Instructions | Tell the model what to do                                   |
+| Material     | Controls the text or structured material the model works on |
 
 AI Builder lets the backend compose material from flow input, form fields, files, and previous outputs instead of asking the language model to write prompt templates. Use advanced material overrides only when the default material assembly is not precise enough.
 
