@@ -159,6 +159,31 @@ are generated from the OpenAPI schema. The error envelope is described in
 
 ---
 
+## Files nothing uses anymore
+
+Eneo 2.2 deletes uploaded files after their last use. Deleting a conversation or
+app run, by hand or through conversation retention, deletes the files only it
+used, including audio recordings and transcriptions. A daily cleanup at 03:30
+UTC deletes every other file that no chat, assistant, app or app run uses and
+that is older than 24 hours.
+
+The first cleanup after the upgrade also deletes files left behind by earlier
+versions, for example recordings from app runs that retention already removed.
+This cannot be undone. To see what it will delete, run the preview in the
+worker container after deploying and before 03:30 UTC:
+
+```bash
+docker compose exec worker python -m eneo.files.unused_file_cleanup preview
+```
+
+To postpone the cleanup, set `UNUSED_FILE_CLEANUP_ENABLED=false` in
+`env_backend.env` before deploying. API integrations that delete a conversation
+and then each of its files now receive `404` for files already deleted with the
+conversation. See [Files nothing uses
+anymore](/guides/object-content-storage#files-nothing-uses-anymore).
+
+---
+
 ## Open browser tabs
 
 Reload open Eneo tabs after the upgrade. A tab loaded before the upgrade keeps

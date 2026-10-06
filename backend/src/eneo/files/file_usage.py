@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from collections.abc import Iterable, Sequence
 from dataclasses import dataclass
+from datetime import timedelta
 from uuid import UUID
 
 import sqlalchemy as sa
@@ -18,6 +19,13 @@ from eneo.database.tables.files_table import Files
 from eneo.database.tables.questions_table import QuestionsFiles
 from eneo.files.file_models import FileUsageKind
 
+_USAGE_COLUMNS: tuple[tuple[FileUsageKind, InstrumentedAttribute[UUID]], ...] = (
+    (FileUsageKind.CHAT_ATTACHMENT, QuestionsFiles.file_id),
+    (FileUsageKind.ASSISTANT_ATTACHMENT, AssistantsFiles.file_id),
+    (FileUsageKind.APP_ATTACHMENT, AppsFiles.file_id),
+    (FileUsageKind.APP_RUN_INPUT, AppRunsFiles.file_id),
+)
+
 
 class FileFamilyTenantMismatchError(RuntimeError):
     """A derived File points across the root File's tenant boundary."""
@@ -30,7 +38,7 @@ class FileUsageCount:
 
 
 class FileUsageRepository:
-    """Derive usage that fences user-initiated File deletion.
+    """Derive usage that fences File deletion by users and by unused-file cleanup.
 
     User and tenant offboarding intentionally keep their database-owned cascade
     behavior. Advisory previews use a recursive CTE, while deletion locks base
@@ -109,15 +117,46 @@ class FileUsageRepository:
 
         return family_ids
 
+    async def list_unreferenced_roots(
+        self,
+        *,
+        after: UUID | None,
+        older_than: timedelta,
+        limit: int,
+    ) -> list[UUID]:
+        """Page root Files that no usage table links to directly, by id.
+
+        This is an index-only prefilter: a derived File can still keep its
+        root in use, so callers pass the page to ``lock_unused_root_families``
+        before deleting anything. ``older_than`` protects uploads that are
+        not attached yet.
+        """
+        query = (
+            sa.select(Files.id)
+            .where(
+                Files.parent_file_id.is_(None),
+                Files.created_at < sa.func.now() - older_than,
+                *(
+                    ~sa.exists().where(file_id_column == Files.id)
+                    for _, file_id_column in _USAGE_COLUMNS
+                ),
+            )
+            .order_by(Files.id)
+            .limit(limit)
+        )
+        if after is not None:
+            query = query.where(Files.id > after)
+        return list((await self._session.scalars(query)).all())
+
     async def lock_unused_root_families(
         self,
         candidate_file_ids: Iterable[UUID],
     ) -> list[UUID]:
         """Lock candidate root Files and return those whose family has no usage.
 
-        Data retention calls this after deleting the records that used the
-        candidates. Derived candidates are skipped, since they belong to their
-        root's family. A family that still has any product usage, or that
+        Callers pass the Files that deleted records used, or a page from
+        ``list_unreferenced_roots``. Derived candidates are skipped, since they
+        belong to their root's family. A family that still has any product usage, or that
         crosses a tenant boundary, is left intact. Rows are locked root first
         and then level by level, matching ``lock_family``, so a concurrent
         attach either commits first and is seen here or waits for the delete.
@@ -206,26 +245,10 @@ class FileUsageRepository:
     def _usage_union(cls, parameter_name: str) -> sa.Subquery:
         file_ids_parameter = cls._file_ids_parameter(parameter_name)
         return sa.union_all(
-            cls._usage_select(
-                FileUsageKind.CHAT_ATTACHMENT,
-                QuestionsFiles.file_id,
-                file_ids_parameter,
-            ),
-            cls._usage_select(
-                FileUsageKind.ASSISTANT_ATTACHMENT,
-                AssistantsFiles.file_id,
-                file_ids_parameter,
-            ),
-            cls._usage_select(
-                FileUsageKind.APP_ATTACHMENT,
-                AppsFiles.file_id,
-                file_ids_parameter,
-            ),
-            cls._usage_select(
-                FileUsageKind.APP_RUN_INPUT,
-                AppRunsFiles.file_id,
-                file_ids_parameter,
-            ),
+            *(
+                cls._usage_select(kind, file_id_column, file_ids_parameter)
+                for kind, file_id_column in _USAGE_COLUMNS
+            )
         ).subquery("file_product_usage")
 
     @staticmethod

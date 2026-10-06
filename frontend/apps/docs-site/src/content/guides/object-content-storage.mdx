@@ -182,11 +182,41 @@ flowchart LR
 
 Preview is advisory. Eneo repeats the same check while holding database locks
 before deletion, so a concurrent attachment cannot be silently removed.
-Removing a File from a chat or Assistant only removes that use; the reusable
-File remains until its owner deletes it. When conversation retention deletes a
-question or App run, it applies the same check to the Files attached to it and
-deletes those that nothing else uses. Organization or user offboarding keeps
-its existing database-cascade behavior.
+A File attached to a sent chat message stays in use until the conversation is
+deleted (see [the FAQ](#why-can-i-not-delete-an-uploaded-file)). Organization or
+user offboarding keeps its existing database-cascade behavior.
+
+### Files nothing uses anymore
+
+Eneo does not keep a File after its last use. The same locked check runs
+whenever a use disappears:
+
+- **Deleting a conversation or App run**, by hand or through conversation
+  retention, deletes the Files that only that conversation or run used. A File
+  still used elsewhere is kept.
+- **A daily cleanup at 03:30 UTC** deletes every other File family that no chat,
+  Assistant, App, or App run uses and that is older than 24 hours. This covers
+  Files left behind when an Assistant, App, Space, or group chat is deleted,
+  uploads that were never attached, and a File removed from an Assistant or
+  App that nothing else uses. The 24 hours protect uploads that are still on
+  their way to a chat message or App run; they do not measure how long a File
+  has been unused.
+
+Deleting the File releases its content, and the object-content lifecycle
+removes the bytes, including audio recordings and transcriptions. Removal runs
+in bounded batches, so after a large cleanup storage usage falls over a few
+hours rather than at once.
+
+Preview the cleanup inside the worker container. It reports the number of
+File families and managed bytes per organization without deleting anything:
+
+```bash
+docker compose exec worker python -m eneo.files.unused_file_cleanup preview
+```
+
+`run` performs the same cleanup immediately. Set
+`UNUSED_FILE_CLEANUP_ENABLED=false` in `env_backend.env` to pause the daily
+cleanup; deleting a conversation or App run still deletes its unused Files.
 
 ## Choose the right deployment
 
@@ -848,12 +878,17 @@ of a later chat request does not remove its earlier reference.
 
 For a disposable automation conversation:
 
-1. Retain the conversation ID and uploaded file IDs when creating them.
+1. Retain the conversation ID when creating it.
 2. Finish processing and save the result the integration needs.
 3. Delete the conversation with `DELETE /api/v1/conversations/{session_id}/`.
-   This removes the whole conversation and its attachment references.
-4. Delete each uploaded file with `DELETE /api/v1/files/{file_id}/`. A successful
-   deletion returns `204`. If another reference remains, it still returns `409`.
+   This removes the whole conversation and deletes the files that only this
+   conversation used. Files still used elsewhere are kept.
+
+You do not need to delete the uploaded files afterwards. If you still call
+`DELETE /api/v1/files/{file_id}/`, treat `404` as already deleted; `409` means
+another use remains. Do not keep a file ID to reuse later without attaching the
+file somewhere: [Files nothing uses anymore](#files-nothing-uses-anymore) are
+deleted after 24 hours.
 
 Use credentials for the owning user/principal, with the required scope and
 permissions. Conversation deletion checks `assistants` and `conversations`
