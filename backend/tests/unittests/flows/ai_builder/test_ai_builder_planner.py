@@ -6170,7 +6170,7 @@ def _modifiable_refs(prepared: ProposalPrepared) -> list[str]:
     """The steps the proposal tool lets the model modify: a saved-step edit
     offers only their modifications, keyed by existing_step_ref."""
     schema = prepared.proposal_tool_schema["function"]["parameters"]
-    steps = schema["properties"]["steps"]
+    steps = schema["properties"]["operations"]
     assert "anyOf" not in steps["items"], "a whole-flow schema, not a saved-step one"
     return list(steps["items"]["properties"]["existing_step_ref"]["enum"])
 
@@ -6617,7 +6617,7 @@ def test_a_handoff_turn_is_offered_the_review_scoped_edit_tool() -> None:
     parameters = prepared.proposal_tool_schema["function"]["parameters"]
     assert "flow_description" not in parameters["properties"]
     assert "form_fields" not in parameters["properties"]
-    modify = parameters["properties"]["steps"]["items"]["anyOf"][0]
+    modify = parameters["properties"]["operations"]["items"]["anyOf"][0]
     assert modify["properties"]["existing_step_ref"]["enum"] == [
         "existing_step_1",
         "existing_step_2",
@@ -6885,7 +6885,7 @@ async def test_saved_step_provider_request_contains_focused_data_and_permissions
         "form_fields",
         "removed_existing_step_refs",
     }.intersection(props)
-    item = props["steps"]["items"]
+    item = props["operations"]["items"]
     assert "anyOf" not in item
     assert item["properties"]["kind"]["enum"] == ["modify"]
     assert item["properties"]["existing_step_ref"]["enum"] == ["existing_step_4"]

@@ -1,6 +1,6 @@
 """Ordered edit compiler for the AI Builder.
 
-Compiles the model-visible ordered edit proposal into the canonical authoring
+Compiles the server-lowered ordered edit proposal into the canonical authoring
 spec plus the edit approval metadata the user approves. The key principle is
 that every existing step is either represented in order or explicitly removed.
 """
@@ -89,9 +89,6 @@ from eneo.flows.application.flow_authoring_description_semantics import (
 from eneo.flows.application.flow_authoring_snapshot import (
     current_flow_authoring_spec,
     flow_step_to_authoring_spec,
-)
-from eneo.flows.application.flow_draft_materialization import (
-    validate_existing_step_ref_coverage,
 )
 from eneo.flows.assistant_authoring_snapshot import AssistantAuthoringSnapshots
 from eneo.flows.domain.canonical_json_hash import canonical_json_bytes
@@ -281,11 +278,12 @@ def compile_edit_proposal(
             "The revision must preserve the saved step sequence.",
             code=AIBuilderErrorCode.BAD_REQUEST,
         )
-    mutation_scope: EditMutationScope | None = None
-    if revision_spec is not None:
-        proposal, mutation_scope = _expand_saved_step_proposal(
-            proposal, revision_spec=revision_spec
-        )
+    baseline = edit_baseline_spec(saved=base_spec, revision=revision_spec)
+    mutation_scope = (
+        _unchanged_step_scope(proposal, baseline=baseline)
+        if revision_spec is not None
+        else None
+    )
     materialized_proposal = materialize_ordered_edit_proposal(
         proposal,
         primary_runtime_input_type=primary_runtime_input_type,
@@ -295,13 +293,12 @@ def compile_edit_proposal(
             else False
         ),
     )
-    baseline = edit_baseline_spec(saved=base_spec, revision=revision_spec)
     prepared = _prepare_ordered_edit_proposal(
         proposal=materialized_proposal,
         current_steps=current_steps,
         baseline_form_fields=baseline.form_fields,
         primary_runtime_input_type=primary_runtime_input_type,
-        may_restructure=mutation_scope is None,
+        may_restructure=revision_spec is None,
     )
     compiled_spec = compile_ordered_edit_proposal(
         base_spec=baseline,
@@ -364,7 +361,7 @@ def compile_edit_proposal(
         normalized_spec,
         baseline=baseline,
         main_text_field=prepared.main_text_field,
-        scoped=mutation_scope is not None,
+        scoped=revision_spec is not None,
     )
     compiled_steps = normalized_spec.steps
     final_name = normalized_spec.flow_name
@@ -477,57 +474,29 @@ def compile_edit_proposal(
     )
 
 
-def _expand_saved_step_proposal(
+def _unchanged_step_scope(
     proposal: OrderedEditProposal,
     *,
-    revision_spec: FlowDraftSpecCore,
-) -> tuple[OrderedEditProposal, EditMutationScope]:
-    """Fill the saved steps the fragment left out and protect every step the
-    model did not author a change on (an identity-only entry included)."""
-
-    modifications: list[ModifyExistingStep] = []
-    for step in proposal.steps:
-        if not isinstance(step, ModifyExistingStep):
-            raise AIBuilderBadRequestException(
-                "A selected-step edit must not add steps.",
-                code=AIBuilderErrorCode.BAD_REQUEST,
-            )
-        modifications.append(step)
-    current_refs = [
-        step.existing_step_ref
-        for step in revision_spec.steps
+    baseline: FlowDraftSpecCore,
+) -> EditMutationScope | None:
+    saved_steps = {
+        step.existing_step_ref: step
+        for step in baseline.steps
         if step.existing_step_ref is not None
+    }
+    modifications = [
+        step for step in proposal.steps if isinstance(step, ModifyExistingStep)
     ]
-    submitted_refs = [step.existing_step_ref for step in modifications]
-    submitted_ref_set = set(submitted_refs)
-    validate_existing_step_ref_coverage(
-        current_refs=set(current_refs),
-        preserved_refs=[
-            *submitted_refs,
-            *(ref for ref in current_refs if ref not in submitted_ref_set),
-        ],
-        removed_existing_step_refs=proposal.removed_existing_step_refs,
-    )
-    by_ref = {step.existing_step_ref: step for step in modifications}
-    expanded = proposal.model_copy(
-        update={
-            "steps": [
-                by_ref[ref]
-                if ref in by_ref
-                else ModifyExistingStep(existing_step_ref=ref)
-                for ref in current_refs
-            ]
-        }
-    )
+    if (
+        proposal.removed_existing_step_refs
+        or len(modifications) != len(proposal.steps)
+        or [step.existing_step_ref for step in modifications] != list(saved_steps)
+    ):
+        return None
     authored_refs = {
         step.existing_step_ref for step in modifications if step.authored_fields
     }
-    saved_steps = {
-        step.existing_step_ref: step
-        for step in revision_spec.steps
-        if step.existing_step_ref is not None
-    }
-    return expanded, EditMutationScope(
+    return EditMutationScope(
         protected_steps={
             ref: step for ref, step in saved_steps.items() if ref not in authored_refs
         },

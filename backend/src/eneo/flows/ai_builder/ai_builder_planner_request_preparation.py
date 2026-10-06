@@ -716,6 +716,7 @@ def build_proposal_prepared(
     plan_revision_context = build_plan_revision_prompt_block(
         context=plan_edit_context,
         prior_spec=prior_spec_for_revision,
+        is_edit_mode=is_edit_mode,
         can_decline=decline_tool_schema is not None,
         saved_step_revision=saved_step_permissions is not None,
     )

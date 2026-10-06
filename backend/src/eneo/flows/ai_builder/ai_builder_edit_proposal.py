@@ -29,7 +29,9 @@ from eneo.flows.ai_builder.ai_builder_domain_models import (
     TargetKind,
 )
 from eneo.flows.ai_builder.ai_builder_edit_admission import (
-    lower_edit_tool_arguments,
+    EditCommandRejection,
+    lower_edit_commands,
+    parse_edit_commands,
 )
 from eneo.flows.ai_builder.ai_builder_edit_compiler import (
     compile_edit_proposal,
@@ -204,8 +206,7 @@ async def process_edit_arguments(
 
     model_arguments: dict[str, Any] = dict(arguments)
     try:
-        model_arguments = lower_edit_tool_arguments(model_arguments)
-        authored_proposal = OrderedEditProposal.model_validate(model_arguments)
+        commands = parse_edit_commands(model_arguments)
     except ValidationError as exc:
         logger.warning("Failed to parse propose_flow edit arguments: %s", exc)
         capture_rejected_proposal_arguments(
@@ -219,12 +220,6 @@ async def process_edit_arguments(
             codes=frozenset({PROPOSAL_PARSE_MODEL_FAILURE_CODE}),
             producers=frozenset({"parse"}),
         )
-    if resource_catalog is not None and (
-        repair := authored_knowledge_ref_repair(
-            resource_catalog, _authored_knowledge_refs(authored_proposal)
-        )
-    ):
-        return repair
     current_step_refs = [
         existing_step_ref_for_order(step.step_order)
         for step in sorted(flow.steps, key=lambda step: step.step_order)
@@ -239,10 +234,9 @@ async def process_edit_arguments(
     # as the model having changed them.
     review_feedback = validate_review_edit_proposal(
         scope=review_scope,
-        proposal=authored_proposal,
+        proposal=commands,
         flow_name=flow.name,
         flow_description=flow.description,
-        current_step_refs=current_step_refs,
     )
     if review_feedback is not None:
         return CorrectableFailure(
@@ -251,10 +245,7 @@ async def process_edit_arguments(
             producers=frozenset({"review_guard"}),
         )
     scoped_proposal_feedback = validate_scoped_edit_proposal(
-        context=plan_edit_context,
-        proposal=authored_proposal,
-        current_step_refs=current_step_refs,
-        saved_step_revision=saved_step_revision,
+        context=plan_edit_context, proposal=commands
     )
     if scoped_proposal_feedback is not None:
         return CorrectableFailure(
@@ -262,6 +253,47 @@ async def process_edit_arguments(
             kind="quality",
             producers=frozenset({"scope_guard"}),
         )
+    baseline_names = (
+        {
+            step.existing_step_ref: step.name
+            for step in prior_spec_for_revision.steps
+            if step.existing_step_ref is not None
+        }
+        if saved_step_revision and prior_spec_for_revision is not None
+        else {
+            existing_step_ref_for_order(step.step_order): step.user_description
+            or f"Step {step.step_order}"
+            for step in sorted(flow.steps, key=lambda step: step.step_order)
+        }
+    )
+    try:
+        authored_proposal = lower_edit_commands(commands, baseline_names=baseline_names)
+    except EditCommandRejection as exc:
+        capture_rejected_proposal_arguments(
+            model_arguments, session_id=str(turn.session_id), issues=[str(exc)]
+        )
+        return CorrectableFailure(
+            feedback=str(exc),
+            kind="validation",
+            codes=frozenset({exc.reason}),
+            producers=frozenset({"assembly"}),
+        )
+    except ValidationError as exc:
+        capture_rejected_proposal_arguments(
+            model_arguments, session_id=str(turn.session_id), issues=[str(exc)]
+        )
+        return CorrectableFailure(
+            feedback=f"Invalid edit arguments: {exc}",
+            kind="parse",
+            codes=frozenset({PROPOSAL_PARSE_MODEL_FAILURE_CODE}),
+            producers=frozenset({"parse"}),
+        )
+    if resource_catalog is not None and (
+        repair := authored_knowledge_ref_repair(
+            resource_catalog, _authored_knowledge_refs(authored_proposal)
+        )
+    ):
+        return repair
     proposal = _apply_server_owned_input_fields(
         authored_proposal, planning_state=planning_state
     )
@@ -306,8 +338,17 @@ async def process_edit_arguments(
                 ),
             )
         except BadRequestException as exc:
+            if exc.code == AIBuilderErrorCode.INVALID_EXISTING_STEP_REF:
+                return architecture_failure_outcome(
+                    AIBuilderArchitectureError(
+                        public_code="architecture_materialization_failed",
+                        repair_disposition="server_defect",
+                        detail="The server-built edit draft failed saved-step coverage.",
+                        log_context={"reason": invalid_existing_step_ref_reason(exc)},
+                    )
+                )
             return CorrectableFailure(
-                feedback=_format_edit_compilation_request_error(exc),
+                feedback=f"Failed to compile edit: {exc}",
                 kind="validation",
                 codes=_edit_compilation_request_failure_codes(exc),
                 producers=frozenset({"assembly"}),
@@ -571,45 +612,15 @@ def _apply_server_owned_input_fields(
     return proposal.model_copy(update={"form_fields": projected_fields})
 
 
-def _format_edit_compilation_request_error(exc: BadRequestException) -> str:
-    if exc.code != "invalid_existing_step_ref":
-        return f"Failed to compile edit: {exc}"
-    context = exc.context or {}
-    missing_refs = context.get("missing_refs")
-    if isinstance(missing_refs, list) and missing_refs:
-        return (
-            "Edit validation failed: every existing step must appear in steps "
-            "or be listed in removed_existing_step_refs. Missing refs: "
-            f"{missing_refs}."
-        )
-    overlap_refs = context.get("overlap_refs")
-    if isinstance(overlap_refs, list) and overlap_refs:
-        return (
-            "Edit validation failed: refs cannot appear in both steps and "
-            "removed_existing_step_refs. Overlap refs: "
-            f"{overlap_refs}."
-        )
-    return f"Edit validation failed: {exc}"
-
-
 def _edit_compilation_request_failure_codes(
     exc: BadRequestException,
 ) -> frozenset[str]:
-    """The producer's typed code, recorded on the failed attempt.
-
-    An invalid existing-step ref also names the rule it broke (the coverage
-    check's is ``missing_existing_step_ref``). Both are diagnostic codes, not
-    public error codes: no client maps them.
-    """
-
-    if exc.code is None:
-        return frozenset()
-    reason = invalid_existing_step_ref_reason(exc)
-    return frozenset({str(exc.code)} if reason is None else {str(exc.code), reason})
+    """The request error's typed code, recorded on the failed attempt."""
+    return frozenset() if exc.code is None else frozenset({str(exc.code)})
 
 
 # Rejections a saved-step revision can only reach through the server: the
-# model's fragment cannot name another step, a form field, the flow name or
+# model's commands cannot name another step, a form field, the flow name or
 # the flow description (validate_scoped_edit_proposal refuses it first).
 _SAVED_STEP_SERVER_OWNED_REJECTIONS: frozenset[ScopedRevisionRejectionReason] = (
     frozenset(

@@ -112,10 +112,13 @@ async def _propose(
 ):
     arguments: dict[str, object] = {
         "plan_rationale": "Ändra bara den valda instruktionen.",
-        "steps": steps,
+        "operations": steps,
     }
     if removed is not None:
-        arguments["removed_existing_step_refs"] = removed
+        arguments["operations"] = [
+            *steps,
+            *({"kind": "remove", "existing_step_ref": ref} for ref in removed),
+        ]
     return await process_edit_arguments(
         turn=_make_turn(),
         conversation=[],

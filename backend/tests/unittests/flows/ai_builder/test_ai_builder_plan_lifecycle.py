@@ -600,7 +600,7 @@ async def _real_approval_without_field_changes() -> tuple[BuilderSession, Builde
         },
         arguments={
             "plan_rationale": "x",
-            "steps": [
+            "operations": [
                 {"kind": "modify", "existing_step_ref": "existing_step_1"},
                 {
                     "kind": "modify",

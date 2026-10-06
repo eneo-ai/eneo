@@ -175,7 +175,7 @@ async def test_scoped_instruction_edit_keeps_unrelated_saved_quality_warning(
     )
     arguments = {
         "plan_rationale": "I am adding the requested sentence to the end of the instructions for step_c to clarify where source references should be placed.",
-        "steps": [
+        "operations": [
             {
                 "kind": "modify",
                 "existing_step_ref": "existing_step_3",
@@ -287,7 +287,7 @@ async def test_scoped_edit_still_rejects_quality_warnings_on_the_selected_step(
             _make_retry_invocation(
                 arguments={
                     "plan_rationale": "Update the selected step.",
-                    "steps": [
+                    "operations": [
                         {
                             "kind": "modify",
                             "existing_step_ref": "existing_step_3",
@@ -1205,10 +1205,15 @@ async def test_an_edit_only_the_user_can_fix_is_answered_after_one_provider_call
                 PROPOSE_FLOW_TOOL_NAME,
                 {
                     "plan_rationale": "Use the confirmed text field.",
-                    "steps": [
-                        {"kind": "modify", "existing_step_ref": "existing_step_1"}
+                    "operations": [
+                        {"kind": "modify", "existing_step_ref": "existing_step_1"},
+                        {
+                            "kind": "modify_flow",
+                            "form_fields": [
+                                {"name": "text", "type": "text", "label": "Text"}
+                            ],
+                        },
                     ],
-                    "form_fields": [{"name": "text", "type": "text", "label": "Text"}],
                 },
                 tool_call_id="call-shadow",
             )
@@ -2217,7 +2222,7 @@ async def test_edit_propose_flow_parse_failure_triggers_self_correction() -> Non
     tool_call.function.arguments = json.dumps(
         {
             "plan_rationale": "Lägg till citerande textsteg.",
-            "steps": [
+            "operations": [
                 {
                     "kind": "modify",
                     "existing_step_ref": "existing_step_1",
@@ -2244,4 +2249,4 @@ async def test_edit_propose_flow_parse_failure_triggers_self_correction() -> Non
 
     assert events == [{"event": "status", "data": '{"status":"repairing"}'}]
     request = repair.call_args.args[0]
-    assert "OrderedEditProposal" in request.failure.feedback
+    assert "EditCommands" in request.failure.feedback

@@ -385,6 +385,11 @@ def test_an_unlabeled_field_read_restated_gains_a_label() -> None:
 EXACT_WRITER = {"question": "namn: {{ flow_input.namn }}", "source_refs": [BESLUT]}
 BESLUT_READ = {"from_step": 1, "field_path": "beslut", "label": "Beslut"}
 MOTIVERING_READ = {"from_step": 1, "field_path": "motivering", "label": "Motivering"}
+BESLUT_COMMAND_READ = {
+    "producer": {"kind": "saved", "existing_step_ref": S1},
+    "field_path": "beslut",
+    "label": "Beslut",
+}
 
 
 def test_a_null_list_on_an_exact_input_is_refused_with_its_lists() -> None:
@@ -397,7 +402,7 @@ def test_a_null_list_on_an_exact_input_is_refused_with_its_lists() -> None:
     assert "uses_form_fields is null" in message
     assert KEEP_AS_SAVED in message
     assert '- uses_form_fields: "namn"' in message
-    assert f"- uses_previous_fields: {json.dumps(BESLUT_READ)}" in message
+    assert f"- uses_previous_fields: {json.dumps(BESLUT_COMMAND_READ)}" in message
 
 
 def test_both_lists_complete_on_an_exact_input_add_only_the_new_read() -> None:
@@ -476,7 +481,7 @@ def test_a_read_of_a_removed_step_offers_null_only_with_that_step_kept() -> None
 
     assert f"To keep them, give both lists complete, or {_keep_steps(1)}." in message
     assert f"or {KEEP_AS_SAVED}" not in message
-    assert f"- uses_previous_fields: {json.dumps(BESLUT_READ)}" in message
+    assert f"- uses_previous_fields: {json.dumps(BESLUT_COMMAND_READ)}" in message
 
 
 # The list contract: a list names explicit reads; the source read stays.
@@ -965,6 +970,7 @@ def test_a_saved_step_edit_cannot_make_the_bound_main_text_field_required() -> N
     with pytest.raises(AIBuilderBadRequestException) as exc_info:
         _compile(
             raw,
+            *_keep(1),
             _modify(S2, uses_form_fields=["input"], input_source="flow_input"),
             saved_step_revision=True,
         )
@@ -1015,6 +1021,7 @@ def test_a_saved_step_instructions_edit_binding_the_main_text_field_is_refused()
     with pytest.raises(AIBuilderBadRequestException) as exc_info:
         _compile(
             raw,
+            *_keep(1),
             _modify(S2, assistant_spec={"instructions": MAIN_TEXT_READ}),
             saved_step_revision=True,
         )
@@ -1172,6 +1179,7 @@ def test_a_saved_step_edit_whose_template_mapping_reads_the_main_text_is_refused
     with pytest.raises(AIBuilderBadRequestException) as exc_info:
         _compile(
             _template_flow(),
+            *_keep(1),
             _modify(S2, name="Fyll mallen"),
             saved_step_revision=True,
             template_placeholders=("namn", "input"),
@@ -1188,6 +1196,7 @@ def test_a_saved_step_edit_of_another_step_ignores_the_mapping_it_restores() -> 
     _, result = _compile(
         _template_flow(),
         _modify(S1, name="Läs ärendet noga"),
+        *_keep(2),
         saved_step_revision=True,
         template_placeholders=("namn", "input"),
     )
@@ -1205,6 +1214,7 @@ def test_a_saved_step_template_edit_that_adds_a_run_field_is_refused() -> None:
     with pytest.raises(AIBuilderBadRequestException) as exc_info:
         _compile(
             _template_flow(),
+            *_keep(1),
             _modify(S2, name="Fyll mallen"),
             saved_step_revision=True,
             template_placeholders=EXTRA_PLACEHOLDERS,
@@ -1228,6 +1238,7 @@ def test_a_whole_flow_template_edit_may_add_the_run_field() -> None:
 def test_a_saved_step_edit_that_leaves_the_run_form_equal_passes() -> None:
     saved, result = _compile(
         _template_flow(),
+        *_keep(1),
         _modify(S2, name="Fyll mallen"),
         saved_step_revision=True,
         template_placeholders=("namn",),

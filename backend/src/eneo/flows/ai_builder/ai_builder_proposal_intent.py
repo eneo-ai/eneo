@@ -517,7 +517,7 @@ class SemanticStepIntent(BaseModel):
         return self
 
 
-class _CreateSemanticStepArguments(BaseModel):
+class SemanticStepArguments(BaseModel):
     """Closed provider-authored subset of ``SemanticStepIntent``."""
 
     model_config = ConfigDict(extra="forbid")
@@ -588,7 +588,7 @@ class ProposalStructuredFieldIntent(BaseModel):
 
 
 def _validate_create_semantic_step(value: object) -> dict[str, object]:
-    step = _CreateSemanticStepArguments.model_validate(value)
+    step = SemanticStepArguments.model_validate(value)
     lowered = step.model_dump(exclude={"output_fields"})
     lowered["knowledge_refs"] = step.knowledge_refs or []
     lowered["uses_form_fields"] = step.uses_form_fields or []
@@ -1006,6 +1006,7 @@ def build_semantic_step_schema(
     include_review_mode: bool = True,
     include_form_field_refs: bool = True,
     kb_refs: list[str] | None = None,
+    producer_schema: dict[str, object] | None = None,
 ) -> dict[str, Any]:
     schema: dict[str, Any] = {
         "type": "object",
@@ -1071,6 +1072,32 @@ def build_semantic_step_schema(
         },
         "additionalProperties": False,
     }
+    if producer_schema is not None:
+        read_properties = {
+            "producer": producer_schema,
+            "label": {"type": ["string", "null"]},
+        }
+        schema["properties"]["uses_previous_fields"] = {
+            "type": ["array", "null"],
+            "items": {
+                "type": "object",
+                "additionalProperties": False,
+                "required": ["producer", "field_path"],
+                "properties": {
+                    **read_properties,
+                    "field_path": {"type": "string", "minLength": 1},
+                },
+            },
+        }
+        schema["properties"]["uses_previous_outputs"] = {
+            "type": ["array", "null"],
+            "items": {
+                "type": "object",
+                "additionalProperties": False,
+                "required": ["producer"],
+                "properties": read_properties,
+            },
+        }
     return schema
 
 
@@ -1090,6 +1117,7 @@ __all__ = [
     "OrderedEditProposal",
     "OrderedEditStep",
     "SemanticStepIntent",
+    "SemanticStepArguments",
     "build_create_flow_tool_schema",
     "attested_result_fields_from_drafts",
     "attested_result_contract_violations",

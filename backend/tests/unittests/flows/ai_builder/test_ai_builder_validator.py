@@ -1319,46 +1319,34 @@ class TestContractDiagnostics:
         )
         assert not _errors_with_code(result, "output_contract_type_mismatch")
 
-    def test_text_output_contract_maps_once_to_authored_step(self) -> None:
-        result = validate_spec(
-            _spec(
-                [
-                    _step(
-                        ref="step_a",
-                        name="Return text",
-                        output_type=OutputType.TEXT,
-                        output_contract={"type": "object", "properties": {}},
-                    )
-                ]
-            )
+    @pytest.mark.parametrize(
+        ("output_type", "output_mode", "code"),
+        [
+            (OutputType.TEXT, OutputMode.PASS_THROUGH, "output_contract_type_mismatch"),
+            (
+                OutputType.DOCX,
+                OutputMode.TEMPLATE_FILL,
+                "output_contract_template_fill_incompatible",
+            ),
+        ],
+    )
+    def test_rejected_non_json_contract_names_a_valid_provider_repair(
+        self, output_type: OutputType, output_mode: OutputMode, code: str
+    ) -> None:
+        step = _step(
+            ref="step_a",
+            output_type=output_type,
+            output_mode=output_mode,
+            output_contract={"type": "object", "properties": {}},
         )
+        result = validate_spec(_spec([step]))
 
         assert not result.valid
-        _assert_single_error(
-            result, code="output_contract_type_mismatch", step_ref="step_a"
-        )
-
-    def test_template_fill_output_contract_maps_once_to_authored_step(self) -> None:
-        result = validate_spec(
-            _spec(
-                [
-                    _step(
-                        ref="step_a",
-                        name="Fill template",
-                        output_mode=OutputMode.TEMPLATE_FILL,
-                        output_type=OutputType.DOCX,
-                        output_contract={"type": "object", "properties": {}},
-                    )
-                ]
-            )
-        )
-
-        assert not result.valid
-        _assert_single_error(
-            result,
-            code="output_contract_template_fill_incompatible",
-            step_ref="step_a",
-        )
+        _assert_single_error(result, code=code, step_ref="step_a")
+        assert "output_fields=[]" in _errors_with_code(result, code)[0].message
+        assert validate_spec(
+            _spec([step.model_copy(update={"output_contract": None})])
+        ).valid
 
 
 # ---------------------------------------------------------------------------

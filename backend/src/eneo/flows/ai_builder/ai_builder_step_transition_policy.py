@@ -186,7 +186,7 @@ def disambiguate_ai_builder_step_names(
     for index in order:
         step = spec.steps[index]
         next_name = _unique_step_name(step.name, used_names=used_names)
-        used_names.add(_step_name_key(next_name))
+        used_names.add(step_name_key(next_name))
         if next_name == step.name:
             continue
 
@@ -213,18 +213,18 @@ def disambiguate_ai_builder_step_names(
 
 def _unique_step_name(name: str, *, used_names: set[str]) -> str:
     base_name = name.strip() or "Step"
-    if _step_name_key(base_name) not in used_names:
+    if step_name_key(base_name) not in used_names:
         return base_name
 
     suffix = 2
     while True:
         candidate = f"{base_name} ({suffix})"
-        if _step_name_key(candidate) not in used_names:
+        if step_name_key(candidate) not in used_names:
             return candidate
         suffix += 1
 
 
-def _step_name_key(name: str) -> str:
+def step_name_key(name: str) -> str:
     return name.strip().casefold()
 
 
@@ -265,7 +265,7 @@ def _normalize_pre_terminal_artifact_body_step(
         return spec, []
 
     used_step_names = {
-        _step_name_key(step.name)
+        step_name_key(step.name)
         for index, step in enumerate(spec.steps)
         if index not in body_step_indexes
     }
@@ -283,7 +283,7 @@ def _normalize_pre_terminal_artifact_body_step(
             ),
             used_names=used_step_names,
         )
-        used_step_names.add(_step_name_key(body_step_name))
+        used_step_names.add(step_name_key(body_step_name))
         normalized_body = step.model_copy(
             update={
                 "name": body_step_name,

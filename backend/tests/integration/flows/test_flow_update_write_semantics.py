@@ -51,8 +51,8 @@ from tests.integration.flows.test_flow_authoring_edit_step_rows import (
     _apply_spec,
     _edit,
     _encryption,
-    _keep,
     _kept_spec,
+    _modify,
     _rows,
     _saved_flow,
     _set_raw,
@@ -683,8 +683,7 @@ async def test_an_unrelated_edit_keeps_legacy_form_field_types_byte_identical(
             .values(metadata_json={"form_schema": _LEGACY_FORM})
         )
 
-    await _edit(db_container, three_steps, [_keep(1, name="Läs"), _keep(2), _keep(3)])
-
+    await _edit(db_container, three_steps, [_modify(1, name="Läs")])
     metadata = await _saved_metadata(db_container, three_steps.flow_id)
     assert metadata is not None
     assert metadata["form_schema"] == _LEGACY_FORM

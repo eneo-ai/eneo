@@ -417,8 +417,8 @@ async def _apply_spec(
     return {a: n for a, n in calls.items() if a in seeded.assistant_ids}
 
 
-def _keep(order: int, **changes: Any) -> dict[str, Any]:
-    """A saved step in the edit's ordered list, with what changes on it."""
+def _modify(order: int, **changes: object) -> dict[str, object]:
+    """An explicitly authored modification of a saved step."""
 
     return {"kind": "modify", "existing_step_ref": f"existing_step_{order}", **changes}
 
@@ -435,10 +435,9 @@ async def _catalog(db_container, seeded: Seeded):
 async def _propose(
     db_container,
     seeded: Seeded,
-    steps: list[dict[str, Any]],
-    removed: tuple[str, ...] = (),
+    operations: list[dict[str, object]],
 ) -> ProposalReady:
-    """The real edit compile of the model's ordered steps against the saved
+    """The real edit compile of local commands against the saved
     flow: the plan a person approves."""
 
     catalog = await _catalog(db_container, seeded)
@@ -450,8 +449,7 @@ async def _propose(
             conversation=[],
             arguments={
                 "plan_rationale": "Ändra flödet.",
-                "steps": steps,
-                "removed_existing_step_refs": list(removed),
+                "operations": operations,
             },
             available_model_refs=None,
             available_kb_refs=None,
@@ -491,13 +489,12 @@ async def _apply_proposal(
 async def _edit(
     db_container,
     seeded: Seeded,
-    steps: list[dict[str, Any]],
-    removed: tuple[str, ...] = (),
+    operations: list[dict[str, object]],
 ) -> dict[UUID, int]:
     """The whole chain a plan goes through: proposed, then applied at once."""
 
     return await _apply_proposal(
-        db_container, seeded, await _propose(db_container, seeded, steps, removed)
+        db_container, seeded, await _propose(db_container, seeded, operations)
     )
 
 
@@ -524,9 +521,7 @@ async def test_a_rename_makes_no_assistant_update_and_leaves_every_assistant_row
 ) -> None:
     before = await _states(db_container, seeded, strict=True)
 
-    calls = await _edit(
-        db_container, seeded, [_keep(1), _keep(2, name="Granska"), _keep(3)]
-    )
+    calls = await _edit(db_container, seeded, [_modify(2, name="Granska")])
 
     assert calls == {}
     assert await _states(db_container, seeded, strict=True) == before
@@ -543,11 +538,7 @@ async def test_an_instruction_edit_changes_the_prompt_and_keeps_everything_else(
     calls = await _edit(
         db_container,
         seeded,
-        [
-            _keep(1),
-            _keep(2, assistant_spec={"instructions": "Gör uppgift 2 och sammanfatta."}),
-            _keep(3),
-        ],
+        [_modify(2, assistant_spec={"instructions": "Gör uppgift 2 och sammanfatta."})],
     )
     after = await _states(db_container, seeded, strict=False)
 
@@ -577,11 +568,7 @@ async def test_a_knowledge_edit_changes_the_collections_and_keeps_everything_els
     calls = await _edit(
         db_container,
         seeded,
-        [
-            _keep(1),
-            _keep(2, assistant_spec={"knowledge_refs": [first.authoring_ref]}),
-            _keep(3),
-        ],
+        [_modify(2, assistant_spec={"knowledge_refs": [first.authoring_ref]})],
     )
     after = await _states(db_container, seeded, strict=False)
 
@@ -607,9 +594,7 @@ async def test_a_step_turned_into_one_without_a_model_loses_the_model_and_nothin
 ) -> None:
     before = await _states(db_container, seeded, strict=False)
 
-    calls = await _edit(
-        db_container, seeded, [_keep(1), _keep(2, output_type="pdf"), _keep(3)]
-    )
+    calls = await _edit(db_container, seeded, [_modify(2, output_type="pdf")])
     after = await _states(db_container, seeded, strict=False)
 
     assert calls == {seeded.assistant_ids[1]: 1}
@@ -643,11 +628,7 @@ async def test_editing_the_prompt_of_a_step_that_runs_no_model_leaves_its_stored
     calls = await _edit(
         db_container,
         seeded,
-        [
-            _keep(1),
-            _keep(2, assistant_spec={"instructions": "Rendera svaret."}),
-            _keep(3),
-        ],
+        [_modify(2, assistant_spec={"instructions": "Rendera svaret."})],
     )
     after = await _state(db_container, seeded.assistant_ids[1], strict=False)
 
@@ -671,11 +652,7 @@ async def test_editing_the_knowledge_of_a_step_that_runs_no_model_leaves_its_sto
     calls = await _edit(
         db_container,
         seeded,
-        [
-            _keep(1),
-            _keep(2, assistant_spec={"knowledge_refs": [first.authoring_ref]}),
-            _keep(3),
-        ],
+        [_modify(2, assistant_spec={"knowledge_refs": [first.authoring_ref]})],
     )
     after = await _state(db_container, seeded.assistant_ids[1], strict=False)
 
@@ -689,7 +666,7 @@ async def test_steps_are_written_whatever_the_assistants_fields_are(
     """The step row is patched by the edit itself; the assistant update is a
     separate write that only an assistant field triggers."""
 
-    await _edit(db_container, seeded, [_keep(1), _keep(2, name="Granska"), _keep(3)])
+    await _edit(db_container, seeded, [_modify(2, name="Granska")])
 
     async with db_container() as container:
         names = list(
@@ -704,7 +681,15 @@ async def test_steps_are_written_whatever_the_assistants_fields_are(
     assert names == ["Steg 1", "Granska", "Steg 3"]
 
 
-_PREP = {"kind": "add", "step": {"name": "Förbered", "instructions": "Förbered."}}
+_PREP = {
+    "kind": "add",
+    "local_id": "prep",
+    "placement": {
+        "kind": "after",
+        "target": {"kind": "saved", "existing_step_ref": "existing_step_1"},
+    },
+    "step": {"name": "Förbered", "instructions": "Förbered."},
+}
 
 
 async def test_a_prompt_that_reads_a_step_an_added_step_pushes_down_is_rewritten(
@@ -714,9 +699,7 @@ async def test_a_prompt_that_reads_a_step_an_added_step_pushes_down_is_rewritten
     now the added step."""
 
     calls = await _edit(
-        db_container,
-        seeded,
-        [_keep(1), _PREP, _keep(2), _keep(3, name="Använd analysen")],
+        db_container, seeded, [_PREP, _modify(3, name="Använd analysen")]
     )
 
     assert calls == {seeded.assistant_ids[2]: 1}
@@ -734,8 +717,11 @@ async def test_a_prompt_that_reads_a_step_after_the_first_is_removed_is_rewritte
     calls = await _edit(
         db_container,
         seeded,
-        [_keep(2, input_source="flow_input"), _keep(3, name="Använd analysen")],
-        removed=("existing_step_1",),
+        [
+            {"kind": "remove", "existing_step_ref": "existing_step_1"},
+            _modify(2, input_source="flow_input"),
+            _modify(3, name="Använd analysen"),
+        ],
     )
 
     assert calls == {seeded.assistant_ids[2]: 1}
@@ -751,9 +737,14 @@ async def test_a_prompt_that_reads_a_step_two_steps_swap_places_around_is_rewrit
         db_container,
         seeded,
         [
-            _keep(2, input_source="flow_input"),
-            _keep(1, input_source="previous_step"),
-            _keep(3, name="Använd analysen"),
+            {
+                "kind": "move",
+                "existing_step_ref": "existing_step_2",
+                "placement": {"kind": "start"},
+            },
+            _modify(2, input_source="flow_input"),
+            _modify(1, input_source="previous_step"),
+            _modify(3, name="Använd analysen"),
         ],
     )
 
@@ -766,7 +757,7 @@ async def test_a_prompt_that_reads_a_step_two_steps_swap_places_around_is_rewrit
 async def test_a_renumbered_step_whose_prompt_reads_no_step_is_not_written(
     db_container, seeded: Seeded
 ) -> None:
-    calls = await _edit(db_container, seeded, [_keep(1), _PREP, _keep(2), _keep(3)])
+    calls = await _edit(db_container, seeded, [_PREP])
 
     assert seeded.assistant_ids[0] not in calls
     assert seeded.assistant_ids[1] not in calls
@@ -862,20 +853,19 @@ _COLLEAGUE = "Direktredigerad {{ step_2.output.text }} av kollega."
 
 @pytest.mark.parametrize(
     "consumer",
-    [_keep(3), _keep(3, name="Använd analysen")],
+    [None, _modify(3, name="Använd analysen")],
     ids=["not in the plan", "renamed in the plan"],
 )
 async def test_a_move_approved_before_a_colleague_rewrites_a_prompt_is_refused(
-    db_container, seeded: Seeded, consumer: dict[str, Any]
+    db_container, seeded: Seeded, consumer: dict[str, object] | None
 ) -> None:
     """The plan was made before a colleague rewrote step 3's prompt. The
     rewrite moved the draft on, so the plan is refused and neither its copy
     of the prompt nor its moves are written over the colleague's edit."""
 
     plan_revision = seeded.revision
-    proposal = await _propose(
-        db_container, seeded, [_keep(1), _PREP, _keep(2), consumer]
-    )
+    operations = [_PREP] if consumer is None else [_PREP, consumer]
+    proposal = await _propose(db_container, seeded, operations)
     await _direct_prompt_edit(db_container, seeded, _COLLEAGUE, order=3)
 
     await _assert_refused_as_stale(
@@ -897,7 +887,7 @@ async def test_a_moved_alias_is_renumbered_with_the_authors_spacing(
         order=3,
     )
 
-    await _edit(db_container, seeded, [_keep(1), _PREP, _keep(2), _keep(3)])
+    await _edit(db_container, seeded, [_PREP])
 
     assert await _prompt(db_container, seeded.assistant_ids[2]) == (
         "A {{step_3.output.text}} B {{ step_1.output.text }} C"
@@ -948,8 +938,7 @@ async def test_a_prompt_renumbered_by_a_removal_is_judged_against_the_steps_it_i
     calls = await _edit(
         db_container,
         seeded,
-        [_keep(2), _keep(3)],
-        removed=("existing_step_1",),
+        [{"kind": "remove", "existing_step_ref": "existing_step_1"}],
     )
 
     assert calls == {seeded.assistant_ids[2]: 1}
@@ -975,11 +964,9 @@ async def test_a_prompt_that_reads_a_classified_step_in_the_saved_flow_is_refuse
             db_container,
             seeded,
             [
-                _keep(1),
-                _keep(2),
-                _keep(
+                _modify(
                     3, assistant_spec={"instructions": "Läs {{ step_1.output.text }}."}
-                ),
+                )
             ],
         )
 
@@ -1003,11 +990,7 @@ async def test_a_prompt_that_reads_a_classified_step_is_kept_while_classificatio
     calls = await _edit(
         db_container,
         seeded,
-        [
-            _keep(1),
-            _keep(2),
-            _keep(3, assistant_spec={"instructions": "Läs {{ step_1.output.text }}."}),
-        ],
+        [_modify(3, assistant_spec={"instructions": "Läs {{ step_1.output.text }}."})],
     )
 
     assert calls == {seeded.assistant_ids[2]: 1}
@@ -1030,10 +1013,13 @@ async def test_a_prompt_that_reads_both_steps_before_an_added_first_step_reads_t
         db_container,
         seeded,
         [
-            {"kind": "add", "step": {"name": "Först", "instructions": "Börja."}},
-            _keep(1, input_source="previous_step"),
-            _keep(2),
-            _keep(3),
+            {
+                "kind": "add",
+                "step": {"name": "Först", "instructions": "Börja."},
+                "local_id": "new",
+                "placement": {"kind": "start"},
+            },
+            _modify(1, input_source="previous_step"),
         ],
     )
 
@@ -1060,9 +1046,13 @@ async def test_a_prompt_that_reads_two_steps_that_swap_names_them_in_their_new_p
         db_container,
         seeded,
         [
-            _keep(2, input_source="flow_input"),
-            _keep(1, input_source="previous_step"),
-            _keep(3),
+            {
+                "kind": "move",
+                "existing_step_ref": "existing_step_2",
+                "placement": {"kind": "start"},
+            },
+            _modify(2, input_source="flow_input"),
+            _modify(1, input_source="previous_step"),
         ],
     )
 
@@ -1101,7 +1091,7 @@ async def test_a_renumbered_prompt_keeps_its_whitespace_and_description(
         description="Skriven av Anna.",
     )
 
-    await _edit(db_container, seeded, [_keep(1), _PREP, _keep(2), _keep(3)])
+    await _edit(db_container, seeded, [_PREP])
 
     assert await _selected_prompt(db_container, seeded.assistant_ids[2]) == (
         "\nLäs {{ step_3.output.text }}\n",
@@ -1137,11 +1127,7 @@ async def test_an_instruction_change_to_an_assistant_two_steps_share_is_refused(
         await _edit(
             db_container,
             seeded,
-            [
-                _keep(1),
-                _keep(2, assistant_spec={"instructions": "Läs noga."}),
-                _keep(3),
-            ],
+            [_modify(2, assistant_spec={"instructions": "Läs noga."})],
         )
 
     assert await _state(db_container, shared, strict=False) == before
@@ -1153,9 +1139,7 @@ async def test_a_rename_of_a_step_that_shares_its_assistant_makes_no_assistant_c
 ) -> None:
     await _share_the_second_steps_assistant(db_container, seeded)
 
-    calls = await _edit(
-        db_container, seeded, [_keep(1), _keep(2), _keep(3, name="Sammanfatta")]
-    )
+    calls = await _edit(db_container, seeded, [_modify(3, name="Sammanfatta")])
 
     assert calls == {}
 
@@ -1169,10 +1153,13 @@ async def test_a_move_writes_an_assistant_two_steps_share_once(
         db_container,
         seeded,
         [
-            {"kind": "add", "step": {"name": "Först", "instructions": "Börja."}},
-            _keep(1, input_source="previous_step"),
-            _keep(2),
-            _keep(3),
+            {
+                "kind": "add",
+                "step": {"name": "Först", "instructions": "Börja."},
+                "local_id": "new",
+                "placement": {"kind": "start"},
+            },
+            _modify(1, input_source="previous_step"),
         ],
     )
 

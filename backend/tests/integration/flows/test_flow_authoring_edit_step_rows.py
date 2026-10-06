@@ -370,15 +370,20 @@ async def _apply(
     )
 
 
-def _keep(order: int, **changes: Any) -> dict[str, Any]:
-    """A saved step in the edit's ordered list, with what changes on it."""
+def _modify(order: int, **changes: object) -> dict[str, object]:
+    """An explicitly authored modification of a saved step."""
 
     return {"kind": "modify", "existing_step_ref": f"existing_step_{order}", **changes}
 
 
-def _new_step(name: str = "Ny") -> dict[str, Any]:
+def _new_step(name: str = "Ny") -> dict[str, object]:
     return {
         "kind": "add",
+        "local_id": "new",
+        "placement": {
+            "kind": "after",
+            "target": {"kind": "saved", "existing_step_ref": "existing_step_1"},
+        },
         "step": {"name": name, "instructions": "Gör en ny uppgift."},
     }
 
@@ -386,8 +391,7 @@ def _new_step(name: str = "Ny") -> dict[str, Any]:
 async def _edit(
     db_container,
     saved: Saved,
-    steps: list[dict[str, Any]],
-    removed: tuple[str, ...] = (),
+    operations: list[dict[str, object]],
 ) -> FlowBuilderEditApproval:
     """The whole chain a plan goes through, from what the model sends: the real
     edit compile against the saved flow, the step lists the lifecycle derives
@@ -402,8 +406,7 @@ async def _edit(
             conversation=[],
             arguments={
                 "plan_rationale": "Ändra flödet.",
-                "steps": steps,
-                "removed_existing_step_refs": list(removed),
+                "operations": operations,
             },
             available_model_refs=None,
             available_kb_refs=None,
@@ -725,11 +728,7 @@ async def test_a_rename_leaves_the_steps_it_does_not_name_as_the_frontend_saved_
 
     before = await _rows(db_container, frontend_saved.flow_id)
 
-    await _edit(
-        db_container,
-        frontend_saved,
-        [_keep(1), _keep(2, name="Granska"), _keep(3)],
-    )
+    await _edit(db_container, frontend_saved, [_modify(2, name="Granska")])
     after = await _rows(db_container, frontend_saved.flow_id)
 
     assert after[0] == before[0]
@@ -749,11 +748,7 @@ async def test_a_step_saved_without_a_description_keeps_none_until_an_edit_names
     await _edit(
         db_container,
         frontend_saved,
-        [
-            _keep(1),
-            _keep(2, assistant_spec={"instructions": "Granska texten noga."}),
-            _keep(3),
-        ],
+        [_modify(2, assistant_spec={"instructions": "Granska texten noga."})],
     )
     after = await _rows(db_container, frontend_saved.flow_id)
 
@@ -770,11 +765,7 @@ async def test_a_step_that_reads_a_moved_step_by_alias_has_only_that_token_renum
 
     before = await _rows(db_container, frontend_saved.flow_id)
 
-    await _edit(
-        db_container,
-        frontend_saved,
-        [_keep(1), _new_step(), _keep(2), _keep(3)],
-    )
+    await _edit(db_container, frontend_saved, [_new_step()])
     after = await _rows(db_container, frontend_saved.flow_id)
 
     assert after[0] == before[0]
@@ -799,9 +790,7 @@ async def test_a_step_the_edit_names_and_a_moved_producer_change_only_what_the_e
     before = await _rows(db_container, frontend_saved.flow_id)
 
     await _edit(
-        db_container,
-        frontend_saved,
-        [_keep(1), _new_step(), _keep(2), _keep(3, name="Sammanfatta")],
+        db_container, frontend_saved, [_new_step(), _modify(3, name="Sammanfatta")]
     )
     after = await _rows(db_container, frontend_saved.flow_id)
 
@@ -832,9 +821,7 @@ async def test_a_step_the_edit_leaves_keeps_configuration_of_modes_it_does_not_u
     )
     before = await _rows(db_container, frontend_saved.flow_id)
 
-    await _edit(
-        db_container, frontend_saved, [_keep(1, name="Läs"), _keep(2), _keep(3)]
-    )
+    await _edit(db_container, frontend_saved, [_modify(1, name="Läs")])
 
     assert (await _rows(db_container, frontend_saved.flow_id))[1] == before[1]
 
@@ -861,9 +848,7 @@ async def test_a_review_mode_patch_that_restates_the_saved_mode_changes_nothing(
 
     before = await _saved_with_review_expiry(db_container, saved)
 
-    approval = await _edit(
-        db_container, saved, [_keep(1), _keep(2, review_mode="view"), _keep(3)]
-    )
+    approval = await _edit(db_container, saved, [_modify(2, review_mode="view")])
 
     assert await _rows(db_container, saved.flow_id) == before
     assert _step_change(approval, "existing_step_2").kind == "unchanged"
@@ -874,9 +859,7 @@ async def test_a_review_mode_change_keeps_the_saved_review_deadline(
 ) -> None:
     before = await _saved_with_review_expiry(db_container, saved)
 
-    approval = await _edit(
-        db_container, saved, [_keep(1), _keep(2, review_mode="edit"), _keep(3)]
-    )
+    approval = await _edit(db_container, saved, [_modify(2, review_mode="edit")])
     after = await _rows(db_container, saved.flow_id)
 
     assert after[1]["review_policy"] == {
@@ -903,7 +886,7 @@ async def test_review_mode_none_clears_the_policy_and_a_step_without_one_gets_th
     await _edit(
         db_container,
         saved,
-        [_keep(1, review_mode="view"), _keep(2, review_mode="none"), _keep(3)],
+        [_modify(1, review_mode="view"), _modify(2, review_mode="none")],
     )
     after = await _rows(db_container, saved.flow_id)
 
@@ -926,9 +909,7 @@ async def test_an_edit_that_names_no_form_field_reports_no_form_change_for_a_leg
             .values(metadata_json={"form_schema": {"fields": [field]}})
         )
 
-    approval = await _edit(
-        db_container, saved, [_keep(1, name="Läs"), _keep(2), _keep(3)]
-    )
+    approval = await _edit(db_container, saved, [_modify(1, name="Läs")])
 
     async with db_container() as container:
         metadata = await container.session().scalar(
@@ -976,8 +957,10 @@ async def test_a_step_the_edit_leaves_reads_its_producer_in_its_prompt_after_a_r
     await _edit(
         db_container,
         saved,
-        [_keep(2, input_source="flow_input"), _keep(3)],
-        removed=("existing_step_1",),
+        [
+            {"kind": "remove", "existing_step_ref": "existing_step_1"},
+            _modify(2, input_source="flow_input"),
+        ],
     )
 
     assert (await _prompts(db_container, saved.flow_id))[1] == (
@@ -1028,9 +1011,7 @@ async def test_a_step_the_edit_leaves_keeps_a_stored_credential_as_it_is(
     before = await _rows(db_container, frontend_saved.flow_id)
 
     with _encryption(active):
-        await _edit(
-            db_container, frontend_saved, [_keep(1, name="Läs"), _keep(2), _keep(3)]
-        )
+        await _edit(db_container, frontend_saved, [_modify(1, name="Läs")])
 
     assert (await _rows(db_container, frontend_saved.flow_id))[1] == before[1]
 
@@ -1321,9 +1302,7 @@ async def test_configuration_of_a_mode_the_step_does_not_run_is_not_renumbered(
     leftover = {"url": "https://example.test/{{step_2.output.text}}", "note": "x"}
     await _set_raw(db_container, rows[2]["id"], output_config=leftover)
 
-    await _edit(
-        db_container, frontend_saved, [_keep(1), _new_step(), _keep(2), _keep(3)]
-    )
+    await _edit(db_container, frontend_saved, [_new_step()])
 
     assert (await _rows(db_container, frontend_saved.flow_id))[3][
         "output_config"

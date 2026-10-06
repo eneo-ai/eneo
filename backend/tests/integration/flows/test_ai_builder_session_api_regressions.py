@@ -7440,9 +7440,11 @@ async def test_handle_edit_flow_with_lost_lease_rolls_back(
             name=PROPOSE_FLOW_TOOL_NAME,
             arguments={
                 "plan_rationale": "Lägg till ett textsammanfattningssteg.",
-                "steps": [
+                "operations": [
                     {
                         "kind": "add",
+                        "local_id": "summary",
+                        "placement": {"kind": "start"},
                         "step": {
                             "name": "Sammanfatta text",
                             "instructions": "Sammanfatta användarens text.",
@@ -8918,7 +8920,7 @@ async def test_ai_builder_api_edit_apply_replays_committed_output_change_once(
         name=PROPOSE_FLOW_TOOL_NAME,
         arguments={
             "plan_rationale": "Byter bara slutformatet till DOCX och behåller övriga delar.",
-            "steps": [
+            "operations": [
                 {
                     "kind": "modify",
                     "existing_step_ref": "existing_step_1",
@@ -9544,9 +9546,11 @@ async def test_ai_builder_api_edit_mode_transcription_insert_clears_stale_runtim
         name=PROPOSE_FLOW_TOOL_NAME,
         arguments={
             "plan_rationale": "Lägger till ett transkriberingssteg före analysen och gör analyssteget textbaserat.",
-            "steps": [
+            "operations": [
                 {
                     "kind": "add",
+                    "local_id": "transcription",
+                    "placement": {"kind": "start"},
                     "step": {
                         "name": "Transkribera ljudfil",
                         "instructions": "Transkribera ljudfilen ordagrant till svensk text.",
@@ -9722,7 +9726,7 @@ async def test_ai_builder_api_edit_mode_keeps_a_transcription_only_flow_at_one_s
         name=PROPOSE_FLOW_TOOL_NAME,
         arguments={
             "plan_rationale": "Förtydligar instruktionen för transkriberingssteget.",
-            "steps": [
+            "operations": [
                 {
                     "kind": "modify",
                     "existing_step_ref": "existing_step_1",
@@ -11328,7 +11332,7 @@ async def test_ai_builder_api_edit_of_template_fill_flow_inherits_its_template(
         name=PROPOSE_FLOW_TOOL_NAME,
         arguments={
             "plan_rationale": "Förtydligar sammanfattningssteget och behåller mallen.",
-            "steps": [
+            "operations": [
                 {
                     "kind": "modify",
                     "existing_step_ref": "existing_step_1",

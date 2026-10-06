@@ -83,12 +83,10 @@ from eneo.users.user import UserInDB
 logger = logging.getLogger(__name__)
 
 if TYPE_CHECKING:
+    from eneo.flows.ai_builder.ai_builder_edit_admission import EditCommands
     from eneo.flows.ai_builder.ai_builder_edit_preview_models import (
         FlowEditDiff,
         StepChange,
-    )
-    from eneo.flows.ai_builder.ai_builder_proposal_intent import (
-        OrderedEditProposal,
     )
 
 # Newest terminal runs examined; those of the published definition are admitted
@@ -782,79 +780,38 @@ def review_edit_scope(
 def validate_review_edit_proposal(
     *,
     scope: ReviewEditScope | None,
-    proposal: "OrderedEditProposal",
+    proposal: "EditCommands",
     flow_name: str | None,
     flow_description: str | None,
-    current_step_refs: Sequence[str],
 ) -> str | None:
-    """Reject a review proposal that reaches past what was selected.
-
-    The prompt asks the model to change nothing the evidence does not
-    justify; this is what holds it to that. It reads the model's own
-    proposal, before any server-owned field is filled in, so what it judges
-    is what the model actually asked for.
-    """
-
+    """Apply the review's operation permissions to the authored commands."""
     if scope is None:
         return None
-
-    if proposal.flow_name is not None and proposal.flow_name != flow_name:
-        return (
-            "This turn investigates selected findings and must not rename the "
-            "flow. Say what you would change in plan_rationale instead."
-        )
-    if (
-        proposal.flow_description is not None
-        and proposal.flow_description != flow_description
-    ):
-        return (
-            "This turn investigates selected findings and must not rewrite the "
-            "flow description. Say what you would change in plan_rationale."
-        )
-    if "form_fields" in proposal.model_fields_set:
-        # Omission (null on the wire) preserves the fields; a list replaces
-        # them and an empty list clears them, changes this turn may not make.
-        return (
-            "This turn investigates selected findings and must not change the "
-            "flow's form fields. Omit form_fields to leave them as they are."
-        )
-
-    for ref in sorted(proposal.removed_existing_step_refs):
-        if ref not in scope.removable_step_refs:
-            return (
-                f"Step `{ref}` may not be removed by this turn. Removal answers "
-                "duplicated work or a step whose output is unused; for anything "
-                "else, change the step or say in plan_rationale why it should "
-                "stay."
-            )
-
-    for step in proposal.steps:
-        if step.kind == "add":
+    for operation in proposal.operations:
+        if operation.kind == "modify_flow":
+            if operation.flow_name is not None and operation.flow_name != flow_name:
+                return "Selected findings must not rename the flow."
+            if (
+                operation.flow_description is not None
+                and operation.flow_description != flow_description
+            ):
+                return "Selected findings must not rewrite the flow description."
+            if operation.form_fields is not None:
+                return "Selected findings must not change form fields. Omit modify_flow to preserve them."
+        elif operation.kind == "add":
             if not scope.may_add:
-                return (
-                    "These findings are not answered by adding a step. Change "
-                    "the selected steps instead."
-                )
-            continue
-        authored = sorted(step.authored_fields)
-        if authored and step.existing_step_ref not in scope.step_refs:
-            return (
-                f"Step `{step.existing_step_ref}` changed even though the "
-                "findings name other steps. Only the findings' steps may "
-                "change."
-            )
-
-    # The compiler builds the flow in the order the proposal lists, so a step
-    # this turn never mentions can still be moved by where it is repeated.
-    proposed_order = [
-        step.existing_step_ref for step in proposal.steps if step.kind == "modify"
-    ]
-    kept = [ref for ref in current_step_refs if ref in set(proposed_order)]
-    if proposed_order != kept:
-        return (
-            "This turn investigates selected findings and must not reorder the "
-            "flow's steps. List the existing steps in their current order."
-        )
+                return "These findings are not answered by adding a step. Change the selected steps instead."
+        elif operation.kind == "remove":
+            if operation.existing_step_ref not in scope.removable_step_refs:
+                return f"Step `{operation.existing_step_ref}` may not be removed by this turn."
+        elif operation.kind == "move":
+            if not scope.may_move or operation.existing_step_ref not in scope.step_refs:
+                return "This review turn must not reorder the flow's steps."
+        elif (
+            operation.authored_fields
+            and operation.existing_step_ref not in scope.step_refs
+        ):
+            return f"Step `{operation.existing_step_ref}` is outside the findings' selected steps."
     return None
 
 

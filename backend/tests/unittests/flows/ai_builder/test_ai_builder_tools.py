@@ -469,8 +469,7 @@ class TestBuildToolSchema:
         ]
         arguments = {
             "plan_rationale": "Steg 3 fångar fler fält.",
-            "steps": [
-                {"kind": "keep", "existing_step_ref": "existing_step_1"},
+            "operations": [
                 {
                     "kind": "modify",
                     "existing_step_ref": "existing_step_2",
@@ -495,13 +494,12 @@ class TestBuildToolSchema:
 
         assert hits == ["_rehome_misplaced_create_children"]
         assert "review_mode" not in admitted
-        assert [step["existing_step_ref"] for step in admitted["steps"]] == [
-            "existing_step_1",
+        assert [step["existing_step_ref"] for step in admitted["operations"]] == [
             "existing_step_2",
             "existing_step_3",
         ]
-        assert admitted["steps"][-1]["output_fields"] == [*kept, *spilled]
-        assert admitted["steps"][-1]["review_mode"] is None
+        assert admitted["operations"][-1]["output_fields"] == [*kept, *spilled]
+        assert admitted["operations"][-1]["review_mode"] is None
         # The captured variant where the step's whole optional tail followed
         # the closed array as nulls: a null beside the step's own value carries
         # nothing and is discarded, the step's values stand.
@@ -513,8 +511,8 @@ class TestBuildToolSchema:
             "output_type": None,
             "name": None,
         }
-        null_tail["steps"][2] = {
-            **null_tail["steps"][2],
+        null_tail["operations"][1] = {
+            **null_tail["operations"][1],
             "input_source": "previous_step",
             "input_type": "json",
             "output_type": "json",
@@ -522,13 +520,16 @@ class TestBuildToolSchema:
         admitted_tail = admit_propose_flow_tool_arguments(
             arguments=null_tail, tool_schema=schema
         )
-        assert admitted_tail["steps"][-1]["input_type"] == "json"
-        assert admitted_tail["steps"][-1]["output_type"] == "json"
+        assert admitted_tail["operations"][-1]["input_type"] == "json"
+        assert admitted_tail["operations"][-1]["output_type"] == "json"
         assert "input_type" not in admitted_tail and "name" not in admitted_tail
         # An explicit `output_fields: null` is the model keeping the contract;
         # a field object after it is not re-homed into a replacement list.
         explicit_null = deepcopy(arguments)
-        explicit_null["steps"][2] = {**explicit_null["steps"][2], "output_fields": None}
+        explicit_null["operations"][1] = {
+            **explicit_null["operations"][1],
+            "output_fields": None,
+        }
         with pytest.raises(ProposalToolArgumentsError):
             admit_propose_flow_tool_arguments(
                 arguments=explicit_null, tool_schema=schema
@@ -989,7 +990,7 @@ class TestBuildToolSchema:
         )
         add_step_schema = next(
             branch
-            for branch in schema["function"]["parameters"]["properties"]["steps"][
+            for branch in schema["function"]["parameters"]["properties"]["operations"][
                 "items"
             ]["anyOf"]
             if branch["properties"]["kind"]["enum"] == ["add"]
@@ -1137,16 +1138,16 @@ class TestBuildToolSchema:
 
         with pytest.raises(
             ProposalToolArgumentsError,
-            match=r"steps\.0.*flow_name.*additionalProperties",
+            match=r"operations\.0.*flow_name.*additionalProperties",
         ):
             validate_propose_flow_tool_arguments(
                 arguments={
                     "plan_rationale": "Update one step.",
-                    "steps": [
+                    "operations": [
                         {
                             "kind": "modify",
                             "existing_step_ref": "existing_step_1",
-                            "flow_name": "This field belongs at the root",
+                            "flow_name": "This field belongs to modify_flow",
                         }
                     ],
                 },
@@ -1174,12 +1175,12 @@ class TestBuildToolSchema:
 
         with pytest.raises(
             ProposalToolArgumentsError,
-            match=r"steps\.0.*existing_step_ref.*required",
+            match=r"operations\.0.*existing_step_ref.*required",
         ):
             validate_propose_flow_tool_arguments(
                 arguments={
                     "plan_rationale": "Update one step.",
-                    "steps": [{"kind": "modify", "input_type": "unsupported"}],
+                    "operations": [{"kind": "modify", "input_type": "unsupported"}],
                 },
                 tool_schema=schema,
             )

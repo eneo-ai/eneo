@@ -10,6 +10,7 @@ from pydantic import BaseModel, ConfigDict, Field, ValidationError
 from eneo.flows.ai_builder.ai_builder_architecture_errors import (
     AIBuilderArchitectureError,
 )
+from eneo.flows.ai_builder.ai_builder_edit_admission import SavedStepTarget
 from eneo.flows.ai_builder.ai_builder_error_contract import (
     AIBuilderBadRequestException,
     AIBuilderErrorCode,
@@ -595,9 +596,11 @@ def _refuse_a_rebuild_that_drops_reads(
             )
     for ref in lists[1] if lists else ():
         producer_ref = saved.steps[ref.from_step - 1].existing_step_ref
-        if producer_ref in before:
+        if producer_ref is not None and producer_ref in before:
             field_read = {
-                "from_step": before[producer_ref],
+                "producer": SavedStepTarget(
+                    existing_step_ref=producer_ref
+                ).model_dump(),
                 "field_path": display_value(ref.field_path),
                 "label": display_value(ref.label or ""),
             }

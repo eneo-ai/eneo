@@ -1158,10 +1158,10 @@ def test_a_revision_that_can_decline_is_told_when_to_use_it() -> None:
     )
 
     declining = build_plan_revision_prompt_block(
-        context=context, prior_spec=prior, can_decline=True
+        is_edit_mode=False, context=context, prior_spec=prior, can_decline=True
     )
     proposing = build_plan_revision_prompt_block(
-        context=context, prior_spec=prior, can_decline=False
+        is_edit_mode=False, context=context, prior_spec=prior, can_decline=False
     )
 
     assert declining is not None and proposing is not None
@@ -1195,6 +1195,7 @@ def test_a_named_part_of_the_step_reaches_the_revision_directive(
 
     def directive(intent: str | None) -> str:
         block = build_plan_revision_prompt_block(
+            is_edit_mode=True,
             context=replace(base, edit_intent=intent),
             prior_spec=prior,
             saved_step_revision=saved_step_revision,
@@ -1308,7 +1309,7 @@ def test_revision_prompt_names_the_target_step_and_prior_refs() -> None:
     )
 
     prompt = build_plan_revision_prompt_block(
-        context=context, prior_spec=prior_plan.spec
+        is_edit_mode=False, context=context, prior_spec=prior_plan.spec
     )
 
     assert prompt is not None
@@ -1326,6 +1327,7 @@ def test_revision_prompt_leaves_what_is_said_about_models_to_the_design_rules(
     # sends it to assumptions. A revision only routes a model-only request to
     # the decline tool when that tool is offered.
     block = build_plan_revision_prompt_block(
+        is_edit_mode=False,
         context=_step_context(target_plan_step_ref="step_b"),
         prior_spec=_model_revision_specs(proposed_model_ref=None)[0],
         can_decline=can_decline,
@@ -1367,10 +1369,10 @@ def test_revision_prompt_tells_a_repair_to_keep_the_contract_or_decline(
     )
 
     repaired = build_plan_revision_prompt_block(
-        context=repair, prior_spec=prior, can_decline=can_decline
+        is_edit_mode=False, context=repair, prior_spec=prior, can_decline=can_decline
     )
     ordinary = build_plan_revision_prompt_block(
-        context=plain, prior_spec=prior, can_decline=can_decline
+        is_edit_mode=False, context=plain, prior_spec=prior, can_decline=can_decline
     )
 
     assert repaired is not None and ordinary is not None
@@ -1626,3 +1628,52 @@ def test_failure_repair_keeps_all_compiled_output_contract_fields(field, value):
         assert rejection is None
     else:
         assert rejection is not None and rejection.reason == "output_contract_changed"
+
+
+@pytest.mark.parametrize(
+    "scope,target_plan_step_ref,target_existing_step_ref,is_edit_mode",
+    [
+        ("whole_plan", None, None, True),
+        ("step", "step_b", None, True),
+        ("step", "step_a", "existing_step_1", True),
+        ("whole_plan", None, None, False),
+        ("step", "step_b", None, False),
+    ],
+    ids=["edit whole", "edit added", "edit saved", "create whole", "create step"],
+)
+def test_revision_directive_keeps_the_edit_commands_cumulative(
+    scope, target_plan_step_ref, target_existing_step_ref, is_edit_mode
+):
+    """Mutant: preview delta, unconditional no-add, or forbidden saved-step restatement."""
+    context = AIBuilderPlanEditContext(
+        scope=scope,
+        plan_id=UUID("00000000-0000-0000-0000-000000000001"),
+        target_plan_step_ref=target_plan_step_ref,
+        target_existing_step_ref=target_existing_step_ref,
+    )
+    prior = _edit_spec(
+        [
+            _edit_step(
+                "step_a",
+                "Read input",
+                output_type=OutputType.JSON,
+                existing_step_ref="existing_step_1",
+            ),
+            _edit_step("step_b", "Write result", output_type=OutputType.TEXT),
+        ]
+    )
+    block = build_plan_revision_prompt_block(
+        is_edit_mode=is_edit_mode, context=context, prior_spec=prior
+    )
+    assert block is not None
+    if is_edit_mode and target_existing_step_ref is None:
+        assert "Commands apply to the saved Flow" in block
+        assert "Restate every prior-plan add, removal, move and field change" in block
+        if scope == "step":
+            assert "re-add it with the same placement" in block
+            assert "beyond the prior plan" in block
+            assert "Do not add, remove, or reorder steps." not in block
+    else:
+        assert "Restate every prior-plan add" not in block
+        if scope == "step":
+            assert "Do not add, remove, or reorder steps." in block

@@ -1,525 +1,333 @@
-"""The strict-shaped edit wire contract lowers into one canonical proposal."""
+"""Local command admission preserves identity without inferring model intent."""
 
 from __future__ import annotations
 
-from typing import Any
-from uuid import uuid4
-
-import jsonschema
 import pytest
 from pydantic import ValidationError
 
-from eneo.flows.ai_builder.ai_builder_edit_admission import lower_edit_tool_arguments
-from eneo.flows.ai_builder.ai_builder_edit_tool_schema import (
-    build_edit_flow_tool_schema,
+from eneo.flows.ai_builder.ai_builder_edit_admission import (
+    EditCommandRejection,
+    lower_edit_commands,
+    parse_edit_commands,
 )
-from eneo.flows.ai_builder.ai_builder_flow_review import (
-    ReviewEditScope,
-    validate_review_edit_proposal,
-)
-from eneo.flows.ai_builder.ai_builder_new_step_models import StructuredFieldDraft
-from eneo.flows.ai_builder.ai_builder_plan_edit_context import (
-    EditOperationPermissions,
-)
-from eneo.flows.ai_builder.ai_builder_proposal_intent import (
-    AddStep,
-    ModifyExistingStep,
-    OrderedEditProposal,
-    ProposalStructuredFieldIntent,
-    build_create_flow_tool_schema,
-)
-from eneo.flows.ai_builder.ai_builder_resource_catalog import (
-    build_ai_builder_resource_catalog,
-)
-from eneo.flows.ai_builder.ai_builder_tool_names import PROPOSE_FLOW_TOOL_NAME
-from eneo.flows.ai_builder.ai_builder_tools import (
-    ProposalToolArgumentsError,
-    build_native_strict_tool_schema,
-    validate_native_strict_schema,
-    validate_propose_flow_tool_arguments,
-)
-from eneo.flows.domain.flow import FlowStep
+from eneo.flows.ai_builder.ai_builder_proposal_intent import AddStep, ModifyExistingStep
+
+BASELINE = {
+    "existing_step_1": "Extract",
+    "existing_step_2": "Check",
+    "existing_step_3": "Write",
+}
 
 
-def _step(order: int) -> FlowStep:
-    return FlowStep(
-        id=uuid4(),
-        flow_id=uuid4(),
-        tenant_id=uuid4(),
-        assistant_id=uuid4(),
-        step_order=order,
-        user_description=f"Step {order}",
-        input_source="flow_input" if order == 1 else "previous_step",
-        input_type="text",
-        output_mode="pass_through",
-        output_type="text",
-    )
+def _modify(ref="existing_step_2", **fields):
+    return {"kind": "modify", "existing_step_ref": ref, **fields}
 
 
-def _catalog():
-    return build_ai_builder_resource_catalog(available_models=[], available_kbs=[])
-
-
-def _edit_schema(step_count: int = 2):
-    return build_edit_flow_tool_schema(
-        [_step(order) for order in range(1, step_count + 1)],
-        resource_catalog=_catalog(),
-        tool_name=PROPOSE_FLOW_TOOL_NAME,
-    )
-
-
-# Every property present, as a strict provider sends it; null keeps the value.
-def _strict_modify(ref: str, **changes: object) -> dict[str, object]:
+def _add(local_id="new", placement=None, **fields):
     return {
-        "kind": "modify",
-        "existing_step_ref": ref,
-        "name": None,
-        "assistant_spec": {"instructions": None, "knowledge_refs": None},
-        "input_source": None,
-        "input_type": None,
-        "output_type": None,
-        "document_delivery_mode": None,
-        "uses_form_fields": None,
-        "uses_previous_fields": None,
-        "output_fields": None,
-        "review_mode": None,
-        **changes,
+        "kind": "add",
+        "local_id": local_id,
+        "placement": placement or {"kind": "start"},
+        "step": {
+            "name": "New assessment",
+            "instructions": "Assess the evidence.",
+            **fields,
+        },
     }
 
 
-def _strict_arguments(*steps: dict[str, object], **top: object) -> dict[str, object]:
-    return {
-        "plan_rationale": "Keep the flow as it is.",
-        "assumptions": [],
-        "flow_name": None,
-        "flow_description": None,
-        "steps": list(steps),
-        "removed_existing_step_refs": [],
-        "form_fields": None,
-        **top,
-    }
+def _saved(ref):
+    return {"kind": "saved", "existing_step_ref": ref}
 
 
-def test_the_edit_tool_schema_projects_into_the_native_strict_subset() -> None:
-    schema = _edit_schema()
-    strict = build_native_strict_tool_schema(schema)  # type: ignore[arg-type]
-    validate_native_strict_schema(strict["function"]["parameters"])
-    assert strict["function"]["strict"] is True
-    # The semantic schema is the admission contract and stays untouched.
-    assert "strict" not in schema["function"]
+def _after(target):
+    return {"kind": "after", "target": target}
 
 
-def test_a_strict_shaped_unchanged_step_lowers_to_an_untouched_modify() -> None:
-    arguments = _strict_arguments(_strict_modify("existing_step_1"))
-    validate_propose_flow_tool_arguments(
-        arguments=arguments,  # type: ignore[arg-type]
-        tool_schema=_edit_schema(1),  # type: ignore[arg-type]
-    )
-
-    proposal = OrderedEditProposal.model_validate(lower_edit_tool_arguments(arguments))
-
-    assert proposal.model_fields_set == {
-        "plan_rationale",
-        "assumptions",
-        "steps",
-        "removed_existing_step_refs",
-    }
-    (step,) = proposal.steps
-    assert isinstance(step, ModifyExistingStep)
-    assert step.model_fields_set == {"kind", "existing_step_ref"}
-
-
-def test_explicit_clears_survive_lowering_and_stay_distinct_from_keeps() -> None:
-    arguments = _strict_arguments(
-        _strict_modify(
-            "existing_step_1",
-            assistant_spec={"instructions": None, "knowledge_refs": []},
-            uses_form_fields=[],
-            output_fields=[],
-            review_mode="none",
+def _lower(operations, **root):
+    return lower_edit_commands(
+        parse_edit_commands(
+            {
+                "plan_rationale": "Change only the requested work.",
+                "operations": operations,
+                **root,
+            }
         ),
-        form_fields=[],
-        flow_description="",
+        baseline_names=BASELINE,
     )
 
-    proposal = OrderedEditProposal.model_validate(lower_edit_tool_arguments(arguments))
 
-    assert proposal.form_fields == [] and "form_fields" in proposal.model_fields_set
-    assert proposal.flow_description == ""
-    (step,) = proposal.steps
-    assert isinstance(step, ModifyExistingStep)
-    assert step.assistant_spec is not None
-    assert step.assistant_spec.model_fields_set == {"knowledge_refs"}
-    assert step.assistant_spec.knowledge_refs == []
-    assert step.uses_form_fields == []
-    # An empty field list is admitted as "no structured contract".
-    assert "output_fields" in step.model_fields_set and step.output_fields is None
-    assert "review_mode" in step.model_fields_set and step.review_mode is None
+@pytest.mark.parametrize("strict", [False, True])
+def test_untouched_steps_and_null_patches_are_kept(strict):
+    """Mutants: drop an omitted saved row; treat keep-null as clear."""
+    patch = _modify(name="Changed")
+    if strict:
+        patch.update(
+            output_fields=None,
+            review_mode=None,
+            assistant_spec={"instructions": None, "knowledge_refs": None},
+        )
+    operations = [patch]
+    if strict:
+        operations.append(
+            {
+                "kind": "modify_flow",
+                "flow_name": None,
+                "flow_description": None,
+                "form_fields": None,
+            }
+        )
+    proposal = _lower(operations)
+    assert [step.existing_step_ref for step in proposal.steps] == list(BASELINE)
+    assert [step.authored_fields for step in proposal.steps] == [
+        frozenset(),
+        frozenset({"name"}),
+        frozenset(),
+    ]
+    assert not proposal.model_fields_set.intersection({"flow_name", "form_fields"})
 
 
-def test_an_added_step_keeps_its_edit_only_fields_and_drops_keep_nulls() -> None:
-    arguments = _strict_arguments(
-        _strict_modify("existing_step_1"),
-        {
-            "kind": "add",
-            "step": {
-                "name": "Sammanställ",
-                "instructions": "Sammanställ ärendet som JSON.",
-                "output_type": "json",
-                "output_fields": [
+def test_explicit_clear_and_provider_field_tree_survive_lowering():
+    """Mutants: clear becomes keep; object children lowered as array members."""
+    proposal = _lower(
+        [
+            _modify(
+                review_mode="none",
+                uses_form_fields=[],
+                output_fields=[
                     {
-                        "name": "summary",
-                        "field_type": "string",
-                        "description": "Sammanfattning",
-                        "required": True,
-                        "nullable": False,
-                        "children": None,
+                        "name": "facts",
+                        "field_type": "object",
+                        "description": "Evidence",
+                        "children": [
+                            {
+                                "name": "date",
+                                "field_type": "string",
+                                "description": "Received date",
+                            }
+                        ],
                     }
                 ],
-                "uses_form_fields": ["case_id"],
-                "knowledge_refs": None,
-                "citations_requested": False,
-                "review_mode": "view",
-            },
-        },
-    )
-    validate_propose_flow_tool_arguments(
-        arguments=arguments,  # type: ignore[arg-type]
-        tool_schema=_edit_schema(1),  # type: ignore[arg-type]
-    )
-
-    proposal = OrderedEditProposal.model_validate(lower_edit_tool_arguments(arguments))
-
-    added = proposal.steps[1]
-    assert isinstance(added, AddStep)
-    assert added.step.output_type == "json"
-    assert added.step.uses_form_fields == ["case_id"]
-    assert added.step.review_mode == "view"
-    assert added.step.knowledge_refs == []
-    assert added.step.output_fields == [
-        StructuredFieldDraft(
-            name="summary", field_type="string", description="Sammanfattning"
-        )
-    ]
-
-
-def test_the_field_tree_lowers_the_same_way_for_create_and_edit() -> None:
-    tree = {
-        "name": "items",
-        "field_type": "array",
-        "description": "Rows",
-        "required": True,
-        "nullable": False,
-        "children": [
-            {
-                "name": "title",
-                "field_type": "string",
-                "description": "Title",
-                "required": True,
-                "nullable": True,
-                "children": None,
-            }
-        ],
-    }
-    create_draft = ProposalStructuredFieldIntent.model_validate(
-        tree
-    ).to_structured_field_draft()
-
-    modify = OrderedEditProposal.model_validate(
-        lower_edit_tool_arguments(
-            _strict_arguments(_strict_modify("existing_step_1", output_fields=[tree]))
-        )
-    ).steps[0]
-    assert isinstance(modify, ModifyExistingStep)
-    added = OrderedEditProposal.model_validate(
-        lower_edit_tool_arguments(
-            _strict_arguments(
-                {
-                    "kind": "add",
-                    "step": {
-                        "name": "Rows",
-                        "instructions": "List the rows.",
-                        "output_fields": [tree],
-                    },
-                }
             )
-        )
-    ).steps[0]
-    assert isinstance(added, AddStep)
-
-    assert modify.output_fields == [create_draft]
-    assert added.step.output_fields == [create_draft]
-    # And the create tool offers the very same field tree on the wire.
-    create_items = build_create_flow_tool_schema(
-        resource_catalog=_catalog(), tool_name=PROPOSE_FLOW_TOOL_NAME
-    )["function"]["parameters"]["properties"]["steps"]["items"]["properties"][
-        "output_fields"
-    ]["items"]
-    edit_items = next(
-        branch
-        for branch in _edit_schema(1)["function"]["parameters"]["properties"]["steps"][
-            "items"
-        ]["anyOf"]
-        if branch["properties"]["kind"]["enum"] == ["modify"]
-    )["properties"]["output_fields"]["items"]
-    assert create_items == edit_items
-
-
-def test_an_edit_in_a_space_without_knowledge_bases_offers_no_knowledge_refs() -> None:
-    schema = _edit_schema(1)
-    modify = _strict_modify(
-        "existing_step_1",
-        assistant_spec={"instructions": None, "knowledge_refs": []},
+        ]
     )
-    validate_propose_flow_tool_arguments(
-        arguments=_strict_arguments(modify), tool_schema=schema
-    )
-    with pytest.raises(ProposalToolArgumentsError, match="knowledge_refs"):
-        validate_propose_flow_tool_arguments(
-            arguments=_strict_arguments(
-                {
-                    **modify,
-                    "assistant_spec": {
-                        "instructions": None,
-                        "knowledge_refs": ["f27f03c7-ff50-40b7-a55f-6c75fb11f8b4"],
-                    },
-                }
-            ),
-            tool_schema=schema,
-        )
-
-
-def test_a_malformed_field_tree_is_a_validation_error_not_a_silent_drop() -> None:
-    with pytest.raises(ValidationError):
-        OrderedEditProposal.model_validate(
-            lower_edit_tool_arguments(
-                _strict_arguments(
-                    _strict_modify(
-                        "existing_step_1",
-                        output_fields=[{"name": "summary", "field_type": "text"}],
-                    )
-                )
-            )
-        )
-
-
-def test_a_scoped_strict_payload_lowers_to_what_the_findings_allow() -> None:
-    # The scoped schema lists untouched steps as keep and offers no flow-level
-    # fields; the lowered proposal must read as touching only the findings'
-    # step, so the scope check has nothing to refuse.
-    scope = ReviewEditScope(
-        step_refs=frozenset({"existing_step_2"}),
-        removable_step_refs=frozenset(),
-        may_add=False,
-    )
-    schema = build_edit_flow_tool_schema(
-        [_step(1), _step(2), _step(3)],
-        resource_catalog=_catalog(),
-        tool_name=PROPOSE_FLOW_TOOL_NAME,
-        review_scope=scope,
-    )
-    arguments: dict[str, object] = {
-        "plan_rationale": "Tighten step 2's instructions.",
-        "assumptions": [],
-        "steps": [
-            {"kind": "keep", "existing_step_ref": "existing_step_1"},
-            _strict_modify(
-                "existing_step_2",
-                assistant_spec={
-                    "instructions": "Read the source and cite it.",
-                    "knowledge_refs": None,
-                },
-            ),
-            {"kind": "keep", "existing_step_ref": "existing_step_3"},
-        ],
-    }
-    validate_propose_flow_tool_arguments(
-        arguments=arguments,  # type: ignore[arg-type]
-        tool_schema=schema,  # type: ignore[arg-type]
-    )
-    strict = build_native_strict_tool_schema(schema)  # type: ignore[arg-type]
-    jsonschema.validate(arguments, strict["function"]["parameters"])
-
-    proposal = OrderedEditProposal.model_validate(lower_edit_tool_arguments(arguments))
-
-    kept = [step for step in proposal.steps if isinstance(step, ModifyExistingStep)]
-    assert [step.existing_step_ref for step in kept] == [
-        "existing_step_1",
-        "existing_step_2",
-        "existing_step_3",
-    ]
-    assert kept[0].model_fields_set == {"kind", "existing_step_ref"}
-    assert kept[2].model_fields_set == {"kind", "existing_step_ref"}
-    assert kept[1].assistant_spec is not None
-    assert (
-        validate_review_edit_proposal(
-            scope=scope,
-            proposal=proposal,
-            flow_name="Flow",
-            flow_description="Current description",
-            current_step_refs=["existing_step_1", "existing_step_2", "existing_step_3"],
-        )
-        is None
-    )
-
-
-# Every value the edit tool schema admits as null must be admitted by the
-# canonical proposal too: a schema-following provider otherwise gets a parse
-# error for doing what the schema said. The walk covers each scope's schema;
-# a recursive field tree is checked at its first level.
-def _edit_schemas() -> dict[str, dict[str, Any]]:
-    steps = [_step(1), _step(2)]
-    scope = ReviewEditScope(
-        step_refs=frozenset({"existing_step_2"}),
-        removable_step_refs=frozenset({"existing_step_2"}),
-        may_add=True,
-    )
-    permissions = EditOperationPermissions(
-        step_refs=frozenset({"existing_step_2"}),
-        removable_step_refs=frozenset(),
-        may_add=False,
-    )
-    common: dict[str, Any] = {
-        "resource_catalog": _catalog(),
-        "tool_name": PROPOSE_FLOW_TOOL_NAME,
-    }
-    return {
-        "flow": build_edit_flow_tool_schema(steps, **common),
-        "review": build_edit_flow_tool_schema(steps, review_scope=scope, **common),
-        "step": build_edit_flow_tool_schema(steps, permissions=permissions, **common),
-    }
-
-
-def _types(node: dict[str, Any]) -> list[object]:
-    kind = node.get("type")
-    return list(kind) if isinstance(kind, list) else [kind]
-
-
-def _nullable_paths(
-    node: dict[str, Any], path: tuple[object, ...] = ()
-) -> list[tuple[object, ...]]:
-    found: list[tuple[object, ...]] = [path] if "null" in _types(node) else []
-    for name, child in node.get("properties", {}).items():
-        if name not in path:
-            found += _nullable_paths(child, (*path, name))
-    if isinstance(node.get("items"), dict):
-        found += _nullable_paths(node["items"], (*path, "[]"))
-    for index, branch in enumerate(node.get("anyOf", [])):
-        found += _nullable_paths(branch, (*path, index))
-    return found
-
-
-def _instance(node: dict[str, Any], target: tuple[object, ...] | None) -> object:
-    """Null at the target, the smallest valid value elsewhere (null if allowed)."""
-
-    if target == ():
-        return None
-    head, rest = (target[0], target[1:]) if target else (None, None)
-    if isinstance(head, int):
-        return _instance(node["anyOf"][head], rest)
-    types = _types(node)
-    if head is None and "null" in types:
-        return None
-    if "object" in types:
-        return {
-            name: _instance(child, rest if name == head else None)
-            for name, child in node["properties"].items()
-        }
-    if "array" in types:
-        return [_instance(node["items"], rest)] if head == "[]" else []
-    if "enum" in node:
-        return next(value for value in node["enum"] if value is not None)
-    if "boolean" in types:
-        return node.get("default", False)
-    if "integer" in types:
-        return node.get("minimum", 1)
-    return "x"
+    step = proposal.steps[1]
+    assert isinstance(step, ModifyExistingStep)
+    assert step.review_mode is None and "review_mode" in step.authored_fields
+    assert step.uses_form_fields == [] and "uses_form_fields" in step.authored_fields
+    assert step.output_fields and step.output_fields[0].fields[0].name == "date"
 
 
 @pytest.mark.parametrize(
-    ("scope", "path"),
+    ("operations", "expected", "removed"),
     [
-        (scope, path)
-        for scope, schema in _edit_schemas().items()
-        for path in _nullable_paths(
-            build_native_strict_tool_schema(schema)["function"]["parameters"]  # type: ignore[arg-type]
-        )
-    ],
-    ids=lambda value: value if isinstance(value, str) else ".".join(map(str, value)),
-)
-def test_every_null_the_edit_schema_admits_passes_admission(
-    scope: str, path: tuple[object, ...]
-) -> None:
-    schema = _edit_schemas()[scope]
-    strict = build_native_strict_tool_schema(schema)  # type: ignore[arg-type]
-    arguments = _instance(strict["function"]["parameters"], path)
-    assert isinstance(arguments, dict)
-    jsonschema.validate(arguments, strict["function"]["parameters"])
-    validate_propose_flow_tool_arguments(
-        arguments=arguments,  # type: ignore[arg-type]
-        tool_schema=schema,  # type: ignore[arg-type]
-    )
-
-    OrderedEditProposal.model_validate(lower_edit_tool_arguments(arguments))  # type: ignore[arg-type]
-
-
-def test_a_schema_following_form_field_passes_admission() -> None:
-    # A strict provider must send every property; a field with no choices
-    # sends an empty list, and null is never on the wire.
-    schema = _edit_schema(1)
-    strict = build_native_strict_tool_schema(schema)  # type: ignore[arg-type]
-    field = {"name": "case_id", "type": "text", "label": "Ärende", "required": True}
-    arguments = _strict_arguments(
-        _strict_modify("existing_step_1"), form_fields=[{**field, "options": []}]
-    )
-    jsonschema.validate(arguments, strict["function"]["parameters"])
-    with pytest.raises(ProposalToolArgumentsError, match="options"):
-        validate_propose_flow_tool_arguments(
-            arguments=_strict_arguments(
-                _strict_modify("existing_step_1"),
-                form_fields=[{**field, "options": None}],
-            ),  # type: ignore[arg-type]
-            tool_schema=schema,  # type: ignore[arg-type]
-        )
-
-    proposal = OrderedEditProposal.model_validate(lower_edit_tool_arguments(arguments))
-
-    assert proposal.form_fields is not None
-    assert [(f.variable_name, f.options) for f in proposal.form_fields] == [
-        ("case_id", [])
-    ]
-
-
-@pytest.mark.parametrize(
-    ("field", "value"),
-    [
-        ("input_type", "image"),
-        ("input_source", "http_get"),
-        ("output_type", "xml"),
-    ],
-)
-def test_a_modify_outside_the_editable_vocabulary_is_refused(
-    field: str, value: str
-) -> None:
-    with pytest.raises(ProposalToolArgumentsError, match=field):
-        validate_propose_flow_tool_arguments(
-            arguments=_strict_arguments(
-                _strict_modify("existing_step_1", **{field: value})
-            ),
-            tool_schema=_edit_schema(1),
-        )
-
-
-def test_a_modify_inside_the_editable_vocabulary_is_admitted() -> None:
-    validate_propose_flow_tool_arguments(
-        arguments=_strict_arguments(
-            _strict_modify(
-                "existing_step_1",
-                input_type="document",
-                input_source="flow_input",
-                output_type="docx",
-                document_delivery_mode="template_fill",
-            )
+        (
+            [_add()],
+            [None, "existing_step_1", "existing_step_2", "existing_step_3"],
+            set(),
         ),
-        tool_schema=_edit_schema(1),
+        (
+            [
+                {
+                    "kind": "move",
+                    "existing_step_ref": "existing_step_3",
+                    "placement": {"kind": "start"},
+                }
+            ],
+            ["existing_step_3", "existing_step_1", "existing_step_2"],
+            set(),
+        ),
+        (
+            [{"kind": "remove", "existing_step_ref": "existing_step_2"}],
+            ["existing_step_1", "existing_step_3"],
+            {"existing_step_2"},
+        ),
+        (
+            [
+                _modify(name="Changed"),
+                {
+                    "kind": "move",
+                    "existing_step_ref": "existing_step_2",
+                    "placement": {"kind": "start"},
+                },
+            ],
+            ["existing_step_2", "existing_step_1", "existing_step_3"],
+            set(),
+        ),
+        (
+            [
+                _add(),
+                _add(
+                    "second",
+                    _after({"kind": "added", "local_id": "new"}),
+                    name="Second new",
+                ),
+            ],
+            [None, None, "existing_step_1", "existing_step_2", "existing_step_3"],
+            set(),
+        ),
+    ],
+)
+def test_topology_changes_only_through_explicit_commands(operations, expected, removed):
+    """Mutants: infer removal/reorder; lose modify when move follows; reverse adds."""
+    before = dict(BASELINE)
+    proposal = _lower(operations)
+    assert [
+        step.existing_step_ref if isinstance(step, ModifyExistingStep) else None
+        for step in proposal.steps
+    ] == expected
+    assert proposal.removed_existing_step_refs == removed
+    assert BASELINE == before
+
+
+@pytest.mark.parametrize(
+    ("operations", "reason"),
+    [
+        ([_modify("missing")], "unknown_edit_step"),
+        ([_modify(), _modify()], "duplicate_edit_operation"),
+        (
+            [
+                {"kind": "modify_flow", "flow_name": "Changed"},
+                {"kind": "modify_flow", "form_fields": []},
+            ],
+            "duplicate_edit_operation",
+        ),
+        (
+            [_modify(), {"kind": "remove", "existing_step_ref": "existing_step_2"}],
+            "conflicting_edit_operations",
+        ),
+        ([_add(), _add()], "duplicate_local_step"),
+        (
+            [_add(placement=_after({"kind": "added", "local_id": "later"}))],
+            "unknown_edit_anchor",
+        ),
+        (
+            [
+                {
+                    "kind": "move",
+                    "existing_step_ref": "existing_step_2",
+                    "placement": _after(_saved("existing_step_2")),
+                }
+            ],
+            "self_edit_move",
+        ),
+        (
+            [
+                _add(placement=_after(_saved("existing_step_2"))),
+                {"kind": "remove", "existing_step_ref": "existing_step_2"},
+            ],
+            "removed_edit_anchor",
+        ),
+        ([_add(name="  EXTRACT  ")], "edit_step_name_collision"),
+        (
+            [
+                _add(
+                    uses_previous_fields=[
+                        {"producer": _saved("existing_step_3"), "field_path": "facts"}
+                    ]
+                )
+            ],
+            "invalid_edit_read",
+        ),
+    ],
+)
+def test_invalid_command_set_refuses_atomically(operations, reason):
+    """Mutants: guess anchor/identity, accept collision, partially mutate baseline."""
+    before = dict(BASELINE)
+    with pytest.raises(EditCommandRejection) as error:
+        _lower(operations)
+    assert error.value.reason == reason
+    assert BASELINE == before
+
+
+@pytest.mark.parametrize(
+    ("operations", "kind", "refs"),
+    [
+        ([_add(name="  EXTRACT  ")], "saved", ["existing_step_1"]),
+        (
+            [_modify(name="Renamed"), _add(name="Renamed")],
+            "saved",
+            ["existing_step_2"],
+        ),
+        ([_add(), _add(local_id="second")], "added", ["new"]),
+    ],
+)
+def test_name_collision_feedback_identifies_the_conflicting_targets(
+    operations, kind, refs
+):
+    """Mutants: lose saved aliases; describe a duplicate new add as saved work."""
+    with pytest.raises(EditCommandRejection) as error:
+        _lower(operations)
+    assert error.value.reason == "edit_step_name_collision"
+    assert f'"kind": "{kind}"' in str(error.value)
+    assert all(ref in str(error.value) for ref in refs)
+
+
+def test_identity_reads_lower_after_all_topology_commands():
+    """Mutant: interpret a saved producer as a guessed numeric position."""
+    proposal = _lower(
+        [
+            _add(
+                placement=_after(_saved("existing_step_2")),
+                uses_previous_fields=[
+                    {"producer": _saved("existing_step_1"), "field_path": "facts"}
+                ],
+            ),
+            {
+                "kind": "move",
+                "existing_step_ref": "existing_step_1",
+                "placement": _after(_saved("existing_step_2")),
+            },
+        ]
     )
+    added = proposal.steps[2]
+    assert isinstance(added, AddStep)
+    assert added.step.uses_previous_fields[0].from_step == 2
+    assert added.step.uses_previous_fields[0].field_path == "facts"
+
+
+@pytest.mark.parametrize(
+    "operation",
+    [
+        _modify(uses_previous_fields=[{"from_step": 1, "field_path": "facts"}]),
+        _add(uses_previous_fields=[{"from_step": 1, "field_path": "facts"}]),
+    ],
+)
+def test_edit_parser_refuses_positional_reads(operation):
+    """Mutant: accept the removed positional wire alongside typed identities."""
+    with pytest.raises(ValidationError):
+        parse_edit_commands(
+            {"plan_rationale": "Read evidence.", "operations": [operation]}
+        )
+
+
+@pytest.mark.parametrize(
+    "removed_root",
+    [
+        {"steps": [_modify()]},
+        {"flow_name": "Unrequested rename"},
+        {"flow_description": "Unrequested description"},
+        {"form_fields": []},
+    ],
+)
+def test_removed_edit_wire_has_no_alias(removed_root):
+    """Mutant: accept mutations outside the explicit command list."""
+    with pytest.raises(ValidationError):
+        parse_edit_commands(
+            {
+                "plan_rationale": "Old contract.",
+                "operations": [_modify()],
+                **removed_root,
+            }
+        )
+
+
+@pytest.mark.parametrize(
+    "fields", [{"flow_name": "Renamed"}, {"flow_description": ""}, {"form_fields": []}]
+)
+def test_explicit_flow_command_preserves_saved_steps(fields):
+    """Mutant: drop the explicit flow change or change saved step fields."""
+    proposal = _lower([{"kind": "modify_flow", **fields}])
+    assert {name: getattr(proposal, name) for name in fields} == fields
+    assert [step.existing_step_ref for step in proposal.steps] == list(BASELINE)
+    assert all(not step.authored_fields for step in proposal.steps)

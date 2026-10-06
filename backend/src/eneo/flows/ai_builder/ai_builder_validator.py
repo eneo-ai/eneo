@@ -289,4 +289,12 @@ def _builder_code_from_graph_issue(issue: FlowStepGraphIssue) -> str:
 def _builder_message_from_graph_issue(issue: FlowStepGraphIssue) -> str:
     if issue.code == FlowGraphIssueCode.DUPLICATE_STEP_NAME:
         return f"Duplicate step name. {issue.message}"
+    if issue.code in {
+        FlowGraphIssueCode.OUTPUT_CONTRACT_TYPE_MISMATCH,
+        FlowGraphIssueCode.OUTPUT_CONTRACT_TEMPLATE_FILL_INCOMPATIBLE,
+    }:
+        return (
+            f"{issue.message} Remove this step's structured JSON contract with "
+            "output_fields=[]; keep the requested output type and delivery mode."
+        )
     return issue.message

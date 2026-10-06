@@ -2192,20 +2192,20 @@ def _suggestion_context(*kinds_and_steps):
 
 
 def _edit_proposal(**overrides):
-    from eneo.flows.ai_builder.ai_builder_proposal_intent import OrderedEditProposal
+    from eneo.flows.ai_builder.ai_builder_edit_admission import EditCommands
 
     payload: dict[str, object] = {
         "plan_rationale": "Steg 2 gör samma sak som steg 1.",
-        "steps": [],
+        "operations": [],
     }
     payload.update(overrides)
-    return OrderedEditProposal.model_validate(payload)
+    return EditCommands.model_validate(payload)
 
 
 def _modify(ref: str, **fields):
-    from eneo.flows.ai_builder.ai_builder_proposal_intent import ModifyExistingStep
+    from eneo.flows.ai_builder.ai_builder_edit_admission import EditModifyOperation
 
-    return ModifyExistingStep.model_validate(
+    return EditModifyOperation.model_validate(
         {"kind": "modify", "existing_step_ref": ref, **fields}
     )
 
@@ -2216,7 +2216,7 @@ def _refs(*orders: int) -> list[str]:
     return [existing_step_ref_for_order(order) for order in orders]
 
 
-def _check_review_edit(context, proposal, *, current_step_refs=None):
+def _check_review_edit(context, proposal):
     from eneo.flows.ai_builder.ai_builder_flow_review import (
         review_edit_scope,
         validate_review_edit_proposal,
@@ -2227,7 +2227,6 @@ def _check_review_edit(context, proposal, *, current_step_refs=None):
         proposal=proposal,
         flow_name="Beslutsunderlag",
         flow_description="Underlag inför beslut",
-        current_step_refs=current_step_refs or _refs(1, 2, 7),
     )
 
 
@@ -2244,11 +2243,13 @@ def test_a_review_edit_may_only_touch_the_steps_the_findings_name():
         return _check_review_edit(context, proposal)
 
     # Changing a selected step is what the turn is for.
-    assert _check(_edit_proposal(steps=[_modify(selected, name="Ny text")])) is None
+    assert (
+        _check(_edit_proposal(operations=[_modify(selected, name="Ny text")])) is None
+    )
     # An unselected step is refused by name.
     refusal = _check(
         _edit_proposal(
-            steps=[
+            operations=[
                 _modify(selected, name="Ny text"),
                 _modify(other, name="Något annat"),
             ]
@@ -2258,7 +2259,9 @@ def test_a_review_edit_may_only_touch_the_steps_the_findings_name():
     # A step it merely repeats, without authoring anything, is not a change.
     assert (
         _check(
-            _edit_proposal(steps=[_modify(selected, name="Ny text"), _modify(other)])
+            _edit_proposal(
+                operations=[_modify(selected, name="Ny text"), _modify(other)]
+            )
         )
         is None
     )
@@ -2267,11 +2270,15 @@ def test_a_review_edit_may_only_touch_the_steps_the_findings_name():
         {"flow_name": "Ett annat namn"},
         {"flow_description": "En annan beskrivning"},
         {"form_fields": []},
-        {"form_fields": None},
     ):
         assert (
             _check(
-                _edit_proposal(steps=[_modify(selected, name="Ny text")], **overrides)
+                _edit_proposal(
+                    operations=[
+                        _modify(selected, name="Ny text"),
+                        {"kind": "modify_flow", **overrides},
+                    ],
+                )
             )
             is not None
         ), overrides
@@ -2279,33 +2286,33 @@ def test_a_review_edit_may_only_touch_the_steps_the_findings_name():
     assert (
         _check(
             _edit_proposal(
-                flow_name="Beslutsunderlag",
-                flow_description="Underlag inför beslut",
-                steps=[_modify(selected, name="Ny text")],
+                operations=[
+                    _modify(selected, name="Ny text"),
+                    {
+                        "kind": "modify_flow",
+                        "flow_name": "Beslutsunderlag",
+                        "flow_description": "Underlag inför beslut",
+                    },
+                ],
             )
         )
         is None
     )
 
 
-def test_a_review_edit_may_not_reorder_the_steps_it_does_not_change():
-    """The compiler builds the flow in the order the proposal lists.
-
-    A step this turn never authors anything on can still be moved by where
-    it is repeated, so the order of the steps it carries has to hold.
-    """
+def test_a_review_edit_may_not_move_saved_steps():
+    """Mutant: permit explicit topology changes in a review scope."""
     context = _suggestion_context(("duplicated_work", [1, 2]))
-    one, two, seven = _refs(1, 2, 7)
-
-    kept_in_order = _edit_proposal(
-        steps=[_modify(one), _modify(two, name="Ny text"), _modify(seven)]
+    proposal = _edit_proposal(
+        operations=[
+            {
+                "kind": "move",
+                "existing_step_ref": _refs(2)[0],
+                "placement": {"kind": "start"},
+            }
+        ]
     )
-    assert _check_review_edit(context, kept_in_order) is None
-
-    swapped = _edit_proposal(
-        steps=[_modify(seven), _modify(two, name="Ny text"), _modify(one)]
-    )
-    refusal = _check_review_edit(context, swapped)
+    refusal = _check_review_edit(context, proposal)
     assert refusal is not None and "reorder" in refusal
 
 
@@ -2324,13 +2331,13 @@ def test_removing_a_step_is_granted_by_the_finding_not_by_the_batch():
     assert (
         _check_review_edit(
             drift_and_duplicate,
-            _edit_proposal(removed_existing_step_refs=frozenset({two})),
+            _edit_proposal(operations=[{"kind": "remove", "existing_step_ref": two}]),
         )
         is None
     )
     refusal = _check_review_edit(
         drift_and_duplicate,
-        _edit_proposal(removed_existing_step_refs=frozenset({one})),
+        _edit_proposal(operations=[{"kind": "remove", "existing_step_ref": one}]),
     )
     assert refusal is not None and one in refusal
 
@@ -2341,12 +2348,14 @@ def test_what_a_review_edit_may_do_follows_the_kind_of_finding():
     Deciding this per kind is the point: the same evidence supports very
     different edits depending on what was found.
     """
-    from eneo.flows.ai_builder.ai_builder_proposal_intent import AddStep
+    from eneo.flows.ai_builder.ai_builder_edit_admission import EditAddOperation
 
     selected = _refs(2)[0]
-    added = AddStep.model_validate(
+    added = EditAddOperation.model_validate(
         {
             "kind": "add",
+            "local_id": "check",
+            "placement": {"kind": "start"},
             "step": {
                 "name": "Kontrollera beloppet",
                 "instructions": "Jämför beloppet mot underlaget.",
@@ -2357,8 +2366,10 @@ def test_what_a_review_edit_may_do_follows_the_kind_of_finding():
     def _check(kind, proposal):
         return _check_review_edit(_suggestion_context((kind, [2])), proposal)
 
-    removal = _edit_proposal(removed_existing_step_refs=frozenset({selected}))
-    addition = _edit_proposal(steps=[added])
+    removal = _edit_proposal(
+        operations=[{"kind": "remove", "existing_step_ref": selected}]
+    )
+    addition = _edit_proposal(operations=[added])
 
     assert _check("duplicated_work", removal) is None
     assert _check("step_not_useful", removal) is None
@@ -2370,7 +2381,9 @@ def test_what_a_review_edit_may_do_follows_the_kind_of_finding():
     assert _check("instruction_outcome_drift", addition) is not None
 
     # Removing a step the findings do not name is refused whatever the kind.
-    outside = _edit_proposal(removed_existing_step_refs=frozenset({_refs(7)[0]}))
+    outside = _edit_proposal(
+        operations=[{"kind": "remove", "existing_step_ref": _refs(7)[0]}]
+    )
     assert _check("duplicated_work", outside) is not None
 
 

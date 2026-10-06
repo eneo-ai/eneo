@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import re
 from types import SimpleNamespace
 from unittest.mock import (
@@ -29,7 +30,7 @@ from eneo.flows.ai_builder.ai_builder_domain_models import (
     FlowBuilderProposal,
     TargetKind,
 )
-from eneo.flows.ai_builder.ai_builder_edit_admission import lower_edit_tool_arguments
+from eneo.flows.ai_builder.ai_builder_edit_admission import parse_edit_commands
 from eneo.flows.ai_builder.ai_builder_edit_compiler import (
     _step_field_changes,
     compile_edit_proposal,
@@ -128,7 +129,7 @@ from tests.unittests.flows.ai_builder.proposal_turn_builders import _make_turn
 
 
 @pytest.mark.asyncio
-async def test_process_edit_arguments_accepts_ordered_submission() -> None:
+async def test_process_edit_arguments_accepts_local_commands() -> None:
     flow = _flow(_flow_step(step_order=1, user_description="Analyze text"))
 
     result = await _process(
@@ -136,7 +137,7 @@ async def test_process_edit_arguments_accepts_ordered_submission() -> None:
         arguments={
             "plan_rationale": "Rename the analysis step.",
             "assumptions": ["The existing input stays text."],
-            "steps": [
+            "operations": [
                 {
                     "kind": "modify",
                     "existing_step_ref": "existing_step_1",
@@ -146,7 +147,6 @@ async def test_process_edit_arguments_accepts_ordered_submission() -> None:
         },
     )
 
-    assert isinstance(result, ProposalReady)
     assert isinstance(result, ProposalReady)
     assert result.compiled.content.assumptions == ["The existing input stays text."]
     assert result.compiled.content.plan_rationale == "Rename the analysis step."
@@ -177,7 +177,7 @@ async def test_process_edit_arguments_persists_resolved_saved_step_scope() -> No
         plan_edit_context=context,
         arguments={
             "plan_rationale": "Clarify the analysis instructions.",
-            "steps": [
+            "operations": [
                 {
                     "kind": "modify",
                     "existing_step_ref": "existing_step_1",
@@ -214,13 +214,12 @@ async def test_process_edit_arguments_classifies_whole_flow_input_change_as_modi
         flow=flow,
         arguments={
             "plan_rationale": "Use the direct predecessor as the input.",
-            "steps": [
-                {"kind": "modify", "existing_step_ref": "existing_step_1"},
+            "operations": [
                 {
                     "kind": "modify",
                     "existing_step_ref": "existing_step_2",
                     "input_source": "previous_step",
-                },
+                }
             ],
         },
     )
@@ -257,18 +256,14 @@ async def test_process_edit_arguments_keeps_identity_entries_unchanged() -> None
         plan_edit_context=context,
         arguments={
             "plan_rationale": "Clarify the source and repair its consumer.",
-            "steps": [
+            "operations": [
                 {
                     "kind": "modify",
                     "existing_step_ref": "existing_step_1",
                     "assistant_spec": {
                         "instructions": "Collect the source and label it clearly."
                     },
-                },
-                {
-                    "kind": "modify",
-                    "existing_step_ref": "existing_step_2",
-                },
+                }
             ],
         },
     )
@@ -283,21 +278,32 @@ async def test_process_edit_arguments_keeps_identity_entries_unchanged() -> None
 
 
 @pytest.mark.asyncio
-async def test_process_edit_arguments_refines_selected_added_plan_step() -> None:
+@pytest.mark.parametrize("scope", ["whole_plan", "step"])
+async def test_plan_revision_rebuilds_added_step_from_cumulative_commands(
+    scope,
+) -> None:
+    """Mutant: compile whole-flow cumulative commands against the previous proposal."""
     flow = _flow(_flow_step(step_order=1, user_description="Collect source"))
     initial = await _process(
         flow=flow,
         arguments={
             "plan_rationale": "Add a report step.",
-            "steps": [
-                {"kind": "modify", "existing_step_ref": "existing_step_1"},
+            "operations": [
                 {
                     "kind": "add",
                     "step": {
                         "name": "Write report",
                         "instructions": "Write a concise report.",
                     },
-                },
+                    "local_id": "new_1",
+                    "placement": {
+                        "kind": "after",
+                        "target": {
+                            "kind": "saved",
+                            "existing_step_ref": "existing_step_1",
+                        },
+                    },
+                }
             ],
         },
     )
@@ -305,7 +311,7 @@ async def test_process_edit_arguments_refines_selected_added_plan_step() -> None
     prior_spec = initial.compiled.content.spec
     target = prior_spec.steps[1]
     context_request = AIBuilderPlanEditContext(
-        scope="step",
+        scope=scope,
         plan_id=uuid4(),
         target_plan_step_ref=target.plan_step_ref,
         target_step_name=target.name,
@@ -317,7 +323,7 @@ async def test_process_edit_arguments_refines_selected_added_plan_step() -> None
         prior_spec_for_revision=prior_spec,
         plan_edit_context=ResolvedAIBuilderEditContext(
             request=context_request,
-            scope="step",
+            scope=scope,
             target_plan_step_ref=target.plan_step_ref,
             target_step_name=target.name,
             target_step_number=2,
@@ -325,25 +331,33 @@ async def test_process_edit_arguments_refines_selected_added_plan_step() -> None
         ),
         arguments={
             "plan_rationale": "Make the selected report more explicit.",
-            "steps": [
-                {"kind": "modify", "existing_step_ref": "existing_step_1"},
+            "operations": [
                 {
                     "kind": "add",
                     "step": {
                         "name": "Write report",
                         "instructions": "Write a concise report with clear conclusions.",
                     },
-                },
+                    "local_id": "new_1",
+                    "placement": {
+                        "kind": "after",
+                        "target": {
+                            "kind": "saved",
+                            "existing_step_ref": "existing_step_1",
+                        },
+                    },
+                }
             ],
         },
     )
 
     assert isinstance(result, ProposalReady)
-    assert isinstance(result, ProposalReady)
     assert result.compiled.content.edit is not None
-    assert (
-        result.compiled.content.edit.scoped_target_plan_step_ref == target.plan_step_ref
+    assert result.compiled.content.edit.scoped_target_plan_step_ref == (
+        target.plan_step_ref if scope == "step" else None
     )
+    assert len(result.compiled.content.spec.steps) == 2
+    assert result.compiled.content.spec.steps[0].existing_step_ref == "existing_step_1"
     assert (
         result.compiled.content.spec.steps[1].assistant_spec.instructions
         == "Write a concise report with clear conclusions."
@@ -352,7 +366,7 @@ async def test_process_edit_arguments_refines_selected_added_plan_step() -> None
     replacement_spec = result.compiled.content.spec
     replacement_target = replacement_spec.steps[1]
     replacement_context_request = AIBuilderPlanEditContext(
-        scope="step",
+        scope=scope,
         plan_id=uuid4(),
         target_plan_step_ref=replacement_target.plan_step_ref,
         target_step_name=replacement_target.name,
@@ -363,7 +377,7 @@ async def test_process_edit_arguments_refines_selected_added_plan_step() -> None
         prior_spec_for_revision=replacement_spec,
         plan_edit_context=ResolvedAIBuilderEditContext(
             request=replacement_context_request,
-            scope="step",
+            scope=scope,
             target_plan_step_ref=replacement_target.plan_step_ref,
             target_step_name=replacement_target.name,
             target_step_number=2,
@@ -371,23 +385,28 @@ async def test_process_edit_arguments_refines_selected_added_plan_step() -> None
         ),
         arguments={
             "plan_rationale": "Add a limitations section to the selected report.",
-            "steps": [
-                {"kind": "modify", "existing_step_ref": "existing_step_1"},
+            "operations": [
                 {
                     "kind": "add",
                     "step": {
                         "name": "Write report",
-                        "instructions": (
-                            "Write a concise report with clear conclusions and limitations."
-                        ),
+                        "instructions": "Write a concise report with clear conclusions and limitations.",
                     },
-                },
+                    "local_id": "new_1",
+                    "placement": {
+                        "kind": "after",
+                        "target": {
+                            "kind": "saved",
+                            "existing_step_ref": "existing_step_1",
+                        },
+                    },
+                }
             ],
         },
     )
 
     assert isinstance(second_result, ProposalReady)
-    assert isinstance(second_result, ProposalReady)
+    assert len(second_result.compiled.content.spec.steps) == 2
     assert (
         second_result.compiled.content.spec.steps[1].assistant_spec.instructions
         == "Write a concise report with clear conclusions and limitations."
@@ -419,7 +438,7 @@ async def test_process_edit_arguments_rejects_model_authored_downstream_wiring()
         plan_edit_context=context,
         arguments={
             "plan_rationale": "Clarify the selected step.",
-            "steps": [
+            "operations": [
                 {
                     "kind": "modify",
                     "existing_step_ref": "existing_step_1",
@@ -440,7 +459,7 @@ async def test_process_edit_arguments_rejects_model_authored_downstream_wiring()
     assert result.producers == {"scope_guard"}
     assert result.kind == "quality"
     assert "existing_step_2" in result.feedback
-    assert "selected step" in result.feedback
+    assert "selected scope" in result.feedback
 
 
 @pytest.mark.asyncio
@@ -450,15 +469,7 @@ async def test_process_edit_arguments_attributes_and_captures_model_parse_failur
 ) -> None:
     monkeypatch.setenv(REJECTED_PROPOSAL_CAPTURE_DIR_ENV, str(tmp_path))
     flow = _flow(_flow_step(step_order=1, user_description="Analyze text"))
-    arguments = {
-        "plan_rationale": " ",
-        "steps": [
-            {
-                "kind": "modify",
-                "existing_step_ref": "existing_step_1",
-            }
-        ],
-    }
+    arguments = {"plan_rationale": " ", "operations": []}
 
     result = await _process(flow=flow, arguments=arguments)
 
@@ -498,18 +509,24 @@ async def test_english_edit_compiles_input_reference_hint_in_english() -> None:
         ],
         arguments={
             "plan_rationale": "Focus the comparison on the source summary.",
-            "steps": [
-                {"kind": "modify", "existing_step_ref": "existing_step_1"},
+            "operations": [
                 {
                     "kind": "modify",
                     "existing_step_ref": "existing_step_2",
-                    "uses_previous_fields": [{"from_step": 1, "field_path": "summary"}],
-                },
+                    "uses_previous_fields": [
+                        {
+                            "producer": {
+                                "kind": "saved",
+                                "existing_step_ref": "existing_step_1",
+                            },
+                            "field_path": "summary",
+                        }
+                    ],
+                }
             ],
         },
     )
 
-    assert isinstance(result, ProposalReady)
     assert isinstance(result, ProposalReady)
     instructions = result.compiled.content.spec.steps[1].assistant_spec.instructions
     assert "Pay particular attention to these structured source fields:" in instructions
@@ -541,19 +558,21 @@ async def test_edit_rejects_invalid_typed_source_ref_without_text_fallback() -> 
         flow=flow,
         arguments={
             "plan_rationale": "Use the typed source summary.",
-            "steps": [
-                {"kind": "modify", "existing_step_ref": "existing_step_1"},
+            "operations": [
                 {
                     "kind": "modify",
                     "existing_step_ref": "existing_step_2",
                     "uses_previous_fields": [
                         {
-                            "from_step": 1,
+                            "producer": {
+                                "kind": "saved",
+                                "existing_step_ref": "existing_step_1",
+                            },
                             "field_path": "summary",
                             "label": "{{ invalid }}",
                         }
                     ],
-                },
+                }
             ],
         },
     )
@@ -588,21 +607,26 @@ async def test_edit_inserting_non_writer_between_body_writer_and_renderer_is_adv
         flow=flow,
         arguments={
             "plan_rationale": "Record processing metrics before rendering.",
-            "steps": [
-                {"kind": "modify", "existing_step_ref": "existing_step_1"},
+            "operations": [
                 {
                     "kind": "add",
                     "step": {
                         "name": "Record processing metrics",
                         "instructions": "Record the processing duration and item count.",
                     },
-                },
-                {"kind": "modify", "existing_step_ref": "existing_step_2"},
+                    "local_id": "new_1",
+                    "placement": {
+                        "kind": "after",
+                        "target": {
+                            "kind": "saved",
+                            "existing_step_ref": "existing_step_1",
+                        },
+                    },
+                }
             ],
         },
     )
 
-    assert isinstance(result, ProposalReady)
     assert isinstance(result, ProposalReady)
     edit = result.compiled.content.edit
     assert edit is not None
@@ -636,18 +660,16 @@ async def test_edit_preserving_body_writer_renderer_adjacency_has_no_topology_ad
         flow=flow,
         arguments={
             "plan_rationale": "Clarify the body writer name.",
-            "steps": [
+            "operations": [
                 {
                     "kind": "modify",
                     "existing_step_ref": "existing_step_1",
                     "name": "Write polished final report",
-                },
-                {"kind": "modify", "existing_step_ref": "existing_step_2"},
+                }
             ],
         },
     )
 
-    assert isinstance(result, ProposalReady)
     assert isinstance(result, ProposalReady)
     edit = result.compiled.content.edit
     assert edit is not None
@@ -684,11 +706,10 @@ async def test_edit_reports_step_local_citation_capability_advisory() -> None:
         ],
         arguments={
             "plan_rationale": "Keep the existing template step.",
-            "steps": [{"kind": "modify", "existing_step_ref": "existing_step_1"}],
+            "operations": [],
         },
     )
 
-    assert isinstance(result, ProposalReady)
     assert isinstance(result, ProposalReady)
     edit = result.compiled.content.edit
     assert edit is not None
@@ -740,11 +761,21 @@ async def test_edit_enforces_template_preparation_stage_limit() -> None:
     def arguments_with_stage_count(stage_count: int) -> dict[str, object]:
         return {
             "plan_rationale": "Prepare content before filling the template.",
-            "steps": [
+            "operations": [
                 {"kind": "modify", "existing_step_ref": "existing_step_1"},
                 *[
                     {
                         "kind": "add",
+                        "local_id": f"stage_{index}",
+                        "placement": {
+                            "kind": "after",
+                            "target": {
+                                "kind": "saved",
+                                "existing_step_ref": "existing_step_1",
+                            }
+                            if index == 1
+                            else {"kind": "added", "local_id": f"stage_{index - 1}"},
+                        },
                         "step": {
                             "name": f"Prepare template content {index}",
                             "instructions": (
@@ -785,7 +816,7 @@ async def test_edit_removing_required_source_reader_field_is_rejected() -> None:
         ),
         arguments={
             "plan_rationale": "Narrow the source extraction.",
-            "steps": [
+            "operations": [
                 {
                     "kind": "modify",
                     "existing_step_ref": "existing_step_1",
@@ -796,8 +827,7 @@ async def test_edit_removing_required_source_reader_field_is_rejected() -> None:
                             "description": "Title",
                         }
                     ],
-                },
-                {"kind": "modify", "existing_step_ref": "existing_step_2"},
+                }
             ],
         },
     )
@@ -821,18 +851,16 @@ async def test_edit_preserving_required_source_reader_field_is_accepted() -> Non
         ),
         arguments={
             "plan_rationale": "Clarify the source reader name.",
-            "steps": [
+            "operations": [
                 {
                     "kind": "modify",
                     "existing_step_ref": "existing_step_1",
                     "name": "Read and summarize source",
-                },
-                {"kind": "modify", "existing_step_ref": "existing_step_2"},
+                }
             ],
         },
     )
 
-    assert isinstance(result, ProposalReady)
     assert isinstance(result, ProposalReady)
 
 
@@ -843,7 +871,7 @@ async def test_edit_removing_terminal_schema_source_leaf_is_rejected() -> None:
         planning_state=_terminal_schema_planning_state(),
         arguments={
             "plan_rationale": "Narrow the source extraction.",
-            "steps": [
+            "operations": [
                 {
                     "kind": "modify",
                     "existing_step_ref": "existing_step_1",
@@ -854,8 +882,7 @@ async def test_edit_removing_terminal_schema_source_leaf_is_rejected() -> None:
                             "description": "Title",
                         }
                     ],
-                },
-                {"kind": "modify", "existing_step_ref": "existing_step_2"},
+                }
             ],
         },
     )
@@ -873,18 +900,16 @@ async def test_edit_preserving_terminal_schema_source_leaf_is_accepted() -> None
         planning_state=_terminal_schema_planning_state(),
         arguments={
             "plan_rationale": "Clarify the source reader name.",
-            "steps": [
+            "operations": [
                 {
                     "kind": "modify",
                     "existing_step_ref": "existing_step_1",
                     "name": "Read source case identity",
-                },
-                {"kind": "modify", "existing_step_ref": "existing_step_2"},
+                }
             ],
         },
     )
 
-    assert isinstance(result, ProposalReady)
     assert isinstance(result, ProposalReady)
 
 
@@ -897,14 +922,12 @@ async def test_edit_removing_compare_aggregation_target_is_rejected() -> None:
         planning_state=_comparison_planning_state(),
         arguments={
             "plan_rationale": "Use only the immediately preceding analysis.",
-            "steps": [
-                {"kind": "modify", "existing_step_ref": "existing_step_1"},
-                {"kind": "modify", "existing_step_ref": "existing_step_2"},
+            "operations": [
                 {
                     "kind": "modify",
                     "existing_step_ref": "existing_step_3",
                     "input_source": "previous_step",
-                },
+                }
             ],
         },
     )
@@ -923,19 +946,16 @@ async def test_edit_preserving_compare_aggregation_target_is_accepted() -> None:
         planning_state=_comparison_planning_state(),
         arguments={
             "plan_rationale": "Clarify the comparison step name.",
-            "steps": [
-                {"kind": "modify", "existing_step_ref": "existing_step_1"},
-                {"kind": "modify", "existing_step_ref": "existing_step_2"},
+            "operations": [
                 {
                     "kind": "modify",
                     "existing_step_ref": "existing_step_3",
                     "name": "Compare all source analyses",
-                },
+                }
             ],
         },
     )
 
-    assert isinstance(result, ProposalReady)
     assert isinstance(result, ProposalReady)
     assert result.compiled.aggregation_intent == "compare"
 
@@ -947,72 +967,17 @@ async def test_edit_preserving_targeted_compare_source_refs_is_accepted() -> Non
         planning_state=_comparison_planning_state(),
         arguments={
             "plan_rationale": "Clarify the targeted comparison name.",
-            "steps": [
-                {"kind": "modify", "existing_step_ref": "existing_step_1"},
-                {"kind": "modify", "existing_step_ref": "existing_step_2"},
+            "operations": [
                 {
                     "kind": "modify",
                     "existing_step_ref": "existing_step_3",
                     "name": "Compare the targeted source analyses",
-                },
+                }
             ],
         },
     )
 
     assert isinstance(result, ProposalReady)
-    assert isinstance(result, ProposalReady)
-
-
-@pytest.mark.asyncio
-async def test_ordered_submission_rejects_omitted_existing_step() -> None:
-    flow = _flow(
-        _flow_step(step_order=1, user_description="Extract data"),
-        _flow_step(
-            step_order=2,
-            user_description="Write report",
-            input_source="previous_step",
-        ),
-    )
-
-    result = await _process(
-        flow=flow,
-        arguments={
-            "plan_rationale": "Only mention one step.",
-            "steps": [{"kind": "modify", "existing_step_ref": "existing_step_1"}],
-        },
-    )
-
-    assert result.kind == "validation"
-    assert "existing_step_2" in result.feedback
-    assert "removed_existing_step_refs" in result.feedback
-
-
-@pytest.mark.asyncio
-async def test_ordered_submission_rejects_step_preserved_and_removed() -> None:
-    flow = _flow(
-        _flow_step(step_order=1, user_description="Extract data"),
-        _flow_step(
-            step_order=2,
-            user_description="Write report",
-            input_source="previous_step",
-        ),
-    )
-
-    result = await _process(
-        flow=flow,
-        arguments={
-            "plan_rationale": "Contradict the requested removal.",
-            "steps": [
-                {"kind": "modify", "existing_step_ref": "existing_step_1"},
-                {"kind": "modify", "existing_step_ref": "existing_step_2"},
-            ],
-            "removed_existing_step_refs": ["existing_step_2"],
-        },
-    )
-
-    assert result.kind == "validation"
-    assert "existing_step_2" in result.feedback
-    assert "both steps and removed_existing_step_refs" in result.feedback
 
 
 @pytest.mark.asyncio
@@ -1023,167 +988,75 @@ async def test_ordered_submission_rejects_unknown_ref_before_omitted_add() -> No
         flow=flow,
         arguments={
             "plan_rationale": "Replace the current step.",
-            "steps": [
-                {"kind": "modify", "existing_step_ref": "existing_step_99"},
+            "operations": [
                 {
                     "kind": "add",
                     "step": {
                         "name": "Replacement",
                         "instructions": "Start from the flow input.",
                     },
+                    "local_id": "new_1",
+                    "placement": {
+                        "kind": "after",
+                        "target": {
+                            "kind": "saved",
+                            "existing_step_ref": "existing_step_99",
+                        },
+                    },
                 },
+                {"kind": "remove", "existing_step_ref": "existing_step_1"},
             ],
-            "removed_existing_step_refs": ["existing_step_1"],
         },
     )
 
     assert result.kind == "validation"
-    assert "existing_step_99" in result.feedback
-
-
-def _transcript_review_summary_flow() -> SimpleNamespace:
-    return _flow(
-        _flow_step(step_order=1, user_description="Transkribera", input_type="audio"),
-        _flow_step(
-            step_order=2, user_description="Granska", input_source="previous_step"
-        ),
-        _flow_step(
-            step_order=3, user_description="Sammanfatta", input_source="previous_step"
-        ),
-    )
-
-
-async def _repair_attempt_failure_codes(
-    flow: SimpleNamespace, repair_arguments: dict[str, object]
-) -> list[str]:
-    """The codes a repair attempt records when its tool call carries
-    ``repair_arguments`` through admission and the real edit processor."""
-    from tests.unittests.flows.ai_builder.test_ai_builder_proposal_retry import (
-        _recorded_repair_attempt,
-    )
-
-    schema = build_edit_flow_tool_schema(
-        list(flow.steps),
-        resource_catalog=build_ai_builder_resource_catalog(
-            available_models=[], available_kbs=[]
-        ),
-        tool_name=PROPOSE_FLOW_TOOL_NAME,
-    )
-
-    async def process(arguments):
-        return await _process(
-            flow=flow,
-            arguments=admit_propose_flow_tool_arguments(
-                arguments=arguments,
-                tool_schema=schema,  # type: ignore[arg-type]
-            ),
-        )
-
-    attempt = await _recorded_repair_attempt(
-        repair_arguments=repair_arguments,
-        process_arguments=process,
-        target_kind=TargetKind.EDIT,
-    )
-    assert attempt["failure_kind"] == "validation"
-    return attempt["failure_codes"]
+    assert "unknown_edit_anchor" in result.codes
 
 
 @pytest.mark.asyncio
-async def test_a_repair_that_re_adds_every_existing_step_records_the_coverage_code():
-    # The edit a model submitted on a live stack (captures-8152,
-    # fde61e5b6532): each saved step written again as a new step, none kept,
-    # none removed. Four attempts failed with empty failure_codes. The
-    # model_ref the schema offered then is dropped; it no longer does.
-    captured = {
-        "assumptions": [
-            "Användaren vill behålla den befintliga strukturen med transkribering "
-            "och granskning, men justera slutresultatets format och stil."
-        ],
-        "flow_description": None,
-        "flow_name": None,
-        "form_fields": None,
-        "plan_rationale": (
-            "Uppdaterar instruktionerna för det sista steget för att begränsa "
-            "längden till maximalt tre meningar per person och kräva lättläst "
-            "svenska."
-        ),
-        "removed_existing_step_refs": [],
-        "steps": [
+async def test_compile_refusal_read_can_be_replayed_as_a_local_command() -> None:
+    """Mutant: a repair writer still emits the removed numeric from_step field."""
+    flow = _source_reader_flow()
+    flow.steps[1].input_type = "text"
+    flow.steps[1].input_bindings = {
+        "source_refs": [
             {
-                "kind": "add",
-                "step": {
-                    "citations_requested": False,
-                    "instructions": "Transkribera ljudfilen.",
-                    "knowledge_refs": [],
-                    "name": "Transkribera ljud",
-                    "output_fields": [],
-                    "output_type": "text",
-                    "review_mode": "none",
-                    "uses_form_fields": None,
-                },
-            },
+                "step_ref": "step_1",
+                "output": "structured",
+                "field_path": "summary",
+                "label": "Summary",
+            }
+        ]
+    }
+    arguments = {
+        "plan_rationale": "Clarify the summary reader without losing its source.",
+        "operations": [
             {
-                "kind": "add",
-                "step": {
-                    "citations_requested": False,
-                    "instructions": (
-                        "Låt användaren granska transkriptet och mappa talare "
-                        "till namn."
-                    ),
-                    "knowledge_refs": [],
-                    "name": "Granska transkript",
-                    "output_fields": [],
-                    "output_type": "json",
-                    "review_mode": "edit",
-                    "uses_form_fields": ["deltagare"],
-                },
-            },
-            {
-                "kind": "add",
-                "step": {
-                    "citations_requested": False,
-                    "instructions": (
-                        "Skapa en kort, källgrundad sammanfattning per talare. "
-                        "Sammanfattningen för varje person får vara högst tre "
-                        "meningar lång och ska skrivas på lättläst svenska."
-                    ),
-                    "knowledge_refs": [],
-                    "name": "Sammanfatta per talare",
-                    "output_fields": [],
-                    "output_type": "text",
-                    "review_mode": "none",
-                    "uses_form_fields": None,
-                },
-            },
+                "kind": "modify",
+                "existing_step_ref": "existing_step_2",
+                "name": "Read the summary clearly",
+                "uses_form_fields": [],
+            }
         ],
     }
-
-    codes = await _repair_attempt_failure_codes(
-        _transcript_review_summary_flow(), captured
-    )
-
-    assert codes == ["invalid_existing_step_ref", "missing_existing_step_ref"]
-
-
-@pytest.mark.asyncio
-async def test_a_repair_that_keeps_and_removes_one_step_records_the_invalid_ref_code():
-    codes = await _repair_attempt_failure_codes(
-        _transcript_review_summary_flow(),
-        {
-            "plan_rationale": "Keep every step, and drop the summary.",
-            "steps": [
-                {"kind": "keep", "existing_step_ref": "existing_step_1"},
-                {"kind": "keep", "existing_step_ref": "existing_step_2"},
-                {"kind": "keep", "existing_step_ref": "existing_step_3"},
-            ],
-            "removed_existing_step_refs": ["existing_step_3"],
-        },
-    )
-
-    assert codes == [
-        "invalid_existing_step_ref",
-        "preserved_and_removed_existing_step_ref",
+    refused = await _process(flow=flow, arguments=arguments)
+    assert isinstance(refused, CorrectableFailure)
+    prefix = "- uses_previous_fields: "
+    reads = [
+        json.loads(line.removeprefix(prefix))
+        for line in refused.feedback.splitlines()
+        if line.startswith(prefix)
     ]
+    assert len(reads) == 1, refused
+    arguments["operations"][0]["uses_previous_fields"] = reads
+    replayed = await _process(flow=flow, arguments=arguments)
+    assert isinstance(replayed, ProposalReady), replayed
+    steps = replayed.compiled.content.spec.steps
+    assert steps[1].name == "Read the summary clearly"
+    assert steps[1].input_bindings["source_refs"][0]["field_path"] == "summary"
+    assert (
+        steps[1].input_bindings["source_refs"][0]["step_ref"] == steps[0].plan_step_ref
+    )
 
 
 @pytest.mark.asyncio
@@ -1194,11 +1067,7 @@ async def test_ordered_submission_reports_unknown_resource_refs() -> None:
         flow=flow,
         arguments={
             "plan_rationale": "Add a drafting step on a model.",
-            "steps": [
-                {
-                    "kind": "modify",
-                    "existing_step_ref": "existing_step_1",
-                },
+            "operations": [
                 {
                     "kind": "add",
                     "step": {
@@ -1206,7 +1075,15 @@ async def test_ordered_submission_reports_unknown_resource_refs() -> None:
                         "instructions": "Write a concise report.",
                         "knowledge_refs": ["knowledge.missing"],
                     },
-                },
+                    "local_id": "new_1",
+                    "placement": {
+                        "kind": "after",
+                        "target": {
+                            "kind": "saved",
+                            "existing_step_ref": "existing_step_1",
+                        },
+                    },
+                }
             ],
         },
         resource_catalog=build_ai_builder_resource_catalog(
@@ -1227,7 +1104,7 @@ async def test_ordered_submission_rejects_unknown_flow_input_key() -> None:
         flow=flow,
         arguments={
             "plan_rationale": "Keep the current step.",
-            "steps": [
+            "operations": [
                 {
                     "kind": "modify",
                     "existing_step_ref": "existing_step_1",
@@ -1257,15 +1134,12 @@ async def test_an_edit_failure_records_only_a_reason_its_producer_declares() -> 
     ):
         result = await _process(
             flow=flow,
-            arguments={
-                "plan_rationale": "Keep the analysis step.",
-                "steps": [{"kind": "modify", "existing_step_ref": "existing_step_1"}],
-            },
+            arguments={"plan_rationale": "Keep the analysis step.", "operations": []},
         )
 
-    assert isinstance(result, CorrectableFailure), result
-    assert result.producers == {"assembly"}
-    assert result.codes == frozenset({"invalid_existing_step_ref"})
+    assert isinstance(result, TerminalFailure), result
+    assert result.details["architecture_repair_disposition"] == "server_defect"
+    assert result.details["reason"] is None
 
 
 @pytest.mark.asyncio
@@ -1281,7 +1155,7 @@ async def test_ordered_submission_propagates_internal_compile_error() -> None:
                 flow=flow,
                 arguments={
                     "plan_rationale": "Rename the analysis step.",
-                    "steps": [
+                    "operations": [
                         {
                             "kind": "modify",
                             "existing_step_ref": "existing_step_1",
@@ -1314,10 +1188,7 @@ async def test_ordered_form_fields_preserve_on_omission() -> None:
 
     result = await _process(
         flow=flow,
-        arguments={
-            "plan_rationale": "Keep form fields.",
-            "steps": [{"kind": "modify", "existing_step_ref": "existing_step_1"}],
-        },
+        arguments={"plan_rationale": "Keep form fields.", "operations": []},
     )
 
     assert isinstance(result, ProposalReady)
@@ -1352,21 +1223,25 @@ async def test_ordered_form_fields_diff_complete_state() -> None:
         flow=flow,
         arguments={
             "plan_rationale": "Update form fields.",
-            "steps": [{"kind": "modify", "existing_step_ref": "existing_step_1"}],
-            "form_fields": [
+            "operations": [
                 {
-                    "name": "case_id",
-                    "type": "text",
-                    "label": "Case reference",
-                    "required": False,
-                },
-                {
-                    "name": "review_date",
-                    "type": "select",
-                    "label": "Review date",
-                    "required": True,
-                    "options": ["Today", "Later"],
-                },
+                    "kind": "modify_flow",
+                    "form_fields": [
+                        {
+                            "name": "case_id",
+                            "type": "text",
+                            "label": "Case reference",
+                            "required": False,
+                        },
+                        {
+                            "name": "review_date",
+                            "type": "select",
+                            "label": "Review date",
+                            "required": True,
+                            "options": ["Today", "Later"],
+                        },
+                    ],
+                }
             ],
         },
     )
@@ -1396,14 +1271,12 @@ async def test_review_only_edit_is_modified_and_names_the_review_policy() -> Non
         flow=flow,
         arguments={
             "plan_rationale": "Pause for a human after the review step.",
-            "steps": [
-                {"kind": "modify", "existing_step_ref": "existing_step_1"},
+            "operations": [
                 {
                     "kind": "modify",
                     "existing_step_ref": "existing_step_2",
                     "review_mode": "view",
-                },
-                {"kind": "modify", "existing_step_ref": "existing_step_3"},
+                }
             ],
         },
     )
@@ -1427,7 +1300,7 @@ async def test_output_contract_only_edit_names_the_fields() -> None:
         ),
         arguments={
             "plan_rationale": "Capture the author as well.",
-            "steps": [
+            "operations": [
                 {
                     "kind": "modify",
                     "existing_step_ref": "existing_step_1",
@@ -1448,8 +1321,7 @@ async def test_output_contract_only_edit_names_the_fields() -> None:
                             "description": "Author",
                         },
                     ],
-                },
-                {"kind": "modify", "existing_step_ref": "existing_step_2"},
+                }
             ],
         },
     )
@@ -1471,14 +1343,20 @@ async def test_binding_only_edit_names_the_input_sources() -> None:
         flow=flow,
         arguments={
             "plan_rationale": "Feed the review only the summary.",
-            "steps": [
-                {"kind": "modify", "existing_step_ref": "existing_step_1"},
+            "operations": [
                 {
                     "kind": "modify",
                     "existing_step_ref": "existing_step_2",
-                    "uses_previous_fields": [{"from_step": 1, "field_path": "summary"}],
-                },
-                {"kind": "modify", "existing_step_ref": "existing_step_3"},
+                    "uses_previous_fields": [
+                        {
+                            "producer": {
+                                "kind": "saved",
+                                "existing_step_ref": "existing_step_1",
+                            },
+                            "field_path": "summary",
+                        }
+                    ],
+                }
             ],
         },
     )
@@ -1530,7 +1408,7 @@ async def test_same_leaf_schema_change_shows_two_different_values() -> None:
         ),
         arguments={
             "plan_rationale": "Make the summary a list of points.",
-            "steps": [
+            "operations": [
                 {
                     "kind": "modify",
                     "existing_step_ref": "existing_step_1",
@@ -1546,8 +1424,7 @@ async def test_same_leaf_schema_change_shows_two_different_values() -> None:
                             "description": "Summary points",
                         },
                     ],
-                },
-                {"kind": "modify", "existing_step_ref": "existing_step_2"},
+                }
             ],
         },
     )
@@ -1604,7 +1481,7 @@ async def test_adding_a_leaf_and_changing_a_type_at_once_keeps_both_on_record() 
         ),
         arguments={
             "plan_rationale": "Add the author and make the summary a list.",
-            "steps": [
+            "operations": [
                 {
                     "kind": "modify",
                     "existing_step_ref": "existing_step_1",
@@ -1625,8 +1502,7 @@ async def test_adding_a_leaf_and_changing_a_type_at_once_keeps_both_on_record() 
                             "description": "Author",
                         },
                     ],
-                },
-                {"kind": "modify", "existing_step_ref": "existing_step_2"},
+                }
             ],
         },
     )
@@ -1677,16 +1553,22 @@ async def test_binding_change_names_the_sources_read_before_and_after() -> None:
         flow=flow,
         arguments={
             "plan_rationale": "Feed the review only the summary.",
-            "form_fields": [],
-            "steps": [
-                {"kind": "modify", "existing_step_ref": "existing_step_1"},
+            "operations": [
                 {
                     "kind": "modify",
                     "existing_step_ref": "existing_step_2",
-                    # Both lists said: the form read goes, the field read comes.
                     "uses_form_fields": [],
-                    "uses_previous_fields": [{"from_step": 1, "field_path": "summary"}],
+                    "uses_previous_fields": [
+                        {
+                            "producer": {
+                                "kind": "saved",
+                                "existing_step_ref": "existing_step_1",
+                            },
+                            "field_path": "summary",
+                        }
+                    ],
                 },
+                {"kind": "modify_flow", "form_fields": []},
             ],
         },
     )
@@ -1731,8 +1613,7 @@ async def test_ordered_step_diff_covers_unchanged_modified_added_removed() -> No
         flow=flow,
         arguments={
             "plan_rationale": "Keep extraction, improve review, replace archive.",
-            "steps": [
-                {"kind": "modify", "existing_step_ref": "existing_step_1"},
+            "operations": [
                 {
                     "kind": "modify",
                     "existing_step_ref": "existing_step_2",
@@ -1746,9 +1627,17 @@ async def test_ordered_step_diff_covers_unchanged_modified_added_removed() -> No
                         "instructions": "Summarize the reviewed case.",
                         "output_type": "text",
                     },
+                    "local_id": "new_2",
+                    "placement": {
+                        "kind": "after",
+                        "target": {
+                            "kind": "saved",
+                            "existing_step_ref": "existing_step_2",
+                        },
+                    },
                 },
+                {"kind": "remove", "existing_step_ref": "existing_step_3"},
             ],
-            "removed_existing_step_refs": ["existing_step_3"],
         },
     )
 
@@ -1780,74 +1669,60 @@ async def test_ordered_step_diff_covers_unchanged_modified_added_removed() -> No
 
 @pytest.mark.asyncio
 async def test_approval_diff_describes_the_prepared_spec_not_the_compiled_one() -> None:
-    # Session preparation renames the second of two same-named steps after the
-    # compiler has diffed; the approval must report the name the user gets.
-    flow = _flow(_flow_step(step_order=1, user_description="Sammanfatta ärendet"))
-
+    """Mutant: build approval from the pre-normalized spec."""
+    flow = _flow(
+        _flow_step(step_order=1, user_description="Analyze"),
+        _flow_step(
+            step_order=2, user_description="Report", input_source="previous_step"
+        ),
+    )
     result = await _process(
         flow=flow,
         arguments={
-            "plan_rationale": "Add a second summary pass.",
-            "steps": [
-                {"kind": "modify", "existing_step_ref": "existing_step_1"},
+            "plan_rationale": "Rename the analysis.",
+            "operations": [
                 {
-                    "kind": "add",
-                    "step": {
-                        "name": "sammanfatta ärendet",
-                        "instructions": "Summarize the case again, shorter.",
-                        "output_type": "text",
-                    },
-                },
+                    "kind": "modify",
+                    "existing_step_ref": "existing_step_1",
+                    "name": "Report",
+                }
             ],
         },
     )
-
-    assert isinstance(result, ProposalReady)
+    assert isinstance(result, ProposalReady), result
     assert result.compiled.content.edit is not None
-    added_step = result.compiled.content.spec.steps[-1]
-    assert added_step.name == "sammanfatta ärendet (2)"
-    added_change = result.compiled.content.edit.diff.step_changes[-1]
-    assert (added_change.kind, added_change.step_name) == (
-        "added",
-        added_step.name,
+    prepared_step = result.compiled.content.spec.steps[1]
+    assert prepared_step.name == "Report (2)"
+    assert (
+        result.compiled.content.edit.diff.step_changes[1].step_name
+        == prepared_step.name
     )
 
 
 @pytest.mark.asyncio
-async def test_an_added_step_named_like_a_saved_step_takes_the_suffix() -> None:
-    # The added step comes first, yet the saved step keeps the name the user
-    # gave it: the step this edit authors takes the suffix.
+async def test_added_step_name_collision_refuses_without_renaming_saved_work() -> None:
+    """Mutant: silently disambiguate a reconstructed saved step."""
     flow = _flow(_flow_step(step_order=1, user_description="Sammanfatta ärendet"))
-
     result = await _process(
         flow=flow,
         arguments={
-            "plan_rationale": "Summarize first, then keep the existing pass.",
-            "steps": [
+            "plan_rationale": "Add a second summary.",
+            "operations": [
                 {
                     "kind": "add",
+                    "local_id": "summary",
+                    "placement": {"kind": "start"},
                     "step": {
-                        "name": "sammanfatta ärendet",
-                        "instructions": "Summarize the case briefly.",
-                        "output_type": "text",
+                        "name": "sammanfatta ärendet ",
+                        "instructions": "Summarize the case.",
                     },
-                },
-                {
-                    "kind": "modify",
-                    "existing_step_ref": "existing_step_1",
-                    "input_source": "previous_step",
-                },
+                }
             ],
         },
     )
-
-    assert isinstance(result, ProposalReady)
-    assert result.compiled.content.edit is not None
-    added_step, existing_step = result.compiled.content.spec.steps
-    assert added_step.name == "sammanfatta ärendet (2)"
-    assert existing_step.name == "Sammanfatta ärendet"
-    existing_change = result.compiled.content.edit.diff.step_changes[-1]
-    assert "name" not in [change.field for change in existing_change.field_changes]
+    assert isinstance(result, CorrectableFailure), result
+    assert result.codes == {"edit_step_name_collision"}
+    assert flow.steps[0].user_description == "Sammanfatta ärendet"
 
 
 async def test_strict_shaped_edit_compiles_like_the_sparse_one_and_passes_review_scope() -> (
@@ -1902,9 +1777,7 @@ async def test_strict_shaped_edit_compiles_like_the_sparse_one_and_passes_review
     strict_arguments: dict[str, object] = {
         "plan_rationale": "Sharpen the extraction instructions.",
         "assumptions": [],
-        "flow_name": None,
-        "flow_description": None,
-        "steps": [
+        "operations": [
             strict_modify(
                 "existing_step_1",
                 assistant_spec={
@@ -1914,18 +1787,15 @@ async def test_strict_shaped_edit_compiles_like_the_sparse_one_and_passes_review
             ),
             strict_modify("existing_step_2"),
         ],
-        "removed_existing_step_refs": [],
-        "form_fields": None,
     }
     sparse_arguments: dict[str, object] = {
         "plan_rationale": "Sharpen the extraction instructions.",
-        "steps": [
+        "operations": [
             {
                 "kind": "modify",
                 "existing_step_ref": "existing_step_1",
                 "assistant_spec": {"instructions": "Extract the case facts as JSON."},
-            },
-            {"kind": "modify", "existing_step_ref": "existing_step_2"},
+            }
         ],
     }
     strict_schema = build_native_strict_tool_schema(schema)  # type: ignore[arg-type]
@@ -1955,16 +1825,13 @@ async def test_strict_shaped_edit_compiles_like_the_sparse_one_and_passes_review
         removable_step_refs=frozenset(),
         may_add=False,
     )
-    lowered = OrderedEditProposal.model_validate(
-        lower_edit_tool_arguments(strict_arguments)
-    )
+    lowered = parse_edit_commands(strict_arguments)
     assert (
         validate_review_edit_proposal(
             scope=scope,
             proposal=lowered,
             flow_name=flow.name,
             flow_description=flow.description,
-            current_step_refs=["existing_step_1", "existing_step_2"],
         )
         is None
     )
@@ -1995,21 +1862,23 @@ async def test_ordered_step_diff_preserves_literal_aliases_after_insertion() -> 
         flow=flow,
         arguments={
             "plan_rationale": "Insert a follow-up step before the consumer.",
-            "steps": [
-                {"kind": "modify", "existing_step_ref": "existing_step_1"},
+            "operations": [
                 {
                     "kind": "add",
-                    "step": {
-                        "name": "Review source",
-                        "instructions": "Review source.",
+                    "step": {"name": "Review source", "instructions": "Review source."},
+                    "local_id": "new_1",
+                    "placement": {
+                        "kind": "after",
+                        "target": {
+                            "kind": "saved",
+                            "existing_step_ref": "existing_step_1",
+                        },
                     },
-                },
-                {"kind": "modify", "existing_step_ref": "existing_step_2"},
+                }
             ],
         },
     )
 
-    assert isinstance(result, ProposalReady)
     assert isinstance(result, ProposalReady)
     edit = result.compiled.content.edit
     assert edit is not None
@@ -2062,14 +1931,19 @@ async def test_ordered_step_diff_keeps_placeholder_named_step_ref_on_its_produce
         flow=flow,
         arguments={
             "plan_rationale": "Insert a review step before the body writer.",
-            "steps": [
-                {"kind": "modify", "existing_step_ref": "existing_step_1"},
+            "operations": [
                 {
                     "kind": "add",
                     "step": {"name": "Review source", "instructions": "Review."},
-                },
-                {"kind": "modify", "existing_step_ref": "existing_step_2"},
-                {"kind": "modify", "existing_step_ref": "existing_step_3"},
+                    "local_id": "new_1",
+                    "placement": {
+                        "kind": "after",
+                        "target": {
+                            "kind": "saved",
+                            "existing_step_ref": "existing_step_1",
+                        },
+                    },
+                }
             ],
         },
     )
@@ -2113,11 +1987,10 @@ async def test_metadata_that_looks_like_a_read_does_not_refuse_the_proposal(
         flow=flow,
         arguments={
             "plan_rationale": "Drop the two middle steps.",
-            "steps": [
-                {"kind": "modify", "existing_step_ref": "existing_step_1"},
-                {"kind": "modify", "existing_step_ref": "existing_step_4"},
+            "operations": [
+                {"kind": "remove", "existing_step_ref": "existing_step_2"},
+                {"kind": "remove", "existing_step_ref": "existing_step_3"},
             ],
-            "removed_existing_step_refs": ["existing_step_2", "existing_step_3"],
         },
     )
 
@@ -2202,15 +2075,13 @@ async def test_ordered_edit_rewrites_source_ref_runtime_aliases_to_plan_refs() -
         flow=flow,
         arguments={
             "plan_rationale": "Shorten the news item.",
-            "steps": [
-                {"kind": "modify", "existing_step_ref": "existing_step_1"},
-                {"kind": "modify", "existing_step_ref": "existing_step_2"},
+            "operations": [
                 {
                     "kind": "modify",
                     "existing_step_ref": "existing_step_3",
                     "name": "Write short news",
                     "assistant_spec": {"instructions": "At most 80 words."},
-                },
+                }
             ],
         },
     )
@@ -2410,16 +2281,12 @@ async def test_an_unrelated_edit_keeps_every_producer_a_saved_fan_in_step_reads(
         flow=flow,
         arguments={
             "plan_rationale": "Rename the extraction step.",
-            "steps": [
+            "operations": [
                 {
                     "kind": "modify",
                     "existing_step_ref": "existing_step_1",
                     "name": "Extrahera sakuppgifter",
-                },
-                *(
-                    {"kind": "keep", "existing_step_ref": f"existing_step_{order}"}
-                    for order in (2, 3, 4)
-                ),
+                }
             ],
         },
     )
@@ -2456,13 +2323,12 @@ async def test_an_edit_whose_failure_has_its_own_card_keeps_the_typed_error() ->
         conversation=[],
         arguments={
             "plan_rationale": "Byt namn.",
-            "steps": [
+            "operations": [
                 {
                     "kind": "modify",
                     "existing_step_ref": "existing_step_1",
                     "name": "Läs",
-                },
-                {"kind": "keep", "existing_step_ref": "existing_step_2"},
+                }
             ],
         },
         available_model_refs=None,
@@ -2561,16 +2427,18 @@ async def test_ordered_add_step_derives_omitted_input_source_through_pipeline() 
         ),
         arguments={
             "plan_rationale": "Replace the first step.",
-            "steps": [
+            "operations": [
                 {
                     "kind": "add",
                     "step": {
                         "name": "New first",
                         "instructions": "Start from the flow input.",
                     },
-                }
+                    "local_id": "new_0",
+                    "placement": {"kind": "start"},
+                },
+                {"kind": "remove", "existing_step_ref": "existing_step_1"},
             ],
-            "removed_existing_step_refs": ["existing_step_1"],
         },
     )
 
@@ -2585,15 +2453,22 @@ async def test_ordered_add_step_derives_omitted_input_source_through_pipeline() 
         flow=_flow(_flow_step(step_order=1, user_description="Keep")),
         arguments={
             "plan_rationale": "Append a follow-up step.",
-            "steps": [
-                {"kind": "modify", "existing_step_ref": "existing_step_1"},
+            "operations": [
                 {
                     "kind": "add",
                     "step": {
                         "name": "New second",
                         "instructions": "Continue from the previous step.",
                     },
-                },
+                    "local_id": "new_1",
+                    "placement": {
+                        "kind": "after",
+                        "target": {
+                            "kind": "saved",
+                            "existing_step_ref": "existing_step_1",
+                        },
+                    },
+                }
             ],
         },
     )
@@ -2618,20 +2493,21 @@ async def test_ordered_add_first_document_step_derives_runtime_input_config() ->
         ),
         arguments={
             "plan_rationale": "Replace the first step with document analysis.",
-            "steps": [
+            "operations": [
                 {
                     "kind": "add",
                     "step": {
                         "name": "Analyze document",
                         "instructions": "Analyze the uploaded document.",
                     },
-                }
+                    "local_id": "new_0",
+                    "placement": {"kind": "start"},
+                },
+                {"kind": "remove", "existing_step_ref": "existing_step_1"},
             ],
-            "removed_existing_step_refs": ["existing_step_1"],
         },
     )
 
-    assert isinstance(result, ProposalReady)
     assert isinstance(result, ProposalReady)
     step = result.compiled.content.spec.steps[0]
     assert step.input_source == InputSource.FLOW_INPUT
@@ -2649,20 +2525,26 @@ async def test_ordered_add_later_document_step_compiles_to_text_input() -> None:
         flow=_flow(_flow_step(step_order=1, user_description="Keep")),
         arguments={
             "plan_rationale": "Append a document-derived follow-up.",
-            "steps": [
-                {"kind": "modify", "existing_step_ref": "existing_step_1"},
+            "operations": [
                 {
                     "kind": "add",
                     "step": {
                         "name": "Use previous output",
                         "instructions": "Continue from the previous step.",
                     },
-                },
+                    "local_id": "new_1",
+                    "placement": {
+                        "kind": "after",
+                        "target": {
+                            "kind": "saved",
+                            "existing_step_ref": "existing_step_1",
+                        },
+                    },
+                }
             ],
         },
     )
 
-    assert isinstance(result, ProposalReady)
     assert isinstance(result, ProposalReady)
     step = result.compiled.content.spec.steps[1]
     assert step.input_source == InputSource.PREVIOUS_STEP
@@ -2705,7 +2587,7 @@ async def test_ordered_edit_noop_round_trip_from_snapshot_reports_unchanged_only
         flow=flow,
         arguments={
             "plan_rationale": "Keep the existing flow unchanged.",
-            "steps": [{"kind": "modify", "existing_step_ref": "existing_step_1"}],
+            "operations": [],
         },
         assistant_snapshots={
             assistant_id: AssistantAuthoringSnapshot(
@@ -2738,7 +2620,6 @@ async def test_ordered_edit_noop_round_trip_from_snapshot_reports_unchanged_only
         ),
     )
 
-    assert isinstance(result, ProposalReady)
     assert isinstance(result, ProposalReady)
     edit = result.compiled.content.edit
     assert edit is not None
@@ -2783,7 +2664,7 @@ async def test_ordered_edit_confidence_needs_review_for_many_changes() -> None:
         flow=flow,
         arguments={
             "plan_rationale": "Rename all steps.",
-            "steps": [
+            "operations": [
                 {
                     "kind": "modify",
                     "existing_step_ref": f"existing_step_{index}",
@@ -2807,14 +2688,18 @@ async def test_ordered_form_field_shadow_declaration_is_dropped_with_advisory() 
         flow=flow,
         arguments={
             "plan_rationale": "Do not duplicate primary input.",
-            "steps": [{"kind": "modify", "existing_step_ref": "existing_step_1"}],
-            "form_fields": [
+            "operations": [
                 {
-                    "name": "text",
-                    "type": "text",
-                    "label": "Text",
-                    "required": True,
-                    "provenance": "user_confirmed",
+                    "kind": "modify_flow",
+                    "form_fields": [
+                        {
+                            "name": "text",
+                            "type": "text",
+                            "label": "Text",
+                            "required": True,
+                            "provenance": "user_confirmed",
+                        }
+                    ],
                 }
             ],
         },
@@ -2856,13 +2741,17 @@ async def test_confirmed_edit_field_options_survive_server_owned_projection() ->
         planning_state=state,
         arguments={
             "plan_rationale": "Use the confirmed priority field.",
-            "steps": [{"kind": "modify", "existing_step_ref": "existing_step_1"}],
-            "form_fields": [
+            "operations": [
                 {
-                    "name": "priority",
-                    "type": "select",
-                    "label": "Changed by model",
-                    "options": ["Other"],
+                    "kind": "modify_flow",
+                    "form_fields": [
+                        {
+                            "name": "priority",
+                            "type": "select",
+                            "label": "Changed by model",
+                            "options": ["Other"],
+                        }
+                    ],
                 }
             ],
         },
@@ -2904,7 +2793,7 @@ async def test_confirmed_edit_field_survives_when_model_omits_form_fields() -> N
         planning_state=state,
         arguments={
             "plan_rationale": "Keep the confirmed priority field.",
-            "steps": [{"kind": "modify", "existing_step_ref": "existing_step_1"}],
+            "operations": [],
         },
     )
 
@@ -2943,8 +2832,12 @@ async def test_confirmed_edit_shadow_field_is_answered_with_the_field_to_rename(
         planning_state=state,
         arguments={
             "plan_rationale": "Use the confirmed text field.",
-            "steps": [{"kind": "modify", "existing_step_ref": "existing_step_1"}],
-            "form_fields": [{"name": "text", "type": "text", "label": "Text"}],
+            "operations": [
+                {
+                    "kind": "modify_flow",
+                    "form_fields": [{"name": "text", "type": "text", "label": "Text"}],
+                }
+            ],
         },
     )
 
@@ -2989,13 +2882,12 @@ async def test_ordered_step_shadow_reference_is_filtered_with_advisory() -> None
         flow=flow,
         arguments={
             "plan_rationale": "Use only the extra form field.",
-            "steps": [
-                {"kind": "modify", "existing_step_ref": "existing_step_1"},
+            "operations": [
                 {
                     "kind": "modify",
                     "existing_step_ref": "existing_step_2",
                     "uses_form_fields": ["text", "case_id"],
-                },
+                }
             ],
         },
     )
@@ -3019,15 +2911,7 @@ async def test_ordered_audio_repair_inserts_transcript_and_rewires_consumer() ->
 
     result = await _process(
         flow=flow,
-        arguments={
-            "plan_rationale": "Keep the flow shape.",
-            "steps": [
-                {"kind": "modify", "existing_step_ref": "existing_step_1"},
-                {"kind": "modify", "existing_step_ref": "existing_step_2"},
-                {"kind": "modify", "existing_step_ref": "existing_step_3"},
-                {"kind": "modify", "existing_step_ref": "existing_step_4"},
-            ],
-        },
+        arguments={"plan_rationale": "Keep the flow shape.", "operations": []},
     )
 
     assert isinstance(result, ProposalReady)
@@ -3087,7 +2971,7 @@ async def test_ordered_audio_repair_keeps_the_rewired_steps_form_reads() -> None
         flow=_audio_flow_reading_the_meeting_form_field(),
         arguments={
             "plan_rationale": "Keep the flow shape.",
-            "steps": [
+            "operations": [
                 {"kind": "modify", "existing_step_ref": f"existing_step_{order}"}
                 for order in range(1, 5)
             ],
@@ -3116,7 +3000,7 @@ async def test_ordered_audio_repair_of_a_hand_written_first_step_asks_the_user()
         flow=flow,
         arguments={
             "plan_rationale": "Keep the flow shape.",
-            "steps": [
+            "operations": [
                 {"kind": "modify", "existing_step_ref": f"existing_step_{order}"}
                 for order in range(1, 5)
             ],
@@ -3139,7 +3023,7 @@ async def test_ordered_audio_repair_keeps_an_authored_form_list() -> None:
         flow=_audio_flow_reading_the_meeting_form_field(),
         arguments={
             "plan_rationale": "Läs också platsen.",
-            "steps": [
+            "operations": [
                 {
                     "kind": "modify",
                     "existing_step_ref": "existing_step_1",
@@ -3149,10 +3033,13 @@ async def test_ordered_audio_repair_keeps_an_authored_form_list() -> None:
                     {"kind": "modify", "existing_step_ref": f"existing_step_{order}"}
                     for order in range(2, 5)
                 ),
-            ],
-            "form_fields": [
-                {"name": "mote", "type": "text", "label": "Möte"},
-                {"name": "plats", "type": "text", "label": "Plats"},
+                {
+                    "kind": "modify_flow",
+                    "form_fields": [
+                        {"name": "mote", "type": "text", "label": "Möte"},
+                        {"name": "plats", "type": "text", "label": "Plats"},
+                    ],
+                },
             ],
         },
     )
@@ -3178,15 +3065,7 @@ async def test_ordered_audio_repair_clears_stale_runtime_input_config() -> None:
 
     result = await _process(
         flow=flow,
-        arguments={
-            "plan_rationale": "Keep the flow shape.",
-            "steps": [
-                {"kind": "modify", "existing_step_ref": "existing_step_1"},
-                {"kind": "modify", "existing_step_ref": "existing_step_2"},
-                {"kind": "modify", "existing_step_ref": "existing_step_3"},
-                {"kind": "modify", "existing_step_ref": "existing_step_4"},
-            ],
-        },
+        arguments={"plan_rationale": "Keep the flow shape.", "operations": []},
     )
 
     assert isinstance(result, ProposalReady)
@@ -3210,7 +3089,7 @@ async def test_ordered_audio_repair_does_not_duplicate_existing_transcript() -> 
         flow=flow,
         arguments={
             "plan_rationale": "The model already inserted transcription.",
-            "steps": [
+            "operations": [
                 {
                     "kind": "add",
                     "step": {
@@ -3218,6 +3097,8 @@ async def test_ordered_audio_repair_does_not_duplicate_existing_transcript() -> 
                         "instructions": "Transkribera uppladdat ljud till text.",
                         "output_type": "text",
                     },
+                    "local_id": "new_0",
+                    "placement": {"kind": "start"},
                 },
                 {
                     "kind": "modify",
@@ -3225,9 +3106,6 @@ async def test_ordered_audio_repair_does_not_duplicate_existing_transcript() -> 
                     "input_source": "previous_step",
                     "input_type": "text",
                 },
-                {"kind": "modify", "existing_step_ref": "existing_step_2"},
-                {"kind": "modify", "existing_step_ref": "existing_step_3"},
-                {"kind": "modify", "existing_step_ref": "existing_step_4"},
             ],
         },
     )
@@ -3265,7 +3143,7 @@ async def test_added_edit_step_uses_server_requested_primary_runtime_input() -> 
         planning_state=_planning_state_with_primary_input("audio"),
         arguments={
             "plan_rationale": "Add transcription before document analysis.",
-            "steps": [
+            "operations": [
                 {
                     "kind": "add",
                     "step": {
@@ -3273,6 +3151,8 @@ async def test_added_edit_step_uses_server_requested_primary_runtime_input() -> 
                         "instructions": "Transkribera ljudfilen ordagrant till svensk text.",
                         "output_type": "text",
                     },
+                    "local_id": "new_0",
+                    "placement": {"kind": "start"},
                 },
                 {
                     "kind": "modify",
@@ -3320,7 +3200,7 @@ async def test_an_edit_with_an_unknown_knowledge_ref_is_a_model_repair() -> None
         resource_catalog=catalog,
         arguments={
             "plan_rationale": "Ground the reading in policy.",
-            "steps": [
+            "operations": [
                 {
                     "kind": "modify",
                     "existing_step_ref": "existing_step_1",
@@ -3332,6 +3212,14 @@ async def test_an_edit_with_an_unknown_knowledge_ref_is_a_model_repair() -> None
                         "name": "Bedöm",
                         "instructions": "Bedöm ärendet.",
                         "knowledge_refs": ["knowledge.policy-3", "okänd"],
+                    },
+                    "local_id": "new_1",
+                    "placement": {
+                        "kind": "after",
+                        "target": {
+                            "kind": "saved",
+                            "existing_step_ref": "existing_step_1",
+                        },
                     },
                 },
             ],
@@ -3430,7 +3318,9 @@ def _saved_step_large_flow_fixture(step_count: int):
 
 
 @pytest.mark.parametrize("step_count", [10, 40])
-async def test_saved_step_fragment_expands_without_changing_untouched_steps(step_count):
+@pytest.mark.parametrize("scoped", [False, True])
+async def test_local_commands_preserve_untouched_saved_steps(step_count, scoped):
+    """Mutants: omit saved rows, normalize untouched payloads, mutate baseline."""
     flow, snapshots, catalog, context, prior = _saved_step_large_flow_fixture(
         step_count
     )
@@ -3441,11 +3331,11 @@ async def test_saved_step_fragment_expands_without_changing_untouched_steps(step
         flow=flow,
         assistant_snapshots=snapshots,
         resource_catalog=catalog,
-        plan_edit_context=context,
-        prior_spec_for_revision=prior,
+        plan_edit_context=context if scoped else None,
+        prior_spec_for_revision=prior if scoped else None,
         arguments={
             "plan_rationale": "Clarify the selected instructions.",
-            "steps": [
+            "operations": [
                 {
                     "kind": "modify",
                     "existing_step_ref": "existing_step_4",
@@ -3474,7 +3364,7 @@ async def test_saved_step_fragment_expands_without_changing_untouched_steps(step
 @pytest.mark.parametrize(
     ("submitted_refs", "feedback"),
     [
-        (["existing_step_99"], "unknown"),
+        (["existing_step_99"], "selected"),
         (["existing_step_5"], "selected"),
         (["existing_step_4", "existing_step_4"], "once"),
     ],
@@ -3491,8 +3381,9 @@ async def test_saved_step_fragment_rejects_invalid_refs_even_without_changes(
         prior_spec_for_revision=prior,
         arguments={
             "plan_rationale": "Clarify the selected instructions.",
-            "steps": [
-                {"kind": "modify", "existing_step_ref": ref} for ref in submitted_refs
+            "operations": [
+                {"kind": "modify", "existing_step_ref": ref, "name": "Changed"}
+                for ref in submitted_refs
             ],
         },
     )
@@ -3542,7 +3433,7 @@ async def test_saved_step_repair_replays_fragment_and_names_target():
     flow, snapshots, catalog, context, prior = _saved_step_large_flow_fixture(40)
     arguments = {
         "plan_rationale": "Clarify the selected instructions.",
-        "steps": [{"kind": "modify", "existing_step_ref": "existing_step_4"}],
+        "operations": [{"kind": "modify", "existing_step_ref": "existing_step_4"}],
     }
 
     async def process(arguments):
@@ -3560,9 +3451,9 @@ async def test_saved_step_repair_replays_fragment_and_names_target():
     assert "existing_step_4" in failure.feedback
     corrected = {
         **arguments,
-        "steps": [
+        "operations": [
             {
-                **arguments["steps"][0],
+                **arguments["operations"][0],
                 "assistant_spec": {"instructions": "Explain the evidence clearly."},
             }
         ],
@@ -3588,7 +3479,7 @@ async def test_saved_step_repair_replays_fragment_and_names_target():
     messages = flatten_proposal_message_groups(repair.call_args.args[0].message_groups)
     replay = json.loads(messages[-2]["tool_calls"][0]["function"]["arguments"])
     assert replay == arguments
-    assert len(replay["steps"]) == 1
+    assert len(replay["operations"]) == 1
     assert "existing_step_4" in messages[-1]["content"]
     assert len(compiled) == 1 and len(compiled[0].steps) == 40
 
@@ -3920,8 +3811,8 @@ async def test_a_review_turn_may_not_change_a_step_the_findings_do_not_name():
     )
     arguments = {
         "plan_rationale": "Steg 2 skrivs om.",
-        "steps": [
-            {"kind": "modify", "existing_step_ref": "existing_step_2", "name": "Nytt"},
+        "operations": [
+            {"kind": "modify", "existing_step_ref": "existing_step_2", "name": "Nytt"}
         ],
     }
 
@@ -3972,10 +3863,7 @@ async def test_a_review_turn_is_not_blamed_for_the_compilers_housekeeping():
                         "instructions": "Fånga mötets syfte, deltagare och beslut.",
                         "knowledge_refs": None,
                     },
-                ),
-                {"kind": "keep", "existing_step_ref": "existing_step_2"},
-                {"kind": "keep", "existing_step_ref": "existing_step_3"},
-                {"kind": "keep", "existing_step_ref": "existing_step_4"},
+                )
             ],
         ),
         conversation=conversation,
@@ -4045,8 +3933,7 @@ async def test_a_review_turn_is_not_blamed_for_the_input_field_the_server_carrie
                 _strict_review_modify(
                     "existing_step_1",
                     assistant_spec={"instructions": "Kortare.", "knowledge_refs": None},
-                ),
-                {"kind": "keep", "existing_step_ref": "existing_step_2"},
+                )
             ],
         ),
         conversation=conversation,
@@ -4084,15 +3971,13 @@ async def test_a_review_turn_is_not_blamed_for_a_duplicate_name_preparation_suff
             flow,
             conversation,
             steps=[
-                {"kind": "keep", "existing_step_ref": "existing_step_1"},
-                {"kind": "keep", "existing_step_ref": "existing_step_2"},
                 _strict_review_modify(
                     "existing_step_3",
                     assistant_spec={
                         "instructions": "Föreslå högst tre beslut.",
                         "knowledge_refs": None,
                     },
-                ),
+                )
             ],
         ),
         conversation=conversation,
@@ -4110,11 +3995,8 @@ async def test_a_review_turn_is_not_blamed_for_a_duplicate_name_preparation_suff
 
 
 @pytest.mark.asyncio
-async def test_a_spilled_edit_payload_is_re_homed_and_then_told_what_it_still_lacks():
-    """The captured non-strict shape, through admission and the real edit
-    processor: the field objects that spilled out of step 3 are re-homed and
-    the root null tail dropped, so the model is told the one thing it can act
-    on (the steps it never emitted) instead of a schema error."""
+async def test_spilled_local_edit_preserves_the_steps_it_did_not_emit():
+    """Mutants: lose lossless provider normalization or demand model keep rows."""
     from eneo.flows.ai_builder.ai_builder_tools import admit_propose_flow_tool_arguments
 
     flow = _flow(
@@ -4139,8 +4021,7 @@ async def test_a_spilled_edit_payload_is_re_homed_and_then_told_what_it_still_la
     )
     captured_shape = {
         "plan_rationale": "Steg 3 fångar fler fält.",
-        "steps": [
-            {"kind": "keep", "existing_step_ref": "existing_step_1"},
+        "operations": [
             {
                 "kind": "modify",
                 "existing_step_ref": "existing_step_2",
@@ -4165,15 +4046,15 @@ async def test_a_spilled_edit_payload_is_re_homed_and_then_told_what_it_still_la
         arguments=captured_shape,
         tool_schema=schema,  # type: ignore[arg-type]
     )
-    assert [f["name"] for f in admitted["steps"][2]["output_fields"]] == [
+    assert [f["name"] for f in admitted["operations"][1]["output_fields"]] == [
         "motestyp",
         "risker",
         "oppna_fragor",
     ]
     result = await _process(flow=flow, arguments=admitted)
 
-    assert isinstance(result, CorrectableFailure)
-    assert "existing_step_4" in result.feedback and "existing_step_5" in result.feedback
+    assert isinstance(result, ProposalReady), result
+    assert len(result.compiled.content.spec.steps) == len(flow.steps)
 
 
 @pytest.mark.asyncio
@@ -4218,7 +4099,7 @@ async def test_an_edit_keeps_every_saved_steps_model_and_adds_a_step_on_the_spac
     arguments = admit_propose_flow_tool_arguments(
         arguments={
             "plan_rationale": "Kortare sammanfattning och en översättning.",
-            "steps": [
+            "operations": [
                 {
                     "kind": "modify",
                     "existing_step_ref": "existing_step_1",
@@ -4226,18 +4107,23 @@ async def test_an_edit_keeps_every_saved_steps_model_and_adds_a_step_on_the_spac
                         "instructions": "Sammanfatta mötet i tre meningar."
                     },
                 },
-                {"kind": "keep", "existing_step_ref": "existing_step_2"},
                 {
                     "kind": "add",
                     "step": {
                         "name": "Översätt",
                         "instructions": "Översätt rapporten till engelska.",
                     },
+                    "local_id": "new_2",
+                    "placement": {
+                        "kind": "after",
+                        "target": {
+                            "kind": "saved",
+                            "existing_step_ref": "existing_step_2",
+                        },
+                    },
                 },
             ],
-            "assumptions": [
-                "Varje stegs modell väljs i stegets modellväljare.",
-            ],
+            "assumptions": ["Varje stegs modell väljs i stegets modellväljare."],
         },
         tool_schema=build_edit_flow_tool_schema(  # type: ignore[arg-type]
             list(flow.steps),
@@ -4325,10 +4211,8 @@ def _admitted_by_the_review_schema(
     arguments: dict[str, object] = {
         "plan_rationale": "Svar på granskningens fynd.",
         "assumptions": [],
-        "steps": steps,
+        "operations": steps,
     }
-    if "removed_existing_step_refs" in parameters["properties"]:
-        arguments["removed_existing_step_refs"] = []
     jsonschema.validate(arguments, parameters)
     # What production admits is what is processed: the strict check above is
     # the provider's, this is the server's.
@@ -4461,10 +4345,7 @@ async def test_an_investigation_that_finds_nothing_to_change_ends_the_turn():
         flow=flow,
         arguments={
             "plan_rationale": "Stegen gör olika saker; ingen ändring behövs.",
-            "steps": [
-                {"kind": "modify", "existing_step_ref": "existing_step_1"},
-                {"kind": "modify", "existing_step_ref": "existing_step_2"},
-            ],
+            "operations": [],
         },
         conversation=_review_command_conversation(),
     )
@@ -4517,13 +4398,12 @@ async def test_edit_compiles_against_the_flows_own_template_binding() -> None:
         planning_state=planning_state,
         arguments={
             "plan_rationale": "Förtydliga sammanfattningssteget, mallen är oförändrad.",
-            "steps": [
+            "operations": [
                 {
                     "kind": "modify",
                     "existing_step_ref": "existing_step_1",
                     "name": "Skriv mötesanteckningar",
-                },
-                {"kind": "modify", "existing_step_ref": "existing_step_2"},
+                }
             ],
         },
     )
@@ -4607,14 +4487,12 @@ async def test_edit_keeps_the_flows_template_mappings_when_an_earlier_step_chang
         ),
         arguments={
             "plan_rationale": "Byter bara namn på första steget.",
-            "steps": [
+            "operations": [
                 {
                     "kind": "modify",
                     "existing_step_ref": "existing_step_1",
                     "name": "Läs ärendet",
-                },
-                {"kind": "modify", "existing_step_ref": "existing_step_2"},
-                {"kind": "modify", "existing_step_ref": "existing_step_3"},
+                }
             ],
         },
     )
@@ -4693,14 +4571,12 @@ async def test_edit_makes_the_field_a_kept_template_mapping_reads_non_null() -> 
         planning_state=_inherited_planning_state(template_asset_id, ["handlaggare"]),
         arguments={
             "plan_rationale": "Byter bara namn på första steget.",
-            "steps": [
+            "operations": [
                 {
                     "kind": "modify",
                     "existing_step_ref": "existing_step_1",
                     "name": "Läs ärendet",
-                },
-                {"kind": "modify", "existing_step_ref": "existing_step_2"},
-                {"kind": "modify", "existing_step_ref": "existing_step_3"},
+                }
             ],
         },
     )
@@ -4753,12 +4629,12 @@ async def _scoped_edit(flow, *, target_ref: str, template_asset_id, placeholders
         prior_spec_for_revision=prior,
         arguments={
             "plan_rationale": "Improve the instructions.",
-            "steps": [
+            "operations": [
                 {
                     "kind": "modify",
                     "existing_step_ref": target_ref,
                     "assistant_spec": {"instructions": "Improved instructions"},
-                },
+                }
             ],
         },
     )
@@ -4807,7 +4683,7 @@ async def test_a_step_scoped_edit_refuses_a_selected_step_the_template_cannot_re
 
 _WHOLE_FLOW_EDIT_KEEPING_THE_TEMPLATE = {
     "plan_rationale": "Byter bara namn på första steget.",
-    "steps": [
+    "operations": [
         {
             "kind": "modify",
             "existing_step_ref": "existing_step_1",
@@ -5054,15 +4930,12 @@ async def test_edit_moves_a_structured_projection_with_the_field_it_replaces() -
         ),
         arguments={
             "plan_rationale": "Byter bara namn på första steget.",
-            "steps": [
+            "operations": [
                 {
                     "kind": "modify",
                     "existing_step_ref": "existing_step_1",
                     "name": "Läs ärendet",
-                },
-                {"kind": "modify", "existing_step_ref": "existing_step_2"},
-                {"kind": "modify", "existing_step_ref": "existing_step_3"},
-                {"kind": "modify", "existing_step_ref": "existing_step_4"},
+                }
             ],
         },
     )
@@ -5154,15 +5027,12 @@ async def test_a_whole_flow_edit_repairs_the_field_a_scoped_edit_had_to_refuse()
         ),
         arguments={
             "plan_rationale": "Byter bara namn på första steget.",
-            "steps": [
+            "operations": [
                 {
                     "kind": "modify",
                     "existing_step_ref": "existing_step_1",
                     "name": "Läs ärendet",
-                },
-                {"kind": "modify", "existing_step_ref": "existing_step_2"},
-                {"kind": "modify", "existing_step_ref": "existing_step_3"},
-                {"kind": "modify", "existing_step_ref": "existing_step_4"},
+                }
             ],
         },
     )
@@ -5190,11 +5060,7 @@ async def test_edit_reports_a_template_mapping_whose_step_was_removed() -> None:
         planning_state=_inherited_planning_state(template_asset_id, ["rapport"]),
         arguments={
             "plan_rationale": "Tar bort rapportsteget.",
-            "steps": [
-                {"kind": "modify", "existing_step_ref": "existing_step_1"},
-                {"kind": "modify", "existing_step_ref": "existing_step_3"},
-            ],
-            "removed_existing_step_refs": ["existing_step_2"],
+            "operations": [{"kind": "remove", "existing_step_ref": "existing_step_2"}],
         },
     )
 
@@ -5216,16 +5082,15 @@ async def test_edit_binds_the_flows_template_to_a_moved_terminal_step() -> None:
         planning_state=_inherited_planning_state(template_asset_id, ["rapport"]),
         arguments={
             "plan_rationale": "Fyller i mallen direkt från rapportsteget.",
-            "steps": [
-                {"kind": "modify", "existing_step_ref": "existing_step_1"},
+            "operations": [
                 {
                     "kind": "modify",
                     "existing_step_ref": "existing_step_2",
                     "output_type": "docx",
                     "document_delivery_mode": "template_fill",
                 },
+                {"kind": "remove", "existing_step_ref": "existing_step_3"},
             ],
-            "removed_existing_step_refs": ["existing_step_3"],
         },
     )
 
@@ -5286,12 +5151,7 @@ async def test_edit_reports_a_removed_producer_instead_of_rebinding_by_position(
         planning_state=_inherited_planning_state(template_asset_id, ["rapport"]),
         arguments={
             "plan_rationale": "Tar bort rapportsteget.",
-            "steps": [
-                {"kind": "modify", "existing_step_ref": "existing_step_1"},
-                {"kind": "modify", "existing_step_ref": "existing_step_3"},
-                {"kind": "modify", "existing_step_ref": "existing_step_4"},
-            ],
-            "removed_existing_step_refs": ["existing_step_2"],
+            "operations": [{"kind": "remove", "existing_step_ref": "existing_step_2"}],
         },
     )
 
@@ -5346,13 +5206,12 @@ async def test_edit_keeps_every_mapping_publication_accepts() -> None:
         ),
         arguments={
             "plan_rationale": "Byter bara namn på första steget.",
-            "steps": [
+            "operations": [
                 {
                     "kind": "modify",
                     "existing_step_ref": "existing_step_1",
                     "name": "Läs ärendet",
-                },
-                {"kind": "modify", "existing_step_ref": "existing_step_2"},
+                }
             ],
         },
     )
@@ -5423,11 +5282,10 @@ async def test_edit_removing_the_template_step_ignores_its_old_mappings() -> Non
         ),
         arguments={
             "plan_rationale": "Tar bort rapportsteget och mallsteget.",
-            "steps": [
-                {"kind": "modify", "existing_step_ref": "existing_step_1"},
-                {"kind": "modify", "existing_step_ref": "existing_step_3"},
+            "operations": [
+                {"kind": "remove", "existing_step_ref": "existing_step_2"},
+                {"kind": "remove", "existing_step_ref": "existing_step_4"},
             ],
-            "removed_existing_step_refs": ["existing_step_2", "existing_step_4"],
         },
     )
 
@@ -5464,12 +5322,7 @@ async def test_edit_ignores_an_old_mapping_the_replacement_template_no_longer_ha
         planning_state=planning_state,
         arguments={
             "plan_rationale": "Byter mall och tar bort rapportsteget.",
-            "steps": [
-                {"kind": "modify", "existing_step_ref": "existing_step_1"},
-                {"kind": "modify", "existing_step_ref": "existing_step_3"},
-                {"kind": "modify", "existing_step_ref": "existing_step_4"},
-            ],
-            "removed_existing_step_refs": ["existing_step_2"],
+            "operations": [{"kind": "remove", "existing_step_ref": "existing_step_2"}],
         },
     )
 
@@ -5547,12 +5400,12 @@ async def test_saved_step_partial_revision_requires_current_saved_revision(
         prior_spec_for_revision=prior,
         arguments={
             "plan_rationale": "Improve the selected step.",
-            "steps": [
+            "operations": [
                 {
                     "kind": "modify",
                     "existing_step_ref": "existing_step_1",
                     "assistant_spec": {"instructions": "Improved instructions"},
-                },
+                }
             ],
         },
     )
@@ -5667,7 +5520,7 @@ async def test_saved_step_partial_revision_requires_current_saved_revision(
         prior_spec_for_revision=prior,
         arguments={
             "plan_rationale": "Improve the selected step.",
-            "steps": [
+            "operations": [
                 {
                     "kind": "modify",
                     "existing_step_ref": "existing_step_1",
@@ -5679,7 +5532,7 @@ async def test_saved_step_partial_revision_requires_current_saved_revision(
                         }
                     ],
                     **patch_fields,
-                },
+                }
             ],
         },
     )
@@ -5755,12 +5608,12 @@ async def test_saved_step_preserves_consumer_with_numeric_runtime_aliases() -> N
         prior_spec_for_revision=prior,
         arguments={
             "plan_rationale": "Clarify analysis.",
-            "steps": [
+            "operations": [
                 {
                     "kind": "modify",
                     "existing_step_ref": "existing_step_1",
                     "assistant_spec": {"instructions": "Improved analysis"},
-                },
+                }
             ],
         },
     )
@@ -5808,14 +5661,14 @@ async def test_saved_step_authored_effect_policy_rejects_flow_fields(authored):
         prior_spec_for_revision=prior,
         arguments={
             "plan_rationale": "Improve instructions.",
-            "steps": [
+            "operations": [
                 {
                     "kind": "modify",
                     "existing_step_ref": "existing_step_1",
                     "assistant_spec": {"instructions": "Improved instructions"},
-                }
+                },
+                {"kind": "modify_flow", **authored},
             ],
-            **authored,
         },
     )
     assert isinstance(result, CorrectableFailure), result
@@ -5957,7 +5810,7 @@ async def test_saved_terminal_step_can_replace_nested_contract_without_consumers
         prior_spec_for_revision=prior,
         arguments={
             "plan_rationale": "Return the summary directly.",
-            "steps": [
+            "operations": [
                 {
                     "kind": "modify",
                     "existing_step_ref": "existing_step_1",
@@ -6110,12 +5963,12 @@ async def test_saved_step_incompatible_consumer_returns_repair(
         prior_spec_for_revision=prior,
         arguments={
             "plan_rationale": "Revise the result schema.",
-            "steps": [
+            "operations": [
                 {
                     "kind": "modify",
                     "existing_step_ref": "existing_step_1",
                     **target_patch,
-                },
+                }
             ],
         },
     )
@@ -6173,12 +6026,12 @@ async def test_saved_step_preserves_contract_used_by_template_bindings(remove_co
         prior_spec_for_revision=prior,
         arguments={
             "plan_rationale": "Remove the schema.",
-            "steps": [
+            "operations": [
                 {
                     "kind": "modify",
                     "existing_step_ref": "existing_step_1",
                     **target_patch,
-                },
+                }
             ],
         },
     )
@@ -6237,17 +6090,12 @@ async def test_untouched_composer_step_keeps_its_mode(scoped):
         prior_spec_for_revision=prior if scoped else None,
         arguments={
             "plan_rationale": "Clarify analysis.",
-            "steps": [
+            "operations": [
                 {
                     "kind": "modify",
                     "existing_step_ref": "existing_step_1",
                     "assistant_spec": {"instructions": "Improved analysis"},
-                },
-                *(
-                    []
-                    if scoped
-                    else [{"kind": "keep", "existing_step_ref": "existing_step_2"}]
-                ),
+                }
             ],
         },
     )
@@ -6367,7 +6215,7 @@ async def test_saved_step_edit_leaves_the_untouched_pdf_body_step_byte_identical
         prior_spec_for_revision=prior,
         arguments={
             "plan_rationale": "Lista saknade uppgifter.",
-            "steps": [
+            "operations": [
                 {
                     "kind": "modify",
                     "existing_step_ref": "existing_step_1",
@@ -6424,7 +6272,7 @@ def _two_step_saved_flow_with_context():
 
 _TARGET_ONLY_FRAGMENT = {
     "plan_rationale": "Förtydliga.",
-    "steps": [
+    "operations": [
         {
             "kind": "modify",
             "existing_step_ref": "existing_step_1",
@@ -6545,7 +6393,7 @@ async def test_saved_step_revision_leaves_a_bad_leading_audio_step_as_saved():
         prior_spec_for_revision=prior,
         arguments={
             "plan_rationale": "Kortare rapport.",
-            "steps": [
+            "operations": [
                 {
                     "kind": "modify",
                     "existing_step_ref": "existing_step_2",
@@ -6590,10 +6438,7 @@ async def test_saved_step_identity_only_target_is_refused_before_normalization()
         resource_catalog=catalog,
         plan_edit_context=context,
         prior_spec_for_revision=prior,
-        arguments={
-            "plan_rationale": "Inget att ändra.",
-            "steps": [{"kind": "modify", "existing_step_ref": "existing_step_3"}],
-        },
+        arguments={"plan_rationale": "Inget att ändra.", "operations": []},
     )
 
     assert isinstance(result, CorrectableFailure), result
@@ -6644,7 +6489,7 @@ async def test_saved_step_target_echoing_its_saved_value_is_not_a_change(echo):
         prior_spec_for_revision=prior,
         arguments={
             "plan_rationale": "Samma som förut.",
-            "steps": [
+            "operations": [
                 {"kind": "modify", "existing_step_ref": "existing_step_3", **echo}
             ],
         },
@@ -6689,7 +6534,7 @@ async def test_a_repair_that_leaves_the_selected_saved_step_unchanged_records_wh
     attempt = await _recorded_repair_attempt(
         repair_arguments={
             "plan_rationale": "Samma som förut.",
-            "steps": [
+            "operations": [
                 {
                     "kind": "modify",
                     "existing_step_ref": "existing_step_3",
@@ -6782,7 +6627,7 @@ async def test_saved_step_fragment_keeps_an_untouched_speaker_mapping_step():
         prior_spec_for_revision=prior,
         arguments={
             "plan_rationale": "Förtydliga sammanfattningen.",
-            "steps": [
+            "operations": [
                 {
                     "kind": "modify",
                     "existing_step_ref": "existing_step_3",
@@ -6823,7 +6668,7 @@ async def test_saved_step_implicit_json_consumer_contract_is_preserved(field_nam
         prior_spec_for_revision=prior,
         arguments={
             "plan_rationale": "Revise the result schema.",
-            "steps": [
+            "operations": [
                 {
                     "kind": "modify",
                     "existing_step_ref": "existing_step_1",
@@ -6834,7 +6679,7 @@ async def test_saved_step_implicit_json_consumer_contract_is_preserved(field_nam
                             "description": "Result summary",
                         }
                     ],
-                },
+                }
             ],
         },
     )
@@ -6870,7 +6715,7 @@ async def test_failure_repair_compilation_accepts_instructions_but_refuses_contr
         resource_catalog=catalog,
         plan_edit_context=context,
         prior_spec_for_revision=prior,
-        arguments={"plan_rationale": "Repair the instruction", "steps": [change]},
+        arguments={"plan_rationale": "Repair the instruction", "operations": [change]},
     )
     if change_contract:
         assert isinstance(result, CorrectableFailure), result
@@ -6914,7 +6759,7 @@ def _flow_with_two_saved_structured_reviews() -> SimpleNamespace:
 
 _RENAME_LETTER = {
     "plan_rationale": "Rename the letter step.",
-    "steps": [
+    "operations": [
         {"kind": "modify", "existing_step_ref": "existing_step_1"},
         {"kind": "modify", "existing_step_ref": "existing_step_2"},
         {

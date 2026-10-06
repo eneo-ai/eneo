@@ -47,7 +47,7 @@ from tests.integration.flows.test_flow_authoring_edit_assistants import (
     Seeded,
     _apply_proposal,
     _edit,
-    _keep,
+    _modify,
     _prompt,
     _propose,
     _seed,
@@ -296,9 +296,8 @@ async def test_an_apply_writing_several_assistants_advances_the_revision_once(
         db_container,
         seeded,
         [
-            _keep(1, assistant_spec={"instructions": "Ny uppgift 1."}),
-            _keep(2, assistant_spec={"instructions": "Ny uppgift 2."}),
-            _keep(3),
+            _modify(1, assistant_spec={"instructions": "Ny uppgift 1."}),
+            _modify(2, assistant_spec={"instructions": "Ny uppgift 2."}),
         ],
     )
 
@@ -317,10 +316,17 @@ async def test_an_assistant_edit_committed_after_the_apply_was_prepared_refuses_
         db_container,
         seeded,
         [
-            _keep(1, assistant_spec={"instructions": "Planens uppgift 1."}),
-            _keep(2, assistant_spec={"instructions": "Planens uppgift 2."}),
-            {"kind": "add", "step": {"name": "Sist", "instructions": "Avsluta."}},
-            _keep(3),
+            _modify(1, assistant_spec={"instructions": "Planens uppgift 1."}),
+            _modify(2, assistant_spec={"instructions": "Planens uppgift 2."}),
+            {
+                "kind": "add",
+                "step": {"name": "Sist", "instructions": "Avsluta."},
+                "local_id": "new",
+                "placement": {
+                    "kind": "after",
+                    "target": {"kind": "saved", "existing_step_ref": "existing_step_2"},
+                },
+            },
         ],
     )
     apply_prepared = FlowAuthoringCommandService.apply_prepared
@@ -490,9 +496,8 @@ async def test_an_assistant_edit_during_an_apply_waits_for_it_and_is_refused(
         db_container,
         seeded,
         [
-            _keep(1, assistant_spec={"instructions": "Planens uppgift 1."}),
-            _keep(2, assistant_spec={"instructions": "Planens uppgift 2."}),
-            _keep(3),
+            _modify(1, assistant_spec={"instructions": "Planens uppgift 1."}),
+            _modify(2, assistant_spec={"instructions": "Planens uppgift 2."}),
         ],
     )
     written = asyncio.Event()

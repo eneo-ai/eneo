@@ -1,40 +1,29 @@
-"""Tests for the dynamic edit-mode tool schema builder."""
+"""One edit grammar offers exactly the current scope's typed operations."""
 
 from __future__ import annotations
 
-import json
 from uuid import uuid4
 
 import jsonschema
 import pytest
 from pydantic import ValidationError
 
+from eneo.flows.ai_builder.ai_builder_edit_admission import parse_edit_commands
 from eneo.flows.ai_builder.ai_builder_edit_tool_schema import (
     build_edit_flow_tool_schema,
 )
-from eneo.flows.ai_builder.ai_builder_flow_schema_values import (
-    document_delivery_mode_values,
-)
-from eneo.flows.ai_builder.ai_builder_plan_edit_context import (
-    saved_step_operation_permissions,
-)
-from eneo.flows.ai_builder.ai_builder_proposal_intent import (
-    OrderedEditProposal,
-    SemanticStepIntent,
-)
+from eneo.flows.ai_builder.ai_builder_flow_review import ReviewEditScope
+from eneo.flows.ai_builder.ai_builder_plan_edit_context import EditOperationPermissions
 from eneo.flows.ai_builder.ai_builder_resource_catalog import (
-    AIBuilderAvailableModelResource,
-    AIBuilderResourceCatalog,
     build_ai_builder_resource_catalog,
 )
 from eneo.flows.ai_builder.ai_builder_tool_names import PROPOSE_FLOW_TOOL_NAME
-from eneo.flows.ai_builder.ai_builder_tools import build_native_strict_tool_schema
+from eneo.flows.ai_builder.ai_builder_tools import (
+    build_native_strict_tool_schema,
+    validate_native_strict_schema,
+)
 from eneo.flows.domain.flow import FlowStep
 from eneo.flows.flow_capability_manifest import CapabilityProjection, projection_values
-from eneo.tokens.token_utils import count_message_tokens, count_tool_tokens
-from tests.unittests.flows.ai_builder.test_ai_builder_edit_proposal import (
-    _saved_step_large_flow_fixture,
-)
 
 
 def _make_step(step_order: int) -> FlowStep:
@@ -52,618 +41,224 @@ def _make_step(step_order: int) -> FlowStep:
     )
 
 
-def _catalog_with_models(
-    models: list[AIBuilderAvailableModelResource],
-) -> AIBuilderResourceCatalog:
-    return build_ai_builder_resource_catalog(
-        available_models=models,
-        available_kbs=[],
+def _schema(step_count=3, **scope):
+    return build_edit_flow_tool_schema(
+        [_make_step(order) for order in range(1, step_count + 1)],
+        resource_catalog=build_ai_builder_resource_catalog(
+            available_models=[], available_kbs=[]
+        ),
+        tool_name=PROPOSE_FLOW_TOOL_NAME,
+        **scope,
     )
 
 
-def _empty_catalog() -> AIBuilderResourceCatalog:
-    return build_ai_builder_resource_catalog(
-        available_models=[],
-        available_kbs=[],
-    )
+def _branches(schema):
+    item = schema["function"]["parameters"]["properties"]["operations"]["items"]
+    branches = item.get("anyOf", [item])
+    return {branch["properties"]["kind"]["enum"][0]: branch for branch in branches}
 
 
-def _modify_step_schema(schema):
-    step_variants = schema["function"]["parameters"]["properties"]["steps"]["items"][
-        "anyOf"
-    ]
-    return next(
-        variant
-        for variant in step_variants
-        if variant["properties"]["kind"]["enum"] == ["modify"]
-    )
-
-
-def _add_step_payload_schema(schema):
-    step_variants = schema["function"]["parameters"]["properties"]["steps"]["items"][
-        "anyOf"
-    ]
-    add_schema = next(
-        variant
-        for variant in step_variants
-        if variant["properties"]["kind"]["enum"] == ["add"]
-    )
-    return add_schema["properties"]["step"]
-
-
-class TestBuildEditFlowToolSchema:
-    def test_schema_has_correct_name(self):
-        schema = build_edit_flow_tool_schema(
-            [_make_step(1)],
-            resource_catalog=_empty_catalog(),
-            tool_name=PROPOSE_FLOW_TOOL_NAME,
-        )
-        assert schema["function"]["name"] == PROPOSE_FLOW_TOOL_NAME
-        assert "complete ordered step list" in schema["function"]["description"]
-        assert "removed_existing_step_refs" in schema["function"]["description"]
-
-    def test_schema_uses_flat_ordered_edit_contract(self):
-        schema = build_edit_flow_tool_schema(
-            [_make_step(1), _make_step(2)],
-            resource_catalog=_empty_catalog(),
-            tool_name=PROPOSE_FLOW_TOOL_NAME,
-        )
-
-        params = schema["function"]["parameters"]
-        props = params["properties"]
-        assert "steps" in props
-        assert "removed_existing_step_refs" in props
-        assert "operations" not in props
-        assert "form_operations" not in props
-
-        step_item = props["steps"]["items"]
-        serialized = str(step_item)
-        assert "existing_step_ref" in serialized
-        assert "existing_step_1" in serialized
-        assert "kind" in serialized
-        assert "modify" in serialized
-        assert "add" in serialized
-        assert "placement" not in serialized
-        assert "patch" not in serialized
-
-    def test_schema_and_parser_accept_the_same_partial_assistant_patch(self) -> None:
-        schema = build_edit_flow_tool_schema(
-            [_make_step(1)],
-            resource_catalog=_empty_catalog(),
-            tool_name=PROPOSE_FLOW_TOOL_NAME,
-        )
-        parameters = schema["function"]["parameters"]
-        arguments = {
-            "plan_rationale": "Sharpen the instructions for this step.",
-            "steps": [
+def test_local_edit_does_not_require_model_authored_keeps() -> None:
+    """Mutant: retain the complete-list edit wire or an old-wire alias."""
+    schema = _schema(30)["function"]["parameters"]
+    jsonschema.validate(
+        {
+            "plan_rationale": "Rename only the selected step.",
+            "operations": [
                 {
                     "kind": "modify",
-                    "existing_step_ref": "existing_step_1",
-                    "assistant_spec": {"instructions": "Compare the evidence."},
+                    "existing_step_ref": "existing_step_17",
+                    "name": "Changed",
                 }
             ],
-        }
+        },
+        schema,
+    )
+    assert "steps" not in schema["properties"]
+    assert "removed_existing_step_refs" not in schema["properties"]
+    assert not {"flow_name", "flow_description", "form_fields"}.intersection(
+        schema["properties"]
+    )
 
-        jsonschema.validate(arguments, parameters)
-        assert OrderedEditProposal.model_validate(arguments).steps[0].kind == "modify"
 
-        assert parameters["additionalProperties"] is False
-        assistant_schema = _modify_step_schema(schema)["properties"]["assistant_spec"]
-        assert assistant_schema["additionalProperties"] is False
-        assert "required" not in assistant_schema
-
-    def test_neither_a_modified_nor_an_added_step_offers_a_model_ref(self) -> None:
-        catalog = _catalog_with_models(
-            [
-                {
-                    "id": "model_a",
-                    "ref": "model_a",
-                    "name": "model_a",
-                    "display_name": "model_a",
-                    "provider": "test",
-                },
-            ]
-        )
-        schema = build_edit_flow_tool_schema(
-            [_make_step(1)],
-            resource_catalog=catalog,
-            tool_name=PROPOSE_FLOW_TOOL_NAME,
-        )
-        parameters = schema["function"]["parameters"]
-
-        assistant_schema = _modify_step_schema(schema)["properties"]["assistant_spec"]
-        assert "model_ref" not in assistant_schema["properties"]
-
-        modify_with_model = {
-            "plan_rationale": "Switch this step to another model.",
-            "steps": [
-                {
-                    "kind": "modify",
-                    "existing_step_ref": "existing_step_1",
-                    "assistant_spec": {"model_ref": "model.model-a"},
-                }
-            ],
-        }
-        with pytest.raises(jsonschema.ValidationError):
-            jsonschema.validate(modify_with_model, parameters)
-        with pytest.raises(ValidationError, match="model_ref"):
-            OrderedEditProposal.model_validate(modify_with_model)
-
-        added_with_model = {
-            "plan_rationale": "Add a drafting step on an available model.",
-            "steps": [
-                {
-                    "kind": "add",
-                    "step": {
-                        "name": "Draft",
-                        "instructions": "Write the draft.",
-                        "model_ref": "model.model-a",
-                    },
-                }
-            ],
-        }
-        # A new step runs on the space default model; its model picker, not
-        # the planner, chooses another one. Both layers refuse it: the tool
-        # schema admission applies and the proposal model behind it.
-        assert "model_ref" not in _add_step_payload_schema(schema)["properties"]
-        with pytest.raises(jsonschema.ValidationError):
-            jsonschema.validate(added_with_model, parameters)
-        with pytest.raises(ValidationError, match="model_ref"):
-            OrderedEditProposal.model_validate(added_with_model)
-
-    @pytest.mark.parametrize(
-        "arguments",
-        [
+@pytest.mark.parametrize(
+    ("scope", "kinds", "refs", "removable"),
+    [
+        (
+            {},
+            {"modify", "add", "remove", "move", "modify_flow"},
+            ["existing_step_1", "existing_step_2", "existing_step_3"],
+            ["existing_step_1", "existing_step_2", "existing_step_3"],
+        ),
+        (
             {
-                "plan_rationale": "Keep the flow unchanged.",
-                "steps": [
-                    {
-                        "kind": "modify",
-                        "existing_step_ref": "existing_step_1",
-                    }
-                ],
-                "unexpected": True,
-            },
-            {
-                "plan_rationale": "Update the instructions.",
-                "steps": [
-                    {
-                        "kind": "modify",
-                        "existing_step_ref": "existing_step_1",
-                        "assistant_spec": {
-                            "instructions": "Compare the evidence.",
-                            "unexpected": True,
-                        },
-                    }
-                ],
-            },
-        ],
-    )
-    def test_schema_rejects_fields_the_parser_forbids(
-        self,
-        arguments: dict[str, object],
-    ) -> None:
-        schema = build_edit_flow_tool_schema(
-            [_make_step(1)],
-            resource_catalog=_empty_catalog(),
-            tool_name=PROPOSE_FLOW_TOOL_NAME,
-        )
-
-        with pytest.raises(jsonschema.ValidationError):
-            jsonschema.validate(arguments, schema["function"]["parameters"])
-
-    def test_schema_exposes_direct_flow_metadata_fields_not_metadata_patch(self):
-        schema = build_edit_flow_tool_schema(
-            [_make_step(1)],
-            resource_catalog=_empty_catalog(),
-            tool_name=PROPOSE_FLOW_TOOL_NAME,
-        )
-
-        properties = schema["function"]["parameters"]["properties"]
-        assert "flow_name" in properties
-        assert "flow_description" in properties
-        assert "metadata_patch" not in properties
-
-    def test_add_step_payload_hides_runtime_input_constraints(self):
-        schema = build_edit_flow_tool_schema(
-            [_make_step(1)],
-            resource_catalog=_empty_catalog(),
-            tool_name=PROPOSE_FLOW_TOOL_NAME,
-        )
-
-        add_payload = _add_step_payload_schema(schema)
-        properties = add_payload["properties"]
-        assert "runtime_required" not in properties
-        assert "runtime_max_files" not in properties
-
-    def test_add_step_payload_keeps_output_type_for_edit_mode(self):
-        schema = build_edit_flow_tool_schema(
-            [_make_step(1)],
-            resource_catalog=_empty_catalog(),
-            tool_name=PROPOSE_FLOW_TOOL_NAME,
-        )
-
-        output_type = _add_step_payload_schema(schema)["properties"]["output_type"]
-
-        assert output_type["enum"] == [
-            *projection_values(CapabilityProjection.PROPOSABLE_NEW, "output_type"),
-            None,
-        ]
-
-    def test_existing_step_ref_enum_contains_valid_refs(self):
-        steps = [_make_step(1), _make_step(2), _make_step(3)]
-        schema = build_edit_flow_tool_schema(
-            steps,
-            resource_catalog=_empty_catalog(),
-            tool_name=PROPOSE_FLOW_TOOL_NAME,
-        )
-
-        existing_ref = _modify_step_schema(schema)["properties"]["existing_step_ref"]
-        assert existing_ref["enum"] == [
-            "existing_step_1",
-            "existing_step_2",
-            "existing_step_3",
-        ]
-
-    def test_removed_existing_step_refs_match_valid_refs(self):
-        steps = [_make_step(1), _make_step(2)]
-        schema = build_edit_flow_tool_schema(
-            steps,
-            resource_catalog=_empty_catalog(),
-            tool_name=PROPOSE_FLOW_TOOL_NAME,
-        )
-
-        removed_refs = schema["function"]["parameters"]["properties"][
-            "removed_existing_step_refs"
-        ]
-        assert removed_refs["items"]["enum"] == [
-            "existing_step_1",
-            "existing_step_2",
-        ]
-
-    def test_step_kind_variants_are_modify_keep_and_add(self):
-        schema = build_edit_flow_tool_schema(
-            [_make_step(1)],
-            resource_catalog=_empty_catalog(),
-            tool_name=PROPOSE_FLOW_TOOL_NAME,
-        )
-        variants = schema["function"]["parameters"]["properties"]["steps"]["items"][
-            "anyOf"
-        ]
-        assert [variant["properties"]["kind"]["enum"][0] for variant in variants] == [
-            "modify",
-            "keep",
-            "add",
-        ]
-
-    def test_form_fields_schema_teaches_complete_state_edits(self):
-        schema = build_edit_flow_tool_schema(
-            [_make_step(1)],
-            resource_catalog=_empty_catalog(),
-            tool_name=PROPOSE_FLOW_TOOL_NAME,
-        )
-
-        form_fields = schema["function"]["parameters"]["properties"]["form_fields"]
-        item_schema = form_fields["items"]
-        properties = item_schema["properties"]
-
-        assert item_schema["additionalProperties"] is False
-        assert item_schema["required"] == ["name", "type", "label"]
-        assert set(properties) == {
-            "name",
-            "type",
-            "label",
-            "required",
-            "options",
-        }
-        assert properties["type"]["enum"] == [
-            "text",
-            "number",
-            "date",
-            "select",
-            "multiselect",
-            "list",
-        ]
-        assert properties["options"] == {"type": "array", "items": {"type": "string"}}
-        description = form_fields["description"]
-        assert "Null keeps the current fields" in description
-        assert "an empty list clears them" in description
-
-    def test_add_payload_exposes_shared_semantic_step_shape(self):
-        schema = build_edit_flow_tool_schema(
-            [_make_step(1)],
-            resource_catalog=_empty_catalog(),
-            tool_name=PROPOSE_FLOW_TOOL_NAME,
-        )
-
-        add_payload = _add_step_payload_schema(schema)
-
-        assert "assistant_spec" not in add_payload["properties"]
-        assert "input_source" not in add_payload["properties"]
-        assert "output_mode" not in add_payload["properties"]
-        assert "input_bindings" not in add_payload["properties"]
-        assert "output_contract" not in add_payload["properties"]
-        assert "output_config" not in add_payload["properties"]
-        assert "input_type" not in add_payload["properties"]
-        assert "runtime_required" not in add_payload["properties"]
-        assert "runtime_max_files" not in add_payload["properties"]
-        assert "document_delivery_mode" not in add_payload["properties"]
-        assert "instructions" in add_payload["properties"]
-        assert "output_fields" in add_payload["properties"]
-        field_schema = add_payload["properties"]["output_fields"]["items"]
-        # The shared proposal field tree: one recursive edge, closed nodes.
-        assert "children" in field_schema["properties"]
-        assert "fields" not in field_schema["properties"]
-        assert "JSON schema key" in field_schema["properties"]["name"]["description"]
-        assert "uses_previous_fields" not in add_payload["properties"]
-        assert "uses_previous_outputs" not in add_payload["properties"]
-        assert add_payload["properties"]["review_mode"]["enum"] == [
-            "view",
-            "edit",
-            "none",
-            None,
-        ]
-
-    def test_add_payload_schema_tracks_shared_semantic_step_intent_fields(self):
-        schema = build_edit_flow_tool_schema(
-            [_make_step(1)],
-            resource_catalog=_empty_catalog(),
-            tool_name=PROPOSE_FLOW_TOOL_NAME,
-        )
-
-        add_payload = _add_step_payload_schema(schema)
-
-        assert set(add_payload["properties"]) < set(SemanticStepIntent.model_fields)
-        # Edit authors its wiring as explicit refs.
-        assert set(SemanticStepIntent.model_fields) - set(
-            add_payload["properties"]
-        ) == {
-            "uses_previous_fields",
-            "uses_previous_outputs",
-        }
-
-    def test_modify_step_schema_exposes_typed_previous_field_refs(self):
-        schema = build_edit_flow_tool_schema(
-            [_make_step(1), _make_step(2)],
-            resource_catalog=_empty_catalog(),
-            tool_name=PROPOSE_FLOW_TOOL_NAME,
-        )
-        modify_step = _modify_step_schema(schema)
-
-        previous_fields = modify_step["properties"]["uses_previous_fields"]
-        assert previous_fields["items"]["required"] == ["from_step", "field_path"]
-        field_path_description = previous_fields["items"]["properties"]["field_path"][
-            "description"
-        ]
-        assert "`summary`" in field_path_description
-        assert "sammanfattning" not in field_path_description
-        assert "input_bindings" not in modify_step["properties"]
-        assert "input_contract" not in modify_step["properties"]
-        assert "input_config" not in modify_step["properties"]
-        assert "output_config" not in modify_step["properties"]
-        assert "output_contract" not in modify_step["properties"]
-        assert "output_fields" in modify_step["properties"]
-        assert "uses_form_fields" in modify_step["properties"]
-
-    def test_modify_step_schema_uses_generated_flow_schema_values(self):
-        schema = build_edit_flow_tool_schema(
-            [_make_step(1), _make_step(2)],
-            resource_catalog=_empty_catalog(),
-            tool_name=PROPOSE_FLOW_TOOL_NAME,
-        )
-        props = _modify_step_schema(schema)["properties"]
-
-        editable = CapabilityProjection.EDITABLE_EXISTING
-        assert props["input_source"]["enum"] == [
-            *projection_values(editable, "input_source"),
-            None,
-        ]
-        assert props["input_type"]["enum"] == [
-            *projection_values(editable, "input_type"),
-            None,
-        ]
-        assert "output_mode" not in props
-        assert props["output_type"]["enum"] == [
-            *projection_values(editable, "output_type"),
-            None,
-        ]
-        assert props["document_delivery_mode"]["enum"] == [
-            *document_delivery_mode_values(),
-            None,
-        ]
-        assert props["review_mode"]["enum"] == ["view", "edit", "none", None]
-
-
-class TestVocabularySources:
-    """Each part of the schema reads the projection that owns its vocabulary."""
-
-    def test_new_steps_follow_proposable_new_and_modifications_follow_editable_existing(
-        self, monkeypatch: pytest.MonkeyPatch
-    ):
-        from eneo.flows import flow_capability_manifest as manifest
-
-        real = manifest.projection_cells
-
-        def without_pdf_proposals(projection):
-            cells = real(projection)
-            if projection is CapabilityProjection.PROPOSABLE_NEW:
-                return frozenset(cell for cell in cells if cell[2].value != "pdf")
-            return cells
-
-        monkeypatch.setattr(manifest, "projection_cells", without_pdf_proposals)
-        schema = build_edit_flow_tool_schema(
-            [_make_step(1)],
-            resource_catalog=_empty_catalog(),
-            tool_name=PROPOSE_FLOW_TOOL_NAME,
-        )
-
-        added = _add_step_payload_schema(schema)["properties"]["output_type"]["enum"]
-        modified = _modify_step_schema(schema)["properties"]["output_type"]["enum"]
-        assert "pdf" not in added
-        assert "pdf" in modified
-
-
-class TestReviewScopedEditSchema:
-    """A handoff turn is offered exactly what its findings allow."""
-
-    def _scoped(self, **scope: object):
-        from eneo.flows.ai_builder.ai_builder_flow_review import ReviewEditScope
-        from eneo.flows.ai_builder.ai_builder_tools import (
-            build_native_strict_tool_schema,
-            validate_native_strict_schema,
-        )
-
-        review_scope = ReviewEditScope(
-            step_refs=frozenset(scope.get("step_refs", {"existing_step_2"})),
-            removable_step_refs=frozenset(scope.get("removable", ())),
-            may_add=bool(scope.get("may_add", False)),
-        )
-        schema = build_edit_flow_tool_schema(
-            [_make_step(1), _make_step(2), _make_step(3)],
-            resource_catalog=_empty_catalog(),
-            tool_name=PROPOSE_FLOW_TOOL_NAME,
-            review_scope=review_scope,
-        )
-        strict = build_native_strict_tool_schema(schema)  # type: ignore[arg-type]
-        validate_native_strict_schema(strict["function"]["parameters"])
-        return schema["function"]["parameters"]
-
-    def test_flow_level_fields_and_removal_are_absent_unless_the_findings_allow(
-        self,
-    ) -> None:
-        params = self._scoped()
-        assert set(params["properties"]) == {"plan_rationale", "steps", "assumptions"}
-
-        with_removal = self._scoped(removable={"existing_step_2"})
-        assert with_removal["properties"]["removed_existing_step_refs"]["items"][
-            "enum"
-        ] == ["existing_step_2"]
-
-    def test_only_the_findings_steps_can_be_modified_and_the_rest_are_kept(
-        self,
-    ) -> None:
-        branches = self._scoped()["properties"]["steps"]["items"]["anyOf"]
-        by_kind = {
-            branch["properties"]["kind"]["enum"][0]: branch for branch in branches
-        }
-        assert set(by_kind) == {"modify", "keep"}
-        assert by_kind["modify"]["properties"]["existing_step_ref"]["enum"] == [
-            "existing_step_2"
-        ]
-        assert by_kind["keep"]["properties"]["existing_step_ref"]["enum"] == [
-            "existing_step_1",
-            "existing_step_2",
-            "existing_step_3",
-        ]
-        assert set(by_kind["keep"]["properties"]) == {"kind", "existing_step_ref"}
-
-    def test_a_findings_step_the_flow_does_not_have_is_a_server_defect(self) -> None:
-        # The stale-review guard refuses a moved flow before the schema is
-        # built, so an absent step is an invariant broken, never degraded.
-        with pytest.raises(ValueError, match="existing_step_9"):
-            self._scoped(step_refs={"existing_step_2", "existing_step_9"})
-
-    def test_adding_is_offered_only_when_the_findings_call_for_it(self) -> None:
-        kinds = lambda params: {  # noqa: E731
-            branch["properties"]["kind"]["enum"][0]
-            for branch in params["properties"]["steps"]["items"]["anyOf"]
-        }
-        assert "add" not in kinds(self._scoped())
-        assert "add" in kinds(self._scoped(may_add=True))
-
-
-@pytest.mark.parametrize("strict", [False, True])
-def test_saved_step_schema_and_call_cost_are_flat_not_the_whole_request(strict):
-    schemas = []
-    calls = []
-    for step_count in (10, 40):
-        flow, _, catalog, context, prior = _saved_step_large_flow_fixture(step_count)
-        permissions = saved_step_operation_permissions(
-            context=context,
-            prior_spec=prior,
-            current_step_refs=[step.existing_step_ref for step in prior.steps],
-        )
-        assert permissions is not None
-        schema = build_edit_flow_tool_schema(
-            flow.steps,
-            resource_catalog=catalog,
-            tool_name=PROPOSE_FLOW_TOOL_NAME,
-            permissions=permissions,
-        )
-        params = schema["function"]["parameters"]
-        assert set(params["properties"]) == {"plan_rationale", "steps", "assumptions"}
-        item = params["properties"]["steps"]["items"]
-        assert "anyOf" not in item
-        assert item["properties"]["kind"]["enum"] == ["modify"]
-        assert item["properties"]["existing_step_ref"]["enum"] == ["existing_step_4"]
-        assert all(
-            step.existing_step_ref not in json.dumps(schema)
-            for step in prior.steps
-            if step.existing_step_ref != "existing_step_4"
-        )
-        assert "kind=keep" not in json.dumps(schema)
-        # One target is permitted, so the array holds exactly one entry. The
-        # bound is one value regardless of flow size, so it does not scale.
-        # Cardinality only: an identity-only entry still validates here.
-        steps_schema = params["properties"]["steps"]
-        assert steps_schema["minItems"] == 1
-        assert steps_schema["maxItems"] == 1
-        if strict:
-            schema = build_native_strict_tool_schema(schema)
-        arguments = {
-            "plan_rationale": "Clarify the selected instructions.",
-            "assumptions": [],
-            "steps": [
-                {
-                    **({name: None for name in item["properties"]} if strict else {}),
-                    "kind": "modify",
-                    "existing_step_ref": context.target_existing_step_ref,
-                    "assistant_spec": {
-                        "instructions": "Explain the evidence clearly.",
-                        **({"knowledge_refs": None} if strict else {}),
-                    },
-                }
-            ],
-        }
-        jsonschema.validate(arguments, schema["function"]["parameters"])
-        # An empty submission and a duplicated target are refused on
-        # cardinality. A no-op modification is not a cardinality question and
-        # is still the scoped validator's to refuse.
-        for invalid_steps in ([], [arguments["steps"][0], arguments["steps"][0]]):
-            with pytest.raises(jsonschema.ValidationError):
-                jsonschema.validate(
-                    {**arguments, "steps": invalid_steps},
-                    schema["function"]["parameters"],
+                "permissions": EditOperationPermissions(
+                    step_refs=frozenset({"existing_step_2"}),
+                    removable_step_refs=frozenset(),
+                    may_add=False,
                 )
-        for invalid_ref in ("existing_step_5", "existing_step_99", "step_4"):
-            invalid_arguments = {
-                **arguments,
-                "steps": [{**arguments["steps"][0], "existing_step_ref": invalid_ref}],
-            }
-            with pytest.raises(jsonschema.ValidationError):
-                jsonschema.validate(invalid_arguments, schema["function"]["parameters"])
-        schemas.append(schema)
-        calls.append(
-            [
-                {
-                    "role": "assistant",
-                    "tool_calls": [
-                        {
-                            "id": "edit",
-                            "type": "function",
-                            "function": {
-                                "name": PROPOSE_FLOW_TOOL_NAME,
-                                "arguments": json.dumps(arguments),
-                            },
-                        }
-                    ],
-                }
-            ]
+            },
+            {"modify"},
+            ["existing_step_2"],
+            [],
+        ),
+        (
+            {
+                "review_scope": ReviewEditScope(
+                    step_refs=frozenset({"existing_step_2"}),
+                    removable_step_refs=frozenset({"existing_step_2"}),
+                    may_add=True,
+                )
+            },
+            {"modify", "add", "remove"},
+            ["existing_step_2"],
+            ["existing_step_2"],
+        ),
+    ],
+)
+def test_scopes_offer_only_permitted_operations(scope, kinds, refs, removable):
+    """Mutants: leak whole-flow targets/topology or metadata into a scoped turn."""
+    schema = _schema(**scope)
+    branches = _branches(schema)
+    assert set(branches) == kinds
+    assert branches["modify"]["properties"]["existing_step_ref"]["enum"] == refs
+    if removable:
+        assert (
+            branches["remove"]["properties"]["existing_step_ref"]["enum"] == removable
         )
-    assert schemas[0] == schemas[1]
-    assert count_tool_tokens([schemas[0]], "gpt-4o-mini") == count_tool_tokens(
-        [schemas[1]], "gpt-4o-mini"
+    if scope:
+        assert set(schema["function"]["parameters"]["properties"]) == {
+            "operations",
+            "plan_rationale",
+            "assumptions",
+        }
+    strict = build_native_strict_tool_schema(schema)
+    validate_native_strict_schema(strict["function"]["parameters"])
+
+
+@pytest.mark.parametrize(
+    "operation",
+    [
+        {
+            "kind": "modify",
+            "existing_step_ref": "existing_step_1",
+            "assistant_spec": {"instructions": "Compare the evidence."},
+        },
+        {
+            "kind": "add",
+            "local_id": "assessment",
+            "placement": {
+                "kind": "after",
+                "target": {"kind": "saved", "existing_step_ref": "existing_step_1"},
+            },
+            "step": {
+                "name": "Assessment",
+                "instructions": "Assess the facts.",
+                "uses_previous_fields": [
+                    {
+                        "producer": {
+                            "kind": "saved",
+                            "existing_step_ref": "existing_step_1",
+                        },
+                        "field_path": "facts",
+                    }
+                ],
+            },
+        },
+        {
+            "kind": "move",
+            "existing_step_ref": "existing_step_2",
+            "placement": {"kind": "start"},
+        },
+        {"kind": "remove", "existing_step_ref": "existing_step_2"},
+        {"kind": "modify_flow", "flow_description": "", "form_fields": []},
+    ],
+)
+def test_schema_and_parser_share_the_command_contract(operation):
+    """Mutant: schema admits a branch the typed parser cannot represent."""
+    arguments = {
+        "plan_rationale": "Change the requested work.",
+        "operations": [operation],
+    }
+    jsonschema.validate(arguments, _schema()["function"]["parameters"])
+    assert parse_edit_commands(arguments).operations[0].kind == operation["kind"]
+
+
+@pytest.mark.parametrize(
+    "operation",
+    [
+        {"kind": "keep", "existing_step_ref": "existing_step_1"},
+        {
+            "kind": "modify",
+            "existing_step_ref": "existing_step_1",
+            "assistant_spec": {"model_ref": "other"},
+        },
+        {
+            "kind": "modify",
+            "existing_step_ref": "existing_step_1",
+            "uses_previous_fields": [{"from_step": 1, "field_path": "facts"}],
+        },
+        {
+            "kind": "add",
+            "local_id": "new",
+            "placement": {"kind": "start"},
+            "step": {"name": "New", "instructions": "Assess.", "model_ref": "other"},
+        },
+        {
+            "kind": "add",
+            "local_id": "new",
+            "placement": {"kind": "start"},
+            "step": {
+                "name": "New",
+                "instructions": "Assess.",
+                "uses_previous_fields": [{"from_step": 1, "field_path": "facts"}],
+            },
+        },
+    ],
+)
+def test_model_switch_and_removed_wire_are_refused(operation):
+    """Mutants: expose model policy or retain positional/keep aliases."""
+    arguments = {"plan_rationale": "Invalid proposal.", "operations": [operation]}
+    with pytest.raises(jsonschema.ValidationError):
+        jsonschema.validate(arguments, _schema()["function"]["parameters"])
+    with pytest.raises(ValidationError):
+        parse_edit_commands(arguments)
+
+
+def test_new_and_saved_steps_use_their_own_capability_vocabulary(monkeypatch):
+    """Mutant: use editable-existing capabilities for newly proposed steps."""
+    from eneo.flows import flow_capability_manifest as manifest
+
+    real = manifest.projection_cells
+
+    def without_pdf_proposals(projection):
+        cells = real(projection)
+        return (
+            frozenset(cell for cell in cells if cell[2].value != "pdf")
+            if projection is CapabilityProjection.PROPOSABLE_NEW
+            else cells
+        )
+
+    monkeypatch.setattr(manifest, "projection_cells", without_pdf_proposals)
+    branches = _branches(_schema())
+    assert (
+        "pdf"
+        not in branches["add"]["properties"]["step"]["properties"]["output_type"][
+            "enum"
+        ]
     )
-    assert count_message_tokens(calls[0], "gpt-4o-mini") == count_message_tokens(
-        calls[1], "gpt-4o-mini"
+    modified = branches["modify"]["properties"]
+    assert modified["output_type"]["enum"] == [
+        *projection_values(CapabilityProjection.EDITABLE_EXISTING, "output_type"),
+        None,
+    ]
+    assert "pdf" in modified["output_type"]["enum"]
+    assert not set(modified).intersection(
+        {
+            "output_mode",
+            "input_bindings",
+            "output_contract",
+            "output_config",
+            "input_config",
+        }
     )

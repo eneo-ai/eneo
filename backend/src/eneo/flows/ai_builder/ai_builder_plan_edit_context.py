@@ -24,7 +24,7 @@ from eneo.flows.flow_authoring_spec import (
 from eneo.flows.step_lineage import existing_step_ref_for_order
 
 if TYPE_CHECKING:
-    from eneo.flows.ai_builder.ai_builder_proposal_intent import OrderedEditProposal
+    from eneo.flows.ai_builder.ai_builder_edit_admission import EditCommands
     from eneo.flows.ai_builder.ai_builder_repo import AIBuilderRepository
     from eneo.flows.domain.flow import Flow
 
@@ -186,6 +186,7 @@ class EditOperationPermissions(BaseModel):
     step_refs: frozenset[str]
     removable_step_refs: frozenset[str]
     may_add: bool
+    may_move: bool = False
 
 
 def saved_step_operation_permissions(
@@ -431,78 +432,25 @@ async def resolve_plan_edit_context(
 def validate_scoped_edit_proposal(
     *,
     context: ResolvedAIBuilderEditContext | None,
-    proposal: "OrderedEditProposal",
-    current_step_refs: list[str],
-    saved_step_revision: bool = False,
+    proposal: "EditCommands",
 ) -> str | None:
-    """Reject model-authored changes outside a selected saved Flow step."""
-
+    """Judge authored commands before the server preserves the untouched graph."""
     if context is None or context.scope != "step":
         return None
     target_ref = context.target_existing_step_ref
     if target_ref is None:
         return None
-    if saved_step_revision and proposal.model_fields_set.intersection(
-        {"flow_name", "flow_description", "form_fields"}
-    ):
-        return (
-            "A selected saved-step edit must preserve the flow name, description "
-            "and runtime form fields. Use a whole-plan edit to change them."
-        )
-
-    if proposal.removed_existing_step_refs:
-        return (
-            "A selected-step edit must not remove steps. Use a whole-flow edit "
-            "when the requested change alters the flow structure."
-        )
-
-    current_refs = set(current_step_refs)
-    submitted_refs: set[str] = set()
-    for step in proposal.steps:
-        if step.kind == "add":
-            return (
-                "A selected-step edit must not add steps. Use a whole-flow edit "
-                "when the requested change alters the flow structure."
-            )
-        if saved_step_revision:
-            if step.existing_step_ref not in current_refs:
-                return (
-                    f"Unknown saved step `{step.existing_step_ref}`. Submit only "
-                    f"modifications to the selected step `{target_ref}`."
-                )
-            if step.existing_step_ref in submitted_refs:
-                return (
-                    f"Submit step `{step.existing_step_ref}` only once, with all "
-                    "its changes in one modification."
-                )
-            submitted_refs.add(step.existing_step_ref)
-            if step.existing_step_ref != target_ref:
-                return (
-                    f"Step `{step.existing_step_ref}` is outside the selected "
-                    f"scope. Submit only modifications to `{target_ref}`; "
-                    "omit unchanged steps."
-                )
-        if step.existing_step_ref == target_ref:
-            continue
-        authored_fields = sorted(step.authored_fields)
-        if authored_fields:
-            return (
-                f"Step `{step.existing_step_ref}` changed even though the user "
-                f"selected `{target_ref}`. Only the selected step may contain "
-                "model-authored changes."
-            )
-    if saved_step_revision and any(
-        step.kind == "modify"
-        and step.existing_step_ref == target_ref
-        and not step.authored_fields
-        for step in proposal.steps
-    ):
-        # Cheap syntactic refusal; the compiler still judges whether the
-        # authored fields change anything (a repeated saved value does not).
-        return (
-            f"The selected step `{target_ref}` was submitted without changes. "
-            "Give the fields of that step that change."
-        )
+    if not proposal.operations:
+        return f"The selected step `{target_ref}` was submitted without changes. Give the fields that change."
+    for operation in proposal.operations:
+        if operation.kind == "modify_flow":
+            return "A selected-step edit must preserve the flow name, description and form fields."
+        if operation.kind != "modify":
+            return "A selected-step edit must not add, remove or move steps. Use a whole-flow edit."
+        if operation.existing_step_ref != target_ref:
+            return f"Step `{operation.existing_step_ref}` is outside the selected scope. Modify only `{target_ref}`."
+        if not operation.authored_fields:
+            return f"The selected step `{target_ref}` was submitted without changes. Give the fields that change."
     return None
 
 
@@ -538,6 +486,7 @@ def build_plan_revision_prompt_block(
     *,
     context: ScopedEditContext | None,
     prior_spec: FlowDraftSpecCore | None,
+    is_edit_mode: bool,
     can_decline: bool = False,
     saved_step_revision: bool = False,
 ) -> str | None:
@@ -592,6 +541,19 @@ def build_plan_revision_prompt_block(
             "ask for a retry."
         )
 
+    cumulative_revision = (
+        is_edit_mode
+        and not saved_step_revision
+        and (context.scope == "whole_plan" or context.target_existing_step_ref is None)
+    )
+    if cumulative_revision:
+        lines.extend(
+            [
+                "- Commands apply to the saved Flow, not to the prior preview. The prior plan below is the desired state to revise.",
+                "- Restate every prior-plan add, removal, move and field change that the revised plan keeps. Omitting a prior add drops it; omitting a prior removal restores the saved step.",
+            ]
+        )
+
     if context.scope == "whole_plan":
         lines.extend(
             [
@@ -615,9 +577,12 @@ def build_plan_revision_prompt_block(
                 "- Submit only the target step's changed fields and omit every other step; the server keeps them exactly as saved. Use a whole-plan edit if the requested change also requires dataflow or downstream-step changes."
                 if saved_step_revision
                 else "- Preserve every other step unchanged. Use a whole-plan edit if the requested change also requires dataflow or downstream-step changes.",
-                "- Do not add, remove, or reorder steps. Use a whole-plan edit when the requested change alters the flow structure.",
+                "- Do not introduce additions, removals or reordering beyond the prior plan. When the selected step was added in the prior plan, re-add it with the same placement and its revised fields; restate the other retained commands. Use a whole-plan edit for structural changes."
+                if cumulative_revision and context.target_existing_step_ref is None
+                else "- Do not add, remove, or reorder steps. Use a whole-plan edit when the requested change alters the flow structure.",
                 "- Do not change runtime form fields or the flow name or description. Use a whole-plan edit when the requested change requires those changes."
                 if saved_step_revision
+                or (is_edit_mode and context.target_existing_step_ref is not None)
                 else "- Do not change runtime form fields. You may update the plan title or description only when needed to reflect the selected step change.",
             ]
         )

@@ -32,6 +32,17 @@ if TYPE_CHECKING:
     )
 
 
+_EDIT_READS_DESCRIPTION = (
+    "Change reads only when requested. Keep both lists null to preserve saved "
+    "input when its source and type are unchanged. Empty lists replace saved "
+    "explicit reads. Setting either list, or changing input_source or input_type, "
+    "rebuilds the entire input: "
+    "give both lists complete, including every read to retain. If the saved "
+    "input cannot be restated exactly, keep input_source, input_type, "
+    "uses_form_fields and uses_previous_fields null."
+)
+
+
 def build_edit_flow_tool_schema(
     current_steps: list[FlowStep],
     *,
@@ -40,174 +51,143 @@ def build_edit_flow_tool_schema(
     review_scope: "ReviewEditScope | None" = None,
     permissions: "EditOperationPermissions | None" = None,
 ) -> dict[str, Any]:
-    """Offer saved-step modifications or an ordered edit within the turn's scope."""
+    """One local-command grammar, narrowed by the turn's existing permissions."""
     if review_scope is not None and permissions is not None:
         raise ValueError("Supply either review_scope or permissions, not both.")
-    saved_step_edit = permissions is not None
     permissions = permissions if permissions is not None else review_scope
-
     valid_refs = [existing_step_ref_for_order(s.step_order) for s in current_steps]
-
-    kb_refs = resource_catalog.small_ref_enum_for_kind("knowledge_base")
-    step_payload_schema = build_semantic_step_schema(kb_refs=kb_refs)
-    if permissions is None:
-        modifiable_refs = valid_refs
-    else:
-        absent = sorted(permissions.step_refs.difference(valid_refs))
-        if absent:
-            raise ValueError(
-                "edit scope names steps the flow does not have: "
-                f"{', '.join(absent)} (flow has {', '.join(valid_refs)})"
-            )
-        modifiable_refs = [ref for ref in valid_refs if ref in permissions.step_refs]
-    modify_step_schema = _build_modify_step_schema(
-        valid_refs=modifiable_refs,
-        kb_refs=kb_refs,
+    if permissions is not None and (
+        absent := permissions.step_refs.difference(valid_refs)
+    ):
+        raise ValueError(f"edit scope names absent steps: {sorted(absent)}")
+    modifiable_refs = (
+        valid_refs
+        if permissions is None
+        else [ref for ref in valid_refs if ref in permissions.step_refs]
     )
-    add_step_schema = {
-        "type": "object",
-        "required": ["kind", "step"],
-        "additionalProperties": False,
-        "properties": {
-            "kind": {"type": "string", "enum": ["add"]},
-            "step": step_payload_schema,
-        },
+    kb_refs = resource_catalog.small_ref_enum_for_kind("knowledge_base")
+    target_schema = _build_target_schema(valid_refs)
+    placement_schema = {
+        "anyOf": [
+            {
+                "type": "object",
+                "required": ["kind"],
+                "additionalProperties": False,
+                "properties": {"kind": {"type": "string", "enum": ["start"]}},
+            },
+            {
+                "type": "object",
+                "required": ["kind", "target"],
+                "additionalProperties": False,
+                "properties": {
+                    "kind": {"type": "string", "enum": ["after"]},
+                    "target": target_schema,
+                },
+            },
+        ]
     }
+    branches = [_build_modify_step_schema(valid_refs=modifiable_refs, kb_refs=kb_refs)]
+    branches[0]["properties"]["uses_previous_fields"] = _build_edit_field_reads_schema(
+        target_schema
+    )
+    if permissions is None or permissions.may_add:
+        branches.append(
+            {
+                "type": "object",
+                "required": ["kind", "local_id", "placement", "step"],
+                "additionalProperties": False,
+                "properties": {
+                    "kind": {"type": "string", "enum": ["add"]},
+                    "local_id": {"type": "string", "minLength": 1},
+                    "placement": placement_schema,
+                    "step": build_semantic_step_schema(
+                        kb_refs=kb_refs, producer_schema=target_schema
+                    ),
+                },
+            }
+        )
     removable_refs = (
         valid_refs
         if permissions is None
         else [ref for ref in valid_refs if ref in permissions.removable_step_refs]
     )
-
+    if removable_refs:
+        branches.append(
+            {
+                "type": "object",
+                "required": ["kind", "existing_step_ref"],
+                "additionalProperties": False,
+                "properties": {
+                    "kind": {"type": "string", "enum": ["remove"]},
+                    "existing_step_ref": {"type": "string", "enum": removable_refs},
+                },
+            }
+        )
+    if permissions is None or permissions.may_move:
+        branches.append(
+            {
+                "type": "object",
+                "required": ["kind", "existing_step_ref", "placement"],
+                "additionalProperties": False,
+                "properties": {
+                    "kind": {"type": "string", "enum": ["move"]},
+                    "existing_step_ref": {"type": "string", "enum": modifiable_refs},
+                    "placement": placement_schema,
+                },
+            }
+        )
+    if permissions is None:
+        branches.append(
+            {
+                "type": "object",
+                "required": ["kind"],
+                "additionalProperties": False,
+                "properties": {
+                    "kind": {"type": "string", "enum": ["modify_flow"]},
+                    "flow_name": {
+                        "type": ["string", "null"],
+                        "maxLength": MAX_FLOW_NAME_LENGTH,
+                    },
+                    "flow_description": {"type": ["string", "null"]},
+                    "form_fields": {
+                        "type": ["array", "null"],
+                        "items": _build_form_field_spec_schema(),
+                        "description": "Complete desired form fields; null keeps, an empty list clears.",
+                    },
+                },
+            }
+        )
     properties: dict[str, Any] = {
-        "plan_rationale": {
-            "type": "string",
+        "plan_rationale": {"type": "string", "minLength": 1},
+        "operations": {
+            "type": "array",
+            "items": branches[0] if len(branches) == 1 else {"anyOf": branches},
             "description": (
-                "Explain what changes you're making and why, in 1-2 sentences."
+                "Only the explicit changes against the saved baseline. Unmentioned steps stay. "
+                "modify changes step fields; modify_flow changes only requested flow metadata or form fields. "
+                "add inserts a step absent from the saved flow, including "
+                "one retained from a prior preview, with a unique local_id "
+                "and name; remove explicitly deletes; move explicitly reorders. Placements "
+                "refer to saved or previously added identities. Do not reconstruct saved steps as adds. "
+                "Reads name producer identities, never numeric positions."
             ),
         },
+        "assumptions": {"type": "array", "items": {"type": "string"}},
     }
-    if permissions is None:
-        properties["flow_name"] = {
-            "type": ["string", "null"],
-            "maxLength": MAX_FLOW_NAME_LENGTH,
-            "description": "New flow name, or null to keep current.",
-        }
-        properties["flow_description"] = {
-            "type": ["string", "null"],
-            "description": "New flow description, or null to keep current.",
-        }
-        properties["steps"] = {
-            "type": "array",
-            "description": (
-                "Complete ordered step list after the edit. Change an existing "
-                "step with kind=modify and its existing_step_ref, giving only "
-                "the fields that change; list a step that stays as it is with "
-                "kind=keep; add new steps with kind=add and a typed step "
-                "payload."
-            ),
-            "items": {
-                "anyOf": [
-                    modify_step_schema,
-                    _build_keep_step_schema(valid_refs=valid_refs),
-                    add_step_schema,
-                ]
-            },
-        }
-    elif saved_step_edit:
-        # Cardinality only: at least one entry, and never more than there are
-        # permitted steps. This says nothing about whether an entry changes
-        # anything - an identity-only modification still validates here, and
-        # the scoped edit validator remains the one owner of that refusal.
-        properties["steps"] = {
-            "type": "array",
-            "description": (
-                "Only modifications to the permitted steps, keyed by "
-                "existing_step_ref. Give only the fields that change. Omit "
-                "unchanged steps; the server preserves their identity and order."
-            ),
-            "items": modify_step_schema,
-            "minItems": 1,
-            "maxItems": len(modifiable_refs),
-        }
-    else:
-        step_branches: list[dict[str, Any]] = [
-            modify_step_schema,
-            _build_keep_step_schema(valid_refs=valid_refs),
-        ]
-        if permissions.may_add:
-            step_branches.append(add_step_schema)
-        properties["steps"] = {
-            "type": "array",
-            "description": (
-                "Complete ordered step list after the edit, in the current "
-                "order. The permitted steps take kind=modify with only the "
-                "fields that change; every other existing step is listed with "
-                "kind=keep and nothing else."
-                + (
-                    " Add a step with kind=add only when the scope allows it."
-                    if permissions.may_add
-                    else ""
-                )
-            ),
-            "items": {"anyOf": step_branches},
-        }
-    if removable_refs and not saved_step_edit:
-        properties["removed_existing_step_refs"] = {
-            "type": "array",
-            "items": {"type": "string", "enum": removable_refs},
-            "uniqueItems": True,
-            "description": (
-                "Existing step refs intentionally deleted by this edit. "
-                "Omission is never deletion; list every removed ref here."
-            ),
-        }
-    if permissions is None:
-        properties["form_fields"] = {
-            "type": ["array", "null"],
-            "items": _build_form_field_spec_schema(),
-            "description": (
-                "Complete desired form field list. Null keeps the current "
-                "fields; an empty list clears them; a list adds, modifies "
-                "or removes fields by complete state."
-            ),
-        }
-    properties["assumptions"] = {
-        "type": "array",
-        "items": {"type": "string"},
-        "description": "Assumptions made about the edit.",
-    }
-
-    description = (
-        "Edit an existing flow by returning the complete ordered step list. "
-        "Every existing step must appear once in steps, as kind=modify or "
-        "kind=keep, unless its ref appears in removed_existing_step_refs. "
-        "Null keeps a current value: flow "
-        "fields, form_fields and every step field. Set form_fields to the "
-        "complete desired list, or an empty list to clear all flow-level "
-        "inmatningsfält/form fields."
-        if permissions is None
-        else (
-            "Answer the selected edit scope by returning the complete "
-            "ordered step list. Change only the permitted steps; list every "
-            "other step with kind=keep. Null keeps a current step field. The "
-            "flow's name, description and form fields are not part of this turn."
-        )
-    )
-    if saved_step_edit:
-        description = (
-            "Edit the selected saved steps by returning only their modifications. "
-            "Do not add, remove, or reorder steps. Null keeps a current step field. "
-            "The flow's name, description and form fields are not part of this turn."
-        )
     return {
         "type": "function",
         "function": {
             "name": tool_name,
-            "description": description,
+            "description": (
+                "Edit through local commands. The server preserves unmentioned steps and builds "
+                "the complete draft. Null keeps a current field; explicit lists replace it. "
+                "Whole-flow later turns and selected added-step revisions use cumulative commands against the saved flow, "
+                "not against a prior preview. Selected saved-step revisions that retain the "
+                "saved sequence use the shown revision."
+            ),
             "parameters": {
                 "type": "object",
-                "required": ["steps", "plan_rationale"],
+                "required": ["operations", "plan_rationale"],
                 "additionalProperties": False,
                 "properties": properties,
             },
@@ -215,20 +195,42 @@ def build_edit_flow_tool_schema(
     }
 
 
-def _build_keep_step_schema(*, valid_refs: list[str]) -> dict[str, Any]:
+def _build_target_schema(valid_refs: list[str]) -> dict[str, object]:
     return {
-        "type": "object",
-        "required": ["kind", "existing_step_ref"],
-        "additionalProperties": False,
-        "properties": {
-            "kind": {"type": "string", "enum": ["keep"]},
-            "existing_step_ref": {
-                "type": "string",
-                "enum": valid_refs,
-                "description": "A step this turn leaves exactly as it is.",
+        "anyOf": [
+            {
+                "type": "object",
+                "required": ["kind", "existing_step_ref"],
+                "additionalProperties": False,
+                "properties": {
+                    "kind": {"type": "string", "enum": ["saved"]},
+                    "existing_step_ref": {"type": "string", "enum": valid_refs},
+                },
             },
-        },
+            {
+                "type": "object",
+                "required": ["kind", "local_id"],
+                "additionalProperties": False,
+                "properties": {
+                    "kind": {"type": "string", "enum": ["added"]},
+                    "local_id": {"type": "string", "minLength": 1},
+                },
+            },
+        ]
     }
+
+
+def _build_edit_field_reads_schema(target_schema: dict[str, object]) -> dict[str, Any]:
+    schema = build_previous_field_refs_schema()
+    schema["description"] = (
+        "Fields of earlier JSON-producing steps this step reads. "
+        + _EDIT_READS_DESCRIPTION
+    )
+    item = schema["items"]
+    item["properties"].pop("from_step")
+    item["properties"]["producer"] = target_schema
+    item["required"] = ["producer", "field_path"]
+    return schema
 
 
 # ---------------------------------------------------------------------------
@@ -292,11 +294,7 @@ def _build_modify_step_schema(
                 "type": ["array", "null"],
                 "items": {"type": "string"},
                 "description": (
-                    "Form fields this step reads. Null keeps the step's current "
-                    "reads when its input is otherwise unchanged. If you set "
-                    "input_source, input_type or either list, give both lists "
-                    "complete. An empty list means no explicit form reads; the "
-                    "step can still read its input source."
+                    "Form fields this step reads. " + _EDIT_READS_DESCRIPTION
                 ),
             },
             "uses_previous_fields": build_previous_field_refs_schema(),

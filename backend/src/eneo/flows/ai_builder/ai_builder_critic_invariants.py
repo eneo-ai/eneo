@@ -1574,7 +1574,7 @@ def _final_text_step_must_reference_relevant_structured_outputs_remediation(
         "fastän flera tidigare steg producerar strukturerad JSON. Behåll "
         '`input_source="previous_step"` och deklarera `uses_previous_fields` på '
         "det steget för de fält det faktiskt behöver från minst två av JSON-"
-        "stegen (from_step och field_path per fält); kompilatorn bygger "
+        "stegen (producer och field_path per fält); kompilatorn bygger "
         "bindningarna. Eventuella DOCX/PDF-renderingar i slutet förblir orörda "
         "— regeln gäller bara det komponerande textsteget."
     )

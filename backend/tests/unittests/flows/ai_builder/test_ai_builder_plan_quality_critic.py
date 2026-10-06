@@ -3783,7 +3783,7 @@ class TestFinalTextStepReferencesRelevantStructuredOutputs:
         ("flow", "required_text", "forbidden_text"),
         [
             (None, "följer efter", "uses_previous_fields"),
-            (_edit_flow(), "uses_previous_fields", "input_bindings.question"),
+            (_edit_flow(), "producer och field_path", "input_bindings.question"),
         ],
         ids=("create", "edit"),
     )

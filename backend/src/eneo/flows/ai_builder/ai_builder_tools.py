@@ -390,13 +390,18 @@ class _StepObjectSchema:
     is_edit_branch: bool
 
 
+def _proposal_items_key(tool_schema: ProposalToolSchema) -> str:
+    properties = tool_schema["function"]["parameters"].get("properties", {})
+    return "operations" if "operations" in properties else "steps"
+
+
 def _step_object_schema(
     tool_schema: ProposalToolSchema,
 ) -> _StepObjectSchema | None:
     """The step object schema the normalisers walk.
 
     The create tool lists one step object under ``steps.items``; the edit tool
-    lists a union of branches (modify, keep, add), of which the modify branch
+    lists a union of operation branches, of which the modify branch
     is the one a non-strict provider closes at the wrong boundary: it is the
     branch that carries ``output_fields``. Both tools are read the same way.
     """
@@ -405,7 +410,9 @@ def _step_object_schema(
     raw_properties = parameters.get("properties")
     if not isinstance(raw_properties, dict):
         return None
-    steps_schema = cast(dict[str, object], raw_properties).get("steps")
+    steps_schema = cast(dict[str, object], raw_properties).get(
+        _proposal_items_key(tool_schema)
+    )
     if not isinstance(steps_schema, dict):
         return None
     items = cast(dict[str, object], steps_schema).get("items")
@@ -413,7 +420,10 @@ def _step_object_schema(
         return None
     items_map = cast(dict[str, object], items)
     if isinstance(items_map.get("properties"), dict):
-        return _StepObjectSchema(schema=items_map, is_edit_branch=False)
+        return _StepObjectSchema(
+            schema=items_map,
+            is_edit_branch=_proposal_items_key(tool_schema) == "operations",
+        )
     for keyword in _UNION_KEYWORDS:
         branches = items_map.get(keyword)
         if not isinstance(branches, list):
@@ -454,7 +464,7 @@ def _discard_punctuation_serialization_artifacts(
     if not isinstance(raw_step_properties, dict):
         return admitted_root
 
-    raw_steps = admitted_root.get("steps")
+    raw_steps = admitted_root.get(_proposal_items_key(tool_schema))
     if not isinstance(raw_steps, list):
         return admitted_root
     allowed_step_keys = frozenset(cast(dict[str, object], raw_step_properties))
@@ -475,7 +485,7 @@ def _discard_punctuation_serialization_artifacts(
         return arguments
     if not steps_changed:
         return admitted_root
-    return {**admitted_root, "steps": admitted_steps}
+    return {**admitted_root, _proposal_items_key(tool_schema): admitted_steps}
 
 
 def _without_punctuation_only_unknown_properties(
@@ -515,10 +525,13 @@ def _normalize_structured_field_children(
 
     parameters = tool_schema["function"]["parameters"]
     raw_properties = parameters.get("properties")
-    if not isinstance(raw_properties, dict) or "steps" not in raw_properties:
+    if (
+        not isinstance(raw_properties, dict)
+        or _proposal_items_key(tool_schema) not in raw_properties
+    ):
         return arguments
 
-    raw_steps = arguments.get("steps")
+    raw_steps = arguments.get(_proposal_items_key(tool_schema))
     if not isinstance(raw_steps, list):
         return arguments
 
@@ -544,7 +557,7 @@ def _normalize_structured_field_children(
 
     if not changed:
         return arguments
-    return {**arguments, "steps": admitted_steps}
+    return {**arguments, _proposal_items_key(tool_schema): admitted_steps}
 
 
 def _normalize_field_children(
@@ -634,7 +647,7 @@ def _rehome_misplaced_step_children(
         if isinstance(value, str)
     )
 
-    raw_steps = arguments.get("steps")
+    raw_steps = arguments.get(_proposal_items_key(tool_schema))
     if not isinstance(raw_steps, list):
         return arguments
     pending = deque(cast(list[object], raw_steps))
@@ -709,7 +722,11 @@ def _rehome_misplaced_step_children(
         admitted_steps.append(candidate_map or cast(object, candidate))
         pending.extendleft(reversed(nested_steps))
 
-    admitted = {**arguments, "steps": admitted_steps} if changed else arguments
+    admitted = (
+        {**arguments, _proposal_items_key(tool_schema): admitted_steps}
+        if changed
+        else arguments
+    )
 
     # A non-strict tool implementation can also close the final step object
     # before its optional tail. Rehome only keys that the prepared schema says
@@ -722,7 +739,7 @@ def _rehome_misplaced_step_children(
     root_keys = frozenset(properties)
     step_tail_keys = allowed_step_keys - root_keys - required_step_keys
     misplaced_tail = step_tail_keys.intersection(admitted)
-    admitted_tail_steps = admitted.get("steps")
+    admitted_tail_steps = admitted.get(_proposal_items_key(tool_schema))
     if not misplaced_tail or not isinstance(admitted_tail_steps, list):
         return admitted
     tail_steps = list(cast(list[object], admitted_tail_steps))
@@ -750,7 +767,7 @@ def _rehome_misplaced_step_children(
             **final_step,
             **{key: admitted[key] for key in movable_tail},
         }
-    updated["steps"] = tail_steps
+    updated[_proposal_items_key(tool_schema)] = tail_steps
     return updated
 
 
