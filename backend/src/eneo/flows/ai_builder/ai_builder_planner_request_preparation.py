@@ -693,6 +693,30 @@ def build_proposal_prepared(
             if compile_context is not None
             else None,
         )
+    elif flow is not None:
+        # Commands apply to the saved Flow even during a cumulative revision.
+        # Its exact facts are required input, while the compact profile keeps
+        # the discovery scope and unresolved decisions visible.
+        saved_spec = current_flow_authoring_spec(
+            current_steps=list(flow.steps),
+            flow_name=flow.name,
+            flow_description=flow.description,
+            assistant_snapshots=assistant_snapshots,
+            assistant_snapshot_projector=resource_catalog.assistant_spec_from_snapshot,
+            form_fields=extract_form_fields_from_metadata(flow.metadata_json),
+        )
+        authoring_data = build_flow_context(
+            flow,
+            assistant_snapshots=assistant_snapshots,
+            is_edit_mode=True,
+            authoring_spec=saved_spec,
+            selected_template_placeholders=compile_context.selected_template_placeholders
+            if compile_context is not None
+            else None,
+        )
+        flow_context = "\n\n".join(
+            part for part in (flow_context, authoring_data) if part
+        )
     is_pure_audio_transcription = (
         not is_edit_mode
         and compile_context is not None
