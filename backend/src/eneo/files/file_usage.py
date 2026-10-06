@@ -3,31 +3,60 @@ from __future__ import annotations
 from collections.abc import Iterable, Sequence
 from dataclasses import dataclass
 from datetime import timedelta
+from importlib import import_module
+from typing import cast
 from uuid import UUID
 
 import sqlalchemy as sa
 from sqlalchemy.dialects.postgresql import ARRAY
 from sqlalchemy.dialects.postgresql import UUID as PostgreSQLUUID
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy.orm import InstrumentedAttribute
 from sqlalchemy.sql.elements import BindParameter
 from sqlalchemy.sql.selectable import Select
 
-from eneo.database.tables.app_table import AppRunsFiles, AppsFiles
-from eneo.database.tables.assistant_table import AssistantsFiles
-from eneo.database.tables.files_table import Files
-from eneo.database.tables.questions_table import QuestionsFiles
+from eneo.database.tables.base_class import Base
+from eneo.database.tables.files_table import FILE_USAGE_INFO_KEY, Files
 from eneo.files.file_models import FileUsageKind
 
-# Every link table that keeps a File in use. A foreign key to ``files.id`` that
-# is missing here would not fence deletion: the daily unused-file cleanup would
-# delete its Files. ``tests/unittests/files/test_file_usage_columns.py`` checks
-# the table metadata against this tuple.
-FILE_USAGE_COLUMNS: tuple[tuple[FileUsageKind, InstrumentedAttribute[UUID]], ...] = (
-    (FileUsageKind.CHAT_ATTACHMENT, QuestionsFiles.file_id),
-    (FileUsageKind.ASSISTANT_ATTACHMENT, AssistantsFiles.file_id),
-    (FileUsageKind.APP_ATTACHMENT, AppsFiles.file_id),
-    (FileUsageKind.APP_RUN_INPUT, AppRunsFiles.file_id),
+
+class FileUsageUndeclaredError(RuntimeError):
+    """A column references ``files.id`` without declaring ``file_usage(...)``."""
+
+
+def collect_file_usage_columns(
+    metadata: sa.MetaData, files_table: sa.Table
+) -> tuple[tuple[FileUsageKind, sa.Column[UUID]], ...]:
+    """Find every column that keeps a File in use, from the table metadata.
+
+    Each foreign key to ``files.id`` carries its meaning in the column ``info``
+    (``file_usage(kind)`` or ``file_usage(None)``), so a link table added later
+    is counted as usage from the start, and one without a declaration fails
+    here rather than making its Files look unused. Ordered by ``FileUsageKind``.
+    """
+    found: list[tuple[FileUsageKind, sa.Column[UUID]]] = []
+    for table in metadata.tables.values():
+        for foreign_key in table.foreign_keys:
+            if foreign_key.column.table is not files_table:
+                continue
+            column = foreign_key.parent
+            if FILE_USAGE_INFO_KEY not in column.info:
+                raise FileUsageUndeclaredError(
+                    f"{table.name}.{column.name} references {files_table.name}.id "
+                    "without file_usage(...): declare whether it keeps the File in use"
+                )
+            kind = column.info[FILE_USAGE_INFO_KEY]
+            if kind is not None:
+                found.append((FileUsageKind(kind), column))
+    order = {kind: index for index, kind in enumerate(FileUsageKind)}
+    found.sort(key=lambda item: (order[item[0]], item[1].table.name))
+    return tuple(found)
+
+
+# Every table module must be registered on the metadata before scanning it.
+import_module("eneo.database.tables")
+FILE_USAGE_COLUMNS = collect_file_usage_columns(
+    cast(sa.MetaData, Base.metadata),  # pyright: ignore[reportAttributeAccessIssue, reportUnknownMemberType, reportUnknownArgumentType]  # SQLAlchemy declarative metadata
+    cast(sa.Table, Files.__table__),  # pyright: ignore[reportAttributeAccessIssue, reportUnknownMemberType, reportUnknownArgumentType]  # SQLAlchemy declarative table
 )
 
 
@@ -262,7 +291,7 @@ class FileUsageRepository:
     @staticmethod
     def _usage_select(
         kind: FileUsageKind,
-        file_id_column: InstrumentedAttribute[UUID],
+        file_id_column: sa.Column[UUID],
         file_ids_parameter: BindParameter[Sequence[UUID]],
     ) -> Select[tuple[str, UUID]]:
         return sa.select(

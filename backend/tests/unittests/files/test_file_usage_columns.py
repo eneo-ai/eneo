@@ -1,51 +1,97 @@
-"""Every link table that points at ``files`` must count as File usage.
+"""File usage is declared on the foreign key and derived from the metadata.
 
-``FILE_USAGE_COLUMNS`` fences user-initiated deletion and the unused-file
-cleanup alike. A new link table that is missing from it would not keep its
-Files alive: the daily sweep would treat them as unused and delete them. This
-test fails as soon as a foreign key to ``files.id`` appears without a usage
-kind, so the author of the new table has to decide on purpose.
+A link table says what its ``files.id`` column means where the column is
+defined (``file_usage(kind)`` or ``file_usage(None)``). ``file_usage`` derives
+the usage columns from that, so nothing has to be registered elsewhere, and a
+column without a declaration fails on import rather than making its Files look
+unused to the daily cleanup.
 """
 
 from __future__ import annotations
 
-import eneo.database.tables  # noqa: F401  # registers every table on the metadata
-from eneo.database.tables.base_class import Base
-from eneo.database.tables.files_table import Files
-from eneo.database.tables.object_content_table import FileContentReferences
-from eneo.files.file_usage import FILE_USAGE_COLUMNS
+import pytest
+import sqlalchemy as sa
+from sqlalchemy.dialects.postgresql import UUID as PostgreSQLUUID
 
-# Foreign keys to ``files.id`` that do not mean "this File is in use": a derived
-# File belongs to its root's family, and content references are released with
-# the File.
-STRUCTURAL_COLUMNS = (Files.parent_file_id, FileContentReferences.file_id)
-
-
-def _qualified(column) -> str:
-    return f"{column.table.name}.{column.name}"
+from eneo.database.tables.files_table import file_usage
+from eneo.files.file_models import FileUsageKind
+from eneo.files.file_usage import (
+    FILE_USAGE_COLUMNS,
+    FileUsageUndeclaredError,
+    collect_file_usage_columns,
+)
 
 
-def test_every_foreign_key_to_files_is_usage_or_structural() -> None:
-    files_table = Files.__table__
-    referencing = {
-        _qualified(foreign_key.parent)
-        for table in Base.metadata.tables.values()
-        for foreign_key in table.foreign_keys
-        if foreign_key.column.table is files_table
-    }
-    usage = {_qualified(column.property.columns[0]) for _, column in FILE_USAGE_COLUMNS}
-    structural = {
-        _qualified(column.property.columns[0]) for column in STRUCTURAL_COLUMNS
-    }
+def test_every_declared_usage_column_is_derived_in_kind_order() -> None:
+    assert [
+        (kind, f"{column.table.name}.{column.name}")
+        for kind, column in FILE_USAGE_COLUMNS
+    ] == [
+        (FileUsageKind.CHAT_ATTACHMENT, "questions_files.file_id"),
+        (FileUsageKind.ASSISTANT_ATTACHMENT, "assistants_files.file_id"),
+        (FileUsageKind.APP_ATTACHMENT, "apps_files.file_id"),
+        (FileUsageKind.APP_RUN_INPUT, "app_runs_files.file_id"),
+    ]
 
-    assert usage.isdisjoint(structural)
-    assert referencing - structural == usage, (
-        "A foreign key to files.id is not counted as File usage. Add it to "
-        "FILE_USAGE_COLUMNS (and FileUsageKind) or, if it never keeps a File in "
-        "use, to STRUCTURAL_COLUMNS in this test."
+
+def _metadata_with_link(info: dict[str, object] | None) -> tuple[sa.MetaData, sa.Table]:
+    metadata = sa.MetaData()
+    files = sa.Table(
+        "files",
+        metadata,
+        sa.Column("id", PostgreSQLUUID(as_uuid=True), primary_key=True),
     )
+    sa.Table(
+        "links",
+        metadata,
+        sa.Column(
+            "file_id",
+            PostgreSQLUUID(as_uuid=True),
+            sa.ForeignKey("files.id"),
+            primary_key=True,
+            info=info or {},
+        ),
+    )
+    return metadata, files
 
 
-def test_usage_columns_have_distinct_kinds() -> None:
-    kinds = [kind for kind, _ in FILE_USAGE_COLUMNS]
-    assert len(kinds) == len(set(kinds))
+def test_undeclared_foreign_key_to_files_fails() -> None:
+    metadata, files = _metadata_with_link(None)
+
+    with pytest.raises(FileUsageUndeclaredError, match="links.file_id"):
+        collect_file_usage_columns(metadata, files)
+
+
+def test_declared_usage_is_counted_and_structural_is_not() -> None:
+    metadata, files = _metadata_with_link(file_usage(FileUsageKind.APP_RUN_INPUT))
+    [(kind, column)] = collect_file_usage_columns(metadata, files)
+    assert kind is FileUsageKind.APP_RUN_INPUT
+    assert column.table.name == "links"
+
+    metadata, files = _metadata_with_link(file_usage(None))
+    assert collect_file_usage_columns(metadata, files) == ()
+
+
+def test_only_foreign_keys_to_files_are_considered() -> None:
+    metadata = sa.MetaData()
+    files = sa.Table(
+        "files",
+        metadata,
+        sa.Column("id", PostgreSQLUUID(as_uuid=True), primary_key=True),
+    )
+    other = sa.Table(
+        "other",
+        metadata,
+        sa.Column("id", PostgreSQLUUID(as_uuid=True), primary_key=True),
+    )
+    sa.Table(
+        "links",
+        metadata,
+        sa.Column(
+            "other_id",
+            PostgreSQLUUID(as_uuid=True),
+            sa.ForeignKey(other.c.id),
+            primary_key=True,
+        ),
+    )
+    assert collect_file_usage_columns(metadata, files) == ()
