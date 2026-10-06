@@ -9,7 +9,6 @@ from typing_extensions import TypedDict
 
 from eneo.database.database import sessionmanager
 from eneo.files.unused_file_cleanup import sweep_unused_files
-from eneo.main.config import get_settings
 from eneo.main.container.container import Container
 from eneo.worker.worker import Worker
 
@@ -159,10 +158,6 @@ async def delete_unused_files(container: Container) -> dict[str, Any]:
     assistant, app, space or group chat), uploads never attached, and files
     left behind before this cleanup existed. Each page commits on its own.
     """
-    if not get_settings().unused_file_cleanup_enabled:
-        logger.info("Unused file cleanup is disabled")
-        return {"skipped": True}
-
     result = await sweep_unused_files(
         cast(AsyncSession, container.session()), dry_run=False
     )
