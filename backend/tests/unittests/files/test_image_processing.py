@@ -118,6 +118,16 @@ def test_extract_respects_max_images_cap(tmp_path: Path):
     assert len(images) == 2
 
 
+def test_extract_stops_scanning_at_page_cap(tmp_path: Path):
+    pdf_path = tmp_path / "many_pages.pdf"
+    pages = [Image.new("RGB", (800, 600), color=(i * 20, 50, 50)) for i in range(5)]
+    pages[0].save(pdf_path, save_all=True, append_images=pages[1:])
+
+    images = extract_images_from_pdf(pdf_path, max_images=8, max_scanned_pages=2)
+
+    assert [image.page_number for image in images] == [1, 2]
+
+
 def test_extract_handles_image_free_pdf(tmp_path: Path):
     import pdfplumber  # noqa: F401  — ensure dependency present for fixture parity
 

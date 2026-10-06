@@ -184,6 +184,11 @@ Icon before its own capture/spool or any storage mutation. Operators must use
 ingress/request-body limits and configure and monitor temporary-disk capacity
 to protect that earlier parsing boundary.
 
+Documents within the size limit can still be rejected by the text-extraction
+limits (page count, extracted text size, CPU, memory, time). See "Large
+documents are rejected or slow to process" in [DEPLOYMENT.md](./DEPLOYMENT.md)
+for the `FILE_EXTRACTION_*` settings.
+
 ### Login Issues During Development
 
 The frontend is configured to bind to `0.0.0.0` by default (see `vite.config.ts` line 36), which should work in most development environments including WSL.

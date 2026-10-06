@@ -10,6 +10,7 @@ from typing import Callable
 from fastapi import UploadFile
 
 from eneo.files.audio import AudioMimeTypes
+from eneo.files.extraction_limits import get_file_extraction_limits
 from eneo.files.file_models import FileContentVariant, FileType
 from eneo.files.file_size_service import FileSizeService
 from eneo.files.image import ImageExtractor, ImageMimeTypes
@@ -178,10 +179,14 @@ class FileProtocol:
                 )
                 return
 
-            extracted_text = self.text_extractor.extract(
-                filepath,
-                media_type,
-                upload_file.filename,
+            # Parsing runs in a resource-limited child: a large or hostile
+            # document must not stall the event loop or exhaust this process.
+            extracted_text = (
+                await self.text_extractor.extract_bounded(
+                    filepath,
+                    media_type,
+                    upload_file.filename,
+                )
             ).encode("utf-8")
             extracted = PendingFileContent(
                 variant=FileContentVariant.EXTRACTED_TEXT,
@@ -200,6 +205,9 @@ class FileProtocol:
                         return extract_images_from_pdf(
                             path,
                             max_images=settings.attachment_max_extracted_images,
+                            max_scanned_pages=(
+                                get_file_extraction_limits().pdf_layout_max_pages
+                            ),
                         )
 
                     derivative_extractor = extract_pdf
@@ -219,7 +227,7 @@ class FileProtocol:
 
             if derivative_extractor is not None:
                 for index, image in enumerate(
-                    derivative_extractor(filepath),
+                    await asyncio.to_thread(derivative_extractor, filepath),
                     start=1,
                 ):
                     label = (
