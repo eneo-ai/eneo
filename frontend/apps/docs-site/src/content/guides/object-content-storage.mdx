@@ -184,7 +184,9 @@ before deletion, so a concurrent attachment cannot be silently removed.
 Removing a File from an Assistant or App only removes that use; the reusable
 File remains until its owner deletes it. A File attached to a sent chat message
 stays in use until the conversation is deleted (see [the
-FAQ](#why-can-i-not-delete-an-uploaded-file)). Organization or user offboarding keeps
+FAQ](#why-can-i-not-delete-an-uploaded-file)). When conversation retention
+deletes a question or App run, it applies the same check to the Files attached
+to it and deletes those that nothing else uses. Organization or user offboarding keeps
 its existing database-cascade behavior.
 
 ## Choose the right deployment

@@ -1,4 +1,5 @@
 import logging
+from collections.abc import Sequence
 from typing import Any, cast
 from uuid import UUID
 
@@ -7,12 +8,14 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from eneo.data_retention.constants import ORPHANED_SESSION_CLEANUP_DAYS
 from eneo.database.affected_rows import affected_row_count
-from eneo.database.tables.app_table import AppRuns, Apps
+from eneo.database.tables.app_table import AppRuns, AppRunsFiles, Apps
 from eneo.database.tables.assistant_table import Assistants
 from eneo.database.tables.audit_retention_policy_table import AuditRetentionPolicy
-from eneo.database.tables.questions_table import Questions
+from eneo.database.tables.files_table import Files
+from eneo.database.tables.questions_table import Questions, QuestionsFiles
 from eneo.database.tables.sessions_table import Sessions
 from eneo.database.tables.spaces_table import Spaces
+from eneo.files.file_usage import FileUsageRepository
 
 logger = logging.getLogger(__name__)
 
@@ -67,12 +70,16 @@ class DataRetentionService:
         entity_retention_col: Any,
         entity_fk_col: Any,
         record_fk_col: Any,
+        link_record_col: Any,
+        link_file_col: Any,
         record_type: str,
     ) -> int:
         """
         Generic method to delete old records based on hierarchical retention policies.
 
         Uses batch deletion to prevent transaction timeouts on large datasets.
+        Files attached to a deleted record are deleted with it once nothing else
+        uses them, so uploads and transcriptions follow the record's retention.
 
         Args:
             record_table: Table to delete from (e.g., Questions, AppRuns)
@@ -80,6 +87,8 @@ class DataRetentionService:
             entity_retention_col: Entity's retention days column
             entity_fk_col: Foreign key column in entity table to Space
             record_fk_col: Foreign key column in record table to entity
+            link_record_col: Record column in the record's file link table
+            link_file_col: File column in the record's file link table
             record_type: Human-readable record type for logging
 
         Returns:
@@ -116,31 +125,65 @@ class DataRetentionService:
 
         # Batch deletion to prevent transaction timeouts on large datasets
         total_deleted = 0
+        total_files_deleted = 0
         while True:
-            # Delete batch of records (ORDER BY ensures deterministic batch selection)
-            batch_subquery = base_subquery.order_by(record_table.id).limit(  # type: ignore[attr-defined]
-                RETENTION_BATCH_SIZE
-            )
-            query = sa.delete(record_table).where(record_table.id.in_(batch_subquery))  # type: ignore[attr-defined]
-            result = await self.session.execute(query)
-            batch_deleted = affected_row_count(result)
-
-            if batch_deleted == 0:
+            # Select batch of records (ORDER BY ensures deterministic batch selection)
+            batch_ids = (
+                await self.session.scalars(
+                    base_subquery.order_by(record_table.id).limit(  # type: ignore[attr-defined]
+                        RETENTION_BATCH_SIZE
+                    )
+                )
+            ).all()
+            if not batch_ids:
                 break
 
+            # Read the attached files before the link rows cascade away
+            file_ids = (
+                await self.session.scalars(
+                    sa.select(link_file_col)
+                    .where(link_record_col.in_(batch_ids))
+                    .distinct()
+                )
+            ).all()
+            query = sa.delete(record_table).where(record_table.id.in_(batch_ids))  # type: ignore[attr-defined]
+            result = await self.session.execute(query)
+            batch_deleted = affected_row_count(result)
+            files_deleted = await self._delete_unused_files(file_ids)
+
             total_deleted += batch_deleted
+            total_files_deleted += files_deleted
             logger.debug(
-                f"Deleted batch of {batch_deleted} {record_type} (total: {total_deleted})"
+                f"Deleted batch of {batch_deleted} {record_type} and {files_deleted} "
+                f"files (total: {total_deleted})"
             )
 
         if total_deleted > 0:
             logger.info(
-                f"Deleted {total_deleted} old {record_type} based on retention policies"
+                f"Deleted {total_deleted} old {record_type} and "
+                f"{total_files_deleted} unused attached files based on retention policies"
             )
         else:
             logger.debug(f"No old {record_type} to delete based on retention policies")
 
         return total_deleted
+
+    async def _delete_unused_files(self, file_ids: Sequence[UUID]) -> int:
+        """Delete root files, with their derived files, that nothing uses anymore.
+
+        Deleting the Files row releases its content references, so the
+        object-content reconciler removes the stored bytes, including audio
+        originals and transcriptions.
+        """
+        unused_ids = await FileUsageRepository(self.session).lock_unused_root_families(
+            file_ids
+        )
+        if not unused_ids:
+            return 0
+        result = await self.session.execute(
+            sa.delete(Files).where(Files.id.in_(unused_ids))
+        )
+        return affected_row_count(result)
 
     async def delete_old_questions(self) -> int:
         """
@@ -169,6 +212,8 @@ class DataRetentionService:
             entity_retention_col=Assistants.data_retention_days,
             entity_fk_col=Assistants.space_id,
             record_fk_col=Questions.assistant_id,
+            link_record_col=QuestionsFiles.question_id,
+            link_file_col=QuestionsFiles.file_id,
             record_type="questions",
         )
 
@@ -189,6 +234,8 @@ class DataRetentionService:
             entity_retention_col=Apps.data_retention_days,
             entity_fk_col=Apps.space_id,
             record_fk_col=AppRuns.app_id,
+            link_record_col=AppRunsFiles.app_run_id,
+            link_file_col=AppRunsFiles.file_id,
             record_type="app runs",
         )
 
