@@ -7896,7 +7896,7 @@ export interface paths {
     get: operations["get_organization_flow_run_retention_policy"];
     /**
      * Replace the Organization Flow run-history retention policy
-     * @description Replace the complete Organization policy or clear it. The change waits for an open history deletion to finish. Modes: preserve and review_required keep history until an explicit purge; auto_delete lets the nightly flows.history task delete terminal runs once they are older than the days, and is accepted only when write_rules.auto_delete_available is true. Days may not exceed write_rules.max_days. A change that stops or delays automatic deletion at this level (auto_delete becomes another mode, is cleared, or gets more days) needs a reason, which the required audit event records with the previous and new policy.
+     * @description Replace the complete Organization policy or clear it. The change waits for an open history deletion to finish. Modes: preserve keeps history until an explicit purge; review_required keeps history without admitting deletion; auto_delete lets the nightly flows.history task delete terminal runs once they are older than the days, and is accepted only when write_rules.auto_delete_available is true. Days may not exceed write_rules.max_days. A change that stops or delays automatic deletion at this level (auto_delete becomes another mode, is cleared, or gets more days) needs a reason, which the required audit event records with the previous and new policy.
      */
     put: operations["replace_organization_flow_run_retention_policy"];
     post?: never;
@@ -7920,7 +7920,7 @@ export interface paths {
     get: operations["get_flow_run_retention_policy"];
     /**
      * Replace a Flow run-history retention policy
-     * @description Replace the complete Flow override or clear it to inherit. Operational retention remains editable after a Flow definition is published because it does not mutate the published definition. A deleted Flow is accepted. The change waits for an open history deletion to finish. Modes: preserve and review_required keep history until an explicit purge; auto_delete lets the nightly flows.history task delete terminal runs once they are older than the days, and is accepted only when write_rules.auto_delete_available is true. Days may not exceed write_rules.max_days. A change that stops or delays automatic deletion at this level (auto_delete becomes another mode, is cleared, or gets more days) needs a reason, which the required audit event records with the previous and new policy.
+     * @description Replace the complete Flow override or clear it to inherit. Operational retention remains editable after a Flow definition is published because it does not mutate the published definition. A deleted Flow is accepted. The change waits for an open history deletion to finish. Modes: preserve keeps history until an explicit purge; review_required keeps history without admitting deletion; auto_delete lets the nightly flows.history task delete terminal runs once they are older than the days, and is accepted only when write_rules.auto_delete_available is true. Days may not exceed write_rules.max_days. A change that stops or delays automatic deletion at this level (auto_delete becomes another mode, is cleared, or gets more days) needs a reason, which the required audit event records with the previous and new policy.
      */
     put: operations["replace_flow_run_retention_policy"];
     post?: never;
@@ -7941,7 +7941,7 @@ export interface paths {
     put?: never;
     /**
      * Preview or purge due Flow run history
-     * @description Apply the administrator purge to one Flow in the authenticated tenant. Dry-run is the default and reports candidates without deleting anything. Real batches delete due terminal runs under the effective preserve policy and expired unbound live transcripts in this Flow, with a transaction audit. The limit applies separately to runs and transcripts, with separate counts. Review-required runs, unresolved deliveries and runs under a legal hold remain stored. A deleted Flow is accepted.
+     * @description Apply the administrator purge to one Flow in the authenticated tenant. Dry-run is the default and reports candidates without deleting anything. Real batches admit due terminal runs under the effective preserve or auto_delete policy and expired unbound live transcripts in this Flow, with a transaction audit. The limit applies separately to runs and transcripts, with separate counts. Review-required runs, unresolved deliveries and runs under a legal hold remain stored. Admitted runs that exceed the request budget return pending receipts and continue through nightly retention. A deleted Flow is accepted.
      */
     post: operations["purge_flow_run_history"];
     delete?: never;
@@ -8005,7 +8005,7 @@ export interface paths {
     put?: never;
     /**
      * Preview or purge due Organization Flow run history
-     * @description Administrators can preview or explicitly purge one bounded batch of due terminal runs under the effective preserve policy, plus expired unbound live transcripts in the authenticated tenant. The limit applies separately to runs and transcripts, with separate candidate and deletion counts. Dry runs select candidates but delete nothing and emit no audit event. Real purges require an audit row in the same transaction. Review-required runs, unresolved deliveries and runs under a legal hold are excluded.
+     * @description Administrators can preview or explicitly purge one bounded batch of due terminal runs under the effective preserve or auto_delete policy, plus expired unbound live transcripts in the authenticated tenant. The limit applies separately to runs and transcripts, with separate candidate and deletion counts. Dry runs select candidates but delete nothing and emit no audit event. Real purges require an audit row in the same transaction. Review-required runs, unresolved deliveries and runs under a legal hold are excluded. An admitted run that exceeds the request budget returns a pending receipt and continues through nightly retention.
      */
     post: operations["purge_organization_flow_run_history"];
     delete?: never;
@@ -8048,7 +8048,7 @@ export interface paths {
     get: operations["get_space_flow_run_retention_policy"];
     /**
      * Replace a Space Flow run-history retention policy
-     * @description Replace the complete Space override or clear it to inherit the Organization policy. The mode and day count move together, preventing ambiguous mixed inheritance. This setting controls Flow run history only: it does not change conversation or AI Builder retention. The change waits for an open history deletion to finish. Modes: preserve and review_required keep history until an explicit purge; auto_delete lets the nightly flows.history task delete terminal runs once they are older than the days, and is accepted only when write_rules.auto_delete_available is true. Days may not exceed write_rules.max_days. A change that stops or delays automatic deletion at this level (auto_delete becomes another mode, is cleared, or gets more days) needs a reason, which the required audit event records with the previous and new policy.
+     * @description Replace the complete Space override or clear it to inherit the Organization policy. The mode and day count move together, preventing ambiguous mixed inheritance. This setting controls Flow run history only: it does not change conversation or AI Builder retention. The change waits for an open history deletion to finish. Modes: preserve keeps history until an explicit purge; review_required keeps history without admitting deletion; auto_delete lets the nightly flows.history task delete terminal runs once they are older than the days, and is accepted only when write_rules.auto_delete_available is true. Days may not exceed write_rules.max_days. A change that stops or delays automatic deletion at this level (auto_delete becomes another mode, is cleared, or gets more days) needs a reason, which the required audit event records with the previous and new policy.
      */
     put: operations["replace_space_flow_run_retention_policy"];
     post?: never;
@@ -8069,7 +8069,7 @@ export interface paths {
     put?: never;
     /**
      * Preview or purge due Space Flow run history
-     * @description Apply the administrator purge to one Space in the authenticated tenant. Dry-run is the default and reports candidates without deleting anything. Real batches delete due terminal runs under the effective preserve policy and expired unbound live transcripts in this Space, with a transaction audit. The limit applies separately to runs and transcripts, with separate counts. Review-required runs, unresolved deliveries and runs under a legal hold remain stored.
+     * @description Apply the administrator purge to one Space in the authenticated tenant. Dry-run is the default and reports candidates without deleting anything. Real batches admit due terminal runs under the effective preserve or auto_delete policy and expired unbound live transcripts in this Space, with a transaction audit. The limit applies separately to runs and transcripts, with separate counts. Review-required runs, unresolved deliveries and runs under a legal hold remain stored. Admitted runs that exceed the request budget return pending receipts and continue through nightly retention.
      */
     post: operations["purge_space_flow_run_history"];
     delete?: never;
@@ -23092,6 +23092,8 @@ export interface components {
      *       },
      *       "candidate_count": 2,
      *       "dry_run": true,
+     *       "pending_count": 0,
+     *       "pending_receipt_ids": [],
      *       "purged_count": 0,
      *       "purged_run_ids": [],
      *       "scope": "organization",
@@ -23101,15 +23103,39 @@ export interface components {
      */
     FlowRunHistoryPurgePublic: {
       blocked: components["schemas"]["FlowRunHistoryPurgeBlockedPublic"];
-      /** Candidate Count */
+      /**
+       * Candidate Count
+       * @description Due runs admitted in scope (preserve or auto_delete; held, review and delivery-blocked runs excluded), at most the limit: Flows in id order, each Flow's runs oldest first.
+       */
       candidate_count: number;
       /** Dry Run */
       dry_run: boolean;
-      /** Purged Count */
+      /**
+       * Pending Count
+       * @description Admitted runs whose deletion did not finish within this request's budget (operator settings GALLRING_MAX_ROWS_PER_RUN and GALLRING_MAX_FILES_PER_RUN). A pending run remains stored but its deletion fence hides it from this request's commit. The enabled nightly flows.history task continues its deletion, subject to legal holds and execution caps. RETENTION_FLOWS_HISTORY_ENABLED=false leaves that work unfinished.
+       */
+      pending_count: number;
+      /**
+       * Pending Receipt Ids
+       * @description Deletion receipts of the pending runs; each records this administrator as the one who started it.
+       */
+      pending_receipt_ids: string[];
+      /**
+       * Purged Count
+       * @description Admitted runs whose deletion receipt completed and run record was removed in this request.
+       */
       purged_count: number;
-      /** Purged Run Ids */
+      /**
+       * Purged Run Ids
+       * @description The runs counted in purged_count; always empty in a dry run.
+       */
       purged_run_ids: string[];
       scope: components["schemas"]["FlowRunRetentionScope"];
+      /**
+       * Selection Complete
+       * @description True only when the run-candidate scan exhausted scope before reaching the requested limit or execution budgets. False means more candidates may remain; each request restarts selection. Pending deletion receipts are reported separately and may remain even after a complete scan.
+       */
+      selection_complete: boolean;
       /**
        * Transcript Candidate Count
        * @description Expired, unbound live transcripts selected in scope, capped at the requested limit independently of run candidates. Available in dry runs and real purges; real purges skip rows locked by another transaction.
@@ -23572,7 +23598,7 @@ export interface components {
        * @description Age in days after which terminal Flow run history becomes eligible under this policy. A write may not exceed the deployment's maximum (max_days, code flow_retention_days_above_maximum); a stored value above a later-lowered maximum stays in force.
        */
       days: number;
-      /** @description Preserve makes records eligible only for an explicit administrator purge. Review_required additionally requires human approval before that purge. Auto_delete makes the nightly flows.history task delete terminal runs once they are older than the days. A deployment accepts auto_delete only once that task is installed (auto_delete_available). */
+      /** @description Preserve makes records eligible only for an explicit administrator purge. Review_required keeps records for human review and admits none for deletion. Auto_delete makes the nightly flows.history task delete terminal runs once they are older than the days. A deployment accepts auto_delete only once that task is installed (auto_delete_available). */
       mode: components["schemas"]["FlowRunRetentionMode"];
     };
     /**

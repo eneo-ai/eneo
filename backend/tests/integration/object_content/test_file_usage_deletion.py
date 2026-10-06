@@ -28,8 +28,9 @@ from eneo.files.file_models import (
 from eneo.files.file_repo import FileRepository
 from eneo.files.file_service import FileService
 from eneo.files.file_usage import FileUsageRepository
-from eneo.flows.infrastructure.flow_run_history_purge_repo import (
-    FlowRunHistoryPurgeRepository,
+from eneo.flows.infrastructure.flow_file_family_repo import (
+    UPLOAD_ANCHOR_EDGES,
+    FlowFileFamilyRepository,
 )
 from eneo.flows.infrastructure.flow_version_repo import FlowVersionRepository
 from eneo.sessions.sessions_repo import SessionRepository
@@ -758,7 +759,7 @@ async def test_a_publisher_after_chat_deletion_skips_the_deleted_generated_file(
 
 
 @pytest.mark.asyncio
-async def test_run_history_purge_waits_for_a_publisher_and_then_keeps_the_file(
+async def test_run_history_deletion_skips_a_file_a_publisher_holds_and_then_keeps_it(
     object_content_database: DatabaseSessionManager,
 ) -> None:
     tenant_id, user_id = await _owner_ids(object_content_database)
@@ -785,22 +786,42 @@ async def test_run_history_purge_waits_for_a_publisher_and_then_keeps_the_file(
             recorded.set()
             await commit.wait()
 
-    async def purge() -> set[UUID]:
-        await recorded.wait()
+    async def purge_families() -> tuple[bool, bool]:
+        """(skipped while the publisher holds the file, owned once it commits)."""
+        await asyncio.wait_for(recorded.wait(), timeout=20)
         async with object_content_database.session() as session, session.begin():
-            return await FlowRunHistoryPurgeRepository(
-                session
-            )._delete_unreferenced_files({file_id})
+            families = FlowFileFamilyRepository(session)
+            skipped = (await families.lock_members(file_id, limit=1)).items is None
+        checked.set()
+        await asyncio.wait_for(publisher_done.wait(), timeout=20)
+        async with object_content_database.session() as session, session.begin():
+            families = FlowFileFamilyRepository(session)
+            members = (await families.lock_members(file_id, limit=1)).items
+            assert members is not None
+            owned = (
+                await families.outside_owner(
+                    file_id, members, root_anchor_edges=UPLOAD_ANCHOR_EDGES
+                )
+                is not None
+            )
+        return skipped, owned
 
-    publisher_task = asyncio.create_task(publisher())
-    purge_task = asyncio.create_task(purge())
-    await recorded.wait()
-    await asyncio.sleep(0.3)
+    publisher_done = asyncio.Event()
+    checked = asyncio.Event()
+
+    async def publish_and_signal() -> None:
+        await publisher()
+        publisher_done.set()
+
+    publisher_task = asyncio.create_task(publish_and_signal())
+    purge_task = asyncio.create_task(purge_families())
     try:
-        assert purge_task.done() is False
+        await asyncio.wait_for(checked.wait(), timeout=20)
     finally:
         commit.set()
-    await publisher_task
-    assert await asyncio.wait_for(purge_task, timeout=20) == set()
+        _, purge_result = await asyncio.wait_for(
+            asyncio.gather(publisher_task, purge_task), timeout=20
+        )
+    assert purge_result == (True, True)
     async with object_content_database.session() as session, session.begin():
         assert await session.get(Files, file_id) is not None

@@ -66,16 +66,6 @@ class _DataRetentionService:
         self.flow_destructive_calls.append(name)
         raise AssertionError(f"Scheduled cleanup called {name}")
 
-    async def purge_old_flow_run_history_batch(self, **_: object) -> Never:
-        self._reject_flow_destructive_call("purge_old_flow_run_history_batch")
-
-    async def count_blocked_flow_run_history_purge_candidates(
-        self, **_: object
-    ) -> Never:
-        self._reject_flow_destructive_call(
-            "count_blocked_flow_run_history_purge_candidates"
-        )
-
     async def purge_abandoned_flow_runtime_uploads(self, **_: object) -> Never:
         self._reject_flow_destructive_call("purge_abandoned_flow_runtime_uploads")
 

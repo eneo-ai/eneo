@@ -18,8 +18,8 @@ from eneo.database.tables.flow_tables import (
 )
 from eneo.flows import FlowVersionRepository
 from eneo.flows.domain.flow import FlowStep
-from eneo.flows.infrastructure.flow_run_history_purge_repo import (
-    FlowRunHistoryPurgeRepository,
+from eneo.flows.infrastructure.flow_retention_predicates import (
+    flow_file_reference_exists,
 )
 from eneo.flows.published_definition import (
     FLOW_DEFINITION_SCHEMA_VERSION,
@@ -291,8 +291,7 @@ async def test_publish_records_the_template_file_and_purge_keeps_it_while_the_ve
         await session.execute(
             sa.delete(FlowTemplateAssets).where(FlowTemplateAssets.id == asset.id)
         )
-        purge = FlowRunHistoryPurgeRepository(session)
-        assert await purge._delete_unreferenced_files({file.id}) == set()
+        assert not await _deletable(session, file.id)
 
         await session.execute(
             sa.update(Flows).where(Flows.id == flow.id).values(published_version=None)
@@ -300,7 +299,18 @@ async def test_publish_records_the_template_file_and_purge_keeps_it_while_the_ve
         await session.execute(
             sa.delete(FlowVersions).where(FlowVersions.flow_id == flow.id)
         )
-        assert await purge._delete_unreferenced_files({file.id}) == {file.id}
+        assert await _deletable(session, file.id)
+
+
+async def _deletable(session, file_id) -> bool:
+    """The shared file reference guard finds no owner of the file."""
+    return (
+        await session.scalar(
+            sa.select(Files.id).where(
+                Files.id == file_id, sa.not_(flow_file_reference_exists())
+            )
+        )
+    ) is not None
 
 
 def _batches(connection, *, fail_on: int | None = None):

@@ -13,6 +13,10 @@ from eneo.flows.application.flow_housekeeping_task import (
     FLOWS_HOUSEKEEPING_TASK,
     FlowHousekeepingTask,
 )
+from eneo.flows.application.flow_run_history_retention_task import (
+    FlowRunHistoryRetentionTask,
+)
+from eneo.flows.domain.flow_run_retention_policy import FLOWS_HISTORY_TASK
 
 
 class _Runner:
@@ -38,20 +42,29 @@ async def test_nightly_run_executes_an_enabled_task_and_records_a_disabled_one(
     monkeypatch: pytest.MonkeyPatch, enabled: bool
 ) -> None:
     runner = _Runner()
-    settings = SimpleNamespace(gallring_flows_housekeeping_enabled=enabled)
+    settings = SimpleNamespace(
+        gallring_flows_housekeeping_enabled=enabled,
+        retention_flows_history_enabled=not enabled,
+    )
     monkeypatch.setattr(retention_worker, "get_settings", lambda: settings)
     monkeypatch.setattr(retention_worker, "retention_runner", lambda **_: runner)
     container = SimpleNamespace(session=lambda: object())
 
     reports = await inspect.unwrap(retention_worker.run_retention)(container=container)
 
-    [(kind, target)] = runner.calls
+    [(first, housekeeping), (second, history)] = runner.calls
     if enabled:
-        assert kind == "run" and isinstance(target, FlowHousekeepingTask)
-    else:
+        assert first == "run" and isinstance(housekeeping, FlowHousekeepingTask)
         # The emergency switch never stops gallring silently.
-        assert (kind, target) == ("skip", FLOWS_HOUSEKEEPING_TASK)
-    assert [report.task for report in reports] == [FLOWS_HOUSEKEEPING_TASK]
+        assert (second, history) == ("skip", FLOWS_HISTORY_TASK)
+    else:
+        assert (first, housekeeping) == ("skip", FLOWS_HOUSEKEEPING_TASK)
+        assert second == "run" and isinstance(history, FlowRunHistoryRetentionTask)
+    # Registration order: staging data first, then run history.
+    assert [report.task for report in reports] == [
+        FLOWS_HOUSEKEEPING_TASK,
+        FLOWS_HISTORY_TASK,
+    ]
 
 
 @pytest.mark.parametrize(("family_rows", "accepted"), [(10_000, True), (10_001, False)])

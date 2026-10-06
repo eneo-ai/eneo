@@ -110,6 +110,9 @@ class FlowRunRetryService:
     async def retry_from_failed_step(
         self, *, flow_id: UUID, run_id: UUID, idempotency_key: str
     ) -> FlowRunRetryResult:
+        await self.run_repo.lock_source_run(
+            run_id=run_id, tenant_id=self.user.tenant_id
+        )
         source = await self.access_policy.load_run(
             flow_id=flow_id, run_id=run_id, access_kind="content"
         )

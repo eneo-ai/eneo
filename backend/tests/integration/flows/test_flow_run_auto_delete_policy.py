@@ -17,9 +17,8 @@ import pytest
 import sqlalchemy as sa
 from httpx import ASGITransport, AsyncClient
 
-from eneo.data_retention.domain.retention import RetentionJobOutcome
+from eneo.data_retention.domain.retention import RetentionJobOutcome, RetentionTrigger
 from eneo.data_retention.infrastructure import retention_tasks
-from eneo.data_retention.infrastructure.retention_tasks import RetentionTaskRegistration
 from eneo.database.tables.audit_log_table import AuditLog
 from eneo.database.tables.flow_tables import (
     FlowRetentionHolds,
@@ -74,22 +73,6 @@ def headers(admin_token) -> dict[str, str]:
     return {"Authorization": f"Bearer {admin_token}"}
 
 
-def _register_flows_history(monkeypatch) -> None:
-    """The deleting task is in the code list (the gate's only input)."""
-    monkeypatch.setattr(
-        retention_tasks,
-        "RETENTION_TASKS",
-        (
-            *retention_tasks.RETENTION_TASKS,
-            RetentionTaskRegistration(
-                name=FLOWS_HISTORY_TASK,
-                enabled=lambda settings: True,
-                build=lambda session: (_ for _ in ()).throw(AssertionError("unused")),
-            ),
-        ),
-    )
-
-
 @pytest.fixture
 async def scope(db_container, admin_user) -> dict[str, UUID]:
     """A Space with one Flow, both inheriting the Organization policy."""
@@ -111,11 +94,6 @@ async def scope(db_container, admin_user) -> dict[str, UUID]:
         await session.flush()
         flow = await _flow(session, admin_user, space.id)
         return {"space_id": space.id, "flow_id": flow}
-
-
-@pytest.fixture
-def flows_history_registered(monkeypatch) -> None:
-    _register_flows_history(monkeypatch)
 
 
 async def _flow(session, admin_user, space_id, mode=None, days=None) -> UUID:
@@ -230,7 +208,13 @@ async def _policy_audits(db_container, tenant_id) -> list[dict[str, object]]:
 async def test_auto_delete_is_refused_until_the_deleting_task_is_registered(
     client, headers, admin_user, db_container, scope, monkeypatch
 ) -> None:
-    """Mutant gate_open."""
+    """Mutant gate_open: registration, not the emergency switch, controls writes."""
+    registered_tasks = retention_tasks.RETENTION_TASKS
+    monkeypatch.setattr(
+        retention_tasks,
+        "RETENTION_TASKS",
+        tuple(task for task in registered_tasks if task.name != FLOWS_HISTORY_TASK),
+    )
     refused = await client.put(
         ROOT, json={"policy": {"mode": "auto_delete", "days": 30}}, headers=headers
     )
@@ -247,7 +231,8 @@ async def test_auto_delete_is_refused_until_the_deleting_task_is_registered(
     ).json()
     assert flow["inherited_policy"] == {"mode": "auto_delete", "days": 30}
 
-    _register_flows_history(monkeypatch)
+    monkeypatch.setattr(retention_tasks, "RETENTION_TASKS", registered_tasks)
+    monkeypatch.setattr(get_settings(), "retention_flows_history_enabled", False)
 
     accepted = await client.put(
         ROOT, json={"policy": {"mode": "auto_delete", "days": 30}}, headers=headers
@@ -283,7 +268,7 @@ async def test_the_maximum_applies_on_write_and_a_stored_longer_rule_still_appli
 
 
 async def test_stopping_or_delaying_auto_delete_needs_a_recorded_reason(
-    client, headers, admin_user, db_container, scope, flows_history_registered
+    client, headers, admin_user, db_container, scope
 ) -> None:
     """Mutants reason_skipped, reason_on_local_policy."""
     space_path = f"{ROOT}/spaces/{scope['space_id']}"
@@ -456,7 +441,7 @@ async def test_status_reports_tasks_overdue_runs_by_blocker_and_receipts(
 
     assert response.status_code == 200, response.text
     status = response.json()
-    assert status["auto_delete_available"] is False
+    assert status["auto_delete_available"] is True
     assert status["overdue_window_days"] == 1
     assert [task["name"] for task in status["tasks"]] == [
         registration.name for registration in retention_tasks.RETENTION_TASKS
@@ -674,6 +659,7 @@ async def test_the_due_index_serves_the_generic_plan_of_the_prepared_query(
                 cutoff=datetime.now(timezone.utc),
                 after=None,
                 limit=10,
+                trigger=RetentionTrigger.SCHEDULED,
             )
         finally:
             sa.event.remove(session.bind.sync_engine, "before_cursor_execute", capture)

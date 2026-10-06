@@ -61,6 +61,7 @@ from eneo.database.tables.retention_tables import (
     RetentionReceiptItems,
     RetentionReceipts,
 )
+from eneo.flows.application.flow_run_access_policy import FlowRunAccessPolicy
 from eneo.flows.application.flow_run_history_deletion import (
     SCHEDULED_MODES,
     FlowRunHistoryDeletion,
@@ -69,6 +70,10 @@ from eneo.flows.application.flow_run_history_deletion import (
 from eneo.flows.application.flow_run_history_purge import FlowRunHistoryExplicitPurge
 from eneo.flows.application.flow_run_history_retention_task import (
     FlowRunHistoryRetentionTask,
+)
+from eneo.flows.application.flow_run_retry_service import FlowRunRetryService
+from eneo.flows.application.flow_transcript_regeneration_service import (
+    FlowTranscriptRegenerationService,
 )
 from eneo.flows.domain.flow_run_exceptions import FlowRunNotFoundError
 from eneo.flows.domain.flow_run_retention_policy import FLOWS_HISTORY_TASK
@@ -81,7 +86,12 @@ from eneo.flows.infrastructure.flow_run_history_due_repo import (
 )
 from eneo.flows.infrastructure.flow_run_repo import FlowRunRepository
 from eneo.main.config import get_settings
+from eneo.main.exceptions import NotFoundException
 from tests.integration.flows.flow_run_deletion_support import delete_run, purge
+from tests.integration.flows.test_flow_delete_fencing import (
+    _backend_pid,
+    _until_blocked_by_or_done,
+)
 from tests.integration.flows.test_flow_gallring import (
     _committed,
     _file,
@@ -89,6 +99,10 @@ from tests.integration.flows.test_flow_gallring import (
     _place_hold,
     _runner,
     _space,
+)
+from tests.integration.flows.test_transcript_corrections import (
+    SEGMENTS,
+    _create_scenario,
 )
 
 pytestmark = [pytest.mark.asyncio, pytest.mark.integration]
@@ -893,16 +907,23 @@ async def test_a_family_over_the_cap_pauses_the_run_until_the_cap_is_raised(
 # Bounded examination ---------------------------------------------------------------
 
 
+@pytest.mark.parametrize(
+    "prefix_kind", ["audit", "run_hold", "flow_hold", "no_due_runs"]
+)
 async def test_a_blocked_prefix_never_starves_later_runs_and_the_pass_resets(
-    test_tenant, admin_user
+    test_tenant, admin_user, prefix_kind
 ):
-    """Mutants examination_uncharged, cursor_not_durable."""
+    """Mutants uncharged_scan, lost_cursor, M153/M154 explicit_blocked_or_empty_prefix."""
     tenant_id, user_id = test_tenant.id, admin_user.id
     space_id = await _space(tenant_id, user_id)
-    blocked_flow = UUID("00000000-0000-0000-0000-00000000000a")
+    prefix = 25
+    blocked_flows = [
+        UUID(int=10 + i)
+        for i in range(prefix if prefix_kind in {"flow_hold", "no_due_runs"} else 1)
+    ]
     open_flow = UUID("ffffffff-0000-0000-0000-00000000000b")
     async with _committed() as session:
-        for flow_id in (blocked_flow, open_flow):
+        for flow_id in (*blocked_flows, open_flow):
             session.add(
                 Flows(
                     id=flow_id,
@@ -913,36 +934,61 @@ async def test_a_blocked_prefix_never_starves_later_runs_and_the_pass_resets(
                     flow_run_history_retention_days=1,
                 )
             )
-    prefix = 25
     for index in range(prefix):
+        if prefix_kind == "no_due_runs":
+            continue
+        blocked_flow = (
+            blocked_flows[index] if prefix_kind == "flow_hold" else blocked_flows[0]
+        )
         run_id = await _bare_run(
-            tenant_id, user_id, blocked_flow, at=OLD - timedelta(minutes=index)
+            tenant_id, user_id, blocked_flow, at=OLD - timedelta(minutes=index + 1)
         )
         async with _committed() as session:
-            session.add(
-                FlowRunAuditOutbox(
-                    tenant_id=tenant_id,
-                    flow_id=blocked_flow,
-                    flow_run_id=run_id,
-                    run_revision=1,
-                    description="flow_run_completed:executor_completed",
-                    action="flow_run_completed",
-                    entity_type="flow_run",
-                    entity_id=run_id,
-                    actor_id=user_id,
-                    actor_type="user",
-                    source="executor_completed",
-                    target_status="completed",
-                    delivery_status=FlowOutboxDeliveryStatus.PENDING.value,
+            if prefix_kind == "audit":
+                session.add(
+                    FlowRunAuditOutbox(
+                        tenant_id=tenant_id,
+                        flow_id=blocked_flow,
+                        flow_run_id=run_id,
+                        run_revision=1,
+                        description="flow_run_completed:executor_completed",
+                        action="flow_run_completed",
+                        entity_type="flow_run",
+                        entity_id=run_id,
+                        actor_id=user_id,
+                        actor_type="user",
+                        source="executor_completed",
+                        target_status="completed",
+                        delivery_status=FlowOutboxDeliveryStatus.PENDING.value,
+                    )
                 )
-            )
-    eligible = await _bare_run(tenant_id, user_id, open_flow)
+            else:
+                await _place_hold(
+                    session,
+                    tenant_id,
+                    blocked_flow,
+                    run_id=run_id if prefix_kind == "run_hold" else None,
+                )
+    eligible_flow = (
+        blocked_flows[0] if prefix_kind in {"audit", "run_hold"} else open_flow
+    )
+    eligible = await _bare_run(tenant_id, user_id, eligible_flow)
     budget = 10
+    blocked_key = "runs.undelivered_audit" if prefix_kind == "audit" else "runs.held"
+
+    # A request has no durable cursor. SQL eligibility must pass a blocked
+    # prefix without consuming its returned-row budget on each new request.
+    for _ in range(2):
+        async with _committed() as session:
+            preview = await purge(session, tenant_id, dry_run=True, max_rows=budget)
+        assert preview.candidate_count == 1
+        assert preview.selection_complete
+    assert await _run_exists(eligible)
 
     # One execution examines at most its budget: it cannot pass the whole prefix.
     first = await _history(chunk_rows=budget, budget_rows=budget)
     assert await _run_exists(eligible)
-    assert first.blocked.get("runs.undelivered_audit", 0) < prefix
+    assert first.blocked.get(blocked_key, 0) < prefix
     executions = 1
     while await _run_exists(eligible):
         executions += 1
@@ -953,7 +999,8 @@ async def test_a_blocked_prefix_never_starves_later_runs_and_the_pass_resets(
     # durable cursor is dropped, so the one after starts from the first Flow.
     final = await _history()
     assert final.outcome == RetentionJobOutcome.SUCCEEDED
-    assert final.blocked.get("runs.undelivered_audit") == prefix
+    if prefix_kind != "no_due_runs":
+        assert final.blocked.get(blocked_key) == prefix
     async with _committed() as session:
         cursors = await session.scalar(
             sa.select(RetentionJobRuns.cursors).where(
@@ -976,11 +1023,18 @@ async def test_admission_rechecks_the_locked_candidate(scope, change):
         await deletion.lock()
         now = datetime.now(timezone.utc)
         rules = await deletion.rules.rules(
-            modes=SCHEDULED_MODES, after=None, limit=1, flow_id=flow_id
+            modes=SCHEDULED_MODES,
+            after=None,
+            limit=1,
+            flow_id=flow_id,
+            trigger=RetentionTrigger.SCHEDULED,
+            now=now,
         )
         rule = rules[0] if rules else None
         assert rule is not None
-        [due] = await deletion.candidates(rule, now=now, after=None, limit=1)
+        [due] = await deletion.candidates(
+            rule, now=now, after=None, limit=1, trigger=RetentionTrigger.SCHEDULED
+        )
         if change == "fresh_anchor":
             await session.execute(
                 sa.update(FlowRuns).where(FlowRuns.id == run_id).values(finished_at=now)
@@ -1275,3 +1329,189 @@ async def test_shared_upload_ownership_controls_binding_and_transcript_release(
     assert (bound, transcripts) == ((1, 1) if other_run_consumes else (0, 0))
     if other_run is not None:
         assert await _run_exists(other_run)
+
+
+async def test_a_retry_copying_the_run_defers_its_deletion(scope):
+    """Mutant admission_waits_for_the_copy (NOWAIT/SKIP LOCKED dropped)."""
+    tenant_id, user_id, _, flow_id = scope
+    run_id = await _bare_run(tenant_id, user_id, flow_id)
+    async with sessionmanager.session() as retrying, retrying.begin():
+        await FlowRunRepository(retrying).lock_source_run(
+            run_id=run_id, tenant_id=tenant_id
+        )
+        async with _committed() as deleting:
+            out, receipt = await delete_run(deleting, run_id)
+        assert receipt is None and out.blocked["lock_deferred"] == 1
+    assert await _fence(run_id) is None
+
+
+@pytest.mark.parametrize(
+    "copy_service", [FlowRunRetryService, FlowTranscriptRegenerationService]
+)
+async def test_a_source_copy_waits_for_a_deletion_and_then_finds_the_run_gone(
+    admin_user,
+    db_container,
+    copy_service,
+    completion_model_factory,
+    space_factory,
+    assistant_factory,
+    monkeypatch,
+):
+    """M145/M146 omit the source lock; M149/M150 read before taking it."""
+    from eneo.database.tables.spaces_table import SpacesUsers
+    from eneo.flows.application.flow_transcript_regeneration_service import (
+        render_original_segments,
+    )
+    from eneo.flows.domain.transcript_corrections import segments_content_hash
+    from eneo.spaces.api.space_models import SpaceRoleValue
+
+    async with db_container(user=admin_user) as container:
+        session = container.session()
+        scenario = await _create_scenario(
+            session=session,
+            completion_model_factory=completion_model_factory,
+            space_factory=space_factory,
+            assistant_factory=assistant_factory,
+            admin_user=admin_user,
+            runtime_definition=True,
+        )
+        flow = await container.flow_repo().get(scenario.flow_id, admin_user.tenant_id)
+        session.add(
+            SpacesUsers(
+                space_id=flow.space_id,
+                user_id=admin_user.id,
+                role=SpaceRoleValue.EDITOR,
+            )
+        )
+        await session.execute(
+            sa.update(FlowRuns)
+            .where(FlowRuns.id == scenario.flow_run_id)
+            .values(
+                status="failed" if copy_service is FlowRunRetryService else "completed",
+                finished_at=OLD,
+                output_payload_json={"text": "Original summary"},
+            )
+        )
+        await session.execute(
+            sa.update(FlowStepResults)
+            .where(FlowStepResults.flow_run_id == scenario.flow_run_id)
+            .values(
+                status="completed", output_payload_json={"text": "Original summary"}
+            )
+        )
+        await session.execute(
+            sa.update(FlowStepResults)
+            .where(
+                FlowStepResults.flow_run_id == scenario.flow_run_id,
+                FlowStepResults.step_id == scenario.transcription_step_id,
+            )
+            .values(output_payload_json={"text": render_original_segments(SEGMENTS)})
+        )
+        if copy_service is FlowRunRetryService:
+            await session.execute(
+                sa.update(FlowStepResults)
+                .where(
+                    FlowStepResults.flow_run_id == scenario.flow_run_id,
+                    FlowStepResults.step_id == scenario.plain_step_id,
+                )
+                .values(status="failed")
+            )
+
+    run_id = scenario.flow_run_id
+    readable_sources: list[UUID] = []
+    load_run = FlowRunAccessPolicy.load_run
+
+    async def observe_readable_source(self, **kwargs):
+        run = await load_run(self, **kwargs)
+        readable_sources.append(run.id)
+        return run
+
+    monkeypatch.setattr(FlowRunAccessPolicy, "load_run", observe_readable_source)
+
+    async def copy(container, key: str) -> UUID:
+        from eneo.server.dependencies.container import load_container_upload_admission
+
+        await load_container_upload_admission(container)
+        if copy_service is FlowRunRetryService:
+            service = FlowRunRetryService(
+                user=container.user(),
+                run_service=container.flow_run_service(),
+                access_policy=container.flow_run_access_policy(),
+                run_repo=container.flow_run_repo(),
+                flow_repo=container.flow_repo(),
+                checkpoint_repo=container.flow_run_review_checkpoint_repo(),
+                audit_service=container.audit_service(),
+            )
+            result = await service.retry_from_failed_step(
+                flow_id=scenario.flow_id,
+                run_id=run_id,
+                idempotency_key=key,
+            )
+            assert result.reused_step_orders == (1,)
+            return result.run_result.run.id
+        result = await container.flow_transcript_regeneration_service().regenerate(
+            flow_id=scenario.flow_id,
+            run_id=run_id,
+            step_id=scenario.transcription_step_id,
+            expected_run_revision=1,
+            expected_correction_revision=None,
+            segments_hash=segments_content_hash(SEGMENTS),
+            idempotency_key=key,
+        )
+        return result.run.id
+
+    # Both fixtures must really be copyable; roll back the control's child so
+    # it cannot become an extra owner during the deletion race.
+    async with db_container(user=admin_user) as container:
+        async with container.session().begin_nested() as control:
+            child_id = await copy(container, "copyable-control")
+            assert child_id != run_id
+            assert await container.session().get(FlowRuns, child_id) is not None
+            await control.rollback()
+    readable_sources.clear()
+
+    fenced = asyncio.Event()
+    release = asyncio.Event()
+    copy_ready = asyncio.Event()
+    holder_pid: int | None = None
+
+    async def delete() -> None:
+        nonlocal holder_pid
+        async with _committed() as deleting:
+            holder_pid = await _backend_pid(deleting)
+            _, receipt = await delete_run(deleting, run_id, max_rows=6, max_files=1)
+            assert receipt is not None
+            fenced.set()
+            await asyncio.wait_for(release.wait(), timeout=20)
+
+    async def retry() -> bool:
+        await asyncio.wait_for(fenced.wait(), timeout=20)
+        async with db_container(user=admin_user) as container:
+            copy_ready.set()
+            try:
+                await copy(container, "held-source-copy")
+            except NotFoundException as exc:
+                assert isinstance(exc.__cause__, FlowRunNotFoundError)
+                return False
+            return True
+
+    deleting = asyncio.create_task(delete())
+    retrying = asyncio.create_task(retry())
+    try:
+        await asyncio.wait_for(fenced.wait(), timeout=20)
+        await asyncio.wait_for(copy_ready.wait(), timeout=20)
+        assert holder_pid is not None
+        await _until_blocked_by_or_done(holder_pid=holder_pid, task=retrying)
+        waited = not retrying.done()
+        # Observe real returned source data, not a mocked repository result:
+        # an uncommitted deletion must serialize before any copy reads it.
+        read_before_commit = tuple(readable_sources)
+    finally:
+        release.set()
+        _, found = await asyncio.wait_for(
+            asyncio.gather(deleting, retrying), timeout=20
+        )
+    assert read_before_commit == (), (
+        "A deleting source was readable before the copy lock."
+    )
+    assert waited and found is False

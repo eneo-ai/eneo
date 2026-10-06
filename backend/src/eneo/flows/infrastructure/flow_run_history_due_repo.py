@@ -19,6 +19,7 @@ from eneo.data_retention.domain.retention import (
     NON_FINAL_RECEIPT_PHASES,
     ReceiptPhase,
     RetentionPolicySource,
+    RetentionTrigger,
 )
 from eneo.database.tables.flow_tables import FlowRetentionHolds, FlowRuns, Flows
 from eneo.database.tables.retention_tables import RetentionReceipts
@@ -36,7 +37,7 @@ from eneo.flows.infrastructure.flow_retention_hold_repo import (
     flow_run_held_predicate,
     flow_runless_data_held_predicate,
 )
-from eneo.flows.infrastructure.flow_run_history_purge_repo import (
+from eneo.flows.infrastructure.flow_retention_predicates import (
     flow_run_undelivered_audit_exists,
     flow_run_unresolved_webhook_exists,
 )
@@ -77,6 +78,15 @@ def flow_run_k4_due_predicates(
     )
 
 
+def flow_run_history_is_unblocked() -> sa.ColumnElement[bool]:
+    """The shared eligibility decision for explicit Flow and run selection."""
+    return sa.and_(
+        ~flow_run_held_predicate(run_id=FlowRuns.id, flow_id=FlowRuns.flow_id),
+        ~flow_run_undelivered_audit_exists(FlowRuns.id),
+        ~flow_run_unresolved_webhook_exists(FlowRuns.id),
+    )
+
+
 # flow_id, tenant_id, space_id, mode, days, level, Flow under a legal hold.
 _RuleRow = tuple[UUID, UUID, UUID, str | None, int | None, str | None, bool]
 
@@ -89,7 +99,9 @@ def auto_delete_flows() -> sa.Select[_RuleRow]:
     return flow_history_rules(modes=(FlowRunRetentionMode.AUTO_DELETE,))
 
 
-def flow_history_rules(*, modes: Sequence[FlowRunRetentionMode]) -> sa.Select[_RuleRow]:
+def flow_history_rules(
+    *, modes: Sequence[FlowRunRetentionMode], eligible_at: datetime | None = None
+) -> sa.Select[_RuleRow]:
     """Flows whose effective rule has one of `modes`, with the rule (mode, days,
     level and the id of the level that set it)."""
     effective = effective_flow_run_retention_policy_sql(
@@ -100,7 +112,7 @@ def flow_history_rules(*, modes: Sequence[FlowRunRetentionMode]) -> sa.Select[_R
         flow_mode=Flows.flow_run_history_retention_mode.__clause_element__(),
         flow_days=Flows.flow_run_history_retention_days.__clause_element__(),
     )
-    return (
+    stmt = (
         sa.select(
             Flows.id.label("flow_id"),
             Flows.tenant_id.label("tenant_id"),
@@ -117,6 +129,21 @@ def flow_history_rules(*, modes: Sequence[FlowRunRetentionMode]) -> sa.Select[_R
         .join(Tenants, Tenants.id == Flows.tenant_id)
         .where(effective.mode.in_([mode.value for mode in modes]))
     )
+
+    if eligible_at is not None:
+        # Cursor-less requests must not repeatedly spend their budget on Flows
+        # with no eligible run. Reuse the same eligibility as the run query.
+        cutoff = sa.cast(
+            sa.literal(eligible_at), sa.TIMESTAMP(timezone=True)
+        ) - sa.func.make_interval(0, 0, 0, effective.days)
+        eligible_run = sa.select(FlowRuns.id).where(
+            *flow_run_k4_due_predicates(
+                flow_id=Flows.id.__clause_element__(), cutoff=cutoff
+            ),
+            flow_run_history_is_unblocked(),
+        )
+        stmt = stmt.where(eligible_run.exists())
+    return stmt
 
 
 @dataclass(frozen=True, slots=True)
@@ -211,9 +238,18 @@ class FlowRunHistoryDueRepository:
         space_id: UUID | None = None,
         flow_id: UUID | None = None,
         inclusive: bool = True,
+        trigger: RetentionTrigger,
+        now: datetime,
     ) -> list[FlowHistoryRule]:
         """One current rule range; exclusive after a completed Flow."""
-        stmt = flow_history_rules(modes=modes).order_by(Flows.id).limit(limit)
+        stmt = (
+            flow_history_rules(
+                modes=modes,
+                eligible_at=now if trigger is RetentionTrigger.EXPLICIT else None,
+            )
+            .order_by(Flows.id)
+            .limit(limit)
+        )
         if after is not None:
             stmt = stmt.where(Flows.id >= after if inclusive else Flows.id > after)
         if tenant_id is not None:

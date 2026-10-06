@@ -36,6 +36,7 @@ _DIAGNOSED_MODES = (*EXPLICIT_MODES, FlowRunRetentionMode.REVIEW_REQUIRED)
 
 @dataclass(frozen=True, slots=True)
 class ExplicitPurgeResult:
+    selection_complete: bool
     candidate_count: int
     purged_run_ids: tuple[UUID, ...]
     pending_receipt_ids: tuple[UUID, ...]
@@ -118,6 +119,10 @@ class FlowRunHistoryExplicitPurge:
                 min_candidate_rows=2,
             )
             return ExplicitPurgeResult(
+                # None from the producer can also mean the request limit was
+                # reached, so exhaustion alone cannot prove scope exhaustion.
+                selection_complete=collected.exhausted
+                and selection.candidate_count < limit,
                 candidate_count=selection.candidate_count,
                 purged_run_ids=tuple(selection.purged_run_ids),
                 effects=collected.effects,

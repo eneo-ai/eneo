@@ -1,12 +1,14 @@
 from __future__ import annotations
 
 from datetime import datetime, timedelta, timezone
-from uuid import uuid4
+from uuid import UUID, uuid4
 
 import pytest
 import sqlalchemy as sa
 
+from eneo.audit.domain.action_types import ActionType
 from eneo.audit.infrastructure.audit_log_repo_impl import AuditLogRepositoryImpl
+from eneo.audit.schemas.audit_config_schemas import ActionUpdate
 from eneo.database.tables.audit_log_table import AuditLog
 from eneo.database.tables.flow_tables import (
     FlowLiveTranscripts,
@@ -17,8 +19,12 @@ from eneo.database.tables.flow_tables import (
     FlowStepAttempts,
     FlowVersions,
 )
+from eneo.database.tables.retention_tables import RetentionReceipts
 from eneo.database.tables.spaces_table import Spaces
 from eneo.database.tables.tenant_table import Tenants
+from eneo.flows.domain.flow_run_exceptions import FlowRunNotFoundError
+from eneo.main.config import get_settings
+from tests.integration.flows.flow_run_deletion_support import purge
 
 pytestmark = [pytest.mark.integration, pytest.mark.asyncio]
 
@@ -115,16 +121,30 @@ async def test_transcript_only_purge_reports_preview_and_audited_deletions(
             "flow_id": str(flow_id) if scope == "flow" else None,
             "limit": 2,
             "purged_count": 0,
+            "selection_complete": True,
             "purged_run_ids": [],
+            "pending_receipt_ids": [],
+            "retention_effects": [],
+            "retention_blocked": {},
             "transcript_candidate_count": 2,
             "transcript_purged_count": 2,
             "blocked": preview.json()["blocked"],
         }
 
 
+@pytest.mark.parametrize("row_budget", [50_000, 8])
 async def test_admin_explicit_purge_defaults_to_preview_and_audits_deletion(
-    client, admin_token, admin_user, published_flow_ids, db_container
+    client,
+    admin_token,
+    admin_user,
+    published_flow_ids,
+    db_container,
+    monkeypatch,
+    row_budget,
 ) -> None:
+    """M143/M144 omit required proof; M151/M152 pending work; M155/M156 false selection completeness."""
+    monkeypatch.setattr(get_settings(), "gallring_max_rows_per_run", row_budget)
+    pending = row_budget == 8
     _, flow_id = published_flow_ids
     old = datetime.now(timezone.utc) - timedelta(days=3)
     async with db_container() as container:
@@ -153,6 +173,18 @@ async def test_admin_explicit_purge_defaults_to_preview_and_audits_deletion(
         session.add(run)
         await session.flush()
         run_id = run.id
+        audit_config = container.audit_config_service()
+        await audit_config.update_action_config(
+            admin_user.tenant_id,
+            [
+                ActionUpdate(
+                    action=ActionType.FLOW_RUN_HISTORY_PURGED.value, enabled=False
+                )
+            ],
+        )
+        assert not await audit_config.is_action_enabled(
+            admin_user.tenant_id, ActionType.FLOW_RUN_HISTORY_PURGED.value
+        )
 
     path = "/api/v1/settings/flow-run-retention-policy/purge"
     headers = {"Authorization": f"Bearer {admin_token}"}
@@ -162,8 +194,11 @@ async def test_admin_explicit_purge_defaults_to_preview_and_audits_deletion(
         "dry_run": True,
         "scope": "organization",
         "candidate_count": 1,
+        "selection_complete": True,
         "purged_count": 0,
         "purged_run_ids": [],
+        "pending_count": 0,
+        "pending_receipt_ids": [],
         "transcript_candidate_count": 0,
         "transcript_purged_count": 0,
         "blocked": {
@@ -188,21 +223,72 @@ async def test_admin_explicit_purge_defaults_to_preview_and_audits_deletion(
 
     response = await client.post(path, json={"dry_run": False}, headers=headers)
     assert response.status_code == 200, response.text
+    pending_ids = response.json()["pending_receipt_ids"]
+    assert len(pending_ids) == int(pending)
     assert response.json() == {
         **preview.json(),
         "dry_run": False,
-        "purged_count": 1,
-        "purged_run_ids": [str(run_id)],
+        "purged_count": int(not pending),
+        "purged_run_ids": [] if pending else [str(run_id)],
+        "pending_count": int(pending),
+        "selection_complete": not pending,
+        "pending_receipt_ids": pending_ids,
     }
     async with db_container() as container:
-        assert await container.session().get(FlowRuns, run_id) is None
+        stored_run = await container.session().get(FlowRuns, run_id)
+        if pending:
+            assert stored_run is not None
+            assert stored_run.retention_receipt_id == UUID(pending_ids[0])
+            with pytest.raises(FlowRunNotFoundError):
+                await container.flow_run_repo().get(
+                    run_id=run_id, tenant_id=admin_user.tenant_id
+                )
+        else:
+            assert stored_run is None
         audit = (
             await container.session().scalars(
                 sa.select(AuditLog).where(AuditLog.action == "flow_run_history_purged")
             )
         ).one()
         assert audit.tenant_id == admin_user.tenant_id
-        assert audit.log_metadata == {
+        metadata = audit.log_metadata
+        assert metadata["pending_receipt_ids"] == pending_ids
+        assert metadata["selection_complete"] is (not pending)
+        assert metadata["retention_blocked"] == {}
+        effects = metadata["retention_effects"]
+        assert sum(
+            effect["counts"].get("runs_deleted", 0) for effect in effects
+        ) == int(not pending)
+        receipt_ids = set(
+            await container.session().scalars(
+                sa.select(RetentionReceipts.id).where(
+                    RetentionReceipts.entity_id == run_id
+                )
+            )
+        )
+        assert receipt_ids
+        if pending:
+            receipt = await container.session().get(
+                RetentionReceipts, UUID(pending_ids[0])
+            )
+            assert receipt is not None
+            assert receipt.trigger == "explicit"
+            assert receipt.triggered_by_user_id == admin_user.id
+            assert receipt.id in receipt_ids
+        assert {
+            receipt_id for effect in effects for receipt_id in effect["receipt_ids"]
+        } == {str(receipt_id) for receipt_id in receipt_ids}
+        assert {
+            key: value
+            for key, value in metadata.items()
+            if key
+            not in {
+                "pending_receipt_ids",
+                "retention_effects",
+                "retention_blocked",
+                "selection_complete",
+            }
+        } == {
             "actor": {
                 "type": "user",
                 "id": str(admin_user.id),
@@ -215,8 +301,8 @@ async def test_admin_explicit_purge_defaults_to_preview_and_audits_deletion(
             "space_id": None,
             "flow_id": None,
             "limit": 100,
-            "purged_count": 1,
-            "purged_run_ids": [str(run_id)],
+            "purged_count": int(not pending),
+            "purged_run_ids": [] if pending else [str(run_id)],
             "transcript_candidate_count": 0,
             "transcript_purged_count": 0,
             "blocked": preview.json()["blocked"],
@@ -774,13 +860,8 @@ async def test_review_required_run_is_listed_but_never_selected_for_purge(
     assert oversized_cursor.status_code == 422, oversized_cursor.text
 
     async with db_container() as container:
-        purge_result = (
-            await container.data_retention_service().purge_old_flow_run_history_batch(
-                now=datetime.now(timezone.utc),
-                limit=10,
-            )
-        )
-        assert purge_result.counts.flow_runs_considered == 0
+        purge_result = await purge(container.session(), admin_user.tenant_id)
+        assert purge_result.candidate_count == 0
         assert await container.session().get(FlowRuns, first_run_id) is not None
         assert await container.session().get(FlowRuns, second_run_id) is not None
 
@@ -1092,6 +1173,7 @@ async def purge_history(db_container, admin_user, published_flow_ids, user_facto
 async def test_purge_is_scoped_bounded_and_reports_blocked_runs(
     client, admin_token, db_container, purge_history, scope
 ):
+    """M157: reaching a request limit must not claim scope exhaustion."""
     root = "/api/v1/settings/flow-run-retention-policy"
     suffix = (
         "" if scope == "organization" else f"/{scope}s/{purge_history[f'{scope}_id']}"
@@ -1108,6 +1190,7 @@ async def test_purge_is_scoped_bounded_and_reports_blocked_runs(
         "counted_runs": {"organization": 7, "space": 6, "flow": 4}[scope],
         "complete": True,
     }
+    assert preview.json()["selection_complete"] is False
     assert preview.json()["candidate_count"] == 1
     assert preview.json()["blocked"] == blocked
     expected = purge_history["eligible"][scope]
@@ -1122,6 +1205,7 @@ async def test_purge_is_scoped_bounded_and_reports_blocked_runs(
         )
         assert response.status_code == 200, response.text
         result = response.json()
+        assert result["selection_complete"] is False
         assert result["scope"] == scope
         assert result["candidate_count"] == result["purged_count"] == 1
         assert result["blocked"] == {
@@ -1132,6 +1216,7 @@ async def test_purge_is_scoped_bounded_and_reports_blocked_runs(
     assert purged == {str(run_id) for run_id in expected}
     empty = await client.post(path, json={"dry_run": False}, headers=headers)
     assert empty.status_code == 200, empty.text
+    assert empty.json()["selection_complete"] is True
     assert empty.json()["candidate_count"] == empty.json()["purged_count"] == 0
     assert empty.json()["blocked"] == {
         **blocked,

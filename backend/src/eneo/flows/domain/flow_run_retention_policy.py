@@ -48,8 +48,8 @@ class FlowRunRetentionPolicy(BaseModel):
     mode: FlowRunRetentionMode = Field(
         description=(
             "Preserve makes records eligible only for an explicit administrator "
-            "purge. Review_required additionally requires human approval before "
-            "that purge. Auto_delete makes the nightly flows.history task delete "
+            "purge. Review_required keeps records for human review and admits "
+            "none for deletion. Auto_delete makes the nightly flows.history task delete "
             "terminal runs once they are older than the days. A deployment accepts "
             "auto_delete only once that task is installed (auto_delete_available)."
         )

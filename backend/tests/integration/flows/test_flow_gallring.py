@@ -1372,8 +1372,12 @@ async def test_final_receipts_and_job_runs_are_pruned_after_audit_retention(
     ] == [{"receipts_marked": 1}, {"receipts_pruned": 1}]
 
 
-async def test_receipt_pruning_keeps_the_proof_of_a_held_flow(scope) -> None:
-    tenant_id, _, _, held_flow_id = scope
+@pytest.mark.parametrize("protection", ["legal_hold", "run_fence"])
+async def test_receipt_pruning_keeps_referenced_or_held_proof(
+    scope, protection
+) -> None:
+    """Mutant M139 receipt_reference_ignored must not stall either pruning stage."""
+    tenant_id, user_id, _, held_flow_id = scope
     old = _NOW - timedelta(days=400)  # past the 365-day default audit retention
 
     def receipt(**values: Any) -> RetentionReceipts:
@@ -1407,7 +1411,34 @@ async def test_receipt_pruning_keeps_the_proof_of_a_held_flow(scope) -> None:
             )
         )
         ids = {"expired": expired.id, "marked": marked.id, "unheld": unheld.id}
-        await _place_hold(session, tenant_id, held_flow_id)
+        if protection == "legal_hold":
+            await _place_hold(session, tenant_id, held_flow_id)
+
+    if protection == "run_fence":
+        for receipt_id in (ids["expired"], ids["marked"]):
+            outbox_id = await _delivered_outbox_row(tenant_id, user_id, held_flow_id)
+            async with _committed() as session:
+                run_id = await session.scalar(
+                    sa.select(FlowRunAuditOutbox.flow_run_id).where(
+                        FlowRunAuditOutbox.id == outbox_id
+                    )
+                )
+                assert run_id is not None
+                await session.execute(
+                    sa.update(RetentionReceipts)
+                    .where(RetentionReceipts.id == receipt_id)
+                    .values(
+                        task="flows.history",
+                        entity_kind="flow_run",
+                        category="run_record",
+                        entity_id=run_id,
+                    )
+                )
+                await session.execute(
+                    sa.update(FlowRuns)
+                    .where(FlowRuns.id == run_id)
+                    .values(retention_receipt_id=receipt_id)
+                )
 
     await _housekeeping()
 

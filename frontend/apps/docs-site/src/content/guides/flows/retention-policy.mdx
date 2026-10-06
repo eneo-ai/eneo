@@ -2,13 +2,13 @@ import { Callout } from "nextra/components";
 
 # Flow run-history retention
 
-This page explains how retention eligibility for Flow runs, steps, and their run-owned history is set, reviewed, purged and put on legal hold. It covers the policy hierarchy, manual and guarded automatic modes, the read-only review queue, legal holds, and who may do what.
+This page explains how retention eligibility for Flow runs, steps, and their run-owned history is set, reviewed, purged and put on legal hold. It covers the policy hierarchy, the modes, the read-only review queue, legal holds, the deletion status, and who may do what.
 
 <Callout type="warning">
 
-**Saving a Flow run-history policy does not delete data.**
+**Delete automatically (`auto_delete`) deletes run history every night.**
 
-The `auto_delete` mode is unavailable until the nightly history task is registered. While that gate is closed, history is deleted only by the explicit purge (an API call that needs `retention_manage`), which skips every run under a legal hold. The admin UI has no purge button; the review queue is read-only.
+Under `auto_delete` the nightly `flows.history` task deletes terminal runs once they are older than the days, with their files. Under `preserve`, history deletes only through the explicit purge (an API call that needs `retention_manage`). Both skip every run under a legal hold. `review_required` keeps history and never admits it for deletion. Saving a policy deletes nothing by itself. The admin UI has no purge button; the review queue is read-only. An installation without the nightly task refuses `auto_delete` (`flow_retention_auto_delete_unavailable`; `write_rules.auto_delete_available` says which).
 
 </Callout>
 
@@ -45,18 +45,13 @@ The Organization value is a default, not a hard maximum or minimum. This support
 
 The litigation Flow uses 90 days. Other Flows in Legal use 60 days. Flows in other Spaces use 30 days. The administrator does not need to raise the Organization default to 90 days.
 
-The run-history mode also accepts `auto_delete`, subject to the deployment's
-`write_rules.auto_delete_available` gate. Until the nightly history task is
-registered, policy writes selecting that mode are refused. The deployment's
-`write_rules.max_days` limits new policy writes; stored longer policies keep
-applying. Stopping or delaying an automatic deletion policy requires a reason.
-
 ## Choose a mode
 
-| UI label                 | API value         | When the threshold passes                                              | What does not happen                                               |
-| ------------------------ | ----------------- | ---------------------------------------------------------------------- | ------------------------------------------------------------------ |
-| Manual purge eligibility | `preserve`        | The history becomes eligible for a separately requested explicit purge | No automatic deletion and no review-queue entry                    |
-| Review before purge      | `review_required` | The history appears in the read-only review queue                      | No approval, purge, or deletion merely from appearing in the queue |
+| UI label                 | API value         | When the threshold passes                                               | What does not happen                                               |
+| ------------------------ | ----------------- | ----------------------------------------------------------------------- | ------------------------------------------------------------------ |
+| Manual purge eligibility | `preserve`        | The history becomes eligible for a separately requested explicit purge  | No automatic deletion and no review-queue entry                    |
+| Review before purge      | `review_required` | The history appears in the read-only review queue                       | No approval, purge, or deletion merely from appearing in the queue |
+| Delete automatically     | `auto_delete`     | The nightly `flows.history` task deletes terminal runs with their files | Runs under a legal hold and runs whose deliveries are pending stay |
 
 Use **Review before purge** when the data owner, records manager, or security role must verify scope before a future deletion. Use **Manual purge eligibility** when an explicit purge by someone with `retention_manage` is sufficient without a separate approval step.
 
@@ -75,6 +70,8 @@ A deleted Flow that still has run history stays in the Flow selector with a **De
 3. Select an individual Flow only when it needs a more specific exception.
 4. Check the effective badge. It shows the resolved number of days, mode, and source level.
 5. Save each scope separately. The saved audit event identifies that scope and the old and new policy.
+
+**Delete automatically** is shown greyed out with "Not available in this installation yet" in an installation without the nightly task. A change that stops or delays automatic deletion at a level (the policy in force there was `auto_delete` and becomes another mode, is cleared, or gets more days) shows a required **Why** field; the reason is saved with your name in the audit log. Shortening automatic deletion needs no reason.
 
 A child set to **Inherit the complete parent policy** stores no local policy. If the parent later changes, the child follows both its new mode and its new number of days.
 
@@ -142,13 +139,25 @@ Clear a Space or Flow override and inherit:
 }
 ```
 
-Partial policies are rejected. `days` accepts whole numbers of at least 1; new writes must also fit `write_rules.max_days` (the deployment default is 36500). Stored longer policies keep applying. Unrecognized modes are rejected, and selecting `auto_delete` requires `write_rules.auto_delete_available`.
+Partial policies and unrecognized modes are rejected (422). `days` is a whole number of at least 1; a write may not exceed the deployment maximum (operator setting `FLOW_RETENTION_MAX_DAYS`, 1-36500, default 36500). The maximum applies on write only: a stored policy above a later-lowered maximum keeps applying.
 
-Every policy response separates three facts:
+A change that stops or delays automatic deletion needs a `reason` (1-512 characters), recorded in the audit event:
+
+```json
+{
+  "policy": { "mode": "preserve", "days": 30 },
+  "reason": "Archive transfer to the records system first"
+}
+```
+
+Typed refusals (400, nothing changed): `flow_retention_auto_delete_unavailable` (`auto_delete` in an installation without `flows.history`), `flow_retention_days_above_maximum` and `flow_retention_reason_required`.
+
+Every policy response separates four facts:
 
 - `local_policy`: the complete policy stored at the requested level, or `null`;
 - `inherited_policy`: the nearest complete parent policy, or `null`;
-- `effective`: the resolved result, including its source and all contributors.
+- `effective`: the resolved result, including its source and all contributors;
+- `write_rules`: `max_days` and `auto_delete_available`, the limits a write must meet.
 
 ### Review-queue endpoints
 
@@ -165,12 +174,42 @@ client. Omitting `cursor` starts again from the first page. The server pages by
 the indexed retention anchor and run identifier; `eligible_since` remains the
 administrator-facing date shown for each result.
 
+### Deletion status
+
+`GET /settings/flow-run-retention-policy/status` (either retention permission) returns, without any run, Flow or Space name:
+
+- `tasks`: every registered nightly gallring task with its emergency switch (`enabled`), `stale`, the last completed time and the newest execution (outcome, counts, blocked counts, error code);
+- `overdue`: terminal runs under `auto_delete` still stored more than the overdue window (operator setting `GALLRING_OVERDUE_WINDOW_DAYS`, default 1 day) after their deadline, counted live up to 1000 (`complete` says whether the count covers all), split into `undelivered_audit`, `unresolved_webhook` and `not_yet_deleted`; runs under a legal hold past the same window are counted apart as `held` up to the same cap;
+- `receipts`: run deletions started and not finished, and the oldest finished deletion whose file content is not yet confirmed gone;
+- `auto_delete_available` and `overdue_window_days`.
+
+A run whose deletion has started (it is fenced) answers as if it were deleted in run reads and run lists, the review queue, the explicit purge and its blocked counts, and when a legal hold names it by id (`flow_retention_hold_run_not_in_flow`, like a missing run). Replaying the `Idempotency-Key` that created it returns `409 flow_run_idempotency_run_deleted`: the run is neither returned nor created again.
+
+The cap bounds returned results, not rows examined by eligibility scans. Each status statement is subject to `GALLRING_CHUNK_STATEMENT_TIMEOUT_MS`. The served OpenAPI specification documents the status route’s error responses.
+
+## How a run is deleted
+
+The nightly `flows.history` task and the explicit purge delete a run with the same command, one receipt (gallringsbevis) per run:
+
+1. **Admission.** The run is locked and checked again: terminal, no active legal hold, every audit event and webhook delivery handed over, every file with stored content. It is then fenced in the same transaction: from that commit it reads as deleted (see above).
+2. **Files.** Each of the run's file families (its result files and consumed uploads, with every file derived from them) is settled in one transaction: the run's links to it go, every member is checked afresh for another owner, and the family's (file, content) pairs are recorded in the receipt's manifest. A family nobody else uses is then deleted with the upload's binding and the live transcripts bound to it; a family another owner keeps (another run, an assistant, a published version) is kept and recorded as shared, and the run is deleted anyway. The manifest is written after the fence, which releases nothing, and before any content reference is released.
+3. **Rows.** The run's rows (steps, attempts, provider calls, transcripts and corrections, reviews, deliveries) go in bounded batches, the run row last. The receipt is then complete.
+
+A run that does not fit one night's budget continues the next night where it stopped; it stays hidden in between. Once a run is fenced, a later policy change does not take it back: what was decided under the rule in force at selection is finished. Only an active legal hold pauses it (receipt reason `legal_hold`); it continues when the hold is released. A file family larger than `GALLRING_MAX_FAMILY_ROWS` pauses the run with `family_exceeds_budget` until the operator raises the cap. Paused and unfinished runs are listed in the deletion status.
+
+The receipt records the rule at selection (level, the Organization, Space or Flow it belongs to, mode, days and the deadline), the run's anchor, the rows and files deleted, and for an explicit purge the person who started it.
+
+The explicit purge admits due runs under `preserve` or `auto_delete`, taking Flows in id order and each Flow's runs oldest first, and deletes them within the deployment's per-run budgets (`GALLRING_MAX_ROWS_PER_RUN`, `GALLRING_MAX_FILES_PER_RUN`) in the request. A run the budget cuts short is returned in `pending_receipt_ids` (`pending_count`); it remains stored but is already hidden. The enabled nightly `flows.history` task continues the deletion on behalf of that receipt, subject to holds and execution caps. While `RETENTION_FLOWS_HISTORY_ENABLED=false`, it stays unfinished.
+
+`selection_complete` is true only when the candidate scan exhausted scope before reaching the requested limit or budgets. A false value means more candidates may remain; each request starts selection again. Empty Flows and blocked runs are excluded in SQL. A complete candidate scan can still leave the separately reported deletion receipts unfinished. Reaching the requested limit is conservatively incomplete.
+
 ## Legal holds
 
 A legal hold ("rättslig spärr"), for example while a disclosure request is
 pending, keeps the run history it covers. It overrides every Organization, Space
-and Flow policy until the hold is released or its end date passes: the explicit
-purge skips held runs, the debug-evidence redaction skips them, and a Space that
+and Flow policy until the hold is released or its end date passes: the nightly
+`flows.history` task and the explicit purge skip held runs (a run already being
+deleted pauses until release), the debug-evidence redaction skips them, and a Space that
 contains an active hold cannot be deleted (`space_contains_legal_hold`, 409).
 Deleting the whole Organization still deletes everything. `preserve` is a
 policy, not a hold. Every stop is a recorded decision: who placed it, why, when,
@@ -270,7 +309,7 @@ completes. Deploy this release with a short stop of the old servers.
 
 Every policy write requires `retention_manage` (see above). Space and Flow lookups remain scoped to the caller's Organization. A successful policy change writes the required audit action `flow_run_retention_policy_changed` in the same transaction as the policy update.
 
-The audit metadata records the scope, scope identifier, old and new local policy, and resulting effective policy and source. It does not copy Flow run content into the audit log. Saving the same value again is a no-op and does not create a misleading change event.
+The audit metadata records the scope, scope identifier, old and new local policy, the effective policy before and after with its source, and the reason (when one was given). It does not copy Flow run content into the audit log. Saving the same value again is a no-op and does not create a misleading change event.
 
 ## What this policy does not govern
 
@@ -287,15 +326,4 @@ Some of those data classes have automatic cleanup when their own policy is confi
 
 Next: [Data retention and deletion](/guides/data-retention).
 
-## Deletion status
-
-`GET /settings/flow-run-retention-policy/status` (either retention permission) returns, without any run, Flow or Space name:
-
-- `tasks`: every registered nightly gallring task with its emergency switch (`enabled`), `stale`, the last completed time and the newest execution (outcome, counts, blocked counts, error code);
-- `overdue`: terminal runs under `auto_delete` still stored more than the overdue window (operator setting `GALLRING_OVERDUE_WINDOW_DAYS`, default 1 day) after their deadline, counted live up to 1000 (`complete` says whether the count covers all), split into `undelivered_audit`, `unresolved_webhook` and `not_yet_deleted`; runs under a legal hold past the same window are counted apart as `held` up to the same cap;
-- `receipts`: run deletions started and not finished, and the oldest finished deletion whose file content is not yet confirmed gone;
-- `auto_delete_available` and `overdue_window_days`.
-
-A run whose deletion has started (it is fenced) answers as if it were deleted in run reads and run lists, the review queue, the explicit purge and its blocked counts, and when a legal hold names it by id (`flow_retention_hold_run_not_in_flow`, like a missing run). Replaying the `Idempotency-Key` that created it returns `409 flow_run_idempotency_run_deleted`: the run is neither returned nor created again.
-
-The cap bounds returned results, not rows examined by eligibility scans. Each status statement is subject to `GALLRING_CHUNK_STATEMENT_TIMEOUT_MS`. The served OpenAPI specification documents the status route’s error responses.
+The served OpenAPI specification documents the status route error responses.

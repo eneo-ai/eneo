@@ -20,7 +20,6 @@ from eneo.database.tables.flow_tables import (
     BuilderClientErrors,
     FlowProviderCalls,
     FlowRuns,
-    Flows,
     FlowStepAttemptResolvedInputs,
     FlowStepAttempts,
     FlowStepResults,
@@ -30,28 +29,14 @@ from eneo.database.tables.sessions_table import Sessions
 from eneo.database.tables.spaces_table import Spaces
 from eneo.database.tables.tenant_table import Tenants
 from eneo.flows.ai_builder.ai_builder_failure_ledger import MAX_WINDOW_DAYS
-from eneo.flows.domain.flow_run_retention_policy import FlowRunRetentionMode
 from eneo.flows.enums import TERMINAL_FLOW_RUN_STATUS_VALUES
 from eneo.flows.flow_retention_policy import resolve_flow_retention_policy
 from eneo.flows.infrastructure.flow_retention_hold_repo import flow_run_held_predicate
-from eneo.flows.infrastructure.flow_run_history_purge_repo import (
-    FlowRunHistoryPurgeRepository,
-    FlowRunHistoryPurgeResult,
-    flow_run_undelivered_audit_exists,
-    flow_run_unresolved_webhook_exists,
-)
-from eneo.flows.infrastructure.flow_run_retention_policy_query import (
-    EffectiveFlowRunRetentionPolicySql,
-    effective_flow_run_retention_policy_sql,
-    flow_run_history_due_predicates,
-)
-from eneo.flows.runtime.live_transcription.repository import LiveTranscriptRepository
 
 logger = logging.getLogger(__name__)
 
 # Statement batch size for retention deletes; worker transaction loops decide commit scope.
 RETENTION_BATCH_SIZE = 5000
-FLOW_RUN_HISTORY_PURGE_DIAGNOSTIC_WINDOW = 500
 
 
 @dataclass(frozen=True)
@@ -62,25 +47,6 @@ class _FlowRuntimeRetentionAction:
     cutoff: datetime
     policy_source: str
     cleanup_timestamp: datetime
-
-
-@dataclass(frozen=True, slots=True)
-class FlowRunHistoryPurgeBlockedCounts:
-    skipped_undelivered_audit: int = 0
-    skipped_unresolved_webhook: int = 0
-    skipped_review_required: int = 0
-    skipped_legal_hold: int = 0
-    counted_runs: int = 0
-    complete: bool = True
-
-
-@dataclass(frozen=True, slots=True)
-class TenantFlowRunHistoryPurgeResult:
-    candidate_count: int
-    purged_run_ids: tuple[UUID, ...]
-    transcript_candidate_count: int
-    transcript_purged_count: int
-    blocked: FlowRunHistoryPurgeBlockedCounts
 
 
 @dataclass(frozen=True, slots=True)
@@ -376,266 +342,6 @@ class DataRetentionService:
 
         result = await self.session.execute(query)
         return result.scalar() or 0
-
-    async def purge_old_flow_run_history_batch(
-        self, *, now: datetime, limit: int
-    ) -> FlowRunHistoryPurgeResult:
-        run_ids = await self._select_flow_run_history_purge_batch(
-            now=now,
-            limit=limit,
-        )
-        return await FlowRunHistoryPurgeRepository(self.session).purge_run_history(
-            run_ids
-        )
-
-    async def count_blocked_flow_run_history_purge_candidates(
-        self,
-        *,
-        now: datetime,
-        tenant_id: UUID | None = None,
-        space_id: UUID | None = None,
-        flow_id: UUID | None = None,
-    ) -> FlowRunHistoryPurgeBlockedCounts:
-        _, preserve = self._flow_run_history_purge_eligibility_predicates()
-        anchor = self._flow_run_history_retention_anchor()
-        held = flow_run_held_predicate(run_id=FlowRuns.id, flow_id=FlowRuns.flow_id)
-        due = self._build_due_flow_run_history_purge_query(
-            now=now,
-            tenant_id=tenant_id,
-            space_id=space_id,
-            flow_id=flow_id,
-            include_blocked=True,
-        )
-        # Held runs are counted apart, bounded like the window, so they never
-        # push runs with a real blocker out of it.
-        held_count = (
-            await self.session.scalar(
-                sa.select(sa.func.count()).select_from(
-                    due.where(held)
-                    .limit(FLOW_RUN_HISTORY_PURGE_DIAGNOSTIC_WINDOW + 1)
-                    .subquery()
-                )
-            )
-            or 0
-        )
-        due_runs = (
-            due.where(sa.not_(held))
-            .add_columns(preserve.label("preserve"), anchor.label("anchor"))
-            .order_by(anchor, FlowRuns.id)
-            .limit(FLOW_RUN_HISTORY_PURGE_DIAGNOSTIC_WINDOW + 1)
-            .subquery()
-        )
-        run_id_col = due_runs.c.run_id
-        undelivered_audit_exists = flow_run_undelivered_audit_exists(run_id_col)
-        unresolved_webhook_exists = flow_run_unresolved_webhook_exists(run_id_col)
-        rows = (
-            await self.session.execute(
-                sa.select(
-                    due_runs.c.preserve,
-                    undelivered_audit_exists,
-                    unresolved_webhook_exists,
-                )
-                .select_from(due_runs)
-                .order_by(due_runs.c.anchor, due_runs.c.run_id)
-            )
-        ).all()
-        window = rows[:FLOW_RUN_HISTORY_PURGE_DIAGNOSTIC_WINDOW]
-        audit_count = webhook_count = review_count = 0
-        for preserves_history, undelivered_audit, unresolved_webhook in window:
-            if not preserves_history:
-                review_count += 1
-            elif undelivered_audit:
-                audit_count += 1
-            elif unresolved_webhook:
-                webhook_count += 1
-
-        return FlowRunHistoryPurgeBlockedCounts(
-            skipped_undelivered_audit=audit_count,
-            skipped_unresolved_webhook=webhook_count,
-            skipped_review_required=review_count,
-            skipped_legal_hold=min(
-                held_count, FLOW_RUN_HISTORY_PURGE_DIAGNOSTIC_WINDOW
-            ),
-            counted_runs=len(window),
-            complete=(
-                len(rows) <= FLOW_RUN_HISTORY_PURGE_DIAGNOSTIC_WINDOW
-                and held_count <= FLOW_RUN_HISTORY_PURGE_DIAGNOSTIC_WINDOW
-            ),
-        )
-
-    async def purge_due_flow_run_history_for_tenant(
-        self,
-        *,
-        tenant_id: UUID,
-        now: datetime,
-        limit: int,
-        dry_run: bool,
-        space_id: UUID | None = None,
-        flow_id: UUID | None = None,
-    ) -> TenantFlowRunHistoryPurgeResult:
-        if not 1 <= limit <= 500:
-            raise ValueError("Flow history purge limit must be between 1 and 500.")
-        if space_id is not None and flow_id is not None:
-            raise ValueError("Flow history purge accepts only one scope.")
-        if not dry_run:
-            # Before any read or row lock: policy and hold changes commit either
-            # before this selection or after this transaction.
-            await acquire_shared(self.session, RetentionSubject.FLOW_HISTORY)
-        blocked = await self.count_blocked_flow_run_history_purge_candidates(
-            now=now, tenant_id=tenant_id, space_id=space_id, flow_id=flow_id
-        )
-        candidates = self._build_flow_run_history_purge_batch_query(
-            now=now,
-            limit=limit,
-            tenant_id=tenant_id,
-            space_id=space_id,
-            flow_id=flow_id,
-        )
-        # Own candidate run locks before deriving the deleted IDs so another
-        # administrator's concurrent purge cannot enter this audit receipt.
-        if not dry_run:
-            candidates = candidates.with_for_update(of=FlowRuns, skip_locked=True)
-        run_ids = list((await self.session.scalars(candidates)).all())
-        purged_run_ids: tuple[UUID, ...] = ()
-        if not dry_run and run_ids:
-            await FlowRunHistoryPurgeRepository(self.session).purge_run_history(run_ids)
-            remaining = set(
-                (
-                    await self.session.scalars(
-                        sa.select(FlowRuns.id).where(FlowRuns.id.in_(run_ids))
-                    )
-                ).all()
-            )
-            purged_run_ids = tuple(
-                run_id for run_id in run_ids if run_id not in remaining
-            )
-        transcripts = await LiveTranscriptRepository(
-            self.session
-        ).delete_expired_unbound(
-            tenant_id=tenant_id,
-            now=now,
-            limit=limit,
-            dry_run=dry_run,
-            space_id=space_id,
-            flow_id=flow_id,
-        )
-        return TenantFlowRunHistoryPurgeResult(
-            candidate_count=len(run_ids),
-            purged_run_ids=purged_run_ids,
-            transcript_candidate_count=transcripts.candidate_count,
-            transcript_purged_count=transcripts.purged_count,
-            blocked=blocked,
-        )
-
-    async def _select_flow_run_history_purge_batch(
-        self, *, now: datetime, limit: int
-    ) -> list[UUID]:
-        result = await self.session.scalars(
-            self._build_flow_run_history_purge_batch_query(now=now, limit=limit)
-        )
-        return list(result.all())
-
-    def _build_flow_run_history_purge_batch_query(
-        self,
-        *,
-        now: datetime,
-        limit: int,
-        tenant_id: UUID | None = None,
-        space_id: UUID | None = None,
-        flow_id: UUID | None = None,
-    ) -> sa.Select[tuple[UUID]]:
-        retention_anchor = self._flow_run_history_retention_anchor()
-        return (
-            self._build_due_flow_run_history_purge_query(
-                now=now, tenant_id=tenant_id, space_id=space_id, flow_id=flow_id
-            )
-            .where(sa.not_(flow_run_undelivered_audit_exists(FlowRuns.id)))
-            .where(sa.not_(flow_run_unresolved_webhook_exists(FlowRuns.id)))
-            .where(
-                sa.not_(
-                    flow_run_held_predicate(
-                        run_id=FlowRuns.id, flow_id=FlowRuns.flow_id
-                    )
-                )
-            )
-            .order_by(retention_anchor, FlowRuns.id)
-            .limit(limit)
-        )
-
-    @staticmethod
-    def _flow_run_history_retention_anchor() -> Any:
-        return sa.func.coalesce(FlowRuns.finished_at, FlowRuns.created_at)
-
-    def _build_due_flow_run_history_purge_query(
-        self,
-        *,
-        now: datetime,
-        tenant_id: UUID | None = None,
-        space_id: UUID | None = None,
-        flow_id: UUID | None = None,
-        include_blocked: bool = False,
-    ) -> sa.Select[tuple[UUID]]:
-        anchor = self._flow_run_history_retention_anchor()
-        effective_policy = self._effective_flow_run_history_policy_sql()
-        terminal, preserve = self._flow_run_history_purge_eligibility_predicates()
-        stmt = (
-            sa.select(FlowRuns.id.label("run_id"))
-            .join(
-                Flows,
-                sa.and_(
-                    FlowRuns.flow_id == Flows.id, FlowRuns.tenant_id == Flows.tenant_id
-                ),
-            )
-            .join(
-                Spaces,
-                sa.and_(
-                    Flows.space_id == Spaces.id, Flows.tenant_id == Spaces.tenant_id
-                ),
-            )
-            .join(Tenants, FlowRuns.tenant_id == Tenants.id)
-            .where(
-                terminal,
-                # A run whose deletion has started is neither a candidate nor
-                # counted as blocked.
-                FlowRuns.retention_receipt_id.is_(None),
-                *flow_run_history_due_predicates(
-                    now=now, anchor=anchor, effective_days=effective_policy.days
-                ),
-            )
-        )
-        if not include_blocked:
-            stmt = stmt.where(preserve)
-        if tenant_id is not None:
-            stmt = stmt.where(FlowRuns.tenant_id == tenant_id)
-        if space_id is not None:
-            stmt = stmt.where(Flows.space_id == space_id)
-        if flow_id is not None:
-            stmt = stmt.where(FlowRuns.flow_id == flow_id)
-        return stmt
-
-    def _flow_run_history_purge_eligibility_predicates(
-        self,
-    ) -> tuple[sa.ColumnElement[bool], sa.ColumnElement[bool]]:
-        return (
-            FlowRuns.status.in_(TERMINAL_FLOW_RUN_STATUS_VALUES),
-            self._effective_flow_run_history_policy_sql().mode
-            == FlowRunRetentionMode.PRESERVE.value,
-        )
-
-    @staticmethod
-    def _effective_flow_run_history_policy_sql() -> EffectiveFlowRunRetentionPolicySql:
-        return effective_flow_run_retention_policy_sql(
-            organization_mode=(
-                Tenants.flow_run_history_retention_mode.__clause_element__()
-            ),
-            organization_days=(
-                Tenants.flow_run_history_retention_days.__clause_element__()
-            ),
-            space_mode=(Spaces.flow_run_history_retention_mode.__clause_element__()),
-            space_days=Spaces.flow_run_history_retention_days.__clause_element__(),
-            flow_mode=Flows.flow_run_history_retention_mode.__clause_element__(),
-            flow_days=Flows.flow_run_history_retention_days.__clause_element__(),
-        )
 
     async def redact_old_flow_debug_evidence(
         self, *, now: datetime

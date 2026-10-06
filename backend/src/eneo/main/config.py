@@ -362,6 +362,9 @@ class Settings(BaseSettings):
     gallring_cron_hour: int = Field(default=3, ge=0, le=23)
     gallring_cron_minute: int = Field(default=30, ge=0, le=59)
     gallring_flows_housekeeping_enabled: bool = True
+    # Emergency switch of the nightly flows.history task (auto_delete of run
+    # history); rules can still be set while it is off.
+    retention_flows_history_enabled: bool = True
     # A due auto_delete run still stored this many days after its deadline is
     # overdue (health flag GALLRING_OVERDUE).
     gallring_overdue_window_days: int = Field(default=1, ge=1, le=365)

@@ -935,9 +935,12 @@ class FlowRunHistoryPurgePublic(BaseModel):
             "example": {
                 "dry_run": True,
                 "scope": "organization",
+                "selection_complete": True,
                 "candidate_count": 2,
                 "purged_count": 0,
                 "purged_run_ids": [],
+                "pending_count": 0,
+                "pending_receipt_ids": [],
                 "transcript_candidate_count": 3,
                 "transcript_purged_count": 0,
                 "blocked": {
@@ -954,9 +957,47 @@ class FlowRunHistoryPurgePublic(BaseModel):
 
     dry_run: bool
     scope: FlowRunRetentionScope
-    candidate_count: int
-    purged_count: int
-    purged_run_ids: list[UUID]
+    selection_complete: bool = Field(
+        description=(
+            "True only when the run-candidate scan exhausted scope before reaching "
+            "the requested limit or execution budgets. False means more candidates "
+            "may remain; each request restarts selection. Pending deletion receipts "
+            "are reported separately and may remain even after a complete scan."
+        )
+    )
+    candidate_count: int = Field(
+        ge=0,
+        description=(
+            "Due runs admitted in scope (preserve or auto_delete; held, review and "
+            "delivery-blocked runs excluded), at most the limit: Flows in id order, "
+            "each Flow's runs oldest first."
+        ),
+    )
+    purged_count: int = Field(
+        ge=0,
+        description="Admitted runs whose deletion receipt completed and run record was removed in this request.",
+    )
+    purged_run_ids: list[UUID] = Field(
+        description="The runs counted in purged_count; always empty in a dry run."
+    )
+    pending_count: int = Field(
+        ge=0,
+        description=(
+            "Admitted runs whose deletion did not finish within this request's "
+            "budget (operator settings GALLRING_MAX_ROWS_PER_RUN and "
+            "GALLRING_MAX_FILES_PER_RUN). A pending run remains stored but its "
+            "deletion fence hides it from this request's commit. The enabled "
+            "nightly flows.history task continues its deletion, subject to legal "
+            "holds and execution caps. RETENTION_FLOWS_HISTORY_ENABLED=false "
+            "leaves that work unfinished."
+        ),
+    )
+    pending_receipt_ids: list[UUID] = Field(
+        description=(
+            "Deletion receipts of the pending runs; each records this administrator "
+            "as the one who started it."
+        )
+    )
     transcript_candidate_count: int = Field(
         ge=0,
         description=(

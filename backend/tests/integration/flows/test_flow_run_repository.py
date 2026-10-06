@@ -341,9 +341,7 @@ async def test_seed_validated_prefix_copies_results_without_provider_usage(
     from eneo.flows.infrastructure.flow_provider_call_repo import (
         FlowProviderCallRepository,
     )
-    from eneo.flows.infrastructure.flow_run_history_purge_repo import (
-        FlowRunHistoryPurgeRepository,
-    )
+    from tests.integration.flows.flow_run_deletion_support import delete_run
 
     context = attempt_provenance_context
     async with db_container(user=admin_user) as container:
@@ -505,10 +503,8 @@ async def test_seed_validated_prefix_copies_results_without_provider_usage(
             )
             == {}
         )
-        purged = await FlowRunHistoryPurgeRepository(session=session).purge_run_history(
-            [context.run_id]
-        )
-        assert purged.counts.flow_runs_purged == 1
+        out, _ = await delete_run(session, context.run_id)
+        assert out.counts[context.tenant_id]["runs_deleted"] == 1
         assert (
             await session.scalar(
                 sa.select(FlowRuns.id).where(FlowRuns.id == context.run_id)

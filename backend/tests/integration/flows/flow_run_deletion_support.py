@@ -178,10 +178,15 @@ async def due_run_ids(
     due: set[UUID] = set()
     admissible: set[UUID] = set()
     for rule in await deletion.rules.rules(
-        modes=EXPLICIT_MODES, after=None, limit=10_000, tenant_id=tenant_id
+        modes=EXPLICIT_MODES,
+        after=None,
+        limit=10_000,
+        tenant_id=tenant_id,
+        now=now,
+        trigger=RetentionTrigger.SCHEDULED,
     ):
         for candidate in await deletion.candidates(
-            rule, now=now, after=None, limit=10_000
+            rule, now=now, after=None, limit=10_000, trigger=RetentionTrigger.SCHEDULED
         ):
             due.add(candidate.run_id)
             if not rule.held and due_blocked_reason(candidate) is None:

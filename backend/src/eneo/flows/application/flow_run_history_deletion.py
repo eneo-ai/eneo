@@ -222,12 +222,14 @@ class FlowRunHistoryDeletion:
         now: datetime,
         after: tuple[datetime, UUID] | None,
         limit: int,
+        trigger: RetentionTrigger,
     ) -> list[DueRun]:
         return await self.runs.due_runs(
             flow_id=rule.flow_id,
             cutoff=rule.cutoff(now),
             after=after,
             limit=limit,
+            trigger=trigger,
         )
 
     def due_candidates(
@@ -288,6 +290,7 @@ class FlowRunHistoryDeletion:
             if limit is not None and selection.candidate_count >= limit:
                 return None
             rules = await self.rules.rules(
+                now=now,
                 modes=modes,
                 after=after.group if after is not None else None,
                 inclusive=after is None or after.at != FLOW_HISTORY_END,
@@ -295,6 +298,7 @@ class FlowRunHistoryDeletion:
                 tenant_id=scope.tenant_id if scope is not None else None,
                 space_id=scope.space_id if scope is not None else None,
                 flow_id=scope.flow_id if scope is not None else None,
+                trigger=trigger,
             )
             if not rules:
                 return None
@@ -309,6 +313,7 @@ class FlowRunHistoryDeletion:
                     if after is not None and after.group == rule.flow_id
                     else None,
                     limit=1,
+                    trigger=trigger,
                 )
             )
             due = candidates[0] if candidates else None

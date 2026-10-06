@@ -11,6 +11,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from eneo.authentication.principal_types import PrincipalType
 from eneo.data_retention.application.retention_runner import RetentionBatch
+from eneo.data_retention.application.retention_units import RetentionEffects
 from eneo.database.database import sessionmanager
 from eneo.database.tables.files_table import Files
 from eneo.database.tables.flow_tables import (
@@ -29,12 +30,9 @@ from eneo.files.file_models import FileContentVariant, FileType
 from eneo.flows.application.flow_housekeeping_task import FlowHousekeepingTask
 from eneo.flows.enums import FlowRunStatus
 from eneo.flows.flow_runtime_upload_repo import FlowRuntimeUploadRepository
-from eneo.flows.infrastructure.flow_run_history_purge_repo import (
-    FlowRunHistoryPurgeRepository,
-    FlowRunHistoryPurgeResult,
-)
 from eneo.flows.principal import FlowPrincipal
 from eneo.object_content.content import ContentState
+from tests.integration.flows.flow_run_deletion_support import delete_run
 
 _RUNTIME_UPLOAD_PAYLOAD = b"r" * 128
 
@@ -212,9 +210,10 @@ async def _delete_runtime_upload_with_lock_timeout(
             )
 
 
-async def _purge_run(run_id: UUID) -> FlowRunHistoryPurgeResult:
+async def _purge_run(run_id: UUID) -> RetentionEffects:
     async with sessionmanager.session() as session, session.begin():
-        return await FlowRunHistoryPurgeRepository(session).purge_run_history([run_id])
+        out, _ = await delete_run(session, run_id)
+        return out
 
 
 async def _sweep_abandoned_runtime_uploads(
@@ -455,17 +454,16 @@ async def test_runtime_upload_bind_first_keeps_source_during_run_purge(
                 fixture=fixture,
             )
 
+            # The binder holds the upload: its family waits, the run is kept.
             skipped_result = await _purge_run(fixture.run_id)
-            assert skipped_result.counts.flow_runs_considered == 1
-            assert skipped_result.counts.flow_runs_lock_deferred == 1
-            assert skipped_result.counts.flow_runs_purged == 0
+            assert skipped_result.counts[fixture.upload.tenant_id]["runs_deleted"] == 0
+            assert skipped_result.blocked["lock_deferred"] == 1
 
     purge_result = await _purge_run(fixture.run_id)
 
-    assert purge_result.counts.flow_runs_purged == 1
-    assert purge_result.counts.flow_runs_lock_deferred == 0
-    assert purge_result.counts.flow_runtime_source_bindings_deleted == 0
-    assert purge_result.counts.flow_runtime_source_files_deleted == 0
+    # The retained run consumes the upload: it stays with its binding.
+    assert purge_result.counts[fixture.upload.tenant_id]["runs_deleted"] == 1
+    assert purge_result.blocked["shared"] == 1
     assert await _runtime_source_rows_exist(fixture=fixture) == (True, True)
     async with sessionmanager.session() as session, session.begin():
         assert await session.get(FlowRuns, retained_run_id) is not None
@@ -496,16 +494,11 @@ async def test_runtime_upload_purge_first_blocks_binding_then_removes_source(
 
     async with sessionmanager.session() as purge_session:
         async with purge_session.begin():
-            purge_result = await FlowRunHistoryPurgeRepository(
-                purge_session
-            ).purge_run_history([fixture.run_id])
-            assert purge_result.counts.flow_runtime_source_candidate_bytes == len(
-                _RUNTIME_UPLOAD_PAYLOAD
-            )
-            assert purge_result.counts.flow_runtime_source_files_deleted == 1
-            assert purge_result.counts.flow_runtime_source_bytes_deleted == len(
-                _RUNTIME_UPLOAD_PAYLOAD
-            )
+            purge_result, _ = await delete_run(purge_session, fixture.run_id)
+            counts = purge_result.counts[fixture.upload.tenant_id]
+            assert purge_result.counts[fixture.upload.tenant_id]["runs_deleted"] == 1
+            assert counts["bindings_released"] == 1
+            assert counts["files_deleted"] == 1
 
             with pytest.raises(DBAPIError) as exc_info:
                 await _lock_runtime_upload_for_binding(

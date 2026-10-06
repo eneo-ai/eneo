@@ -12,6 +12,10 @@ from eneo.flows.application.flow_housekeeping_task import (
     FLOWS_HOUSEKEEPING_TASK,
     FlowHousekeepingTask,
 )
+from eneo.flows.application.flow_run_history_retention_task import (
+    FlowRunHistoryRetentionTask,
+)
+from eneo.flows.domain.flow_run_retention_policy import FLOWS_HISTORY_TASK
 from eneo.main.config import Settings
 
 
@@ -22,13 +26,18 @@ class RetentionTaskRegistration:
     build: Callable[[AsyncSession], RetentionTask]
 
 
-# The registered tasks, in run order. Later slices add flows.history,
-# flows.step_cleanup and others here.
+# The registered tasks, in run order. Registering flows.history is what makes
+# auto_delete policies acceptable (flow_run_retention_write_rules).
 RETENTION_TASKS: tuple[RetentionTaskRegistration, ...] = (
     RetentionTaskRegistration(
         name=FLOWS_HOUSEKEEPING_TASK,
         enabled=lambda settings: settings.gallring_flows_housekeeping_enabled,
         build=FlowHousekeepingTask,
+    ),
+    RetentionTaskRegistration(
+        name=FLOWS_HISTORY_TASK,
+        enabled=lambda settings: settings.retention_flows_history_enabled,
+        build=FlowRunHistoryRetentionTask,
     ),
 )
 

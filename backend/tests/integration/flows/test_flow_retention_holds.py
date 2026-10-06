@@ -17,10 +17,7 @@ import sqlalchemy as sa
 from sqlalchemy.exc import IntegrityError
 
 from eneo.audit.infrastructure.audit_log_repo_impl import AuditLogRepositoryImpl
-from eneo.data_retention.infrastructure import data_retention_service, retention_lock
-from eneo.data_retention.infrastructure.data_retention_service import (
-    DataRetentionService,
-)
+from eneo.data_retention.infrastructure import retention_lock
 from eneo.database.tables.audit_log_table import AuditLog
 from eneo.database.tables.flow_tables import (
     FlowRetentionHolds,
@@ -32,13 +29,11 @@ from eneo.database.tables.roles_table import Roles
 from eneo.database.tables.spaces_table import Spaces, SpacesUsers
 from eneo.database.tables.tenant_table import Tenants
 from eneo.database.tables.users_table import users_roles_table
+from eneo.flows.application import flow_run_history_purge
 from eneo.flows.domain.flow_retention_hold import FlowRetentionHoldCreateRequest
 from eneo.flows.domain.flow_run_retention_policy import (
     FlowRunRetentionMode,
     FlowRunRetentionPolicy,
-)
-from eneo.flows.infrastructure.flow_run_history_purge_repo import (
-    FlowRunHistoryPurgeRepository,
 )
 from eneo.flows.runtime.flow_runtime_health import (
     FlowRuntimeHealthFlag,
@@ -51,6 +46,7 @@ from eneo.main.config import get_settings
 from eneo.main.exceptions import ConflictException
 from eneo.settings.settings import FlowRetentionPolicyUpdate
 from tests.fixtures import mint_v2_api_key
+from tests.integration.flows.flow_run_deletion_support import delete_run, due_run_ids
 
 pytestmark = [pytest.mark.integration, pytest.mark.asyncio]
 
@@ -332,20 +328,16 @@ async def test_purge_recheck_honours_a_hold_committed_after_selection(
     run_id = await _add_run(db_container, admin_user, flow_id)
     async with db_container() as purging:
         session = purging.session()
-        selected = list(
-            await session.scalars(
-                DataRetentionService(session)._build_flow_run_history_purge_batch_query(
-                    now=datetime.now(timezone.utc), limit=10, flow_id=flow_id
-                )
-            )
+        # Selected without the retention lock, as an older caller could.
+        _, selected = await due_run_ids(
+            session, admin_user.tenant_id, now=datetime.now(timezone.utc)
         )
-        assert selected == [run_id]
+        assert run_id in selected
         async with db_container() as holding:
             await holding.flow_retention_hold_service().place(_hold_request(flow_id))
-        result = await FlowRunHistoryPurgeRepository(session).purge_run_history(
-            selected
-        )
-        assert result.counts.flow_runs_purged == 0
+        out, receipt = await delete_run(session, run_id)
+        assert receipt is None
+        assert out.blocked["held"] == 1
     assert await _existing_runs(db_container, {run_id}) == {run_id}
 
 
@@ -1210,9 +1202,7 @@ async def test_purge_preview_counts_held_runs_apart_from_real_blockers(
             .values(flow_run_history_retention_mode="review_required")
         )
     await _place(client, admin_token, flow_id=flow_id)
-    monkeypatch.setattr(
-        data_retention_service, "FLOW_RUN_HISTORY_PURGE_DIAGNOSTIC_WINDOW", 1
-    )
+    monkeypatch.setattr(flow_run_history_purge, "FLOW_RUN_HISTORY_DIAGNOSTIC_WINDOW", 1)
 
     response = await client.post(
         f"/api/v1/settings/flow-run-retention-policy/spaces/{history['space_id']}/purge",

@@ -29,10 +29,10 @@ from eneo.database.tables.flow_tables import (
     FlowRuntimeUploadedFiles,
 )
 from eneo.database.tables.object_content_table import FileContentReferences
-from eneo.flows.infrastructure.flow_run_deletion_repo import run_file_roots
-from eneo.flows.infrastructure.flow_run_history_purge_repo import (
+from eneo.flows.infrastructure.flow_retention_predicates import (
     flow_file_reference_exists,
 )
+from eneo.flows.infrastructure.flow_run_deletion_repo import run_file_roots
 
 T = TypeVar("T")
 

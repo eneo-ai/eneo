@@ -126,6 +126,9 @@ class FlowTranscriptRegenerationService:
         segments_hash: str,
         idempotency_key: str,
     ) -> CreateRunResult:
+        await self.run_repo.lock_source_run(
+            run_id=run_id, tenant_id=self.user.tenant_id
+        )
         source = await self.access_policy.load_run(
             flow_id=flow_id,
             run_id=run_id,

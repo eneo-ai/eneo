@@ -753,14 +753,14 @@ When `care_data_policy.sensitive = true`, JSON evidence export remains blocked b
 
 Flow retention settings define eligibility, not authorization to delete:
 
-- Run-history policy resolves the first complete `{mode, days}` pair in Flow → Space → Organization order. `days` accepts `1..2555`; `mode` is `preserve` or `review_required`; no policy means there is no age threshold.
+- Run-history policy resolves the first complete `{mode, days}` pair in Flow → Space → Organization order. `days` is at least 1 and a write may not exceed the deployment maximum (`FLOW_RETENTION_MAX_DAYS`, default 36500); `mode` is `preserve`, `review_required` or `auto_delete`; no policy means there is no age threshold.
 - A Space or Flow either inherits its complete parent policy or replaces the complete pair. Parent values are defaults, not maximums, so one Flow can retain history longer than its Space.
 - Tenant `flow_settings.retention_policy.run_debug_evidence_days` independently defines when debug evidence can become eligible. `flow_runtime_upload_abandonment_days` (30 days when unset) is how long unbound runtime uploads and unbound live transcripts are kept before the nightly Flow gallring job deletes them; changing it needs `retention_manage` in a signed-in session, and a longer window needs a reason.
 - `review_required` exposes matching terminal runs through a bounded, read-only queue that omits inputs and outputs. Reading it has no side effects.
-- Saving any policy never deletes, approves, schedules, or redacts Flow data. The nightly Flow gallring job deletes only staging and waste data (unbound uploads and transcripts, delivered audit outbox mirrors), never run history; see [Data retention and deletion](/guides/data-retention#nightly-flow-gallring).
-- The current settings surface has no Flow run-history purge action. A future purge must preview the exact scope, require confirmation and a reason, execute in bounded tenant-scoped batches, respect audit/webhook blockers, and leave an immutable audit receipt.
+- Saving any policy never deletes, approves or redacts Flow data by itself. Under `auto_delete` the nightly `flows.history` task deletes due terminal runs with their files, one receipt per run; the nightly `flows.housekeeping` job deletes only staging and waste data (unbound uploads and transcripts, delivered audit outbox mirrors); see [Data retention and deletion](/guides/data-retention#nightly-flow-gallring).
+- The explicit purge is an API call (Organization, Space or Flow scope, with a dry run) that needs `retention_manage`. It deletes due runs under `preserve` or `auto_delete` with the same command as the nightly task, within the deployment's per-run budgets. An unfinished admitted run keeps a pending receipt for later nightly executions, which recheck holds, locks and delivery status; a family above the configured cap pauses until it fits that cap. Purge skips runs under a legal hold and runs whose audit events or webhook deliveries are not handed over, and records a required audit event. The admin UI has no purge button. See [Flow run-history retention](/guides/flows/retention-policy).
 
-Eligible Flow data remains stored until that separate purge workflow exists and an administrator explicitly completes it.
+Under `preserve`, due history remains stored until an administrator requests the purge. `review_required` keeps history in the review queue; deletion requires a policy change to an eligible mode.
 
 Reusable runtime uploads that are still owned outside a completed run are not deleted by the run-history purge. If a workflow needs upload-library cleanup independent of run history, that needs a separate file-lifecycle policy.
 

@@ -16,9 +16,6 @@ import pytest
 import sqlalchemy as sa
 from dependency_injector import providers
 
-from eneo.data_retention.infrastructure.data_retention_service import (
-    DataRetentionService,
-)
 from eneo.database.database import sessionmanager
 from eneo.database.tables.flow_tables import (
     FlowRunAuditOutbox,
@@ -45,6 +42,7 @@ from eneo.flows.principal import FlowPrincipal
 from eneo.flows.runtime import tasks as flow_runtime_tasks
 from eneo.main.container.container import Container
 from eneo.main.exceptions import NotFoundException
+from tests.integration.flows.flow_run_deletion_support import purge
 from tests.integration.flows.test_flow_live_transcription_session import (
     _published_flow,
 )
@@ -82,6 +80,9 @@ async def _until_blocked_by_or_done(
         while monotonic() < deadline:
             if task.done():
                 return
+            # The activity view is cached in a transaction; a later connection
+            # must appear before we can observe its live lock wait.
+            await observer.execute(sa.text("SELECT pg_stat_clear_snapshot()"))
             blocked = await observer.scalar(
                 sa.text(
                     "SELECT count(*) FROM pg_stat_activity "
@@ -592,10 +593,9 @@ async def test_the_history_purge_selects_a_drained_run_once_it_is_due(
     async def selected() -> bool:
         await flow_runtime_tasks._deliver_flow_audit_outbox()
         async with sessionmanager.session() as session, session.begin():
-            result = await DataRetentionService(
-                session
-            ).purge_due_flow_run_history_for_tenant(
-                tenant_id=admin_user.tenant_id,
+            result = await purge(
+                session,
+                admin_user.tenant_id,
                 now=datetime.now(timezone.utc) + timedelta(days=30),
                 limit=500,
                 dry_run=True,

@@ -264,7 +264,7 @@ def _flow_retention_policy_write_refused_response() -> dict[str, object]:
 
 
 _FLOW_RETENTION_WRITE_RULES_TEXT = (
-    " Modes: preserve and review_required keep history until an explicit purge; "
+    " Modes: preserve keeps history until an explicit purge; review_required keeps history without admitting deletion; "
     "auto_delete lets the nightly flows.history task delete terminal runs once "
     "they are older than the days, and is accepted only when write_rules."
     "auto_delete_available is true. Days may not exceed write_rules.max_days. A "
@@ -1306,13 +1306,14 @@ async def replace_flow_run_retention_policy(
     summary="Preview or purge due Organization Flow run history",
     description=(
         "Administrators can preview or explicitly purge one bounded batch of due "
-        "terminal runs under the effective preserve policy, plus expired unbound "
+        "terminal runs under the effective preserve or auto_delete policy, plus expired unbound "
         "live transcripts in the authenticated tenant. The limit applies separately "
         "to runs and transcripts, with separate candidate and deletion counts. "
         "Dry runs select candidates but delete nothing "
         "and emit no audit event. Real purges require an audit row in the same "
         "transaction. Review-required runs, unresolved deliveries and runs under a "
-        "legal hold are excluded."
+        "legal hold are excluded. An admitted run that exceeds the request budget "
+        "returns a pending receipt and continues through nightly retention."
     ),
     responses={
         403: _retention_forbidden_response("manage"),
@@ -1341,11 +1342,12 @@ async def purge_organization_flow_run_history(
     description=(
         "Apply the administrator purge to one Space in the authenticated tenant. "
         "Dry-run is the default and reports candidates without deleting anything. "
-        "Real batches delete due terminal runs under the effective preserve policy "
+        "Real batches admit due terminal runs under the effective preserve or auto_delete policy "
         "and expired unbound live transcripts in this Space, with a transaction audit. "
         "The limit applies separately to runs and transcripts, with separate counts. "
         "Review-required runs, unresolved deliveries and runs under a legal hold "
-        "remain stored."
+        "remain stored. Admitted runs that exceed the request budget return pending "
+        "receipts and continue through nightly retention."
     ),
     responses={
         403: _retention_forbidden_response("manage"),
@@ -1376,11 +1378,12 @@ async def purge_space_flow_run_history(
     description=(
         "Apply the administrator purge to one Flow in the authenticated tenant. "
         "Dry-run is the default and reports candidates without deleting anything. "
-        "Real batches delete due terminal runs under the effective preserve policy "
+        "Real batches admit due terminal runs under the effective preserve or auto_delete policy "
         "and expired unbound live transcripts in this Flow, with a transaction audit. "
         "The limit applies separately to runs and transcripts, with separate counts. "
         "Review-required runs, unresolved deliveries and runs under a legal hold "
-        "remain stored."
+        "remain stored. Admitted runs that exceed the request budget return pending "
+        "receipts and continue through nightly retention."
         " A deleted Flow is accepted."
     ),
     responses={

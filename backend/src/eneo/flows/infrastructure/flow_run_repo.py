@@ -846,6 +846,17 @@ class FlowRunRepository:
             )
         return FlowRunStatusSnapshot.model_validate(row)
 
+    async def lock_source_run(self, *, run_id: UUID, tenant_id: UUID) -> None:
+        """Hold a run another run is copied from (retry, transcript regeneration)
+        until this transaction ends: FOR KEY SHARE conflicts with the deletion
+        chunk's FOR UPDATE, so a deletion either waits for the copy or has
+        fenced the run before it (the following read then finds it gone)."""
+        await self.session.execute(
+            sa.select(FlowRuns.id)
+            .where(FlowRuns.id == run_id, FlowRuns.tenant_id == tenant_id)
+            .with_for_update(of=FlowRuns, read=True, key_share=True)
+        )
+
     async def get_idempotent_run(
         self,
         *,

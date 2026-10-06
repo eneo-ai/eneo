@@ -3492,9 +3492,7 @@ async def test_retry_requires_durable_review_of_current_attempt(
 
     child_id = retried.json()["run"]["id"]
     async with db_container() as container:
-        from eneo.flows.infrastructure.flow_run_history_purge_repo import (
-            FlowRunHistoryPurgeRepository,
-        )
+        from tests.integration.flows.flow_run_deletion_support import delete_run
 
         await container.flow_run_terminalizer().terminalize_run(
             run_id=UUID(child_id),
@@ -3510,10 +3508,8 @@ async def test_retry_requires_durable_review_of_current_attempt(
             now=datetime.now(timezone.utc)
         )
         assert delivery.retry_scheduled_count == delivery.dead_lettered_count == 0
-        purged = await FlowRunHistoryPurgeRepository(
-            session=container.session()
-        ).purge_run_history([UUID(run["id"])])
-        assert purged.counts.flow_runs_purged == 1
+        out, _ = await delete_run(container.session(), UUID(run["id"]))
+        assert out.counts[admin_user.tenant_id]["runs_deleted"] == 1
     retried_child = await client.post(
         f"/api/v1/flows/{flow['id']}/runs/{child_id}/retry/",
         headers={**headers, "Idempotency-Key": "retry-child-reviewed-prefix"},

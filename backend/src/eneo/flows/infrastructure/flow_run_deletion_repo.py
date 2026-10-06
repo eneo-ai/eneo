@@ -18,6 +18,7 @@ import sqlalchemy as sa
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import InstrumentedAttribute
 
+from eneo.data_retention.domain.retention import RetentionTrigger
 from eneo.data_retention.infrastructure.retention_sql import uuid_in
 from eneo.database.affected_rows import affected_row_count
 from eneo.database.tables.base_class import BaseWithTableName
@@ -42,13 +43,14 @@ from eneo.database.tables.flow_tables import (
 from eneo.database.tables.object_content_table import FileContentReferences
 from eneo.flows.enums import TERMINAL_FLOW_RUN_STATUS_VALUES
 from eneo.flows.infrastructure.flow_retention_hold_repo import flow_run_held_predicate
-from eneo.flows.infrastructure.flow_run_history_due_repo import (
-    FLOW_RUN_RETENTION_ANCHOR,
-    flow_run_k4_due_predicates,
-)
-from eneo.flows.infrastructure.flow_run_history_purge_repo import (
+from eneo.flows.infrastructure.flow_retention_predicates import (
     flow_run_undelivered_audit_exists,
     flow_run_unresolved_webhook_exists,
+)
+from eneo.flows.infrastructure.flow_run_history_due_repo import (
+    FLOW_RUN_RETENTION_ANCHOR,
+    flow_run_history_is_unblocked,
+    flow_run_k4_due_predicates,
 )
 
 
@@ -170,22 +172,24 @@ class FlowRunDeletionRepository:
         cutoff: datetime,
         after: tuple[datetime, UUID] | None,
         limit: int,
+        trigger: RetentionTrigger,
     ) -> list[DueRun]:
         """The Flow's next `limit` due runs in anchor order, with their blockers.
 
-        Ranges over ix_flow_runs_flow_gallring_due from a literal cutoff; the
-        blockers are evaluated per examined run, never in the range condition, so
-        a blocked prefix is passed once per pass.
+        Scheduled passes charge each examined blocker and keep a durable cursor.
+        Explicit requests have no cursor between calls, so they filter blockers
+        in SQL. Both reuse the same predicates and recheck locked admission.
         """
+        held = flow_run_held_predicate(run_id=FlowRuns.id, flow_id=FlowRuns.flow_id)
+        audit = flow_run_undelivered_audit_exists(FlowRuns.id)
+        webhook = flow_run_unresolved_webhook_exists(FlowRuns.id)
         stmt = (
             sa.select(
                 FlowRuns.id,
                 FLOW_RUN_RETENTION_ANCHOR.label("anchor"),
-                flow_run_held_predicate(
-                    run_id=FlowRuns.id, flow_id=FlowRuns.flow_id
-                ).label("held"),
-                flow_run_undelivered_audit_exists(FlowRuns.id).label("audit"),
-                flow_run_unresolved_webhook_exists(FlowRuns.id).label("webhook"),
+                held.label("held"),
+                audit.label("audit"),
+                webhook.label("webhook"),
             )
             .where(
                 *flow_run_k4_due_predicates(
@@ -196,6 +200,8 @@ class FlowRunDeletionRepository:
             .order_by(FLOW_RUN_RETENTION_ANCHOR, FlowRuns.id)
             .limit(limit)
         )
+        if trigger is RetentionTrigger.EXPLICIT:
+            stmt = stmt.where(flow_run_history_is_unblocked())
         if after is not None:
             stmt = stmt.where(
                 sa.tuple_(FLOW_RUN_RETENTION_ANCHOR, FlowRuns.id)

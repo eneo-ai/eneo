@@ -8,9 +8,6 @@ import pytest
 import sqlalchemy as sa
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from eneo.data_retention.infrastructure.data_retention_service import (
-    DataRetentionService,
-)
 from eneo.database.tables.flow_tables import (
     FlowOutboxDeliveryStatus,
     FlowRunAuditOutbox,
@@ -22,6 +19,9 @@ from eneo.database.tables.spaces_table import Spaces
 from eneo.database.tables.tenant_table import Tenants
 from eneo.flows.domain.flow_run_retention_policy import FlowRunRetentionMode
 from eneo.flows.infrastructure.flow_repo import FlowRepository
+from tests.integration.flows.flow_run_deletion_support import (
+    due_run_ids as due_runs_of,
+)
 
 pytestmark = [pytest.mark.integration, pytest.mark.asyncio]
 
@@ -218,17 +218,8 @@ async def test_flow_retention_envelope_matrix_controls_purge_and_effective_reads
         )
         await async_session.flush()
 
-    retention_service = DataRetentionService(async_session)
-    due_run_ids = list(
-        (
-            await async_session.scalars(
-                retention_service._build_due_flow_run_history_purge_query(now=anchor)
-            )
-        ).all()
-    )
-    candidates = await retention_service._select_flow_run_history_purge_batch(
-        now=anchor,
-        limit=100,
+    due_run_ids, candidates = await due_runs_of(
+        async_session, test_tenant.id, now=anchor
     )
     projected_flow = await FlowRepository(
         session=async_session,
