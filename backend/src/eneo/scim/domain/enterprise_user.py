@@ -180,8 +180,9 @@ def _apply_pathless(result: EnterpriseUser, value: dict[str, Any]) -> None:
 def _merge_object(result: EnterpriseUser, value: Any) -> None:
     """Set the attributes named in ``value``; leave the others unchanged.
 
-    This is RFC 7644 §3.5.2.1/§3.5.2.3 for a complex target, and — applied to
-    an empty ``result`` — whole-object parsing. A null attribute removes it.
+    This is RFC 7644 §3.5.2.1/§3.5.2.3 for a complex target, ``manager``
+    included, and — applied to an empty ``result`` — whole-object parsing.
+    A null attribute removes it.
     """
     if value is None:
         return
@@ -199,25 +200,16 @@ def _merge_object(result: EnterpriseUser, value: Any) -> None:
                 f"Enterprise attribute '{canonical}' was supplied more than once"
             )
         seen.add(canonical)
-        _store(result, canonical, _normalise_value(canonical, item))
+        _set_attribute(result, canonical, item)
 
 
 def _set(result: EnterpriseUser, target: _Target, value: Any) -> None:
     if target.attribute is None:
         _merge_object(result, value)
-        return
-
-    if target.sub_attribute is None:
-        _store(result, target.attribute, _normalise_value(target.attribute, value))
-        return
-
-    sub_value = _normalise_string(f"manager.{target.sub_attribute}", value)
-    manager = dict(cast(dict[str, str], result.get(MANAGER) or {}))
-    if sub_value is None:
-        manager.pop(target.sub_attribute, None)
+    elif target.sub_attribute is None:
+        _set_attribute(result, target.attribute, value)
     else:
-        manager[target.sub_attribute] = sub_value
-    _store(result, MANAGER, manager or None)
+        _set_attribute(result, MANAGER, {target.sub_attribute: value})
 
 
 def _remove(result: EnterpriseUser, target: _Target) -> None:
@@ -236,10 +228,11 @@ def _store(result: EnterpriseUser, attribute: str, value: Any) -> None:
         result[attribute] = value
 
 
-def _normalise_value(attribute: str, value: Any) -> Any:
+def _set_attribute(result: EnterpriseUser, attribute: str, value: Any) -> None:
     if attribute == MANAGER:
-        return _normalise_manager(value)
-    return _normalise_string(attribute, value)
+        _store(result, MANAGER, _merge_manager(result.get(MANAGER), value))
+    else:
+        _store(result, attribute, _normalise_string(attribute, value))
 
 
 def _normalise_string(attribute: str, value: Any) -> str | None:
@@ -259,20 +252,25 @@ def _normalise_string(attribute: str, value: Any) -> str | None:
     return value
 
 
-def _normalise_manager(value: Any) -> dict[str, str] | None:
+def _merge_manager(current: Any, value: Any) -> dict[str, str] | None:
+    """``manager`` is complex: an object sets only the sub-attributes it names
+    and leaves the others unchanged (RFC 7644 §3.5.2.3), so a readOnly or
+    unknown key never clears a stored reference. POST and PUT parse into an
+    empty result, where this is a whole replacement."""
     if value is None:
         return None
     if isinstance(value, str):
         # IdPs are known to send the manager reference as a bare id string in
         # PATCH (`path: "...:manager", value: "<id>"`). Rejecting it would fail
         # the whole atomic request and stall the sync, so treat it as `value`.
+        # It names a whole new reference, so a stored `$ref` is not kept.
         reference = _normalise_string("manager.value", value)
         return {"value": reference} if reference is not None else None
     if not isinstance(value, dict):
         raise ScimValidationError(
             "Enterprise attribute 'manager' must be an object with 'value' and/or '$ref'"
         )
-    manager: dict[str, str] = {}
+    manager = dict(cast(dict[str, str], current or {}))
     for key, item in cast(dict[str, Any], value).items():
         folded = key.casefold()
         if folded in _MANAGER_READ_ONLY:
@@ -281,7 +279,9 @@ def _normalise_manager(value: Any) -> dict[str, str] | None:
         if sub is None:
             continue
         normalised = _normalise_string(f"manager.{sub}", item)
-        if normalised is not None:
+        if normalised is None:
+            manager.pop(sub, None)
+        else:
             manager[sub] = normalised
     return manager or None
 

@@ -249,6 +249,88 @@ class TestPatchOperations:
         )
         assert result == {}
 
+    MANAGER_OBJECT_FORMS = [
+        pytest.param(
+            lambda op, manager: _op(op, f"{URN}:manager", manager), id="manager-path"
+        ),
+        pytest.param(
+            lambda op, manager: _op(op, URN, {"manager": manager}), id="urn-path"
+        ),
+        pytest.param(
+            lambda op, manager: _op(op, None, {URN: {"manager": manager}}),
+            id="pathless-urn-object",
+        ),
+        pytest.param(
+            lambda op, manager: _op(op, None, {f"{URN}:manager": manager}),
+            id="pathless-qualified-key",
+        ),
+    ]
+
+    @pytest.mark.parametrize("op", ["add", "replace"])
+    @pytest.mark.parametrize("form", MANAGER_OBJECT_FORMS)
+    def test_manager_object_sets_only_the_named_sub_attributes(self, form, op):
+        # RFC 7644 §3.5.2.3: sub-attributes not in the value are left unchanged.
+        result = apply_patch_operations(
+            {"manager": {"value": "mgr-1"}},
+            [form(op, {"$ref": "../Users/mgr-1"})],
+        )
+        assert result == {"manager": {"value": "mgr-1", "$ref": "../Users/mgr-1"}}
+
+    @pytest.mark.parametrize("op", ["add", "replace"])
+    @pytest.mark.parametrize("form", MANAGER_OBJECT_FORMS)
+    @pytest.mark.parametrize(
+        "ignored",
+        [{"displayName": "Boss"}, {"shoeSize": "44"}, {}],
+        ids=["display-name", "unknown-key", "empty-object"],
+    )
+    def test_manager_object_without_writable_sub_attributes_changes_nothing(
+        self, form, op, ignored
+    ):
+        current = {"manager": {"value": "mgr-1", "$ref": "../Users/mgr-1"}}
+        assert apply_patch_operations(current, [form(op, ignored)]) == current
+
+    @pytest.mark.parametrize("empty", [None, ""])
+    def test_manager_object_null_sub_attribute_clears_only_that_part(
+        self, empty: str | None
+    ):
+        result = apply_patch_operations(
+            {"manager": {"value": "mgr-1", "$ref": "../Users/mgr-1"}},
+            [_op("replace", f"{URN}:manager", {"$ref": empty})],
+        )
+        assert result == {"manager": {"value": "mgr-1"}}
+
+    @pytest.mark.parametrize(
+        "operation",
+        [
+            _op("replace", f"{URN}:manager", None),
+            _op("remove", f"{URN}:manager"),
+            _op("replace", None, {URN: {"manager": None}}),
+            _op("replace", f"{URN}:manager", {"value": None}),
+        ],
+        ids=["null", "remove", "pathless-null", "last-sub-attribute-null"],
+    )
+    def test_manager_explicit_clear_removes_it(self, operation: PatchOperation):
+        result = apply_patch_operations(
+            {"department": "HR", "manager": {"value": "mgr-1"}}, [operation]
+        )
+        assert result == {"department": "HR"}
+
+    def test_manager_bare_string_replaces_the_reference(self):
+        # A bare id names a new manager; keeping the old $ref would point at
+        # the previous one.
+        result = apply_patch_operations(
+            {"manager": {"value": "mgr-1", "$ref": "../Users/mgr-1"}},
+            [_op("replace", f"{URN}:manager", "mgr-2")],
+        )
+        assert result == {"manager": {"value": "mgr-2"}}
+
+    def test_manager_merge_does_not_mutate_the_stored_manager(self):
+        current = {"manager": {"value": "mgr-1"}}
+        apply_patch_operations(
+            current, [_op("add", f"{URN}:manager", {"$ref": "../Users/mgr-1"})]
+        )
+        assert current == {"manager": {"value": "mgr-1"}}
+
     def test_unknown_attribute_path_is_invalid_path(self):
         with pytest.raises(ScimHttpError) as exc_info:
             apply_patch_operations(

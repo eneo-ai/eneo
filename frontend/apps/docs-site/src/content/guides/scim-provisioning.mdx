@@ -244,6 +244,8 @@ Values are checked rather than converted. A request is rejected with `400 invali
 | `urn:…:enterprise:2.0:User` | `add`/`replace` sets the attributes named in the value and leaves the others unchanged. `remove` clears the whole extension |
 | No path, with the extension URN (or fully qualified attribute names) as keys in the value | Sets the named attributes |
 
+With any of these forms, `add`/`replace` with a `manager` object sets only the parts (`value`, `$ref`) it contains and leaves the other part as stored. A part set to `null` is removed. An object holding only `displayName` or unknown keys changes nothing. A bare identifier string for `manager` replaces the whole reference, so a stored `$ref` is removed.
+
 A `PATCH` is all-or-nothing. If any operation is invalid, the whole request is rejected and the user is left unchanged. A path that names an attribute the extension does not define, such as `urn:…:enterprise:2.0:User:shoeSize`, is rejected with `400 invalidPath` rather than ignored.
 
 ### Where the attributes are visible

@@ -141,7 +141,13 @@ async def test_put_replaces_the_extension_wholesale(
     client, bypass_scim_auth, db_session, scim_user
 ):
     await _set_extension(
-        db_session, scim_user.id, {"division": "North", "department": "HR"}
+        db_session,
+        scim_user.id,
+        {
+            "division": "North",
+            "department": "HR",
+            "manager": {"value": "mgr-1", "$ref": "../Users/mgr-1"},
+        },
     )
 
     response = await client.put(
@@ -149,13 +155,15 @@ async def test_put_replaces_the_extension_wholesale(
         json={
             "userName": "scim.user",
             "emails": [{"value": "scim-user@example.com", "primary": True}],
-            ENTERPRISE: {"department": "Finance"},
+            ENTERPRISE: {"department": "Finance", "manager": {"value": "mgr-2"}},
         },
     )
 
     assert response.status_code == 200
     _, stored = await _stored(db_session, scim_user.id)
-    assert stored == {ENTERPRISE: {"department": "Finance"}}
+    assert stored == {
+        ENTERPRISE: {"department": "Finance", "manager": {"value": "mgr-2"}}
+    }
 
 
 @pytest.mark.asyncio
@@ -229,6 +237,71 @@ async def test_patch_operation_forms(
         f"/scim/v2/Users/{scim_user.id}", json=_patch(operation)
     )
 
+    assert response.status_code == 200
+    assert response.json()[ENTERPRISE] == expected
+    _, stored = await _stored(db_session, scim_user.id)
+    assert stored == {ENTERPRISE: expected}
+
+
+MANAGER_REF = {"$ref": "../Users/mgr-1"}
+MANAGER_DISPLAY_NAME = {"displayName": "Client Asserted"}
+
+
+@pytest.mark.asyncio
+@pytest.mark.integration
+@pytest.mark.parametrize(
+    ("operation", "expected_manager"),
+    [
+        (
+            {"op": "Add", "path": f"{ENTERPRISE}:manager", "value": MANAGER_REF},
+            {"value": "mgr-1", "$ref": "../Users/mgr-1"},
+        ),
+        (
+            {"op": "Replace", "path": ENTERPRISE, "value": {"manager": MANAGER_REF}},
+            {"value": "mgr-1", "$ref": "../Users/mgr-1"},
+        ),
+        (
+            {"op": "Add", "value": {ENTERPRISE: {"manager": MANAGER_REF}}},
+            {"value": "mgr-1", "$ref": "../Users/mgr-1"},
+        ),
+        (
+            {"op": "Replace", "value": {f"{ENTERPRISE}:manager": MANAGER_REF}},
+            {"value": "mgr-1", "$ref": "../Users/mgr-1"},
+        ),
+        (
+            {
+                "op": "Replace",
+                "path": f"{ENTERPRISE}:manager",
+                "value": MANAGER_DISPLAY_NAME,
+            },
+            {"value": "mgr-1"},
+        ),
+        (
+            {"op": "Add", "value": {ENTERPRISE: {"manager": MANAGER_DISPLAY_NAME}}},
+            {"value": "mgr-1"},
+        ),
+    ],
+    ids=[
+        "add-ref-manager-path",
+        "add-ref-urn-path",
+        "add-ref-pathless-urn-object",
+        "add-ref-pathless-qualified-key",
+        "display-name-only-manager-path",
+        "display-name-only-pathless",
+    ],
+)
+async def test_patch_manager_object_keeps_unnamed_sub_attributes(
+    client, bypass_scim_auth, db_session, scim_user, operation, expected_manager
+):
+    await _set_extension(
+        db_session, scim_user.id, {"department": "HR", "manager": {"value": "mgr-1"}}
+    )
+
+    response = await client.patch(
+        f"/scim/v2/Users/{scim_user.id}", json=_patch(operation)
+    )
+
+    expected = {"department": "HR", "manager": expected_manager}
     assert response.status_code == 200
     assert response.json()[ENTERPRISE] == expected
     _, stored = await _stored(db_session, scim_user.id)
