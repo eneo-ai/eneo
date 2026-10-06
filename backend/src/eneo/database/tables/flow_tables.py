@@ -395,7 +395,9 @@ class FlowVersions(BaseCrossReference):
             ondelete="CASCADE",
             name="fk_flow_versions_flow_tenant",
         ),
-        UniqueConstraint("flow_id", "version", name="uq_flow_versions_flow_version"),
+        sa.PrimaryKeyConstraint(
+            "flow_id", "version", name="uq_flow_versions_flow_version"
+        ),
     )
 
 
