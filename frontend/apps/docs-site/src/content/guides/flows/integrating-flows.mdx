@@ -2,11 +2,11 @@ import { Callout } from "nextra/components";
 
 # Integrating Flows
 
-This page is the authoritative guide for building an application on the Eneo Flows runtime API. It covers the whole runtime surface in the order a client calls it: discover a published flow, upload input files, create and start a run, poll it, handle a human review checkpoint, cancel or retry, and download outputs.
+This guide shows the main runtime workflow for an application using a published Eneo Flow: discover it, upload input files, create and start a run, poll it, handle a human review checkpoint, cancel or retry, and download outputs.
 
 You are in the integration step of the consumer journey, where the published design becomes runtime calls and user-facing states.
 
-It is written to be complete on its own. Everything a client needs is stated explicitly: exact paths including trailing slashes, exact header names, exact request bodies, exact status values, and the error codes to branch on. Where a value is deployment-configurable, the page says so and names the endpoint that reports the effective value.
+The examples include paths, headers, request bodies, status values and error codes for this workflow. Use your deployment's `/openapi.json` for its supported operations and exact request and response contracts, including transcript editing and regeneration, review edits and signed input-file downloads.
 
 Flows themselves are authored by people in the Eneo Builder. This page never asks you to create or edit a flow; it assumes someone has already published one.
 
