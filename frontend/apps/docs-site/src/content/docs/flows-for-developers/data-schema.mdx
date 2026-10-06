@@ -77,15 +77,16 @@ Run-history retention resolves one complete policy in this order:
 
 At every level both columns are null (inherit) or both are present (replace the
 complete parent policy). The first complete policy wins. `preserve` marks age
-eligibility for a later explicit purge; `review_required` additionally routes
+eligibility for an explicit purge; `review_required` additionally routes
 matching terminal runs to the read-only review queue. No policy means there is
 no run-history age threshold.
 
 These values never authorize scheduled deletion: the shared retention worker
-does not mutate Flow-owned data, and the current settings surface has no purge
-action. A later administrator purge must own preview, confirmation, approval
-where required, bounded execution, and the immutable audit receipt while
-continuing to respect audit and webhook delivery blockers.
+does not mutate Flow-owned data. The existing administrator settings API
+previews or explicitly purges eligible history while respecting legal holds,
+review requirements, and delivery blockers. See
+[Flow run-history retention](/guides/flows/retention-policy) for the purge and
+audit contract.
 
 Space `data_retention_days` remains the separate conversation/App policy and is
 not a Flow run-history fallback.

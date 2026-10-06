@@ -1955,9 +1955,9 @@ This table checks workloads against the default limits. It does not establish pr
 
 ### Retention
 
-Run-history policy resolves one complete `{mode, days}` pair from Flow, Space, then Organization. `preserve` defines manual purge eligibility; `review_required` adds a read-only human-review queue. Configuring a policy, reaching its age threshold, or reading that queue does not delete anything. No scheduled worker purges Flow-owned data, and this release exposes no administrator run-history purge action from the settings surface.
+Run-history policy resolves one complete `{mode, days}` pair from Flow, Space, then Organization. `preserve` defines manual purge eligibility; `review_required` adds a read-only human-review queue. Configuring a policy, reaching its age threshold, or reading that queue does not delete anything. The existing administrator settings API can preview or explicitly purge eligible history with `retention_manage`; review-required and held runs remain stored. See [Flow run-history retention](/guides/flows/retention-policy) for the eligibility, delivery blockers, and audit contract.
 
-Runs and their files therefore remain stored, and create-run idempotency replay remains tied to the retained run row. Do not infer deletion from an eligibility timestamp.
+Eligibility does not itself erase runs or their run-owned files. Create-run idempotency replay remains tied to the retained run row. Do not infer deletion from an eligibility timestamp.
 
 Abandoned uploads that were never attached to a run are not swept automatically. Delete them yourself with `DELETE /api/v1/flows/{id}/runtime-files/{file_id}/`; a file already bound to a run returns `409 flow_runtime_file_attached`.
 
