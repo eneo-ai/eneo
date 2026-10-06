@@ -64,25 +64,13 @@ class ServiceAccountAuthService:
         super().__init__()
         self.default_scopes = self.DEFAULT_SCOPES
 
-    def _get_redirect_uri(self) -> str:
-        """Get the OAuth redirect URI for service account flow."""
-        settings = get_settings()
-        redirect_uri = settings.oauth_callback_url
-        if not redirect_uri:
-            if settings.public_origin:
-                redirect_uri = f"{settings.public_origin}/integrations/callback/token/"
-            else:
-                raise ValueError(
-                    "OAUTH_CALLBACK_URL or PUBLIC_ORIGIN must be set for service account authentication"
-                )
-        return redirect_uri
-
     def _build_credentials(
         self,
         client_id: str,
         client_secret: str,
         tenant_domain: str,
         include_redirect_uri: bool = True,
+        redirect_uri: str | None = None,
     ) -> ServiceAccountCredentials:
         """Build credentials object from provided values.
 
@@ -92,7 +80,11 @@ class ServiceAccountAuthService:
             tenant_domain: Microsoft Entra ID tenant domain
             include_redirect_uri: Whether to include redirect_uri (only needed for OAuth flow)
         """
-        redirect_uri = self._get_redirect_uri() if include_redirect_uri else None
+        redirect_uri = (
+            get_settings().integration_callback_uri(redirect_uri)
+            if include_redirect_uri
+            else None
+        )
         return ServiceAccountCredentials(
             client_id=client_id,
             client_secret=client_secret,
@@ -125,6 +117,7 @@ class ServiceAccountAuthService:
         client_id: str,
         client_secret: str,
         tenant_domain: str,
+        redirect_uri: str | None = None,
     ) -> dict[str, str]:
         """Generate OAuth authorization URL for service account login.
 
@@ -137,7 +130,9 @@ class ServiceAccountAuthService:
         Returns:
             Dictionary with 'auth_url' key containing the authorization URL
         """
-        creds = self._build_credentials(client_id, client_secret, tenant_domain)
+        creds = self._build_credentials(
+            client_id, client_secret, tenant_domain, redirect_uri=redirect_uri
+        )
         auth_endpoint = f"{creds.authority}/oauth2/v2.0/authorize"
         scope_param = " ".join(["offline_access", *self.default_scopes])
 
@@ -161,6 +156,7 @@ class ServiceAccountAuthService:
         client_id: str,
         client_secret: str,
         tenant_domain: str,
+        redirect_uri: str | None = None,
     ) -> ServiceAccountTokenResult:
         """Exchange authorization code for access and refresh tokens.
 
@@ -173,7 +169,9 @@ class ServiceAccountAuthService:
         Returns:
             ServiceAccountTokenResult with access_token, refresh_token, and email
         """
-        creds = self._build_credentials(client_id, client_secret, tenant_domain)
+        creds = self._build_credentials(
+            client_id, client_secret, tenant_domain, redirect_uri=redirect_uri
+        )
         token_endpoint = f"{creds.authority}/oauth2/v2.0/token"
 
         data = {

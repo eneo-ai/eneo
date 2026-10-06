@@ -1,5 +1,16 @@
 # flake8: noqa
 
+# Keep the placement rule identical for knowledge and MCP resource citations.
+# The model supplies the tags; rewriting them after generation could attach a
+# source to the wrong claim, especially while the answer is streaming.
+CITATION_PLACEMENT_INSTRUCTION = (
+    "Put each tag after the punctuation ending its complete sourced sentence. "
+    "If a list item or table cell has no sentence, put the tag after the complete "
+    "item or cell. Never put it after a heading, bold label, or introductory "
+    "phrase before its claim. Example: **Smakprofil:** Brasilianskt kaffe är "
+    'fylligt och milt. <inref id="<source_id>"/>'
+)
+
 # Inline instruction appended after the MCP resource blocks. Lives next to the
 # data so the model gets the citation rule whenever a tool returns resources,
 # without requiring the system-level SHOW_REFERENCES_PROMPT (that one only fires
@@ -9,9 +20,11 @@
 MCP_TOOL_REFERENCES_INSTRUCTION = (
     "The tool returned one or more sources above, each delimited by triple "
     "quotes and opening with a source_id line. When you use information from a "
-    "source, cite it with an inline self-closing tag immediately after the "
-    'relevant text: <inref id="<source_id>"/>, using that source\'s 8-character '
-    "source_id. If the user asks about a source, refer to its title, never the "
+    "source, cite its supporting sentence or sentence-free item with an inline "
+    "self-closing tag "
+    '<inref id="<source_id>"/>, using that source\'s 8-character source_id. '
+    f"{CITATION_PLACEMENT_INSTRUCTION} "
+    "If the user asks about a source, refer to its title, never the "
     "source_id."
 )
 
@@ -60,12 +73,13 @@ ATTACHED_FILE_REFERENCES_INSTRUCTION = (
     "have expired."
 )
 
-SHOW_REFERENCES_PROMPT = """Use the provided sources delimited by triple quotes to answer questions.
-Only use the sources to answer questions. You MUST reference every source you use by adding an inline XML self-closing tag immediately after the information: <inref id="<source_id>"/>
+SHOW_REFERENCES_PROMPT = f"""Use the provided sources delimited by triple quotes to answer questions.
+Only use the sources to answer questions. You MUST cite every sentence or sentence-free item that uses a source with an inline XML self-closing tag: <inref id="<source_id>"/>
 
 Rules:
-- Every claim, fact, or piece of information taken from a source MUST be followed by its reference tag.
-- Use the 8-character source_id from the source metadata. Example: if source_id is a5477f85, write <inref id="a5477f85"/> right after the relevant sentence or paragraph.
+- Every sourced sentence or sentence-free list item or table cell MUST be followed by its reference tag.
+- Use the 8-character source_id from the source metadata.
+- {CITATION_PLACEMENT_INSTRUCTION}
 - If information comes from multiple sources, include multiple tags: <inref id="a5477f85"/><inref id="b3291cc0"/>
 - If the user asks about the sources, respond with the source_title, never the source_id.
 - If you cannot find the information in any of the sources, politely respond that the answer cannot be found.

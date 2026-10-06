@@ -23,6 +23,7 @@ concurrency:
 env:
   BACKEND_IMAGE: ghcr.io/eneo-ai/eneo-backend
   FRONTEND_IMAGE: ghcr.io/eneo-ai/eneo-frontend
+  WEB_NEXT_IMAGE: ghcr.io/eneo-ai/eneo-web-next
   SEAWEEDFS_IMAGE: ghcr.io/eneo-ai/eneo-seaweedfs
   PLATFORM: linux/amd64
   PLATFORM_OS: linux
@@ -360,6 +361,9 @@ jobs:
           generate_component_sbom "backend" "$BACKEND_IMAGE"
           generate_backend_python_runtime_sbom "$backend_digest_ref"
           generate_component_sbom "frontend" "$FRONTEND_IMAGE"
+          if [[ -f frontend/apps/web-next/Dockerfile ]]; then
+            generate_component_sbom "web-next" "$WEB_NEXT_IMAGE"
+          fi
           seaweedfs_tag="$SEAWEEDFS_VERSION"
           generate_component_sbom \
             "seaweedfs" "$SEAWEEDFS_IMAGE" "$seaweedfs_tag" \
@@ -515,5 +519,13 @@ jobs:
             "release-sbom/IMAGE-DIGESTS.txt#Image digests scanned"
             "release-sbom/SBOM-SHA256SUMS.txt#SBOM file checksums"
           )
+
+          if [[ -f frontend/apps/web-next/Dockerfile ]]; then
+            release_assets+=(
+              "release-sbom/eneo-web-next-${RELEASE_TAG}-${PLATFORM_OS}-${PLATFORM_ARCH}.cyclonedx.json#Web-next image SBOM - CycloneDX JSON"
+              "release-sbom/eneo-web-next-${RELEASE_TAG}-${PLATFORM_OS}-${PLATFORM_ARCH}.spdx.json#Web-next image SBOM - SPDX JSON"
+              "release-sbom/eneo-web-next-${RELEASE_TAG}-${PLATFORM_OS}-${PLATFORM_ARCH}.table.txt#Web-next image packages - readable table"
+            )
+          fi
 
           gh release upload "$RELEASE_TAG" "${release_assets[@]}" --repo "$GITHUB_REPOSITORY"

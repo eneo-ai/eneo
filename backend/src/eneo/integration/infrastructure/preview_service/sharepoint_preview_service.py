@@ -206,10 +206,8 @@ class SharePointPreviewService(BasePreviewService):
             return await content_client.get_group_root_sites_batched(member_group_ids)
 
         try:
-            return await asyncio.wait_for(
-                load(),
-                timeout=OPTIONAL_USER_CONTEXT_TIMEOUT_SECONDS,
-            )
+            async with asyncio.timeout(OPTIONAL_USER_CONTEXT_TIMEOUT_SECONDS):
+                return await load()
         except Exception as e:
             logger.warning(
                 "Could not resolve team sites for my-teams categorization: %s",
@@ -223,10 +221,8 @@ class SharePointPreviewService(BasePreviewService):
         content_client: SharePointContentClient,
     ) -> Optional[IntegrationPreview]:
         try:
-            drive_data = await asyncio.wait_for(
-                content_client.get_my_drive(),
-                timeout=OPTIONAL_USER_CONTEXT_TIMEOUT_SECONDS,
-            )
+            async with asyncio.timeout(OPTIONAL_USER_CONTEXT_TIMEOUT_SECONDS):
+                drive_data = await content_client.get_my_drive()
         except Exception as e:
             logger.warning(
                 "Could not fetch OneDrive: %s",

@@ -1,11 +1,13 @@
 """Unit tests for the cross-provider /v1/models normalization helpers."""
 
 from eneo.model_providers.domain.model_provider_service import (
-    _auth_headers_for,
     _coerce_to_epoch,
     _extract_mode_hint,
-    _normalize_endpoint_base,
     _normalize_live_model,
+)
+from eneo.model_providers.domain.provider_api import (
+    auth_headers_for,
+    normalize_endpoint_base,
 )
 
 
@@ -73,7 +75,7 @@ def test_unknown_shape_still_works_with_just_id() -> None:
 
 
 def test_anthropic_uses_x_api_key() -> None:
-    headers = _auth_headers_for("anthropic", "sk-ant-test")
+    headers = auth_headers_for("anthropic", "sk-ant-test")
     assert headers == {
         "x-api-key": "sk-ant-test",
         "anthropic-version": "2023-06-01",
@@ -81,37 +83,36 @@ def test_anthropic_uses_x_api_key() -> None:
 
 
 def test_other_providers_use_bearer() -> None:
-    assert _auth_headers_for("openai", "sk-test") == {"Authorization": "Bearer sk-test"}
-    assert _auth_headers_for("vllm", "tok") == {"Authorization": "Bearer tok"}
-    assert _auth_headers_for("berget", "tok") == {"Authorization": "Bearer tok"}
+    assert auth_headers_for("openai", "sk-test") == {"Authorization": "Bearer sk-test"}
+    assert auth_headers_for("vllm", "tok") == {"Authorization": "Bearer tok"}
+    assert auth_headers_for("berget", "tok") == {"Authorization": "Bearer tok"}
 
 
 def test_endpoint_normalization_handles_v1_suffix() -> None:
     """Users may paste either ``https://api.example.com`` or ``…/v1`` and we
     must avoid producing ``/v1/v1/models`` either way."""
     assert (
-        _normalize_endpoint_base("https://api.example.com") == "https://api.example.com"
+        normalize_endpoint_base("https://api.example.com") == "https://api.example.com"
     )
     assert (
-        _normalize_endpoint_base("https://api.example.com/")
+        normalize_endpoint_base("https://api.example.com/") == "https://api.example.com"
+    )
+    assert (
+        normalize_endpoint_base("https://api.example.com/v1")
         == "https://api.example.com"
     )
     assert (
-        _normalize_endpoint_base("https://api.example.com/v1")
-        == "https://api.example.com"
-    )
-    assert (
-        _normalize_endpoint_base("https://api.example.com/v1/")
+        normalize_endpoint_base("https://api.example.com/v1/")
         == "https://api.example.com"
     )
     # ``v1beta`` should NOT be stripped — only the exact ``/v1`` segment.
     assert (
-        _normalize_endpoint_base("https://api.example.com/v1beta")
+        normalize_endpoint_base("https://api.example.com/v1beta")
         == "https://api.example.com/v1beta"
     )
     # Path before /v1 is preserved.
     assert (
-        _normalize_endpoint_base("https://gateway.example.com/proxy/v1")
+        normalize_endpoint_base("https://gateway.example.com/proxy/v1")
         == "https://gateway.example.com/proxy"
     )
 

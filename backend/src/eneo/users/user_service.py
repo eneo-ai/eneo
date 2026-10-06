@@ -8,6 +8,7 @@ from uuid import UUID
 import idna
 import jwt
 import sqlalchemy as sa
+from fastapi import HTTPException
 from starlette.requests import Request
 
 from eneo.audit.application.audit_metadata import AuditMetadata
@@ -59,6 +60,7 @@ from eneo.main.exceptions import (
     FederatedLoginDenied,
     NotFoundException,
     TenantSuspendedException,
+    UniqueException,
     UniqueUserException,
     UserInactiveException,
 )
@@ -518,16 +520,29 @@ class UserService:
             if await self.repo.get_user_by_username(username, with_deleted=True):
                 username = None
 
-        user = await self.repo.add(
-            UserAdd(
-                email=identity.email,
-                email_verified=True,
-                username=username,
-                tenant_id=tenant_id,
-                roles=roles,
-                state=UserState.ACTIVE,
+        try:
+            user = await self.repo.add(
+                UserAdd(
+                    email=identity.email,
+                    email_verified=True,
+                    username=username,
+                    tenant_id=tenant_id,
+                    roles=roles,
+                    state=UserState.ACTIVE,
+                )
             )
-        )
+        except UniqueException:
+            # A concurrent first sign-in created the row between the lookup
+            # and the insert. Admit that row under the same membership checks.
+            user = await self.repo.get_user_by_email(identity.email)
+            if (
+                user is None
+                or user.tenant_id != tenant_id
+                or user.state != UserState.ACTIVE
+                or user.deleted_at is not None
+            ):
+                raise FederatedLoginDenied("Access denied for this organization.")
+            return user, False
         logger.info(
             "JIT provisioning: Created user",
             extra={
@@ -764,8 +779,112 @@ class UserService:
         return user
 
     async def _get_user_from_token(self, token: str):
-        payload = self._get_token_payload(token, aud=get_settings().jwt_audience)
+        settings = get_settings()
+        try:
+            payload = self._get_token_payload(token, aud=settings.jwt_audience)
+        except AuthenticationException:
+            # In resource-server mode, the bearer token may be an IdP token.
+            if not settings.oidc_resource_server_enabled:
+                raise
+            return await self._get_user_from_idp_access_token(token)
         return await self._get_user_from_payload(payload)
+
+    async def _get_user_from_idp_access_token(self, token: str) -> "UserInDB":
+        """Validate an IdP access token and resolve the user by email claim.
+
+        Admission (allowed domains, JIT provisioning, tenant membership) is
+        the same ``resolve_federated_user`` decision the OIDC federation
+        callback takes. Any token problem raises ``AuthenticationException``
+        (401), never a 500.
+        """
+        from eneo.authentication.oidc_resource_server import (
+            validate_idp_access_token,
+        )
+
+        correlation_id = (
+            get_request_context().get("correlation_id") or "oidc-resource-server"
+        )
+
+        payload = await validate_idp_access_token(
+            token, auth_service=self.auth_service, correlation_id=correlation_id
+        )
+
+        try:
+            identity = FederatedIdentity.from_claims(payload)
+        except ValueError as exc:
+            logger.warning(
+                "IdP access token has no usable email claim",
+                extra={
+                    "correlation_id": correlation_id,
+                    "payload_keys": list(payload.keys()),
+                    "reason": str(exc),
+                },
+            )
+            raise AuthenticationException(
+                "Could not validate token credentials."
+            ) from exc
+
+        tenant = await self._resolve_tenant_for_idp_access_token(correlation_id)
+
+        # Resource-server mode is configured globally, like the global OIDC
+        # login: the tenant's federation config wins, the settings fill in.
+        federation_config = tenant.federation_config or {}
+        allowed_domains = (
+            cast("list[str] | None", federation_config.get("allowed_domains"))
+            or get_settings().oidc_allowed_domains
+        )
+
+        try:
+            user, _created = await self.resolve_federated_user(
+                identity=identity,
+                tenant_id=tenant.id,
+                allowed_domains=allowed_domains,
+                correlation_id=correlation_id,
+            )
+        except FederatedLoginDenied as exc:
+            # The token is valid; the identity is not admitted. 403, as the
+            # federation callback answers, not a credentials failure.
+            raise HTTPException(status_code=403, detail=str(exc)) from exc
+        return user
+
+    async def _resolve_tenant_for_idp_access_token(self, correlation_id: str):
+        """Pick the tenant IdP-token users belong to.
+
+        ``OIDC_TENANT_ID`` wins when configured (same setting the global OIDC
+        login uses for user creation); otherwise the first active tenant —
+        resource-server mode targets single-tenant deployments.
+        """
+        settings = get_settings()
+
+        if settings.oidc_tenant_id:
+            try:
+                tenant_id = UUID(settings.oidc_tenant_id)
+            except ValueError:
+                logger.error(
+                    "Invalid OIDC_TENANT_ID format",
+                    extra={"correlation_id": correlation_id},
+                )
+                raise AuthenticationException("Could not validate token credentials.")
+            tenant = await self.tenant_repo.get(tenant_id)
+            if tenant is None:
+                logger.error(
+                    "OIDC_TENANT_ID does not match an existing tenant",
+                    extra={
+                        "correlation_id": correlation_id,
+                        "tenant_id": str(tenant_id),
+                    },
+                )
+                raise AuthenticationException("Could not validate token credentials.")
+            return tenant
+
+        tenants = await self.tenant_repo.get_all_active()
+        if not tenants:
+            logger.error(
+                "No active tenant available for IdP token resolution",
+                extra={"correlation_id": correlation_id},
+            )
+            raise AuthenticationException("Could not validate token credentials.")
+        return tenants[0]
 
     async def authenticate_internal_mcp_token(self, token: str) -> "UserInDB":
         """Authenticate the principal behind a scoped loopback MCP token.

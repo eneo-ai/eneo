@@ -1,0 +1,329 @@
+"use client";
+
+import { useMutation, useQueryClient, useSuspenseQuery } from "@tanstack/react-query";
+import { Bot, Play, Send, SlidersHorizontal, Wrench } from "lucide-react";
+import Link from "next/link";
+import { useTranslations } from "next-intl";
+import { useEffect, useMemo, useRef, useState } from "react";
+import { IconField } from "@/components/composites/icon-field";
+import { SaveStatusProvider } from "@/components/composites/save-status";
+import {
+  SectionedSettings,
+  type SettingsSection
+} from "@/components/composites/sectioned-settings";
+import { SettingsGroup, SettingsRow } from "@/components/composites/settings-rows";
+import { useAutosave, useAutosaveField } from "@/components/composites/use-autosave";
+import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import { Switch } from "@/components/ui/switch";
+import { browserApi } from "@/lib/api/browser";
+import { unwrap } from "@/lib/api/errors";
+import { toastApiError } from "@/lib/api/toast";
+import { chatPartnerHref } from "@/features/assistants/assistants";
+import { PublishDialog } from "@/features/assistants/publish-dialog";
+import { EditorHeader, useCreatedAnnouncement } from "@/features/spaces/editor-header";
+import { useJustCreated } from "@/features/spaces/just-created";
+import { useSpace } from "@/features/spaces/use-space";
+import { GroupChatAssistantList } from "./assistant-list";
+import {
+  groupChatQueryOptions,
+  useUpdateGroupChat,
+  type GroupChat,
+  type GroupChatAssistant
+} from "./use-group-chat";
+
+function GeneralSection({
+  groupChat,
+  focusName = false
+}: {
+  groupChat: GroupChat;
+  /**
+   * The editor opened right after the group chat was created with a default
+   * name: focus the name field with that name selected, so typing replaces it.
+   */
+  focusName?: boolean;
+}) {
+  const t = useTranslations();
+  const update = useUpdateGroupChat(groupChat.id);
+  const nameRef = useRef<HTMLInputElement>(null);
+
+  const name = useAutosaveField({
+    key: "group-chat-name",
+    value: groupChat.name,
+    save: (value) => update.mutateAsync({ name: value }),
+    normalize: (value) => value.trim(),
+    validate: (value) => value.length > 0
+  });
+
+  useEffect(() => {
+    if (!focusName) return;
+    nameRef.current?.focus();
+    nameRef.current?.select();
+  }, [focusName]);
+
+  return (
+    <SettingsGroup title={t("general")}>
+      <SettingsRow
+        title={t("name")}
+        description={t("give_group_chat_name_displayed_to_users")}
+        htmlFor="group-chat-name"
+      >
+        <Input
+          ref={nameRef}
+          id="group-chat-name"
+          value={name.value}
+          onChange={(event) => name.setValue(event.target.value)}
+          // A group chat must keep a name — revert an emptied field on blur.
+          onBlur={() => (name.value.trim() ? name.commit() : name.reset())}
+        />
+      </SettingsRow>
+      <SettingsRow title={t("avatar")} description={t("avatar_description")}>
+        <IconField
+          iconId={groupChat.icon_id}
+          onSave={(iconId) => update.mutateAsync({ icon_id: iconId })}
+        />
+      </SettingsRow>
+    </SettingsGroup>
+  );
+}
+
+function AssistantsSection({ groupChat }: { groupChat: GroupChat }) {
+  const t = useTranslations();
+  const update = useUpdateGroupChat(groupChat.id);
+  const autosave = useAutosave("assistants");
+  const saved = useMemo(() => groupChat.tools.assistants, [groupChat.tools.assistants]);
+  const [selected, setSelected] = useState<GroupChatAssistant[]>(saved);
+  const selectionKey = (assistants: GroupChatAssistant[]) => JSON.stringify(assistants);
+
+  // Adopt server changes (our own save landing) unless the user diverged.
+  const savedKey = JSON.stringify(saved);
+  const savedRef = useRef(savedKey);
+  useEffect(() => {
+    if (savedRef.current === savedKey) return;
+    const previous = savedRef.current;
+    savedRef.current = savedKey;
+    setSelected((current) => (JSON.stringify(current) === previous ? saved : current));
+  }, [savedKey, saved]);
+
+  function handleChange(next: GroupChatAssistant[]) {
+    const previous = selected;
+    const attemptedKey = selectionKey(next);
+    setSelected(next);
+    void autosave(() =>
+      update.mutateAsync({
+        tools: {
+          assistants: next.map((assistant) => ({
+            id: assistant.id,
+            user_description: assistant.user_description
+          }))
+        }
+      })
+    ).then((result) => {
+      if (result !== undefined) return;
+      setSelected((current) => (selectionKey(current) === attemptedKey ? previous : current));
+    });
+  }
+
+  return (
+    <SettingsGroup title={t("group_settings")}>
+      <SettingsRow
+        title={t("assistants")}
+        description={t("assistants_will_be_able_to_answer_questions")}
+      >
+        <GroupChatAssistantList selected={selected} onChange={handleChange} />
+      </SettingsRow>
+    </SettingsGroup>
+  );
+}
+
+function AdvancedSection({ groupChat }: { groupChat: GroupChat }) {
+  const t = useTranslations();
+  const update = useUpdateGroupChat(groupChat.id);
+  const autosave = useAutosave("advanced");
+  // Saving, a switch stays enabled so it keeps focus (aria-busy on the one
+  // being saved); a toggle meanwhile is ignored.
+  const saving = (field: "allow_mentions" | "show_response_label") =>
+    (update.isPending && update.variables?.[field] !== undefined) || undefined;
+  const saveField = (body: { allow_mentions: boolean } | { show_response_label: boolean }) => {
+    if (!update.isPending) void autosave(() => update.mutateAsync(body));
+  };
+
+  return (
+    <SettingsGroup title={t("advanced_settings")}>
+      <SettingsRow
+        title={t("mentions")}
+        description={t("allow_users_to_select_assistant_by_mentioning")}
+      >
+        <Label className="flex items-center justify-between gap-2 py-1 font-normal">
+          {t("enable_mentions")}
+          <Switch
+            checked={groupChat.allow_mentions}
+            aria-busy={saving("allow_mentions")}
+            onCheckedChange={(checked) => saveField({ allow_mentions: checked })}
+          />
+        </Label>
+      </SettingsRow>
+      <SettingsRow
+        title={t("response_labels")}
+        description={t("show_answering_assistant_name_next_to_response")}
+      >
+        <Label className="flex items-center justify-between gap-2 py-1 font-normal">
+          {t("show_labels")}
+          <Switch
+            checked={groupChat.show_response_label}
+            aria-busy={saving("show_response_label")}
+            onCheckedChange={(checked) => saveField({ show_response_label: checked })}
+          />
+        </Label>
+      </SettingsRow>
+    </SettingsGroup>
+  );
+}
+
+function PublishingSection({ groupChat }: { groupChat: GroupChat }) {
+  const t = useTranslations();
+  const { routeId } = useSpace();
+  const queryClient = useQueryClient();
+  const update = useUpdateGroupChat(groupChat.id);
+  const autosave = useAutosave("publishing");
+  const [showDialog, setShowDialog] = useState(false);
+
+  const permissions = groupChat.permissions ?? [];
+  const canPublish = permissions.includes("publish");
+  const canToggleInsights = permissions.includes("insight_toggle");
+
+  const publish = useMutation({
+    mutationFn: () =>
+      unwrap(
+        browserApi.POST("/api/v1/group-chats/{id}/publish/", {
+          params: { path: { id: groupChat.id }, query: { published: !groupChat.published } }
+        })
+      ),
+    onSuccess: (updated) => {
+      queryClient.setQueryData(["group-chats", groupChat.id], updated);
+      void queryClient.invalidateQueries({ queryKey: ["spaces", routeId] });
+      setShowDialog(false);
+    },
+    onError: (error) => toastApiError(error, t)
+  });
+
+  if (!canPublish && !canToggleInsights) return null;
+
+  return (
+    <SettingsGroup title={t("publishing")}>
+      {canPublish && (
+        <SettingsRow title={t("status")} description={t("publishing_group_chat_description")}>
+          <div className="flex items-center gap-3">
+            <Badge variant={groupChat.published ? "default" : "outline"}>
+              {groupChat.published ? t("published") : t("draft")}
+            </Badge>
+            <Button
+              variant={groupChat.published ? "destructive" : "default"}
+              size="sm"
+              onClick={() => setShowDialog(true)}
+            >
+              {groupChat.published ? t("unpublish") : t("publish")}
+            </Button>
+          </div>
+          <PublishDialog
+            open={showDialog}
+            onOpenChange={setShowDialog}
+            name={groupChat.name}
+            published={groupChat.published}
+            pending={publish.isPending}
+            onConfirm={() => publish.mutate()}
+          />
+        </SettingsRow>
+      )}
+      {canToggleInsights && (
+        <SettingsRow
+          title={t("insights")}
+          description={t("collect_insights_about_group_chat_usage")}
+        >
+          <Label className="flex items-center justify-between gap-2 py-1 font-normal">
+            {t("enable_insights")}
+            {/* Saving, it stays enabled so it keeps focus; a toggle meanwhile is ignored. */}
+            <Switch
+              checked={groupChat.insight_enabled}
+              aria-busy={update.isPending || undefined}
+              onCheckedChange={(checked) => {
+                if (!update.isPending)
+                  void autosave(() => update.mutateAsync({ insight_enabled: checked }));
+              }}
+            />
+          </Label>
+        </SettingsRow>
+      )}
+    </SettingsGroup>
+  );
+}
+
+/**
+ * Group chat settings, saved per section. The editor owns the surface (see
+ * AssistantEditor); "Testa" opens a chat with the group. Opened right after
+ * "Skapa ny gruppchatt", it focuses the (default) name and announces the
+ * creation.
+ */
+export function GroupChatEditor({ groupChatId }: { groupChatId: string }) {
+  const t = useTranslations();
+  const { routeId } = useSpace();
+  const { data: groupChat } = useSuspenseQuery(groupChatQueryOptions(browserApi, groupChatId));
+  const created = useJustCreated("group-chat", groupChatId);
+  useCreatedAnnouncement(created, t("group_chat_created_announcement"));
+  const permissions = groupChat.permissions ?? [];
+  const sections: SettingsSection[] = [
+    {
+      id: "general",
+      label: t("general"),
+      icon: SlidersHorizontal,
+      node: <GeneralSection groupChat={groupChat} focusName={created} />
+    },
+    {
+      id: "assistants",
+      label: t("assistants"),
+      icon: Bot,
+      node: <AssistantsSection groupChat={groupChat} />
+    },
+    {
+      id: "advanced",
+      label: t("advanced_settings"),
+      icon: Wrench,
+      node: <AdvancedSection groupChat={groupChat} />
+    },
+    ...(permissions.includes("publish") || permissions.includes("insight_toggle")
+      ? [
+          {
+            id: "publishing",
+            label: t("publishing"),
+            icon: Send,
+            node: <PublishingSection groupChat={groupChat} />
+          }
+        ]
+      : [])
+  ];
+
+  return (
+    <SaveStatusProvider>
+      <SectionedSettings
+        navigationLabel={t("editor_sections_label")}
+        sections={sections}
+        header={
+          <EditorHeader
+            section="assistants"
+            name={groupChat.name}
+            actions={
+              <Button asChild size="sm">
+                <Link href={chatPartnerHref(routeId, { type: "group-chat", id: groupChat.id })}>
+                  <Play className="size-4" />
+                  {t("test")}
+                </Link>
+              </Button>
+            }
+          />
+        }
+      />
+    </SaveStatusProvider>
+  );
+}

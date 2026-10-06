@@ -744,6 +744,65 @@ class TestMCPClientAuthenticationErrorMapping:
             await client.list_tools()
 
 
+class TestMCPClientCancellation:
+    """A cancelled caller is not a failed MCP request."""
+
+    @staticmethod
+    def _client() -> MCPClient:
+        server = MagicMock()
+        server.name = "test-server"
+        server.http_url = "http://localhost:8080"
+        server.http_auth_type = "none"
+        client = MCPClient(server)
+        client.session = AsyncMock()
+        return client
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize(
+        ("method", "call"),
+        [
+            ("list_tools", lambda client: client.list_tools()),
+            ("call_tool", lambda client: client.call_tool("tool", {})),
+        ],
+    )
+    async def test_cancellation_during_a_request_propagates(self, method, call):
+        client = self._client()
+
+        async def never_responds(*_args, **_kwargs):
+            await asyncio.Event().wait()
+
+        getattr(client.session, method).side_effect = never_responds
+        request = asyncio.create_task(call(client))
+        for _ in range(3):
+            await asyncio.sleep(0)
+
+        request.cancel()
+
+        with pytest.raises(asyncio.CancelledError):
+            await request
+
+    @pytest.mark.asyncio
+    async def test_cancellation_as_a_tool_call_completes_propagates(self):
+        # The caller is cancelled in the same step as the response arrives.
+        client = self._client()
+        request: asyncio.Task | None = None
+
+        async def respond(*_args, **_kwargs):
+            assert request is not None
+            request.cancel()
+            return SimpleNamespace(
+                content=[SimpleNamespace(type="text", text="done")],
+                isError=False,
+                meta=None,
+            )
+
+        client.session.call_tool.side_effect = respond
+        request = asyncio.create_task(client.call_tool("tool", {}))
+
+        with pytest.raises(asyncio.CancelledError):
+            await request
+
+
 # =============================================================================
 # P2: Tool name collision handling (skip + warn)
 # =============================================================================

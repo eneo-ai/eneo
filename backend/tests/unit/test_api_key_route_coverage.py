@@ -516,6 +516,15 @@ class TestHighRiskExactRouteGuards:
         assert route_is_session_only(route)
         assert access_for(route.endpoint).authorization is Permission.ASSISTANT_DEBUG
 
+    def test_recent_conversations_is_session_only(self):
+        route = _find_route_by_method_and_paths(
+            "GET", "/conversations/recent/", "/conversations/recent"
+        )
+        assert route_is_session_only(route), (
+            "GET /conversations/recent/ spans every space of the signed-in "
+            "user and filters by membership only; it must reject API keys"
+        )
+
     def test_integrations_admin_route_has_scope_and_admin_key_guards(self):
         route = _find_route_by_method_and_paths(
             "GET", "/integrations/", "/integrations"
@@ -650,6 +659,8 @@ class TestHighRiskExactRouteGuards:
             ("GET", "/conversations/"),
             ("GET", "/conversations/{session_id}/"),
             ("DELETE", "/conversations/{session_id}/"),
+            ("PUT", "/conversations/{session_id}/messages/{message_id}/feedback/"),
+            ("DELETE", "/conversations/{session_id}/messages/{message_id}/feedback/"),
             ("GET", "/assistants/{id}/sessions/"),
             ("GET", "/assistants/{id}/sessions/{session_id}/"),
             ("DELETE", "/assistants/{id}/sessions/{session_id}/"),
@@ -1178,7 +1189,9 @@ class TestReadOverrideSnapshot:
         ],
         "CONVERSATIONS_READ_OVERRIDES": [
             "chat",
+            "delete_message_feedback",
             "leave_feedback",
+            "set_message_feedback",
         ],
         "APPS_READ_OVERRIDES": [
             "run_app",

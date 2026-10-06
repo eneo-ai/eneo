@@ -1,0 +1,272 @@
+"use client";
+
+import { AppShellMobileContext, useAppShellMobile } from "@astryxdesign/core/AppShell";
+import { Button } from "@astryxdesign/core/Button";
+import { Icon } from "@astryxdesign/core/Icon";
+import { IconButton } from "@astryxdesign/core/IconButton";
+import { Kbd } from "@astryxdesign/core/Kbd";
+import { SideNavItem, SideNavSection, useSideNavCollapse } from "@astryxdesign/core/SideNav";
+import { Skeleton } from "@astryxdesign/core/Skeleton";
+import { Tooltip } from "@astryxdesign/core/Tooltip";
+import { Bot, LayoutGrid, Plus, RotateCcw, Search, SquarePen, User } from "lucide-react";
+import { usePathname } from "next/navigation";
+import { useTranslations } from "next-intl";
+import { useEffect, useMemo, useRef } from "react";
+import { EntityAvatar } from "@/components/composites/entity-avatar";
+import { useAppContext } from "@/components/providers/app-context";
+import type { RecentConversation } from "@/lib/api/conversations";
+import { cn } from "@/lib/utils";
+import { conversationContext } from "./conversation-context";
+import { useNavSpaces, useNavTarget, useRecentConversations } from "./nav-data";
+import { NAV_ITEM_CLASSES, SECONDARY_LINK_CLASSES } from "./nav-styles";
+import { conversationHref, NEW_CONVERSATION_HREF } from "./routes";
+import { useShell } from "./shell-context";
+
+/** Shared spaces shown before "Alla ytor" takes over. */
+const MAX_SPACES_IN_NAV = 8;
+
+function NewConversationButton() {
+  const t = useTranslations();
+  const isCurrent = useNavTarget().kind === "new-conversation";
+  const { isCollapsed } = useSideNavCollapse();
+  const { closeMobileNav } = useAppShellMobile();
+
+  return (
+    <Button
+      href={NEW_CONVERSATION_HREF}
+      label={t("new_conversation")}
+      icon={<Icon icon={SquarePen} />}
+      isIconOnly={isCollapsed}
+      tooltip={isCollapsed ? t("new_conversation") : undefined}
+      variant="ghost"
+      size="lg"
+      elevation="low"
+      width={isCollapsed ? undefined : "100%"}
+      aria-current={isCurrent ? "page" : undefined}
+      onClick={closeMobileNav}
+      className={cn("bg-ax-surface font-semibold", !isCollapsed && "justify-start px-3")}
+    />
+  );
+}
+
+/** "Ny konversation", "Sök" (⌘K) and "Assistenter": sticky at the top of the main nav. */
+export function MainTopContent() {
+  const t = useTranslations();
+  const { openPalette } = useShell();
+  const mobile = useAppShellMobile();
+  const pathname = usePathname();
+  // In the drawer, "Sök" opens the palette over the drawer instead of closing
+  // it, so focus has somewhere to return to when the palette closes.
+  const keepDrawerOpen = useMemo(() => ({ ...mobile, closeMobileNav: () => {} }), [mobile]);
+
+  return (
+    // The design sets "Sök" (the only button row) in secondary text.
+    <div
+      className={cn(
+        "flex flex-col gap-1",
+        NAV_ITEM_CLASSES,
+        "[&_button.astryx-side-nav-item]:text-ax-text-secondary"
+      )}
+    >
+      <NewConversationButton />
+      <AppShellMobileContext value={keepDrawerOpen}>
+        <SideNavItem
+          label={t("search")}
+          icon={Search}
+          size="lg"
+          onClick={() => openPalette()}
+          aria-keyshortcuts="Meta+K Control+K"
+          endContent={
+            <span aria-hidden="true" className="flex">
+              <Kbd keys="mod+k" />
+            </span>
+          }
+        />
+      </AppShellMobileContext>
+      <SideNavItem
+        label={t("assistants")}
+        icon={Bot}
+        size="lg"
+        href="/dashboard"
+        isSelected={pathname === "/dashboard" || pathname.startsWith("/dashboard/")}
+      />
+    </div>
+  );
+}
+
+function PersonalTile() {
+  return (
+    <span
+      aria-hidden="true"
+      className="bg-ax-muted text-ax-text-secondary rounded-ax-inner inline-flex size-6 shrink-0 items-center justify-center [&_svg]:size-3.5"
+    >
+      <User />
+    </span>
+  );
+}
+
+function SpacesSection() {
+  const t = useTranslations();
+  const target = useNavTarget();
+  const { can } = useAppContext();
+  const { openCreateSpace } = useShell();
+  const { isCollapsed } = useSideNavCollapse();
+  const { spaces, isPending, isError, isFetching, refetch } = useNavSpaces();
+  const currentRouteId = target.kind === "space" ? target.routeId : null;
+  const focusAfterRetry = useRef(false);
+  const firstSpaceRef = useRef<HTMLElement>(null);
+  const allSpacesRef = useRef<HTMLElement>(null);
+
+  useEffect(() => {
+    if (!isError && focusAfterRetry.current) {
+      // The retry button leaves the DOM after recovery. Give its focus to the
+      // newly available first space, or the stable "Alla ytor" link.
+      (firstSpaceRef.current ?? allSpacesRef.current)?.focus();
+      focusAfterRetry.current = false;
+    }
+  }, [isError]);
+
+  // Keep the list short; the current space stays visible even past the cap.
+  const shown = spaces.slice(0, MAX_SPACES_IN_NAV);
+  const current = spaces.find((space) => space.id === currentRouteId);
+  if (current && !shown.includes(current)) shown.push(current);
+
+  return (
+    <SideNavSection
+      title={t("shell_spaces")}
+      className={NAV_ITEM_CLASSES}
+      endContent={
+        !isCollapsed && can("shared_spaces") ? (
+          <IconButton
+            variant="ghost"
+            size="sm"
+            icon={<Icon icon={Plus} />}
+            label={t("create_space")}
+            tooltip={t("create_space")}
+            onClick={() => openCreateSpace()}
+          />
+        ) : undefined
+      }
+    >
+      <SideNavItem
+        label={t("personal")}
+        icon={<PersonalTile />}
+        href="/spaces/personal/overview"
+        isSelected={currentRouteId === "personal"}
+      />
+      {spaces.length === 0 && isPending && !isError && !isCollapsed ? (
+        <div aria-hidden="true" className="flex flex-col gap-2 px-2 py-1.5">
+          <Skeleton height={16} width="70%" radius={1} />
+          <Skeleton height={16} width="55%" radius={1} />
+        </div>
+      ) : null}
+      {shown.map((space, index) => (
+        <SideNavItem
+          key={space.id}
+          ref={index === 0 ? firstSpaceRef : undefined}
+          label={space.name}
+          icon={<EntityAvatar id={space.id} name={space.name} size="sm" />}
+          href={`/spaces/${space.id}/overview`}
+          isSelected={space.id === currentRouteId}
+        />
+      ))}
+      {isError ? (
+        <div className={cn("flex flex-col gap-1 px-2 py-1.5", isCollapsed && "items-center px-0")}>
+          <p className={cn("text-ax-error text-xs", isCollapsed && "sr-only")}>
+            {t("shell_spaces_load_failed")}
+          </p>
+          <Button
+            variant="ghost"
+            size="sm"
+            label={t("shell_spaces_retry")}
+            icon={<Icon icon={RotateCcw} />}
+            isIconOnly={isCollapsed}
+            tooltip={isCollapsed ? t("shell_spaces_retry") : undefined}
+            isLoading={isFetching}
+            isInterruptible
+            className="pointer-coarse:min-h-11 pointer-coarse:min-w-11"
+            onClick={(event) => {
+              if (isFetching) return;
+              focusAfterRetry.current = document.activeElement === event.currentTarget;
+              void refetch?.();
+            }}
+            onBlur={() => {
+              focusAfterRetry.current = false;
+            }}
+          />
+        </div>
+      ) : null}
+      <SideNavItem
+        ref={allSpacesRef}
+        label={t("shell_all_spaces")}
+        icon={LayoutGrid}
+        href="/spaces/list"
+        isSelected={target.kind === "all-spaces"}
+      />
+    </SideNavSection>
+  );
+}
+
+/**
+ * A conversation under "Senaste": its title, plus a tooltip saying who it is
+ * with (the assistant or group chat and its space) unless it is the personal
+ * chat. The tooltip is also the link's accessible description, so screen
+ * readers hear it without the nav growing a second line per row.
+ */
+function RecentConversationItem({
+  conversation,
+  isSelected
+}: {
+  conversation: RecentConversation;
+  isSelected: boolean;
+}) {
+  const t = useTranslations();
+  const linkRef = useRef<HTMLElement>(null);
+  const context = conversationContext(conversation, t);
+
+  return (
+    <>
+      <SideNavItem
+        ref={linkRef}
+        label={conversation.name.trim() || t("shell_untitled_conversation")}
+        href={conversationHref(conversation)}
+        isSelected={isSelected}
+      />
+      {context ? <Tooltip anchorRef={linkRef} content={context} placement="end" /> : null}
+    </>
+  );
+}
+
+function RecentSection() {
+  const t = useTranslations();
+  const target = useNavTarget();
+  const { isCollapsed } = useSideNavCollapse();
+  const conversations = useRecentConversations();
+
+  // Titles only (no icons): nothing to show in the icon rail.
+  if (isCollapsed || conversations.length === 0) return null;
+
+  return (
+    <SideNavSection
+      title={t("shell_recent")}
+      className={cn(NAV_ITEM_CLASSES, SECONDARY_LINK_CLASSES)}
+    >
+      {conversations.map((conversation) => (
+        <RecentConversationItem
+          key={conversation.id}
+          conversation={conversation}
+          isSelected={target.kind === "conversation" && target.sessionId === conversation.id}
+        />
+      ))}
+    </SideNavSection>
+  );
+}
+
+export function MainSections() {
+  return (
+    <div className="flex flex-col gap-3">
+      <SpacesSection />
+      <RecentSection />
+    </div>
+  );
+}

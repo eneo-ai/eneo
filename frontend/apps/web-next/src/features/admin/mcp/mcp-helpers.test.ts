@@ -1,0 +1,103 @@
+import { describe, expect, it } from "vitest";
+import type { McpServer } from "./mcp";
+import { activationState, hostFromUrl, initials, readableParams, toolRisk } from "./mcp-helpers";
+
+describe("server activation", () => {
+  const base = {
+    purpose: "general",
+    is_org_enabled: false,
+    is_enabled: false,
+    readiness_reason: null,
+    security_classification: { id: "classified" }
+  } as McpServer;
+
+  it("uses tenant enablement for general MCP servers", () => {
+    expect(activationState({ ...base, is_org_enabled: true }, true)).toEqual({
+      capability: false,
+      active: true,
+      blocked: false
+    });
+    expect(activationState({ ...base, security_classification: null }, true).blocked).toBe(true);
+  });
+
+  it("uses provider activation and readiness for function sources", () => {
+    const source = {
+      ...base,
+      purpose: "image_generation" as const,
+      readiness_reason: "model_missing"
+    };
+    expect(activationState(source, false)).toEqual({
+      capability: true,
+      active: false,
+      blocked: true
+    });
+    expect(activationState({ ...source, is_enabled: true }, false).active).toBe(true);
+  });
+});
+
+describe("hostFromUrl", () => {
+  it("extracts the host from a valid url", () => {
+    expect(hostFromUrl("https://api.github.com/mcp")).toBe("api.github.com");
+    expect(hostFromUrl("https://mcp.diariet.internal:8443/")).toBe("mcp.diariet.internal:8443");
+  });
+
+  it("falls back for malformed but host-bearing strings and returns null otherwise", () => {
+    expect(hostFromUrl("http://example.com")).toBe("example.com");
+    expect(hostFromUrl("not a url")).toBeNull();
+    expect(hostFromUrl(null)).toBeNull();
+    expect(hostFromUrl("")).toBeNull();
+  });
+});
+
+describe("initials", () => {
+  it("derives up to two uppercase initials", () => {
+    expect(initials("Diariesök")).toBe("DI");
+    expect(initials("Kommunens dokument MCP")).toBe("KM");
+    expect(initials("  ")).toBe("?");
+  });
+});
+
+describe("toolRisk", () => {
+  it("flags state-changing verbs as write", () => {
+    for (const name of [
+      "create_issue",
+      "updateRecord",
+      "delete-file",
+      "sendMessage",
+      "post_comment"
+    ]) {
+      expect(toolRisk({ name })).toBe("write");
+    }
+  });
+
+  it("treats read-style verbs as read", () => {
+    for (const name of ["get_weather", "list_files", "searchDocuments", "read_page", "fetch_url"]) {
+      expect(toolRisk({ name })).toBe("read");
+    }
+  });
+});
+
+describe("readableParams", () => {
+  it("flattens properties with type, required flag, and description", () => {
+    const schema = {
+      type: "object",
+      required: ["city"],
+      properties: {
+        city: { type: "string", description: "The city to look up" },
+        days: { type: "integer" },
+        tags: { type: "array", items: { type: "string" } }
+      }
+    };
+    expect(readableParams(schema)).toEqual([
+      { name: "city", type: "string", required: true, description: "The city to look up" },
+      { name: "days", type: "integer", required: false, description: null },
+      { name: "tags", type: "string[]", required: false, description: null }
+    ]);
+  });
+
+  it("returns an empty list for absent or malformed schemas", () => {
+    expect(readableParams(null)).toEqual([]);
+    expect(readableParams(undefined)).toEqual([]);
+    expect(readableParams({ type: "object" })).toEqual([]);
+  });
+});

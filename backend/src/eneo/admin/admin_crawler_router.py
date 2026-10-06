@@ -219,7 +219,8 @@ async def _scheduler_health(
 ) -> AdminCrawlerSchedulerHealth:
     """Read the scheduler marker for one tenant; never fails the overview."""
     try:
-        record = await asyncio.wait_for(read_crawl_scheduler_run(), timeout=1.0)
+        async with asyncio.timeout(1.0):
+            record = await read_crawl_scheduler_run()
     except Exception:
         logger.warning("Crawl scheduler marker unavailable", exc_info=True)
         return AdminCrawlerSchedulerHealth(

@@ -1,0 +1,322 @@
+// @vitest-environment jsdom
+import { cleanup, fireEvent, screen, waitFor, within } from "@testing-library/react";
+import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
+import { browserApi } from "@/lib/api/browser";
+import { recentConversationsQueryOptions } from "@/lib/api/conversations";
+import type { ChatPartner } from "@/lib/chat/types";
+import { expectNoAxeViolations } from "@/test/axe";
+import { renderInApp, testQueryClient } from "@/test/render";
+import { HistoryAside } from "./history-panel";
+import { RenameSessionDialog } from "./session-actions";
+
+const now = Date.now();
+const day = 86_400_000;
+
+type Row = { id: string; name: string; updated_at: string };
+
+const api = vi.hoisted(() => ({
+  /** The history the backend holds, newest first, served two per page. */
+  rows: [] as Row[],
+  cursors: [] as (string | undefined)[],
+  GET: vi.fn(),
+  PATCH: vi.fn(async () => ({ data: {}, response: new Response() })),
+  POST: vi.fn(async () => ({ data: {}, response: new Response() })),
+  DELETE: vi.fn(async (_path: string, init: { params: { path: { session_id: string } } }) => {
+    api.rows = api.rows.filter((row) => row.id !== init.params.path.session_id);
+    return { data: null, response: new Response(null, { status: 204 }) };
+  })
+}));
+vi.mock("@/lib/api/browser", () => ({ browserApi: api }));
+
+beforeAll(() => {
+  api.GET.mockImplementation(
+    async (_path: string, init: { params: { query: { cursor?: string } } }) => {
+      const cursor = init.params.query.cursor;
+      api.cursors.push(cursor);
+      const start = cursor ? Number(cursor) : 0;
+      const items = api.rows.slice(start, start + 2);
+      const next = start + 2 < api.rows.length ? String(start + 2) : null;
+      return {
+        data: { items, total_count: api.rows.length, next_cursor: next },
+        response: new Response()
+      };
+    }
+  );
+});
+beforeEach(() => {
+  api.rows = [
+    { id: "s1", name: "Upphandlingsanalys", updated_at: new Date(now).toISOString() },
+    { id: "s2", name: "Protokoll KS", updated_at: new Date(now - 40 * day).toISOString() }
+  ];
+  api.cursors.length = 0;
+});
+afterEach(() => {
+  cleanup();
+  vi.clearAllMocks();
+});
+
+const partner: ChatPartner = {
+  type: "assistant",
+  id: "assistant-1",
+  name: "Upphandlingsassistenten"
+};
+/** The panel is the partner's own list; the sidebar's "Senaste" spans every partner. */
+const HEADING = "Konversationer med Upphandlingsassistenten";
+
+/** Opens a row's menu and returns the menu item with the given name. */
+async function rowMenuItem(row: string, item: string) {
+  const trigger = await screen.findByRole("button", { name: `Åtgärder för ${row}` });
+  fireEvent.click(trigger);
+  const menu = document.getElementById(trigger.getAttribute("aria-controls") ?? "");
+  return within(menu!).getByRole("menuitem", { name: item });
+}
+
+function renderHistory({
+  onClose = vi.fn(),
+  onSelect = vi.fn(),
+  onDeleted = vi.fn(),
+  queryClient = testQueryClient()
+} = {}) {
+  renderInApp(
+    <HistoryAside
+      inline
+      partner={partner}
+      activeSessionId="s1"
+      onSelect={onSelect}
+      onDeleted={onDeleted}
+      onClose={onClose}
+    />,
+    { queryClient }
+  );
+  return { onClose, onSelect, onDeleted };
+}
+
+describe("HistoryAside", () => {
+  it("groups conversations by date, marks the open one and selects on click", async () => {
+    const { onSelect } = renderHistory();
+    const aside = screen.getByRole("complementary", { name: HEADING });
+    await waitFor(() => expect(document.activeElement?.textContent).toBe(HEADING));
+
+    const today = await within(aside).findByRole("region", { name: "Idag" });
+    const current = within(today).getByRole("button", { name: "Upphandlingsanalys" });
+    expect(current.getAttribute("aria-current")).toBe("true");
+    const older = within(aside).getByRole("region", { name: "Äldre" });
+    fireEvent.click(within(older).getByRole("button", { name: "Protokoll KS" }));
+    expect(onSelect).toHaveBeenCalledWith("s2");
+  });
+
+  it("closes on Escape", async () => {
+    const { onClose } = renderHistory();
+    const heading = await screen.findByRole("heading", { name: HEADING });
+    fireEvent.keyDown(heading, { key: "Escape" });
+    expect(onClose).toHaveBeenCalled();
+  });
+
+  it("adds older conversations below and moves focus to the first one it added", async () => {
+    api.rows.push(
+      { id: "s3", name: "Budget 2027", updated_at: new Date(now - 50 * day).toISOString() },
+      { id: "s4", name: "Remissvar", updated_at: new Date(now - 60 * day).toISOString() },
+      { id: "s5", name: "Delegationsordning", updated_at: new Date(now - 70 * day).toISOString() }
+    );
+    renderHistory();
+    await screen.findByRole("button", { name: "Protokoll KS" });
+
+    fireEvent.click(screen.getByRole("button", { name: "Visa fler konversationer" }));
+    const added = await screen.findByRole("button", { name: "Budget 2027" });
+    await waitFor(() => expect(document.activeElement).toBe(added));
+    // The earlier conversations stay: the list grows instead of paging.
+    expect(screen.getByRole("button", { name: "Upphandlingsanalys" })).toBeTruthy();
+
+    fireEvent.click(screen.getByRole("button", { name: "Visa fler konversationer" }));
+    const last = await screen.findByRole("button", { name: "Delegationsordning" });
+    // No more pages: the button is gone, focus is on what it loaded.
+    await waitFor(() => expect(document.activeElement).toBe(last));
+    expect(screen.queryByRole("button", { name: "Visa fler konversationer" })).toBeNull();
+    expect(api.cursors).toEqual([undefined, "2", "4"]);
+  });
+
+  it("deletes after a confirmation outside the menu, then keeps focus in the panel", async () => {
+    const { onDeleted } = renderHistory();
+    fireEvent.click(await rowMenuItem("Protokoll KS", "Ta bort"));
+
+    const dialog = await screen.findByRole("alertdialog", { name: "Ta bort konversationen" });
+    expect(within(dialog).getByText("Protokoll KS")).toBeTruthy();
+    // The dialog is not part of the row's menu (Escape and focus belong to it).
+    expect(dialog.closest('[role="menu"]')).toBeNull();
+
+    fireEvent.click(within(dialog).getByRole("button", { name: "Bekräfta borttagning" }));
+    await waitFor(() => expect(onDeleted).toHaveBeenCalledWith("s2"));
+    expect(screen.queryByRole("button", { name: "Protokoll KS" })).toBeNull();
+    await waitFor(() =>
+      expect(document.activeElement).toBe(screen.getByRole("heading", { name: HEADING }))
+    );
+  });
+
+  it("refreshes the recent list (Senaste, ⌘K) after renaming or deleting", async () => {
+    const queryClient = testQueryClient();
+    const recent = recentConversationsQueryOptions(browserApi).queryKey;
+    queryClient.setQueryData(recent, []);
+    const { onDeleted } = renderHistory({ queryClient });
+
+    fireEvent.click(await rowMenuItem("Upphandlingsanalys", "Byt namn"));
+    const input = await screen.findByLabelText(/^Namn/);
+    fireEvent.change(input, { target: { value: "Direktupphandling" } });
+    fireEvent.keyDown(input, { key: "Enter" });
+    await waitFor(() => expect(queryClient.getQueryState(recent)?.isInvalidated).toBe(true));
+
+    queryClient.setQueryData(recent, []);
+    fireEvent.click(await rowMenuItem("Protokoll KS", "Ta bort"));
+    const dialog = await screen.findByRole("alertdialog", { name: "Ta bort konversationen" });
+    fireEvent.click(within(dialog).getByRole("button", { name: "Bekräfta borttagning" }));
+    await waitFor(() => expect(onDeleted).toHaveBeenCalledWith("s2"));
+    expect(queryClient.getQueryState(recent)?.isInvalidated).toBe(true);
+  });
+
+  it("renames and deletes from a row's menu; answers are rated in the conversation", async () => {
+    renderHistory();
+    const trigger = await screen.findByRole("button", { name: "Åtgärder för Upphandlingsanalys" });
+    fireEvent.click(trigger);
+    const menu = document.getElementById(trigger.getAttribute("aria-controls") ?? "")!;
+    expect(
+      within(menu)
+        .getAllByRole("menuitem")
+        .map((item) => item.textContent)
+    ).toEqual(["Byt namn", "Ta bort"]);
+  });
+
+  it("filters the loaded conversations by title and keeps older pages reachable", async () => {
+    api.rows.push({ id: "s3", name: "Budget 2027", updated_at: new Date(now).toISOString() });
+    renderHistory();
+    await screen.findByRole("button", { name: "Protokoll KS" });
+
+    const search = screen.getByRole("textbox", { name: "Sök konversation" });
+    fireEvent.change(search, { target: { value: "PROTO" } });
+    expect(screen.getByRole("button", { name: "Protokoll KS" })).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "Upphandlingsanalys" })).toBeNull();
+    // The search covers what is loaded; the next page is still one click away.
+    expect(screen.getByRole("button", { name: "Visa fler konversationer" })).toBeTruthy();
+
+    fireEvent.change(search, { target: { value: "budget" } });
+    expect(screen.getByText('Inga konversationer matchar "budget".')).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "Visa fler konversationer" }));
+    expect(await screen.findByRole("button", { name: "Budget 2027" })).toBeTruthy();
+
+    fireEvent.change(search, { target: { value: "" } });
+    expect(screen.getByRole("button", { name: "Upphandlingsanalys" })).toBeTruthy();
+  });
+
+  it("says whose conversations are missing, without a search field", async () => {
+    api.rows = [];
+    renderHistory();
+    expect(
+      await screen.findByText(
+        "Inga konversationer med Upphandlingsassistenten ännu. Din första fråga hamnar här."
+      )
+    ).toBeTruthy();
+    expect(screen.queryByRole("textbox", { name: "Sök konversation" })).toBeNull();
+  });
+
+  it("names the personal assistant's list after the personal assistant", async () => {
+    renderInApp(
+      <HistoryAside
+        inline
+        partner={{ type: "default-assistant", id: "d", name: "Default", personalSpace: true }}
+        activeSessionId={null}
+        onSelect={vi.fn()}
+        onDeleted={vi.fn()}
+        onClose={vi.fn()}
+      />,
+      { queryClient: testQueryClient() }
+    );
+    expect(
+      await screen.findByRole("heading", { name: "Konversationer med Personlig assistent" })
+    ).toBeTruthy();
+    expect(screen.queryByText(/Default/)).toBeNull();
+  });
+
+  it("names untitled conversations", async () => {
+    api.rows[1]!.name = "";
+    renderHistory();
+    expect(await screen.findByRole("button", { name: "Namnlös" })).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Åtgärder för Namnlös" })).toBeTruthy();
+  });
+
+  it("has no axe violations", async () => {
+    renderHistory();
+    await screen.findByRole("region", { name: "Idag" });
+    await expectNoAxeViolations(document.body);
+  });
+});
+
+describe("RenameSessionDialog", () => {
+  it("renames with a visible label and saves on Enter", () => {
+    const onSave = vi.fn();
+    const session = { id: "s1", name: "Gammalt namn" };
+    const { rerender } = renderInApp(
+      <RenameSessionDialog session={session} pending={false} onCancel={vi.fn()} onSave={onSave} />
+    );
+    const input = screen.getByLabelText(/^Namn/);
+    fireEvent.change(input, { target: { value: "Nytt namn" } });
+    fireEvent.keyDown(input, { key: "Enter" });
+    expect(onSave).toHaveBeenCalledWith("Nytt namn");
+
+    rerender(<RenameSessionDialog session={session} pending onCancel={vi.fn()} onSave={onSave} />);
+    expect((screen.getByLabelText(/^Namn/) as HTMLInputElement).value).toBe("Nytt namn");
+  });
+
+  it("shows an empty name at the field on save, which takes focus", async () => {
+    const onSave = vi.fn();
+    renderInApp(
+      <RenameSessionDialog
+        session={{ id: "s1", name: "Gammalt namn" }}
+        pending={false}
+        onCancel={vi.fn()}
+        onSave={onSave}
+      />
+    );
+    const dialog = screen.getByRole("dialog", { name: "Byt namn" });
+    const input = within(dialog).getByRole("textbox", { name: /^Namn/ });
+    const save = within(dialog).getByRole("button", { name: "Spara" }) as HTMLButtonElement;
+    fireEvent.change(input, { target: { value: "  " } });
+    // Never disabled: a disabled button says nothing about what is missing.
+    expect(save.disabled).toBe(false);
+
+    fireEvent.click(save);
+
+    expect(input.getAttribute("aria-invalid")).toBe("true");
+    expect(within(dialog).getByText("Detta fält är obligatoriskt")).toBeTruthy();
+    expect(document.activeElement).toBe(input);
+    expect(onSave).not.toHaveBeenCalled();
+    await expectNoAxeViolations(dialog);
+  });
+
+  it("discards an unsaved name and validation when the same dialog reopens", () => {
+    const session = { id: "s1", name: "Gammalt namn" };
+    const onCancel = vi.fn();
+    const onSave = vi.fn();
+    const dialog = (current: typeof session | null) => (
+      <RenameSessionDialog session={current} pending={false} onCancel={onCancel} onSave={onSave} />
+    );
+    const { rerender } = renderInApp(dialog(session));
+
+    fireEvent.change(screen.getByLabelText(/^Namn/), { target: { value: "Osparat namn" } });
+    fireEvent.click(screen.getByRole("button", { name: "Avbryt" }));
+    rerender(dialog(null));
+    rerender(dialog(session));
+    expect((screen.getByLabelText(/^Namn/) as HTMLInputElement).value).toBe("Gammalt namn");
+
+    const input = screen.getByLabelText(/^Namn/);
+    fireEvent.change(input, { target: { value: "  " } });
+    fireEvent.click(screen.getByRole("button", { name: "Spara" }));
+    expect(input.getAttribute("aria-invalid")).toBe("true");
+    fireEvent.click(screen.getByRole("button", { name: "Avbryt" }));
+    rerender(dialog(null));
+    rerender(dialog(session));
+
+    const reopened = screen.getByLabelText(/^Namn/) as HTMLInputElement;
+    expect(reopened.value).toBe("Gammalt namn");
+    expect(reopened.getAttribute("aria-invalid")).not.toBe("true");
+    expect(screen.queryByText("Detta fält är obligatoriskt")).toBeNull();
+    expect(onSave).not.toHaveBeenCalled();
+  });
+});

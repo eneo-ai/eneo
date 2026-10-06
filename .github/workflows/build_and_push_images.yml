@@ -27,11 +27,18 @@ env:
   REGISTRY: ghcr.io
   BACKEND_IMAGE_NAME: eneo-ai/eneo-backend
   FRONTEND_IMAGE_NAME: eneo-ai/eneo-frontend
+  WEB_NEXT_IMAGE_NAME: eneo-ai/eneo-web-next
   BUILDX_VERSION: v0.33.0
   BUILDKIT_IMAGE: moby/buildkit@sha256:0168606be2315b7c807a03b3d8aa79beefdb31c98740cebdffdfeebf31190c9f
 
 jobs:
+  security:
+    uses: ./.github/workflows/security.yml
+    with:
+      base_sha: ${{ github.event.before || '' }}
+
   build-and-push-backend:
+    needs: security
     runs-on: ubuntu-latest
     outputs:
       backend_tag: ${{ steps.backend-version.outputs.version }}
@@ -92,7 +99,7 @@ jobs:
       - name: Determine build context
         id: build-context
         run: |
-          if [[ "${{ github.ref }}" == "refs/tags/v"* ]]; then
+          if [[ "$GITHUB_REF" == "refs/tags/v"* ]]; then
             VERSION="${GITHUB_REF#refs/tags/}"
             # Check if this is a pre-release (contains hyphen after version, e.g., v1.7.0-rc)
             if [[ "$VERSION" == *-* ]]; then
@@ -104,7 +111,7 @@ jobs:
               echo "is-release=true" >> $GITHUB_OUTPUT
               echo "is-prerelease=false" >> $GITHUB_OUTPUT
             fi
-          elif [[ "${{ github.ref }}" == "refs/heads/develop" ]]; then
+          elif [[ "$GITHUB_REF" == "refs/heads/develop" ]]; then
             echo "Building develop branch for dev environment"
             echo "is-release=false" >> $GITHUB_OUTPUT
           else
@@ -179,6 +186,17 @@ jobs:
           push-to-registry: true
 
   build-and-push-frontend:
+    name: Publish ${{ matrix.name }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: frontend
+            image: eneo-ai/eneo-frontend
+            dockerfile: ./frontend/Dockerfile
+          - name: web-next
+            image: eneo-ai/eneo-web-next
+            dockerfile: ./frontend/apps/web-next/Dockerfile
     needs: build-and-push-backend
     runs-on: ubuntu-latest
     permissions:
@@ -227,7 +245,7 @@ jobs:
         id: meta-frontend
         uses: docker/metadata-action@c299e40c65443455700f0fdfc63efafe5b349051 # v5
         with:
-          images: ${{ env.REGISTRY }}/${{ env.FRONTEND_IMAGE_NAME }}
+          images: ${{ env.REGISTRY }}/${{ matrix.image }}
           tags: |
             # Branch-based tags
             type=raw,value=develop,enable=${{ github.ref == 'refs/heads/develop' }}
@@ -242,7 +260,8 @@ jobs:
             type=sha,prefix={{branch}}-,format=short,enable=${{ github.ref_type == 'branch' }}
             type=sha,format=short,enable=${{ github.ref_type == 'tag' }}
 
-      - name: Synchronize frontend with backend
+      - name: Synchronize Svelte frontend with backend
+        if: matrix.name == 'frontend'
         env:
           BACKEND_TAG: ${{ needs['build-and-push-backend'].outputs.backend_tag }}
         run: ./scripts/sync-frontend-with-backend.sh "${{ env.REGISTRY }}/${{ env.BACKEND_IMAGE_NAME }}:$BACKEND_TAG"
@@ -252,17 +271,17 @@ jobs:
         uses: docker/build-push-action@ca052bb54ab0790a636c9b5f226502c73d547a25 # v5
         with:
           context: ./frontend
-          file: ./frontend/Dockerfile
+          file: ${{ matrix.dockerfile }}
           push: true
           tags: ${{ steps.meta-frontend.outputs.tags }}
           labels: ${{ steps.meta-frontend.outputs.labels }}
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
+          cache-from: type=gha,scope=${{ matrix.name }}
+          cache-to: type=gha,mode=max,scope=${{ matrix.name }}
 
       - name: Attest frontend image provenance
         uses: actions/attest@59d89421af93a897026c735860bf21b6eb4f7b26 # v4
         with:
-          subject-name: ${{ env.REGISTRY }}/${{ env.FRONTEND_IMAGE_NAME }}
+          subject-name: ${{ env.REGISTRY }}/${{ matrix.image }}
           subject-digest: ${{ steps.build-frontend.outputs.digest }}
           push-to-registry: true
 
@@ -279,9 +298,10 @@ jobs:
       - name: Build Summary
         run: |
           echo "## 🐳 Docker Images Built and Pushed" >> $GITHUB_STEP_SUMMARY
+          echo "The existing frontend remains Svelte. The optional beta is published as ghcr.io/eneo-ai/eneo-web-next with the same tags." >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
 
-          if [[ "${{ github.ref }}" == "refs/tags/v"* ]]; then
+          if [[ "$GITHUB_REF" == "refs/tags/v"* ]]; then
             VERSION="${GITHUB_REF#refs/tags/}"
             if [[ "$VERSION" == *-* ]]; then
               echo "### Pre-release: $VERSION" >> $GITHUB_STEP_SUMMARY
@@ -306,7 +326,7 @@ jobs:
               echo "" >> $GITHUB_STEP_SUMMARY
               echo "✅ Ready for production deployment" >> $GITHUB_STEP_SUMMARY
             fi
-          elif [[ "${{ github.ref }}" == "refs/heads/develop" ]]; then
+          elif [[ "$GITHUB_REF" == "refs/heads/develop" ]]; then
             echo "### Development Environment Build" >> $GITHUB_STEP_SUMMARY
             echo "" >> $GITHUB_STEP_SUMMARY
             echo "**Backend:** \`${{ env.REGISTRY }}/${{ env.BACKEND_IMAGE_NAME }}:develop\`" >> $GITHUB_STEP_SUMMARY

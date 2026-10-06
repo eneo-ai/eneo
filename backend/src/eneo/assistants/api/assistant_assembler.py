@@ -7,6 +7,7 @@ from eneo.assistants.api.assistant_models import (
     DefaultAssistant,
     EffectiveConfigPublic,
     MCPServerPublicDict,
+    MCPToolSetting,
     ModelInfo,
 )
 from eneo.assistants.assistant import Assistant
@@ -241,9 +242,12 @@ class AssistantAssembler:
             ],
             integration_knowledge_list=integration_knowledge_list,
             mcp_servers=mcp_servers,
+            mcp_tools=[
+                MCPToolSetting(tool_id=tool_id, is_enabled=is_enabled)
+                for tool_id, is_enabled in assistant.mcp_tools
+            ],
             enabled_capabilities=assistant.enabled_capabilities,
             available_capabilities=assistant.available_capabilities,
-            mcp_tools=[],  # Initialize as empty - frontend will track changes from current state
             completion_model=completion_model,
             completion_model_kwargs=assistant.completion_model_kwargs,
             logging_enabled=assistant.logging_enabled,

@@ -428,26 +428,26 @@ class PythonCrawlEngine:
                         return cached_policy
 
                 try:
-                    await asyncio.wait_for(
-                        robots_for_url(seed_url),
-                        timeout=self._remaining_seconds(started_at, request),
-                    )
+                    async with asyncio.timeout(
+                        self._remaining_seconds(started_at, request)
+                    ):
+                        await robots_for_url(seed_url)
                     if request.crawl_type == CrawlType.SITEMAP:
-                        (
-                            sitemap_urls,
-                            sitemap_failures,
-                            sitemap_snapshot,
-                            sitemap_truncated,
-                        ) = await asyncio.wait_for(
-                            self._sitemap_urls(
+                        async with asyncio.timeout(
+                            self._remaining_seconds(started_at, request)
+                        ):
+                            (
+                                sitemap_urls,
+                                sitemap_failures,
+                                sitemap_snapshot,
+                                sitemap_truncated,
+                            ) = await self._sitemap_urls(
                                 session,
                                 seed_url,
                                 request,
                                 origin_authorization,
                                 robots_for_url,
-                            ),
-                            timeout=self._remaining_seconds(started_at, request),
-                        )
+                            )
                     else:
                         sitemap_urls = []
                         sitemap_failures = []

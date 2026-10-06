@@ -29,6 +29,7 @@ from eneo.authentication.endpoint_access import (
     require_endpoint_access,
 )
 from eneo.main.exceptions import UnauthorizedException
+from eneo.model_providers.domain.connection_check import ConnectionCheck
 from eneo.roles.permissions import Permission
 from eneo.roles.role import RoleInDB
 from eneo.server.endpoint_routes import (
@@ -431,15 +432,23 @@ def test_all_shipped_endpoints_have_valid_access_contracts() -> None:
 
 
 @pytest.mark.parametrize(
-    ("method", "path", "payload", "operation", "result"),
+    ("method", "path", "payload", "operation", "result", "expected"),
     [
-        ("GET", "models", None, "list_available_models", []),
-        ("POST", "test", None, "test_connection", {"success": True}),
+        ("GET", "models", None, "list_available_models", [], []),
+        (
+            "POST",
+            "test",
+            None,
+            "check_connection",
+            (None, ConnectionCheck.ok()),
+            {"success": True, "message": "Connection successful"},
+        ),
         (
             "POST",
             "validate-model",
             {"model_name": "test", "model_type": "completion"},
             "validate_model",
+            {"success": True},
             {"success": True},
         ),
     ],
@@ -451,6 +460,7 @@ def test_provider_probes_enforce_policy_through_real_authentication(
     payload,
     operation,
     result,
+    expected,
 ) -> None:
     from eneo.authentication.auth_dependencies import get_current_active_user
     from eneo.database.database import AsyncSession, get_session_with_transaction
@@ -508,5 +518,5 @@ def test_provider_probes_enforce_policy_through_real_authentication(
         method, url, json=payload, headers={"X-Test-User": "admin"}
     )
     assert response.status_code == 200, response.text
-    assert response.json() == result
+    assert response.json() == expected
     assert calls == ["external provider"]

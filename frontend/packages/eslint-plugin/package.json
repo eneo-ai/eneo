@@ -8,6 +8,7 @@
     "test": "bun test"
   },
   "devDependencies": {
+    "@typescript-eslint/parser": "8.62.1",
     "eslint": "^9.39.4",
     "svelte-eslint-parser": "^1.8.0"
   }

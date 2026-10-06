@@ -44,9 +44,9 @@ def mock_tenant_app_not_service_account():
 
 
 @pytest.fixture
-def mock_settings():
+def mock_settings(test_settings):
     """Mock settings with oauth_callback_url configured."""
-    settings = MagicMock()
+    settings = test_settings.model_copy()
     settings.oauth_callback_url = (
         "https://test.example.com/integrations/callback/token/"
     )

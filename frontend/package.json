@@ -2,23 +2,36 @@
   "version": "1.23.1",
   "private": true,
   "scripts": {
-    "build": "NODE_ENV=production FORCE_COLOR=1 bun run --filter @eneo/ui build && NODE_ENV=production FORCE_COLOR=1 bun run --filter @eneo/web build",
+    "build": "NODE_ENV=production FORCE_COLOR=1 bun run --filter @eneo/ui build && NODE_ENV=production FORCE_COLOR=1 bun run --filter @eneo/web build && NODE_ENV=production FORCE_COLOR=1 bun run --filter @eneo/web-next build",
     "dev": "bun scripts/frontend-dev.mjs start",
     "dev:status": "bun scripts/frontend-dev.mjs status",
     "dev:stop": "bun scripts/frontend-dev.mjs stop",
     "dev:restart": "bun scripts/frontend-dev.mjs restart",
     "dev:clean": "bun run dev:stop && bun run clean:cache && bun run dev",
+    "dev:web-next": "NODE_ENV=development FORCE_COLOR=1 bun run --cwd apps/web-next dev",
+    "dev:web-next:clean": "bun run clean:cache:web-next && bun run dev:web-next",
     "clean:cache": "rm -rf apps/web/node_modules/.vite apps/web/.svelte-kit packages/ui/.svelte-kit",
+    "clean:cache:web-next": "rm -rf apps/web-next/.next apps/web-next/node_modules/.cache",
     "lint": "FORCE_COLOR=1 bun run --filter '*' lint",
     "check": "NODE_ENV=production FORCE_COLOR=1 bun run --filter '*' check",
     "format": "FORCE_COLOR=1 bun run --filter '*' format",
-    "test": "bun run test:dev-lifecycle && cd apps/web && bun run test:unit",
+    "test": "bun run test:dev-lifecycle && bun run test:web && bun run test:web-next",
     "test:dev-lifecycle": "bun test scripts/frontend-dev.test.mjs scripts/frontend-dev.boundary.test.mjs",
-    "test:watch": "cd apps/web && bun run test:unit:watch",
-    "test:e2e": "cd apps/web && bun run test:e2e",
-    "test:e2e:ui": "cd apps/web && bun run test:e2e:ui",
-    "test:e2e:report": "cd apps/web && bun run test:e2e:report",
-    "test:all": "cd apps/web && bun run test:all",
+    "test:watch": "bun run test:watch:web",
+    "test:web": "cd apps/web && bun run test:unit",
+    "test:web-next": "cd apps/web-next && bun run test",
+    "test:watch:web": "cd apps/web && bun run test:unit:watch",
+    "test:watch:web-next": "cd apps/web-next && bun run test:watch",
+    "test:e2e": "bun run test:e2e:web && bun run test:e2e:web-next",
+    "test:e2e:web": "cd apps/web && bun run test:e2e",
+    "test:e2e:web-next": "cd apps/web-next && bun run test:e2e",
+    "test:e2e:ui": "bun run test:e2e:ui:web-next",
+    "test:e2e:ui:web": "cd apps/web && bun run test:e2e:ui",
+    "test:e2e:ui:web-next": "cd apps/web-next && bun run test:e2e:ui",
+    "test:e2e:report": "bun run test:e2e:report:web-next",
+    "test:e2e:report:web": "cd apps/web && bun run test:e2e:report",
+    "test:e2e:report:web-next": "cd apps/web-next && bun run test:e2e:report",
+    "test:all": "bun run test && bun run test:e2e",
     "knip": "knip-bun",
     "setup": "sh setup.sh",
     "setup:github": "GITHUB=TRUE sh setup.sh"
@@ -30,7 +43,11 @@
   "resolutions": {
     "cookie": "0.7.2",
     "esbuild": ">0.25.0",
-    "prettier": "3.9.4"
+    "prettier": "3.9.4",
+    "@xmldom/xmldom": "0.9.12",
+    "postcss": "8.5.28",
+    "mermaid": "11.16.1",
+    "sharp": "0.35.5"
   },
   "workspaces": [
     "apps/*",
@@ -40,9 +57,12 @@
     "knip": "^6.23.0",
     "prettier": "3.9.4",
     "prettier-plugin-svelte": "^4.1.1",
-    "prettier-plugin-tailwindcss": "^0.8.0"
+    "prettier-plugin-tailwindcss": "0.8.0"
   },
   "patchedDependencies": {
-    "nextra-theme-docs@4.6.1": "patches/nextra-theme-docs@4.6.1.patch"
+    "nextra-theme-docs@4.6.1": "patches/nextra-theme-docs@4.6.1.patch",
+    "sonner@2.0.8": "patches/sonner@2.0.8.patch",
+    "@astryxdesign/core@0.6.4": "patches/@astryxdesign%2Fcore@0.6.4.patch",
+    "braces@3.0.3": "patches/braces@3.0.3.patch"
   }
 }

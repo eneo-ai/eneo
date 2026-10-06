@@ -13,6 +13,7 @@ from eneo.integration.domain.value_objects import (
     SkippedDetail,
     SyncMetadata,
 )
+from eneo.jobs.job_models import Task
 from eneo.jobs.task_models import ResourceTaskParams
 from eneo.main.models import ResourcePermission
 
@@ -215,7 +216,9 @@ class IntegrationKnowledgePublic(BaseModel):
     )
     metadata: IntegrationKnowledgeMetaData
     integration_type: Literal["confluence", "sharepoint"]
-    task: Enum
+    # Annotating the bare Enum base class produced an empty enum (`never`) in
+    # the OpenAPI spec; the assembler always sets a Task member.
+    task: Task
 
 
 class SyncLog(BaseModel):

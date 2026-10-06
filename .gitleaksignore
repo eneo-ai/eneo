@@ -1,0 +1,12 @@
+# Reviewed non-secrets: isolated E2E/test credentials and generated OpenAPI examples.
+# Exact commit/file/rule/line fingerprints only; no path-wide or rule-wide exclusions.
+2f36b611127e4cf8222d5ab1dac2c05d7a53747a:docker-compose.e2e.ci.yml:generic-api-key:78
+2f36b611127e4cf8222d5ab1dac2c05d7a53747a:docker-compose.e2e.yml:generic-api-key:83
+8e4e2d9b4a94cfa2dbcba949dc735b55e404601a:backend/tests/unittests/model_providers/test_model_provider_masked_api_key.py:generic-api-key:23
+bbe9d6a5b5a8cbaf86013f2b7c5a9dda09b72673:backend/tests/unittests/model_providers/test_provider_connection_probe.py:generic-api-key:26
+bbe9d6a5b5a8cbaf86013f2b7c5a9dda09b72673:backend/tests/integration/model_providers/test_provider_connection_check.py:generic-api-key:19
+bbe9d6a5b5a8cbaf86013f2b7c5a9dda09b72673:backend/tests/unittests/model_providers/test_provider_connection_check.py:generic-api-key:38
+4763c9c6966227045bbd1c4f0683a8c9e7b4d6fb:frontend/apps/web-next/src/lib/api/schema.d.ts:generic-api-key:15853
+4763c9c6966227045bbd1c4f0683a8c9e7b4d6fb:frontend/apps/web-next/src/lib/api/schema.d.ts:generic-api-key:17405
+4763c9c6966227045bbd1c4f0683a8c9e7b4d6fb:frontend/apps/web-next/src/lib/api/schema.d.ts:generic-api-key:19762
+4763c9c6966227045bbd1c4f0683a8c9e7b4d6fb:frontend/apps/web-next/src/lib/api/schema.d.ts:generic-api-key:22424

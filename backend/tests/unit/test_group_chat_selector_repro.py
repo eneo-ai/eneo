@@ -18,14 +18,18 @@ clarification text and surfaced to the user. This eliminates both the crash
 class and the silent false-positive routing class.
 """
 
+import asyncio
 from types import SimpleNamespace
-from unittest.mock import AsyncMock, MagicMock
+from unittest.mock import AsyncMock, MagicMock, patch
+from uuid import uuid4
 
 import pytest
 
 from eneo.ai_models.completion_models.completion_model import Completion
+from eneo.group_chat.application import group_chat_service as group_chat_module
 from eneo.group_chat.application.group_chat_service import GroupChatService
 from eneo.group_chat.domain.entities.group_chat import GroupChatAssistant
+from eneo.sessions import session_service as session_service_module
 
 
 def _make_assistant(name: str, description: str) -> GroupChatAssistant:
@@ -241,3 +245,65 @@ async def test_single_assistant_shortcut_bypasses_selector():
     assert result is not None
     assert result.assistant is only
     service.completion_service.get_response.assert_not_called()
+
+
+# --- clarification echo -----------------------------------------------------
+
+CLARIFICATION = "Jag vet inte vem som passar.\n\n- @Knowledge\n- @Reasoning"
+
+
+def _without_echo_delay():
+    return patch.object(
+        group_chat_module, "asyncio", SimpleNamespace(sleep=AsyncMock())
+    )
+
+
+async def _clarification_echo(service: GroupChatService):
+    return await service._handle_response(
+        response=CLARIFICATION,
+        question="help",
+        completion_model=SimpleNamespace(name="gpt-4"),
+        session=SimpleNamespace(id=uuid4()),
+        stream=True,
+        question_id=uuid4(),
+    )
+
+
+@pytest.mark.asyncio
+async def test_clarification_echo_streams_the_reply_verbatim():
+    service = _make_service(selector_text="")
+    service.session_service = AsyncMock()
+
+    with _without_echo_delay():
+        chunks = [chunk async for chunk in await _clarification_echo(service)]
+
+    assert len(chunks) > 1
+    assert "".join(chunk.text for chunk in chunks) == CLARIFICATION
+    persisted = service.session_service.complete_question_with_answer.call_args
+    assert persisted.kwargs["answer"] == CLARIFICATION
+
+
+@pytest.mark.asyncio
+async def test_aborted_clarification_echo_persists_the_whole_reply():
+    service = _make_service(selector_text="")
+    service.session_service = AsyncMock()
+    persist_calls: list[dict[str, object]] = []
+
+    async def tracking_persist(**kwargs: object) -> None:
+        persist_calls.append(kwargs)
+
+    with (
+        _without_echo_delay(),
+        patch.object(
+            session_service_module,
+            "persist_partial_question_answer",
+            tracking_persist,
+        ),
+    ):
+        echo = await _clarification_echo(service)
+        await echo.__anext__()
+        await echo.aclose()
+    await asyncio.sleep(0)
+
+    assert [call["answer"] for call in persist_calls] == [CLARIFICATION]
+    service.session_service.complete_question_with_answer.assert_not_called()

@@ -22,7 +22,7 @@ from eneo.main.exceptions import (
     UnauthorizedException,
 )
 from eneo.main.logging import get_logger
-from eneo.questions.question import QuestionAdd, ToolCallInfo
+from eneo.questions.question import MessageFeedback, QuestionAdd, ToolCallInfo
 from eneo.questions.questions_repo import QuestionRepository
 from eneo.sessions.session import (
     SessionAdd,
@@ -30,7 +30,7 @@ from eneo.sessions.session import (
     SessionInDB,
     SessionUpdate,
 )
-from eneo.sessions.sessions_repo import SessionRepository
+from eneo.sessions.sessions_repo import OwnedChatPartner, SessionRepository
 from eneo.skills.domain.skill import (
     SkillActivationEvidenceV1,
     SkillExecutionReference,
@@ -531,6 +531,66 @@ class SessionService:
         )
         return await self.session_repo.add_feedback(
             feedback=feedback, id=owned_session.id
+        )
+
+    async def get_message_partner(
+        self, *, session_id: UUID, message_id: UUID
+    ) -> OwnedChatPartner:
+        """The assistant or group chat behind a message in the principal's conversation.
+
+        Raises NotFoundException alike for a message outside the session, a
+        conversation of another principal and one without a chat partner, so
+        callers learn nothing about conversations that are not theirs.
+        """
+        user_id, api_key_id = self._principal_columns()
+        partner = await self.session_repo.get_owned_message_partner(
+            session_id=session_id,
+            message_id=message_id,
+            tenant_id=self.user.tenant_id,
+            user_id=user_id,
+            api_key_id=api_key_id,
+        )
+        if partner is None:
+            raise NotFoundException("Message not found.")
+        return partner
+
+    async def set_message_feedback(
+        self, *, session_id: UUID, message_id: UUID, feedback: MessageFeedback
+    ) -> MessageFeedback:
+        """Rate an answer in the principal's conversation, replacing an earlier rating.
+
+        Separate from the conversation-level feedback (``leave_feedback``):
+        neither overwrites the other.
+        """
+        user_id, api_key_id = self._principal_columns()
+        stored = await self.session_repo.set_message_feedback(
+            session_id=session_id,
+            message_id=message_id,
+            tenant_id=self.user.tenant_id,
+            user_id=user_id,
+            api_key_id=api_key_id,
+            feedback=feedback,
+        )
+        if stored is None:
+            raise NotFoundException("Message not found.")
+        return stored
+
+    async def clear_message_feedback(
+        self, *, session_id: UUID, message_id: UUID
+    ) -> None:
+        """Remove the rating of an answer in the principal's conversation.
+
+        Idempotent, and scoped to the principal's own messages; resolve the
+        message with ``get_message_partner`` first to report one that is not
+        theirs.
+        """
+        user_id, api_key_id = self._principal_columns()
+        await self.session_repo.delete_message_feedback(
+            session_id=session_id,
+            message_id=message_id,
+            tenant_id=self.user.tenant_id,
+            user_id=user_id,
+            api_key_id=api_key_id,
         )
 
     async def get_sessions_by_group_chat(

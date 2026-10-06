@@ -707,7 +707,9 @@ def get_application():
                 return await CrawlRunRepository(session).health_snapshot()
 
         try:
-            snapshot = await asyncio.wait_for(_query_db_lifecycle(), timeout=2.0)
+            # 2 second timeout to keep endpoint responsive
+            async with asyncio.timeout(2.0):
+                snapshot = await _query_db_lifecycle()
         except asyncio.TimeoutError:
             db_query_error = True
             logger.warning("DB query timeout in crawler health check")

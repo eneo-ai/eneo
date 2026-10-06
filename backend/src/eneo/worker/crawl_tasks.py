@@ -1136,10 +1136,8 @@ async def crawl_task(*, job_id: UUID, params: CrawlTask, container: Container):
                 while not heartbeat_stop.is_set():
                     await heartbeat_monitor.tick()
                     try:
-                        await asyncio.wait_for(
-                            heartbeat_stop.wait(),
-                            timeout=float(heartbeat_interval_seconds),
-                        )
+                        async with asyncio.timeout(float(heartbeat_interval_seconds)):
+                            await heartbeat_stop.wait()
                     except TimeoutError:
                         pass
 

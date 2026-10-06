@@ -1,0 +1,175 @@
+import { NextRequest } from "next/server";
+import { afterEach, expect, it, vi } from "vitest";
+import { env } from "@/lib/env";
+import { SESSION_COOKIE } from "@/lib/auth/session";
+import { openSession, sealSession } from "@/lib/auth/session-codec";
+import { buildContentSecurityPolicy, proxy } from "./proxy";
+
+const refresh = vi.hoisted(() => vi.fn());
+vi.mock("@/lib/auth/oidc", () => ({ refreshTokens: refresh }));
+afterEach(() => vi.resetAllMocks());
+
+it.each(["/api/eneo/api/v1/files/", "/api/chat", "/deactivated", "/module-login"])(
+  "persists OIDC refresh before forwarding %s",
+  async (path) => {
+    refresh.mockResolvedValue({
+      accessToken: "new-access",
+      refreshToken: "new-refresh",
+      accessTokenExpiresAt: Math.floor(Date.now() / 1000) + 3600
+    });
+    const raw = await sealSession(
+      {
+        mode: "oidc",
+        accessToken: "old-access",
+        refreshToken: "old-refresh",
+        accessTokenExpiresAt: Math.floor(Date.now() / 1000) + 30,
+        user: { email: "anna@example.se" }
+      },
+      env.SESSION_SECRET,
+      3600
+    );
+    const response = await proxy(
+      new NextRequest(new URL(path, "http://localhost:3100"), {
+        headers: { cookie: `${SESSION_COOKIE}=${raw}` }
+      })
+    );
+    expect(response.status).toBe(200);
+    const renewed = response.cookies.get(SESSION_COOKIE)!.value;
+    expect((await openSession(renewed, env.SESSION_SECRET))?.refreshToken).toBe("new-refresh");
+    expect(response.headers.get("x-middleware-request-cookie")).toContain(renewed);
+    expect(refresh).toHaveBeenCalledExactlyOnceWith("old-refresh");
+  }
+);
+
+it("returns JSON 401 when refresh fails for an API request", async () => {
+  refresh.mockRejectedValue(new Error("Rejected"));
+  const raw = await sealSession(
+    {
+      mode: "oidc",
+      accessToken: "expired",
+      refreshToken: "old",
+      accessTokenExpiresAt: 1,
+      user: { email: "anna@example.se" }
+    },
+    env.SESSION_SECRET,
+    3600
+  );
+  const response = await proxy(
+    new NextRequest("http://localhost:3100/api/chat", {
+      headers: { cookie: `${SESSION_COOKIE}=${raw}` }
+    })
+  );
+  expect(response.status).toBe(401);
+  expect(response.headers.get("location")).toBeNull();
+  expect(await response.json()).toEqual({ message: "Unauthenticated" });
+});
+
+const IPHONE =
+  "Mozilla/5.0 (iPhone; CPU iPhone OS 18_0 like Mac OS X) AppleWebKit/605.1.15 Mobile/15E148";
+const ANDROID = "Mozilla/5.0 (Android 14; Mobile) AppleWebKit/537.36";
+
+it.each([undefined, "null", "https://attacker.example", "http://other.localhost:3100"])(
+  "rejects mutations from an untrusted origin: %s",
+  async (origin) => {
+    const response = await proxy(
+      new NextRequest("http://localhost:3100/api/eneo/api/v1/spaces/", {
+        method: "POST",
+        headers: origin ? { origin } : {}
+      })
+    );
+    expect(response.status).toBe(403);
+  }
+);
+
+it("accepts a mutation from the configured app origin", async () => {
+  const response = await proxy(
+    new NextRequest("http://localhost:3100/api/chat", {
+      method: "POST",
+      headers: { origin: "http://localhost:3100" }
+    })
+  );
+  expect(response.status).toBe(200);
+});
+
+async function signedInRequest(path: string, userAgent: string) {
+  const session = await sealSession(
+    {
+      mode: "password",
+      accessToken: "token",
+      accessTokenExpiresAt: Math.floor(Date.now() / 1000) + 3600,
+      user: { email: "anna@example.se" }
+    },
+    env.SESSION_SECRET,
+    3600
+  );
+  return new NextRequest(new URL(path, "http://localhost:3100"), {
+    headers: { cookie: `${SESSION_COOKIE}=${session}`, "user-agent": userAgent }
+  });
+}
+
+function directive(csp: string, name: string): string {
+  const value = csp.split("; ").find((part) => part.startsWith(`${name} `));
+  if (!value) throw new Error(`missing ${name}`);
+  return value;
+}
+
+it("builds a strict production script policy with a request nonce", () => {
+  const csp = buildContentSecurityPolicy("test-nonce", "production");
+  const script = directive(csp, "script-src");
+
+  expect(script).toContain("'self'");
+  expect(script).toContain("'nonce-test-nonce'");
+  expect(script).toContain("'strict-dynamic'");
+  expect(script).not.toContain("'unsafe-inline'");
+  expect(script).not.toContain("'unsafe-eval'");
+  expect(directive(csp, "script-src-attr")).toBe("script-src-attr 'none'");
+  expect(directive(csp, "style-src")).toBe("style-src 'self' 'nonce-test-nonce'");
+  expect(directive(csp, "frame-src")).toBe("frame-src blob:");
+  expect(directive(csp, "frame-ancestors")).toBe("frame-ancestors 'self'");
+  expect(csp).toContain("upgrade-insecure-requests");
+});
+
+it("allows React dev eval and the dev tools' inline styles without weakening production", () => {
+  const csp = buildContentSecurityPolicy("dev-nonce", "development");
+
+  expect(directive(csp, "script-src")).toContain("'unsafe-eval'");
+  // No nonce: with one, browsers ignore 'unsafe-inline'.
+  expect(directive(csp, "style-src")).toBe("style-src 'self' 'unsafe-inline'");
+  expect(csp).not.toContain("upgrade-insecure-requests");
+});
+
+it("serves phones the requested page instead of redirecting them to /dashboard", async () => {
+  for (const userAgent of [IPHONE, ANDROID]) {
+    const response = await proxy(await signedInRequest("/spaces/personal/chat", userAgent));
+    expect(response.status).toBe(200);
+    expect(response.headers.get("location")).toBeNull();
+  }
+});
+
+it("keeps /dashboard reachable on phones", async () => {
+  const response = await proxy(await signedInRequest("/dashboard", ANDROID));
+  expect(response.status).toBe(200);
+  expect(response.headers.get("location")).toBeNull();
+});
+
+it("still sends signed-out visitors to the login page", async () => {
+  const response = await proxy(
+    new NextRequest(new URL("/spaces/personal/chat", "http://localhost:3100"), {
+      headers: { "user-agent": IPHONE }
+    })
+  );
+  expect(response.status).toBe(307);
+  expect(new URL(response.headers.get("location") ?? "").pathname).toBe("/login");
+});
+
+it("lets /module-login and /invite through signed out: they gate or explain themselves", async () => {
+  for (const path of [
+    "/module-login?module_key=reports&redirect_uri=https%3A%2F%2Fm.example%2Fcb&state=abc",
+    "/module-login/failed?reason=module_unavailable",
+    "/invite/org-1"
+  ]) {
+    const response = await proxy(new NextRequest(new URL(path, "http://localhost:3100")));
+    expect(response.status, path).toBe(200);
+    expect(response.headers.get("location"), path).toBeNull();
+  }
+});

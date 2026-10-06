@@ -41,8 +41,9 @@ services:
       timeout: 3s
       retries: 30
 
-  # Deterministic OpenAI-compatible stand-in. The seeded test model's provider
-  # endpoint points here, so chat completions never reach a real provider.
+  # Deterministic OpenAI-compatible stand-in. The seeded test models' provider
+  # endpoint points here, so chat completions and embeddings never reach a real
+  # provider.
   e2e-mock-model:
     image: eneo_devcontainer-eneo
     command: ["python3", "/workspace/e2e/mock_model_server.py"]
@@ -75,9 +76,11 @@ services:
       POSTGRES_DB: eneo_test
       REDIS_HOST: e2e-redis
       PYTHONDONTWRITEBYTECODE: "1"
-      # No encryption → seeded provider credentials are read as plaintext (no
-      # real keys involved). Requires tenant credentials disabled.
-      ENCRYPTION_KEY: ""
+      # Credentials are encrypted as in production, so providers can be added
+      # (the backend refuses to store a key without encryption). A fixed,
+      # public test key (CI's backend jobs use it too) that guards only the
+      # stack's dummy keys; e2e/seed.py encrypts the seeded provider's with it.
+      ENCRYPTION_KEY: yPIAaWTENh5knUuz75NYHblR3672X-7lH-W6AD4F1hs=
       TENANT_CREDENTIALS_ENABLED: "false"
       # Hard guarantee: no real outbound model calls from the test stack.
       OPENAI_API_KEY: test-openai-key
@@ -96,7 +99,7 @@ services:
         export PATH="/workspace/backend/.venv/bin:$$PATH"
         apt-get update -qq && apt-get install -y -qq libsndfile1 ffmpeg >/dev/null
         python init_db.py            # migrate (alembic upgrade head) + seed tenant/user
-        python /workspace/e2e/seed.py  # seed mock completion model
+        python /workspace/e2e/seed.py  # seed mock completion + embedding models
         exec gunicorn src.eneo.server.main:app \
           --workers 1 --worker-class uvicorn.workers.UvicornWorker \
           --keep-alive 75 --bind 0.0.0.0:8000

@@ -1,27 +1,36 @@
-from collections.abc import Sequence
+from collections.abc import Collection, Sequence
+from dataclasses import dataclass
 from datetime import datetime
 from typing import Any, NamedTuple
 from uuid import UUID
 
 import sqlalchemy as sa
-from sqlalchemy.orm import selectinload
+from sqlalchemy.dialects.postgresql import UUID as PG_UUID
+from sqlalchemy.dialects.postgresql import insert as pg_insert
+from sqlalchemy.orm import QueryableAttribute, aliased, selectinload
 
+from eneo.actors.actors.space_actor import SpaceAccessFacts, SpaceRoleFact
 from eneo.database.database import AsyncSession
 from eneo.database.repositories.base import BaseRepositoryDelegate
 from eneo.database.tables.api_keys_v2_table import ApiKeysV2
 from eneo.database.tables.assistant_table import Assistants
 from eneo.database.tables.files_table import Files
+from eneo.database.tables.group_chats_table import GroupChatsTable
 from eneo.database.tables.help_assistant_runs_table import HelpAssistantRuns
 from eneo.database.tables.info_blobs_table import InfoBlobs
 from eneo.database.tables.questions_table import (
     InfoBlobReferences,
+    QuestionFeedback,
     Questions,
     QuestionsFiles,
 )
 from eneo.database.tables.sessions_table import Sessions
+from eneo.database.tables.spaces_table import Spaces, SpacesUserGroups, SpacesUsers
+from eneo.database.tables.user_groups_table import UserGroups
 from eneo.database.tables.users_table import Users
 from eneo.files.file_content_loader import FileContentLoader
 from eneo.info_blobs.info_blob_repo import InfoBlobRepository
+from eneo.questions.question import MessageFeedback
 from eneo.questions.question_file_projection import attach_question_files
 from eneo.sessions.session import (
     SessionAdd,
@@ -30,9 +39,41 @@ from eneo.sessions.session import (
     SessionMetadataPublic,
     SessionUpdate,
 )
+from eneo.user_groups.user_group import UserGroupState
 
 
 class OwnedChatPartner(NamedTuple):
+    assistant_id: UUID | None
+    group_chat_id: UUID | None
+
+
+@dataclass(frozen=True, slots=True)
+class ChatPartnerAccess:
+    """An assistant or group chat the user has conversations with.
+
+    ``space`` carries what ``SpaceActor`` needs to decide whether the user may
+    still open it; ``published`` only matters for group chats.
+    """
+
+    assistant_id: UUID | None
+    group_chat_id: UUID | None
+    name: str
+    published: bool
+    space_name: str
+    space: SpaceAccessFacts
+
+    @property
+    def id(self) -> UUID:
+        partner_id = self.group_chat_id or self.assistant_id
+        assert partner_id is not None
+        return partner_id
+
+
+class RecentSessionRow(NamedTuple):
+    id: UUID
+    name: str
+    created_at: datetime
+    last_activity_at: datetime
     assistant_id: UUID | None
     group_chat_id: UUID | None
 
@@ -201,6 +242,335 @@ class SessionRepository:
         return OwnedChatPartner(
             assistant_id=row.assistant_id,
             group_chat_id=row.group_chat_id,
+        )
+
+    async def get_chat_partners_of_user(
+        self,
+        *,
+        user_id: UUID,
+        tenant_id: UUID,
+        user_group_ids: Collection[UUID],
+    ) -> list[ChatPartnerAccess]:
+        """Every assistant and group chat the user has conversations with.
+
+        Each comes with the facts of its space that decide whether the user
+        can still open it: the space's kind and default assistant, the user's
+        direct role and the roles of the user's groups. Like
+        ``SpaceRepository.get_info_blob_read_access`` these cover the user's
+        own membership only; resource-scoped API key ids are left out.
+        """
+        partners = self._exclude_helper_run_sessions(
+            sa.select(Sessions.assistant_id, Sessions.group_chat_id)
+            .where(Sessions.user_id == user_id)
+            .where(
+                sa.or_(
+                    Sessions.assistant_id.is_not(None),
+                    Sessions.group_chat_id.is_not(None),
+                )
+            )
+            .distinct()
+        ).subquery("partners")
+        # The space's own assistant, picked the way the space load picks it.
+        default_assistants = aliased(Assistants)
+        default_assistant_id = (
+            sa.select(default_assistants.id)
+            .where(default_assistants.space_id == Spaces.id)
+            .where(default_assistants.is_default.is_(True))
+            .order_by(default_assistants.created_at)
+            .limit(1)
+            .correlate(Spaces)
+            .scalar_subquery()
+        )
+        query = (
+            sa.select(
+                partners.c.assistant_id,
+                partners.c.group_chat_id,
+                Assistants.name.label("assistant_name"),
+                GroupChatsTable.name.label("group_chat_name"),
+                GroupChatsTable.published.label("group_chat_published"),
+                Spaces.id.label("space_id"),
+                Spaces.name.label("space_name"),
+                Spaces.user_id.label("space_user_id"),
+                Spaces.tenant_space_id,
+                default_assistant_id.label("default_assistant_id"),
+                sa.Nullable(SpacesUsers.role),
+            )
+            .select_from(partners)
+            .outerjoin(GroupChatsTable, GroupChatsTable.id == partners.c.group_chat_id)
+            # A group chat conversation belongs to the group chat, whatever
+            # assistant answered in it.
+            .outerjoin(
+                Assistants,
+                sa.and_(
+                    partners.c.group_chat_id.is_(None),
+                    Assistants.id == partners.c.assistant_id,
+                ),
+            )
+            .join(
+                Spaces,
+                Spaces.id
+                == sa.func.coalesce(GroupChatsTable.space_id, Assistants.space_id),
+            )
+            .outerjoin(
+                SpacesUsers,
+                sa.and_(
+                    SpacesUsers.space_id == Spaces.id,
+                    SpacesUsers.user_id == user_id,
+                ),
+            )
+            .where(Spaces.tenant_id == tenant_id)
+        )
+        rows = (await self.session.execute(query)).all()
+
+        group_roles: dict[UUID, dict[UUID, SpaceRoleFact]] = {}
+        space_ids = {row.space_id for row in rows}
+        if user_group_ids and space_ids:
+            group_rows = await self.session.execute(
+                sa.select(
+                    SpacesUserGroups.space_id,
+                    SpacesUserGroups.user_group_id,
+                    SpacesUserGroups.role,
+                )
+                .join(UserGroups, UserGroups.id == SpacesUserGroups.user_group_id)
+                .where(SpacesUserGroups.space_id.in_(space_ids))
+                .where(SpacesUserGroups.user_group_id.in_(user_group_ids))
+                .where(UserGroups.tenant_id == tenant_id)
+                .where(
+                    sa.or_(
+                        UserGroups.state.is_(None),
+                        UserGroups.state != UserGroupState.DELETED.value,
+                    )
+                )
+            )
+            for space_id, group_id, role in group_rows.tuples():
+                group_roles.setdefault(space_id, {})[group_id] = SpaceRoleFact(
+                    id=group_id, role=role
+                )
+
+        spaces: dict[UUID, SpaceAccessFacts] = {}
+        partner_access: list[ChatPartnerAccess] = []
+        for row in rows:
+            space = spaces.get(row.space_id)
+            if space is None:
+                space = spaces[row.space_id] = SpaceAccessFacts(
+                    id=row.space_id,
+                    tenant_id=tenant_id,
+                    user_id=row.space_user_id,
+                    tenant_space_id=row.tenant_space_id,
+                    members=(
+                        {user_id: SpaceRoleFact(id=user_id, role=row.role)}
+                        if row.role is not None
+                        else {}
+                    ),
+                    group_members=group_roles.get(row.space_id, {}),
+                    default_assistant_id=row.default_assistant_id,
+                    assistant_ids=frozenset(),
+                    app_ids=frozenset(),
+                )
+            is_group_chat = row.group_chat_id is not None
+            partner_access.append(
+                ChatPartnerAccess(
+                    assistant_id=None if is_group_chat else row.assistant_id,
+                    group_chat_id=row.group_chat_id,
+                    name=row.group_chat_name if is_group_chat else row.assistant_name,
+                    published=bool(row.group_chat_published),
+                    space_name=row.space_name,
+                    space=space,
+                )
+            )
+        return partner_access
+
+    async def get_recent_for_user(
+        self,
+        *,
+        user_id: UUID,
+        assistant_ids: Collection[UUID],
+        group_chat_ids: Collection[UUID],
+        limit: int,
+    ) -> list[RecentSessionRow]:
+        """The user's own conversations with these partners, latest activity first.
+
+        A conversation's activity is its latest question, or its creation when
+        it has none. The user's sessions come from
+        ``idx_sessions_user_created_at`` and each latest question is one
+        index-only probe of ``idx_questions_session_created_id``, so the cost
+        follows the size of the user's own history, not the tenant's.
+        """
+        last_question_at = (
+            sa.select(sa.func.max(Questions.created_at))
+            .where(Questions.session_id == Sessions.id)
+            .correlate(Sessions)
+            .scalar_subquery()
+        )
+        last_activity_at = sa.func.coalesce(
+            last_question_at, Sessions.created_at
+        ).label("last_activity_at")
+        query = self._exclude_helper_run_sessions(
+            sa.select(
+                Sessions.id,
+                Sessions.name,
+                Sessions.created_at,
+                last_activity_at,
+                Sessions.assistant_id,
+                Sessions.group_chat_id,
+            )
+            .where(Sessions.user_id == user_id)
+            .where(
+                sa.or_(
+                    sa.and_(
+                        Sessions.group_chat_id.is_(None),
+                        Sessions.assistant_id.in_(assistant_ids),
+                    ),
+                    Sessions.group_chat_id.in_(group_chat_ids),
+                )
+            )
+            .order_by(last_activity_at.desc(), Sessions.id.desc())
+            .limit(limit)
+        )
+        result = await self.session.execute(query)
+        return [RecentSessionRow(*row) for row in result.tuples()]
+
+    @staticmethod
+    def _owned_by(
+        user_id: UUID | None, api_key_id: UUID | None
+    ) -> sa.ColumnElement[bool]:
+        """Sessions of exactly this principal: a user, or a service API key.
+
+        Never matches NULL against NULL, so a request without either principal
+        owns nothing.
+        """
+        if user_id is not None:
+            return Sessions.user_id == user_id
+        if api_key_id is not None:
+            return Sessions.api_key_id == api_key_id
+        return sa.false()
+
+    def _owned_message(
+        self,
+        *columns: sa.ColumnElement[Any] | QueryableAttribute[Any],
+        session_id: UUID,
+        message_id: UUID,
+        tenant_id: UUID,
+        user_id: UUID | None,
+        api_key_id: UUID | None,
+    ) -> sa.Select[Any]:
+        """A message in one of the principal's assistant or group chat conversations."""
+        query = (
+            sa.select(*columns)
+            .select_from(Questions)
+            .join(Sessions, Sessions.id == Questions.session_id)
+            .where(Questions.id == message_id)
+            .where(Questions.session_id == session_id)
+            .where(Questions.tenant_id == tenant_id)
+            .where(self._owned_by(user_id, api_key_id))
+            .where(
+                sa.or_(
+                    Sessions.assistant_id.is_not(None),
+                    Sessions.group_chat_id.is_not(None),
+                )
+            )
+        )
+        return self._exclude_helper_run_sessions(query)
+
+    async def get_owned_message_partner(
+        self,
+        *,
+        session_id: UUID,
+        message_id: UUID,
+        tenant_id: UUID,
+        user_id: UUID | None,
+        api_key_id: UUID | None,
+    ) -> OwnedChatPartner | None:
+        """The chat partner of a message in one of the principal's conversations.
+
+        None when the message is not in that session, the session belongs to
+        another principal or tenant, or it has no assistant or group chat.
+        """
+        query = self._owned_message(
+            Sessions.assistant_id,
+            Sessions.group_chat_id,
+            session_id=session_id,
+            message_id=message_id,
+            tenant_id=tenant_id,
+            user_id=user_id,
+            api_key_id=api_key_id,
+        )
+        row = (await self.session.execute(query)).one_or_none()
+        if row is None:
+            return None
+        return OwnedChatPartner(
+            assistant_id=row.assistant_id,
+            group_chat_id=row.group_chat_id,
+        )
+
+    async def set_message_feedback(
+        self,
+        *,
+        session_id: UUID,
+        message_id: UUID,
+        tenant_id: UUID,
+        user_id: UUID | None,
+        api_key_id: UUID | None,
+        feedback: MessageFeedback,
+    ) -> MessageFeedback | None:
+        """Rate a message in one of the principal's conversations.
+
+        Replaces an earlier rating of the message. Returns None, and writes
+        nothing, when the message is not the principal's.
+        """
+        source = self._owned_message(
+            Questions.id,
+            sa.literal(feedback.value, sa.SmallInteger()),
+            sa.literal(feedback.text, sa.Text()),
+            sa.literal(user_id, PG_UUID(as_uuid=True)),
+            sa.literal(api_key_id, PG_UUID(as_uuid=True)),
+            session_id=session_id,
+            message_id=message_id,
+            tenant_id=tenant_id,
+            user_id=user_id,
+            api_key_id=api_key_id,
+        )
+        insert = pg_insert(QuestionFeedback).from_select(
+            ["question_id", "value", "text", "user_id", "api_key_id"], source
+        )
+        stmt = insert.on_conflict_do_update(
+            index_elements=[QuestionFeedback.question_id],
+            set_={
+                "value": insert.excluded.value,
+                "text": insert.excluded.text,
+                "user_id": insert.excluded.user_id,
+                "api_key_id": insert.excluded.api_key_id,
+                "updated_at": sa.func.now(),
+            },
+        ).returning(QuestionFeedback.value, QuestionFeedback.text)
+        row = (await self.session.execute(stmt)).one_or_none()
+        if row is None:
+            return None
+        return MessageFeedback(value=row.value, text=row.text)
+
+    async def delete_message_feedback(
+        self,
+        *,
+        session_id: UUID,
+        message_id: UUID,
+        tenant_id: UUID,
+        user_id: UUID | None,
+        api_key_id: UUID | None,
+    ) -> None:
+        """Remove the rating of a message in one of the principal's conversations.
+
+        A no-op when the message has no rating or is not the principal's.
+        """
+        owned = self._owned_message(
+            Questions.id,
+            session_id=session_id,
+            message_id=message_id,
+            tenant_id=tenant_id,
+            user_id=user_id,
+            api_key_id=api_key_id,
+        )
+        await self.session.execute(
+            sa.delete(QuestionFeedback).where(QuestionFeedback.question_id.in_(owned))
         )
 
     async def get_for_helper_run(self, id: UUID, tenant_id: UUID) -> SessionInDB | None:

@@ -48,7 +48,7 @@ def _service(provider: ModelProvider) -> tuple[ModelProviderService, AsyncMock]:
     repository = AsyncMock()
     repository.get_by_id.return_value = provider
     repository.get_by_name.return_value = None
-    repository.update.side_effect = lambda p: p
+    repository.update.side_effect = lambda p, **_: p
     repository.session = MagicMock()
     encryption = MagicMock()
     encryption.encrypt.side_effect = lambda value: f"enc({value})"

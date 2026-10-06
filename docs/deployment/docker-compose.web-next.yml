@@ -1,0 +1,41 @@
+# Optional overlay for docker-compose.yml: both UIs share the existing backend,
+# workers, database and storage. Use the same release tag for all three images.
+# Configure env_web_next.env from env_web_next.template and set WEB_NEXT_HOST
+# and WEB_NEXT_TAG in the deployment's .env. The beta starts only with its profile.
+# docker compose -f docker-compose.yml -f docker-compose.web-next.yml --profile web-next up -d
+services:
+  web-next:
+    image: ghcr.io/eneo-ai/eneo-web-next:${WEB_NEXT_TAG:?Set the matching backend release tag}
+    profiles: [web-next]
+    restart: unless-stopped
+    init: true
+    env_file:
+      - env_web_next.env
+    environment:
+      ENEO_BACKEND_URL: http://backend:8000
+      APP_ORIGIN: https://${WEB_NEXT_HOST:?Set the beta hostname}
+    networks:
+      - proxy_tier
+    security_opt:
+      - no-new-privileges:true
+    cap_drop: [ALL]
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:3000/healthz').then(r => process.exit(r.ok ? 0 : 1)).catch(() => process.exit(1))"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 30s
+    labels:
+      - traefik.enable=true
+      - traefik.http.routers.eneo-web-next.rule=Host(`${WEB_NEXT_HOST}`)
+      - traefik.http.routers.eneo-web-next.entrypoints=web
+      - traefik.http.routers.eneo-web-next.middlewares=redirect-to-https
+      - traefik.http.routers.eneo-web-next-secure.rule=Host(`${WEB_NEXT_HOST}`)
+      - traefik.http.routers.eneo-web-next-secure.entrypoints=websecure
+      - traefik.http.routers.eneo-web-next-secure.tls=true
+      - traefik.http.routers.eneo-web-next-secure.tls.certresolver=letsencrypt
+      - traefik.http.routers.eneo-web-next-secure.service=eneo-web-next-svc
+      - traefik.http.services.eneo-web-next-svc.loadbalancer.server.port=3000
+    depends_on:
+      backend:
+        condition: service_healthy

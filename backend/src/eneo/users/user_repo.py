@@ -242,17 +242,21 @@ class UsersRepository:
 
     async def add(self, user: UserAdd):
         try:
-            stmt = (
-                sa.insert(Users)
-                .values(**user.model_dump(exclude_none=True, exclude={"roles"}))
-                .returning(Users)
-            )
-            entry_in_db = await self.delegate.get_record_from_query(query=stmt)
-            assert entry_in_db is not None
-            # TODO should be refactored when we will remove int id field from tables
-            entry_in_db.roles = await self.get_roles_by_ids(user.roles, user.tenant_id)
+            # A duplicate JIT insert must leave the outer request usable.
+            async with self.session.begin_nested():
+                stmt = (
+                    sa.insert(Users)
+                    .values(**user.model_dump(exclude_none=True, exclude={"roles"}))
+                    .returning(Users)
+                )
+                entry_in_db = await self.delegate.get_record_from_query(query=stmt)
+                assert entry_in_db is not None
+                # TODO should be refactored when we will remove int id field from tables
+                entry_in_db.roles = await self.get_roles_by_ids(
+                    user.roles, user.tenant_id
+                )
 
-            return UserInDB.model_validate(entry_in_db)
+                return UserInDB.model_validate(entry_in_db)
         except IntegrityError as e:
             raise UniqueException("User already exists.") from e
 
