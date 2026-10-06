@@ -33,6 +33,9 @@ from eneo.flows.domain.flow_retention_hold import (
     FlowRetentionHoldReviewLimitUpdate,
     FlowRetentionHoldStatusFilter,
 )
+from eneo.flows.domain.flow_run_history_deletion_status import (
+    FlowRunHistoryDeletionStatus,
+)
 from eneo.flows.domain.flow_run_retention_policy import (
     FLOW_RETENTION_AUTO_DELETE_UNAVAILABLE_CODE,
     FLOW_RETENTION_DAYS_ABOVE_MAXIMUM_CODE,
@@ -1010,6 +1013,39 @@ async def replace_organization_flow_run_retention_policy(
     return await container.flow_run_retention_policy_service().replace_organization(
         policy=payload.policy, reason=payload.reason
     )
+
+
+@settings_admin_router.get(
+    "/flow-run-retention-policy/status",
+    response_model=FlowRunHistoryDeletionStatus,
+    operation_id="get_flow_run_history_deletion_status",
+    summary="Get the status of scheduled Flow run-history deletion",
+    description=(
+        "Every registered nightly gallring task with its switch, staleness and "
+        "newest execution (outcome, counts, blocked counts, error code); Flow runs "
+        "under auto_delete still stored past the overdue window after their "
+        "deadline (a live count capped at 1000, by blocker, legal holds counted "
+        "apart); and unfinished run deletions. The cap bounds returned results, "
+        "not examined rows. Each statement uses "
+        "GALLRING_CHUNK_STATEMENT_TIMEOUT_MS; statement or lock timeouts return 503 with "
+        "code retention_status_unavailable. Ids, "
+        "counts, timestamps and codes only. Readable with retention_manage or "
+        "retention_holds."
+    ),
+    responses={
+        403: _retention_forbidden_response("view"),
+        503: {"description": "Retention status timed out; retry shortly."},
+    },
+)
+@endpoint_access(
+    authentication=Authentication.USER,
+    authorization=Authorization.AUTHENTICATED,
+    reason=_RETENTION_ACCESS_REASON,
+)
+async def get_flow_run_history_deletion_status(
+    container: Annotated[Container, Depends(get_container(with_user=True))],
+) -> FlowRunHistoryDeletionStatus:
+    return await container.flow_run_retention_policy_service().get_deletion_status()
 
 
 @settings_admin_router.get(

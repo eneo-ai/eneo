@@ -53,7 +53,7 @@ export interface paths {
     };
     /**
      * Flow Runtime Health
-     * @description Return super-key-protected Flow runtime readiness signals derived from persisted run, review, data-integrity, audit-outbox, webhook-outbox, gallring job, and platform task worker readiness. GALLRING_JOB_STALE (UNHEALTHY) means an enabled nightly gallring task has not completed within twice its daily cadence; GALLRING_DISABLED (UNHEALTHY) means the deployment's emergency switch turned a gallring task off.
+     * @description Return super-key-protected Flow runtime readiness signals derived from persisted run, review, data-integrity, audit-outbox, webhook-outbox, gallring job, and platform task worker readiness. GALLRING_JOB_STALE (UNHEALTHY) means an enabled nightly gallring task has not completed within twice its daily cadence; GALLRING_DISABLED (UNHEALTHY) means the deployment's emergency switch turned a gallring task off; GALLRING_OVERDUE (UNHEALTHY) means run history due for automatic deletion is still stored past the overdue window, or that the nightly flows.history snapshot is missing or older than twice the daily cadence (overdue_unknown).
      */
     get: operations["flow_runtime_health_api_healthz_flows_get"];
     put?: never;
@@ -8090,6 +8090,26 @@ export interface paths {
      * @description List terminal Flow runs in one Space whose effective review_required policy has reached its age threshold. A Flow-level preserve override is excluded, even when the surrounding Space requires review. The bounded response omits run content, and reading it never approves or deletes data.
      */
     get: operations["list_space_flow_run_retention_review_queue"];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/v1/settings/flow-run-retention-policy/status": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /**
+     * Get the status of scheduled Flow run-history deletion
+     * @description Every registered nightly gallring task with its switch, staleness and newest execution (outcome, counts, blocked counts, error code); Flow runs under auto_delete still stored past the overdue window after their deadline (a live count capped at 1000, by blocker, legal holds counted apart); and unfinished run deletions. The cap bounds returned results, not examined rows. Each statement uses GALLRING_CHUNK_STATEMENT_TIMEOUT_MS; statement or lock timeouts return 503 with code retention_status_unavailable. Ids, counts, timestamps and codes only. Readable with retention_manage or retention_holds.
+     */
+    get: operations["get_flow_run_history_deletion_status"];
     put?: never;
     post?: never;
     delete?: never;
@@ -22936,6 +22956,105 @@ export interface components {
        */
       preview: string;
     };
+    /**
+     * FlowRunHistoryDeletionStatus
+     * @example {
+     *       "auto_delete_available": true,
+     *       "overdue": {
+     *         "complete": true,
+     *         "count": 2,
+     *         "held": 3,
+     *         "not_yet_deleted": 1,
+     *         "oldest_due_at": "2026-10-02T09:00:00Z",
+     *         "undelivered_audit": 1,
+     *         "unresolved_webhook": 0
+     *       },
+     *       "overdue_window_days": 1,
+     *       "receipts": {
+     *         "oldest_physical_pending_completed_at": null,
+     *         "oldest_unfinished_started_at": null,
+     *         "unfinished": 0
+     *       },
+     *       "tasks": [
+     *         {
+     *           "enabled": true,
+     *           "last_completed_at": "2026-10-05T03:41:00Z",
+     *           "last_execution": {
+     *             "blocked": {
+     *               "abandoned_uploads.held": 1
+     *             },
+     *             "counts": {
+     *               "abandoned_uploads.files_deleted": 12
+     *             },
+     *             "error_code": null,
+     *             "finished_at": "2026-10-05T03:41:00Z",
+     *             "outcome": "succeeded",
+     *             "started_at": "2026-10-05T03:30:00Z"
+     *           },
+     *           "name": "flows.housekeeping",
+     *           "stale": false
+     *         }
+     *       ]
+     *     }
+     */
+    FlowRunHistoryDeletionStatus: {
+      /**
+       * Auto Delete Available
+       * @description Whether this deployment accepts auto_delete policies.
+       */
+      auto_delete_available: boolean;
+      /** @description Live, capped count over the caller's Organization. */
+      overdue: components["schemas"]["FlowRunHistoryOverdueStatus"];
+      /**
+       * Overdue Window Days
+       * @description Operator setting GALLRING_OVERDUE_WINDOW_DAYS: how long past its deadline a due run may stay before it is overdue.
+       */
+      overdue_window_days: number;
+      receipts: components["schemas"]["FlowRunHistoryReceiptStatus"];
+      /**
+       * Tasks
+       * @description Every registered nightly gallring task, in run order.
+       */
+      tasks: components["schemas"]["RetentionTaskStatus"][];
+    };
+    /** FlowRunHistoryOverdueStatus */
+    FlowRunHistoryOverdueStatus: {
+      /**
+       * Complete
+       * @description Whether the cap covered every overdue run.
+       */
+      complete: boolean;
+      /**
+       * Count
+       * @description Terminal runs under auto_delete still stored more than the overdue window after their deadline, capped; legal holds excluded.
+       */
+      count: number;
+      /**
+       * Held
+       * @description Runs past the same deadline and overdue window but kept by an active legal hold; counted apart up to the result cap.
+       */
+      held: number;
+      /**
+       * Not Yet Deleted
+       * @description Overdue runs without a blocker of their own: the nightly task has not reached them (see the flows.history execution).
+       */
+      not_yet_deleted: number;
+      /**
+       * Oldest Due At
+       * @description Deletion deadline of the oldest overdue run.
+       */
+      oldest_due_at: string | null;
+      /**
+       * Undelivered Audit
+       * @description Overdue runs waiting for their audit events to be delivered.
+       */
+      undelivered_audit: number;
+      /**
+       * Unresolved Webhook
+       * @description Overdue runs with a webhook delivery still pending.
+       */
+      unresolved_webhook: number;
+    };
     /** FlowRunHistoryPurgeBlockedPublic */
     FlowRunHistoryPurgeBlockedPublic: {
       /**
@@ -23020,6 +23139,21 @@ export interface components {
        * @default 100
        */
       limit?: number;
+    };
+    /** FlowRunHistoryReceiptStatus */
+    FlowRunHistoryReceiptStatus: {
+      /**
+       * Oldest Physical Pending Completed At
+       * @description Oldest finished run deletion whose stored file content is not yet confirmed gone.
+       */
+      oldest_physical_pending_completed_at: string | null;
+      /** Oldest Unfinished Started At */
+      oldest_unfinished_started_at: string | null;
+      /**
+       * Unfinished
+       * @description Run deletions started and not yet finished (resumed nightly, or paused by a legal hold).
+       */
+      unfinished: number;
     };
     /** FlowRunInlineTextResultPublic */
     FlowRunInlineTextResultPublic: {
@@ -25054,6 +25188,32 @@ export interface components {
        */
       disabled_tasks?: string[];
       /**
+       * Oldest Overdue Age Seconds
+       * @description Seconds since the oldest overdue run's deletion deadline.
+       */
+      oldest_overdue_age_seconds?: number | null;
+      /**
+       * Overdue Complete
+       * @description Whether the capped snapshot count covers every overdue run.
+       */
+      overdue_complete?: boolean | null;
+      /**
+       * Overdue Count
+       * @description Terminal runs due for automatic deletion (auto_delete) and still stored more than the overdue window (operator setting GALLRING_OVERDUE_WINDOW_DAYS, default 1 day) after their deadline, from the newest flows.history snapshot; runs under a legal hold are not counted. Any positive count raises GALLRING_OVERDUE (UNHEALTHY). Null when no snapshot is in use.
+       */
+      overdue_count?: number | null;
+      /**
+       * Overdue Snapshot Age Seconds
+       * @description Seconds since flows.history wrote its overdue snapshot.
+       */
+      overdue_snapshot_age_seconds?: number | null;
+      /**
+       * Overdue Unknown
+       * @description True when flows.history has run but its newest overdue snapshot is missing, older than twice the daily cadence, or counted nothing without covering everything: whether deletion keeps up is unknown. Raises GALLRING_OVERDUE.
+       * @default false
+       */
+      overdue_unknown?: boolean;
+      /**
        * Stale Tasks
        * @description Enabled gallring tasks (for example flows.housekeeping) whose last completed execution is older than twice the daily cadence, or that started but never completed within it. Any entry raises GALLRING_JOB_STALE (UNHEALTHY). A task that never ran is not listed.
        */
@@ -25081,7 +25241,8 @@ export interface components {
       | "WEBHOOK_OUTBOX_DEAD_LETTERS"
       | "GALLRING_HOLD_REVIEW_OVERDUE"
       | "GALLRING_JOB_STALE"
-      | "GALLRING_DISABLED";
+      | "GALLRING_DISABLED"
+      | "GALLRING_OVERDUE";
     /** FlowRuntimeHealthResponse */
     FlowRuntimeHealthResponse: {
       audit_outbox?: components["schemas"]["FlowRuntimeAuditOutboxSummary"];
@@ -32782,6 +32943,48 @@ export interface components {
       slot: string;
     };
     /**
+     * RetentionErrorCode
+     * @enum {string}
+     */
+    RetentionErrorCode:
+      | "chunk_timeout"
+      | "chunk_failed"
+      | "claim_timeout"
+      | "finish_timeout"
+      | "disabled_by_deployment_setting";
+    /** RetentionExecutionStatus */
+    RetentionExecutionStatus: {
+      /**
+       * Blocked
+       * @description What it left in place and why, by `<step>.<reason>`.
+       */
+      blocked: {
+        [key: string]: number;
+      };
+      /**
+       * Counts
+       * @description What the execution deleted or recorded, by `<step>.<count>`.
+       */
+      counts: {
+        [key: string]: number;
+      };
+      error_code: components["schemas"]["RetentionErrorCode"] | null;
+      /** Finished At */
+      finished_at: string | null;
+      /** @description running, succeeded, partial (budget spent, resumes next night), failed, superseded (a later execution took over) or skipped (emergency switch or a claim that timed out). */
+      outcome: components["schemas"]["RetentionJobOutcome"];
+      /**
+       * Started At
+       * Format: date-time
+       */
+      started_at: string;
+    };
+    /**
+     * RetentionJobOutcome
+     * @enum {string}
+     */
+    RetentionJobOutcome: "running" | "succeeded" | "partial" | "failed" | "superseded" | "skipped";
+    /**
      * RetentionPolicyResponse
      * @description Schema for audit log retention policy response.
      *
@@ -32827,6 +33030,31 @@ export interface components {
        * @description Days to retain audit logs (1 day minimum, 2555 days/7 years maximum). Recommended: 90+ days for compliance
        */
       retention_days: number;
+    };
+    /** RetentionTaskStatus */
+    RetentionTaskStatus: {
+      /**
+       * Enabled
+       * @description False when the deployment's emergency switch turned the task off (health flag GALLRING_DISABLED); each suppressed run is audited.
+       */
+      enabled: boolean;
+      /**
+       * Last Completed At
+       * @description End of the newest succeeded or partial execution.
+       */
+      last_completed_at: string | null;
+      /** @description The newest execution of any outcome, or null if it never ran. */
+      last_execution: components["schemas"]["RetentionExecutionStatus"] | null;
+      /**
+       * Name
+       * @description Registered task, for example flows.housekeeping.
+       */
+      name: string;
+      /**
+       * Stale
+       * @description The task is enabled and has no completed execution within twice the daily cadence (health flag GALLRING_JOB_STALE); a task that never ran is not stale, and a task the switch turned off never is (it raises GALLRING_DISABLED).
+       */
+      stale: boolean;
     };
     /**
      * RetrievedPassage
@@ -68531,6 +68759,49 @@ export interface operations {
         content: {
           "application/json": components["schemas"]["GeneralError"];
         };
+      };
+    };
+  };
+  get_flow_run_history_deletion_status: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["FlowRunHistoryDeletionStatus"];
+        };
+      };
+      /** @description Caller lacks retention_manage or retention_holds (`retention_permission_required`), or used an API key: retention is changed or stopped by signed-in people only (`retention_person_required`). */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          /**
+           * @example {
+           *       "code": "retention_permission_required",
+           *       "eneo_error_code": 9001,
+           *       "message": "Need permission retention_manage or retention_holds."
+           *     }
+           */
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Retention status timed out; retry shortly. */
+      503: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content?: never;
       };
     };
   };

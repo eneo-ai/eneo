@@ -286,3 +286,16 @@ Flow run-history policy is separate from:
 Some of those data classes have automatic cleanup when their own policy is configured. See [Data retention and deletion](/guides/data-retention) before making a production claim about the whole workflow.
 
 Next: [Data retention and deletion](/guides/data-retention).
+
+## Deletion status
+
+`GET /settings/flow-run-retention-policy/status` (either retention permission) returns, without any run, Flow or Space name:
+
+- `tasks`: every registered nightly gallring task with its emergency switch (`enabled`), `stale`, the last completed time and the newest execution (outcome, counts, blocked counts, error code);
+- `overdue`: terminal runs under `auto_delete` still stored more than the overdue window (operator setting `GALLRING_OVERDUE_WINDOW_DAYS`, default 1 day) after their deadline, counted live up to 1000 (`complete` says whether the count covers all), split into `undelivered_audit`, `unresolved_webhook` and `not_yet_deleted`; runs under a legal hold past the same window are counted apart as `held` up to the same cap;
+- `receipts`: run deletions started and not finished, and the oldest finished deletion whose file content is not yet confirmed gone;
+- `auto_delete_available` and `overdue_window_days`.
+
+A run whose deletion has started (it is fenced) answers as if it were deleted in run reads and run lists, the review queue, the explicit purge and its blocked counts, and when a legal hold names it by id (`flow_retention_hold_run_not_in_flow`, like a missing run). Replaying the `Idempotency-Key` that created it returns `409 flow_run_idempotency_run_deleted`: the run is neither returned nor created again.
+
+The cap bounds returned results, not rows examined by eligibility scans. Each status statement is subject to `GALLRING_CHUNK_STATEMENT_TIMEOUT_MS`. The served OpenAPI specification documents the status route’s error responses.

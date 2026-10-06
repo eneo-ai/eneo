@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from collections.abc import Mapping
+from dataclasses import dataclass
 from datetime import datetime
 from typing import Any, cast
 from uuid import UUID
@@ -16,6 +17,7 @@ from eneo.data_retention.domain.retention import (
     RetentionErrorCode,
     RetentionJobOutcome,
     RetentionKeyset,
+    RetentionOverdue,
     retention_name,
 )
 from eneo.data_retention.infrastructure.retention_sql import (
@@ -61,6 +63,33 @@ def _read_cursors(stored: object) -> dict[str, RetentionKeyset]:
         except (KeyError, TypeError, ValueError):
             continue
     return cursors
+
+
+def _int_map(stored: object) -> dict[str, int]:
+    """A job row's count map; entries of any other shape are dropped."""
+    if not isinstance(stored, dict):
+        return {}
+    return {
+        key: value
+        for key, value in cast(dict[object, object], stored).items()
+        if isinstance(key, str) and isinstance(value, int) and value >= 0
+    }
+
+
+@dataclass(frozen=True, slots=True)
+class RetentionOverdueSnapshot:
+    observed_at: datetime
+    overdue: RetentionOverdue
+
+
+@dataclass(frozen=True, slots=True)
+class RetentionJobRunRecord:
+    outcome: RetentionJobOutcome
+    started_at: datetime
+    finished_at: datetime | None
+    counts: dict[str, int]
+    blocked: dict[str, int]
+    error_code: RetentionErrorCode | None
 
 
 class RetentionJobRunRepository:
@@ -207,6 +236,85 @@ class RetentionJobRunRepository:
         )
         return finished is not None
 
+    async def record_overdue(self, job_run_id: UUID, overdue: RetentionOverdue) -> bool:
+        """The execution's overdue snapshot; False once it no longer owns the task."""
+        recorded = await self.session.scalar(
+            sa.update(RetentionJobRuns)
+            .where(*_owned(job_run_id))
+            .values(
+                heartbeat_at=sa.func.clock_timestamp(),
+                overdue_observed_at=sa.func.clock_timestamp(),
+                overdue_count=overdue.count,
+                overdue_complete=overdue.complete,
+                overdue_oldest_due_at=overdue.oldest_due_at,
+            )
+            .returning(RetentionJobRuns.id)
+        )
+        return recorded is not None
+
+    async def latest_overdue(self, task: str) -> RetentionOverdueSnapshot | None:
+        """The task's newest overdue snapshot, whatever the execution's outcome."""
+        row = (
+            await self.session.execute(
+                sa.select(
+                    RetentionJobRuns.overdue_observed_at,
+                    RetentionJobRuns.overdue_count,
+                    RetentionJobRuns.overdue_complete,
+                    RetentionJobRuns.overdue_oldest_due_at,
+                )
+                .where(
+                    RetentionJobRuns.task == task,
+                    RetentionJobRuns.overdue_observed_at.is_not(None),
+                )
+                .order_by(RetentionJobRuns.overdue_observed_at.desc())
+                .limit(1)
+            )
+        ).one_or_none()
+        if row is None or row[0] is None or row[1] is None or row[2] is None:
+            return None
+        return RetentionOverdueSnapshot(
+            observed_at=row[0],
+            overdue=RetentionOverdue(
+                count=row[1], complete=row[2], oldest_due_at=row[3]
+            ),
+        )
+
+    async def latest(self, task: str) -> RetentionJobRunRecord | None:
+        """The task's newest execution (any outcome), content-free."""
+        row = await self.session.scalar(
+            sa.select(RetentionJobRuns)
+            .where(RetentionJobRuns.task == task)
+            .order_by(RetentionJobRuns.started_at.desc(), RetentionJobRuns.id.desc())
+            .limit(1)
+        )
+        if row is None:
+            return None
+        return RetentionJobRunRecord(
+            outcome=RetentionJobOutcome(row.outcome),
+            started_at=row.started_at,
+            finished_at=row.finished_at,
+            counts=_int_map(row.counts),
+            blocked=_int_map(row.blocked),
+            error_code=(
+                RetentionErrorCode(row.error_code)
+                if row.error_code is not None
+                else None
+            ),
+        )
+
+    async def has_finished(self, task: str) -> bool:
+        return (
+            await self.session.scalar(
+                sa.select(RetentionJobRuns.id)
+                .where(
+                    RetentionJobRuns.task == task,
+                    RetentionJobRuns.finished_at.is_not(None),
+                    RetentionJobRuns.outcome != RetentionJobOutcome.SKIPPED.value,
+                )
+                .limit(1)
+            )
+        ) is not None
+
     async def last_completed_at(self, task: str) -> datetime | None:
         return await self.session.scalar(
             sa.select(RetentionJobRuns.finished_at)
@@ -219,6 +327,14 @@ class RetentionJobRunRepository:
             .order_by(RetentionJobRuns.finished_at.desc())
             .limit(1)
         )
+
+    async def is_stale(self, task: str, *, stale_before: datetime) -> bool:
+        """No completion (never completed: no first start) since `stale_before`;
+        a task that never ran is not stale."""
+        anchor = await self.last_completed_at(task)
+        if anchor is None:
+            anchor = await self.first_started_at(task)
+        return anchor is not None and anchor < stale_before
 
     async def first_started_at(self, task: str) -> datetime | None:
         return await self.session.scalar(

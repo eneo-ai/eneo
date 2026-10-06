@@ -27,6 +27,12 @@ Each step has a durable keyset cursor: the batch carries the position the
 task's newest execution reached, the step returns its new position, and the
 chunk persists it on the job row in the same transaction; a step whose pass is
 complete (exhausted) starts the next pass from the beginning.
+
+A task that reports overdue work (RetentionOverdueReporter) has its snapshot
+written to the job row when the execution ends, whatever the outcome (budget
+spent, a failed or timed-out chunk), in its own bounded transaction before the
+final outcome; a superseded execution writes none. A snapshot that fails is
+logged; the previous snapshot continues to age until health marks it stale.
 """
 
 from __future__ import annotations
@@ -36,7 +42,7 @@ import time
 from collections.abc import AsyncGenerator, Awaitable, Callable, Mapping, Sequence
 from contextlib import asynccontextmanager
 from dataclasses import dataclass, field
-from typing import Protocol, cast
+from typing import Protocol, cast, runtime_checkable
 from uuid import UUID
 
 from sqlalchemy import text
@@ -52,6 +58,7 @@ from eneo.data_retention.domain.retention import (
     RetentionErrorCode,
     RetentionJobOutcome,
     RetentionKeyset,
+    RetentionOverdue,
     RetentionUsage,
     retention_batch_audit_id,
     retention_name,
@@ -130,6 +137,13 @@ class RetentionTask(Protocol):
     def steps(self) -> Sequence[RetentionStep]: ...
 
 
+@runtime_checkable
+class RetentionOverdueReporter(Protocol):
+    """A task whose due work can be overdue; one bounded read."""
+
+    async def overdue(self) -> RetentionOverdue: ...
+
+
 class RetentionJobRunStore(Protocol):
     async def claim(self, *, task: str, stale_after_seconds: int) -> UUID | None: ...
 
@@ -158,6 +172,10 @@ class RetentionJobRunStore(Protocol):
     async def record_skip(
         self, *, task: str, error_code: RetentionErrorCode
     ) -> UUID: ...
+
+    async def record_overdue(
+        self, job_run_id: UUID, overdue: RetentionOverdue
+    ) -> bool: ...
 
     async def deployment_tenant_id(self) -> UUID | None: ...
 
@@ -310,6 +328,9 @@ class RetentionRunner:
                     "Retention task %s chunk %s failed", task.name, progress.batch_seq
                 )
 
+        if isinstance(task, RetentionOverdueReporter):
+            await self._record_overdue(task.name, task, job_run_id)
+
         try:
             async with self._transaction():
                 finished = await self.job_runs.finish(
@@ -416,6 +437,24 @@ class RetentionRunner:
                     step.name,
                 )
                 return False
+
+    async def _record_overdue(
+        self, name: str, reporter: RetentionOverdueReporter, job_run_id: UUID
+    ) -> None:
+        """Write the task's overdue snapshot on its own row; never fails the run.
+
+        The deletions already committed stand on their own; a snapshot that is
+        not written leaves the newest one to age. Health reports overdue_unknown
+        (GALLRING_OVERDUE) once that snapshot passes its freshness threshold."""
+        try:
+            async with self._transaction():
+                overdue = await reporter.overdue()
+                if not await self.job_runs.record_overdue(job_run_id, overdue):
+                    logger.warning(
+                        "Retention task %s was superseded; no overdue snapshot.", name
+                    )
+        except Exception:
+            logger.exception("Retention task %s could not record overdue work.", name)
 
     async def skip(self, task: str) -> RetentionRunReport:
         """Record a run the deployment's emergency switch suppressed; never silent.

@@ -1,36 +1,53 @@
-"""Flow run-history policy write guards and read fences.
+"""Flow run-history policies, read fences, status and overdue health.
 
 The write limits (the activation gate and the deployment maximum), the reason a
 change that stops or delays automatic deletion needs, the read fence on runs
-whose deletion has started, all against real PostgreSQL through the admin API and the run repository. Each test
+whose deletion has started, the status route and the overdue health flag, all
+against real PostgreSQL through the admin API and the run repository. Each test
 names the mutant it kills (.lane/mutants.py).
 """
 
 from __future__ import annotations
 
+import logging
 from datetime import datetime, timedelta, timezone
 from uuid import UUID, uuid4
 
 import pytest
 import sqlalchemy as sa
+from httpx import ASGITransport, AsyncClient
 
+from eneo.data_retention.domain.retention import RetentionJobOutcome
 from eneo.data_retention.infrastructure import retention_tasks
-from eneo.data_retention.infrastructure.retention_tasks import (
-    RetentionTaskRegistration,
-)
+from eneo.data_retention.infrastructure.retention_tasks import RetentionTaskRegistration
 from eneo.database.tables.audit_log_table import AuditLog
 from eneo.database.tables.flow_tables import (
+    FlowRetentionHolds,
+    FlowRunAuditOutbox,
     FlowRuns,
     Flows,
     FlowVersions,
 )
+from eneo.database.tables.retention_tables import RetentionJobRuns, RetentionReceipts
 from eneo.database.tables.spaces_table import Spaces
 from eneo.flows.domain.flow_run_exceptions import FlowRunNotFoundError
 from eneo.flows.domain.flow_run_retention_policy import FLOWS_HISTORY_TASK
+from eneo.flows.infrastructure.flow_run_history_due_repo import (
+    FlowRunHistoryDueRepository,
+)
 from eneo.flows.infrastructure.flow_run_repo import FlowRunRepository
 from eneo.flows.principal import FlowPrincipal
+from eneo.flows.runtime.flow_runtime_health import (
+    FlowRuntimeHealthFlag,
+    FlowRuntimeHealthStatus,
+    FlowRuntimeProbe,
+    build_flow_runtime_health_policy,
+    classify_flow_runtime_health,
+    load_flow_runtime_health_snapshot,
+)
 from eneo.main.config import get_settings
 from eneo.main.exceptions import ConflictException
+from eneo.server.main import logger as server_logger
 
 pytestmark = [pytest.mark.integration, pytest.mark.asyncio]
 
@@ -72,11 +89,6 @@ def _register_flows_history(monkeypatch) -> None:
 
 
 @pytest.fixture
-def flows_history_registered(monkeypatch) -> None:
-    _register_flows_history(monkeypatch)
-
-
-@pytest.fixture
 async def scope(db_container, admin_user) -> dict[str, UUID]:
     """A Space with one Flow, both inheriting the Organization policy."""
     async with db_container() as container:
@@ -97,6 +109,11 @@ async def scope(db_container, admin_user) -> dict[str, UUID]:
         await session.flush()
         flow = await _flow(session, admin_user, space.id)
         return {"space_id": space.id, "flow_id": flow}
+
+
+@pytest.fixture
+def flows_history_registered(monkeypatch) -> None:
+    _register_flows_history(monkeypatch)
 
 
 async def _flow(session, admin_user, space_id, mode=None, days=None) -> UUID:
@@ -154,6 +171,37 @@ async def _run(session, admin_user, flow_id, *, age: timedelta, **values) -> UUI
     session.add(run)
     await session.flush()
     return run.id
+
+
+async def _seed_runs(session, admin_user, flow_id, *, n: int, age_days: int) -> None:
+    await session.execute(
+        sa.text(
+            "INSERT INTO flow_runs (flow_id, flow_version, tenant_id, principal_type, "
+            "principal_user_id, status, started_at, finished_at, created_at, updated_at) "
+            "SELECT :flow_id, 1, :tenant_id, 'user', :user_id, 'completed', at, at, at, at "
+            "FROM (SELECT now() - make_interval(days => :age) - make_interval(mins => g) "
+            "AS at FROM generate_series(1, :n) AS g) AS s"
+        ),
+        {
+            "flow_id": flow_id,
+            "tenant_id": admin_user.tenant_id,
+            "user_id": admin_user.id,
+            "n": n,
+            "age": age_days,
+        },
+    )
+
+
+def _hold(admin_user, flow_id: UUID, run_id: UUID) -> FlowRetentionHolds:
+    return FlowRetentionHolds(
+        tenant_id=admin_user.tenant_id,
+        flow_id=flow_id,
+        flow_run_id=run_id,
+        reason="Disclosure request",
+        review_by=datetime.now(timezone.utc) + timedelta(days=30),
+        created_by_actor={"type": "user", "id": str(admin_user.id)},
+        created_by_user_id=admin_user.id,
+    )
 
 
 async def _policy_audits(db_container, tenant_id) -> list[dict[str, object]]:
@@ -339,3 +387,272 @@ async def test_a_run_whose_deletion_started_reads_as_deleted_everywhere(
     assert purged.json()["blocked"]["counted_runs"] == 1
     async with db_container() as container:
         assert await container.session().get(FlowRuns, fenced) is not None
+
+
+# Status and overdue -------------------------------------------------------------
+
+
+@pytest.fixture
+async def overdue_history(db_container, admin_user, scope) -> dict[str, UUID]:
+    """An auto_delete Flow (1 day) with runs in every overdue state, and one
+    unfinished deletion receipt."""
+    flow_id = scope["flow_id"]
+    await _set_policy(db_container, Flows, flow_id, "auto_delete", 1)
+    async with db_container() as container:
+        session = container.session()
+        plain = await _run(session, admin_user, flow_id, age=timedelta(days=5))
+        audit = await _run(session, admin_user, flow_id, age=timedelta(days=4))
+        session.add(
+            FlowRunAuditOutbox(
+                tenant_id=admin_user.tenant_id,
+                flow_id=flow_id,
+                flow_run_id=audit,
+                run_revision=1,
+                description="flow_run_completed:executor_completed",
+                action="flow_run_completed",
+                entity_type="flow_run",
+                entity_id=audit,
+                actor_id=admin_user.id,
+                actor_type="user",
+                source="executor_completed",
+                target_status="completed",
+                delivery_status="pending",
+            )
+        )
+        held = await _run(session, admin_user, flow_id, age=timedelta(days=6))
+        session.add(_hold(admin_user, flow_id, held))
+        # Due, but within the overdue window: not overdue yet.
+        await _run(session, admin_user, flow_id, age=timedelta(hours=36))
+        # Deletion started, still running, or under another mode: never counted.
+        await _run(
+            session, admin_user, flow_id, age=timedelta(9), gallring_receipt_id=uuid4()
+        )
+        await _run(
+            session,
+            admin_user,
+            flow_id,
+            age=timedelta(9),
+            status="running",
+            execution_heartbeat_at=datetime.now(timezone.utc),
+        )
+        other = await _flow(
+            session, admin_user, scope["space_id"], mode="preserve", days=1
+        )
+        await _run(session, admin_user, other, age=timedelta(days=9))
+        now = datetime.now(timezone.utc)
+        session.add(
+            RetentionReceipts(
+                task=FLOWS_HISTORY_TASK,
+                entity_kind="flow_run",
+                entity_id=uuid4(),
+                category="run_record",
+                trigger="scheduled",
+                tenant_id=admin_user.tenant_id,
+                policy_source="flow",
+                policy_mode="auto_delete",
+                policy_days=30,
+                phase="deleting",
+                started_at=now - timedelta(hours=5),
+                updated_at=now,
+                manifest_completed_at=now,
+            )
+        )
+        return {"plain": plain, "audit": audit, "held": held}
+
+
+async def test_status_reports_tasks_overdue_runs_by_blocker_and_receipts(
+    client, headers, regular_token, db_container, overdue_history
+) -> None:
+    """Mutants overdue_counts_held, overdue_skips_fence, overdue_always_complete."""
+    response = await client.get(f"{ROOT}/status", headers=headers)
+
+    assert response.status_code == 200, response.text
+    status = response.json()
+    assert status["auto_delete_available"] is False
+    assert status["overdue_window_days"] == 1
+    assert [task["name"] for task in status["tasks"]] == [
+        registration.name for registration in retention_tasks.RETENTION_TASKS
+    ]
+    assert status["tasks"][0]["enabled"] is True
+    assert status["tasks"][0]["last_execution"] is None
+    overdue = status["overdue"]
+    assert {key: overdue[key] for key in overdue if key != "oldest_due_at"} == {
+        "count": 2,
+        "complete": True,
+        "undelivered_audit": 1,
+        "unresolved_webhook": 0,
+        "not_yet_deleted": 1,
+        "held": 1,
+    }
+    expected = datetime.now(timezone.utc) - timedelta(days=4)
+    oldest = datetime.fromisoformat(overdue["oldest_due_at"])
+    assert abs((oldest - expected).total_seconds()) < 120
+    assert status["receipts"]["unfinished"] == 1
+    assert status["receipts"]["oldest_unfinished_started_at"] is not None
+    forbidden = await client.get(
+        f"{ROOT}/status", headers={"Authorization": f"Bearer {regular_token}"}
+    )
+    assert forbidden.status_code == 403, forbidden.text
+    # Capped: the count says it did not cover everything.
+    async with db_container() as container:
+        capped = await FlowRunHistoryDueRepository(container.session()).overdue(
+            now=datetime.now(timezone.utc), window=timedelta(days=1), cap=1
+        )
+    assert (capped.count, capped.complete, capped.held) == (1, False, 1)
+
+
+async def test_a_task_the_switch_turned_off_is_never_reported_stale(
+    client, headers, db_container, monkeypatch
+) -> None:
+    """Mutant stale_when_disabled."""
+    monkeypatch.setattr(get_settings(), "gallring_flows_housekeeping_enabled", False)
+    at = datetime.now(timezone.utc) - timedelta(days=5)
+    async with db_container() as container:
+        container.session().add(
+            RetentionJobRuns(
+                task="flows.housekeeping",
+                outcome=RetentionJobOutcome.SKIPPED.value,
+                started_at=at,
+                heartbeat_at=at,
+                finished_at=at,
+                error_code="disabled_by_deployment_setting",
+            )
+        )
+
+    status = (await client.get(f"{ROOT}/status", headers=headers)).json()
+
+    [housekeeping] = [t for t in status["tasks"] if t["name"] == "flows.housekeeping"]
+    assert (housekeeping["enabled"], housekeeping["stale"]) == (False, False)
+    assert housekeeping["last_execution"]["outcome"] == "skipped"
+
+
+# Health ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize(
+    ("snapshots", "registered", "flagged", "count", "unknown", "window_days"),
+    [
+        # (age in hours, overdue count, complete) per execution, oldest first.
+        pytest.param([], True, False, None, False, 1, id="never-ran"),
+        pytest.param([(3, 0, True)], True, False, 0, False, 1, id="zero"),
+        pytest.param(
+            [(3, 0, True), (1, 4, True)], True, True, 4, False, 1, id="newest"
+        ),
+        pytest.param([(49, 0, True)], True, True, None, True, 1, id="stale"),
+        pytest.param(
+            [(49, 0, True)], True, True, None, True, 7, id="stale-large-window"
+        ),
+        pytest.param([(2, None, None)], True, True, None, True, 1, id="missing"),
+        pytest.param([(1, 0, False)], True, True, None, True, 1, id="zero-partial"),
+        pytest.param([(1, 4, True)], False, False, None, False, 1, id="not-registered"),
+    ],
+)
+async def test_health_flags_overdue_from_the_newest_fresh_complete_snapshot(
+    db_container,
+    snapshots,
+    registered,
+    flagged,
+    count,
+    unknown,
+    window_days,
+    monkeypatch,
+) -> None:
+    """Mutants health_reads_oldest, health_ignores_unknown, zero_incomplete_is_known,
+    freshness_uses_window, unregistered_snapshot_is_read."""
+    now = datetime.now(timezone.utc)
+    async with db_container() as container:
+        for hours, overdue, complete in snapshots:
+            at = now - timedelta(hours=hours)
+            container.session().add(
+                RetentionJobRuns(
+                    task=FLOWS_HISTORY_TASK,
+                    outcome=RetentionJobOutcome.SUCCEEDED.value,
+                    started_at=at,
+                    heartbeat_at=at,
+                    finished_at=at,
+                    overdue_observed_at=at if overdue is not None else None,
+                    overdue_count=overdue,
+                    overdue_complete=complete,
+                    overdue_oldest_due_at=at - timedelta(days=3) if overdue else None,
+                )
+            )
+    monkeypatch.setattr(get_settings(), "gallring_overdue_window_days", window_days)
+    policy = build_flow_runtime_health_policy(
+        task_timeout_seconds=600,
+        gallring_tasks=(FLOWS_HISTORY_TASK,) if registered else (),
+        gallring_overdue_task=FLOWS_HISTORY_TASK,
+    )
+    async with db_container() as container:
+        snapshot = await load_flow_runtime_health_snapshot(
+            session=container.session(), now=now, policy=policy
+        )
+    health = classify_flow_runtime_health(
+        snapshot=snapshot,
+        now=now,
+        policy=policy,
+        probe=FlowRuntimeProbe(
+            db_query_ok=True, execution_worker_ready=True, maintenance_worker_ready=True
+        ),
+    )
+
+    assert (FlowRuntimeHealthFlag.GALLRING_OVERDUE in health.status_flags) is flagged
+    assert (health.gallring.overdue_count, health.gallring.overdue_unknown) == (
+        count,
+        unknown,
+    )
+    if flagged:
+        assert health.status is FlowRuntimeHealthStatus.UNHEALTHY
+
+
+@pytest.mark.parametrize(
+    ("statement", "status", "code"),
+    [
+        pytest.param(
+            sa.select(sa.func.pg_sleep(1)),
+            503,
+            "retention_status_unavailable",
+            id="timeout",
+        ),
+        pytest.param(None, 200, None, id="within-limit"),
+        pytest.param(
+            sa.select(sa.literal_column("retention_status_missing_column")),
+            500,
+            "internal_error",
+            id="permanent-error",
+        ),
+    ],
+)
+async def test_status_database_errors_keep_their_failure_contract(
+    app, headers, monkeypatch, caplog, statement, status, code
+) -> None:
+    """Mutants status_timeout_removed, permanent_error_mapped_to_unavailable."""
+    monkeypatch.setattr(get_settings(), "gallring_chunk_statement_timeout_ms", 500)
+    original = FlowRunHistoryDueRepository.overdue
+
+    async def observed(self, **kwargs):
+        if statement is not None:
+            await self.session.execute(statement)
+        return await original(self, **kwargs)
+
+    monkeypatch.setattr(FlowRunHistoryDueRepository, "overdue", observed)
+    server_logger.addHandler(caplog.handler)
+    try:
+        async with AsyncClient(
+            transport=ASGITransport(app=app, raise_app_exceptions=False),
+            base_url="http://test.local",
+        ) as client:
+            with caplog.at_level(logging.ERROR):
+                response = await client.get(f"{ROOT}/status", headers=headers)
+    finally:
+        server_logger.removeHandler(caplog.handler)
+    assert response.status_code == status, response.text
+    if code is not None:
+        assert response.json()["code"] == code
+    if status == 500:
+        error_id = response.json()["error_id"]
+        records = [
+            r for r in caplog.records if getattr(r, "error_id", None) == error_id
+        ]
+        assert len(records) == 1
+        assert getattr(records[0], "exception_type", None) == "ProgrammingError"
+        assert "UndefinedColumn" in getattr(records[0], "traceback", "")

@@ -93,6 +93,7 @@ describe("settings flow policy endpoints", () => {
     await settings.replaceSpaceFlowRunRetentionPolicy({ spaceId: "space-id", policy: null });
     await settings.getFlowRunRetentionPolicy({ flowId: "flow-id" });
     await settings.replaceFlowRunRetentionPolicy({ flowId: "flow-id", policy });
+    await settings.replaceOrganizationFlowRunRetentionPolicy({ policy: null, reason: "Why" });
 
     expect(fetch.mock.calls).toEqual([
       ["/api/v1/settings/flow-run-retention-policy", { method: "get" }],
@@ -131,6 +132,13 @@ describe("settings flow policy endpoints", () => {
           method: "put",
           params: { path: { flow_id: "flow-id" } },
           requestBody: { "application/json": { policy } }
+        }
+      ],
+      [
+        "/api/v1/settings/flow-run-retention-policy",
+        {
+          method: "put",
+          requestBody: { "application/json": { policy: null, reason: "Why" } }
         }
       ]
     ]);

@@ -1,6 +1,15 @@
 /** @typedef {import('../client/client').EneoError} EneoError */
 
 /**
+ * A policy replacement body; the reason is sent only when one is given.
+ * @param {import('../types/resources').FlowRunRetentionPolicy | null} policy
+ * @param {string | undefined} reason
+ */
+function policyBody(policy, reason) {
+  return reason === undefined ? { policy } : { policy, reason };
+}
+
+/**
  * @param {import('../client/client').Client} client Provide a client with which to call the endpoints
  */
 export function initSettings(client) {
@@ -272,14 +281,15 @@ export function initSettings(client) {
 
     /**
      * Replace or clear the Organization default for Flow run-history retention.
-     * @param {{policy: import('../types/resources').FlowRunRetentionPolicy | null}} params
+     * A change that stops or delays automatic deletion needs a `reason`.
+     * @param {{policy: import('../types/resources').FlowRunRetentionPolicy | null, reason?: string}} params
      * @throws {EneoError}
      * @returns {Promise<import('../types/resources').FlowRunRetentionPolicySettings>}
      */
-    replaceOrganizationFlowRunRetentionPolicy: async ({ policy }) => {
+    replaceOrganizationFlowRunRetentionPolicy: async ({ policy, reason }) => {
       return await client.fetch("/api/v1/settings/flow-run-retention-policy", {
         method: "put",
-        requestBody: { "application/json": { policy } }
+        requestBody: { "application/json": policyBody(policy, reason) }
       });
     },
 
@@ -330,15 +340,16 @@ export function initSettings(client) {
 
     /**
      * Replace a Space override, or clear it to inherit the Organization default.
-     * @param {{spaceId: string, policy: import('../types/resources').FlowRunRetentionPolicy | null}} params
+     * A change that stops or delays automatic deletion needs a `reason`.
+     * @param {{spaceId: string, policy: import('../types/resources').FlowRunRetentionPolicy | null, reason?: string}} params
      * @throws {EneoError}
      * @returns {Promise<import('../types/resources').FlowRunRetentionPolicySettings>}
      */
-    replaceSpaceFlowRunRetentionPolicy: async ({ spaceId, policy }) => {
+    replaceSpaceFlowRunRetentionPolicy: async ({ spaceId, policy, reason }) => {
       return await client.fetch("/api/v1/settings/flow-run-retention-policy/spaces/{space_id}", {
         method: "put",
         params: { path: { space_id: spaceId } },
-        requestBody: { "application/json": { policy } }
+        requestBody: { "application/json": policyBody(policy, reason) }
       });
     },
 
@@ -357,15 +368,16 @@ export function initSettings(client) {
 
     /**
      * Replace a Flow override, or clear it to inherit its Space or Organization policy.
-     * @param {{flowId: string, policy: import('../types/resources').FlowRunRetentionPolicy | null}} params
+     * A change that stops or delays automatic deletion needs a `reason`.
+     * @param {{flowId: string, policy: import('../types/resources').FlowRunRetentionPolicy | null, reason?: string}} params
      * @throws {EneoError}
      * @returns {Promise<import('../types/resources').FlowRunRetentionPolicySettings>}
      */
-    replaceFlowRunRetentionPolicy: async ({ flowId, policy }) => {
+    replaceFlowRunRetentionPolicy: async ({ flowId, policy, reason }) => {
       return await client.fetch("/api/v1/settings/flow-run-retention-policy/flows/{flow_id}", {
         method: "put",
         params: { path: { flow_id: flowId } },
-        requestBody: { "application/json": { policy } }
+        requestBody: { "application/json": policyBody(policy, reason) }
       });
     },
 

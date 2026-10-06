@@ -1,19 +1,35 @@
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from uuid import UUID
+
+import sqlalchemy as sa
+from sqlalchemy.exc import DBAPIError
 
 from eneo.audit.application.audit_service import AuditService
 from eneo.audit.domain.action_types import ActionType
 from eneo.audit.domain.entity_types import EntityType
+from eneo.data_retention.application.retention_runner import is_retention_timeout
+from eneo.data_retention.domain.retention import RETENTION_STALE_AFTER
 from eneo.data_retention.infrastructure.data_retention_service import (
     DataRetentionService,
+)
+from eneo.data_retention.infrastructure.retention_job_run_repo import (
+    RetentionJobRunRepository,
 )
 from eneo.flows.application.flow_retention_authz import (
     require_retention_manage,
     require_retention_view,
 )
 from eneo.flows.domain.flow_retention_hold import FlowRetentionHoldReviewLimit
+from eneo.flows.domain.flow_run_history_deletion_status import (
+    FlowRetentionStatusUnavailableError,
+    FlowRunHistoryDeletionStatus,
+    FlowRunHistoryOverdueStatus,
+    FlowRunHistoryReceiptStatus,
+    RetentionExecutionStatus,
+    RetentionTaskStatus,
+)
 from eneo.flows.domain.flow_run_retention_policy import (
     FLOW_RETENTION_AUTO_DELETE_UNAVAILABLE_CODE,
     FLOW_RETENTION_DAYS_ABOVE_MAXIMUM_CODE,
@@ -29,10 +45,14 @@ from eneo.flows.domain.flow_run_retention_policy import (
     effective_flow_run_retention_policy,
     flow_run_retention_change_postpones_deletion,
 )
+from eneo.flows.infrastructure.flow_run_history_due_repo import (
+    FlowRunHistoryDueRepository,
+)
 from eneo.flows.infrastructure.flow_run_retention_policy_repo import (
     FlowRunRetentionPolicyChange,
     FlowRunRetentionPolicyRepository,
 )
+from eneo.main.config import get_settings
 from eneo.main.exceptions import BadRequestException
 from eneo.settings.settings import (
     FlowRunHistoryPurgeBlockedPublic,
@@ -340,6 +360,102 @@ class FlowRunRetentionPolicyService:
             },
             required=True,
         )
+
+    async def get_deletion_status(self) -> FlowRunHistoryDeletionStatus:
+        """A bounded status observation, or an explicit unavailable failure."""
+        require_retention_view(self.user)
+        session = self.repository.session
+        try:
+            async with session.begin_nested():
+                previous_timeout = await session.scalar(
+                    sa.select(sa.func.current_setting("statement_timeout"))
+                )
+                await session.scalar(
+                    sa.select(
+                        sa.func.set_config(
+                            "statement_timeout",
+                            f"{get_settings().gallring_chunk_statement_timeout_ms}ms",
+                            True,
+                        )
+                    )
+                )
+                # Imported here: the task registry imports flows application modules.
+                from eneo.data_retention.infrastructure.retention_tasks import (
+                    RETENTION_TASKS,
+                )
+
+                settings = get_settings()
+                job_runs = RetentionJobRunRepository(session)
+                due = FlowRunHistoryDueRepository(session)
+                now = datetime.now(timezone.utc)
+                stale_before = now - RETENTION_STALE_AFTER
+                tasks: list[RetentionTaskStatus] = []
+                for registration in RETENTION_TASKS:
+                    latest = await job_runs.latest(registration.name)
+                    tasks.append(
+                        RetentionTaskStatus(
+                            name=registration.name,
+                            enabled=registration.enabled(settings),
+                            stale=registration.enabled(settings)
+                            and await job_runs.is_stale(
+                                registration.name, stale_before=stale_before
+                            ),
+                            last_completed_at=await job_runs.last_completed_at(
+                                registration.name
+                            ),
+                            last_execution=(
+                                RetentionExecutionStatus(
+                                    outcome=latest.outcome,
+                                    started_at=latest.started_at,
+                                    finished_at=latest.finished_at,
+                                    counts=latest.counts,
+                                    blocked=latest.blocked,
+                                    error_code=latest.error_code,
+                                )
+                                if latest is not None
+                                else None
+                            ),
+                        )
+                    )
+                overdue = await due.overdue(
+                    now=now,
+                    window=timedelta(days=settings.gallring_overdue_window_days),
+                    cap=FLOW_RUN_HISTORY_STATUS_OVERDUE_CAP,
+                    tenant_id=self.user.tenant_id,
+                )
+                receipts = await due.receipts()
+                result = FlowRunHistoryDeletionStatus(
+                    auto_delete_available=self.repository.write_rules.auto_delete_available,
+                    overdue_window_days=settings.gallring_overdue_window_days,
+                    tasks=tasks,
+                    overdue=FlowRunHistoryOverdueStatus(
+                        count=overdue.count,
+                        complete=overdue.complete,
+                        oldest_due_at=overdue.oldest_due_at,
+                        undelivered_audit=overdue.undelivered_audit,
+                        unresolved_webhook=overdue.unresolved_webhook,
+                        not_yet_deleted=overdue.not_yet_deleted,
+                        held=overdue.held,
+                    ),
+                    receipts=FlowRunHistoryReceiptStatus(
+                        unfinished=receipts.unfinished,
+                        oldest_unfinished_started_at=receipts.oldest_unfinished_started_at,
+                        oldest_physical_pending_completed_at=(
+                            receipts.oldest_physical_pending_completed_at
+                        ),
+                    ),
+                )
+
+                await session.scalar(
+                    sa.select(
+                        sa.func.set_config("statement_timeout", previous_timeout, True)
+                    )
+                )
+                return result
+        except DBAPIError as error:
+            if not is_retention_timeout(error):
+                raise
+            raise FlowRetentionStatusUnavailableError() from error
 
     async def get_hold_review_limit(self) -> FlowRetentionHoldReviewLimit:
         require_retention_view(self.user)

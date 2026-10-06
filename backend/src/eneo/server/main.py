@@ -31,6 +31,7 @@ from eneo.flows.ai_builder.ai_builder_router import (
     AIBuilderEnvelopedError,
     ai_builder_enveloped_error_handler,
 )
+from eneo.flows.domain.flow_run_retention_policy import FLOWS_HISTORY_TASK
 from eneo.flows.runtime.flow_runtime_health import (
     FlowRuntimeHealthResponse,
     FlowRuntimeProbe,
@@ -822,7 +823,11 @@ def get_application():
             "gallring job, and platform task worker readiness. GALLRING_JOB_STALE "
             "(UNHEALTHY) means an enabled nightly gallring task has not completed "
             "within twice its daily cadence; GALLRING_DISABLED (UNHEALTHY) means the "
-            "deployment's emergency switch turned a gallring task off."
+            "deployment's emergency switch turned a gallring task off; "
+            "GALLRING_OVERDUE (UNHEALTHY) means run history due for automatic "
+            "deletion is still stored past the overdue window, or that the nightly "
+            "flows.history snapshot is missing or older than twice the daily cadence "
+            "(overdue_unknown)."
         ),
         responses={
             200: {
@@ -847,6 +852,7 @@ def get_application():
             task_timeout_seconds=settings.task_execution_timeout_seconds,
             gallring_tasks=enabled_retention_tasks(settings),
             gallring_disabled_tasks=disabled_retention_tasks(settings),
+            gallring_overdue_task=FLOWS_HISTORY_TASK,
         )
         worker_readiness = await load_task_worker_readiness(timeout_seconds=1.0)
         query_started_at = time.perf_counter()

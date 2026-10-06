@@ -61,6 +61,7 @@ from eneo.data_retention.domain.retention import (
     RetentionErrorCode,
     RetentionJobOutcome,
     RetentionKeyset,
+    RetentionOverdue,
     retention_batch_audit_id,
 )
 from eneo.data_retention.infrastructure.retention_job_run_repo import (
@@ -415,6 +416,7 @@ async def test_renewed_execution_is_not_superseded() -> None:
 
 
 async def test_superseded_runner_commits_no_further_chunk(test_tenant) -> None:
+    """Mutant superseded_runner_queries_snapshot."""
     items = await _work_items(test_tenant.id, 3)
     takeovers: list[asyncio.Task[None]] = []
 
@@ -435,15 +437,25 @@ async def test_superseded_runner_commits_no_further_chunk(test_tenant) -> None:
             takeovers.append(asyncio.create_task(supersede(batch.job_run_id)))
             await _until_a_session_waits_on_a_lock()
 
-    report = await _run(take_over_after_first_batch, chunk_rows=1)
+    snapshot_calls: list[bool] = []
+
+    async def snapshot() -> RetentionOverdue:
+        snapshot_calls.append(True)
+        return RetentionOverdue(count=0, complete=True)
+
+    async with sessionmanager.session() as session:
+        task = _OverdueTask(session, snapshot, after_batch=take_over_after_first_batch)
+        report = await _runner(session, chunk_rows=1).run(task)
 
     await asyncio.gather(*takeovers)
     assert report.outcome == RetentionJobOutcome.SUPERSEDED
+    assert snapshot_calls == []
     assert await _remaining(items) == 2  # chunk 2 failed its ownership check
     async with _committed() as session:
         job = await session.get(RetentionJobRuns, report.job_run_id)
         assert job is not None
         assert job.outcome == RetentionJobOutcome.SUPERSEDED.value
+        assert job.overdue_observed_at is None
 
 
 async def test_a_contended_claim_times_out_and_is_recorded() -> None:
@@ -1729,3 +1741,115 @@ async def test_pruning_is_bounded_by_the_deployment_audit_retention(
     # the expired receipt, none of the 2 000 kept ones.
     assert "ix_gallring_receipts_completed_at" in plan
     assert "Rows Removed by Filter" not in plan
+
+
+# Overdue snapshot in the finalization path ------------------------------------
+
+
+class _OverdueTask(_FakeTask):
+    """A fake task that reports overdue work; `snapshot` may raise."""
+
+    def __init__(
+        self,
+        session: AsyncSession,
+        snapshot: Callable[[], Awaitable[RetentionOverdue]],
+        extra_steps: tuple[RetentionStep, ...] = (),
+        after_batch: Callable[[RetentionBatch], Awaitable[None]] | None = None,
+    ) -> None:
+        super().__init__(session, extra_steps=extra_steps, after_batch=after_batch)
+        self._snapshot = snapshot
+
+    async def overdue(self) -> RetentionOverdue:
+        return await self._snapshot()
+
+
+async def _job_row(job_run_id: UUID | None) -> RetentionJobRuns:
+    assert job_run_id is not None
+    async with _committed() as session:
+        row = await session.get(RetentionJobRuns, job_run_id)
+        assert row is not None
+        session.expunge(row)
+        return row
+
+
+@pytest.mark.parametrize("ending", ["budget", "failed_chunk", "timed_out_chunk"])
+async def test_every_ending_writes_the_overdue_snapshot(test_tenant, ending) -> None:
+    """Mutant runner_no_snapshot_on_failure."""
+    await _work_items(test_tenant.id, 3)
+    due = datetime(2026, 9, 1, tzinfo=timezone.utc)
+
+    async def snapshot() -> RetentionOverdue:
+        return RetentionOverdue(count=7, complete=False, oldest_due_at=due)
+
+    async def fail(batch: RetentionBatch) -> RetentionStepResult:
+        raise RuntimeError("a chunk failed")
+
+    async def time_out(batch: RetentionBatch) -> RetentionStepResult:
+        await session.execute(sa.text("SET LOCAL statement_timeout = 1"))
+        await session.execute(sa.text("SELECT pg_sleep(0.2)"))
+        return RetentionStepResult(exhausted=True)
+
+    extra = {
+        "budget": (),
+        "failed_chunk": (RetentionStep(name="boom", run=fail),),
+        "timed_out_chunk": (RetentionStep(name="slow", run=time_out),),
+    }[ending]
+    async with sessionmanager.session() as session:
+        task = _OverdueTask(session, snapshot, extra_steps=extra)
+        report = await _runner(
+            session, chunk_rows=1, budget_rows=1 if ending == "budget" else 100
+        ).run(task)
+
+    expected = {
+        "budget": RetentionJobOutcome.PARTIAL,
+        "failed_chunk": RetentionJobOutcome.FAILED,
+        "timed_out_chunk": RetentionJobOutcome.PARTIAL,
+    }[ending]
+    assert report.outcome == expected
+    row = await _job_row(report.job_run_id)
+    assert row.overdue_observed_at is not None
+    assert (row.overdue_count, row.overdue_complete) == (7, False)
+    assert row.overdue_oldest_due_at == due
+    assert row.finished_at is not None and row.overdue_observed_at <= row.finished_at
+
+
+async def test_a_failing_snapshot_leaves_the_run_outcome_and_no_snapshot(
+    test_tenant,
+) -> None:
+    """Mutant snapshot_failure_fails_run."""
+    await _work_items(test_tenant.id, 1)
+
+    async def broken() -> RetentionOverdue:
+        raise RuntimeError("the overdue read failed")
+
+    async with sessionmanager.session() as session:
+        task = _OverdueTask(session, broken)
+        report = await _runner(session).run(task)
+
+    assert report.outcome == RetentionJobOutcome.SUCCEEDED
+    row = await _job_row(report.job_run_id)
+    assert row.overdue_observed_at is None and row.overdue_count is None
+
+
+async def test_a_superseded_execution_writes_no_snapshot() -> None:
+    """Mutant snapshot_after_supersede: only the running execution writes it."""
+    at = datetime.now(timezone.utc)
+    async with _committed() as session:
+        row = RetentionJobRuns(
+            task="flows.history",
+            outcome=RetentionJobOutcome.SUPERSEDED.value,
+            started_at=at,
+            heartbeat_at=at,
+            finished_at=at,
+        )
+        session.add(row)
+        await session.flush()
+        job_run_id = row.id
+
+    async with _committed() as session:
+        written = await RetentionJobRunRepository(session).record_overdue(
+            job_run_id, RetentionOverdue(count=0, complete=True)
+        )
+
+    assert written is False
+    assert (await _job_row(job_run_id)).overdue_observed_at is None

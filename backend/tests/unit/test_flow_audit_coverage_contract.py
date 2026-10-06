@@ -208,6 +208,9 @@ FLOW_ROUTE_AUDIT_CONTRACTS: dict[str, FlowAuditContract] = {
             "get_flow_retention_hold_review_limit": (
                 "FlowRunRetentionPolicyService.get_hold_review_limit"
             ),
+            "get_flow_run_history_deletion_status": (
+                "FlowRunRetentionPolicyService.get_deletion_status"
+            ),
         }.items()
     },
     **{
