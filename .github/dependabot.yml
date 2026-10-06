@@ -1,10 +1,8 @@
 version: 2
 
-# Dependabot version updates are intentionally paused while we stabilize the
-# initial security rollout and close the noisy first batch of generated PRs.
-#
-# Re-enable one ecosystem at a time by raising its open-pull-requests-limit
-# from 0 to 1. Do not raise all ecosystems together.
+# Runtime Docker updates are enabled with one grouped PR per area so pinned
+# base digests receive security refreshes. Other ecosystems remain paused.
+# Runtime owners review image scans and smoke tests before merging updates.
 updates:
   - package-ecosystem: "uv"
     directory: "/backend"
@@ -81,7 +79,7 @@ updates:
       day: "monday"
       time: "07:30"
       timezone: "Europe/Stockholm"
-    open-pull-requests-limit: 0
+    open-pull-requests-limit: 1
     rebase-strategy: "disabled"
     labels:
       - "dependencies"
@@ -111,7 +109,7 @@ updates:
       day: "monday"
       time: "07:45"
       timezone: "Europe/Stockholm"
-    open-pull-requests-limit: 0
+    open-pull-requests-limit: 1
     rebase-strategy: "disabled"
     labels:
       - "dependencies"
@@ -130,7 +128,7 @@ updates:
       # Keep Node runtime upgrades explicit until the frontend runtime is reviewed.
       - dependency-name: "node"
         versions:
-          - ">=21"
+          - ">=23"
 
   - package-ecosystem: "docker"
     directory: "/.devcontainer"

@@ -147,6 +147,7 @@ jobs:
             local platform_os="$2"
             local platform_arch="$3"
             local raw_manifest
+            local image_config
             local digest
 
             for attempt in {1..60}; do
@@ -160,6 +161,17 @@ jobs:
                 if [[ -n "$digest" ]]; then
                   echo "$digest"
                   return 0
+                fi
+
+                # Images scanned locally before publication have a single
+                # manifest; older BuildKit publications have an index.
+                if jq -e '.config.digest and (.manifests == null)' <<< "$raw_manifest" >/dev/null; then
+                  image_config="$(docker buildx imagetools inspect "$image_ref" --format '{{json .Image}}')"
+                  if jq -e --arg os "$platform_os" --arg arch "$platform_arch" \
+                    '.os == $os and .architecture == $arch' <<< "$image_config" >/dev/null; then
+                    docker buildx imagetools inspect "$image_ref" --format '{{.Manifest.Digest}}'
+                    return 0
+                  fi
                 fi
 
                 echo "::error::Image $image_ref does not expose linux/$platform_arch." >&2
