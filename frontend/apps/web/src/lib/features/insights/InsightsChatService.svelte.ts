@@ -64,6 +64,8 @@ class InsightsChatService {
   messages = $state<InsightsChatMessage[]>([]);
   conversationId = $state<string | null>(null);
   isStreaming = $state(false);
+  /** True while a previous analysis is being fetched for resuming. */
+  isOpening = $state(false);
   /** Error code of the last failed request, or null. */
   error = $state<string | null>(null);
 
@@ -99,6 +101,7 @@ class InsightsChatService {
     this.messages = [];
     this.conversationId = null;
     this.isStreaming = false;
+    this.isOpening = false;
     this.error = null;
   }
 
@@ -133,11 +136,16 @@ class InsightsChatService {
     }
   });
 
-  /** Resume a previous analysis with all its turns. */
-  openConversation = createAsyncState(async (conversation: { id: string }) => {
+  /**
+   * Resume a previous analysis with all its turns. Sending is held back until
+   * it has loaded: a turn started meanwhile would open a new conversation that
+   * the loaded one then replaces mid-stream.
+   */
+  async openConversation(conversation: { id: string }) {
     if (!browser) return;
     this.reset();
     const requestId = this.#openRequestId;
+    this.isOpening = true;
     try {
       const session = await this.#eneo.analytics.insights.chat.get(conversation);
       if (requestId !== this.#openRequestId) return;
@@ -153,8 +161,11 @@ class InsightsChatService {
     } catch {
       if (requestId !== this.#openRequestId) return;
       this.error = "failed";
+    } finally {
+      // A newer open or a reset owns the flag from here on.
+      if (requestId === this.#openRequestId) this.isOpening = false;
     }
-  });
+  }
 
   /** Result text of one tool call in the open conversation, cached per call. */
   getToolCallResult(toolCallId: string): Promise<string | null> {
@@ -189,7 +200,7 @@ class InsightsChatService {
   });
 
   async send(question: string) {
-    if (!browser || this.isStreaming) return;
+    if (!browser || this.isStreaming || this.isOpening) return;
     const trimmed = question.trim();
     if (!trimmed) return;
 

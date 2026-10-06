@@ -12,7 +12,7 @@
   type Props = {
     /** Two-way bound textarea content. */
     value: string;
-    /** True while a turn streams; disables the textarea and the send button. */
+    /** True while a turn streams or an analysis loads; disables the textarea and the send button. */
     disabled?: boolean;
     placeholder?: string;
     /** Bindable ref so the parent can refocus the input after each turn. */

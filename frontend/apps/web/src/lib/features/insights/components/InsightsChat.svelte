@@ -137,7 +137,7 @@
               loadToolResult={(toolCallId) => chat.getToolCallResult(toolCallId)}
               onOpenSession={openCitedSession}
             />
-          {:else if chat.openConversation.isLoading}
+          {:else if chat.isOpening}
             <div class="text-secondary flex h-full items-center justify-center text-sm">
               {m.loading()}
             </div>
@@ -170,7 +170,7 @@
       <InsightsChatInput
         bind:value={question}
         bind:ref={inputRef}
-        disabled={chat.isStreaming}
+        disabled={chat.isStreaming || chat.isOpening}
         onSubmit={send}
       />
     </div>
