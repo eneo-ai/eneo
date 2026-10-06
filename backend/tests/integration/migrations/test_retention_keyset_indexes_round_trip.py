@@ -17,16 +17,29 @@ from psycopg2 import sql
 import eneo.database.tables  # noqa: F401
 from alembic import command
 from alembic.config import Config
+from eneo.database.tables.app_table import AppRuns
 from eneo.database.tables.assistant_table import Assistants
 from eneo.database.tables.flow_tables import (
     FlowLiveTranscripts,
     FlowRunAuditOutbox,
     FlowRuns,
 )
+from eneo.database.tables.questions_table import Questions
 
 pytestmark = [pytest.mark.integration, pytest.mark.migration_isolation]
 
 _REVISIONS = [
+    pytest.param(
+        (
+            "202610051020",
+            "202610061200",
+            {
+                "ix_questions_retention_owner_created_id": Questions,
+                "ix_app_runs_retention_owner_created_id": AppRuns,
+            },
+        ),
+        id="conversation-full-keyset",
+    ),
     pytest.param(
         (
             "202610051010",
@@ -133,8 +146,24 @@ def test_upgrade_builds_the_declared_indexes_and_downgrade_removes_them(
     migration_db,
 ):
     conn, cfg, engine, pre_revision, revision, indexes = migration_db
+    replaced = (
+        {
+            "ix_questions_assistant_created": (
+                Questions,
+                ("assistant_id", "created_at"),
+            ),
+            "idx_questions_assistant_created": (
+                Questions,
+                ("assistant_id", "created_at"),
+            ),
+            "ix_app_runs_app_created": (AppRuns, ("app_id", "created_at")),
+        }
+        if revision == "202610061200"
+        else {}
+    )
 
     assert _state(conn, indexes) == dict.fromkeys(indexes, True)
+    assert _state(conn, replaced) == {}
     for name in indexes:
         reflected_columns, reflected_partial, columns, partial = _shape(
             engine, name, indexes
@@ -143,8 +172,17 @@ def test_upgrade_builds_the_declared_indexes_and_downgrade_removes_them(
 
     command.downgrade(cfg, pre_revision)
     assert _state(conn, indexes) == {}
+    assert _state(conn, replaced) == dict.fromkeys(replaced, True)
+    for name, (model, columns) in replaced.items():
+        [reflected] = [
+            index
+            for index in sa.inspect(engine).get_indexes(model.__table__.name)
+            if index["name"] == name
+        ]
+        assert tuple(reflected["column_names"]) == columns
     command.upgrade(cfg, revision)
     assert _state(conn, indexes) == dict.fromkeys(indexes, True)
+    assert _state(conn, replaced) == {}
 
 
 def test_a_build_failed_behind_an_old_snapshot_is_replaced_on_rerun(

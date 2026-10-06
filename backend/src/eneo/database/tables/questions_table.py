@@ -22,6 +22,15 @@ if TYPE_CHECKING:
 
 
 class Questions(BasePublic):
+    __table_args__ = (
+        Index(
+            "ix_questions_retention_owner_created_id",
+            "assistant_id",
+            "created_at",
+            "id",
+        ),
+    )
+
     question: Mapped[str] = mapped_column()
     answer: Mapped[str] = mapped_column()
     num_tokens_question: Mapped[int] = mapped_column()

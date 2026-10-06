@@ -88,6 +88,7 @@ class AppRuns(BasePublic):
     job: Mapped[Jobs] = relationship()
 
     __table_args__ = (
+        Index("ix_app_runs_retention_owner_created_id", "app_id", "created_at", "id"),
         Index(
             "ix_app_runs_skill_provenance_gin",
             "skill_provenance",
