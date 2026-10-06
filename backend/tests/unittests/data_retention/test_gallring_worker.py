@@ -11,7 +11,7 @@ from eneo.data_retention.application.conversation_retention import (
 )
 from eneo.data_retention.application.retention_runner import RetentionRunReport
 from eneo.data_retention.domain.retention import RetentionJobOutcome
-from eneo.data_retention.infrastructure import retention_worker
+from eneo.data_retention.infrastructure import retention_tasks, retention_worker
 from eneo.flows.application.flow_housekeeping_task import (
     FLOWS_HOUSEKEEPING_TASK,
     FlowHousekeepingTask,
@@ -65,6 +65,10 @@ async def test_nightly_run_executes_an_enabled_task_and_records_a_disabled_one(
     else:
         assert (first, housekeeping) == ("skip", FLOWS_HOUSEKEEPING_TASK)
         assert second == "run" and isinstance(history, FlowRunHistoryRetentionTask)
+    # Kills G1b-H01: omit reporting metadata or include a disabled reporter.
+    assert retention_tasks.overdue_retention_tasks(settings) == (
+        (FLOWS_HISTORY_TASK,) if not enabled else ()
+    )
     # Registration order: staging data first, then run history.
     assert [report.task for report in reports] == [
         FLOWS_HOUSEKEEPING_TASK,

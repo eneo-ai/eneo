@@ -13,6 +13,7 @@ from eneo.data_retention.domain.retention import (
 )
 from eneo.data_retention.infrastructure.retention_job_run_repo import (
     RetentionJobRunRepository,
+    RetentionOverdueSnapshot,
 )
 from eneo.database.tables.flow_tables import (
     FlowOutboxDeliveryStatus,
@@ -104,8 +105,8 @@ class FlowRuntimeHealthPolicy:
     gallring_stale_after: timedelta = RETENTION_STALE_AFTER
     # Tasks the deployment's emergency switch turns off; never a silent stop.
     gallring_disabled_tasks: tuple[str, ...] = ()
-    # The enabled task whose stored overdue snapshot health reads.
-    gallring_overdue_task: str | None = None
+    # Enabled reporting tasks whose stored snapshots health reads together.
+    retention_overdue_tasks: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True, slots=True)
@@ -271,36 +272,39 @@ class FlowRuntimeGallringSummary(BaseModel):
             "(UNHEALTHY)."
         ),
     )
+    overdue_tasks: list[str] = Field(
+        default_factory=list[str],
+        description="Enabled reporting tasks whose snapshots the overdue fields fold.",
+    )
     overdue_count: int | None = Field(
         default=None,
         description=(
-            "Terminal runs due for automatic deletion (auto_delete) and still "
-            "stored more than the overdue window (operator setting "
-            "GALLRING_OVERDUE_WINDOW_DAYS, default 1 day) after their deadline, "
-            "from the newest flows.history snapshot; runs under a legal hold are "
-            "not counted. Any positive count raises GALLRING_OVERDUE (UNHEALTHY). "
-            "Null when no snapshot is in use."
+            "Sum of overdue root counts from the newest valid snapshot of each "
+            "named reporting task. Each task applies its own deletion deadline and "
+            "the operator's GALLRING_OVERDUE_WINDOW_DAYS (default 1 day). Flow "
+            "auto_delete runs under legal holds are excluded. A positive count "
+            "raises GALLRING_OVERDUE (UNHEALTHY). Null when snapshots are missing "
+            "or invalid, or no reporting task is enabled."
         ),
     )
     overdue_complete: bool | None = Field(
         default=None,
-        description="Whether the capped snapshot count covers every overdue run.",
+        description="True only when every named snapshot covers all its overdue work.",
     )
     oldest_overdue_age_seconds: int | None = Field(
         default=None,
-        description="Seconds since the oldest overdue run's deletion deadline.",
+        description="Seconds since the earliest overdue deadline across named tasks.",
     )
     overdue_snapshot_age_seconds: int | None = Field(
         default=None,
-        description="Seconds since flows.history wrote its overdue snapshot.",
+        description="Seconds since the oldest observation across named tasks.",
     )
     overdue_unknown: bool = Field(
         default=False,
         description=(
-            "True when flows.history has run but its newest overdue snapshot is "
-            "missing, older than twice the daily cadence, or "
-            "counted nothing without covering everything: whether deletion keeps "
-            "up is unknown. Raises GALLRING_OVERDUE."
+            "True when a required named snapshot is missing, older than twice the "
+            "daily cadence, or counts zero without covering all work. A deployment "
+            "where no reporting task has run is not judged. Raises GALLRING_OVERDUE."
         ),
     )
 
@@ -348,7 +352,7 @@ def build_flow_runtime_health_policy(
     task_timeout_seconds: int,
     gallring_tasks: tuple[str, ...] = (),
     gallring_disabled_tasks: tuple[str, ...] = (),
-    gallring_overdue_task: str | None = None,
+    retention_overdue_tasks: tuple[str, ...] = (),
 ) -> FlowRuntimeHealthPolicy:
     return FlowRuntimeHealthPolicy(
         stale_queued_after_seconds=FLOW_QUEUED_REDISPATCH_AFTER_SECONDS,
@@ -366,8 +370,8 @@ def build_flow_runtime_health_policy(
         webhook_outbox_backlog_grace_seconds=FLOW_WEBHOOK_DELIVERY_CLAIM_TTL_SECONDS,
         gallring_tasks=gallring_tasks,
         gallring_disabled_tasks=gallring_disabled_tasks,
-        gallring_overdue_task=(
-            gallring_overdue_task if gallring_overdue_task in gallring_tasks else None
+        retention_overdue_tasks=tuple(
+            task for task in retention_overdue_tasks if task in gallring_tasks
         ),
     )
 
@@ -440,9 +444,9 @@ async def load_flow_runtime_health_snapshot(
         tasks=policy.gallring_tasks,
         stale_before=now - policy.gallring_stale_after,
     )
-    overdue = await _load_gallring_overdue(
+    overdue = await _load_retention_overdue(
         session=session,
-        task=policy.gallring_overdue_task,
+        tasks=policy.retention_overdue_tasks,
         unknown_before=now - RETENTION_STALE_AFTER,
     )
 
@@ -632,6 +636,7 @@ def classify_flow_runtime_health(
         gallring=FlowRuntimeGallringSummary(
             stale_tasks=list(snapshot.stale_gallring_tasks),
             disabled_tasks=list(policy.gallring_disabled_tasks),
+            overdue_tasks=list(policy.retention_overdue_tasks),
             overdue_count=snapshot.gallring_overdue_count,
             overdue_complete=snapshot.gallring_overdue_complete,
             oldest_overdue_age_seconds=_age_seconds(
@@ -1170,27 +1175,38 @@ class _RetentionOverdue:
     unknown: bool = False
 
 
-async def _load_gallring_overdue(
-    *, session: AsyncSession, task: str | None, unknown_before: datetime
+async def _load_retention_overdue(
+    *, session: AsyncSession, tasks: tuple[str, ...], unknown_before: datetime
 ) -> _RetentionOverdue:
-    """The task's newest overdue snapshot; unknown when it ran but the snapshot
-    is missing or too old. A task that never ran is not judged (fresh install)."""
-    if task is None:
+    """Fold named reporters; a partial set cannot prove deployment-wide health."""
+    if not tasks:
         return _RetentionOverdue()
     job_runs = RetentionJobRunRepository(session)
-    snapshot = await job_runs.latest_overdue(task)
-    if snapshot is None:
-        return _RetentionOverdue(unknown=await job_runs.has_finished(task))
-    if snapshot.observed_at < unknown_before or (
-        snapshot.overdue.count == 0 and not snapshot.overdue.complete
+    records: list[RetentionOverdueSnapshot] = []
+    for task in tasks:
+        record = await job_runs.latest_overdue(task)
+        if record is not None:
+            records.append(record)
+    if not records:
+        finished = [await job_runs.has_finished(task) for task in tasks]
+        return _RetentionOverdue(unknown=any(finished))
+    observed_at = min(record.observed_at for record in records)
+    if len(records) != len(tasks) or any(
+        record.observed_at < unknown_before
+        or (record.overdue.count == 0 and not record.overdue.complete)
+        for record in records
     ):
-        # Too old, or a cap that counted nothing yet did not cover everything.
-        return _RetentionOverdue(observed_at=snapshot.observed_at, unknown=True)
+        return _RetentionOverdue(observed_at=observed_at, unknown=True)
+    deadlines = [
+        record.overdue.oldest_due_at
+        for record in records
+        if record.overdue.oldest_due_at is not None
+    ]
     return _RetentionOverdue(
-        count=snapshot.overdue.count,
-        complete=snapshot.overdue.complete,
-        oldest_due_at=snapshot.overdue.oldest_due_at,
-        observed_at=snapshot.observed_at,
+        count=sum(record.overdue.count for record in records),
+        complete=all(record.overdue.complete for record in records),
+        oldest_due_at=min(deadlines) if deadlines else None,
+        observed_at=observed_at,
     )
 
 

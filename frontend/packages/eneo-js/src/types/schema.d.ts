@@ -53,7 +53,7 @@ export interface paths {
     };
     /**
      * Flow Runtime Health
-     * @description Return super-key-protected Flow runtime readiness signals derived from persisted run, review, data-integrity, audit-outbox, webhook-outbox, gallring job, and platform task worker readiness. GALLRING_JOB_STALE (UNHEALTHY) means an enabled nightly gallring task has not completed within twice its daily cadence; GALLRING_DISABLED (UNHEALTHY) means the deployment's emergency switch turned a gallring task off; GALLRING_OVERDUE (UNHEALTHY) means run history due for automatic deletion is still stored past the overdue window, or that the nightly flows.history snapshot is missing or older than twice the daily cadence (overdue_unknown).
+     * @description Return super-key-protected Flow runtime readiness signals derived from persisted run, review, data-integrity, audit-outbox, webhook-outbox, gallring job, and platform task worker readiness. GALLRING_JOB_STALE (UNHEALTHY) means an enabled nightly gallring task has not completed within twice its daily cadence; GALLRING_DISABLED (UNHEALTHY) means the deployment's emergency switch turned a gallring task off; GALLRING_OVERDUE (UNHEALTHY) means a named reporting task still has work past its deletion deadline and overdue window, or that a required snapshot is missing or older than twice the daily cadence (overdue_unknown).
      */
     get: operations["flow_runtime_health_api_healthz_flows_get"];
     put?: never;
@@ -23097,6 +23097,7 @@ export interface components {
      *       "purged_count": 0,
      *       "purged_run_ids": [],
      *       "scope": "organization",
+     *       "selection_complete": true,
      *       "transcript_candidate_count": 3,
      *       "transcript_purged_count": 0
      *     }
@@ -25215,27 +25216,32 @@ export interface components {
       disabled_tasks?: string[];
       /**
        * Oldest Overdue Age Seconds
-       * @description Seconds since the oldest overdue run's deletion deadline.
+       * @description Seconds since the earliest overdue deadline across named tasks.
        */
       oldest_overdue_age_seconds?: number | null;
       /**
        * Overdue Complete
-       * @description Whether the capped snapshot count covers every overdue run.
+       * @description True only when every named snapshot covers all its overdue work.
        */
       overdue_complete?: boolean | null;
       /**
        * Overdue Count
-       * @description Terminal runs due for automatic deletion (auto_delete) and still stored more than the overdue window (operator setting GALLRING_OVERDUE_WINDOW_DAYS, default 1 day) after their deadline, from the newest flows.history snapshot; runs under a legal hold are not counted. Any positive count raises GALLRING_OVERDUE (UNHEALTHY). Null when no snapshot is in use.
+       * @description Sum of overdue root counts from the newest valid snapshot of each named reporting task. Each task applies its own deletion deadline and the operator's GALLRING_OVERDUE_WINDOW_DAYS (default 1 day). Flow auto_delete runs under legal holds are excluded. A positive count raises GALLRING_OVERDUE (UNHEALTHY). Null when snapshots are missing or invalid, or no reporting task is enabled.
        */
       overdue_count?: number | null;
       /**
        * Overdue Snapshot Age Seconds
-       * @description Seconds since flows.history wrote its overdue snapshot.
+       * @description Seconds since the oldest observation across named tasks.
        */
       overdue_snapshot_age_seconds?: number | null;
       /**
+       * Overdue Tasks
+       * @description Enabled reporting tasks whose snapshots the overdue fields fold.
+       */
+      overdue_tasks?: string[];
+      /**
        * Overdue Unknown
-       * @description True when flows.history has run but its newest overdue snapshot is missing, older than twice the daily cadence, or counted nothing without covering everything: whether deletion keeps up is unknown. Raises GALLRING_OVERDUE.
+       * @description True when a required named snapshot is missing, older than twice the daily cadence, or counts zero without covering all work. A deployment where no reporting task has run is not judged. Raises GALLRING_OVERDUE.
        * @default false
        */
       overdue_unknown?: boolean;

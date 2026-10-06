@@ -553,7 +553,7 @@ async def test_health_flags_overdue_from_the_newest_fresh_complete_snapshot(
     policy = build_flow_runtime_health_policy(
         task_timeout_seconds=600,
         gallring_tasks=(FLOWS_HISTORY_TASK,) if registered else (),
-        gallring_overdue_task=FLOWS_HISTORY_TASK,
+        retention_overdue_tasks=(FLOWS_HISTORY_TASK,),
     )
     async with db_container() as container:
         snapshot = await load_flow_runtime_health_snapshot(
@@ -684,3 +684,89 @@ async def test_the_due_index_serves_the_generic_plan_of_the_prepared_query(
 
     rendered = "\n".join(row[0] for row in rows)
     assert "ix_flow_runs_flow_gallring_due" in rendered, rendered
+
+
+@pytest.mark.parametrize(
+    "chat_snapshot,chat_enabled,count,complete,oldest_days,observed_hours,unknown",
+    [
+        ((2, 0, True, None), True, 4, True, 3, 2, False),
+        ((2, 6, True, 4), True, 10, True, 4, 2, False),
+        ((2, 6, False, 4), True, 10, False, 4, 2, False),
+        (None, True, None, None, None, 1, True),
+        ((49, 0, True, None), True, None, None, None, 49, True),
+        ((2, 0, False, None), True, None, None, None, 2, True),
+        ((49, 6, True, 4), False, 4, True, 3, 1, False),
+    ],
+    ids=[
+        "zero",
+        "sum-and-oldest",
+        "capped-positive",
+        "missing",
+        "stale",
+        "incomplete-zero",
+        "disabled",
+    ],
+)
+async def test_health_folds_only_enabled_reporting_tasks(
+    db_container,
+    chat_snapshot,
+    chat_enabled,
+    count,
+    complete,
+    oldest_days,
+    observed_hours,
+    unknown,
+):
+    """Kills G1b-H02/H03/H04: Flow-only fold, newest observation, missing as zero."""
+    now = datetime.now(timezone.utc)
+    records = [(FLOWS_HISTORY_TASK, (1, 4, True, 3))]
+    if chat_snapshot is not None:
+        records.append(("chats.history", chat_snapshot))
+    async with db_container() as container:
+        for task, (hours, total, covered, days) in records:
+            at = now - timedelta(hours=hours)
+            container.session().add(
+                RetentionJobRuns(
+                    task=task,
+                    outcome=RetentionJobOutcome.SUCCEEDED.value,
+                    started_at=at,
+                    heartbeat_at=at,
+                    finished_at=at,
+                    overdue_observed_at=at,
+                    overdue_count=total,
+                    overdue_complete=covered,
+                    overdue_oldest_due_at=now - timedelta(days=days) if days else None,
+                )
+            )
+    tasks = (
+        (FLOWS_HISTORY_TASK, "chats.history") if chat_enabled else (FLOWS_HISTORY_TASK,)
+    )
+    policy = build_flow_runtime_health_policy(
+        task_timeout_seconds=600,
+        gallring_tasks=tasks,
+        retention_overdue_tasks=(FLOWS_HISTORY_TASK, "chats.history"),
+    )
+    async with db_container() as container:
+        snapshot = await load_flow_runtime_health_snapshot(
+            session=container.session(), now=now, policy=policy
+        )
+    health = classify_flow_runtime_health(
+        snapshot=snapshot,
+        now=now,
+        policy=policy,
+        probe=FlowRuntimeProbe(
+            db_query_ok=True, execution_worker_ready=True, maintenance_worker_ready=True
+        ),
+    )
+    assert health.gallring.overdue_tasks == list(tasks)
+    assert (
+        health.gallring.overdue_count,
+        health.gallring.overdue_complete,
+        health.gallring.overdue_unknown,
+    ) == (count, complete, unknown)
+    assert snapshot.gallring_overdue_observed_at == now - timedelta(
+        hours=observed_hours
+    )
+    assert snapshot.oldest_gallring_overdue_due_at == (
+        now - timedelta(days=oldest_days) if oldest_days else None
+    )

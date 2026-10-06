@@ -29,6 +29,8 @@ class RetentionTaskRegistration:
         lambda settings: settings.gallring_max_rows_per_run
     )
 
+    reports_overdue: bool = False
+
     def budget(self, settings: Settings) -> RetentionBudget:
         return RetentionBudget(
             rows=self.budget_rows(settings),
@@ -47,6 +49,7 @@ RETENTION_TASKS: tuple[RetentionTaskRegistration, ...] = (
     ),
     RetentionTaskRegistration(
         name=FLOWS_HISTORY_TASK,
+        reports_overdue=True,
         enabled=lambda settings: settings.retention_flows_history_enabled,
         build=lambda session, _budget: FlowRunHistoryRetentionTask(session),
     ),
@@ -60,3 +63,12 @@ def enabled_retention_tasks(settings: Settings) -> tuple[str, ...]:
 def disabled_retention_tasks(settings: Settings) -> tuple[str, ...]:
     """Tasks the deployment's emergency switch turns off."""
     return tuple(task.name for task in RETENTION_TASKS if not task.enabled(settings))
+
+
+def overdue_retention_tasks(settings: Settings) -> tuple[str, ...]:
+    """Enabled tasks whose persisted overdue snapshots health must read."""
+    return tuple(
+        task.name
+        for task in RETENTION_TASKS
+        if task.enabled(settings) and task.reports_overdue
+    )

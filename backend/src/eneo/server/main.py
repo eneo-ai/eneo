@@ -23,6 +23,7 @@ from eneo.authentication.endpoint_access import (
 from eneo.data_retention.infrastructure.retention_tasks import (
     disabled_retention_tasks,
     enabled_retention_tasks,
+    overdue_retention_tasks,
 )
 from eneo.flow_packages.api.flow_package_models import (
     FLOW_PACKAGE_OMITTED_MCP_ASSISTANT_COUNT_HEADER,
@@ -31,7 +32,6 @@ from eneo.flows.ai_builder.ai_builder_router import (
     AIBuilderEnvelopedError,
     ai_builder_enveloped_error_handler,
 )
-from eneo.flows.domain.flow_run_retention_policy import FLOWS_HISTORY_TASK
 from eneo.flows.runtime.flow_runtime_health import (
     FlowRuntimeHealthResponse,
     FlowRuntimeProbe,
@@ -824,9 +824,9 @@ def get_application():
             "(UNHEALTHY) means an enabled nightly gallring task has not completed "
             "within twice its daily cadence; GALLRING_DISABLED (UNHEALTHY) means the "
             "deployment's emergency switch turned a gallring task off; "
-            "GALLRING_OVERDUE (UNHEALTHY) means run history due for automatic "
-            "deletion is still stored past the overdue window, or that the nightly "
-            "flows.history snapshot is missing or older than twice the daily cadence "
+            "GALLRING_OVERDUE (UNHEALTHY) means a named reporting task still has "
+            "work past its deletion deadline and overdue window, or that a required "
+            "snapshot is missing or older than twice the daily cadence "
             "(overdue_unknown)."
         ),
         responses={
@@ -852,7 +852,7 @@ def get_application():
             task_timeout_seconds=settings.task_execution_timeout_seconds,
             gallring_tasks=enabled_retention_tasks(settings),
             gallring_disabled_tasks=disabled_retention_tasks(settings),
-            gallring_overdue_task=FLOWS_HISTORY_TASK,
+            retention_overdue_tasks=overdue_retention_tasks(settings),
         )
         worker_readiness = await load_task_worker_readiness(timeout_seconds=1.0)
         query_started_at = time.perf_counter()
