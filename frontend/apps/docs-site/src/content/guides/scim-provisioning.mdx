@@ -221,10 +221,10 @@ An attribute is only stored if your identity provider sends it. Check the attrib
 ### What Eneo keeps and what it ignores
 
 - **Other schema extensions** in a request are accepted and ignored. They are not stored, and the response does not include them.
-- **Unknown attributes** inside the Enterprise User extension are dropped.
+- **Attributes the Enterprise User extension does not define** are dropped, however they arrive: inside the extension object, as a `PATCH` path, or as a fully qualified name. The rest of the request is applied, and the backend logs `scim.user.enterprise_attributes_dropped` at WARNING with the attribute names, never their values.
 - **Responses echo what was stored**, not what was sent. The extension's URN is listed in the response `schemas` only when something is stored, so comparing a response with its request shows what was retained.
 - **Attribute names are case-insensitive** (`costcenter` and `costCenter` are the same attribute).
-- **`null` or an empty string removes an attribute.** A `PUT` without the extension clears it.
+- **`null` or an empty string removes an attribute.** `null` for the whole extension clears it, and so does a `PUT` without the extension.
 
 Values are checked rather than converted. A request is rejected with `400 invalidValue`, and nothing is written, when:
 
@@ -241,12 +241,12 @@ Values are checked rather than converted. A request is rejected with `400 invali
 |---|---|
 | `urn:…:enterprise:2.0:User:department` | Sets or removes that attribute |
 | `urn:…:enterprise:2.0:User:manager.value` | Sets or removes one part of the manager reference |
-| `urn:…:enterprise:2.0:User` | `add`/`replace` sets the attributes named in the value and leaves the others unchanged. `remove` clears the whole extension |
+| `urn:…:enterprise:2.0:User` | `add`/`replace` sets the attributes named in the value and leaves the others unchanged. `remove`, or a `null` value, clears the whole extension |
 | No path, with the extension URN (or fully qualified attribute names) as keys in the value | Sets the named attributes |
 
 With any of these forms, `add`/`replace` with a `manager` object sets only the parts (`value`, `$ref`) it contains and leaves the other part as stored. A part set to `null` is removed. An object holding only `displayName` or unknown keys changes nothing. A bare identifier string for `manager` replaces the whole reference, so a stored `$ref` is removed.
 
-A `PATCH` is all-or-nothing. If any operation is invalid, the whole request is rejected and the user is left unchanged. A path that names an attribute the extension does not define, such as `urn:…:enterprise:2.0:User:shoeSize`, is rejected with `400 invalidPath` rather than ignored.
+A `PATCH` is all-or-nothing. If any operation is invalid, the whole request is rejected and the user is left unchanged. A path that names an attribute the extension does not define, such as `urn:…:enterprise:2.0:User:shoeSize`, is not invalid: it is dropped like an unknown attribute in the extension object. A malformed path is rejected with `400 invalidPath`: a filter such as `manager[value eq "…"]`, a sub-attribute of a string attribute such as `department.code`, or a path nested deeper than `manager.value`.
 
 ### Where the attributes are visible
 
@@ -460,7 +460,13 @@ Check the `detail` field in the SCIM error response to determine the cause. Reco
 
 ### Provisioning logs show 400 for an Enterprise User attribute
 
-A `400 invalidValue` means a mapped attribute sent a value Eneo does not accept, for example a number instead of a string, or a value over 1,024 characters. A `400 invalidPath` means an operation targeted an attribute the Enterprise User extension does not define. The `detail` field names the attribute. Fix the attribute mapping in your identity provider and re-run provisioning. Because a `PATCH` is all-or-nothing, none of that request's changes were applied.
+A `400 invalidValue` means a mapped attribute sent a value Eneo does not accept, for example a number instead of a string, or a value over 1,024 characters. A `400 invalidPath` means an operation's path into the Enterprise User extension is malformed, for example a filter. The `detail` field names the attribute or path. Fix the attribute mapping in your identity provider and re-run provisioning. Because a `PATCH` is all-or-nothing, none of that request's changes were applied.
+
+### An Enterprise User attribute is not stored
+
+If provisioning succeeds but an attribute never appears on the user, look for `scim.user.enterprise_attributes_dropped` in the backend logs. It names attributes your identity provider sent that the extension does not define, usually a mapping whose target is misspelled or is a custom attribute. Map the source to one of the attributes in [Enterprise User attributes](#enterprise-user-attributes).
+
+`scim.user.enterprise_extension_unreadable` means a user's stored attributes are not in a form Eneo writes, for example after a direct database edit. The log line names the user and the affected attributes. Responses for that user omit the extension until the identity provider sends those attributes again. Other users are not affected.
 
 ### OIDC sign-in fails with "Email claim not found in ID token"
 

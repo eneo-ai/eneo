@@ -43,10 +43,18 @@ class TestParseEnterpriseObject:
         with pytest.raises(ScimValidationError, match="more than once"):
             parse_enterprise_object({"costCenter": "1", "costcenter": "2"})
 
-    def test_unknown_attributes_are_dropped(self):
-        assert parse_enterprise_object({"department": "HR", "shoeSize": "44"}) == {
-            "department": "HR"
-        }
+    def test_unknown_attributes_are_dropped_and_reported_by_name(self):
+        dropped: list[str] = []
+        assert parse_enterprise_object(
+            {
+                "department": "HR",
+                "shoeSize": "44",
+                "manager": {"value": "mgr-1", "badge": "7", "displayName": "John"},
+            },
+            dropped=dropped,
+        ) == {"department": "HR", "manager": {"value": "mgr-1"}}
+        # The readOnly displayName is ignored as the standard says, not reported.
+        assert dropped == ["shoeSize", "manager.badge"]
 
     @pytest.mark.parametrize("empty", [None, ""])
     def test_null_and_empty_string_mean_absent(self, empty: str | None):
@@ -331,19 +339,131 @@ class TestPatchOperations:
         )
         assert current == {"manager": {"value": "mgr-1"}}
 
-    def test_unknown_attribute_path_is_invalid_path(self):
+    @pytest.mark.parametrize(
+        "operation",
+        [
+            _op("replace", f"{URN}:shoeSize", "44"),
+            _op("add", f"{URN.lower()}:SHOESIZE", "44"),
+            _op("remove", f"{URN}:shoeSize"),
+            _op("replace", URN, {"shoeSize": "44"}),
+            _op("replace", None, {URN: {"shoeSize": "44"}}),
+            _op("replace", None, {f"{URN}:shoeSize": "44"}),
+        ],
+        ids=[
+            "path",
+            "path-any-case",
+            "remove-path",
+            "urn-path",
+            "pathless-urn-object",
+            "pathless-qualified-key",
+        ],
+    )
+    def test_unknown_attribute_is_dropped_and_reported_in_every_form(
+        self, operation: PatchOperation
+    ):
+        # The same rule as inside the extension object on POST and PUT: the
+        # rest of the request still applies.
+        dropped: list[str] = []
+        result = apply_patch_operations(
+            self.CURRENT,
+            [operation, _op("replace", f"{URN}:division", "North")],
+            dropped=dropped,
+        )
+        assert result == {**self.CURRENT, "division": "North"}
+        assert [name.casefold() for name in dropped] == ["shoesize"]
+
+    @pytest.mark.parametrize(
+        "operation",
+        [
+            _op("replace", f"{URN}:manager.badge", "7"),
+            _op("replace", f"{URN}:manager", {"badge": "7"}),
+            _op("replace", None, {URN: {"manager": {"badge": "7"}}}),
+        ],
+        ids=["sub-attribute-path", "manager-path", "pathless-urn-object"],
+    )
+    def test_unknown_manager_sub_attribute_is_dropped_and_reported(
+        self, operation: PatchOperation
+    ):
+        current = {"manager": {"value": "mgr-1"}}
+        dropped: list[str] = []
+        assert apply_patch_operations(current, [operation], dropped=dropped) == current
+        assert dropped == ["manager.badge"]
+
+    @pytest.mark.parametrize(
+        "operation",
+        [
+            _op("replace", f"{URN}:manager.displayName", "John"),
+            _op("remove", f"{URN}:manager.displayName"),
+            _op("replace", f"{URN}:manager", {"displayName": "John"}),
+        ],
+        ids=["sub-attribute-path", "remove-sub-attribute-path", "manager-path"],
+    )
+    def test_read_only_display_name_is_ignored_in_every_form(
+        self, operation: PatchOperation
+    ):
+        current = {"manager": {"value": "mgr-1"}}
+        dropped: list[str] = []
+        assert apply_patch_operations(current, [operation], dropped=dropped) == current
+        assert dropped == []
+
+    @pytest.mark.parametrize(
+        "path",
+        [
+            f"{URN}:",
+            f"{URN}:department.code",
+            f'{URN}:manager[value eq "mgr-1"]',
+            f'{URN}:shoeSize[size eq "44"]',
+            f"{URN}:manager.value.id",
+        ],
+        ids=[
+            "no-attribute",
+            "sub-attribute-of-a-string",
+            "filter",
+            "filter-on-unknown",
+            "nested-too-deep",
+        ],
+    )
+    def test_malformed_path_is_invalid_path(self, path: str):
         with pytest.raises(ScimHttpError) as exc_info:
-            apply_patch_operations(
-                self.CURRENT, [_op("replace", f"{URN}:shoeSize", "44")]
-            )
+            apply_patch_operations(self.CURRENT, [_op("replace", path, "x")])
         assert exc_info.value.status_code == 400
         assert exc_info.value.scim_type == "invalidPath"
 
-    def test_display_name_sub_attribute_path_is_invalid_path(self):
-        with pytest.raises(ScimHttpError, match="manager.displayName"):
-            apply_patch_operations(
-                {}, [_op("replace", f"{URN}:manager.displayName", "John")]
-            )
+    @pytest.mark.parametrize(
+        "operation",
+        [
+            _op("replace", URN, None),
+            _op("add", URN, None),
+            _op("replace", None, {URN: None}),
+            _op("remove", URN),
+        ],
+        ids=["replace-urn-path", "add-urn-path", "pathless", "remove"],
+    )
+    def test_null_whole_extension_clears_it_like_remove(
+        self, operation: PatchOperation
+    ):
+        current = {**self.CURRENT, "manager": {"value": "mgr-1"}}
+        assert apply_patch_operations(current, [operation]) == {}
+
+    def test_null_whole_extension_then_attribute_sets_only_that_attribute(self):
+        result = apply_patch_operations(
+            self.CURRENT,
+            [
+                _op("replace", URN, None),
+                _op("add", f"{URN}:division", "North"),
+            ],
+        )
+        assert result == {"division": "North"}
+
+    @pytest.mark.parametrize("stored", ["mgr-1", ["mgr-1"], 42])
+    def test_stored_manager_that_is_not_an_object_counts_as_absent(self, stored: Any):
+        # Not written by this module (a direct database edit); merging over it
+        # must not fail every PATCH of the manager.
+        result = apply_patch_operations(
+            {"manager": stored},
+            [_op("add", f"{URN}:manager", {"$ref": "../Users/mgr-2"})],
+        )
+        assert result == {"manager": {"$ref": "../Users/mgr-2"}}
 
     def test_invalid_operation_rejects_the_whole_request(self):
         with pytest.raises(ScimValidationError):

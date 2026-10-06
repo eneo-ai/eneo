@@ -1,3 +1,4 @@
+import logging
 from datetime import datetime, timezone
 from unittest.mock import ANY, AsyncMock, MagicMock
 from uuid import uuid4
@@ -949,6 +950,190 @@ class TestEnterpriseExtension:
         assert db_user.state == ScimUserState.DELETED
         assert db_user.scim_extensions == {
             SCIM_ENTERPRISE_USER_URN: {"department": "HR"}
+        }
+
+
+@pytest.fixture
+def service_warnings(caplog):
+    from eneo.scim.services.user_service import logger as svc_logger
+
+    with caplog.at_level(logging.WARNING):
+        svc_logger.addHandler(caplog.handler)
+        try:
+            yield caplog
+        finally:
+            svc_logger.removeHandler(caplog.handler)
+
+
+def _warnings(caplog, event: str) -> list[logging.LogRecord]:
+    return [
+        r for r in caplog.records if r.levelname == "WARNING" and r.message == event
+    ]
+
+
+class TestDroppedEnterpriseAttributes:
+    """Attributes the extension does not define are dropped, never rejected,
+    and logged by name so a mapping that targets one is visible."""
+
+    async def test_create_drops_them_and_logs_names_only(self, service_warnings):
+        repo = AsyncMock()
+        repo.get_by_username.return_value = None
+        repo.get_by_email.return_value = None
+        repo.email_exists_in_other_tenant.return_value = False
+        repo.create.side_effect = lambda model: model
+
+        await _make_service(repo).create_user(
+            ScimUserRequest.model_validate(
+                {
+                    "userName": "jane@example.com",
+                    SCIM_ENTERPRISE_USER_URN: {
+                        "department": "HR",
+                        "shoeSize": "value-not-logged",
+                    },
+                }
+            )
+        )
+
+        created = repo.create.call_args.args[0]
+        assert created.scim_extensions == {
+            SCIM_ENTERPRISE_USER_URN: {"department": "HR"}
+        }
+        [record] = _warnings(
+            service_warnings, "scim.user.enterprise_attributes_dropped"
+        )
+        assert record.attributes == ["shoeSize"]
+        assert "value-not-logged" not in str(record.__dict__)
+
+    async def test_patch_by_path_drops_them_and_applies_the_rest(
+        self, service_warnings
+    ):
+        repo = AsyncMock()
+        db_user = _make_db_user()
+        db_user.scim_extensions = {SCIM_ENTERPRISE_USER_URN: {"department": "HR"}}
+        repo.get_by_id.return_value = db_user
+        repo.update.return_value = db_user
+
+        await _make_service(repo).patch_user(
+            db_user.id,
+            [
+                PatchOperation(
+                    op="Replace",
+                    path=f"{SCIM_ENTERPRISE_USER_URN}:shoeSize",
+                    value="value-not-logged",
+                ),
+                PatchOperation(
+                    op="Add",
+                    path=f"{SCIM_ENTERPRISE_USER_URN}:division",
+                    value="North",
+                ),
+            ],
+        )
+
+        repo.update.assert_awaited_once()
+        assert db_user.scim_extensions == {
+            SCIM_ENTERPRISE_USER_URN: {"department": "HR", "division": "North"}
+        }
+        [record] = _warnings(
+            service_warnings, "scim.user.enterprise_attributes_dropped"
+        )
+        assert record.attributes == ["shoeSize"]
+        assert "value-not-logged" not in str(record.__dict__)
+
+    async def test_nothing_is_logged_when_nothing_is_dropped(self, service_warnings):
+        repo = AsyncMock()
+        db_user = _make_db_user()
+        repo.get_by_id.return_value = db_user
+        repo.update.return_value = db_user
+
+        await _make_service(repo).patch_user(
+            db_user.id,
+            [
+                PatchOperation(
+                    op="Add",
+                    path=f"{SCIM_ENTERPRISE_USER_URN}:department",
+                    value="HR",
+                )
+            ],
+        )
+
+        assert not _warnings(
+            service_warnings, "scim.user.enterprise_attributes_dropped"
+        )
+
+
+class TestUnreadableStoredExtension:
+    """A stored extension this code would never write (a direct database edit)
+    must not fail the reads and writes of everyone around it."""
+
+    UNREADABLE = {
+        SCIM_ENTERPRISE_USER_URN: {
+            "department": 4130,
+            "manager": "stored-manager-id",
+        }
+    }
+
+    async def test_list_omits_it_for_that_user_only_and_logs_where(
+        self, service_warnings
+    ):
+        readable = _make_db_user()
+        readable.scim_extensions = {SCIM_ENTERPRISE_USER_URN: {"division": "North"}}
+        unreadable = _make_db_user("bob@example.com")
+        unreadable.scim_extensions = self.UNREADABLE
+        repo = AsyncMock()
+        repo.list.return_value = [readable, unreadable]
+        repo.count.return_value = 2
+
+        users, total = await _make_service(repo).list_users()
+
+        assert total == 2
+        good, bad = (user.model_dump(mode="json") for user in users)
+        assert good[SCIM_ENTERPRISE_USER_URN] == {"division": "North"}
+        assert bad["schemas"] == [SCIM_CORE_USER_URN]
+        assert SCIM_ENTERPRISE_USER_URN not in bad
+        assert bad["userName"] == "bob@example.com"
+        [record] = _warnings(
+            service_warnings, "scim.user.enterprise_extension_unreadable"
+        )
+        assert record.user_id == str(unreadable.id)
+        assert record.attributes == ["department", "manager"]
+        assert "stored-manager-id" not in str(record.__dict__)
+
+    async def test_get_omits_it_instead_of_failing(self, service_warnings):
+        repo = AsyncMock()
+        db_user = _make_db_user()
+        db_user.scim_extensions = self.UNREADABLE
+        repo.get_by_id.return_value = db_user
+
+        result = await _make_service(repo).get_user(db_user.id)
+
+        assert result.enterprise_user is None
+        assert result.schemas == [SCIM_CORE_USER_URN]
+
+    async def test_patching_the_manager_replaces_a_stored_non_object(self):
+        repo = AsyncMock()
+        db_user = _make_db_user()
+        db_user.scim_extensions = {
+            SCIM_ENTERPRISE_USER_URN: {"manager": "stored-manager-id"}
+        }
+        repo.get_by_id.return_value = db_user
+        repo.update.return_value = db_user
+
+        result = await _make_service(repo).patch_user(
+            db_user.id,
+            [
+                PatchOperation(
+                    op="Add",
+                    path=f"{SCIM_ENTERPRISE_USER_URN}:manager",
+                    value={"value": "m-2"},
+                )
+            ],
+        )
+
+        assert db_user.scim_extensions == {
+            SCIM_ENTERPRISE_USER_URN: {"manager": {"value": "m-2"}}
+        }
+        assert result.model_dump(mode="json")[SCIM_ENTERPRISE_USER_URN] == {
+            "manager": {"value": "m-2"}
         }
 
 

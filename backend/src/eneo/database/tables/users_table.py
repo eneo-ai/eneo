@@ -26,8 +26,12 @@ class Users(BasePublic):
     email: Mapped[str] = mapped_column(index=True)
     external_id: Mapped[Optional[str]] = mapped_column(index=True)
     # SCIM schema extensions keyed by URN. Only the Enterprise User extension is
-    # written (eneo.scim.domain.enterprise_user); NULL when none is stored.
-    scim_extensions: Mapped[Optional[dict[str, Any]]] = mapped_column(JSONB)
+    # written (eneo.scim.domain.enterprise_user); SQL NULL when none is stored,
+    # as on rows that predate the column. none_as_null keeps Python None from
+    # being written as the JSON literal 'null'.
+    scim_extensions: Mapped[Optional[dict[str, Any]]] = mapped_column(
+        JSONB(none_as_null=True)
+    )
     email_verified: Mapped[bool] = mapped_column(server_default="False")
     salt: Mapped[Optional[str]] = mapped_column()
     password: Mapped[Optional[str]] = mapped_column()

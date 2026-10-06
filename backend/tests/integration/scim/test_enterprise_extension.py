@@ -8,7 +8,7 @@ from typing import Any
 from uuid import UUID
 
 import pytest
-from sqlalchemy import select
+from sqlalchemy import select, text
 
 from eneo.database.tables.users_table import Users
 
@@ -27,6 +27,15 @@ async def _stored(db_session, user_id: str | UUID) -> tuple[str | None, Any]:
             await session.execute(select(Users).where(Users.id == UUID(str(user_id))))
         ).scalar_one()
         return row.username, row.scim_extensions
+
+
+async def _is_sql_null(db_session, user_id: str | UUID) -> bool:
+    """Read with raw SQL: the ORM decodes SQL NULL and JSON 'null' alike."""
+    async with db_session() as session:
+        return await session.scalar(
+            text("SELECT scim_extensions IS NULL FROM users WHERE id = :id"),
+            {"id": UUID(str(user_id))},
+        )
 
 
 async def _set_extension(db_session, user_id: UUID, enterprise: dict[str, Any]) -> None:
@@ -92,6 +101,7 @@ async def test_create_without_extension_leaves_column_null_and_response_unchange
     assert ENTERPRISE not in body
     _, stored = await _stored(db_session, body["id"])
     assert stored is None
+    assert await _is_sql_null(db_session, body["id"])
 
 
 @pytest.mark.asyncio
@@ -185,6 +195,7 @@ async def test_put_without_extension_clears_it(
     assert ENTERPRISE not in response.json()
     _, stored = await _stored(db_session, scim_user.id)
     assert stored is None
+    assert await _is_sql_null(db_session, scim_user.id)
 
 
 @pytest.mark.asyncio
@@ -310,20 +321,31 @@ async def test_patch_manager_object_keeps_unnamed_sub_attributes(
 
 @pytest.mark.asyncio
 @pytest.mark.integration
-async def test_patch_remove_whole_extension_clears_column(
-    client, bypass_scim_auth, db_session, scim_user
+@pytest.mark.parametrize(
+    "operation",
+    [
+        {"op": "remove", "path": ENTERPRISE},
+        {"op": "replace", "path": ENTERPRISE, "value": None},
+        {"op": "replace", "value": {ENTERPRISE: None}},
+    ],
+    ids=["remove", "null-urn-path", "null-pathless"],
+)
+async def test_patch_remove_or_null_whole_extension_clears_column(
+    client, bypass_scim_auth, db_session, scim_user, operation
 ):
-    await _set_extension(db_session, scim_user.id, {"department": "HR"})
+    await _set_extension(
+        db_session, scim_user.id, {"department": "HR", "manager": {"value": "mgr-1"}}
+    )
 
     response = await client.patch(
-        f"/scim/v2/Users/{scim_user.id}",
-        json=_patch({"op": "remove", "path": ENTERPRISE}),
+        f"/scim/v2/Users/{scim_user.id}", json=_patch(operation)
     )
 
     assert response.status_code == 200
     assert response.json()["schemas"] == [CORE]
     _, stored = await _stored(db_session, scim_user.id)
     assert stored is None
+    assert await _is_sql_null(db_session, scim_user.id)
 
 
 @pytest.mark.asyncio
@@ -350,18 +372,90 @@ async def test_patch_is_atomic_when_a_later_operation_is_invalid(
 
 @pytest.mark.asyncio
 @pytest.mark.integration
-async def test_patch_unknown_extension_attribute_is_invalid_path(
-    client, bypass_scim_auth, db_session, scim_user
+@pytest.mark.parametrize(
+    "operation",
+    [
+        {"op": "replace", "path": f"{ENTERPRISE}:shoeSize", "value": "44"},
+        {"op": "add", "value": {f"{ENTERPRISE}:shoeSize": "44"}},
+        {"op": "add", "value": {ENTERPRISE: {"shoeSize": "44"}}},
+    ],
+    ids=["path", "pathless-qualified-key", "pathless-urn-object"],
+)
+async def test_patch_unknown_extension_attribute_is_dropped_like_on_create(
+    client, bypass_scim_auth, db_session, scim_user, operation
 ):
+    # Every shape is treated as on POST: the unknown attribute is dropped and
+    # the rest of the request applies. Rejecting it would fail every cycle.
+    await _set_extension(db_session, scim_user.id, {"department": "HR"})
+
     response = await client.patch(
         f"/scim/v2/Users/{scim_user.id}",
-        json=_patch({"op": "replace", "path": f"{ENTERPRISE}:shoeSize", "value": "44"}),
+        json=_patch(
+            operation,
+            {"op": "add", "path": f"{ENTERPRISE}:division", "value": "North"},
+        ),
+    )
+
+    assert response.status_code == 200
+    assert response.json()[ENTERPRISE] == {"department": "HR", "division": "North"}
+    _, stored = await _stored(db_session, scim_user.id)
+    assert stored == {ENTERPRISE: {"department": "HR", "division": "North"}}
+
+
+@pytest.mark.asyncio
+@pytest.mark.integration
+async def test_patch_malformed_extension_path_is_invalid_path(
+    client, bypass_scim_auth, db_session, scim_user
+):
+    await _set_extension(db_session, scim_user.id, {"department": "HR"})
+    before = await _stored(db_session, scim_user.id)
+
+    response = await client.patch(
+        f"/scim/v2/Users/{scim_user.id}",
+        json=_patch(
+            {"op": "replace", "path": f"{ENTERPRISE}:department.code", "value": "7"}
+        ),
     )
 
     assert response.status_code == 400
     assert response.json()["scimType"] == "invalidPath"
+    assert await _stored(db_session, scim_user.id) == before
+
+
+@pytest.mark.asyncio
+@pytest.mark.integration
+async def test_unreadable_stored_extension_does_not_break_reads_or_patch(
+    client, bypass_scim_auth, db_session, scim_user
+):
+    """A value no SCIM write produces (a direct database edit) is omitted for
+    that user instead of failing the list page, and the IdP can still PATCH."""
+    await _set_extension(
+        db_session, scim_user.id, {"department": 4130, "manager": "mgr-1"}
+    )
+
+    listed = await client.get(
+        "/scim/v2/Users", params={"filter": 'userName eq "scim.user"'}
+    )
+    fetched = await client.get(f"/scim/v2/Users/{scim_user.id}")
+    patched = await client.patch(
+        f"/scim/v2/Users/{scim_user.id}",
+        json=_patch(
+            {"op": "replace", "path": f"{ENTERPRISE}:department", "value": "HR"},
+            {"op": "add", "path": f"{ENTERPRISE}:manager", "value": {"value": "m-2"}},
+        ),
+    )
+
+    assert listed.status_code == 200
+    [resource] = listed.json()["Resources"]
+    assert resource["schemas"] == [CORE]
+    assert ENTERPRISE not in resource
+    assert fetched.status_code == 200
+    assert ENTERPRISE not in fetched.json()
+    assert patched.status_code == 200
+    expected = {"department": "HR", "manager": {"value": "m-2"}}
+    assert patched.json()[ENTERPRISE] == expected
     _, stored = await _stored(db_session, scim_user.id)
-    assert stored is None
+    assert stored == {ENTERPRISE: expected}
 
 
 @pytest.mark.asyncio

@@ -13,7 +13,7 @@ from alembic.config import Config
 pytestmark = [pytest.mark.integration, pytest.mark.migration_isolation]
 
 _REVISION = "202609281000"
-_PREVIOUS_REVISION = "202609231001"
+_PREVIOUS_REVISION = "202609221000"
 
 
 @pytest.fixture(scope="session", autouse=True)

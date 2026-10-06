@@ -3,6 +3,8 @@ from datetime import datetime, timezone
 from typing import Any, cast
 from uuid import UUID
 
+from pydantic import ValidationError
+
 from eneo.audit.application.audit_service import AuditService
 from eneo.audit.domain.action_types import ActionType
 from eneo.audit.domain.actor_types import ActorType
@@ -52,12 +54,43 @@ def _resolve_email(data: ScimUserRequest) -> str:
     return email
 
 
-def _to_scim_user(model: UserModel) -> ScimUser:
+def _enterprise_response(model: UserModel) -> ScimEnterpriseUser | None:
+    """The stored extension as returned over SCIM.
+
+    A stored value that does not validate was not written through SCIM (a
+    direct database edit, another writer). It omits the extension for that
+    user, and is logged, rather than failing every list page with the user on
+    it and stalling the IdP's sync for the whole tenant.
+    """
     enterprise = enterprise_from_column(model.scim_extensions)
+    if not enterprise:
+        return None
+    try:
+        return ScimEnterpriseUser.model_validate(enterprise)
+    except ValidationError as exc:
+        logger.warning(
+            "scim.user.enterprise_extension_unreadable",
+            extra={
+                "tenant_id": str(model.tenant_id),
+                "user_id": str(model.id),
+                # Locations only: the errors also carry the stored values.
+                "attributes": sorted(
+                    {
+                        ".".join(str(part) for part in error["loc"])
+                        for error in exc.errors()
+                    }
+                ),
+            },
+        )
+        return None
+
+
+def _to_scim_user(model: UserModel) -> ScimUser:
+    enterprise = _enterprise_response(model)
     return ScimUser(
         schemas=(
             [SCIM_CORE_USER_URN, SCIM_ENTERPRISE_USER_URN]
-            if enterprise
+            if enterprise is not None
             else [SCIM_CORE_USER_URN]
         ),
         id=str(model.id),
@@ -70,9 +103,7 @@ def _to_scim_user(model: UserModel) -> ScimUser:
             created=model.created_at,
             lastModified=model.updated_at,
         ),
-        enterprise_user=(
-            ScimEnterpriseUser.model_validate(enterprise) if enterprise else None
-        ),
+        enterprise_user=enterprise,
     )
 
 
@@ -166,6 +197,18 @@ class ScimUserService:
                     f"External ID '{external_id}' already exists"
                 )
 
+    def _log_dropped(self, dropped: list[str]) -> None:
+        """Attributes the extension does not define are dropped, not rejected;
+        WARNING so a mapping that targets one is visible. Names only."""
+        if dropped:
+            logger.warning(
+                "scim.user.enterprise_attributes_dropped",
+                extra={
+                    "tenant_id": str(self._tenant_id),
+                    "attributes": sorted(set(dropped)),
+                },
+            )
+
     def _enterprise_from_request(self, data: ScimUserRequest) -> EnterpriseUser:
         """The request's Enterprise User object, validated. Absent means empty:
         POST and PUT both describe the whole resource."""
@@ -175,7 +218,12 @@ class ScimUserService:
                 "scim.user.extensions_ignored",
                 extra={"tenant_id": str(self._tenant_id), "keys": sorted(ignored)},
             )
-        return parse_enterprise_object(raw) if present else {}
+        if not present:
+            return {}
+        dropped: list[str] = []
+        enterprise = parse_enterprise_object(raw, dropped=dropped)
+        self._log_dropped(dropped)
+        return enterprise
 
     async def create_user(self, data: ScimUserRequest) -> ScimUser:
         # Validate before any lookup or write so an invalid extension can never
@@ -451,7 +499,11 @@ class ScimUserService:
         # RFC 7644 §3.5.2 requires an unappliable request to leave the resource
         # unchanged, and an IdP told 200 about a partial PATCH never retries.
         current_enterprise = enterprise_from_column(model.scim_extensions)
-        enterprise = apply_patch_operations(current_enterprise, operations)
+        dropped: list[str] = []
+        enterprise = apply_patch_operations(
+            current_enterprise, operations, dropped=dropped
+        )
+        self._log_dropped(dropped)
         for op in operations:
             _apply_patch_operation(model, op)
         if enterprise != current_enterprise:

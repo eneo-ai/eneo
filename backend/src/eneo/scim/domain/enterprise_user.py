@@ -7,6 +7,13 @@ have exactly one representation of "absent": a missing key.
 
 ``manager.displayName`` is readOnly (RFC 7643 §4.3) and is dropped on ingest;
 RFC 7644 §3.5.2 directs a server to ignore client-supplied readOnly values.
+
+An attribute the extension does not define is dropped however it arrives —
+inside the extension object, as a PATCH path, or as a fully qualified key — and
+its name is reported in ``dropped`` for the caller to log. Rejecting it would
+fail the IdP's whole request, on every sync cycle, for a value Eneo has no use
+for, and Entra quarantines a job whose requests keep failing, which also stops
+deprovisioning.
 """
 
 from __future__ import annotations
@@ -14,7 +21,7 @@ from __future__ import annotations
 import json
 from collections.abc import Iterable, Mapping
 from dataclasses import dataclass
-from typing import Any, cast
+from typing import TYPE_CHECKING, Any, cast
 
 from eneo.scim.constants import (
     SCIM_ENTERPRISE_USER_URN,
@@ -23,7 +30,9 @@ from eneo.scim.constants import (
     SCIM_EXTENSION_MAX_VALUE_CHARS,
 )
 from eneo.scim.domain.errors import ScimHttpError, ScimValidationError
-from eneo.scim.schemas.user import PatchOperation
+
+if TYPE_CHECKING:
+    from eneo.scim.schemas.user import PatchOperation
 
 EnterpriseUser = dict[str, Any]
 
@@ -72,14 +81,17 @@ def split_request_extensions(
     return present, raw, ignored
 
 
-def parse_enterprise_object(raw: Any) -> EnterpriseUser:
+def parse_enterprise_object(
+    raw: Any, *, dropped: list[str] | None = None
+) -> EnterpriseUser:
     """Validate a whole Enterprise User object (POST, PUT, whole-URN PATCH).
 
-    Unknown attributes are dropped, ``null`` means absent, and names are matched
-    case-insensitively (RFC 7643 §2.1) and stored in canonical casing.
+    Unknown attributes are dropped (their names appended to ``dropped``),
+    ``null`` means absent, and names are matched case-insensitively
+    (RFC 7643 §2.1) and stored in canonical casing.
     """
     parsed: EnterpriseUser = {}
-    _merge_object(parsed, raw)
+    _merge_object(parsed, raw, [] if dropped is None else dropped)
     return parsed
 
 
@@ -104,13 +116,14 @@ class _Target:
     sub_attribute: str | None = None
 
 
-def _parse_path(path: str) -> _Target | None:
+def _parse_path(path: str, dropped: list[str]) -> _Target | None:
     """Resolve a PATCH path against the enterprise URN.
 
-    Returns None when the path is not in the enterprise extension (core
-    attributes, other URNs). A path that *is* in the extension but names no
-    known attribute is an error: once /Schemas advertises the extension, a
-    silent no-op would tell the IdP a write succeeded when nothing changed.
+    Returns None when there is nothing to apply in the extension: the path is
+    outside it (core attributes, other URNs), names the readOnly
+    ``manager.displayName``, or names an attribute the extension does not
+    define. The last is appended to ``dropped``, exactly as an unknown key in
+    the extension object is. A malformed path is ``invalidPath``.
     """
     if path[: len(SCIM_ENTERPRISE_USER_URN)].casefold() != _URN_FOLDED:
         return None
@@ -122,19 +135,31 @@ def _parse_path(path: str) -> _Target | None:
 
     attribute_path = rest[1:]
     name, _, sub = attribute_path.partition(".")
-    canonical = _CANONICAL_ATTRIBUTES.get(name.casefold())
-    if canonical is None or "[" in attribute_path:
+    # Nothing in the extension is multi-valued or nested past `manager.value`.
+    if not name or "[" in attribute_path or "." in sub:
         raise _invalid_path(path)
+    canonical = _CANONICAL_ATTRIBUTES.get(name.casefold())
+    if canonical is None:
+        dropped.append(attribute_path)
+        return None
     if not sub:
         return _Target(attribute=canonical)
+    if canonical != MANAGER:
+        raise _invalid_path(path)  # a string attribute has no sub-attributes
+    if sub.casefold() in _MANAGER_READ_ONLY:
+        return None
     sub_canonical = _MANAGER_SUB_ATTRIBUTES.get(sub.casefold())
-    if canonical != MANAGER or sub_canonical is None:
-        raise _invalid_path(path)
+    if sub_canonical is None:
+        dropped.append(attribute_path)
+        return None
     return _Target(attribute=MANAGER, sub_attribute=sub_canonical)
 
 
 def apply_patch_operations(
-    current: EnterpriseUser, operations: Iterable[PatchOperation]
+    current: EnterpriseUser,
+    operations: Iterable[PatchOperation],
+    *,
+    dropped: list[str] | None = None,
 ) -> EnterpriseUser:
     """Fold the enterprise-extension parts of a PATCH request over ``current``.
 
@@ -143,7 +168,9 @@ def apply_patch_operations(
     gets RFC 7644 §3.5.2 atomicity — one invalid operation rejects the whole
     request with the resource unchanged. Operations (or path-less value keys)
     outside the extension are ignored; the core-attribute handler owns them.
+    Names of unknown attributes are appended to ``dropped``.
     """
+    dropped = [] if dropped is None else dropped
     result: EnterpriseUser = dict(current)
     for operation in operations:
         op = operation.op.casefold()
@@ -152,39 +179,43 @@ def apply_patch_operations(
         value: Any = operation.value
         if operation.path is None:
             if op != "remove" and isinstance(value, dict):
-                _apply_pathless(result, cast(dict[str, Any], value))
+                _apply_pathless(result, cast(dict[str, Any], value), dropped)
             continue
-        target = _parse_path(operation.path)
+        target = _parse_path(operation.path, dropped)
         if target is None:
             continue
         if op == "remove":
-            _remove(result, target)
+            _remove(result, target, dropped)
         else:
-            _set(result, target, value)
+            _set(result, target, value, dropped)
     return result
 
 
-def _apply_pathless(result: EnterpriseUser, value: dict[str, Any]) -> None:
+def _apply_pathless(
+    result: EnterpriseUser, value: dict[str, Any], dropped: list[str]
+) -> None:
     """Path-less add/replace: the value object may name the whole extension
     (``{URN: {...}}``) or individual attributes by fully qualified name
     (``{"URN:department": "..."}``); both forms are seen from IdPs."""
     for key, item in value.items():
         if is_enterprise_urn(key):
-            _set(result, _Target(attribute=None), item)
+            _set(result, _Target(attribute=None), item, dropped)
             continue
-        target = _parse_path(key)
+        target = _parse_path(key, dropped)
         if target is not None:
-            _set(result, target, item)
+            _set(result, target, item, dropped)
 
 
-def _merge_object(result: EnterpriseUser, value: Any) -> None:
+def _merge_object(result: EnterpriseUser, value: Any, dropped: list[str]) -> None:
     """Set the attributes named in ``value``; leave the others unchanged.
 
     This is RFC 7644 §3.5.2.1/§3.5.2.3 for a complex target, ``manager``
     included, and — applied to an empty ``result`` — whole-object parsing.
-    A null attribute removes it.
+    A null attribute removes it, and a null object clears them all: null is
+    unassigned (RFC 7643 §2.5) at either level, as ``remove`` is.
     """
     if value is None:
+        result.clear()
         return
     if not isinstance(value, dict):
         raise ScimValidationError(f"'{SCIM_ENTERPRISE_USER_URN}' must be an object")
@@ -194,31 +225,34 @@ def _merge_object(result: EnterpriseUser, value: Any) -> None:
     for key, item in incoming.items():
         canonical = _CANONICAL_ATTRIBUTES.get(key.casefold())
         if canonical is None:
+            dropped.append(key)
             continue
         if canonical in seen:
             raise ScimValidationError(
                 f"Enterprise attribute '{canonical}' was supplied more than once"
             )
         seen.add(canonical)
-        _set_attribute(result, canonical, item)
+        _set_attribute(result, canonical, item, dropped)
 
 
-def _set(result: EnterpriseUser, target: _Target, value: Any) -> None:
+def _set(
+    result: EnterpriseUser, target: _Target, value: Any, dropped: list[str]
+) -> None:
     if target.attribute is None:
-        _merge_object(result, value)
+        _merge_object(result, value, dropped)
     elif target.sub_attribute is None:
-        _set_attribute(result, target.attribute, value)
+        _set_attribute(result, target.attribute, value, dropped)
     else:
-        _set_attribute(result, MANAGER, {target.sub_attribute: value})
+        _set_attribute(result, MANAGER, {target.sub_attribute: value}, dropped)
 
 
-def _remove(result: EnterpriseUser, target: _Target) -> None:
+def _remove(result: EnterpriseUser, target: _Target, dropped: list[str]) -> None:
     if target.attribute is None:
         result.clear()
     elif target.sub_attribute is None:
         result.pop(target.attribute, None)
     else:
-        _set(result, target, None)
+        _set(result, target, None, dropped)
 
 
 def _store(result: EnterpriseUser, attribute: str, value: Any) -> None:
@@ -228,9 +262,11 @@ def _store(result: EnterpriseUser, attribute: str, value: Any) -> None:
         result[attribute] = value
 
 
-def _set_attribute(result: EnterpriseUser, attribute: str, value: Any) -> None:
+def _set_attribute(
+    result: EnterpriseUser, attribute: str, value: Any, dropped: list[str]
+) -> None:
     if attribute == MANAGER:
-        _store(result, MANAGER, _merge_manager(result.get(MANAGER), value))
+        _store(result, MANAGER, _merge_manager(result.get(MANAGER), value, dropped))
     else:
         _store(result, attribute, _normalise_string(attribute, value))
 
@@ -252,11 +288,15 @@ def _normalise_string(attribute: str, value: Any) -> str | None:
     return value
 
 
-def _merge_manager(current: Any, value: Any) -> dict[str, str] | None:
+def _merge_manager(
+    current: Any, value: Any, dropped: list[str]
+) -> dict[str, str] | None:
     """``manager`` is complex: an object sets only the sub-attributes it names
     and leaves the others unchanged (RFC 7644 §3.5.2.3), so a readOnly or
     unknown key never clears a stored reference. POST and PUT parse into an
-    empty result, where this is a whole replacement."""
+    empty result, where this is a whole replacement. A stored manager that is
+    not an object was not written here; it counts as absent rather than
+    failing every request that touches it."""
     if value is None:
         return None
     if isinstance(value, str):
@@ -270,13 +310,14 @@ def _merge_manager(current: Any, value: Any) -> dict[str, str] | None:
         raise ScimValidationError(
             "Enterprise attribute 'manager' must be an object with 'value' and/or '$ref'"
         )
-    manager = dict(cast(dict[str, str], current or {}))
+    manager = dict(cast(dict[str, str], current)) if isinstance(current, dict) else {}
     for key, item in cast(dict[str, Any], value).items():
         folded = key.casefold()
         if folded in _MANAGER_READ_ONLY:
             continue
         sub = _MANAGER_SUB_ATTRIBUTES.get(folded)
         if sub is None:
+            dropped.append(f"{MANAGER}.{key}")
             continue
         normalised = _normalise_string(f"manager.{sub}", item)
         if normalised is None:
@@ -292,12 +333,9 @@ def _check_object_bounds(attributes: dict[str, Any]) -> None:
             f"'{SCIM_ENTERPRISE_USER_URN}' has more than "
             f"{SCIM_EXTENSION_MAX_ATTRIBUTES} attributes"
         )
-    try:
-        size = len(json.dumps(attributes, ensure_ascii=False).encode("utf-8"))
-    except (TypeError, ValueError) as exc:
-        raise ScimValidationError(
-            f"'{SCIM_ENTERPRISE_USER_URN}' is not valid JSON"
-        ) from exc
+    # The object was decoded from JSON, so it always re-serialises. Unknown
+    # attributes count: they are dropped, but only after this bound.
+    size = len(json.dumps(attributes, ensure_ascii=False).encode("utf-8"))
     if size > SCIM_EXTENSION_MAX_BYTES:
         raise ScimValidationError(
             f"'{SCIM_ENTERPRISE_USER_URN}' exceeds {SCIM_EXTENSION_MAX_BYTES} bytes"
