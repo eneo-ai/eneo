@@ -1498,12 +1498,18 @@ async def test_mark_plan_applied_terminalizes_an_expired_send_turn(
 
 @pytest.mark.integration
 @pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("error_field", "error_value"),
+    [("code", "unknown_stored_error"), ("schema_version", 3), ("schema_version", 2)],
+)
 async def test_ai_builder_repo_list_sessions_with_draft_titles_reads_title_and_nulls_in_recency_order(
     client,
     bearer_token,
     completion_model_factory,
     db_container,
     admin_user,
+    error_field,
+    error_value,
 ):
     space_id = await _create_space_with_planner_model(
         client=client,
@@ -1535,10 +1541,23 @@ async def test_ai_builder_repo_list_sessions_with_draft_titles_reads_title_and_n
 
     async with db_container() as container:
         now = datetime.now(timezone.utc)
+        stored_error = build_ai_builder_error(
+            message="Stored planner context failure.",
+            code=AIBuilderErrorCode.PLANNER_CONTEXT_LIMIT_EXCEEDED,
+        ).model_dump(mode="json")
+        stored_error[error_field] = error_value
         await container.session().execute(
             update(BuilderSessions)
             .where(BuilderSessions.id == session_id)
-            .values(updated_at=now - timedelta(minutes=2))
+            .values(
+                updated_at=now - timedelta(minutes=2),
+                latest_turn_id=uuid4(),
+                latest_turn_request_fingerprint="a" * 64,
+                latest_turn_request_jsonb={},
+                latest_turn_state=BuilderTurnState.COMMITTED.value,
+                latest_turn_message_id=uuid4(),
+                latest_turn_error_jsonb=stored_error,
+            )
         )
         await container.session().execute(
             update(BuilderSessions)
@@ -1598,6 +1617,22 @@ async def test_ai_builder_repo_list_sessions_with_draft_titles_reads_title_and_n
         (session_id, "Testplan"),
     ]
     assert drafts_elsewhere == []
+
+    response = await client.get(
+        "/api/v1/flows/ai-builder/sessions",
+        headers={"Authorization": f"Bearer {bearer_token}"},
+    )
+    assert response.status_code == 200, response.text
+    assert [item["session_id"] for item in response.json()["sessions"]] == [
+        str(empty_session_id),
+        str(planless_session_id),
+        str(session_id),
+    ]
+    assert [item["status"] for item in response.json()["sessions"]] == [
+        SessionStatus.CHATTING.value,
+        SessionStatus.CHATTING.value,
+        SessionStatus.AWAITING_APPROVAL.value,
+    ]
 
 
 @pytest.mark.integration
