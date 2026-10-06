@@ -2593,6 +2593,7 @@ class BuilderClientErrors(BasePublic):
     # Referential cleanup is the schema (session, then tenant cascade);
     # time-based retention is the daily data-retention worker's TTL step.
     __table_args__ = (
+        sa.Index("ix_builder_client_errors_created_id", "created_at", "id"),
         ForeignKeyConstraint(
             ["session_id", "tenant_id"],
             ["builder_sessions.id", "builder_sessions.tenant_id"],

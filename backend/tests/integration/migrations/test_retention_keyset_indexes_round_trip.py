@@ -20,11 +20,13 @@ from alembic.config import Config
 from eneo.database.tables.app_table import AppRuns
 from eneo.database.tables.assistant_table import Assistants
 from eneo.database.tables.flow_tables import (
+    BuilderClientErrors,
     FlowLiveTranscripts,
     FlowRunAuditOutbox,
     FlowRuns,
 )
 from eneo.database.tables.questions_table import Questions
+from eneo.database.tables.sessions_table import Sessions
 
 pytestmark = [pytest.mark.integration, pytest.mark.migration_isolation]
 
@@ -37,14 +39,45 @@ _REVISIONS = [
                 "ix_questions_retention_owner_created_id": Questions,
                 "ix_app_runs_retention_owner_created_id": AppRuns,
             },
+            {
+                "ix_questions_assistant_created": (
+                    Questions,
+                    ("assistant_id", "created_at"),
+                ),
+                "idx_questions_assistant_created": (
+                    Questions,
+                    ("assistant_id", "created_at"),
+                ),
+                "ix_app_runs_app_created": (AppRuns, ("app_id", "created_at")),
+            },
         ),
         id="conversation-full-keyset",
+    ),
+    pytest.param(
+        (
+            "202610061200",
+            "202610061600",
+            {
+                "ix_sessions_created_id": Sessions,
+                "ix_builder_client_errors_created_id": BuilderClientErrors,
+            },
+            {
+                "created_at_idx": (Sessions, ("created_at",)),
+                "idx_sessions_created_at": (Sessions, ("created_at",)),
+                "ix_builder_client_errors_created_at": (
+                    BuilderClientErrors,
+                    ("created_at",),
+                ),
+            },
+        ),
+        id="session-client-error-full-keyset",
     ),
     pytest.param(
         (
             "202610051010",
             "202610051020",
             {"ix_flow_runs_retention_receipt": FlowRuns},
+            {},
         ),
         id="run-receipt-reference",
     ),
@@ -56,6 +89,7 @@ _REVISIONS = [
                 "ix_flow_live_transcripts_unbound_created": FlowLiveTranscripts,
                 "ix_flow_run_audit_outbox_delivered": FlowRunAuditOutbox,
             },
+            {},
         ),
         id="flow-housekeeping",
     ),
@@ -64,6 +98,7 @@ _REVISIONS = [
             "202610041300",
             "202610060100",
             {"ix_assistants_flow_managed_created_at_id": Assistants},
+            {},
         ),
         id="managed-assistants",
     ),
@@ -94,7 +129,7 @@ def _connect(settings):
 
 @pytest.fixture(params=_REVISIONS)
 def migration_db(test_settings, request):
-    pre_revision, revision, indexes = request.param
+    pre_revision, revision, indexes, replaced = request.param
     backend_dir = Path(__file__).parent.parent.parent.parent
     cfg = Config(str(backend_dir / "alembic.ini"))
     cfg.set_main_option("sqlalchemy.url", test_settings.sync_database_url)
@@ -102,7 +137,7 @@ def migration_db(test_settings, request):
     conn = _connect(test_settings)
     engine = sa.create_engine(test_settings.sync_database_url)
     try:
-        yield conn, cfg, engine, pre_revision, revision, indexes
+        yield conn, cfg, engine, pre_revision, revision, indexes, replaced
     finally:
         command.upgrade(cfg, "head")
         engine.dispose()
@@ -145,22 +180,7 @@ def _shape(engine, name: str, indexes) -> tuple[object, ...]:
 def test_upgrade_builds_the_declared_indexes_and_downgrade_removes_them(
     migration_db,
 ):
-    conn, cfg, engine, pre_revision, revision, indexes = migration_db
-    replaced = (
-        {
-            "ix_questions_assistant_created": (
-                Questions,
-                ("assistant_id", "created_at"),
-            ),
-            "idx_questions_assistant_created": (
-                Questions,
-                ("assistant_id", "created_at"),
-            ),
-            "ix_app_runs_app_created": (AppRuns, ("app_id", "created_at")),
-        }
-        if revision == "202610061200"
-        else {}
-    )
+    conn, cfg, engine, pre_revision, revision, indexes, replaced = migration_db
 
     assert _state(conn, indexes) == dict.fromkeys(indexes, True)
     assert _state(conn, replaced) == {}
@@ -188,7 +208,7 @@ def test_upgrade_builds_the_declared_indexes_and_downgrade_removes_them(
 def test_a_build_failed_behind_an_old_snapshot_is_replaced_on_rerun(
     migration_db, test_settings
 ):
-    conn, cfg, _, pre_revision, revision, indexes = migration_db
+    conn, cfg, _, pre_revision, revision, indexes, _ = migration_db
     command.downgrade(cfg, pre_revision)
     # An old snapshot (a long report, an idle transaction) makes the concurrent
     # build wait; the revision's 5 s lock timeout then aborts it.
