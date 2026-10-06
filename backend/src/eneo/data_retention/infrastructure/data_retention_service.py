@@ -6,8 +6,12 @@ from uuid import UUID
 
 import sqlalchemy as sa
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.sql.elements import ColumnElement
 
 from eneo.data_retention.constants import ORPHANED_SESSION_CLEANUP_DAYS
+from eneo.data_retention.infrastructure.conversation_retention_policy import (
+    conversation_retention_policy,
+)
 from eneo.data_retention.infrastructure.retention_lock import (
     RetentionSubject,
     acquire_shared,
@@ -65,44 +69,11 @@ class DataRetentionService:
         super().__init__()
         self.session = session
 
-    def _build_effective_retention_days(
-        self,
-        entity_retention_col: Any,
-        space_retention_col: Any = Spaces.data_retention_days,
-    ) -> Any:
-        """
-        Build COALESCE expression for hierarchical retention policy.
-
-        The hierarchy is:
-        1. Entity-level retention (Assistant/App specific)
-        2. Space-level retention
-        3. Tenant-level retention (if enabled)
-        4. NULL (keep forever)
-
-        Args:
-            entity_retention_col: Column for entity-level retention (e.g., Assistants.data_retention_days)
-            space_retention_col: Column for space-level retention (default: Spaces.data_retention_days)
-
-        Returns:
-            SQLAlchemy COALESCE expression
-        """
-        return sa.func.coalesce(
-            entity_retention_col,
-            space_retention_col,
-            sa.case(
-                (
-                    AuditRetentionPolicy.conversation_retention_enabled.is_(True),
-                    AuditRetentionPolicy.conversation_retention_days,
-                ),
-                else_=None,
-            ),
-        )
-
     async def _delete_old_records(
         self,
         record_table: type,
         entity_table: type,
-        entity_retention_col: Any,
+        entity_retention_col: ColumnElement[int | None],
         entity_fk_col: Any,
         record_fk_col: Any,
         record_type: str,
@@ -128,9 +99,9 @@ class DataRetentionService:
         )
 
         # Build effective retention days using hierarchy
-        effective_retention_days = self._build_effective_retention_days(
+        effective_retention_days = conversation_retention_policy(
             entity_retention_col
-        )
+        ).days
 
         # Build base subquery to identify records to delete (will be limited per batch)
         base_subquery = cast(
@@ -204,7 +175,7 @@ class DataRetentionService:
         return await self._delete_old_records(
             record_table=Questions,
             entity_table=Assistants,
-            entity_retention_col=Assistants.data_retention_days,
+            entity_retention_col=Assistants.data_retention_days.expression,
             entity_fk_col=Assistants.space_id,
             record_fk_col=Questions.assistant_id,
             record_type="questions",
@@ -224,7 +195,7 @@ class DataRetentionService:
         return await self._delete_old_records(
             record_table=AppRuns,
             entity_table=Apps,
-            entity_retention_col=Apps.data_retention_days,
+            entity_retention_col=Apps.data_retention_days.expression,
             entity_fk_col=Apps.space_id,
             record_fk_col=AppRuns.app_id,
             record_type="app runs",

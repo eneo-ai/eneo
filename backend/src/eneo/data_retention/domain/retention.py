@@ -225,6 +225,12 @@ class RetentionPolicySource(StrEnum):
     FLOW = "flow"
 
 
+class ConversationPolicySource(StrEnum):
+    OWN = "own"
+    SPACE = "space"
+    ORGANIZATION = "organization"
+
+
 class RetentionTrigger(StrEnum):
     SCHEDULED = "scheduled"
     EXPLICIT = "explicit"

@@ -3,18 +3,21 @@
 from __future__ import annotations
 
 from collections.abc import Collection
-from typing import Any
 from uuid import UUID
 
 import sqlalchemy as sa
 from sqlalchemy.dialects import postgresql
+from sqlalchemy.sql import SQLColumnExpression
 
 from eneo.data_retention.constants import DEFAULT_AUDIT_RETENTION_DAYS
 from eneo.database.tables.audit_retention_policy_table import AuditRetentionPolicy
 from eneo.database.tables.tenant_table import Tenants
 
 
-def uuid_in(column: Any, values: Collection[UUID]) -> sa.ColumnElement[bool]:
+def uuid_in(
+    column: SQLColumnExpression[UUID] | SQLColumnExpression[UUID | None],
+    values: Collection[UUID],
+) -> sa.ColumnElement[bool]:
     """`column = ANY(:ids)` with one array bind, whatever the number of ids."""
     return column == sa.any_(
         sa.literal(list(values), type_=postgresql.ARRAY(postgresql.UUID(as_uuid=True)))

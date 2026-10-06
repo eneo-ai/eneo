@@ -26,17 +26,17 @@ worker = Worker()
 
 
 def retention_runner(
-    *, session: AsyncSession, container: Container, settings: Settings
+    *,
+    session: AsyncSession,
+    container: Container,
+    settings: Settings,
+    budget: RetentionBudget,
 ) -> RetentionRunner:
     return RetentionRunner(
         session=session,
         job_runs=RetentionJobRunRepository(session),
         audit_service=container.audit_service(),
-        budget=RetentionBudget(
-            rows=settings.gallring_max_rows_per_run,
-            files=settings.gallring_max_files_per_run,
-            seconds=settings.gallring_max_seconds_per_run,
-        ),
+        budget=budget,
         limits=RetentionChunkLimits(
             rows=settings.gallring_chunk_rows,
             statement_timeout_ms=settings.gallring_chunk_statement_timeout_ms,
@@ -58,11 +58,14 @@ async def run_retention(container: Container) -> list[RetentionRunReport]:
     """Run each enabled task once; each task commits chunk by chunk."""
     settings = get_settings()
     session = cast(AsyncSession, container.session())
-    runner = retention_runner(session=session, container=container, settings=settings)
     reports: list[RetentionRunReport] = []
     for registration in RETENTION_TASKS:
+        budget = registration.budget(settings)
+        runner = retention_runner(
+            session=session, container=container, settings=settings, budget=budget
+        )
         if registration.enabled(settings):
-            report = await runner.run(registration.build(session))
+            report = await runner.run(registration.build(session, budget))
         else:
             report = await runner.skip(registration.name)
         logger.info(

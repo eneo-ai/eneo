@@ -100,6 +100,11 @@ class RetentionUnitUsage:
     disposition: RetentionUnitDisposition = RetentionUnitDisposition.DONE
 
 
+def retention_unit_allowance(maximum: int, chunk: int, *, fresh: bool) -> int:
+    """An atomic first unit can use the batch; later units share the chunk."""
+    return maximum if fresh else min(maximum, chunk)
+
+
 async def gather_retention_units(
     next_candidate: Callable[
         [RetentionKeyset | None], Awaitable[RetentionUnitCandidate | None]
@@ -126,8 +131,8 @@ async def gather_retention_units(
     started = clock()
     while True:
         fresh = rows == 0 and files == 0
-        row_limit = max_rows if fresh else min(max_rows, chunk_rows)
-        file_limit = max_files if fresh else min(max_files, chunk_rows)
+        row_limit = retention_unit_allowance(max_rows, chunk_rows, fresh=fresh)
+        file_limit = retention_unit_allowance(max_files, chunk_rows, fresh=fresh)
         if row_limit - rows < min_candidate_rows:
             return out.result(
                 rows=rows,

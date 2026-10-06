@@ -8,6 +8,7 @@ from dataclasses import dataclass
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from eneo.data_retention.application.retention_runner import RetentionTask
+from eneo.data_retention.domain.retention import RetentionBudget
 from eneo.flows.application.flow_housekeeping_task import (
     FLOWS_HOUSEKEEPING_TASK,
     FlowHousekeepingTask,
@@ -23,7 +24,17 @@ from eneo.main.config import Settings
 class RetentionTaskRegistration:
     name: str
     enabled: Callable[[Settings], bool]
-    build: Callable[[AsyncSession], RetentionTask]
+    build: Callable[[AsyncSession, RetentionBudget], RetentionTask]
+    budget_rows: Callable[[Settings], int] = (
+        lambda settings: settings.gallring_max_rows_per_run
+    )
+
+    def budget(self, settings: Settings) -> RetentionBudget:
+        return RetentionBudget(
+            rows=self.budget_rows(settings),
+            files=settings.gallring_max_files_per_run,
+            seconds=settings.gallring_max_seconds_per_run,
+        )
 
 
 # The registered tasks, in run order. Registering flows.history is what makes
@@ -32,12 +43,12 @@ RETENTION_TASKS: tuple[RetentionTaskRegistration, ...] = (
     RetentionTaskRegistration(
         name=FLOWS_HOUSEKEEPING_TASK,
         enabled=lambda settings: settings.gallring_flows_housekeeping_enabled,
-        build=FlowHousekeepingTask,
+        build=lambda session, _budget: FlowHousekeepingTask(session),
     ),
     RetentionTaskRegistration(
         name=FLOWS_HISTORY_TASK,
         enabled=lambda settings: settings.retention_flows_history_enabled,
-        build=FlowRunHistoryRetentionTask,
+        build=lambda session, _budget: FlowRunHistoryRetentionTask(session),
     ),
 )
 

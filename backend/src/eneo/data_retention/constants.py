@@ -9,9 +9,20 @@ DEFAULT_CONVERSATION_RETENTION_DAYS = 90  # Default for conversation data
 # Session cleanup
 ORPHANED_SESSION_CLEANUP_DAYS = 1  # Delete sessions without questions after 1 day
 
+# One selected root and one aggregate cascade-proof row, before deletion.
+CONVERSATION_UNIT_OVERHEAD_ROWS = 2
+
 # Recommended minimum retention for compliance
 RECOMMENDED_MIN_AUDIT_DAYS = 90
 RECOMMENDED_MIN_CONVERSATION_DAYS = 30
+
+
+def validate_conversation_unit_budget(*, unit_rows: int, execution_rows: int) -> None:
+    if unit_rows + CONVERSATION_UNIT_OVERHEAD_ROWS > execution_rows:
+        raise ValueError(
+            "RETENTION_CHATS_MAX_UNIT_ROWS plus discovery/proof rows must not "
+            "exceed the resolved conversation execution row budget."
+        )
 
 
 def validate_retention_days(days: int, context: str = "retention") -> int:

@@ -17,6 +17,7 @@ from pydantic import (
 )
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
+from eneo.data_retention.constants import validate_conversation_unit_budget
 from eneo.main.removed_env import UPGRADE_GUIDE_URL, check_removed_variables
 from eneo.object_content.configuration import DEFAULT_FILE_UPLOAD_LIMIT_BYTES
 
@@ -373,6 +374,10 @@ class Settings(BaseSettings):
     # years, so every cutoff stays a valid timestamp.
     flow_retention_max_days: int = Field(default=36_500, ge=1, le=36_500)
     gallring_max_rows_per_run: int = Field(default=50_000, gt=0)
+    retention_chats_max_rows_per_run: int = Field(default=250_000, gt=0)
+    # A complete conversation cascade plus its bounded discovery/proof fits
+    # an execution; oversized roots remain intact.
+    retention_chats_max_unit_rows: int = Field(default=5000, gt=0)
     gallring_max_files_per_run: int = Field(default=10_000, gt=0)
     gallring_max_seconds_per_run: int = Field(default=1800, gt=0)
     gallring_chunk_rows: int = Field(default=500, gt=0, le=2000)
@@ -751,8 +756,8 @@ class Settings(BaseSettings):
         return v
 
     @model_validator(mode="after")
-    def validate_gallring_family_cap(self):
-        """A family within the cap must always fit one execution's whole budget."""
+    def validate_retention_unit_budgets(self):
+        """An admitted atomic unit must fit with its discovery and proof work."""
         if self.gallring_max_family_rows > min(
             self.gallring_max_rows_per_run, self.gallring_max_files_per_run
         ):
@@ -760,6 +765,10 @@ class Settings(BaseSettings):
                 "GALLRING_MAX_FAMILY_ROWS must not exceed GALLRING_MAX_ROWS_PER_RUN "
                 "or GALLRING_MAX_FILES_PER_RUN."
             )
+        validate_conversation_unit_budget(
+            unit_rows=self.retention_chats_max_unit_rows,
+            execution_rows=self.retention_chats_max_rows_per_run,
+        )
         return self
 
     @model_validator(mode="after")

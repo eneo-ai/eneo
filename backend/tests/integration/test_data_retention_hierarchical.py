@@ -9,28 +9,57 @@ Tests cover:
 
 from __future__ import annotations
 
+from collections.abc import Sequence
 from datetime import datetime, timedelta, timezone
-from uuid import uuid4
+from uuid import UUID, uuid4
 
 import pytest
-from sqlalchemy import select, update
+from sqlalchemy import select, text, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from eneo.data_retention.application.conversation_retention import (
+    ConversationDeletion,
+    conversation_page_allocation,
+    run_conversation_page,
+)
+from eneo.data_retention.application.retention_runner import (
+    RetentionBatch,
+    RetentionStep,
+    RetentionStepResult,
+)
+from eneo.data_retention.domain.retention import (
+    ConversationPolicySource,
+    RetentionJobOutcome,
+)
+from eneo.data_retention.infrastructure.conversation_retention_repo import (
+    ConversationRetentionRepository,
+    ConversationRootKind,
+)
 from eneo.data_retention.infrastructure.data_retention_service import (
     DataRetentionService,
 )
-from eneo.database.tables.app_table import AppRuns, Apps
+from eneo.database.database import sessionmanager
+from eneo.database.tables.app_table import AppRuns, AppRunsFiles, Apps
 from eneo.database.tables.assistant_table import Assistants
+from eneo.database.tables.audit_log_table import AuditLog
 from eneo.database.tables.audit_retention_policy_table import AuditRetentionPolicy
+from eneo.database.tables.files_table import Files
 from eneo.database.tables.flow_tables import (
     FlowRuns,
     Flows,
     FlowVersions,
 )
-from eneo.database.tables.questions_table import Questions
+from eneo.database.tables.info_blobs_table import InfoBlobs
+from eneo.database.tables.mcp_tool_references_table import McpToolReference
+from eneo.database.tables.questions_table import (
+    InfoBlobReferences,
+    Questions,
+    QuestionsFiles,
+)
 from eneo.database.tables.sessions_table import Sessions
 from eneo.database.tables.spaces_table import Spaces
 from eneo.database.tables.tenant_table import Tenants
+from tests.integration.data_retention.test_gallring_runner import _runner, _Task
 from tests.integration.flows.flow_run_deletion_support import due_run_ids
 
 
@@ -57,15 +86,22 @@ async def test_space(async_session: AsyncSession, test_tenant, admin_user) -> Sp
 
 
 @pytest.fixture
+async def retention_completion_model(
+    async_session: AsyncSession, completion_model_factory
+):
+    return await completion_model_factory(async_session, "gpt-4")
+
+
+@pytest.fixture
 async def test_assistant(
     async_session: AsyncSession,
     test_space,
     test_tenant,
     admin_user,
-    completion_model_factory,
+    retention_completion_model,
 ) -> Assistants:
     """Create a test assistant with no retention policy."""
-    completion_model = await completion_model_factory(async_session, "gpt-4")
+    completion_model = retention_completion_model
 
     assistant = Assistants(
         name="Test Assistant for Retention",
@@ -90,10 +126,10 @@ async def test_app(
     test_space,
     test_tenant,
     admin_user,
-    completion_model_factory,
+    retention_completion_model,
 ) -> Apps:
     """Create a test app with no retention policy."""
-    completion_model = await completion_model_factory(async_session, "gpt-4")
+    completion_model = retention_completion_model
 
     app = Apps(
         name="Test App for Retention",
@@ -894,3 +930,678 @@ async def test_tenant_enabled_but_days_null_keeps_forever(
     assert exists is not None, (
         "Question should be kept when tenant has enabled=True but days=NULL"
     )
+
+
+async def create_conversation_root(
+    session: AsyncSession,
+    owner: Assistants | Apps,
+    tenant_id: UUID,
+    user_id: UUID,
+    *,
+    days_old: int,
+) -> Questions | AppRuns:
+    if isinstance(owner, Assistants):
+        return await create_old_question(
+            session, owner.id, tenant_id, user_id, days_old
+        )
+    return await create_old_app_run(
+        session, owner.id, tenant_id, user_id, owner.completion_model_id, days_old
+    )
+
+
+async def add_conversation_files(
+    session: AsyncSession,
+    root: Questions | AppRuns,
+    user_id: UUID,
+    count: int,
+) -> set[UUID]:
+    files = [
+        Files(
+            name=f"retained-{index}.txt",
+            tenant_id=root.tenant_id,
+            owner_type="user",
+            owner_user_id=user_id,
+        )
+        for index in range(count)
+    ]
+    session.add_all(files)
+    await session.flush()
+    for file in files:
+        reference = (
+            QuestionsFiles(question_id=root.id, file_id=file.id, type="input")
+            if isinstance(root, Questions)
+            else AppRunsFiles(app_run_id=root.id, file_id=file.id)
+        )
+        session.add(reference)
+    await session.flush()
+    return {file.id for file in files}
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("kind", list(ConversationRootKind))
+async def test_oversized_conversation_keeps_its_children_and_allows_later_roots(
+    async_session: AsyncSession,
+    test_assistant,
+    test_app,
+    test_tenant,
+    admin_user,
+    kind: ConversationRootKind,
+):
+    """Kills G1b-C02/C03: omit cascade cost, or stop at an oversized root."""
+    owner = test_assistant if kind is ConversationRootKind.QUESTION else test_app
+    owner.data_retention_days = 30
+    oversized = await create_conversation_root(
+        async_session, owner, test_tenant.id, admin_user.id, days_old=60
+    )
+    small = await create_conversation_root(
+        async_session, owner, test_tenant.id, admin_user.id, days_old=50
+    )
+    file_ids = await add_conversation_files(async_session, oversized, admin_user.id, 5)
+    file_ids |= await add_conversation_files(async_session, small, admin_user.id, 1)
+    repository = ConversationRetentionRepository(
+        async_session, kind=kind, now=datetime.now(timezone.utc)
+    )
+    allocation = conversation_page_allocation(
+        unit_rows=4, chunk_rows=12, execution_rows=50
+    )
+    result = await run_conversation_page(
+        repository,
+        RetentionBatch(
+            job_run_id=uuid4(), batch_seq=0, rows=allocation.max_batch, files=0
+        ),
+        allocation,
+    )
+    remaining = set((await async_session.scalars(select(type(oversized).id))).all())
+    assert oversized.id in remaining and small.id not in remaining
+    references = (
+        QuestionsFiles if kind is ConversationRootKind.QUESTION else AppRunsFiles
+    )
+    assert len((await async_session.scalars(select(references.file_id))).all()) == 5
+    assert (
+        set(
+            (
+                await async_session.scalars(
+                    select(Files.id).where(Files.id.in_(file_ids))
+                )
+            ).all()
+        )
+        == file_ids
+    )
+    assert result.rows == 6  # Two discovery/proof pairs, one root, one child.
+    assert result.blocked == {"unit_exceeds_budget": 1}
+    assert result.cursor is not None and result.cursor.id == small.id
+    assert result.exhausted and not result.deferred
+    assert len(result.effects) == 1
+    assert result.effects[0].tenant_id == test_tenant.id
+    assert result.effects[0].counts == {"conversations_deleted": 1, "by_own_rule": 1}
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("kind", list(ConversationRootKind))
+@pytest.mark.parametrize(
+    "completed_prefix,unit_rows,chunk_rows,remaining_rows",
+    [
+        (False, 4, 12, 5),
+        (True, 7, 6, 11),
+    ],
+    ids=["execution-remainder", "chunk-remainder"],
+)
+async def test_conversation_remainder_preserves_next_root_for_a_fresh_call(
+    async_session: AsyncSession,
+    test_assistant,
+    test_app,
+    test_tenant,
+    admin_user,
+    kind: ConversationRootKind,
+    completed_prefix: bool,
+    unit_rows: int,
+    chunk_rows: int,
+    remaining_rows: int,
+):
+    """Kills G1b-C04/C05: skip a no-fit root, or enlarge every unit's allowance."""
+    owner = test_assistant if kind is ConversationRootKind.QUESTION else test_app
+    owner.data_retention_days = 30
+    first = (
+        await create_conversation_root(
+            async_session, owner, test_tenant.id, admin_user.id, days_old=60
+        )
+        if completed_prefix
+        else None
+    )
+    next_root = await create_conversation_root(
+        async_session, owner, test_tenant.id, admin_user.id, days_old=50
+    )
+    await add_conversation_files(async_session, next_root, admin_user.id, 3)
+    repository = ConversationRetentionRepository(
+        async_session, kind=kind, now=datetime.now(timezone.utc)
+    )
+    allocation = conversation_page_allocation(
+        unit_rows=unit_rows, chunk_rows=chunk_rows, execution_rows=50
+    )
+    partial = await run_conversation_page(
+        repository,
+        RetentionBatch(job_run_id=uuid4(), batch_seq=0, rows=remaining_rows, files=0),
+        allocation,
+    )
+    remaining = set((await async_session.scalars(select(type(next_root).id))).all())
+    assert next_root.id in remaining
+    assert not partial.blocked and not partial.exhausted
+    assert partial.deferred is not completed_prefix
+    if first is None:
+        assert partial.rows == 0 and partial.cursor is None and not partial.effects
+    else:
+        assert first.id not in remaining and partial.rows == 5
+        assert partial.cursor is not None and partial.cursor.id == first.id
+        assert partial.effects[0].counts == {
+            "conversations_deleted": 1,
+            "by_own_rule": 1,
+        }
+    resumed = await run_conversation_page(
+        repository,
+        RetentionBatch(
+            job_run_id=uuid4(),
+            batch_seq=1,
+            rows=allocation.max_batch,
+            files=0,
+            cursor=partial.cursor,
+        ),
+        allocation,
+    )
+    assert (
+        next_root.id
+        not in (await async_session.scalars(select(type(next_root).id))).all()
+    )
+    assert resumed.rows == 6 and not resumed.deferred
+    assert resumed.effects[0].counts == {"conversations_deleted": 1, "by_own_rule": 1}
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("kind", list(ConversationRootKind))
+@pytest.mark.parametrize(
+    "own_days,space_days,organization_days,expected_source",
+    [
+        (None, None, None, None),
+        (90, None, None, None),
+        (None, 10, None, ConversationPolicySource.SPACE),
+        (None, None, 10, ConversationPolicySource.ORGANIZATION),
+    ],
+)
+async def test_conversation_delete_rechecks_policy_and_audits_its_current_source(
+    async_session: AsyncSession,
+    test_assistant,
+    test_app,
+    test_space,
+    test_tenant,
+    admin_user,
+    kind: ConversationRootKind,
+    own_days: int | None,
+    space_days: int | None,
+    organization_days: int | None,
+    expected_source: ConversationPolicySource | None,
+):
+    """Kills G1b-C06/C07: delete from stale eligibility or audit its old rule."""
+    owner = test_assistant if kind is ConversationRootKind.QUESTION else test_app
+    owner.data_retention_days = 30
+    root = await create_conversation_root(
+        async_session, owner, test_tenant.id, admin_user.id, days_old=60
+    )
+    repository = ConversationRetentionRepository(
+        async_session, kind=kind, now=datetime.now(timezone.utc)
+    )
+    selected = await repository.lock_due_page(None, 1)
+    assert [row.id for row in selected.roots] == [root.id]
+    assert list(selected.locked_ids) == [root.id]
+    assert await repository.cascade_costs([root.id], 4) == {root.id: 0}
+    owner.data_retention_days = own_days
+    test_space.data_retention_days = space_days
+    if organization_days is not None:
+        async_session.add(
+            AuditRetentionPolicy(
+                tenant_id=test_tenant.id,
+                retention_days=365,
+                conversation_retention_enabled=True,
+                conversation_retention_days=organization_days,
+            )
+        )
+    await async_session.flush()
+    deleted = await repository.delete_due_prefix([root.id])
+    exists = root.id in (await async_session.scalars(select(type(root).id))).all()
+    if expected_source is None:
+        assert deleted == () and exists
+    else:
+        assert len(deleted) == 1 and not exists
+        assert deleted[0].tenant_id == test_tenant.id
+        assert deleted[0].source is expected_source
+
+
+@pytest.mark.asyncio
+async def test_question_budget_counts_all_three_cascading_reference_stores(
+    async_session: AsyncSession,
+    test_assistant,
+    test_tenant,
+    admin_user,
+):
+    """Kills G1b-C08: omit a reference store from the cascade proof."""
+    test_assistant.data_retention_days = 30
+    root = await create_old_question(
+        async_session, test_assistant.id, test_tenant.id, admin_user.id, days_old=60
+    )
+    files = await add_conversation_files(async_session, root, admin_user.id, 1)
+    blob = InfoBlobs(
+        text="independent knowledge",
+        size=21,
+        source_id=uuid4(),
+        version_state="active",
+        user_id=admin_user.id,
+        tenant_id=test_tenant.id,
+    )
+    async_session.add(blob)
+    await async_session.flush()
+    async_session.add_all(
+        [
+            InfoBlobReferences(question_id=root.id, info_blob_id=blob.id),
+            McpToolReference(question_id=root.id, uri="test://independent-reference"),
+        ]
+    )
+    await async_session.flush()
+    repository = ConversationRetentionRepository(
+        async_session,
+        kind=ConversationRootKind.QUESTION,
+        now=datetime.now(timezone.utc),
+    )
+    allocation = conversation_page_allocation(
+        unit_rows=3, chunk_rows=12, execution_rows=50
+    )
+    refused = await run_conversation_page(
+        repository,
+        RetentionBatch(
+            job_run_id=uuid4(), batch_seq=0, rows=allocation.max_batch, files=0
+        ),
+        allocation,
+    )
+    assert refused.blocked == {"unit_exceeds_budget": 1} and not refused.effects
+    assert root.id in (await async_session.scalars(select(Questions.id))).all()
+    allocation = conversation_page_allocation(
+        unit_rows=4, chunk_rows=12, execution_rows=50
+    )
+    deleted = await run_conversation_page(
+        repository,
+        RetentionBatch(
+            job_run_id=uuid4(), batch_seq=0, rows=allocation.max_batch, files=0
+        ),
+        allocation,
+    )
+    assert deleted.rows == 6 and deleted.effects[0].counts["conversations_deleted"] == 1
+    assert root.id not in (await async_session.scalars(select(Questions.id))).all()
+    assert not (await async_session.scalars(select(QuestionsFiles.question_id))).all()
+    assert not (
+        await async_session.scalars(select(InfoBlobReferences.question_id))
+    ).all()
+    assert not (await async_session.scalars(select(McpToolReference.question_id))).all()
+    assert blob.id in (await async_session.scalars(select(InfoBlobs.id))).all()
+    assert files <= set((await async_session.scalars(select(Files.id))).all())
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("kind", list(ConversationRootKind))
+@pytest.mark.parametrize("competing_write", ["root_lock", "child_insert"])
+async def test_conversation_page_skips_roots_with_competing_writers(
+    async_session: AsyncSession,
+    test_assistant,
+    test_app,
+    test_tenant,
+    admin_user,
+    kind: ConversationRootKind,
+    competing_write: str,
+):
+    """Kills G1b-C09: remove SKIP LOCKED or weaken the FK-conflicting root lock."""
+    owner = test_assistant if kind is ConversationRootKind.QUESTION else test_app
+    owner.data_retention_days = 30
+    root = await create_conversation_root(
+        async_session, owner, test_tenant.id, admin_user.id, days_old=60
+    )
+    next_root = await create_conversation_root(
+        async_session, owner, test_tenant.id, admin_user.id, days_old=59
+    )
+    file = Files(
+        name="concurrent.txt",
+        tenant_id=test_tenant.id,
+        owner_type="user",
+        owner_user_id=admin_user.id,
+    )
+    async_session.add(file)
+    await async_session.flush()
+    root_id, file_id, next_id = root.id, file.id, next_root.id
+    records = type(root)
+    await async_session.commit()
+    async with (
+        sessionmanager.session() as writer,
+        writer.begin(),
+        sessionmanager.session() as worker,
+        worker.begin(),
+    ):
+        if competing_write == "root_lock":
+            await writer.execute(
+                select(records.id).where(records.id == root_id).with_for_update()
+            )
+        else:
+            reference = (
+                QuestionsFiles(question_id=root_id, file_id=file_id, type="input")
+                if kind is ConversationRootKind.QUESTION
+                else AppRunsFiles(app_run_id=root_id, file_id=file_id)
+            )
+            writer.add(reference)
+            await writer.flush()
+        await worker.execute(text("SET LOCAL lock_timeout = '250ms'"))
+        repository = ConversationRetentionRepository(
+            worker, kind=kind, now=datetime.now(timezone.utc)
+        )
+        allocation = conversation_page_allocation(
+            unit_rows=4, chunk_rows=12, execution_rows=50
+        )
+        batch = RetentionBatch(job_run_id=uuid4(), batch_seq=0, rows=6, files=0)
+        skipped = await run_conversation_page(repository, batch, allocation)
+        assert not skipped.exhausted and skipped.rows == 1 and not skipped.effects
+        assert skipped.blocked == {"root_locked": 1}
+        assert skipped.cursor is not None and skipped.cursor.id == root_id
+        assert root_id in (await worker.scalars(select(records.id))).all()
+        following = await run_conversation_page(
+            repository,
+            RetentionBatch(
+                job_run_id=batch.job_run_id,
+                batch_seq=1,
+                rows=6,
+                files=0,
+                cursor=skipped.cursor,
+            ),
+            allocation,
+        )
+        assert following.effects[0].counts["conversations_deleted"] == 1
+        assert next_id not in (await worker.scalars(select(records.id))).all()
+        await writer.rollback()
+        resumed = await run_conversation_page(repository, batch, allocation)
+        assert resumed.effects[0].counts["conversations_deleted"] == 1
+        assert root_id not in (await worker.scalars(select(records.id))).all()
+        assert file_id in (await worker.scalars(select(Files.id))).all()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("kind", list(ConversationRootKind))
+async def test_conversation_page_failure_rolls_back_roots_and_their_cascades(
+    async_session: AsyncSession,
+    test_assistant,
+    test_app,
+    test_tenant,
+    admin_user,
+    kind: ConversationRootKind,
+):
+    """Kills G1b-C10: commit deletion separately from its enclosing transaction."""
+    owner = test_assistant if kind is ConversationRootKind.QUESTION else test_app
+    owner.data_retention_days = 30
+    root = await create_conversation_root(
+        async_session, owner, test_tenant.id, admin_user.id, days_old=60
+    )
+    files = await add_conversation_files(async_session, root, admin_user.id, 3)
+    root_id, records = root.id, type(root)
+    await async_session.commit()
+    with pytest.raises(RuntimeError, match="required audit failed"):
+        async with sessionmanager.session() as worker, worker.begin():
+            repository = ConversationRetentionRepository(
+                worker, kind=kind, now=datetime.now(timezone.utc)
+            )
+            allocation = conversation_page_allocation(
+                unit_rows=4, chunk_rows=12, execution_rows=50
+            )
+            deleted = await run_conversation_page(
+                repository,
+                RetentionBatch(
+                    job_run_id=uuid4(), batch_seq=0, rows=allocation.max_batch, files=0
+                ),
+                allocation,
+            )
+            assert deleted.effects[0].counts["conversations_deleted"] == 1
+            raise RuntimeError("required audit failed")
+    async with sessionmanager.session() as verifier, verifier.begin():
+        assert root_id in (await verifier.scalars(select(records.id))).all()
+        references = (
+            QuestionsFiles if kind is ConversationRootKind.QUESTION else AppRunsFiles
+        )
+        assert files <= set((await verifier.scalars(select(references.file_id))).all())
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("kind", list(ConversationRootKind))
+async def test_conversation_cursor_reaches_older_roots_of_the_next_owner(
+    async_session: AsyncSession,
+    test_assistant,
+    test_app,
+    test_tenant,
+    admin_user,
+    assistant_factory,
+    app_factory,
+    kind: ConversationRootKind,
+):
+    """Kills G1b-C11: apply the timestamp cursor across different owners."""
+    owner = test_assistant if kind is ConversationRootKind.QUESTION else test_app
+    owner.data_retention_days = 30
+    factory = (
+        assistant_factory if kind is ConversationRootKind.QUESTION else app_factory
+    )
+    other = await factory(
+        async_session,
+        "Other retention owner",
+        owner.completion_model_id,
+        space_id=owner.space_id,
+        data_retention_days=30,
+    )
+    owners = sorted([owner, other], key=lambda row: row.id)
+    first = await create_conversation_root(
+        async_session, owners[0], test_tenant.id, admin_user.id, days_old=50
+    )
+    second = await create_conversation_root(
+        async_session, owners[1], test_tenant.id, admin_user.id, days_old=80
+    )
+    repository = ConversationRetentionRepository(
+        async_session, kind=kind, now=datetime.now(timezone.utc)
+    )
+    allocation = conversation_page_allocation(
+        unit_rows=3, chunk_rows=3, execution_rows=50
+    )
+    initial = await run_conversation_page(
+        repository,
+        RetentionBatch(
+            job_run_id=uuid4(), batch_seq=0, rows=allocation.max_batch, files=0
+        ),
+        allocation,
+    )
+    remaining = set((await async_session.scalars(select(type(first).id))).all())
+    assert first.id not in remaining and second.id in remaining
+    assert initial.cursor is not None and initial.cursor.group == owners[0].id
+    following = await run_conversation_page(
+        repository,
+        RetentionBatch(
+            job_run_id=uuid4(),
+            batch_seq=1,
+            rows=allocation.max_batch,
+            files=0,
+            cursor=initial.cursor,
+        ),
+        allocation,
+    )
+    assert second.id not in (await async_session.scalars(select(type(first).id))).all()
+    assert following.effects[0].counts == {"conversations_deleted": 1, "by_own_rule": 1}
+    assert following.cursor is not None and following.cursor.group == owners[1].id
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("kind", list(ConversationRootKind))
+async def test_conversation_cutoff_keeps_equal_and_newer_roots(
+    async_session: AsyncSession,
+    test_assistant,
+    test_app,
+    test_tenant,
+    admin_user,
+    kind: ConversationRootKind,
+):
+    """Kills G1b-C12: make the strict retention cutoff inclusive."""
+    owner = test_assistant if kind is ConversationRootKind.QUESTION else test_app
+    owner.data_retention_days = 30
+    now = datetime.now(timezone.utc)
+    roots = []
+    for delta in [-1, 0, 1]:
+        root = await create_conversation_root(
+            async_session, owner, test_tenant.id, admin_user.id, days_old=30
+        )
+        root.created_at = now - timedelta(days=30) + timedelta(microseconds=delta)
+        roots.append(root)
+    await async_session.flush()
+    repository = ConversationRetentionRepository(async_session, kind=kind, now=now)
+    allocation = conversation_page_allocation(
+        unit_rows=4, chunk_rows=12, execution_rows=50
+    )
+    result = await run_conversation_page(
+        repository,
+        RetentionBatch(
+            job_run_id=uuid4(), batch_seq=0, rows=allocation.max_batch, files=0
+        ),
+        allocation,
+    )
+    remaining = set((await async_session.scalars(select(type(roots[0]).id))).all())
+    assert roots[0].id not in remaining
+    assert {root.id for root in roots[1:]} <= remaining
+    assert result.effects[0].counts == {"conversations_deleted": 1, "by_own_rule": 1}
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("kind", list(ConversationRootKind))
+async def test_conversation_run_defers_its_tail_without_one_root_transactions(
+    async_session: AsyncSession,
+    test_assistant,
+    test_app,
+    test_tenant,
+    admin_user,
+    kind: ConversationRootKind,
+):
+    """Kills G1b-C13: shrink the remaining run budget into one-root pages."""
+    owner = test_assistant if kind is ConversationRootKind.QUESTION else test_app
+    owner.data_retention_days = 30
+    roots = [
+        await create_conversation_root(
+            async_session, owner, test_tenant.id, admin_user.id, days_old=60 - index
+        )
+        for index in range(10)
+    ]
+    allocation = conversation_page_allocation(
+        unit_rows=4, chunk_rows=6, execution_rows=23
+    )
+    repository = ConversationRetentionRepository(
+        async_session, kind=kind, now=datetime.now(timezone.utc)
+    )
+    remaining, cursor, charged_pages = 23, None, 0
+    for sequence in range(10):
+        result = await run_conversation_page(
+            repository,
+            RetentionBatch(
+                job_run_id=uuid4(),
+                batch_seq=sequence,
+                rows=min(remaining, allocation.max_batch),
+                files=0,
+                cursor=cursor,
+            ),
+            allocation,
+        )
+        remaining -= result.rows
+        cursor = result.cursor
+        charged_pages += bool(result.rows)
+        if result.deferred or result.exhausted:
+            break
+    assert charged_pages == 3 and remaining == 5
+    assert result.deferred and result.rows == 0 and not result.effects
+    assert cursor is not None and cursor.id == roots[5].id
+    assert set((await async_session.scalars(select(type(roots[0]).id))).all()) == {
+        root.id for root in roots[6:]
+    }
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("kind", list(ConversationRootKind))
+async def test_fresh_policy_refusal_keeps_the_root_and_audits_proof_work(
+    async_session: AsyncSession,
+    test_assistant,
+    test_app,
+    test_tenant,
+    admin_user,
+    kind: ConversationRootKind,
+):
+    """Kills G1b-C14: charge discovery/proof without an audited fresh refusal."""
+    owner = test_assistant if kind is ConversationRootKind.QUESTION else test_app
+    owner.data_retention_days = 30
+    root = await create_conversation_root(
+        async_session, owner, test_tenant.id, admin_user.id, days_old=60
+    )
+    root_id, owner_id, owner_type, record_type = (
+        root.id,
+        owner.id,
+        type(owner),
+        type(root),
+    )
+    await async_session.commit()
+
+    class PolicyChangingRepository(ConversationRetentionRepository):
+        async def delete_due_prefix(
+            self, ids: Sequence[UUID]
+        ) -> Sequence[ConversationDeletion]:
+            await self.session.execute(
+                update(owner_type)
+                .where(owner_type.id == owner_id)
+                .values(data_retention_days=90)
+            )
+            return await super().delete_due_prefix(ids)
+
+    async with sessionmanager.session() as session:
+        repository = PolicyChangingRepository(
+            session, kind=kind, now=datetime.now(timezone.utc)
+        )
+        allocation = conversation_page_allocation(
+            unit_rows=4, chunk_rows=12, execution_rows=50
+        )
+
+        async def page(batch: RetentionBatch) -> RetentionStepResult:
+            return await run_conversation_page(repository, batch, allocation)
+
+        task = _Task(
+            (
+                RetentionStep(
+                    "roots", page, max_batch=allocation.max_batch, max_files=0
+                ),
+            ),
+            count_keys=frozenset(
+                {
+                    "conversations_deleted",
+                    "by_own_rule",
+                    "by_space_rule",
+                    "by_organization_rule",
+                }
+            ),
+            blocked_keys=frozenset({"unit_exceeds_budget", "no_longer_due"}),
+            name="tests.conversation_fresh",
+        )
+        report = await _runner(session, budget_rows=50, chunk_rows=12).run(task)
+    assert report.outcome is RetentionJobOutcome.SUCCEEDED
+    assert report.blocked == {"roots.no_longer_due": 1}
+    assert not report.counts
+    async with sessionmanager.session() as verifier, verifier.begin():
+        assert await verifier.get(record_type, root_id) is not None
+        events = list(
+            (
+                await verifier.scalars(
+                    select(AuditLog).where(
+                        AuditLog.log_metadata["job_run_id"].astext
+                        == str(report.job_run_id)
+                    )
+                )
+            ).all()
+        )
+        assert len(events) == 1
+        assert events[0].log_metadata["blocked"] == {"no_longer_due": 1}
+        assert events[0].log_metadata["counts"] == {}
