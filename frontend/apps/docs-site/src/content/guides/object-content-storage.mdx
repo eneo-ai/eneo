@@ -214,9 +214,7 @@ File families and managed bytes per organization without deleting anything:
 docker compose exec worker python -m eneo.files.unused_file_cleanup preview
 ```
 
-`run` performs the same cleanup immediately. Set
-`UNUSED_FILE_CLEANUP_ENABLED=false` in `env_backend.env` to pause the daily
-cleanup; deleting a conversation or App run still deletes its unused Files.
+`run` performs the same cleanup immediately.
 
 ## Choose the right deployment
 
