@@ -1815,7 +1815,26 @@ def test_evidence_export_reports_the_lineage_of_an_unrecognised_input_source_as_
     ]
 
 
-def test_render_evidence_json_export_adds_manifest_and_summary() -> None:
+@pytest.mark.parametrize(
+    ("input_payload", "expected_masked_path"),
+    [
+        (
+            {"authorization": "Bearer secret-token"},
+            "bundle.run.input_payload_json.authorization",
+        ),
+        (
+            {
+                "contact.authorization": "Bearer first-dummy-token",
+                "contact": {"authorization": "Bearer second-dummy-token"},
+            },
+            "bundle.run.input_payload_json.contact.authorization",
+        ),
+    ],
+    ids=["authorization", "colliding-paths"],
+)
+def test_render_evidence_json_export_adds_manifest_and_summary(
+    input_payload, expected_masked_path
+) -> None:
     now = datetime.now(timezone.utc)
     run = FlowRun(
         id=uuid4(),
@@ -1827,7 +1846,7 @@ def test_render_evidence_json_export_adds_manifest_and_summary() -> None:
         trace_id=uuid4(),
         status=FlowRunStatus.COMPLETED,
         cancelled_at=None,
-        input_payload_json={"authorization": "Bearer secret-token"},
+        input_payload_json=input_payload,
         output_payload_json={"text": "done"},
         job_id=None,
         created_at=now,
@@ -1906,6 +1925,10 @@ def test_render_evidence_json_export_adds_manifest_and_summary() -> None:
         export["manifest"]["masked_fields_count"]
         == export["redaction"]["masked_fields_count"]
     )
+    assert (
+        export["bundle"]["debug_export"]["security"]["masked_fields_count"]
+        == export["manifest"]["masked_fields_count"]
+    )
     assert export["manifest"]["retention_state_summary"] == {
         "tracking_state": "not_tracked",
         "note": (
@@ -1949,10 +1972,7 @@ def test_render_evidence_json_export_adds_manifest_and_summary() -> None:
     assert export["redaction"]["applied"] is True
     assert export["redaction"]["policy_version"] == "flow-evidence-redaction.v3"
     assert export["redaction"]["masked_fields_count"] >= 1
-    assert (
-        "bundle.run.input_payload_json.authorization"
-        in export["redaction"]["masked_paths"]
-    )
+    assert export["redaction"]["masked_paths"] == [expected_masked_path]
     assert export["redaction"]["masked_fields"][0]["reason"] in {
         "sensitive_key",
         "bearer_token",

@@ -434,15 +434,18 @@ def redact_evidence_bundle(bundle: EvidenceBundle) -> RedactedEvidenceBundle:
     )
     masked_paths.extend(knowledge_result.masked_paths)
     masked_fields.extend(knowledge_result.masked_fields)
-    security = debug_export.get("security")
-    if isinstance(security, dict):
-        security["redaction_applied"] = True
-        security["masked_fields_count"] = len(
+    unique_masked_paths = tuple(
+        dict.fromkeys(
             tuple(run_result.masked_paths)
             + tuple(definition_result.masked_paths)
             + tuple(masked_paths)
             + tuple(debug_result.masked_paths)
         )
+    )
+    security = debug_export.get("security")
+    if isinstance(security, dict):
+        security["redaction_applied"] = True
+        security["masked_fields_count"] = len(unique_masked_paths)
     return RedactedEvidenceBundle(
         run=cast(
             dict[str, Any],
@@ -467,14 +470,7 @@ def redact_evidence_bundle(bundle: EvidenceBundle) -> RedactedEvidenceBundle:
         knowledge_traces=tuple(
             StepKnowledgeTrace.model_validate(trace) for trace in knowledge_result.value
         ),
-        masked_paths=tuple(
-            dict.fromkeys(
-                tuple(run_result.masked_paths)
-                + tuple(definition_result.masked_paths)
-                + tuple(masked_paths)
-                + tuple(debug_result.masked_paths)
-            )
-        ),
+        masked_paths=unique_masked_paths,
         masked_fields=tuple(
             dict.fromkeys(
                 tuple(run_result.masked_fields)
