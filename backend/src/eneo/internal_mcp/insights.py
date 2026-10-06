@@ -81,8 +81,8 @@ mcp = FastMCP(
         "Analysis tools over the conversations users had with one Eneo "
         "assistant or group chat. Scope is fixed by the access token; tools "
         "take no target id. Always call a tool before answering, page through "
-        "truncated output before summarising, and cite conversations by "
-        "session id."
+        "truncated output as far as the answer needs and say how much was "
+        "read, and cite conversations by session id."
     ),
 )
 
