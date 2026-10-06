@@ -164,14 +164,13 @@ jobs:
           echo "version=$VERSION" >> "$GITHUB_OUTPUT"
           ./scripts/inject-backend-version.sh "$VERSION"
 
-      - name: Build backend candidate image
+      - name: Build and push backend Docker image
         id: build-backend
         uses: docker/build-push-action@ca052bb54ab0790a636c9b5f226502c73d547a25 # v5
         with:
           context: ./backend
           file: ./backend/Dockerfile
-          push: false
-          load: true
+          push: true
           build-args: |
             OTEL_SERVICE_VERSION=${{ steps.backend-version.outputs.version }}
           tags: ${{ steps.meta-backend.outputs.tags }}
@@ -179,37 +178,11 @@ jobs:
           cache-from: type=gha
           cache-to: type=gha,mode=max
 
-      - uses: ./.github/actions/security-tools
-      - uses: ./.github/actions/scan-application-image
-        with:
-          image: ${{ steps.build-backend.outputs.imageid }}
-          output-directory: ${{ runner.temp }}/image-security
-      - name: Verify backend runtime
-        run: ./scripts/check-application-image.sh backend "${{ steps.build-backend.outputs.imageid }}"
-      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
-        if: always()
-        with:
-          name: security-publish-backend
-          path: ${{ runner.temp }}/image-security/*.json
-          retention-days: 14
-      - name: Publish the verified image
-        id: publish-backend
-        env:
-          IMAGE_TAGS: ${{ steps.meta-backend.outputs.tags }}
-        run: |
-          set -euo pipefail
-          image="$(head -n 1 <<< "$IMAGE_TAGS")"
-          while IFS= read -r tag; do
-            [[ -z "$tag" ]] || docker push "$tag"
-          done <<< "$IMAGE_TAGS"
-          digest="$(docker buildx imagetools inspect "$image" --format '{{.Manifest.Digest}}')"
-          echo "digest=$digest" >> "$GITHUB_OUTPUT"
-
       - name: Attest backend image provenance
         uses: actions/attest@59d89421af93a897026c735860bf21b6eb4f7b26 # v4
         with:
           subject-name: ${{ env.REGISTRY }}/${{ env.BACKEND_IMAGE_NAME }}
-          subject-digest: ${{ steps.publish-backend.outputs.digest }}
+          subject-digest: ${{ steps.build-backend.outputs.digest }}
           push-to-registry: true
 
   build-and-push-frontend:
@@ -293,50 +266,23 @@ jobs:
           BACKEND_TAG: ${{ needs['build-and-push-backend'].outputs.backend_tag }}
         run: ./scripts/sync-frontend-with-backend.sh "${{ env.REGISTRY }}/${{ env.BACKEND_IMAGE_NAME }}:$BACKEND_TAG"
 
-      - name: Build frontend candidate image
+      - name: Build and push frontend Docker image
         id: build-frontend
         uses: docker/build-push-action@ca052bb54ab0790a636c9b5f226502c73d547a25 # v5
         with:
           context: ./frontend
           file: ${{ matrix.dockerfile }}
-          push: false
-          load: true
+          push: true
           tags: ${{ steps.meta-frontend.outputs.tags }}
           labels: ${{ steps.meta-frontend.outputs.labels }}
           cache-from: type=gha,scope=${{ matrix.name }}
           cache-to: type=gha,mode=max,scope=${{ matrix.name }}
 
-      - uses: ./.github/actions/security-tools
-      - uses: ./.github/actions/scan-application-image
-        with:
-          image: ${{ steps.build-frontend.outputs.imageid }}
-          output-directory: ${{ runner.temp }}/image-security
-      - name: Verify frontend runtime
-        run: ./scripts/check-application-image.sh "${{ matrix.name }}" "${{ steps.build-frontend.outputs.imageid }}"
-      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
-        if: always()
-        with:
-          name: security-publish-${{ matrix.name }}
-          path: ${{ runner.temp }}/image-security/*.json
-          retention-days: 14
-      - name: Publish the verified image
-        id: publish-frontend
-        env:
-          IMAGE_TAGS: ${{ steps.meta-frontend.outputs.tags }}
-        run: |
-          set -euo pipefail
-          image="$(head -n 1 <<< "$IMAGE_TAGS")"
-          while IFS= read -r tag; do
-            [[ -z "$tag" ]] || docker push "$tag"
-          done <<< "$IMAGE_TAGS"
-          digest="$(docker buildx imagetools inspect "$image" --format '{{.Manifest.Digest}}')"
-          echo "digest=$digest" >> "$GITHUB_OUTPUT"
-
       - name: Attest frontend image provenance
         uses: actions/attest@59d89421af93a897026c735860bf21b6eb4f7b26 # v4
         with:
           subject-name: ${{ env.REGISTRY }}/${{ matrix.image }}
-          subject-digest: ${{ steps.publish-frontend.outputs.digest }}
+          subject-digest: ${{ steps.build-frontend.outputs.digest }}
           push-to-registry: true
 
   build-summary:

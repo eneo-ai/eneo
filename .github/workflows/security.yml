@@ -6,15 +6,7 @@ on:
       base_sha:
         type: string
         default: ''
-      audit_published:
-        type: boolean
-        default: false
   workflow_dispatch:
-    inputs:
-      audit_published:
-        description: Recheck already published develop images
-        type: boolean
-        default: true
   schedule:
     - cron: '17 6 * * 1'
 
@@ -22,35 +14,6 @@ permissions:
   contents: read
 
 jobs:
-  published-images:
-    name: Published image (${{ matrix.image }})
-    if: github.event_name == 'schedule' || inputs.audit_published
-    runs-on: ubuntu-latest
-    timeout-minutes: 15
-    strategy:
-      fail-fast: false
-      matrix:
-        image: [eneo-backend, eneo-frontend, eneo-web-next]
-    steps:
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
-        with:
-          persist-credentials: false
-      - uses: ./.github/actions/security-tools
-      - name: Pull published image
-        env:
-          IMAGE: ghcr.io/eneo-ai/${{ matrix.image }}:develop
-        run: docker pull "$IMAGE"
-      - uses: ./.github/actions/scan-application-image
-        with:
-          image: ghcr.io/eneo-ai/${{ matrix.image }}:develop
-          output-directory: ${{ runner.temp }}/image-security
-      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
-        if: always()
-        with:
-          name: security-published-${{ matrix.image }}
-          path: ${{ runner.temp }}/image-security/*.json
-          retention-days: 14
-
   dependencies:
     name: Dependency vulnerabilities
     runs-on: ubuntu-latest

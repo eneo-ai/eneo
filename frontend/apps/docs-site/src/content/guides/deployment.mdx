@@ -1323,7 +1323,7 @@ the shared database simply to turn off the beta; a backend rollback is a separat
 operation that requires a tested migration/restore plan and preserved user data.
 
 Before release, require the normal CI/E2E checks, source/dependency/secret scans
-and scans of the exact built application images. Review the temporary dependency
+and the deployment's application-image security checks. Review the temporary dependency
 mitigation in `frontend/patches/SECURITY.md`. Scanner success alone does not prove
 that authentication, tenant separation or accessibility is correct in the actual
 deployment; complete the staging checks with the configured providers.

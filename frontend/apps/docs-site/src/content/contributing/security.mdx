@@ -28,18 +28,11 @@ Ruff currently checks `backend/src/eneo`. Tests and Alembic are not part of the 
 
 When this check fails, update the dependency to a safe version, remove it, or document why the vulnerable code is not reachable. Do not dismiss the warning just to make the PR green.
 
-### Source, dependency, secret and container scanning
+### Source, dependency and secret scanning
 
 The reusable `Security` workflow is part of the CI aggregate. It runs a complete
 lockfile audit, Semgrep's security-audit and GitHub Actions rules, and Gitleaks on
-added Git history. Application Docker candidates are scanned by Trivy and Grype;
-unfixed HIGH/CRITICAL findings block publication too. Grype supplements Wolfi's
-distribution feed with upstream NVD/CPE matches. Both reports are retained as
-artifacts, and the weekly workflow rescans published develop images.
-Runtime checks exercise actual audio decoding and MP3 segmentation, native
-libraries, startup dispatch, SBOM tooling, frontend health and Next image
-optimization before publication. The runtime/update policy is maintained in
-`docs/SECURITY.md`; Docker Dependabot updates include both frontends.
+added Git history.
 Temporary dependency mitigations require a documented owner, targeted tests and
 an expiry; see `frontend/patches/SECURITY.md`.
 

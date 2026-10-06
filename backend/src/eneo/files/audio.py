@@ -1,19 +1,28 @@
 # MIT License
 
 import asyncio
-import math
 import tempfile
-from collections.abc import AsyncGenerator
+import wave
+from collections.abc import AsyncGenerator, Generator
 from contextlib import asynccontextmanager
 from pathlib import Path
-from typing import Literal
+from typing import IO
+
+import audioread
+import numpy as np
+import soundfile as sf
+from soundfile import SoundFile
 
 from eneo.files.text import MimeTypesBase
+from eneo.main.logging import get_logger
 
-# FFmpeg owns both decoding and encoding. Keep native codec updates in the
-# runtime package inventory instead of a second, wheel-bundled libsndfile.
-_CONVERSION_TIMEOUT_SECONDS = 300
-_INPUT_FORMATS = "mov,mp3,wav,ogg,matroska,webm"
+logger = get_logger(__name__)
+
+FRAMES = 32768  # Number of frames in one mebibyte
+
+# Concrete numpy array type used throughout this module.
+# soundfile.blocks() yields float64 arrays; we use this alias for clarity.
+_FloatArray = np.ndarray[tuple[int, ...], np.dtype[np.float64]]
 
 
 # TODO: When we support video, remove the video mimetypes
@@ -29,125 +38,111 @@ class AudioMimeTypes(MimeTypesBase):
     MP4A = "audio/mp4"
 
 
-async def _run_codec(
-    executable: Literal["ffmpeg", "ffprobe"], *arguments: str
-) -> bytes:
-    process = await asyncio.create_subprocess_exec(
-        executable,
-        *(["-nostdin"] if executable == "ffmpeg" else []),
-        "-hide_banner",
-        "-loglevel",
-        "error",
-        "-threads",
-        "1",
-        *arguments,
-        stdin=asyncio.subprocess.DEVNULL,
-        # Only ffprobe's single duration value uses stdout; encoders write files.
-        stdout=asyncio.subprocess.PIPE,
-        # Media metadata and decoder messages can contain uploaded content.
-        stderr=asyncio.subprocess.DEVNULL,
-    )
-    try:
-        async with asyncio.timeout(_CONVERSION_TIMEOUT_SECONDS):
-            stdout, _ = await process.communicate()
-        if process.returncode:
-            raise ValueError("Audio conversion failed: invalid or unsupported audio")
-        return stdout
-    finally:
-        # Reap the decoder before deleting its files, also on cancellation or
-        # timeout. A cancelled upload must not leave a converter running.
-        if process.returncode is None:
-            process.kill()
-            await process.wait()
+def _to_wav(filepath: str) -> IO[bytes]:
+    logger.debug(f"Converting {filepath} to wav")
+
+    with audioread.audio_open(filepath) as f:  # pyright: ignore[reportUnknownMemberType, reportUnknownVariableType]  # audioread lacks stubs
+        # audioread has no type stubs; cast via int()/bytes() to give pyright concrete types
+        # pyright: ignore[reportUnknownMemberType, reportUnknownVariableType] — audioread lacks stubs
+        samplerate = int(f.samplerate)  # pyright: ignore[reportUnknownMemberType, reportUnknownArgumentType]  # audioread lacks stubs
+        channels = int(f.channels)  # pyright: ignore[reportUnknownMemberType, reportUnknownArgumentType]  # audioread lacks stubs
+        tmp_file = tempfile.NamedTemporaryFile(suffix=".wav")
+        with wave.open(tmp_file, "w") as of:
+            of.setframerate(samplerate)
+            of.setnchannels(channels)
+            of.setsampwidth(2)
+
+            for buf in f:  # pyright: ignore[reportUnknownVariableType]  # audioread yields bytes at runtime
+                buf_bytes: bytes = bytes(buf)  # pyright: ignore[reportUnknownArgumentType]  # audioread yields bytes at runtime
+                of.writeframes(buf_bytes)
+
+    return tmp_file
 
 
 @asynccontextmanager
 async def to_wav(filepath: str) -> AsyncGenerator["AudioFile"]:
-    with tempfile.TemporaryDirectory(prefix="eneo-audio-") as directory:
-        output = Path(directory) / "decoded.wav"
-        await _run_codec(
-            "ffmpeg",
-            # An upload is a local media file, never a playlist or network URL.
-            "-protocol_whitelist",
-            "file",
-            "-format_whitelist",
-            _INPUT_FORMATS,
-            "-i",
-            str(Path(filepath).resolve()),
-            "-map",
-            "0:a:0",
-            "-vn",
-            "-sn",
-            "-dn",
-            "-map_metadata",
-            "-1",
-            "-c:a",
-            "pcm_s16le",
-            str(output),
-        )
-        # Python 3.11's wave reader cannot read WAVE_FORMAT_EXTENSIBLE (valid
-        # high-rate/multichannel PCM). Use the same codec owner for its metadata.
-        duration = float(
-            await _run_codec(
-                "ffprobe",
-                "-protocol_whitelist",
-                "file",
-                "-f",
-                "wav",
-                "-show_entries",
-                "format=duration",
-                "-of",
-                "default=noprint_wrappers=1:nokey=1",
-                str(output),
-            )
-        )
-        if not math.isfinite(duration) or duration <= 0:
-            raise ValueError("Audio contains no samples")
-        yield AudioFile(str(output), duration)
+    tmp_file = await asyncio.to_thread(_to_wav, filepath)
+
+    try:
+        yield AudioFile(tmp_file.name)
+    finally:
+        tmp_file.close()
 
 
 class AudioFile:
-    """Decoded PCM WAV owned by ``to_wav`` for one transcription."""
-
-    def __init__(self, path_to_file: str, duration: float):
+    def __init__(self, path_to_file: str):
+        super().__init__()
         self.path = Path(path_to_file)
-        self._duration = duration
+        # sf.info() returns _SoundFileInfo which lacks annotations; we store it
+        # and access .samplerate/.channels as int at call sites with explicit casts.
+        self._info = sf.info(path_to_file)  # pyright: ignore[reportUnknownMemberType]  # soundfile lacks stubs for info()
+        self._samplerate: int = self._info.samplerate  # pyright: ignore[reportUnknownMemberType, reportUnknownVariableType]  # soundfile lacks stubs
+        self._channels: int = self._info.channels  # pyright: ignore[reportUnknownMemberType, reportUnknownVariableType]  # soundfile lacks stubs
+        self._duration: float = float(self._info.duration)  # pyright: ignore[reportUnknownMemberType, reportUnknownArgumentType]  # soundfile lacks stubs
 
     @property
     def duration(self) -> float:
+        """Total duration of the audio file in seconds."""
         return self._duration
+
+    def _gen_file(self) -> Generator[_FloatArray, None, None]:
+        # sf.blocks() yields ndarray[Any, dtype[float64]]; the cast is safe.
+        for block in sf.blocks(self.path, blocksize=FRAMES):  # pyright: ignore[reportUnknownMemberType, reportUnknownVariableType]  # soundfile lacks stubs
+            yield block  # pyright: ignore[reportUnknownVariableType]  # soundfile lacks stubs
+
+    def _write_to_file(
+        self, gen: Generator[_FloatArray, None, None], max_size: int
+    ) -> tuple[IO[bytes], bool]:
+        frames_in_file = 0
+        temp_file = tempfile.NamedTemporaryFile(suffix=".mp3")
+        soundfile = SoundFile(
+            temp_file,
+            mode="w",
+            samplerate=self._samplerate,
+            channels=1,
+            format="mp3",
+        )
+        for block in gen:  # pyright: ignore[reportUnknownVariableType]  # _gen_file yield is partially unknown due to soundfile stubs
+            if self._channels == 2:
+                # Make mono by averaging the two channels
+                data: _FloatArray = np.sum(block, axis=1) / 2  # pyright: ignore[reportUnknownArgumentType]  # block type from soundfile lacks stubs
+            else:
+                data = block  # pyright: ignore[reportUnknownVariableType]  # soundfile stubs propagate unknown
+
+            frames_in_file += len(data)
+            soundfile.write(data)  # pyright: ignore[reportUnknownMemberType]  # soundfile lacks stubs
+            soundfile.flush()  # pyright: ignore[reportUnknownMemberType]  # soundfile lacks stubs
+
+            if frames_in_file > max_size:
+                return temp_file, False
+
+        return temp_file, True
+
+    def _split_file(self, seconds: int) -> list[IO[bytes]]:
+        max_size = self._samplerate * seconds
+        temp_files: list[IO[bytes]] = []
+        gen = self._gen_file()
+        done = False
+        while not done:
+            file, done = self._write_to_file(gen, max_size)
+            temp_files.append(file)
+
+        return temp_files
 
     @asynccontextmanager
     async def asplit_file(self, seconds: int) -> AsyncGenerator[list[Path]]:
-        if seconds <= 0:
-            raise ValueError("Audio segment duration must be positive")
-        with tempfile.TemporaryDirectory(prefix="eneo-audio-segments-") as directory:
-            await _run_codec(
-                "ffmpeg",
-                "-protocol_whitelist",
-                "file",
-                "-f",
-                "wav",
-                "-i",
-                str(self.path.resolve()),
-                "-map",
-                "0:a:0",
-                "-ac",
-                "1",
-                "-c:a",
-                "libmp3lame",
-                "-f",
-                "segment",
-                "-segment_time",
-                str(seconds),
-                "-reset_timestamps",
-                "1",
-                str(Path(directory) / "%08d.mp3"),
-            )
-            files = sorted(Path(directory).glob("*.mp3"))
-            if not files:
-                raise ValueError("Audio contains no samples")
-            yield files
+        logger.debug("Splitting the file")
+
+        temp_files = await asyncio.to_thread(self._split_file, seconds)
+        filepaths = [Path(f.name) for f in temp_files]
+
+        logger.debug("File was split in %s parts", len(filepaths))
+
+        try:
+            yield filepaths
+        finally:
+            for f in temp_files:
+                f.close()
 
     def delete(self) -> None:
         self.path.unlink()

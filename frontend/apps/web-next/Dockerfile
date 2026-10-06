@@ -13,7 +13,7 @@
 # copied in for install. The version is pinned because a floating `oven/bun:1`
 # drifts ahead of the committed bun.lock (generated with bun@1.3.x, see root
 # package.json "packageManager") and breaks `bun install --frozen-lockfile`.
-FROM node:22-trixie-slim AS builder
+FROM node:22-bookworm-slim AS builder
 COPY --from=oven/bun:1.3.14 /usr/local/bin/bun /usr/local/bin/bun
 WORKDIR /repo
 
@@ -45,24 +45,18 @@ ENV ENEO_BACKEND_URL=http://build.invalid \
 RUN npm run build
 
 # ---- runner -----------------------------------------------------------------
-FROM cgr.dev/chainguard/glibc-dynamic:latest@sha256:82edc253a57efee78d0fb504e11a93b7c74687b1b736110ad3a2a4f3edf632ab AS runner
-# Use the exact Node 22 binary from the builder with maintained glibc/C++
-# libraries. Keep its license and the base's package inventory for SBOM/scans.
-COPY --from=builder /usr/local/bin/node /usr/bin/node
-COPY --from=builder /usr/local/LICENSE /usr/share/licenses/node/LICENSE
-ENTRYPOINT ["/usr/bin/node"]
-
+FROM node:22-bookworm-slim AS runner
 WORKDIR /app
 ENV NODE_ENV=production \
     PORT=3000 \
     HOSTNAME=0.0.0.0
 
 # Standalone output bundles the minimal server + traced node_modules.
-COPY --from=builder --chown=1000:1000 /repo/apps/web-next/.next/standalone ./
-COPY --from=builder --chown=1000:1000 /repo/apps/web-next/.next/static ./apps/web-next/.next/static
-COPY --from=builder --chown=1000:1000 /repo/apps/web-next/public ./apps/web-next/public
+COPY --from=builder --chown=node:node /repo/apps/web-next/.next/standalone ./
+COPY --from=builder --chown=node:node /repo/apps/web-next/.next/static ./apps/web-next/.next/static
+COPY --from=builder --chown=node:node /repo/apps/web-next/public ./apps/web-next/public
 
-USER 1000:1000
+USER node
 EXPOSE 3000
 # Standalone server entrypoint lives at the app's path inside the bundle.
-CMD ["apps/web-next/server.js"]
+CMD ["node", "apps/web-next/server.js"]
