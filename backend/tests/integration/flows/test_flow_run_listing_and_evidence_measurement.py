@@ -33,9 +33,6 @@ import sqlalchemy as sa
 from sqlalchemy.engine import Connection, Engine
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from eneo.data_retention.infrastructure.data_retention_service import (
-    RETENTION_BATCH_SIZE,
-)
 from eneo.database.tables.flow_tables import FlowRuns
 from eneo.files.file_models import FileType
 from eneo.files.file_service import FileService
@@ -930,7 +927,6 @@ async def test_flow_run_listing_and_evidence_measurement_contract(
                 },
             },
             "production_constants": {
-                "retention_batch_size": RETENTION_BATCH_SIZE,
                 "webhook": {
                     "batch_size": FLOW_WEBHOOK_DELIVERY_BATCH_SIZE,
                     "interval_seconds": FLOW_WEBHOOK_DELIVERY_INTERVAL_SECONDS,

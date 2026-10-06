@@ -47,7 +47,6 @@ from eneo.flows.infrastructure.flow_run_retention_policy_query import (
 )
 
 # The status route and nightly snapshot share one result cap.
-FLOW_RUN_HISTORY_OVERDUE_CAP = 1000
 FLOW_RUN_HISTORY_DIAGNOSTIC_WINDOW = 500
 
 FLOW_RUN_RETENTION_ANCHOR: sa.ColumnElement[datetime] = sa.func.coalesce(

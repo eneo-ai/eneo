@@ -405,12 +405,12 @@ async def test_system_user_survives_data_retention_cleanup(db_container, admin_u
     """Cleanup-job survival: the conversation-retention sweep does not touch
     the ``users`` table, so a system user with an old marker stays put.
 
-    Mirrors the parametrized-survival style suggested by step 014, collapsed
-    to a single test because no cron job under ``eneo.worker``,
-    ``eneo.audit``, or ``eneo.data_retention`` modifies user rows today.
+    Kills an accidental users-table cascade in chats.history.
     """
-    from eneo.data_retention.infrastructure.data_retention_service import (
-        DataRetentionService,
+    from eneo.data_retention.domain.retention import RetentionJobOutcome
+    from eneo.database.database import sessionmanager
+    from tests.integration.data_retention.retention_support import (
+        run_conversation_history,
     )
 
     async with db_container() as container:
@@ -429,12 +429,11 @@ async def test_system_user_survives_data_retention_cleanup(db_container, admin_u
         )
         await session.flush()
 
-        retention = DataRetentionService(session)
-        await retention.delete_old_questions()
-        await retention.delete_old_app_runs()
-        await retention.delete_old_sessions()
-
-        assert await _row_exists(session, user_id=system_user_id)
+    async with sessionmanager.session() as worker_session:
+        report = await run_conversation_history(worker_session)
+    assert report.outcome is RetentionJobOutcome.SUCCEEDED
+    async with db_container() as verifier:
+        assert await _row_exists(verifier.session(), user_id=system_user_id)
 
 
 @pytest.mark.asyncio

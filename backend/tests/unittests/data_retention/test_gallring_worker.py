@@ -6,12 +6,20 @@ from typing import Any
 
 import pytest
 
+from eneo.data_retention.application.conversation_history_retention_task import (
+    CONVERSATION_HISTORY_TASK,
+    ConversationHistoryRetentionTask,
+)
 from eneo.data_retention.application.conversation_retention import (
     conversation_page_allocation,
 )
 from eneo.data_retention.application.retention_runner import RetentionRunReport
-from eneo.data_retention.domain.retention import RetentionJobOutcome
+from eneo.data_retention.domain.retention import RetentionBudget, RetentionJobOutcome
 from eneo.data_retention.infrastructure import retention_tasks, retention_worker
+from eneo.flows.application.builder_client_error_retention_task import (
+    BUILDER_CLIENT_ERROR_TASK,
+    BuilderClientErrorRetentionTask,
+)
 from eneo.flows.application.flow_housekeeping_task import (
     FLOWS_HOUSEKEEPING_TASK,
     FlowHousekeepingTask,
@@ -49,31 +57,56 @@ async def test_nightly_run_executes_an_enabled_task_and_records_a_disabled_one(
         update={
             "gallring_flows_housekeeping_enabled": enabled,
             "retention_flows_history_enabled": not enabled,
+            "retention_chats_history_enabled": enabled,
+            "retention_builder_client_errors_enabled": not enabled,
+            "retention_chats_max_unit_rows": 100_001,
         }
     )
     monkeypatch.setattr(retention_worker, "get_settings", lambda: settings)
-    monkeypatch.setattr(retention_worker, "retention_runner", lambda **_: runner)
+    budgets: list[RetentionBudget] = []
+
+    def build_runner(*, session, container, settings, budget: RetentionBudget):
+        budgets.append(budget)
+        return runner
+
+    monkeypatch.setattr(retention_worker, "retention_runner", build_runner)
     container = SimpleNamespace(session=lambda: object())
 
     reports = await inspect.unwrap(retention_worker.run_retention)(container=container)
 
-    [(first, housekeeping), (second, history)] = runner.calls
+    # Kills a global-budget handoff: the chat builder also rejects its smaller cap.
+    assert [budget.rows for budget in budgets] == [50_000, 50_000, 250_000, 50_000]
+    from eneo.worker.arq import WorkerSettings
+
+    # Kills retaining either legacy scheduler beside the shared engine.
+    scheduled = [job.coroutine.__name__ for job in WorkerSettings["cron_jobs"]]
+    assert scheduled.count("run_retention") == 1
+    assert not {"cleanup_old_data", "purge_old_conversations"}.intersection(scheduled)
+
+    assert [report.task for report in reports] == [
+        FLOWS_HOUSEKEEPING_TASK,
+        FLOWS_HISTORY_TASK,
+        CONVERSATION_HISTORY_TASK,
+        BUILDER_CLIENT_ERROR_TASK,
+    ]
+    [(first, housekeeping), (second, history), (third, chats), (fourth, errors)] = (
+        runner.calls
+    )
     if enabled:
         assert first == "run" and isinstance(housekeeping, FlowHousekeepingTask)
         # The emergency switch never stops gallring silently.
         assert (second, history) == ("skip", FLOWS_HISTORY_TASK)
+        assert third == "run" and isinstance(chats, ConversationHistoryRetentionTask)
+        assert (fourth, errors) == ("skip", BUILDER_CLIENT_ERROR_TASK)
     else:
         assert (first, housekeeping) == ("skip", FLOWS_HOUSEKEEPING_TASK)
         assert second == "run" and isinstance(history, FlowRunHistoryRetentionTask)
+        assert (third, chats) == ("skip", CONVERSATION_HISTORY_TASK)
+        assert fourth == "run" and isinstance(errors, BuilderClientErrorRetentionTask)
     # Kills G1b-H01: omit reporting metadata or include a disabled reporter.
     assert retention_tasks.overdue_retention_tasks(settings) == (
-        (FLOWS_HISTORY_TASK,) if not enabled else ()
+        (FLOWS_HISTORY_TASK,) if not enabled else (CONVERSATION_HISTORY_TASK,)
     )
-    # Registration order: staging data first, then run history.
-    assert [report.task for report in reports] == [
-        FLOWS_HOUSEKEEPING_TASK,
-        FLOWS_HISTORY_TASK,
-    ]
 
 
 @pytest.mark.parametrize(("family_rows", "accepted"), [(10_000, True), (10_001, False)])

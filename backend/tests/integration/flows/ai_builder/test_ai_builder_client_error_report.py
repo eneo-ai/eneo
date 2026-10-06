@@ -467,17 +467,27 @@ async def test_report_client_error_rejects_unknown_phase_and_category(
 
 
 @pytest.mark.asyncio
-async def test_expired_client_errors_are_deleted_in_batches(
+async def test_expired_client_errors_are_deleted_through_budgeted_runner_pages(
     client,
     bearer_token: str,
     db_container,
 ) -> None:
+    """Kills client-error 89/91-day cutoffs and a page larger than the chunk budget."""
+    from dependency_injector import providers
     from sqlalchemy import update
 
-    from eneo.data_retention.infrastructure.data_retention_service import (
-        DataRetentionService,
+    from eneo.data_retention.domain.retention import (
+        RetentionBudget,
+        RetentionJobOutcome,
     )
+    from eneo.data_retention.infrastructure.retention_worker import retention_runner
+    from eneo.database.database import sessionmanager
     from eneo.flows.ai_builder.ai_builder_failure_ledger import MAX_WINDOW_DAYS
+    from eneo.flows.application.builder_client_error_retention_task import (
+        BuilderClientErrorRetentionTask,
+    )
+    from eneo.main.config import get_settings
+    from eneo.main.container.container import Container
 
     now = datetime.now(timezone.utc)
     cutoff = now - timedelta(days=MAX_WINDOW_DAYS)
@@ -500,21 +510,34 @@ async def test_expired_client_errors_are_deleted_in_batches(
                 .values(created_at=created_at)
             )
 
+    async with sessionmanager.session() as worker_session:
+        settings = get_settings().model_copy(update={"gallring_chunk_rows": 2})
+        report = await retention_runner(
+            session=worker_session,
+            container=Container(session=providers.Object(worker_session)),
+            settings=settings,
+            budget=RetentionBudget(rows=6, files=1, seconds=600),
+        ).run(BuilderClientErrorRetentionTask(worker_session, now=now))
+    assert report.outcome is RetentionJobOutcome.SUCCEEDED
+    assert report.counts == {"client_errors.client_errors_deleted": 2}
+
     async with db_container() as container:
         session = container.session()
-        service = DataRetentionService(session=session)
-        # limit=1 forces one row per call: proves the batch contract.
-        first = await service.delete_expired_builder_client_errors_batch(
-            now=now, limit=1
-        )
-        second = await service.delete_expired_builder_client_errors_batch(
-            now=now, limit=1
-        )
-        drained = await service.delete_expired_builder_client_errors_batch(
-            now=now, limit=1
-        )
-        assert (first, second, drained) == (1, 1, 0)
-
+        audits = (
+            await session.scalars(
+                select(AuditLogTable)
+                .where(
+                    AuditLogTable.action == ActionType.GALLRING_APPLIED.value,
+                    AuditLogTable.log_metadata["job_run_id"].astext
+                    == str(report.job_run_id),
+                )
+                .order_by(AuditLogTable.log_metadata["batch_seq"].as_integer())
+            )
+        ).all()
+        assert [event.log_metadata["counts"] for event in audits] == [
+            {"client_errors_deleted": 1},
+            {"client_errors_deleted": 1},
+        ]
         remaining = {
             row.code
             for row in (

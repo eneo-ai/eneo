@@ -687,15 +687,16 @@ async def test_the_due_index_serves_the_generic_plan_of_the_prepared_query(
 
 
 @pytest.mark.parametrize(
-    "chat_snapshot,chat_enabled,count,complete,oldest_days,observed_hours,unknown",
+    "flow_snapshot,chat_snapshot,chat_enabled,count,complete,oldest_days,observed_hours,unknown",
     [
-        ((2, 0, True, None), True, 4, True, 3, 2, False),
-        ((2, 6, True, 4), True, 10, True, 4, 2, False),
-        ((2, 6, False, 4), True, 10, False, 4, 2, False),
-        (None, True, None, None, None, 1, True),
-        ((49, 0, True, None), True, None, None, None, 49, True),
-        ((2, 0, False, None), True, None, None, None, 2, True),
-        ((49, 6, True, 4), False, 4, True, 3, 1, False),
+        ((1, 4, True, 3), (2, 0, True, None), True, 4, True, 3, 2, False),
+        ((1, 4, True, 3), (2, 6, True, 4), True, 10, True, 4, 2, False),
+        ((1, 4, True, 3), (2, 6, False, 4), True, 10, False, 4, 2, False),
+        ((1, 4, True, 3), None, True, None, None, None, 1, True),
+        ((1, 4, True, 3), (49, 0, True, None), True, None, None, None, 49, True),
+        ((1, 4, True, 3), (2, 0, False, None), True, None, None, None, 2, True),
+        ((1, 4, True, 3), (49, 6, True, 4), False, 4, True, 3, 1, False),
+        (None, (2, None, None, None), True, None, None, None, None, True),
     ],
     ids=[
         "zero",
@@ -705,10 +706,12 @@ async def test_the_due_index_serves_the_generic_plan_of_the_prepared_query(
         "stale",
         "incomplete-zero",
         "disabled",
+        "only-second-reporter-finished",
     ],
 )
 async def test_health_folds_only_enabled_reporting_tasks(
     db_container,
+    flow_snapshot,
     chat_snapshot,
     chat_enabled,
     count,
@@ -719,7 +722,7 @@ async def test_health_folds_only_enabled_reporting_tasks(
 ):
     """Kills G1b-H02/H03/H04: Flow-only fold, newest observation, missing as zero."""
     now = datetime.now(timezone.utc)
-    records = [(FLOWS_HISTORY_TASK, (1, 4, True, 3))]
+    records = [(FLOWS_HISTORY_TASK, flow_snapshot)] if flow_snapshot is not None else []
     if chat_snapshot is not None:
         records.append(("chats.history", chat_snapshot))
     async with db_container() as container:
@@ -732,7 +735,7 @@ async def test_health_folds_only_enabled_reporting_tasks(
                     started_at=at,
                     heartbeat_at=at,
                     finished_at=at,
-                    overdue_observed_at=at,
+                    overdue_observed_at=at if total is not None else None,
                     overdue_count=total,
                     overdue_complete=covered,
                     overdue_oldest_due_at=now - timedelta(days=days) if days else None,
@@ -764,8 +767,8 @@ async def test_health_folds_only_enabled_reporting_tasks(
         health.gallring.overdue_complete,
         health.gallring.overdue_unknown,
     ) == (count, complete, unknown)
-    assert snapshot.gallring_overdue_observed_at == now - timedelta(
-        hours=observed_hours
+    assert snapshot.gallring_overdue_observed_at == (
+        now - timedelta(hours=observed_hours) if observed_hours is not None else None
     )
     assert snapshot.oldest_gallring_overdue_due_at == (
         now - timedelta(days=oldest_days) if oldest_days else None

@@ -72,9 +72,6 @@ from eneo.completion_models.presentation import CompletionModelAssembler
 from eneo.conversations.application.conversation_service import ConversationService
 from eneo.crawler.destination_policy import DestinationPolicy
 from eneo.crawler.python_engine import PythonCrawlEngine
-from eneo.data_retention.infrastructure.data_retention_service import (
-    DataRetentionService,
-)
 from eneo.database.database import AsyncSession
 from eneo.embedding_models.application.embedding_model_crud_service import (
     EmbeddingModelCRUDService,
@@ -1170,10 +1167,6 @@ class Container(containers.DeclarativeContainer):
         transcription_model_repo=transcription_model_repo,
     )
     auth_service = providers.Factory(AuthService)
-    data_retention_service = providers.Factory(
-        DataRetentionService,
-        session=session,
-    )
     flow_run_audit_outbox_delivery_service = providers.Factory(
         FlowRunAuditOutboxDeliveryService,
         audit_outbox_repo=flow_run_audit_outbox_repo,
@@ -1361,7 +1354,6 @@ class Container(containers.DeclarativeContainer):
         feature_flag_service=feature_flag_service,
         tenant_repo=tenant_repo,
         audit_service=audit_service,
-        data_retention_service=data_retention_service,
         skill_repo=skill_repo,
         upload_admission=upload_admission,
     )

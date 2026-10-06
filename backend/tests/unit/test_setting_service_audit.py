@@ -87,7 +87,6 @@ def _make_service(
         feature_flag_service=feature_flag_service,
         tenant_repo=tenant_repo,
         audit_service=audit_service,
-        data_retention_service=AsyncMock(),
         skill_repo=skill_repo,
     )
 

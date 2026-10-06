@@ -54,10 +54,9 @@ from eneo.flows.application.flow_run_history_deletion import (
 )
 from eneo.flows.domain.flow_run_retention_policy import FLOWS_HISTORY_TASK
 from eneo.flows.infrastructure.flow_run_history_due_repo import (
-    FLOW_RUN_HISTORY_OVERDUE_CAP,
     FlowRunHistoryDueRepository,
 )
-from eneo.main.config import get_settings
+from eneo.main.config import Settings, get_settings
 
 
 def _utcnow() -> datetime:
@@ -74,9 +73,11 @@ class FlowRunHistoryRetentionTask:
         *,
         now: Callable[[], datetime] = _utcnow,
         family_rows: int | None = None,
+        settings: Settings | None = None,
     ) -> None:
         self._now = now
         self._session = session
+        self._settings = settings if settings is not None else get_settings()
         self._deletion = FlowRunHistoryDeletion(session, family_rows=family_rows)
 
     @property
@@ -104,8 +105,8 @@ class FlowRunHistoryRetentionTask:
     async def overdue(self) -> RetentionOverdue:
         overdue = await FlowRunHistoryDueRepository(self._session).overdue(
             now=self._now(),
-            window=timedelta(days=get_settings().gallring_overdue_window_days),
-            cap=FLOW_RUN_HISTORY_OVERDUE_CAP,
+            window=timedelta(days=self._settings.gallring_overdue_window_days),
+            cap=self._settings.retention_overdue_max_rows,
         )
         return RetentionOverdue(
             count=overdue.count,

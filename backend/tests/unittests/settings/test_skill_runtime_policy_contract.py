@@ -55,7 +55,6 @@ def _setting_service() -> SettingService:
         feature_flag_service=MagicMock(),
         tenant_repo=MagicMock(),
         audit_service=MagicMock(),
-        data_retention_service=MagicMock(),
         skill_repo=MagicMock(),
     )
 

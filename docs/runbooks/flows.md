@@ -104,6 +104,11 @@ Any positive count triggers a flag unless an age condition is stated.
 | `GALLRING_DISABLED` | The deployment's emergency switch turned a retention task off (`gallring.disabled_tasks`); every suppressed nightly run is audited as skipped. | Re-enable the affected task's switch (`GALLRING_FLOWS_HOUSEKEEPING_ENABLED` or `RETENTION_FLOWS_HISTORY_ENABLED`) when the emergency is over; the switch is not a policy pause. |
 | `GALLRING_OVERDUE` | Work reported by an enabled task (`gallring.overdue_tasks`) remains beyond its deletion deadline and `GALLRING_OVERDUE_WINDOW_DAYS` (default one day), or a required snapshot is missing, stale or zero without covering all work. Counts are summed, completeness requires every task, and snapshot age uses the oldest observation. Held Flow runs are counted separately. | Check the general worker's `run_retention` cron, the named tasks' job outcomes, receipt pause reasons and unresolved deliveries; restore the failing dependency and let bounded deletion resume. Do not clear fences or receipts with SQL. |
 
+An upgrade with existing Flow snapshots adds `chats.history` as an overdue reporter.
+Until its first snapshot, overdue health is unknown and can report `GALLRING_OVERDUE`;
+the normal first opportunity is the next 03:30 retention run. A fresh installation
+with no retained snapshots keeps its existing startup behavior.
+
 A stale running run with a pending or claimed webhook delivery may still have an
 external effect in progress. Do not terminalize it manually. Let the bounded
 claim/retry lifecycle converge first.

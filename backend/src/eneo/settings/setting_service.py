@@ -9,9 +9,6 @@ from eneo.audit.application.audit_service import AuditService
 from eneo.audit.domain.action_types import ActionType
 from eneo.audit.domain.entity_types import EntityType
 from eneo.completion_models.domain.skill_context import skill_context_token_allowance
-from eneo.data_retention.infrastructure.data_retention_service import (
-    DataRetentionService,
-)
 from eneo.data_retention.infrastructure.retention_lock import (
     RetentionSubject,
     acquire_exclusive,
@@ -257,7 +254,6 @@ class SettingService:
         feature_flag_service: "FeatureFlagService",
         tenant_repo: TenantRepository,
         audit_service: AuditService,
-        data_retention_service: DataRetentionService,
         skill_repo: SkillRepo,
         upload_admission: UploadAdmissionSnapshot | None = None,
         object_content: ObjectContentRuntime = object_content_runtime,
@@ -269,7 +265,6 @@ class SettingService:
         self.feature_flag_service = feature_flag_service
         self.tenant_repo = tenant_repo
         self.audit_service = audit_service
-        self.data_retention_service = data_retention_service
         self.skill_repo = skill_repo
         self.upload_admission = upload_admission
         self.object_content = object_content

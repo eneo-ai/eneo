@@ -48,7 +48,6 @@ def _make_service(*, object_store_configured: bool) -> SettingService:
         feature_flag_service=feature_flag_service,
         tenant_repo=tenant_repo,
         audit_service=AsyncMock(),
-        data_retention_service=AsyncMock(),
         skill_repo=AsyncMock(),
         object_content=object_content,
     )

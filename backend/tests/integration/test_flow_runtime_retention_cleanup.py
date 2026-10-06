@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import inspect
 import itertools
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
@@ -13,12 +12,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from eneo.audit.infrastructure.audit_log_repo_impl import AuditLogRepositoryImpl
 from eneo.data_retention.application.retention_runner import RetentionBatch
-from eneo.data_retention.infrastructure import (
-    data_retention_worker,
-)
-from eneo.data_retention.infrastructure.data_retention_service import (
-    DataRetentionService,
-)
+from eneo.data_retention.domain.retention import RetentionJobOutcome
+from eneo.database.database import sessionmanager
 from eneo.database.tables.assistant_table import Assistants, AssistantsFiles
 from eneo.database.tables.audit_log_table import AuditLog as AuditLogTable
 from eneo.database.tables.audit_retention_policy_table import AuditRetentionPolicy
@@ -27,7 +22,6 @@ from eneo.database.tables.flow_tables import (
     BuilderSessions,
     FlowLiveTranscripts,
     FlowOutboxDeliveryStatus,
-    FlowRetentionHolds,
     FlowRunAuditOutbox,
     FlowRunReviewCheckpoints,
     FlowRuns,
@@ -71,8 +65,8 @@ from eneo.flows.infrastructure.flow_run_webhook_delivery_repo import (
     FlowRunWebhookDeliveryRepository,
 )
 from eneo.main.config import get_settings
-from eneo.main.container.container import Container
 from eneo.object_content.content import ContentAccessClass, ContentState, StorageKind
+from tests.integration.data_retention.retention_support import run_conversation_history
 from tests.integration.flows.flow_run_deletion_support import delete_run, purge
 
 
@@ -193,13 +187,6 @@ async def _create_durable_file(
 def row_budget_not_wall_clock(monkeypatch: pytest.MonkeyPatch) -> None:
     # These cases observe file and row ownership, independently of host load.
     monkeypatch.setattr(get_settings(), "gallring_family_gather_seconds", 60.0)
-
-
-@pytest.fixture
-async def flow_retention_service(
-    async_session: AsyncSession,
-) -> DataRetentionService:
-    return DataRetentionService(async_session)
 
 
 @pytest.fixture
@@ -674,7 +661,6 @@ async def test_live_transcript_admin_purge_obeys_scope_expiry_and_bound_rows(
     test_tenant,
     admin_user,
     flow_retention_space,
-    flow_retention_service,
     scope,
 ):
     from eneo.database.tables.flow_tables import FlowLiveTranscripts
@@ -1186,11 +1172,9 @@ async def test_scheduled_cleanup_preserves_all_flow_owned_data(
         template_asset_id = template.template_asset.id
         template_file_id = template.template_file.id
 
-    cleanup_old_data = inspect.unwrap(data_retention_worker.cleanup_old_data)
-    result = await cleanup_old_data(container=Container())
-
-    assert result["success"] is True
-    assert not any(key.startswith("flow_") for key in result["deleted"])
+    async with sessionmanager.session() as worker_session:
+        report = await run_conversation_history(worker_session)
+    assert report.outcome is RetentionJobOutcome.SUCCEEDED
 
     async with db_session() as session:
         assert await session.get(FlowRuns, run_id) is not None
@@ -1276,10 +1260,9 @@ async def test_scheduled_cleanup_preserves_builder_sessions_without_builder_poli
         await session.flush()
         builder_session_id = builder_session.id
 
-    cleanup_old_data = inspect.unwrap(data_retention_worker.cleanup_old_data)
-    result = await cleanup_old_data(container=Container())
-
-    assert result["success"] is True
+    async with sessionmanager.session() as worker_session:
+        report = await run_conversation_history(worker_session)
+    assert report.outcome is RetentionJobOutcome.SUCCEEDED
     async with db_session() as session:
         assert await session.get(BuilderSessions, builder_session_id) is not None
 
@@ -1291,7 +1274,6 @@ async def test_flow_run_history_purge_preserves_canonical_audit(
     admin_user,
     flow_retention_space: Spaces,
     flow_retention_assistant: Assistants,
-    flow_retention_service: DataRetentionService,
 ):
     fixture = await _create_flow_runtime_fixture(
         async_session,
@@ -1379,7 +1361,6 @@ async def test_housekeeping_reclaims_only_past_horizon_uploads(
     test_tenant,
     admin_user,
     flow_retention_space: Spaces,
-    flow_retention_service: DataRetentionService,
 ):
     now = datetime.now(timezone.utc)
     abandoned = await _create_unbound_runtime_upload_fixture(
@@ -1440,7 +1421,6 @@ async def test_flow_run_history_purge_reclaims_runtime_source_after_final_refere
     admin_user,
     flow_retention_space: Spaces,
     flow_retention_assistant: Assistants,
-    flow_retention_service: DataRetentionService,
     monkeypatch: pytest.MonkeyPatch,
 ):
     first_run_id = UUID("00000000-0000-0000-0000-000000000001")
@@ -1540,7 +1520,6 @@ async def test_flow_run_history_purge_keeps_runtime_source_with_another_owner(
     admin_user,
     flow_retention_space: Spaces,
     flow_retention_assistant: Assistants,
-    flow_retention_service: DataRetentionService,
 ):
     fixture = await _create_flow_runtime_fixture(
         async_session,
@@ -1585,7 +1564,6 @@ async def test_flow_run_history_purge_reclaims_runtime_source_with_its_derived_c
     admin_user,
     flow_retention_space: Spaces,
     flow_retention_assistant: Assistants,
-    flow_retention_service: DataRetentionService,
 ):
     fixture = await _create_flow_runtime_fixture(
         async_session,
@@ -1765,7 +1743,6 @@ async def test_flow_run_history_purge_keeps_run_with_pending_webhook(
     admin_user,
     flow_retention_space: Spaces,
     flow_retention_assistant: Assistants,
-    flow_retention_service: DataRetentionService,
     claim_expiry_offset_seconds: int | None,
 ):
     fixture = await _create_flow_runtime_fixture(
@@ -1826,7 +1803,6 @@ async def test_flow_run_history_purge_removes_run_with_dead_lettered_webhook(
     admin_user,
     flow_retention_space: Spaces,
     flow_retention_assistant: Assistants,
-    flow_retention_service: DataRetentionService,
 ):
     fixture = await _create_flow_runtime_fixture(
         async_session,
@@ -1869,7 +1845,6 @@ async def test_flow_run_history_purge_keeps_generated_file_shared_with_retained_
     admin_user,
     flow_retention_space: Spaces,
     flow_retention_assistant: Assistants,
-    flow_retention_service: DataRetentionService,
 ):
     fixture = await _create_flow_runtime_fixture(
         async_session,
@@ -1902,7 +1877,6 @@ async def test_flow_run_history_purge_reclaims_generated_file_with_its_derived_c
     admin_user,
     flow_retention_space: Spaces,
     flow_retention_assistant: Assistants,
-    flow_retention_service: DataRetentionService,
 ):
     fixture = await _create_flow_runtime_fixture(
         async_session,
@@ -1943,7 +1917,6 @@ async def test_flow_run_history_purge_uses_flow_override_instead_of_space_policy
     admin_user,
     flow_retention_space: Spaces,
     flow_retention_assistant: Assistants,
-    flow_retention_service: DataRetentionService,
 ):
     flow_retention_space.flow_run_history_retention_mode = "preserve"
     flow_retention_space.flow_run_history_retention_days = 1
@@ -1983,7 +1956,6 @@ async def test_flow_run_history_purge_uses_space_policy_when_flow_inherits(
     admin_user,
     flow_retention_space: Spaces,
     flow_retention_assistant: Assistants,
-    flow_retention_service: DataRetentionService,
 ):
     flow_retention_space.flow_run_history_retention_mode = "preserve"
     flow_retention_space.flow_run_history_retention_days = 1
@@ -2013,7 +1985,6 @@ async def test_flow_run_history_purge_uses_space_retention_one_day_boundary(
     admin_user,
     flow_retention_space: Spaces,
     flow_retention_assistant: Assistants,
-    flow_retention_service: DataRetentionService,
 ):
     now = datetime(2026, 6, 10, 12, 0, tzinfo=timezone.utc)
     flow_retention_space.flow_run_history_retention_mode = "preserve"
@@ -2067,7 +2038,6 @@ async def test_flow_run_history_purge_skips_old_non_terminal_runs(
     admin_user,
     flow_retention_space: Spaces,
     flow_retention_assistant: Assistants,
-    flow_retention_service: DataRetentionService,
     status: FlowRunStatus,
 ):
     fixture = await _create_flow_runtime_fixture(
@@ -2120,7 +2090,6 @@ async def test_flow_run_history_purge_keeps_runs_without_retention_policy(
     admin_user,
     flow_retention_space: Spaces,
     flow_retention_assistant: Assistants,
-    flow_retention_service: DataRetentionService,
 ):
     fixture = await _create_flow_runtime_fixture(
         async_session,
@@ -2155,7 +2124,6 @@ async def test_flow_run_history_purge_skips_runs_with_undelivered_audit_outbox(
     admin_user,
     flow_retention_space: Spaces,
     flow_retention_assistant: Assistants,
-    flow_retention_service: DataRetentionService,
     delivery_status: str,
 ):
     fixture = await _create_flow_runtime_fixture(
@@ -2195,7 +2163,6 @@ async def test_successful_audit_outbox_redrive_delivery_permits_existing_purge_p
     admin_user,
     flow_retention_space: Spaces,
     flow_retention_assistant: Assistants,
-    flow_retention_service: DataRetentionService,
 ):
     fixture = await _create_flow_runtime_fixture(
         async_session,
@@ -2244,7 +2211,6 @@ async def test_explicit_purge_drains_only_eligible_runs(
     admin_user,
     flow_retention_space: Spaces,
     flow_retention_assistant: Assistants,
-    flow_retention_service: DataRetentionService,
 ):
     purge_first = await _create_flow_runtime_fixture(
         async_session,
@@ -2309,7 +2275,6 @@ async def test_flow_run_history_blocked_counts_use_audit_webhook_precedence(
     admin_user,
     flow_retention_space: Spaces,
     flow_retention_assistant: Assistants,
-    flow_retention_service: DataRetentionService,
 ):
     audit_blocked = await _create_flow_runtime_fixture(
         async_session,
@@ -2365,7 +2330,6 @@ async def test_flow_run_history_purge_removes_run_for_soft_deleted_flow(
     admin_user,
     flow_retention_space: Spaces,
     flow_retention_assistant: Assistants,
-    flow_retention_service: DataRetentionService,
 ):
     fixture = await _create_flow_runtime_fixture(
         async_session,
@@ -2390,200 +2354,12 @@ async def test_flow_run_history_purge_removes_run_for_soft_deleted_flow(
 
 
 @pytest.mark.asyncio
-async def test_debug_evidence_redaction_precedes_later_flow_purge(
-    async_session: AsyncSession,
-    test_tenant,
-    admin_user,
-    flow_retention_space: Spaces,
-    flow_retention_assistant: Assistants,
-    flow_retention_service: DataRetentionService,
-):
-    fixture = await _create_flow_runtime_fixture(
-        async_session,
-        tenant=test_tenant,
-        user=admin_user,
-        space=flow_retention_space,
-        assistant=flow_retention_assistant,
-        days_old=10,
-        flow_retention_days=30,
-        flow_settings={
-            "retention_policy": {
-                "run_debug_evidence_days": 7,
-            }
-        },
-    )
-
-    counts = await flow_retention_service.redact_old_flow_debug_evidence(
-        now=datetime.now(timezone.utc)
-    )
-    await _flush_and_clear_identity_map(async_session)
-
-    assert counts.debug_step_results == 1
-    assert counts.debug_step_attempts == 1
-
-    refreshed_run = await async_session.get(FlowRuns, fixture.run.id)
-    refreshed_step_result = await async_session.get(
-        FlowStepResults, fixture.step_result.id
-    )
-    refreshed_attempt = await async_session.get(
-        FlowStepAttempts, fixture.step_attempt.id
-    )
-
-    assert refreshed_run is not None
-    assert refreshed_step_result is not None
-    assert refreshed_step_result.input_payload_json is None
-    assert refreshed_step_result.effective_prompt is None
-    assert refreshed_step_result.model_parameters_json is None
-    assert refreshed_step_result.output_payload_json is not None
-    assert refreshed_step_result.output_payload_json["text"] == "kept output"
-    assert refreshed_attempt is not None
-    assert refreshed_attempt.provenance_json is None
-    assert refreshed_attempt.input_payload_json is None
-    assert refreshed_attempt.output_payload_json is None
-
-
-@pytest.mark.asyncio
-async def test_debug_evidence_redaction_skips_a_run_under_a_legal_hold(
-    async_session: AsyncSession,
-    test_tenant,
-    admin_user,
-    flow_retention_space: Spaces,
-    flow_retention_assistant: Assistants,
-    flow_retention_service: DataRetentionService,
-):
-    fixtures = [
-        await _create_flow_runtime_fixture(
-            async_session,
-            tenant=test_tenant,
-            user=admin_user,
-            space=flow_retention_space,
-            assistant=flow_retention_assistant,
-            days_old=10,
-            flow_retention_days=30,
-            flow_settings={"retention_policy": {"run_debug_evidence_days": 7}},
-        )
-        for _ in range(2)
-    ]
-    held, free = fixtures
-    now = datetime.now(timezone.utc)
-    async_session.add(
-        FlowRetentionHolds(
-            tenant_id=test_tenant.id,
-            flow_id=held.flow.id,
-            flow_run_id=held.run.id,
-            reason="Pending disclosure request",
-            review_by=now + timedelta(days=30),
-            created_by_actor={"type": "user", "id": str(admin_user.id)},
-        )
-    )
-    await async_session.flush()
-
-    counts = await flow_retention_service.redact_old_flow_debug_evidence(now=now)
-    await _flush_and_clear_identity_map(async_session)
-
-    assert counts.debug_step_results == 1
-    held_result = await async_session.get(FlowStepResults, held.step_result.id)
-    held_attempt = await async_session.get(FlowStepAttempts, held.step_attempt.id)
-    free_result = await async_session.get(FlowStepResults, free.step_result.id)
-    assert held_result is not None and held_attempt is not None
-    assert held_result.input_payload_json is not None
-    assert held_result.effective_prompt is not None
-    assert held_attempt.provenance_json is not None
-    assert free_result is not None and free_result.input_payload_json is None
-
-
-@pytest.mark.asyncio
-async def test_debug_evidence_redacts_attempt_payloads_without_provenance(
-    async_session: AsyncSession,
-    test_tenant,
-    admin_user,
-    flow_retention_space: Spaces,
-    flow_retention_assistant: Assistants,
-    flow_retention_service: DataRetentionService,
-):
-    fixture = await _create_flow_runtime_fixture(
-        async_session,
-        tenant=test_tenant,
-        user=admin_user,
-        space=flow_retention_space,
-        assistant=flow_retention_assistant,
-        days_old=10,
-        flow_retention_days=30,
-        flow_settings={
-            "retention_policy": {
-                "run_debug_evidence_days": 7,
-            }
-        },
-    )
-    fixture.step_attempt.provenance_json = None
-    await async_session.flush()
-
-    counts = await flow_retention_service.redact_old_flow_debug_evidence(
-        now=datetime.now(timezone.utc)
-    )
-    await _flush_and_clear_identity_map(async_session)
-
-    assert counts.debug_step_attempts == 1
-    refreshed_attempt = await async_session.get(
-        FlowStepAttempts, fixture.step_attempt.id
-    )
-    assert refreshed_attempt is not None
-    assert refreshed_attempt.input_payload_json is None
-    assert refreshed_attempt.output_payload_json is None
-    assert refreshed_attempt.provenance_json is None
-
-
-@pytest.mark.asyncio
-async def test_debug_evidence_does_not_reuse_flow_run_history_policy(
-    async_session: AsyncSession,
-    test_tenant,
-    admin_user,
-    flow_retention_space: Spaces,
-    flow_retention_assistant: Assistants,
-    flow_retention_service: DataRetentionService,
-):
-    fixture = await _create_flow_runtime_fixture(
-        async_session,
-        tenant=test_tenant,
-        user=admin_user,
-        space=flow_retention_space,
-        assistant=flow_retention_assistant,
-        days_old=10,
-        flow_retention_days=30,
-    )
-
-    counts = await flow_retention_service.redact_old_flow_debug_evidence(
-        now=datetime.now(timezone.utc)
-    )
-    await _flush_and_clear_identity_map(async_session)
-
-    refreshed_step_result = await async_session.get(
-        FlowStepResults, fixture.step_result.id
-    )
-    refreshed_attempt = await async_session.get(
-        FlowStepAttempts, fixture.step_attempt.id
-    )
-
-    assert counts.debug_step_results == 0
-    assert counts.debug_step_attempts == 0
-    assert refreshed_step_result is not None
-    assert refreshed_step_result.input_payload_json == {"text": "sensitive input"}
-    assert refreshed_step_result.effective_prompt == "Very sensitive prompt"
-    assert refreshed_step_result.model_parameters_json == {"temperature": 0.1}
-    assert refreshed_attempt is not None
-    assert refreshed_attempt.provenance_json == {"artifacts": {"items": ["debug"]}}
-    assert refreshed_attempt.input_payload_json == {"text": "sensitive attempt input"}
-    assert refreshed_attempt.output_payload_json == {"text": "sensitive attempt output"}
-
-
-@pytest.mark.asyncio
 async def test_housekeeping_deletes_delivered_outbox_rows_after_their_audit_log(
     async_session: AsyncSession,
     test_tenant,
     admin_user,
     flow_retention_space: Spaces,
     flow_retention_assistant: Assistants,
-    flow_retention_service: DataRetentionService,
 ):
     async def create_outbox_row(*, delivery_status: str, with_audit_log: bool):
         fixture = await _create_flow_runtime_fixture(

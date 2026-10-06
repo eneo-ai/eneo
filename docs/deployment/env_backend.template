@@ -567,6 +567,16 @@ EXPORT_MAX_CONCURRENT_PER_TENANT=2
 # Files older than this are automatically cleaned up by daily cron job (03:00 UTC)
 EXPORT_MAX_AGE_HOURS=24
 
+# Nightly conversation and App retention (the shared 03:30 retention engine).
+# Enable switches are emergency controls; disabling a task is audited and unhealthy.
+RETENTION_CHATS_HISTORY_ENABLED=true
+RETENTION_BUILDER_CLIENT_ERRORS_ENABLED=true
+RETENTION_CHATS_MAX_ROWS_PER_RUN=250000
+# The unit's cascade plus discovery/proof must fit its execution budget.
+RETENTION_CHATS_MAX_UNIT_ROWS=5000
+# Bounded overdue count per reporting task; capped counts are lower bounds.
+RETENTION_OVERDUE_MAX_ROWS=1000
+
 # ----------------------------------------------------------------------------
 # Internal MCP Loopback URL
 # ----------------------------------------------------------------------------

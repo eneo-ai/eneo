@@ -366,9 +366,12 @@ class Settings(BaseSettings):
     # Emergency switch of the nightly flows.history task (auto_delete of run
     # history); rules can still be set while it is off.
     retention_flows_history_enabled: bool = True
+    retention_chats_history_enabled: bool = True
+    retention_builder_client_errors_enabled: bool = True
     # A due auto_delete run still stored this many days after its deadline is
     # overdue (health flag GALLRING_OVERDUE).
     gallring_overdue_window_days: int = Field(default=1, ge=1, le=365)
+    retention_overdue_max_rows: int = Field(default=1000, gt=0)
     # Largest number of days a Flow run-history retention policy write may set;
     # checked on write only, stored longer policies keep applying. At most 100
     # years, so every cutoff stays a valid timestamp.

@@ -9,7 +9,7 @@ Tests cover:
 
 from __future__ import annotations
 
-from collections.abc import Sequence
+from collections.abc import AsyncIterator, Sequence
 from datetime import datetime, timedelta, timezone
 from uuid import UUID, uuid4
 
@@ -29,14 +29,15 @@ from eneo.data_retention.application.retention_runner import (
 )
 from eneo.data_retention.domain.retention import (
     ConversationPolicySource,
+    RetentionBudget,
     RetentionJobOutcome,
 )
 from eneo.data_retention.infrastructure.conversation_retention_repo import (
     ConversationRetentionRepository,
     ConversationRootKind,
 )
-from eneo.data_retention.infrastructure.data_retention_service import (
-    DataRetentionService,
+from eneo.data_retention.infrastructure.retention_tasks import (
+    build_conversation_history_task,
 )
 from eneo.database.database import sessionmanager
 from eneo.database.tables.app_table import AppRuns, AppRunsFiles, Apps
@@ -49,6 +50,7 @@ from eneo.database.tables.flow_tables import (
     Flows,
     FlowVersions,
 )
+from eneo.database.tables.help_assistant_runs_table import HelpAssistantRuns
 from eneo.database.tables.info_blobs_table import InfoBlobs
 from eneo.database.tables.mcp_tool_references_table import McpToolReference
 from eneo.database.tables.questions_table import (
@@ -59,14 +61,234 @@ from eneo.database.tables.questions_table import (
 from eneo.database.tables.sessions_table import Sessions
 from eneo.database.tables.spaces_table import Spaces
 from eneo.database.tables.tenant_table import Tenants
+from eneo.main.config import get_settings
+from tests.integration.data_retention.retention_support import run_conversation_history
 from tests.integration.data_retention.test_gallring_runner import _runner, _Task
 from tests.integration.flows.flow_run_deletion_support import due_run_ids
 
 
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "cap,conversations_due,count,complete,oldest_days",
+    [
+        (1, True, 1, False, 5),
+        (2, True, 2, True, 5),
+        (4, True, 2, True, 5),
+        (1, False, 0, True, None),
+    ],
+)
+async def test_overdue_counts_share_one_deadline_cap_without_orphan_false_alarms(
+    async_session,
+    test_assistant,
+    test_app,
+    test_tenant,
+    admin_user,
+    cap: int,
+    conversations_due: bool,
+    count: int,
+    complete: bool,
+    oldest_days: int | None,
+):
+    """Kills G1b-P1A: independent store caps, missing policy filters or orphan health noise."""
+    now = datetime.now(timezone.utc)
+    test_assistant.data_retention_days = 7 if conversations_due else None
+    test_app.data_retention_days = 3 if conversations_due else None
+    question = await create_old_question(
+        async_session,
+        test_assistant.id,
+        test_tenant.id,
+        admin_user.id,
+        days_old=12,
+    )
+    question.created_at = now - timedelta(days=12)
+    await async_session.execute(
+        update(Sessions)
+        .where(Sessions.id == question.session_id)
+        .values(created_at=question.created_at)
+    )
+    app = await create_old_app_run(
+        async_session,
+        test_app.id,
+        test_tenant.id,
+        admin_user.id,
+        test_app.completion_model_id,
+        days_old=8,
+    )
+    app.created_at = now - timedelta(days=8)
+    orphan = Sessions(
+        user_id=admin_user.id,
+        name="overdue orphan",
+        created_at=now - timedelta(days=7),
+        updated_at=now,
+    )
+    async_session.add(orphan)
+    await async_session.flush()
+    settings = get_settings().model_copy(update={"retention_overdue_max_rows": cap})
+    task = build_conversation_history_task(
+        async_session,
+        RetentionBudget(rows=250_000, files=1, seconds=600),
+        settings,
+        now=now,
+    )
+    snapshot = await task.overdue()
+    assert (snapshot.count, snapshot.complete) == (count, complete)
+    assert snapshot.oldest_due_at == (
+        now - timedelta(days=oldest_days) if oldest_days is not None else None
+    )
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("unit_rows,deleted", [(1, False), (2, True)])
+async def test_orphan_session_cascade_respects_age_references_and_unit_cap(
+    async_session,
+    test_assistant,
+    test_space,
+    test_tenant,
+    admin_user,
+    monkeypatch,
+    unit_rows: int,
+    deleted: bool,
+):
+    """Kills omitted orphan anti-join, inclusive age cutoff, or omitted helper cost."""
+    now = datetime.now(timezone.utc)
+    monkeypatch.setattr(get_settings(), "retention_chats_max_unit_rows", unit_rows)
+    orphan = Sessions(
+        user_id=admin_user.id,
+        name="old orphan",
+        created_at=now - timedelta(days=3),
+        updated_at=now - timedelta(days=3),
+    )
+    boundary = Sessions(
+        user_id=admin_user.id,
+        name="exact age boundary",
+        created_at=now - timedelta(days=1),
+        updated_at=now - timedelta(days=1),
+    )
+    async_session.add_all([orphan, boundary])
+    await async_session.flush()
+    helper = HelpAssistantRuns(
+        tenant_id=test_tenant.id,
+        org_space_id=test_space.id,
+        kind="help",
+        target_type="space",
+        target_id=test_space.id,
+        session_id=orphan.id,
+        actor_user_id=admin_user.id,
+    )
+    async_session.add(helper)
+    referenced = await create_old_question(
+        async_session, test_assistant.id, test_tenant.id, admin_user.id, days_old=3
+    )
+    orphan_id, boundary_id, helper_id = orphan.id, boundary.id, helper.id
+    referenced_id, referenced_session = referenced.id, referenced.session_id
+    report = await run_conversation_history(async_session, now=now)
+    assert report.outcome is RetentionJobOutcome.SUCCEEDED
+    assert (await async_session.get(Sessions, orphan_id) is None) is deleted
+    assert (await async_session.get(HelpAssistantRuns, helper_id) is None) is deleted
+    assert await async_session.get(Sessions, boundary_id) is not None
+    assert await async_session.get(Sessions, referenced_session) is not None
+    assert await async_session.get(Questions, referenced_id) is not None
+    assert report.counts.get("orphan_sessions.orphan_sessions_deleted", 0) == int(
+        deleted
+    )
+    assert report.blocked.get("orphan_sessions.unit_exceeds_budget", 0) == int(
+        not deleted
+    )
+    events = (
+        await async_session.scalars(
+            select(AuditLog).where(
+                AuditLog.log_metadata["job_run_id"].astext == str(report.job_run_id)
+            )
+        )
+    ).all()
+    assert any(event.log_metadata["step"] == "orphan_sessions" for event in events)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "execution_day,first_count",
+    [
+        (5, "questions.conversations_deleted"),
+        (6, "app_runs.conversations_deleted"),
+        (7, "questions.conversations_deleted"),
+    ],
+)
+async def test_deadline_stores_rotate_before_aged_session_housekeeping(
+    async_session,
+    test_assistant,
+    test_app,
+    test_tenant,
+    admin_user,
+    monkeypatch,
+    execution_day: int,
+    first_count: str,
+):
+    """Kills G1b-P1B: housekeeping starvation or fixed deadline-store order."""
+    now = datetime(2026, 10, execution_day, tzinfo=timezone.utc)
+    test_assistant.data_retention_days = test_app.data_retention_days = 1
+    question = await create_old_question(
+        async_session, test_assistant.id, test_tenant.id, admin_user.id, days_old=60
+    )
+    await async_session.execute(
+        update(Sessions)
+        .where(Sessions.id == question.session_id)
+        .values(created_at=now - timedelta(days=60))
+    )
+    app = await create_old_app_run(
+        async_session,
+        test_app.id,
+        test_tenant.id,
+        admin_user.id,
+        days_old=60,
+        completion_model_id=test_app.completion_model_id,
+    )
+    orphan = Sessions(
+        user_id=admin_user.id,
+        name="rotated store",
+        created_at=now - timedelta(days=3),
+        updated_at=now - timedelta(days=3),
+    )
+    async_session.add(orphan)
+    await async_session.flush()
+    ids = {
+        "questions.conversations_deleted": (Questions, question.id),
+        "app_runs.conversations_deleted": (AppRuns, app.id),
+        "orphan_sessions.orphan_sessions_deleted": (Sessions, orphan.id),
+    }
+    for name, value in (
+        ("retention_chats_max_rows_per_run", 4),
+        ("retention_chats_max_unit_rows", 1),
+        ("gallring_chunk_rows", 4),
+    ):
+        monkeypatch.setattr(get_settings(), name, value)
+    report = await run_conversation_history(async_session, now=now)
+    assert report.outcome is RetentionJobOutcome.PARTIAL
+    assert report.counts[first_count] == 1
+    assert report.counts.get("orphan_sessions.session_rows_examined", 0) == 0
+    assert (
+        sum(
+            report.counts.get(name, 0)
+            for name in (
+                "questions.conversations_deleted",
+                "app_runs.conversations_deleted",
+                "orphan_sessions.orphan_sessions_deleted",
+            )
+        )
+        == 1
+    )
+    for count, (model, identifier) in ids.items():
+        assert (await async_session.get(model, identifier) is None) is (
+            count == first_count
+        )
+
+
 @pytest.fixture
-async def retention_service(async_session: AsyncSession) -> DataRetentionService:
-    """Create a DataRetentionService instance."""
-    return DataRetentionService(async_session)
+async def async_session(setup_database) -> AsyncIterator[AsyncSession]:
+    # Runner commits must release real transactions, not nested savepoints.
+    async with sessionmanager.session() as session:
+        session.sync_session.expire_on_commit = False
+        await session.begin()
+        yield session
 
 
 @pytest.fixture
@@ -212,7 +434,6 @@ async def test_assistant_level_retention_deletes_old_questions(
     test_assistant: Assistants,
     test_tenant,
     admin_user,
-    retention_service: DataRetentionService,
 ):
     """Test that assistant-level retention policy deletes old questions."""
     # Set assistant retention to 30 days
@@ -234,7 +455,8 @@ async def test_assistant_level_retention_deletes_old_questions(
     )
 
     # Run cleanup
-    deleted_count = await retention_service.delete_old_questions()
+    report = await run_conversation_history(async_session)
+    deleted_count = report.counts.get("questions.conversations_deleted", 0)
     await async_session.flush()
 
     # Verify: old question deleted, recent kept
@@ -254,7 +476,6 @@ async def test_space_level_retention_fallback(
     test_assistant: Assistants,
     test_tenant,
     admin_user,
-    retention_service: DataRetentionService,
 ):
     """Test that space-level retention applies when assistant has no policy."""
     # Set space retention to 90 days (assistant has None)
@@ -276,7 +497,8 @@ async def test_space_level_retention_fallback(
     )
 
     # Run cleanup
-    deleted_count = await retention_service.delete_old_questions()
+    report = await run_conversation_history(async_session)
+    deleted_count = report.counts.get("questions.conversations_deleted", 0)
     await async_session.flush()
 
     # Verify: old question deleted, recent kept
@@ -296,7 +518,6 @@ async def test_assistant_overrides_space_retention(
     test_assistant: Assistants,
     test_tenant,
     admin_user,
-    retention_service: DataRetentionService,
 ):
     """Test that assistant-level retention overrides space-level retention."""
     # Space: 90 days, Assistant: 30 days (more restrictive)
@@ -317,7 +538,8 @@ async def test_assistant_overrides_space_retention(
     )
 
     # Run cleanup
-    deleted_count = await retention_service.delete_old_questions()
+    report = await run_conversation_history(async_session)
+    deleted_count = report.counts.get("questions.conversations_deleted", 0)
     await async_session.flush()
 
     # Verify: question deleted by assistant retention (30d), not space (90d)
@@ -336,7 +558,6 @@ async def test_tenant_level_retention_fallback(
     test_assistant: Assistants,
     test_tenant,
     admin_user,
-    retention_service: DataRetentionService,
 ):
     """Test that tenant-level retention applies when space and assistant have no policy."""
     # Create tenant retention policy
@@ -363,7 +584,8 @@ async def test_tenant_level_retention_fallback(
     )
 
     # Run cleanup
-    deleted_count = await retention_service.delete_old_questions()
+    report = await run_conversation_history(async_session)
+    deleted_count = report.counts.get("questions.conversations_deleted", 0)
     await async_session.flush()
 
     # Verify: old question deleted by tenant policy
@@ -382,7 +604,6 @@ async def test_no_retention_keeps_all_questions(
     test_assistant: Assistants,
     test_tenant,
     admin_user,
-    retention_service: DataRetentionService,
 ):
     """Test that questions are kept forever when no retention policy is set."""
     # No retention at any level
@@ -398,7 +619,8 @@ async def test_no_retention_keeps_all_questions(
     )
 
     # Run cleanup
-    deleted_count = await retention_service.delete_old_questions()
+    report = await run_conversation_history(async_session)
+    deleted_count = report.counts.get("questions.conversations_deleted", 0)
     await async_session.flush()
 
     # Verify: nothing deleted
@@ -414,7 +636,6 @@ async def test_app_level_retention_deletes_old_runs(
     test_app: Apps,
     test_tenant,
     admin_user,
-    retention_service: DataRetentionService,
 ):
     """Test that app-level retention policy deletes old app runs."""
     # Set app retention to 30 days
@@ -437,7 +658,8 @@ async def test_app_level_retention_deletes_old_runs(
     )
 
     # Run cleanup
-    deleted_count = await retention_service.delete_old_app_runs()
+    report = await run_conversation_history(async_session)
+    deleted_count = report.counts.get("app_runs.conversations_deleted", 0)
     await async_session.flush()
 
     # Verify: old run deleted, recent kept
@@ -457,7 +679,6 @@ async def test_space_level_app_retention_fallback(
     test_app: Apps,
     test_tenant,
     admin_user,
-    retention_service: DataRetentionService,
 ):
     """Test that space-level retention applies to apps without their own policy."""
     # Set space retention to 90 days (app has None)
@@ -480,7 +701,8 @@ async def test_space_level_app_retention_fallback(
     )
 
     # Run cleanup
-    deleted_count = await retention_service.delete_old_app_runs()
+    report = await run_conversation_history(async_session)
+    deleted_count = report.counts.get("app_runs.conversations_deleted", 0)
     await async_session.flush()
 
     # Verify: old run deleted by space policy
@@ -500,7 +722,6 @@ async def test_space_conversation_and_app_retention_does_not_activate_flow_delet
     test_app: Apps,
     test_tenant,
     admin_user,
-    retention_service: DataRetentionService,
 ) -> None:
     anchor = datetime.now(timezone.utc)
     old = anchor - timedelta(days=60)
@@ -593,8 +814,9 @@ async def test_space_conversation_and_app_retention_does_not_activate_flow_delet
     await async_session.flush()
 
     flow_candidates, _ = await due_run_ids(async_session, test_tenant.id, now=anchor)
-    deleted_questions = await retention_service.delete_old_questions()
-    deleted_app_runs = await retention_service.delete_old_app_runs()
+    report = await run_conversation_history(async_session)
+    deleted_questions = report.counts.get("questions.conversations_deleted", 0)
+    deleted_app_runs = report.counts.get("app_runs.conversations_deleted", 0)
     await async_session.flush()
 
     assert flow_run.id not in flow_candidates
@@ -611,7 +833,6 @@ async def test_multi_tenant_isolation(
     test_assistant: Assistants,
     test_tenant,
     admin_user,
-    retention_service: DataRetentionService,
 ):
     """Test that retention policies are isolated per tenant."""
     # Set assistant retention to 30 days
@@ -630,7 +851,8 @@ async def test_multi_tenant_isolation(
     )
 
     # Run cleanup
-    deleted_count = await retention_service.delete_old_questions()
+    report = await run_conversation_history(async_session)
+    deleted_count = report.counts.get("questions.conversations_deleted", 0)
     await async_session.flush()
 
     # Verify: only this tenant's old questions deleted
@@ -638,77 +860,6 @@ async def test_multi_tenant_isolation(
 
     exists = await async_session.get(Questions, old_question.id)
     assert exists is None, "Old question from this tenant should be deleted"
-
-
-@pytest.mark.asyncio
-async def test_get_affected_count_for_assistant(
-    async_session: AsyncSession,
-    test_assistant: Assistants,
-    test_tenant,
-    admin_user,
-    retention_service: DataRetentionService,
-):
-    """Test getting affected question count before enabling retention."""
-    # Extract IDs
-    assistant_id = test_assistant.id
-    tenant_id = test_tenant.id
-    user_id = admin_user.id
-
-    # Create questions at different ages
-    await create_old_question(
-        async_session, assistant_id, tenant_id, user_id, days_old=100
-    )
-    await create_old_question(
-        async_session, assistant_id, tenant_id, user_id, days_old=50
-    )
-    await create_old_question(
-        async_session, assistant_id, tenant_id, user_id, days_old=10
-    )
-
-    # Check affected count for 30-day retention
-    count = await retention_service.get_affected_questions_count_for_assistant(
-        assistant_id=test_assistant.id, retention_days=30
-    )
-
-    # Should find 2 questions older than 30 days
-    assert count == 2, "Should count questions older than 30 days"
-
-
-@pytest.mark.asyncio
-async def test_get_affected_count_for_space(
-    async_session: AsyncSession,
-    test_space: Spaces,
-    test_assistant: Assistants,
-    test_tenant,
-    admin_user,
-    retention_service: DataRetentionService,
-):
-    """Test getting affected question count for space-level retention."""
-    # Extract IDs
-    assistant_id = test_assistant.id
-    tenant_id = test_tenant.id
-    user_id = admin_user.id
-
-    # Create questions for assistant without retention
-    await create_old_question(
-        async_session, assistant_id, tenant_id, user_id, days_old=100
-    )
-    await create_old_question(
-        async_session, assistant_id, tenant_id, user_id, days_old=50
-    )
-    await create_old_question(
-        async_session, assistant_id, tenant_id, user_id, days_old=10
-    )
-
-    # Check affected count for space 90-day retention
-    count = await retention_service.get_affected_questions_count_for_space(
-        space_id=test_space.id, retention_days=90
-    )
-
-    # Should find 1 question older than 90 days
-    assert count == 1, (
-        "Should count questions older than 90 days without assistant retention"
-    )
 
 
 @pytest.mark.asyncio
@@ -746,7 +897,6 @@ async def test_hard_delete_not_soft_delete(
     test_assistant: Assistants,
     test_tenant,
     admin_user,
-    retention_service: DataRetentionService,
 ):
     """Test that questions are permanently deleted (hard delete), not soft deleted."""
     test_assistant.data_retention_days = 30
@@ -765,7 +915,8 @@ async def test_hard_delete_not_soft_delete(
     question_id = old_question.id
 
     # Run cleanup
-    deleted_count = await retention_service.delete_old_questions()
+    report = await run_conversation_history(async_session)
+    deleted_count = report.counts.get("questions.conversations_deleted", 0)
     await async_session.flush()
 
     assert deleted_count == 1
@@ -790,7 +941,6 @@ async def test_tenant_level_retention_fallback_for_app_runs(
     test_app: Apps,
     test_tenant,
     admin_user,
-    retention_service: DataRetentionService,
 ):
     """Test that tenant-level retention applies to app runs when space and app have no policy."""
     # Create tenant retention policy
@@ -818,7 +968,8 @@ async def test_tenant_level_retention_fallback_for_app_runs(
     )
 
     # Run cleanup
-    deleted_count = await retention_service.delete_old_app_runs()
+    report = await run_conversation_history(async_session)
+    deleted_count = report.counts.get("app_runs.conversations_deleted", 0)
     await async_session.flush()
 
     # Verify: old run deleted by tenant policy
@@ -832,60 +983,12 @@ async def test_tenant_level_retention_fallback_for_app_runs(
 
 
 @pytest.mark.asyncio
-async def test_boundary_condition_exact_retention_days(
-    async_session: AsyncSession,
-    test_assistant: Assistants,
-    test_tenant,
-    admin_user,
-    retention_service: DataRetentionService,
-):
-    """Test boundary condition: question exactly at retention boundary should NOT be deleted.
-
-    The logic uses created_at < cutoff_date, so a question exactly at the boundary
-    should be kept (not deleted). This tests the < vs <= boundary condition.
-    """
-    # Set assistant retention to 30 days
-    test_assistant.data_retention_days = 30
-    async_session.add(test_assistant)
-    await async_session.flush()
-
-    # Extract IDs
-    assistant_id = test_assistant.id
-    tenant_id = test_tenant.id
-    user_id = admin_user.id
-
-    # Create questions: one exactly at boundary (30 days), one just past (31 days)
-    boundary_question = await create_old_question(
-        async_session, assistant_id, tenant_id, user_id, days_old=30
-    )
-    past_boundary_question = await create_old_question(
-        async_session, assistant_id, tenant_id, user_id, days_old=31
-    )
-
-    # Run cleanup
-    deleted_count = await retention_service.delete_old_questions()
-    await async_session.flush()
-
-    # Verify: only question past boundary is deleted
-    assert deleted_count == 1
-
-    boundary_exists = await async_session.get(Questions, boundary_question.id)
-    past_exists = await async_session.get(Questions, past_boundary_question.id)
-
-    assert boundary_exists is not None, (
-        "Question exactly at 30 days should be kept (< not <=)"
-    )
-    assert past_exists is None, "Question at 31 days should be deleted"
-
-
-@pytest.mark.asyncio
 async def test_tenant_enabled_but_days_null_keeps_forever(
     async_session: AsyncSession,
     test_space: Spaces,
     test_assistant: Assistants,
     test_tenant,
     admin_user,
-    retention_service: DataRetentionService,
 ):
     """Test edge case: tenant retention enabled but days is NULL should keep forever.
 
@@ -920,7 +1023,8 @@ async def test_tenant_enabled_but_days_null_keeps_forever(
     )
 
     # Run cleanup
-    deleted_count = await retention_service.delete_old_questions()
+    report = await run_conversation_history(async_session)
+    deleted_count = report.counts.get("questions.conversations_deleted", 0)
     await async_session.flush()
 
     # Verify: nothing deleted (enabled=True but days=NULL means keep forever)

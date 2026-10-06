@@ -50,6 +50,7 @@ from eneo.data_retention.application.retention_runner import (
     RetentionStep,
     RetentionStepResult,
 )
+from eneo.data_retention.application.retention_step_order import rotate_retention_steps
 from eneo.data_retention.application.retention_units import (
     RetentionEffects,
     RetentionUnitCandidate,
@@ -179,31 +180,35 @@ class FlowHousekeepingTask:
 
     def steps(self) -> Sequence[RetentionStep]:
         family = self._family_rows
-        families = [
+        families = (
             ("file_families", self._file_families, family),
             ("abandoned_uploads", self._abandoned_uploads, family),
-        ]
-        # Consecutive execution dates alternate which family step sees the full
-        # budget first. Backlog within either step still controls how soon a
-        # particular family can be reclaimed.
-        if self._now().date().toordinal() % 2:
-            families.reverse()
-        return tuple(
-            RetentionStep(
-                name,
-                self._after_flow_history_lock(run),
-                max_batch=batch,
-                max_files=0 if name == STEP_ASSISTANTS_STEP else None,
-            )
-            for name, run, batch in (
-                *families,
-                ("live_transcripts", self._live_transcripts, None),
-                ("audit_outbox", self._audit_outbox, None),
-                (STEP_ASSISTANTS_STEP, self._step_assistants.step, family),
-                ("physical_confirmation", self._receipts.physical_step, None),
-                ("prune_receipts", self._prune_receipts, None),
-                ("prune_job_runs", self._prune_job_runs, None),
-            )
+        )
+        first = rotate_retention_steps(
+            tuple(
+                RetentionStep(name, self._after_flow_history_lock(run), max_batch=batch)
+                for name, run, batch in families
+            ),
+            execution_date=self._now().astimezone(timezone.utc).date(),
+        )
+        return (
+            *first,
+            *(
+                RetentionStep(
+                    name,
+                    self._after_flow_history_lock(run),
+                    max_batch=batch,
+                    max_files=0 if name == STEP_ASSISTANTS_STEP else None,
+                )
+                for name, run, batch in (
+                    ("live_transcripts", self._live_transcripts, None),
+                    ("audit_outbox", self._audit_outbox, None),
+                    (STEP_ASSISTANTS_STEP, self._step_assistants.step, family),
+                    ("physical_confirmation", self._receipts.physical_step, None),
+                    ("prune_receipts", self._prune_receipts, None),
+                    ("prune_job_runs", self._prune_job_runs, None),
+                )
+            ),
         )
 
     def _after_flow_history_lock(

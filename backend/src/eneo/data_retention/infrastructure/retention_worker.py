@@ -65,7 +65,7 @@ async def run_retention(container: Container) -> list[RetentionRunReport]:
             session=session, container=container, settings=settings, budget=budget
         )
         if registration.enabled(settings):
-            report = await runner.run(registration.build(session, budget))
+            report = await runner.run(registration.build(session, budget, settings))
         else:
             report = await runner.skip(registration.name)
         logger.info(

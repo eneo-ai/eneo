@@ -20,9 +20,10 @@ A Flow run-history policy deletes run history automatically only in the mode **D
 | Unused Flow runtime uploads                | Organization Flow settings (30 days when unset)                | Days an upload never attached to a run input is kept, with its derived files                         | **Yes; nightly Flow gallring**                        |
 | Unbound live transcripts                   | Same setting as unused uploads (30 days when unset)            | Days a live transcript never used by a run is kept                                                   | **Yes; nightly Flow gallring**                        |
 | Deleted Flow template files                | None                                                           | The deleted template's asset row and its files stay stored                                           | **No (not yet reclaimed)**                            |
-| Flow debug evidence                        | Organization Flow settings                                     | Marks debug evidence as eligible for a separate administrator cleanup                                | **No Flow-owned scheduled deletion**                  |
-| Conversation and App history               | Assistant or App, then Space, then the conversation default    | Controls the existing conversation-retention cleanup path                                            | **May be automatic when configured**                  |
-| Flow AI Builder sessions                   | Currently follows separate Space/conversation cleanup behavior | Controls Builder conversation-session history, not Flow run history                                  | **May be automatic when configured**                  |
+| Flow debug evidence                        | Organization Flow settings                                     | Retains the setting; no active cleanup consumes it                                | **No Flow-owned scheduled deletion**                  |
+| Conversation and App history               | Assistant or App, then Space, then the conversation default    | Deletes old conversations under the effective age rule                                                | **Yes when configured; nightly `chats.history`**       |
+| Flow AI Builder sessions                   | Separate Builder history owner                                 | Remains independent of conversation and Flow run-history retention                                    | **No scheduled Builder-session deletion**             |
+| Flow AI Builder client-error reports        | Fixed 90-day reporting window                                  | Deletes reports older than the reporting window                                                       | **Yes; nightly `builder.client_errors`**               |
 | Audit logs                                 | Organization audit-log settings                                | Sets how long audit rows remain available                                                            | **Yes; the daily audit cleanup removes expired rows** |
 | Export files and other temporary artifacts | Their owning feature                                           | Uses that feature's documented lifetime                                                              | Depends on the feature                                |
 
@@ -69,7 +70,13 @@ The review queue is also side-effect free. Reading or refreshing it cannot appro
 
 ## Nightly Flow gallring
 
-Every night (03:30 by default) the general worker runs the registered gallring tasks in order: `flows.housekeeping`, then `flows.history`.
+Every night (03:30 by default) the general worker runs the registered retention tasks in order: `flows.housekeeping`, `flows.history`, `chats.history`, then `builder.client_errors`. All use the same engine, budgets, job records and required audit. This replaces the separate 03:00 conversation-cleanup job and the duplicate 04:00 conversation purge.
+
+`chats.history` deletes Questions and App runs older than their effective conversation rule: Assistant or App, then Space, then the enabled Organization conversation default. If no level supplies days, it keeps the history. Each transaction locks a bounded page, proves its cascade cost and checks the policy again before deleting. It removes the conversation's reference rows, including file joins and MCP references; attached files and the logging rows the conversation points at remain. Questions without an Assistant, including service-key conversations, remain. Flow holds do not cover chat conversations, including those of Flow-managed Assistants.
+
+The same task sweeps sessions older than one day through bounded windows. It deletes a session only when no Question refers to it; an associated helper-run row counts toward its unit cap. Questions and App runs rotate which goes first on consecutive UTC execution dates; the session sweep always follows them using the remaining budget. An orphan left after that night's session pass becomes eligible for a later pass. The per-execution budget limits work examined and deleted, including cascade proof; it does not guarantee that a backlog drains overnight. A conversation or session exceeding its unit cap is counted as blocked while the pass continues; one that does not fit the execution tail is deferred.
+
+`builder.client_errors` deletes client-error reports strictly older than the existing 90-day reporting window, in budgeted transactions. It does not delete Builder conversation sessions.
 
 `flows.history` deletes the run history of Flows whose effective policy is `auto_delete`: every terminal run older than the days, with its files, one receipt per run (see [How a run is deleted](/guides/flows/retention-policy#how-a-run-is-deleted)). It first continues unfinished run deletions (also those an explicit purge started), then walks the Flows in id order and each Flow's due runs oldest first from the K4 due index. Every Flow and run it examines is charged to the night's row budget; runs under a legal hold or with pending deliveries are passed and counted. They can consume the remaining budget, but the durable cursor lets the next night continue where the pass stopped, towards later runs.
 
@@ -129,16 +136,21 @@ Proof records hold only identifiers, codes, timestamps and counts: no file names
 | `GALLRING_OVERDUE_WINDOW_DAYS`               | `1`       | Days past its deadline a run due for automatic deletion may stay before it is overdue                                                         |
 | `FLOW_RETENTION_MAX_DAYS`                    | `36500`   | Largest number of days a Flow run-history policy write may set (1-36500); stored longer policies keep applying                                |
 | `RETENTION_FLOWS_HISTORY_ENABLED`            | `true`    | Emergency switch for `flows.history`; rules can still be set while it is off                                                                  |
+| `RETENTION_CHATS_HISTORY_ENABLED`           | `true`    | Emergency switch for `chats.history`                                                                                                         |
+| `RETENTION_BUILDER_CLIENT_ERRORS_ENABLED`   | `true`    | Emergency switch for `builder.client_errors`                                                                                                 |
+| `RETENTION_CHATS_MAX_ROWS_PER_RUN`           | `250000`  | Logical rows one chat-history execution may examine or delete, including proof and cascades                                                  |
+| `RETENTION_CHATS_MAX_UNIT_ROWS`              | `5000`    | Largest conversation or session cascade admitted; its discovery and proof allowance must also fit the chat execution budget                   |
+| `RETENTION_OVERDUE_MAX_ROWS`                 | `1000`    | Maximum counted overdue rows per reporting task; a capped result is a lower bound                                                            |
 
 <Callout type="warning">
 
-**The enable switch is an emergency control, not a pause.** A deployment setting cannot say who stopped deletion or why. While `GALLRING_FLOWS_HOUSEKEEPING_ENABLED` or `RETENTION_FLOWS_HISTORY_ENABLED` is `false`, every suppressed nightly run is recorded as a skipped execution and writes one required `gallring_skipped` audit event (Scheduled deletion skipped) in the deployment's Organization, and `/api/healthz/flows` reports `GALLRING_DISABLED` (unhealthy). Turn it back on as soon as the emergency is over.
+**An enable switch is an emergency control, not a pause.** A deployment setting cannot say who stopped deletion or why. While any registered task's enable switch is `false`, every suppressed nightly run is recorded as a skipped execution and writes one required `gallring_skipped` audit event (Scheduled deletion skipped) in the deployment's Organization, and `/api/healthz/flows` reports `GALLRING_DISABLED` (unhealthy). Turn it back on as soon as the emergency is over.
 
 </Callout>
 
 `/api/healthz/flows` also reports `GALLRING_JOB_STALE` (unhealthy) when an enabled task has not completed (succeeded or partial) within two days, or has started but never completed within that time. A task that never ran is not flagged.
 
-Every execution of `flows.history` ends by writing an overdue snapshot to its job record, whatever the outcome (budget spent, a failed chunk). `/api/healthz/flows` then reports `GALLRING_OVERDUE` (unhealthy) when the newest snapshot counts runs still stored past their deadline plus the overdue window, or when the task has run but its newest snapshot is missing or older than one day plus the window (`overdue_unknown`). `GET /settings/flow-run-retention-policy/status` shows the same work live, by blocker (see the [Flow run-history retention guide](/guides/flows/retention-policy)).
+Every execution of `flows.history` and `chats.history` ends by writing an overdue snapshot to its job record, whatever the outcome (budget spent or a failed chunk). A snapshot is bounded by `RETENTION_OVERDUE_MAX_ROWS`; a capped count is a lower bound. Chat snapshots cover Questions and App runs with configured retention deadlines; orphan-session housekeeping is not an overdue reporter. `/api/healthz/flows` folds all enabled reporters, sums their counts and keeps their earliest known deadline and oldest observation. It reports `GALLRING_OVERDUE` (unhealthy) for positive overdue counts or unknown coverage: a missing reporter, an observation older than 48 hours, or an incomplete zero. On an upgrade with existing Flow snapshots, a newly enabled chat reporter makes health unknown until its first nightly observation. A fresh deployment where no reporter has ever finished keeps its initial health behavior. `GET /settings/flow-run-retention-policy/status` shows Flow history live by blocker (see the [Flow run-history retention guide](/guides/flows/retention-policy)).
 
 ### Honest limits
 
@@ -158,7 +170,7 @@ For confidential, security-classified, or regulated data, define the retention d
 
 <Callout type="info">
 
-**Flow AI Builder is a separate retention workstream.** Builder conversation sessions can contain sensitive source material. They are not governed by the Flow run-history hierarchy described here, and their current Space/conversation cleanup behavior must be reviewed separately before handling sensitive production data.
+**Flow AI Builder is a separate retention workstream.** Builder conversation sessions can contain sensitive source material. Neither the Flow run-history hierarchy nor `chats.history` schedules their deletion. Review their lifetime separately before handling sensitive production data; the client-error reporting window covers only client-error reports.
 
 </Callout>
 

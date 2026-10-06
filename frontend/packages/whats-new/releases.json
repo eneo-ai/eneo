@@ -17,6 +17,20 @@
             "en": "Files uploaded for a flow run but never used, and live transcripts that no run used, are now deleted by a nightly job once they are older than 30 days. People who may manage retention change the number of days under Flow settings, with a reason when they keep items longer. The window counts from when each item was created and applies to items that already exist, so anything older than it becomes eligible for deletion from the first night after the update; legal holds, files still in use elsewhere and the nightly budget can keep some items longer.",
             "sv": "Filer som laddats upp till en flödeskörning men aldrig använts, och livetranskriberingar som ingen körning använt, gallras nu av ett nattligt jobb när de är äldre än 30 dagar. Den som får hantera gallring ändrar antalet dagar under Flödesinställningar, med ett skäl när de sparas längre. Tiden räknas från när filen eller transkriberingen skapades och gäller även det som redan finns, så allt som är äldre kan gallras från första natten efter uppdateringen; rättsliga spärrar, filer som används på annat håll och nattens budget kan behålla en del längre."
           }
+        },
+        {
+          "id": "conversation-retention-audit",
+          "type": "improved",
+          "area": "admin",
+          "audience": "admin",
+          "title": {
+            "en": "Trace nightly conversation deletion in the audit log",
+            "sv": "Följ nattlig gallring av samtal i revisionsloggen"
+          },
+          "body": {
+            "en": "You can trace nightly deletion of Assistant conversations and App history in the audit log, with counts and the rule used. The existing retention periods still apply; large backlogs are processed in bounded batches and can take several nights.",
+            "sv": "Du kan följa den nattliga gallringen av assistentsamtal och apphistorik i revisionsloggen, med antal och vilken regel som användes. De befintliga gallringstiderna gäller fortfarande; stora köer behandlas i begränsade omgångar och kan kräva flera nätter."
+          }
         }
       ]
     },

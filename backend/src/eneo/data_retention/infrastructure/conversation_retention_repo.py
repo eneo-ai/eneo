@@ -1,7 +1,7 @@
 """Locked pages and fresh deletes for the two conversation root stores."""
 
 from collections.abc import Mapping, Sequence
-from datetime import datetime
+from datetime import datetime, timedelta
 from enum import StrEnum
 from uuid import UUID
 
@@ -9,6 +9,7 @@ import sqlalchemy as sa
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.sql.elements import ColumnElement
 from sqlalchemy.sql.functions import count
+from sqlalchemy.sql.selectable import CTE
 
 from eneo.data_retention.application.conversation_retention import (
     ConversationDeletion,
@@ -18,6 +19,7 @@ from eneo.data_retention.application.retention_runner import RetentionContractEr
 from eneo.data_retention.domain.retention import (
     ConversationPolicySource,
     RetentionKeyset,
+    RetentionOverdue,
 )
 from eneo.data_retention.infrastructure.conversation_retention_policy import (
     conversation_retention_policy,
@@ -88,13 +90,17 @@ class ConversationRetentionRepository:
             )
         )
 
-    def _lock_statement(
-        self, cursor: RetentionKeyset | None, limit: int
-    ) -> sa.Select[tuple[UUID, datetime, UUID, UUID | None]]:
+    def _window_statement(
+        self,
+        cursor: RetentionKeyset | None,
+        limit: int,
+        overdue_window: timedelta = timedelta(0),
+    ) -> CTE:
         owners_query = (
             sa.select(
                 self.parent.id,
-                self.cutoff.label("cutoff"),
+                (self.cutoff - overdue_window).label("cutoff"),
+                self.policy.days.label("days"),
             )
             .join(Spaces, self.parent.space_id == Spaces.id)
             .outerjoin(
@@ -109,7 +115,13 @@ class ConversationRetentionRepository:
                 )
             owners_query = owners_query.where(self.parent.id >= cursor.group)
         owners = owners_query.order_by(self.parent.id).subquery("conversation_owners")
-        due = sa.select(self.records.id, self.records.created_at).where(
+        due = sa.select(
+            self.records.id,
+            self.records.created_at,
+            (
+                self.records.created_at + sa.func.make_interval(0, 0, 0, owners.c.days)
+            ).label("due_at"),
+        ).where(
             self.parent_fk == owners.c.id,
             self.records.created_at < owners.c.cutoff,
         )
@@ -135,14 +147,24 @@ class ConversationRetentionRepository:
             .lateral("due_owner_conversations")
         )
         # Bound discovery before taking any locks, including across owner changes.
-        window = (
-            sa.select(roots.c.id, roots.c.created_at, owners.c.id.label("owner_id"))
+        return (
+            sa.select(
+                roots.c.id,
+                roots.c.created_at,
+                owners.c.id.label("owner_id"),
+                roots.c.due_at,
+            )
             .select_from(owners.join(roots, sa.true()))
             .order_by(owners.c.id, roots.c.created_at, roots.c.id)
             .limit(limit)
             .cte("conversation_window")
             .prefix_with("MATERIALIZED")
         )
+
+    def _lock_statement(
+        self, cursor: RetentionKeyset | None, limit: int
+    ) -> sa.Select[tuple[UUID, datetime, UUID, UUID | None]]:
+        window = self._window_statement(cursor, limit)
         locked = (
             sa.select(self.records.id.label("locked_id"))
             .where(self.records.id == window.c.id)
@@ -156,6 +178,25 @@ class ConversationRetentionRepository:
             )
             .select_from(window.outerjoin(locked, sa.true()))
             .order_by(window.c.owner_id, window.c.created_at, window.c.id)
+        )
+
+    async def overdue(self, *, window: timedelta, limit: int) -> RetentionOverdue:
+        candidates = self._window_statement(None, limit + 1, window)
+        deadline = sa.type_coerce(candidates.c.due_at, sa.DateTime(timezone=True))
+        rows = (
+            await self.session.scalars(
+                sa.select(deadline).order_by(
+                    candidates.c.owner_id,
+                    candidates.c.created_at,
+                    candidates.c.id,
+                )
+            )
+        ).all()
+        covered = rows[:limit]
+        return RetentionOverdue(
+            count=len(covered),
+            complete=len(rows) <= limit,
+            oldest_due_at=min(covered) if covered else None,
         )
 
     async def lock_due_page(
