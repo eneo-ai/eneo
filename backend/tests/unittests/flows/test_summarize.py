@@ -24,12 +24,14 @@ from eneo.flows.domain.text_processing import (
     TextProcessingRecord,
     TextSection,
 )
+from eneo.flows.flow_api_error_code import FlowApiErrorCode
 from eneo.flows.flow_run_error import FlowRunErrorDetails
 from eneo.flows.runtime.step_deadline import (
     StepDeadline,
     current_step_deadline_scope,
     step_deadline_scope,
 )
+from eneo.flows.runtime.step_execution_runtime import json_mode_cache_key
 from eneo.flows.runtime.step_handlers.summarize import (
     fold_section_records,
     record_bytes,
@@ -50,12 +52,26 @@ def _case(*args, **kwargs):
     return case
 
 
-@pytest.mark.parametrize("inline", [False, True])
-async def test_summarize_fitting_material_uses_one_call_and_one_record(user, inline):
+@pytest.mark.parametrize(
+    "inline,call_ceiling", [(False, 100), (True, 100), (False, None)]
+)
+async def test_summarize_fitting_material_requires_a_call_budget(
+    user, inline, call_ceiling
+):
     executor, repo, assistant, run, state, step, _, _, questions, _ = _case(
         user, text="A short municipal report.", inline=inline
     )
     step = replace(step, input_config={"text_processing": {"mode": "summarize"}})
+    executor.mapped_execution_policy = FlowMappedExecutionPolicy(
+        max_provider_calls_per_mapped_step=call_ceiling
+    )
+    if call_ceiling is None:
+        state.json_mode_supported[json_mode_cache_key(assistant)] = False
+        with pytest.raises(TypedIOValidationException) as caught:
+            await executor._execute_step(step=step, run=run, state=state, attempt_no=1)
+        assert caught.value.code == FlowApiErrorCode.SUMMARIZATION_NON_CONVERGENT.value
+        assert questions == []
+        return
 
     result = await executor._execute_step(step=step, run=run, state=state, attempt_no=1)
 
