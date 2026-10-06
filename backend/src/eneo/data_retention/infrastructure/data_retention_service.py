@@ -1,4 +1,5 @@
 import logging
+from contextlib import AbstractAsyncContextManager, nullcontext
 from typing import Any, cast
 from uuid import UUID
 
@@ -27,6 +28,21 @@ class DataRetentionService:
     def __init__(self, session: AsyncSession) -> None:
         super().__init__()
         self.session = session
+
+    def _batch_transaction(
+        self, commit_each_batch: bool
+    ) -> AbstractAsyncContextManager[Any]:
+        """Scope one deletion batch.
+
+        With ``commit_each_batch`` every batch runs in its own transaction, so
+        the row locks it takes (deleted records and the Files they used, kept
+        or not) are released as soon as the batch commits and an interrupted
+        run keeps the progress made so far. The session must not be in a
+        transaction. Without it the caller owns the transaction.
+        """
+        if commit_each_batch:
+            return self.session.begin()
+        return nullcontext()
 
     def _build_effective_retention_days(
         self,
@@ -71,6 +87,7 @@ class DataRetentionService:
         link_record_col: Any,
         link_file_col: Any,
         record_type: str,
+        commit_each_batch: bool = False,
     ) -> int:
         """
         Generic method to delete old records based on hierarchical retention policies.
@@ -78,6 +95,7 @@ class DataRetentionService:
         Uses batch deletion to prevent transaction timeouts on large datasets.
         Files attached to a deleted record are deleted with it once nothing else
         uses them, so uploads and transcriptions follow the record's retention.
+        See ``_batch_transaction`` for ``commit_each_batch``.
 
         Args:
             record_table: Table to delete from (e.g., Questions, AppRuns)
@@ -88,6 +106,7 @@ class DataRetentionService:
             link_record_col: Record column in the record's file link table
             link_file_col: File column in the record's file link table
             record_type: Human-readable record type for logging
+            commit_each_batch: Commit every batch in its own transaction
 
         Returns:
             Number of records deleted
@@ -125,29 +144,30 @@ class DataRetentionService:
         total_deleted = 0
         total_files_deleted = 0
         while True:
-            # Select batch of records (ORDER BY ensures deterministic batch selection)
-            batch_ids = (
-                await self.session.scalars(
-                    base_subquery.order_by(record_table.id).limit(  # type: ignore[attr-defined]
-                        RETENTION_BATCH_SIZE
+            async with self._batch_transaction(commit_each_batch):
+                # Select batch of records (ORDER BY ensures deterministic batch selection)
+                batch_ids = (
+                    await self.session.scalars(
+                        base_subquery.order_by(record_table.id).limit(  # type: ignore[attr-defined]
+                            RETENTION_BATCH_SIZE
+                        )
                     )
-                )
-            ).all()
-            if not batch_ids:
-                break
+                ).all()
+                if not batch_ids:
+                    break
 
-            # Read the attached files before the link rows cascade away
-            file_ids = (
-                await self.session.scalars(
-                    sa.select(link_file_col)
-                    .where(link_record_col.in_(batch_ids))
-                    .distinct()
-                )
-            ).all()
-            query = sa.delete(record_table).where(record_table.id.in_(batch_ids))  # type: ignore[attr-defined]
-            result = await self.session.execute(query)
-            batch_deleted = affected_row_count(result)
-            files_deleted = await delete_unused_root_files(self.session, file_ids)
+                # Read the attached files before the link rows cascade away
+                file_ids = (
+                    await self.session.scalars(
+                        sa.select(link_file_col)
+                        .where(link_record_col.in_(batch_ids))
+                        .distinct()
+                    )
+                ).all()
+                query = sa.delete(record_table).where(record_table.id.in_(batch_ids))  # type: ignore[attr-defined]
+                result = await self.session.execute(query)
+                batch_deleted = affected_row_count(result)
+                files_deleted = await delete_unused_root_files(self.session, file_ids)
 
             total_deleted += batch_deleted
             total_files_deleted += files_deleted
@@ -166,7 +186,7 @@ class DataRetentionService:
 
         return total_deleted
 
-    async def delete_old_questions(self) -> int:
+    async def delete_old_questions(self, *, commit_each_batch: bool = False) -> int:
         """
         Delete old questions using hierarchical retention policy resolution:
         1. Assistant-level retention_days (if set)
@@ -196,9 +216,10 @@ class DataRetentionService:
             link_record_col=QuestionsFiles.question_id,
             link_file_col=QuestionsFiles.file_id,
             record_type="questions",
+            commit_each_batch=commit_each_batch,
         )
 
-    async def delete_old_app_runs(self) -> int:
+    async def delete_old_app_runs(self, *, commit_each_batch: bool = False) -> int:
         """
         Delete old app runs using hierarchical retention policy resolution:
         1. App-level retention_days (if set)
@@ -218,14 +239,16 @@ class DataRetentionService:
             link_record_col=AppRunsFiles.app_run_id,
             link_file_col=AppRunsFiles.file_id,
             record_type="app runs",
+            commit_each_batch=commit_each_batch,
         )
 
-    async def delete_old_sessions(self) -> int:
+    async def delete_old_sessions(self, *, commit_each_batch: bool = False) -> int:
         """
         Delete orphaned sessions that have no questions.
 
         Sessions without questions are deleted after ORPHANED_SESSION_CLEANUP_DAYS.
         Uses batch deletion to prevent transaction timeouts on large datasets.
+        See ``_batch_transaction`` for ``commit_each_batch``.
 
         Returns:
             Number of sessions deleted
@@ -250,13 +273,14 @@ class DataRetentionService:
         # Batch deletion to prevent transaction timeouts on large datasets
         total_deleted = 0
         while True:
-            # ORDER BY ensures deterministic batch selection
-            batch_subquery = base_subquery.order_by(Sessions.id).limit(
-                RETENTION_BATCH_SIZE
-            )
-            query = sa.delete(Sessions).where(Sessions.id.in_(batch_subquery))
-            result = await self.session.execute(query)
-            batch_deleted = affected_row_count(result)
+            async with self._batch_transaction(commit_each_batch):
+                # ORDER BY ensures deterministic batch selection
+                batch_subquery = base_subquery.order_by(Sessions.id).limit(
+                    RETENTION_BATCH_SIZE
+                )
+                query = sa.delete(Sessions).where(Sessions.id.in_(batch_subquery))
+                result = await self.session.execute(query)
+                batch_deleted = affected_row_count(result)
 
             if batch_deleted == 0:
                 break
