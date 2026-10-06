@@ -41,6 +41,7 @@ from eneo.database.tables.flow_tables import (
     FlowLiveTranscripts,
     FlowOutboxDeliveryStatus,
     FlowRunAuditOutbox,
+    FlowRuns,
     FlowRunStepInputFiles,
     FlowRuntimeUploadedFiles,
 )
@@ -281,8 +282,15 @@ class FlowHousekeepingRepository:
 
     @staticmethod
     def receipt_held() -> sa.ColumnElement[bool]:
-        """A receipt whose Flow a hold covers keeps its proof (receipt pruning)."""
-        return flow_runless_data_held_predicate(flow_id=RetentionReceipts.flow_id)
+        """A held Flow or a remaining run's fence keeps the receipt's proof."""
+        return sa.or_(
+            flow_runless_data_held_predicate(flow_id=RetentionReceipts.flow_id),
+            sa.exists(
+                sa.select(FlowRuns.id).where(
+                    FlowRuns.retention_receipt_id == RetentionReceipts.id
+                )
+            ),
+        )
 
     # Delivered audit outbox mirrors -------------------------------------------
 

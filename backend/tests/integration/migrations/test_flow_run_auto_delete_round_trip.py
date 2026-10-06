@@ -52,6 +52,7 @@ def round_trip_db(test_settings):
     )
     conn.autocommit = True
     command.upgrade(cfg, FENCE)
+    command.downgrade(cfg, FENCE)
     engine = sa.create_engine(test_settings.sync_database_url)
     try:
         yield conn, cfg, engine
@@ -233,3 +234,53 @@ def test_downgrades_refuse_while_stored_values_need_them(round_trip_db):
         )
     _execute(conn, "DELETE FROM tenants WHERE id = %s", tenant_id)
     command.upgrade(cfg, FENCE)
+
+
+def test_receipt_reference_survives_until_the_fenced_run_is_gone(round_trip_db):
+    """Mutant receipt_fk_missing: pruning cannot erase a fenced run's proof."""
+    conn, cfg, _ = round_trip_db
+    tenant_id = _tenant(conn)
+    run_id = _fenced_run(conn, tenant_id)
+    receipt_id = _scalar(
+        conn, "SELECT gallring_receipt_id FROM flow_runs WHERE id = %s", run_id
+    )
+    _execute(
+        conn,
+        "INSERT INTO gallring_receipts "
+        "(id, task, entity_kind, entity_id, category, trigger, tenant_id, "
+        "phase, started_at, updated_at, manifest_completed_at) "
+        "VALUES (%s, 'flows.history', 'flow_run', %s, 'run_record', 'scheduled', "
+        "%s, 'deleting', now(), now(), now())",
+        str(receipt_id),
+        run_id,
+        tenant_id,
+    )
+    try:
+        command.upgrade(cfg, "202610051020")
+        with pytest.raises(psycopg2.errors.ForeignKeyViolation):
+            _execute(
+                conn, "DELETE FROM gallring_receipts WHERE id = %s", str(receipt_id)
+            )
+        assert (
+            _scalar(
+                conn,
+                "SELECT convalidated FROM pg_constraint "
+                "WHERE conname = 'fk_flow_runs_retention_receipt' "
+                "AND conrelid = 'flow_runs'::regclass",
+            )
+            is True
+        )
+        assert _scalar(conn, "SHOW lock_timeout") == "0"
+        _execute(conn, "DELETE FROM flow_runs WHERE id = %s", run_id)
+        _execute(conn, "DELETE FROM gallring_receipts WHERE id = %s", str(receipt_id))
+        assert (
+            _scalar(
+                conn,
+                "SELECT count(*) FROM gallring_receipts WHERE id = %s",
+                str(receipt_id),
+            )
+            == 0
+        )
+    finally:
+        _execute(conn, "DELETE FROM tenants WHERE id = %s", tenant_id)
+        _execute(conn, "DELETE FROM gallring_receipts WHERE id = %s", str(receipt_id))

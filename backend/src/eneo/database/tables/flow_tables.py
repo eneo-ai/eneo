@@ -160,7 +160,7 @@ FLOW_RUN_TERMINAL_RETENTION_ANCHOR_INDEX_PREDICATE = (
     f"status IN ({_index_values(TERMINAL_FLOW_RUN_STATUS_VALUES)})"
 )
 # Terminal runs whose automatic deletion has not started (K4 due selection).
-FLOW_RUN_GALLRING_DUE_INDEX_PREDICATE = (
+FLOW_RUN_RETENTION_DUE_INDEX_PREDICATE = (
     f"{FLOW_RUN_TERMINAL_RETENTION_ANCHOR_INDEX_PREDICATE} "
     "AND gallring_receipt_id IS NULL"
 )
@@ -941,10 +941,16 @@ class FlowRuns(BasePublic):
         ForeignKey(Jobs.id, ondelete="SET NULL"),
         nullable=True,
     )
-    # Public run lookup, status/list, review-queue and idempotent-replay queries
-    # exclude this fence, as do hold placement and history-purge selection.
-    # No foreign key: the deletion receipt outlives the run.
-    gallring_receipt_id: Mapped[Optional[UUID]] = mapped_column(nullable=True)
+    # The fence refers to the receipt while the run still exists.
+    retention_receipt_id: Mapped[Optional[UUID]] = mapped_column(
+        "gallring_receipt_id",
+        ForeignKey(
+            "gallring_receipts.id",
+            ondelete="RESTRICT",
+            name="fk_flow_runs_retention_receipt",
+        ),
+        nullable=True,
+    )
 
     __table_args__ = (
         CheckConstraint(
@@ -1004,6 +1010,11 @@ class FlowRuns(BasePublic):
         ),
         UniqueConstraint("id", "tenant_id", name="uq_flow_runs_id_tenant_id"),
         UniqueConstraint("id", "flow_id", name="uq_flow_runs_id_flow_id"),
+        Index(
+            "ix_flow_runs_retention_receipt",
+            "gallring_receipt_id",
+            postgresql_where=sa.text("gallring_receipt_id IS NOT NULL"),
+        ),
         Index("ix_flow_runs_job_id", "job_id"),
         Index("ix_flow_runs_flow_id_status", "flow_id", "status"),
         Index("ix_flow_runs_tenant_created_at", "tenant_id", "created_at"),
@@ -1086,7 +1097,7 @@ class FlowRuns(BasePublic):
             "flow_id",
             sa.text("coalesce(finished_at, created_at)"),
             "id",
-            postgresql_where=sa.text(FLOW_RUN_GALLRING_DUE_INDEX_PREDICATE),
+            postgresql_where=sa.text(FLOW_RUN_RETENTION_DUE_INDEX_PREDICATE),
         ),
         _principal_fk_index("flow_runs", "principal_user_id"),
         _principal_fk_index("flow_runs", "principal_service_id"),

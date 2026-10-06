@@ -563,7 +563,7 @@ _FLOW_RUN_STATUS_COLUMNS = (
 )
 
 # A run whose deletion has started (gallring receipt set) reads as deleted.
-FLOW_RUN_NOT_FENCED = FlowRuns.gallring_receipt_id.is_(None)
+FLOW_RUN_NOT_FENCED = FlowRuns.retention_receipt_id.is_(None)
 
 
 class FlowRunRepository:
@@ -870,7 +870,7 @@ class FlowRunRepository:
         row = await self.session.scalar(stmt)
         if row is None:
             return None
-        if row.gallring_receipt_id is not None:
+        if row.retention_receipt_id is not None:
             raise FlowRunIdempotencyRunDeletedError
         return FlowRun.model_validate(row), row.request_fingerprint
 

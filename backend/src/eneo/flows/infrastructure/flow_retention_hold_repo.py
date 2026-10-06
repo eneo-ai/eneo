@@ -125,7 +125,7 @@ class FlowRetentionHoldRepository:
             .where(FlowRuns.flow_id == flow_id)
             .where(FlowRuns.tenant_id == tenant_id)
             # A run whose deletion has started answers like a missing run.
-            .where(FlowRuns.gallring_receipt_id.is_(None))
+            .where(FlowRuns.retention_receipt_id.is_(None))
         )
         return set(result.all())
 

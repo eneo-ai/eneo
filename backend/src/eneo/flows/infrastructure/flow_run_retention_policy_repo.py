@@ -430,7 +430,7 @@ class FlowRunRetentionPolicyRepository:
             .where(FlowRuns.tenant_id == tenant_id)
             .where(FlowRuns.status.in_(TERMINAL_FLOW_RUN_STATUS_VALUES))
             # A run whose deletion has started is never offered for review.
-            .where(FlowRuns.gallring_receipt_id.is_(None))
+            .where(FlowRuns.retention_receipt_id.is_(None))
             .where(effective_policy.mode == FlowRunRetentionMode.REVIEW_REQUIRED.value)
             .where(
                 *flow_run_history_due_predicates(

@@ -72,6 +72,10 @@ from eneo.data_retention.infrastructure.retention_job_run_repo import (
 from eneo.data_retention.infrastructure.retention_receipt_repo import (
     RetentionReceiptRepository,
 )
+from eneo.flows.application.flow_file_family_preparation import (
+    FileFamilyPreparationStopped,
+    prepare_file_family,
+)
 from eneo.flows.application.step_assistant_reclamation import (
     STEP_ASSISTANT_BLOCKED_KEYS,
     STEP_ASSISTANT_COUNT_KEYS,
@@ -333,71 +337,30 @@ class FlowHousekeepingTask:
         if not await self._housekeeping.lock_upload(root, now=now):
             out.blocked["lock_deferred"] += 1
             return RetentionUnitUsage(rows=1, files=0)
-        cap = self._family_rows
-        not_now = RetentionUnitDisposition.DOES_NOT_FIT
-        used = 1
-        if rows <= used:
-            return RetentionUnitUsage(rows=used, files=0, disposition=not_now)
-
-        def room(most: int) -> int:
-            # A count may examine `most` + 1 rows (the sentinel) within what is left.
-            return max(0, min(most, rows - used - 1))
-
-        member_max = (cap - 2) // 4
-        limit = room(member_max)
-        members = await self._families.count_members(root, limit=limit + 1)
-        used += members
-        if members > member_max:
-            return await self._over_cap(root, receipt, upload, used, out)
-        if members > limit:
-            return RetentionUnitUsage(rows=used, files=0, disposition=not_now)
-        reference_max = (cap - 2 - 4 * members) // 2
-        limit = room(reference_max)
-        references = await self._families.count_references(root, limit=limit + 1)
-        used += references
-        if references > reference_max:
-            return await self._over_cap(root, receipt, upload, used, out)
-        if references > limit:
-            return RetentionUnitUsage(rows=used, files=0, disposition=not_now)
-        transcript_max = (cap - 2 - 4 * members - 2 * references) // 2
-        limit = room(transcript_max)
-        transcripts = await self._families.count_bound_transcripts(
-            root, limit=limit + 1
+        prepared = await prepare_file_family(
+            self._families,
+            root,
+            rows=rows,
+            files=files,
+            cap=self._family_rows,
+            initial_rows=1,
         )
-        used += transcripts
-        if transcripts > transcript_max:
-            return await self._over_cap(root, receipt, upload, used, out)
-        if (
-            transcripts > limit
-            or 2 + 4 * members + 2 * references + 2 * transcripts > rows
-            or 1 + members + 2 * references + transcripts > files
-        ):
-            return RetentionUnitUsage(rows=used, files=0, disposition=not_now)
-
-        # Under the locks the family is read again, never past what was counted:
-        # anything that grew in between makes it wait for another pass.
-        locked = await self._families.lock_members(root, limit=members)
-        used += locked.examined
-        if locked.items is None:
-            out.blocked["lock_deferred"] += 1
-            return RetentionUnitUsage(rows=used, files=0)
-        manifest = await self._families.manifest(locked.items, limit=references)
-        used += manifest.examined
-        bound = await self._families.count_all_bound_transcripts(
-            root, limit=transcripts
-        )
-        used += bound
-        if manifest.items is None or bound > transcripts:
-            out.blocked["lock_deferred"] += 1
-            return RetentionUnitUsage(rows=used, files=0)
-        members_locked, pairs = locked.items, manifest.items
+        if isinstance(prepared, FileFamilyPreparationStopped):
+            if prepared.pause_reason is not None:
+                receipt = await self._receipt(root, receipt, upload)
+                await self._pause(receipt, prepared.pause_reason, out)
+            elif prepared.usage.disposition is RetentionUnitDisposition.DONE:
+                out.blocked["lock_deferred"] += 1
+            return prepared.usage
+        members_locked, pairs = prepared.members, prepared.manifest
+        used = prepared.examined_rows
         receipt = await self._receipt(root, receipt, upload)
         tenant_id = receipt.tenant_id
         out.add(tenant_id, "members_checked", len(members_locked))
-        used += len(members_locked) + 1
+        used += len(members_locked)
         block = await self._families.outside_owner(
             root, members_locked, root_anchor_edges=UPLOAD_ANCHOR_EDGES
-        ) or await self._families.too_deep(root)
+        )
         if block is not None:
             await self._pause(receipt, _block_reason(block), out)
             return RetentionUnitUsage(rows=used, files=0)
@@ -426,19 +389,6 @@ class FlowHousekeepingTask:
             rows=used,
             files=2 * len(pairs) + deleted + released + deleted_transcripts,
         )
-
-    async def _over_cap(
-        self,
-        root: UUID,
-        receipt: RetentionReceipt | None,
-        upload: AbandonedUpload | None,
-        used: int,
-        out: RetentionEffects,
-    ) -> RetentionUnitUsage:
-        """Larger than the family cap: never reclaimed, paused once a pass."""
-        receipt = await self._receipt(root, receipt, upload)
-        await self._pause(receipt, ReceiptReason.FAMILY_EXCEEDS_BUDGET, out)
-        return RetentionUnitUsage(rows=used, files=0)
 
     async def _receipt(
         self,

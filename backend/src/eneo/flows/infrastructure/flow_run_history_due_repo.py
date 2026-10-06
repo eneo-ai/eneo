@@ -64,7 +64,7 @@ def flow_run_k4_due_predicates(
                 literal_execute=True,
             )
         ),
-        FlowRuns.gallring_receipt_id.is_(None),
+        FlowRuns.retention_receipt_id.is_(None),
         FLOW_RUN_RETENTION_ANCHOR <= cutoff,
     )
 

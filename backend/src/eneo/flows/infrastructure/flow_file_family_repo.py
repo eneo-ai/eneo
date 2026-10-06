@@ -24,9 +24,12 @@ from eneo.data_retention.infrastructure.retention_sql import uuid_in
 from eneo.database.tables.files_table import Files
 from eneo.database.tables.flow_tables import (
     FlowLiveTranscripts,
+    FlowRunStepInputFiles,
+    FlowRunStepResultFiles,
     FlowRuntimeUploadedFiles,
 )
 from eneo.database.tables.object_content_table import FileContentReferences
+from eneo.flows.infrastructure.flow_run_deletion_repo import run_file_roots
 from eneo.flows.infrastructure.flow_run_history_purge_repo import (
     flow_file_reference_exists,
 )
@@ -50,8 +53,7 @@ UPLOAD_ANCHOR_EDGES = _INTERNAL_EDGES | {
 
 @dataclass(frozen=True, slots=True)
 class FamilyBlock:
-    """A member another owner references (the root is blocked differently), or
-    a member whose children lie beyond the traversal depth."""
+    """A member another owner references, or an incomplete family traversal."""
 
     file_id: UUID
     is_root: bool
@@ -96,6 +98,74 @@ class FlowFileFamilyRepository:
     def __init__(self, session: AsyncSession) -> None:
         self.session = session
 
+    async def next_run_family(self, run_id: UUID) -> UUID | FamilyBlock | None:
+        """Settle a linked ancestor before any of its linked descendants.
+
+        A shared family stays physical after its own links are removed. Choosing
+        its descendant first would reclaim part of that kept family or record
+        its manifest twice. The bounded lineage walk chooses the highest linked
+        ancestor. An incomplete ancestor walk pauses before any release, since
+        a linked owner may lie beyond its traversal bound.
+        """
+        first = run_file_roots(run_id).limit(1).subquery()
+        lineage = (
+            sa.select(
+                Files.id.label("file_id"),
+                Files.parent_file_id,
+                sa.literal(0).label("depth"),
+            )
+            .join(first, first.c.file_id == Files.id)
+            .cte("run_file_lineage", recursive=True)
+        )
+        parent = aliased(Files)
+        lineage = lineage.union_all(
+            sa.select(parent.id, parent.parent_file_id, lineage.c.depth + 1).where(
+                parent.id == lineage.c.parent_file_id,
+                lineage.c.depth < _MAX_FAMILY_DEPTH,
+            )
+        )
+        root = (
+            sa.select(lineage.c.file_id)
+            .where(
+                sa.or_(
+                    *(
+                        sa.select(sa.literal(1))
+                        .select_from(table)
+                        .where(
+                            table.flow_run_id == run_id,
+                            table.file_id == lineage.c.file_id,
+                        )
+                        .exists()
+                        for table in (FlowRunStepInputFiles, FlowRunStepResultFiles)
+                    )
+                )
+            )
+            .order_by(lineage.c.depth.desc(), lineage.c.file_id)
+            .limit(1)
+            .scalar_subquery()
+        )
+        incomplete = (
+            sa.select(sa.literal(1))
+            .select_from(lineage)
+            .where(
+                lineage.c.depth == _MAX_FAMILY_DEPTH,
+                lineage.c.parent_file_id.is_not(None),
+            )
+            .exists()
+        )
+        selected = (
+            await self.session.execute(
+                sa.select(root.label("root"), incomplete.label("incomplete"))
+            )
+        ).one()
+        if selected.root is None:
+            return None
+        if selected.incomplete:
+            return FamilyBlock(
+                file_id=selected.root, is_root=False, depth_exceeded=True
+            )
+        return selected.root
+
     async def _bounded_count(self, stmt: sa.Select[tuple[UUID]], limit: int) -> int:
         """How many rows `stmt` yields, examining at most `limit` of them."""
         if limit <= 0:
@@ -118,6 +188,19 @@ class FlowFileFamilyRepository:
             ),
             limit,
         )
+
+    async def count_run_links(self, root_id: UUID, *, run_id: UUID, limit: int) -> int:
+        """Bound this run's input/result links, including repeated uses of a file."""
+        family = _family(root_id)
+        links = sa.union_all(
+            *(
+                sa.select(table.file_id)
+                .join(family, family.c.file_id == table.file_id)
+                .where(table.flow_run_id == run_id)
+                for table in (FlowRunStepInputFiles, FlowRunStepResultFiles)
+            )
+        ).subquery()
+        return await self._bounded_count(sa.select(links.c.file_id), limit)
 
     async def count_bound_transcripts(self, root_id: UUID, *, limit: int) -> int:
         return await self._bounded_count(
@@ -193,7 +276,12 @@ class FlowFileFamilyRepository:
                     sa.case(
                         (
                             Files.id == root_id,
-                            flow_file_reference_exists(excluding=root_anchor_edges),
+                            sa.or_(
+                                # A selected descendant belongs to a parent
+                                # outside this unit; keep its derived subtree.
+                                Files.parent_file_id.is_not(None),
+                                flow_file_reference_exists(excluding=root_anchor_edges),
+                            ),
                         ),
                         else_=flow_file_reference_exists(excluding=_INTERNAL_EDGES),
                     ),

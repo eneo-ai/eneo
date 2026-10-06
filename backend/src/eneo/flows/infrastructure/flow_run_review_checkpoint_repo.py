@@ -82,7 +82,10 @@ from eneo.flows.flow_review_policy import FlowStepReviewMode
 from eneo.flows.infrastructure.flow_run_audit_outbox_repo import (
     FlowRunAuditOutboxRepository,
 )
-from eneo.flows.infrastructure.flow_run_repo import FlowRunRepository
+from eneo.flows.infrastructure.flow_run_repo import (
+    FLOW_RUN_NOT_FENCED,
+    FlowRunRepository,
+)
 from eneo.flows.principal import FlowPrincipal
 
 
@@ -699,6 +702,7 @@ class FlowRunReviewCheckpointRepository:
             .where(FlowRuns.id == flow_run_id)
             .where(FlowRuns.flow_id == flow_id)
             .where(FlowRuns.tenant_id == tenant_id)
+            .where(FLOW_RUN_NOT_FENCED)
             .with_for_update()
         )
         if run_row is None:
@@ -1437,6 +1441,7 @@ class FlowRunReviewCheckpointRepository:
             sa.select(FlowRuns)
             .where(FlowRuns.id == flow_run_id)
             .where(FlowRuns.tenant_id == tenant_id)
+            .where(FLOW_RUN_NOT_FENCED)
             .with_for_update()
         )
         if run_row is None:
@@ -1495,6 +1500,7 @@ class FlowRunReviewCheckpointRepository:
             .where(FlowRuns.id == flow_run_id)
             .where(FlowRuns.flow_id == flow_id)
             .where(FlowRuns.tenant_id == tenant_id)
+            .where(FLOW_RUN_NOT_FENCED)
             .with_for_update()
         )
         if run_row is None:

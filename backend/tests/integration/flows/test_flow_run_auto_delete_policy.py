@@ -28,10 +28,11 @@ from eneo.database.tables.flow_tables import (
     Flows,
     FlowVersions,
 )
-from eneo.database.tables.retention_tables import RetentionJobRuns, RetentionReceipts
+from eneo.database.tables.retention_tables import RetentionJobRuns
 from eneo.database.tables.spaces_table import Spaces
 from eneo.flows.domain.flow_run_exceptions import FlowRunNotFoundError
 from eneo.flows.domain.flow_run_retention_policy import FLOWS_HISTORY_TASK
+from eneo.flows.infrastructure.flow_run_deletion_repo import FlowRunDeletionRepository
 from eneo.flows.infrastructure.flow_run_history_due_repo import (
     FlowRunHistoryDueRepository,
 )
@@ -48,6 +49,7 @@ from eneo.flows.runtime.flow_runtime_health import (
 from eneo.main.config import get_settings
 from eneo.main.exceptions import ConflictException
 from eneo.server.main import logger as server_logger
+from tests.integration.flows.retention_fixtures import fence_flow_run
 
 pytestmark = [pytest.mark.integration, pytest.mark.asyncio]
 
@@ -151,7 +153,9 @@ async def _set_policy(db_container, table, row_id: UUID, mode: str, days: int) -
         )
 
 
-async def _run(session, admin_user, flow_id, *, age: timedelta, **values) -> UUID:
+async def _run(
+    session, admin_user, flow_id, *, age: timedelta, fenced: bool = False, **values
+) -> UUID:
     at = datetime.now(timezone.utc) - age
     status = values.pop("status", "completed")
     run = FlowRuns(
@@ -170,6 +174,10 @@ async def _run(session, admin_user, flow_id, *, age: timedelta, **values) -> UUI
     )
     session.add(run)
     await session.flush()
+    if fenced:
+        await fence_flow_run(
+            session, run_id=run.id, tenant_id=admin_user.tenant_id, flow_id=flow_id
+        )
     return run.id
 
 
@@ -338,7 +346,7 @@ async def test_a_run_whose_deletion_started_reads_as_deleted_everywhere(
             flow_id,
             age=timedelta(4),
             idempotency_key="replay-me",
-            gallring_receipt_id=uuid4(),
+            fenced=True,
         )
 
     async with db_container() as container:
@@ -424,9 +432,7 @@ async def overdue_history(db_container, admin_user, scope) -> dict[str, UUID]:
         # Due, but within the overdue window: not overdue yet.
         await _run(session, admin_user, flow_id, age=timedelta(hours=36))
         # Deletion started, still running, or under another mode: never counted.
-        await _run(
-            session, admin_user, flow_id, age=timedelta(9), gallring_receipt_id=uuid4()
-        )
+        await _run(session, admin_user, flow_id, age=timedelta(9), fenced=True)
         await _run(
             session,
             admin_user,
@@ -439,24 +445,6 @@ async def overdue_history(db_container, admin_user, scope) -> dict[str, UUID]:
             session, admin_user, scope["space_id"], mode="preserve", days=1
         )
         await _run(session, admin_user, other, age=timedelta(days=9))
-        now = datetime.now(timezone.utc)
-        session.add(
-            RetentionReceipts(
-                task=FLOWS_HISTORY_TASK,
-                entity_kind="flow_run",
-                entity_id=uuid4(),
-                category="run_record",
-                trigger="scheduled",
-                tenant_id=admin_user.tenant_id,
-                policy_source="flow",
-                policy_mode="auto_delete",
-                policy_days=30,
-                phase="deleting",
-                started_at=now - timedelta(hours=5),
-                updated_at=now,
-                manifest_completed_at=now,
-            )
-        )
         return {"plain": plain, "audit": audit, "held": held}
 
 
@@ -656,3 +644,57 @@ async def test_status_database_errors_keep_their_failure_contract(
         assert len(records) == 1
         assert getattr(records[0], "exception_type", None) == "ProgrammingError"
         assert "UndefinedColumn" in getattr(records[0], "traceback", "")
+
+
+async def test_the_due_index_serves_the_generic_plan_of_the_prepared_query(
+    db_container, admin_user, scope
+) -> None:
+    """Mutant statuses_bound: the per-Flow due page as asyncpg prepares it (20k
+    runs in the Flow, 50 other Flows of 200), planned without its parameter
+    values (force_generic_plan): the partial index predicate must still hold."""
+    await _set_policy(db_container, Flows, scope["flow_id"], "auto_delete", 30)
+    async with db_container() as container:
+        session = container.session()
+        await _seed_runs(session, admin_user, scope["flow_id"], n=20_000, age_days=0)
+        for _ in range(50):
+            other = await _flow(session, admin_user, scope["space_id"], "preserve", 30)
+            await _seed_runs(session, admin_user, other, n=200, age_days=0)
+    async with db_container() as container:
+        session = container.session()
+        await session.execute(sa.text("ANALYZE flow_runs"))
+        executed: list[tuple[str, tuple[object, ...]]] = []
+
+        def capture(conn, cursor, statement, parameters, context, executemany):
+            executed.append((statement, parameters))
+
+        sa.event.listen(session.bind.sync_engine, "before_cursor_execute", capture)
+        try:
+            await FlowRunDeletionRepository(session).due_runs(
+                flow_id=scope["flow_id"],
+                cutoff=datetime.now(timezone.utc),
+                after=None,
+                limit=10,
+            )
+        finally:
+            sa.event.remove(session.bind.sync_engine, "before_cursor_execute", capture)
+        [statement_and_parameters] = executed
+        statement, params = statement_and_parameters
+        connection = await session.connection()
+        driver = (await connection.get_raw_connection()).driver_connection
+        await driver.execute("SET plan_cache_mode = force_generic_plan")
+        await driver.execute(f"PREPARE k4_due_generic AS {statement}")
+        # EXECUTE takes values as SQL literals; the plan stays the generic one.
+        values = ", ".join(
+            str(value)
+            if isinstance(value, int)
+            else "'{}'".format(
+                value.isoformat() if isinstance(value, datetime) else value
+            )
+            for value in params
+        )
+        rows = await driver.fetch(f"EXPLAIN EXECUTE k4_due_generic({values})")
+        await driver.execute("DEALLOCATE k4_due_generic")
+        await driver.execute("RESET plan_cache_mode")
+
+    rendered = "\n".join(row[0] for row in rows)
+    assert "ix_flow_runs_flow_gallring_due" in rendered, rendered

@@ -21,11 +21,20 @@ from eneo.database.tables.assistant_table import Assistants
 from eneo.database.tables.flow_tables import (
     FlowLiveTranscripts,
     FlowRunAuditOutbox,
+    FlowRuns,
 )
 
 pytestmark = [pytest.mark.integration, pytest.mark.migration_isolation]
 
 _REVISIONS = [
+    pytest.param(
+        (
+            "202610051010",
+            "202610051020",
+            {"ix_flow_runs_retention_receipt": FlowRuns},
+        ),
+        id="run-receipt-reference",
+    ),
     pytest.param(
         (
             "202610041200",

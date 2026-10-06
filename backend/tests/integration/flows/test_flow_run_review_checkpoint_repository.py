@@ -29,6 +29,7 @@ from eneo.flows.application.flow_review_expiry_reconciliation import (
 from eneo.flows.application.flow_run_terminalization import FlowRunTerminalizer
 from eneo.flows.domain.canonical_json_hash import canonical_json_hash
 from eneo.flows.domain.flow import Flow, FlowRun, FlowRunReviewCheckpoint, FlowStep
+from eneo.flows.domain.flow_run_exceptions import FlowRunNotFoundError
 from eneo.flows.domain.review_checkpoint_exceptions import (
     FlowReviewCheckpointAlreadyResumedError,
     FlowReviewCheckpointExpiredError,
@@ -77,6 +78,7 @@ from eneo.flows.runtime.flow_runtime_health import (
     load_flow_runtime_health_snapshot,
 )
 from tests.flow_snapshot_fixtures import assistant_snapshot
+from tests.integration.flows.retention_fixtures import fence_flow_run
 from tests.integration.flows.test_flow_run_listing_and_evidence_measurement import (
     _capture_queries,
 )
@@ -1187,13 +1189,16 @@ async def test_open_review_checkpoint_transitions_run_and_writes_outbox(
 
 @pytest.mark.asyncio
 @pytest.mark.integration
+@pytest.mark.parametrize("fenced", [False, True], ids=["live_replay", "fenced_run"])
 async def test_open_review_checkpoint_replays_existing_attempt_without_second_outbox(
     db_container,
     completion_model_factory,
     space_factory,
     assistant_factory,
     admin_user,
+    fenced,
 ):
+    """Mutants checkpoint_open_fence, checkpoint_resume_fence, checkpoint_expiry_fence."""
     async with db_container() as container:
         session = container.session()
         scenario = await _create_review_checkpoint_scenario(
@@ -1224,27 +1229,64 @@ async def test_open_review_checkpoint_replays_existing_attempt_without_second_ou
             review_mode=FlowStepReviewMode.VIEW,
             output_type=FlowOutputType.JSON,
         )
-        replayed = await checkpoint_repo.open_review_checkpoint_for_completed_step(
-            tenant_id=scenario.tenant_id,
-            flow_id=scenario.flow_id,
-            flow_run_id=scenario.flow_run_id,
-            step_id=scenario.step_ids[0],
-            step_order=1,
-            attempt_no=1,
-            requester_principal=FlowPrincipal.from_user(admin_user),
-            next_step_ids=(scenario.step_ids[1],),
-            review_mode=FlowStepReviewMode.VIEW,
-            output_type=FlowOutputType.JSON,
+        if fenced:
+            await fence_flow_run(
+                session,
+                run_id=scenario.flow_run_id,
+                tenant_id=scenario.tenant_id,
+                flow_id=scenario.flow_id,
+            )
+            await session.execute(
+                sa.update(FlowRuns)
+                .where(FlowRuns.id == scenario.flow_run_id)
+                .values(status="completed")
+            )
+        queries = (
+            lambda: checkpoint_repo.open_review_checkpoint_for_completed_step(
+                tenant_id=scenario.tenant_id,
+                flow_id=scenario.flow_id,
+                flow_run_id=scenario.flow_run_id,
+                step_id=scenario.step_ids[0],
+                step_order=1,
+                attempt_no=1,
+                requester_principal=FlowPrincipal.from_user(admin_user),
+                next_step_ids=(scenario.step_ids[1],),
+                review_mode=FlowStepReviewMode.VIEW,
+                output_type=FlowOutputType.JSON,
+            ),
+            lambda: checkpoint_repo.find_review_resume_replay(
+                checkpoint_id=opened.checkpoint.id,
+                tenant_id=scenario.tenant_id,
+                flow_id=scenario.flow_id,
+                flow_run_id=scenario.flow_run_id,
+                resume_idempotency_key="unused-resume-key",
+            ),
+            lambda: checkpoint_repo.expire_review_checkpoint_for_reconciliation(
+                checkpoint_id=opened.checkpoint.id,
+                flow_run_id=scenario.flow_run_id,
+                tenant_id=scenario.tenant_id,
+                expires_before=datetime.now(timezone.utc) - timedelta(days=1),
+            ),
         )
+        if fenced:
+            for query in queries:
+                with pytest.raises(FlowRunNotFoundError):
+                    await query()
+            replayed = None
+        else:
+            replayed = await queries[0]()
+            assert await queries[1]() is None
+            assert await queries[2]() is None
         outbox_count = await session.scalar(
             sa.select(sa.func.count())
             .select_from(FlowRunAuditOutbox)
             .where(FlowRunAuditOutbox.review_checkpoint_id == opened.checkpoint.id)
         )
 
-    assert replayed.created is False
-    assert replayed.checkpoint.id == opened.checkpoint.id
-    assert replayed.audit_outbox_id is None
+    if not fenced:
+        assert replayed.created is False
+        assert replayed.checkpoint.id == opened.checkpoint.id
+        assert replayed.audit_outbox_id is None
     assert outbox_count == 1
 
 
