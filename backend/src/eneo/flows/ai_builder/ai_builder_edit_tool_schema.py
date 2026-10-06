@@ -302,9 +302,13 @@ def _build_modify_step_schema(
                 "type": ["array", "null"],
                 "items": build_proposal_structured_field_schema(),
                 "description": (
-                    "Complete structured fields of a JSON output step, replacing "
-                    "the current contract. Null keeps the current contract; an "
-                    "empty list removes it."
+                    "Complete structured fields of a JSON output step. A restated "
+                    "field tree keeps the full saved contract, including annotations "
+                    "and constraints. Descriptions of saved fields cannot be edited here; "
+                    "report that limitation for a field-description-only request. "
+                    "A different non-empty tree is supported only "
+                    "when the saved constraints are representable by these fields. "
+                    "Null keeps the current contract; an empty list removes it."
                 ),
             },
             "review_mode": build_review_mode_schema(),

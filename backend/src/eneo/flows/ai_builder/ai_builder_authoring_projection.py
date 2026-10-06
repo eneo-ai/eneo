@@ -5,7 +5,7 @@ from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from typing import Annotated, Any, Literal
 
-from pydantic import BaseModel, ConfigDict, Field, ValidationError
+from pydantic import BaseModel, ConfigDict, Field, TypeAdapter, ValidationError
 
 from eneo.flows.ai_builder.ai_builder_architecture_errors import (
     AIBuilderArchitectureError,
@@ -34,6 +34,7 @@ from eneo.flows.ai_builder.ai_builder_new_step_models import (
     DocumentDeliveryMode,
     NewStepDraft,
     PreviousFieldRef,
+    StructuredFieldDraft,
 )
 from eneo.flows.ai_builder.ai_builder_primary_input_fields import (
     elect_main_text_field,
@@ -316,7 +317,7 @@ def apply_existing_step_patch(
         if field_name in fields:
             updates[field_name] = getattr(patch, field_name)
     if "output_fields" in fields:
-        updates["output_contract"] = compile_output_contract(patch.output_fields)
+        updates["output_contract"] = _edit_output_contract(existing, patch)
     if "review_mode" in fields:
         updates["review_policy"] = compile_review_policy(
             patch.review_mode, existing.review_policy
@@ -334,6 +335,150 @@ def apply_existing_step_patch(
         )
 
     return strip_inapplicable_completion_model(existing.model_copy(update=updates))
+
+
+def _edit_output_contract(
+    existing: StepSpec, patch: ModifyExistingStep
+) -> dict[str, object] | None:
+    declared = compile_output_contract(patch.output_fields)
+    if declared is None:
+        return None
+    saved = existing.output_contract
+    if saved is None:
+        return declared
+    try:
+        fields = _saved_output_fields(saved)
+        representable = compile_output_contract(fields)
+        # The compact field tree cannot express every saved constraint. Repeating
+        # that tree must not erase constraints or turn annotations into edits.
+        if representable is not None:
+            if _output_schema_shape(declared) == _output_schema_shape(representable):
+                return saved
+        if representable is None or _output_schema_shape(saved) != _output_schema_shape(
+            representable
+        ):
+            raise _unrepresentable_output_contract(patch)
+    except ValidationError as error:
+        raise _unrepresentable_output_contract(patch) from error
+    return declared
+
+
+def _unrepresentable_output_contract(
+    patch: ModifyExistingStep,
+) -> AIBuilderBadRequestException:
+    return AIBuilderBadRequestException(
+        f"Step {patch.existing_step_ref}: this saved output contract has details "
+        "output_fields cannot represent. Omit output_fields only when the request "
+        "leaves the contract unchanged; otherwise report that this output-field "
+        "change is unsupported. An empty list explicitly removes the contract.",
+        code=AIBuilderErrorCode.BAD_REQUEST,
+    )
+
+
+_SCHEMA_OBJECT = TypeAdapter(dict[str, object])
+_SCHEMA_STRINGS = TypeAdapter(list[str])
+
+
+def _schema_object(value: object) -> dict[str, object] | None:
+    if not isinstance(value, dict):
+        return None
+    return _SCHEMA_OBJECT.validate_python(value, strict=True)
+
+
+def _saved_output_fields(
+    schema: Mapping[str, object],
+) -> list[StructuredFieldDraft] | None:
+    properties = _schema_object(schema.get("properties"))
+    required = schema.get("required", [])
+    if (
+        schema.get("type") != "object"
+        or properties is None
+        or not isinstance(required, list)
+    ):
+        return None
+    required = _SCHEMA_STRINGS.validate_python(required, strict=True)
+    fields: list[StructuredFieldDraft] = []
+    for name, value in properties.items():
+        field = _schema_object(value)
+        if field is None:
+            return None
+        field_type = field.get("type")
+        nullable = False
+        if isinstance(field_type, list):
+            kinds = _SCHEMA_STRINGS.validate_python(field_type, strict=True)
+            nullable = "null" in kinds
+            non_null = [kind for kind in kinds if kind != "null"]
+            if not nullable or len(non_null) != 1:
+                return None
+            field_type = non_null[0]
+        data: dict[str, object] = {
+            "name": name,
+            "field_type": field_type,
+            "description": name,
+            "required": name in required,
+            "nullable": nullable,
+        }
+        if field_type == "object":
+            children = _saved_output_fields(field)
+            if children is None:
+                if (
+                    "properties" in field
+                    or field.get("additionalProperties") is not True
+                ):
+                    return None
+                data["allow_additional_properties"] = True
+            else:
+                data["fields"] = children
+        elif field_type == "array":
+            items = _schema_object(field.get("items"))
+            if items is None:
+                return None
+            if items.get("type") == "object":
+                children = _saved_output_fields(items)
+                if children is None:
+                    return None
+                data["item_fields"] = children
+            elif items.get("type") != "string":
+                return None
+        draft = StructuredFieldDraft.model_validate(data)
+        if draft.name != name:
+            return None
+        fields.append(draft)
+    return fields
+
+
+def _output_schema_shape(schema: Mapping[str, object]) -> dict[str, object]:
+    result = dict(schema)
+    result.pop("title", None)
+    result.pop("description", None)
+    # A complete field replacement uses the compiler's closed object policy;
+    # absent/true adds no saved constraint that this replacement would lose.
+    if schema.get("type") == "object" and (
+        "additionalProperties" not in schema or schema["additionalProperties"] is True
+    ):
+        result["additionalProperties"] = False
+    properties = _schema_object(schema.get("properties"))
+    if properties is not None:
+        result["properties"] = {
+            name: (
+                _output_schema_shape(child)
+                if (child := _schema_object(value)) is not None
+                else value
+            )
+            for name, value in properties.items()
+        }
+    items = _schema_object(schema.get("items"))
+    if items is not None:
+        result["items"] = _output_schema_shape(items)
+    for key in ("type", "required"):
+        value = schema.get(key)
+        if isinstance(value, list):
+            strings = _SCHEMA_STRINGS.validate_python(value, strict=True)
+            if key == "required" and not strings:
+                result.pop(key, None)
+            else:
+                result[key] = sorted(strings)
+    return result
 
 
 def _compile_existing_step_modification(

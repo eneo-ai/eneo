@@ -6672,6 +6672,9 @@ async def test_saved_step_implicit_json_consumer_contract_is_preserved(field_nam
                 {
                     "kind": "modify",
                     "existing_step_ref": "existing_step_1",
+                    "assistant_spec": {
+                        "instructions": "Summarize the source evidence."
+                    },
                     "output_fields": [
                         {
                             "name": field_name,
@@ -6685,6 +6688,10 @@ async def test_saved_step_implicit_json_consumer_contract_is_preserved(field_nam
     )
     if field_name == "summary":
         assert isinstance(result, ProposalReady), result
+        assert (
+            result.compiled.content.spec.steps[0].output_contract
+            == prior.steps[0].output_contract
+        )
     else:
         assert isinstance(result, CorrectableFailure), result
         assert result.producers == {"platform_validator"}

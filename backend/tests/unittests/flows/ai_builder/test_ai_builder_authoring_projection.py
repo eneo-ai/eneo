@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from typing import Any
+from typing import Any, Literal
 from uuid import uuid4
 
 import pytest
@@ -167,6 +167,133 @@ def test_edit_overlay_compiles_output_fields_into_the_contract_and_clears_on_emp
         ),
     )
     assert cleared.steps[0].output_contract is None
+
+
+@pytest.mark.parametrize("action", ["restate", "change", "clear"])
+@pytest.mark.parametrize(
+    "saved_shape", ["plain", "optional", "enum", "legacy_array", "unicode"]
+)
+@pytest.mark.parametrize("open_saved", [False, True])
+@pytest.mark.parametrize("container", ["scalar", "object", "array"])
+def test_edit_output_restatement_keeps_schema_and_refuses_constraint_loss(
+    action: Literal["restate", "change", "clear"],
+    saved_shape: Literal["plain", "optional", "enum", "legacy_array", "unicode"],
+    open_saved: bool,
+    container: Literal["scalar", "object", "array"],
+) -> None:
+    # Mutants: recompiling a restatement drops the captured s17 enum;
+    # accepting a different field tree silently discards its constraints.
+    properties: dict[str, dict[str, object]] = {
+        "omrade": {"type": "string"},
+        "bedomning": {"type": "string"},
+        "iakttagelser": {"type": "string"},
+        "krav": {"type": ["string", "null"]},
+    }
+    contract: dict[str, object] = {
+        "type": "object",
+        "properties": properties,
+        "required": ["omrade", "bedomning", "iakttagelser", "krav"],
+    }
+    if saved_shape == "enum":
+        properties["bedomning"]["enum"] = [
+            "Utan anmärkning",
+            "Avvikelse",
+            "Ej kontrollerat",
+        ]
+    elif saved_shape == "legacy_array":
+        properties["krav"] = {
+            "type": "array",
+            "items": {"type": "string", "required": [1]},
+        }
+    elif saved_shape == "optional":
+        contract["required"] = []
+    elif saved_shape == "unicode":
+        properties["område"] = properties.pop("omrade")
+        contract["required"] = ["område", "bedomning", "iakttagelser", "krav"]
+    if not open_saved:
+        contract["additionalProperties"] = False
+    fields = [
+        StructuredFieldDraft(
+            name=name,
+            field_type=(
+                "array"
+                if saved_shape == "legacy_array" and name == "krav"
+                else "string"
+            ),
+            description=description,
+            required=saved_shape != "optional",
+            nullable=name == "krav" and saved_shape != "legacy_array",
+        )
+        for name, description in (
+            ("omrade", "Områdets namn"),
+            ("bedomning", "Bedömning av området"),
+            ("iakttagelser", "Sakliga iakttagelser"),
+            ("krav", "Krav vid avvikelse"),
+        )
+    ]
+    if container != "scalar":
+        field = StructuredFieldDraft(
+            name="description",
+            field_type=container,
+            description="Grouped result.",
+            fields=fields if container == "object" else None,
+            item_fields=fields if container == "array" else None,
+        )
+        nested = (
+            contract if container == "object" else {"type": "array", "items": contract}
+        )
+        contract = {
+            "type": "object",
+            "properties": {"description": nested},
+            "required": ["description"],
+            "additionalProperties": False,
+        }
+        fields = [field]
+    saved = _base_spec(
+        _step(
+            "s17",
+            "existing_step_1",
+            "Saved step",
+            output_type=OutputType.JSON,
+            output_contract=contract,
+        )
+    )
+    if action == "change":
+        fields = [
+            StructuredFieldDraft(
+                name="summary", field_type="string", description="Summary."
+            )
+        ]
+    elif action == "clear":
+        fields = []
+    patch = ModifyExistingStep(
+        existing_step_ref="existing_step_1", output_fields=fields
+    )
+    if action == "clear":
+        patch = patch.model_copy(update={"output_type": OutputType.TEXT})
+    proposal = _edit_proposal(steps=[patch])
+    if (saved_shape == "unicode" and action != "clear") or (
+        saved_shape in {"enum", "legacy_array"} and action == "change"
+    ):
+        with pytest.raises(AIBuilderBadRequestException) as caught:
+            compile_ordered_edit_proposal(base_spec=saved, proposal=proposal)
+        assert caught.value.code is AIBuilderErrorCode.BAD_REQUEST
+        return
+    compiled = compile_ordered_edit_proposal(base_spec=saved, proposal=proposal)
+    result = compiled.steps[0]
+    if action == "restate":
+        assert result.output_contract == contract
+    elif action == "clear":
+        assert result.output_contract is None
+        assert result.output_type is OutputType.TEXT
+        assert validate_spec(compiled).valid
+    else:
+        assert result.output_contract is not None
+        assert result.output_contract["required"] == ["summary"]
+        assert set(result.output_contract["properties"]) == {"summary"}
+    assert result.existing_step_ref == saved.steps[0].existing_step_ref
+    assert result.assistant_spec == saved.steps[0].assistant_spec
+    assert saved.steps[0].output_contract == contract
 
 
 def test_edit_overlay_cleared_step_name_is_a_request_error() -> None:
@@ -1542,9 +1669,9 @@ def test_edit_overlay_keeps_an_authored_mode_while_the_step_io_stays_legal(
             "existing_step_1",
             "Authored",
             output_mode=mode,
-            input_type=InputType.TEXT
-            if mode is OutputMode.COMPOSE_TEXT
-            else InputType.TEXT,
+            input_type=(
+                InputType.TEXT if mode is OutputMode.COMPOSE_TEXT else InputType.TEXT
+            ),
             output_type=(
                 OutputType.JSON
                 if mode is OutputMode.SPEAKER_MAPPING
