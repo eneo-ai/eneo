@@ -195,14 +195,26 @@ async def resolve_http_input_source_text(
 
     start_time = time.monotonic()
     try:
-        response = await deps.send_http_request(
-            method=method,
-            url=url,
-            headers=headers,
-            timeout_seconds=timeout_seconds,
-            body_bytes=body_bytes,
-            json_body=json_body,
-        )
+        # Normalize before auditing so audit failures cannot chain raw credentials.
+        try:
+            response = await deps.send_http_request(
+                method=method,
+                url=url,
+                headers=headers,
+                timeout_seconds=timeout_seconds,
+                body_bytes=body_bytes,
+                json_body=json_body,
+            )
+        except httpx.TimeoutException:
+            raise TypedIOValidationException(
+                f"Step {step.step_order}: HTTP {method} input timed out after {timeout_seconds:g}s.",
+                code=FlowApiErrorCode.TYPED_IO_HTTP_TIMEOUT.value,
+            ) from None
+        except httpx.HTTPError:
+            raise TypedIOValidationException(
+                f"Step {step.step_order}: HTTP {method} input request failed.",
+                code=FlowApiErrorCode.TYPED_IO_HTTP_CONNECTION_ERROR.value,
+            ) from None
     except TypedIOValidationException as exc:
         duration_ms = (time.monotonic() - start_time) * 1000
         await deps.audit_http_outbound(
@@ -216,40 +228,6 @@ async def resolve_http_input_source_text(
             duration_ms=duration_ms,
         )
         raise
-    except httpx.TimeoutException as exc:
-        duration_ms = (time.monotonic() - start_time) * 1000
-        err_msg = f"Step {step.step_order}: HTTP {method} input timed out after {timeout_seconds:g}s."
-        await deps.audit_http_outbound(
-            run=run,
-            step=step,
-            url=url,
-            method=method,
-            call_type="http_input",
-            outcome=Outcome.FAILURE,
-            error_message=err_msg,
-            duration_ms=duration_ms,
-        )
-        raise TypedIOValidationException(
-            err_msg,
-            code=FlowApiErrorCode.TYPED_IO_HTTP_TIMEOUT.value,
-        ) from exc
-    except httpx.HTTPError as exc:
-        duration_ms = (time.monotonic() - start_time) * 1000
-        err_msg = f"Step {step.step_order}: HTTP {method} input request failed: {exc}"
-        await deps.audit_http_outbound(
-            run=run,
-            step=step,
-            url=url,
-            method=method,
-            call_type="http_input",
-            outcome=Outcome.FAILURE,
-            error_message=err_msg,
-            duration_ms=duration_ms,
-        )
-        raise TypedIOValidationException(
-            err_msg,
-            code=FlowApiErrorCode.TYPED_IO_HTTP_CONNECTION_ERROR.value,
-        ) from exc
 
     duration_ms = (time.monotonic() - start_time) * 1000
     if response.status_code >= 400:
@@ -401,15 +379,23 @@ async def deliver_webhook(
 
     start_time = time.monotonic()
     try:
-        response = await deps.send_http_request(
-            method="POST",
-            url=url,
-            headers=headers,
-            timeout_seconds=timeout_seconds,
-            body_bytes=body_bytes,
-            json_body=json_body,
-            read_response_body=False,
-        )
+        # Normalize before auditing so audit failures cannot chain raw credentials.
+        try:
+            response = await deps.send_http_request(
+                method="POST",
+                url=url,
+                headers=headers,
+                timeout_seconds=timeout_seconds,
+                body_bytes=body_bytes,
+                json_body=json_body,
+                read_response_body=False,
+            )
+        except httpx.TimeoutException:
+            raise WebhookDeliveryError(
+                f"Webhook delivery timed out after {timeout_seconds:g}s."
+            ) from None
+        except httpx.HTTPError:
+            raise WebhookDeliveryError("Webhook delivery failed.") from None
     except TypedIOValidationException as exc:
         duration_ms = (time.monotonic() - start_time) * 1000
         err_msg = redact_string(str(exc), key=None)
@@ -424,9 +410,8 @@ async def deliver_webhook(
             duration_ms=duration_ms,
         )
         raise BadRequestException(err_msg, code=exc.code) from exc
-    except httpx.TimeoutException as exc:
+    except WebhookDeliveryError as exc:
         duration_ms = (time.monotonic() - start_time) * 1000
-        err_msg = f"Webhook delivery timed out after {timeout_seconds:g}s."
         await deps.audit_http_outbound(
             run=run,
             step=step,
@@ -434,24 +419,10 @@ async def deliver_webhook(
             method="POST",
             call_type="webhook_delivery",
             outcome=Outcome.FAILURE,
-            error_message=err_msg,
+            error_message=str(exc),
             duration_ms=duration_ms,
         )
-        raise WebhookDeliveryError(err_msg) from exc
-    except httpx.HTTPError as exc:
-        duration_ms = (time.monotonic() - start_time) * 1000
-        err_msg = redact_string(f"Webhook delivery failed: {exc}", key=None)
-        await deps.audit_http_outbound(
-            run=run,
-            step=step,
-            url=url,
-            method="POST",
-            call_type="webhook_delivery",
-            outcome=Outcome.FAILURE,
-            error_message=err_msg,
-            duration_ms=duration_ms,
-        )
-        raise WebhookDeliveryError(err_msg) from exc
+        raise
 
     duration_ms = (time.monotonic() - start_time) * 1000
     if response.status_code >= 400:

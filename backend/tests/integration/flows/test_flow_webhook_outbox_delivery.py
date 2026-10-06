@@ -2079,7 +2079,8 @@ async def test_flow_webhook_delivery_redacts_url_secrets_from_persisted_error(
         request = httpx.Request("POST", "https://example.org/hook/case-123")
         service.http_runtime.send_request = AsyncMock(
             side_effect=httpx.ConnectError(
-                "POST https://user:pass@example.org/hook?token=secret-value failed",
+                "POST https://user:pass@example.org/hook?token=secret-value failed; "
+                "X-Partner-Proof: dummy-credential-outside-url",
                 request=request,
             )
         )
@@ -2095,7 +2096,7 @@ async def test_flow_webhook_delivery_redacts_url_secrets_from_persisted_error(
     assert persisted_error is not None
     assert "user:pass" not in persisted_error
     assert "secret-value" not in persisted_error
-    assert "token=%5BREDACTED%5D" in persisted_error
+    assert "dummy-credential-outside-url" not in persisted_error
 
 
 @pytest.mark.asyncio
