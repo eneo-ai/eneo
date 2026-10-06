@@ -475,8 +475,8 @@
 
             return async ({ result }) => {
               if (result.type === "redirect") {
-                // eslint-disable-next-line svelte/no-navigation-without-resolve -- redirect location from server form action
-                await goto(result.location);
+                // The validated destination may be a server-only authentication handoff.
+                window.location.assign(result.location);
                 return;
               }
 
