@@ -213,6 +213,11 @@ async def test_proposal_renames_transcript_and_records_provenance(harness) -> No
     assert calls["activated"][0].prepared.completion_call is not None
     # Knowledge retrieval is skipped for this step.
     assert calls["deps"].retrieve_rag_chunks is handler_module._no_rag
+    assert await calls["deps"].retrieve_rag_chunks() == (
+        [],
+        {"attempted": False, "status": "skipped", "reason": "speaker_mapping"},
+        [],
+    )
     assert any(d.code == "speaker_mapping_unmapped_labels" for d in output.diagnostics)
     persist.assert_awaited_once()
     stored = persist.await_args.args[1]
