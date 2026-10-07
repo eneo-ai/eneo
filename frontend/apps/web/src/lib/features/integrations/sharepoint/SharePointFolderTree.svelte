@@ -112,11 +112,16 @@
   let searchGeneration = 0;
   let searchTimer: ReturnType<typeof setTimeout> | undefined;
 
+  const editableMatches = $derived(
+    searchResults.filter(
+      (item) =>
+        selectedItemKeySet.has(buildSharePointSelectionKey(item)) ||
+        !isSharePointItemCovered(item, selectedItemKeySet, selectedPaths)
+    )
+  );
   const allMatchesSelected = $derived(
-    searchResults.length > 0 &&
-      searchResults.every((item) =>
-        isSharePointItemCovered(item, selectedItemKeySet, selectedPaths)
-      )
+    editableMatches.length > 0 &&
+      editableMatches.every((item) => selectedItemKeySet.has(buildSharePointSelectionKey(item)))
   );
   const canSelectMatches = $derived(
     Boolean(onSelectMany && onDeselectMany) &&
@@ -128,9 +133,9 @@
 
   function toggleAllMatches() {
     if (allMatchesSelected) {
-      onDeselectMany?.(searchResults);
+      onDeselectMany?.(editableMatches);
     } else {
-      onSelectMany?.(searchResults);
+      onSelectMany?.(editableMatches);
     }
   }
 
@@ -189,13 +194,23 @@
     }
   }
 
-  // Typing should not fire a Graph query per keystroke; facets apply at once.
+  // Invalidate old results as soon as the query, filters or source changes.
+  // Only the request is debounced; stale hits cannot be selected meanwhile.
   $effect(() => {
     void search;
     void facets;
+    void currentTreeSource();
     clearTimeout(searchTimer);
-    searchTimer = setTimeout(() => void runSearch(), 300);
-    return () => clearTimeout(searchTimer);
+    searchGeneration += 1;
+    searchResults = [];
+    searchError = false;
+    searchTruncated = false;
+    searchLoading = searching;
+    if (searching) searchTimer = setTimeout(() => void runSearch(), 300);
+    return () => {
+      clearTimeout(searchTimer);
+      searchGeneration += 1;
+    };
   });
 
   let treeGeneration = 0;
@@ -375,13 +390,17 @@
           <Button
             variant="outline"
             size="sm"
-            disabled={siteRootSelected}
-            title={siteRootSelected ? m.sharepoint_selected_by_parent() : undefined}
+            disabled={siteRootSelected || editableMatches.length === 0}
+            title={siteRootSelected || editableMatches.length === 0
+              ? m.sharepoint_selected_by_parent()
+              : undefined}
             onclick={toggleAllMatches}
           >
-            {allMatchesSelected
-              ? m.sharepoint_deselect_all_matches()
-              : m.sharepoint_select_all_matches({ count: String(searchResults.length) })}
+            {editableMatches.length === 0
+              ? m.sharepoint_selected_by_parent()
+              : allMatchesSelected
+                ? m.sharepoint_deselect_all_matches()
+                : m.sharepoint_select_all_matches({ count: String(editableMatches.length) })}
           </Button>
         {/if}
       </div>

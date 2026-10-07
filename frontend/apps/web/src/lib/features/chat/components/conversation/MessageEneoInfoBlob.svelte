@@ -13,7 +13,10 @@
   } from "../../mcpReferenceDocs";
   import { m } from "$lib/paraglide/messages";
   import SourceMetadataList from "$lib/features/knowledge/components/SourceMetadataList.svelte";
-  import { hasSourceMetadata } from "$lib/features/knowledge/sourceMetadata";
+  import {
+    hasSourceMetadata,
+    type SourceMetadataEntry
+  } from "$lib/features/knowledge/sourceMetadata";
 
   let { token }: EneoInrefCustomComponentProps = $props();
 
@@ -56,6 +59,7 @@
     title?: string;
     pageRange?: string;
     section?: string;
+    source_metadata?: SourceMetadataEntry[];
   };
 
   const mcpReference = $derived.by(() => {
@@ -83,6 +87,7 @@
         sourceType: sourceType ?? null,
         pageRange,
         section,
+        source_metadata: meta.source_metadata,
         // Number by DOCUMENT, matching the deduped chip list in
         // MessageTools: passages from the same document share one number.
         number: documentNumber(mcpToolReferences, ref)
@@ -206,7 +211,12 @@
               </button>
             {/snippet}
           </Tooltip.Trigger>
-          <Tooltip.Content>{mcpReference?.title}</Tooltip.Content>
+          <Tooltip.Content class="flex-col items-start">
+            <span>{mcpReference?.title}</span>
+            {#if hasSourceMetadata(mcpReference)}
+              <SourceMetadataList entries={mcpReference.source_metadata} variant="inline" />
+            {/if}
+          </Tooltip.Content>
         </Tooltip.Root>
       {/snippet}
     </McpResourceSnippetModal>
