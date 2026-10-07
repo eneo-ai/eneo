@@ -17,6 +17,7 @@ from eneo.integration.presentation.models import (
     IntegrationList,
     IntegrationPreviewDataList,
     PaginatedSyncLogList,
+    SharePointSearchResponse,
     SharePointTreeResponse,
     SyncLog,
     TenantIntegration,
@@ -373,6 +374,67 @@ async def get_integration_preview(
     )
 
     return assembler.to_paginated_response(items=preview_data)
+
+
+@router.get(
+    "/{user_integration_id:uuid}/sharepoint/search/",
+    response_model=SharePointSearchResponse,
+    status_code=200,
+    description=(
+        "Search a SharePoint library or OneDrive by free text and column values, "
+        "across every folder."
+    ),
+    responses=responses.get_responses([400, 403, 404]),
+)
+@endpoint_access(
+    authentication=Authentication.USER,
+    authorization=Authorization.AUTHENTICATED,
+    reason="Integration services enforce tenant, user and space access for this operation.",
+)
+async def search_sharepoint_library(
+    user_integration_id: UUID,
+    space_id: Annotated[
+        UUID, Query(description="Space ID (requires integration import rights)")
+    ],
+    container: Annotated[Container, Depends(get_container(with_user=True))],
+    site_id: Annotated[
+        Optional[str], Query(description="SharePoint site ID (required for SharePoint)")
+    ] = None,
+    drive_id: Annotated[
+        Optional[str], Query(description="Drive ID (required for OneDrive)")
+    ] = None,
+    q: Annotated[
+        str,
+        Query(description="Free text matched against names, content and properties"),
+    ] = "",
+    filter: Annotated[
+        list[str],
+        Query(
+            description=(
+                "Column filter as `Column:value`, repeatable. Columns come from the "
+                "tree response; yes/no columns take true or false."
+            )
+        ),
+    ] = [],
+):
+    """Find files anywhere in a library, so a person need not browse folder by folder."""
+    from eneo.integration.infrastructure.preview_service.sharepoint_search import (
+        parse_filter_params,
+    )
+    from eneo.main.exceptions import BadRequestException
+
+    service = container.sharepoint_tree_service()
+    if not site_id and not drive_id:
+        raise BadRequestException("Either site_id or drive_id must be provided")
+    result = await service.search_library(
+        user_integration_id=user_integration_id,
+        space_id=space_id,
+        site_id=site_id,
+        drive_id=drive_id,
+        text=q,
+        filters=parse_filter_params(filter),
+    )
+    return SharePointSearchResponse(**result)
 
 
 @router.get(

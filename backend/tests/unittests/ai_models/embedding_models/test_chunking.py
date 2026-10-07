@@ -90,3 +90,22 @@ def test_the_splitter_never_exceeds_the_models_limit():
 
     assert len(chunks) > 1
     assert max(count_tokens(chunk) for chunk in chunks) <= 30
+
+
+def test_the_splitter_reserves_prepended_text_within_the_model_limit():
+    header = "Policy\nType: document\n\n"
+    prefix = "passage: "
+    splitter = build_text_splitter(
+        model(30, family="e5"), reserved_tokens=count_tokens(header)
+    )
+
+    chunks = splitter.split_text(" ".join(f"word{i}" for i in range(400)))
+
+    assert len(chunks) > 1
+    assert all(count_tokens(prefix + header + chunk) <= 30 for chunk in chunks)
+
+
+@pytest.mark.parametrize("reserved_tokens", [-1, 30, 31])
+def test_a_header_cannot_consume_the_entire_chunk_budget(reserved_tokens: int):
+    with pytest.raises(ValueError, match="leave room"):
+        build_text_splitter(model(30), reserved_tokens=reserved_tokens)

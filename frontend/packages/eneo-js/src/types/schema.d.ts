@@ -5854,6 +5854,26 @@ export interface paths {
     patch?: never;
     trace?: never;
   };
+  "/api/v1/integrations/sharepoint/fixtures/{scenario}/search/": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /**
+     * Search Sharepoint Fixture
+     * @description Search a development-only SharePoint fixture by text and column values. No Microsoft Graph request is made. Requires SHAREPOINT_FIXTURE_MODE_ENABLED=true.
+     */
+    get: operations["search_sharepoint_fixture_api_v1_integrations_sharepoint_fixtures__scenario__search__get"];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
   "/api/v1/integrations/": {
     parameters: {
       query?: never;
@@ -6026,6 +6046,26 @@ export interface paths {
      * @description Get preview data for a user integration.
      */
     get: operations["get_integration_preview_api_v1_integrations__user_integration_id__preview__get"];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/v1/integrations/{user_integration_id}/sharepoint/search/": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /**
+     * Search Sharepoint Library
+     * @description Search a SharePoint library or OneDrive by free text and column values, across every folder.
+     */
+    get: operations["search_sharepoint_library_api_v1_integrations__user_integration_id__sharepoint_search__get"];
     put?: never;
     post?: never;
     delete?: never;
@@ -14305,6 +14345,11 @@ export interface components {
       website_id?: string | null;
       /** Original Available */
       original_available: boolean;
+      /**
+       * Source Metadata
+       * @default []
+       */
+      source_metadata?: components["schemas"]["SourceMetadataEntry"][];
       /** Score */
       score: number;
     };
@@ -14352,6 +14397,11 @@ export interface components {
       website_id?: string | null;
       /** Original Available */
       original_available: boolean;
+      /**
+       * Source Metadata
+       * @default []
+       */
+      source_metadata?: components["schemas"]["SourceMetadataEntry"][];
       /** Text */
       text: string;
     };
@@ -14373,6 +14423,11 @@ export interface components {
       website_id?: string | null;
       /** Original Available */
       original_available: boolean;
+      /**
+       * Source Metadata
+       * @default []
+       */
+      source_metadata?: components["schemas"]["SourceMetadataEntry"][];
     };
     /** InfoBlobUpdatePublic */
     InfoBlobUpdatePublic: {
@@ -18805,6 +18860,26 @@ export interface components {
        */
       developer_tools_available?: boolean;
     };
+    /**
+     * SharePointFilterColumn
+     * @description A library column a person can filter on without typing a value.
+     */
+    SharePointFilterColumn: {
+      /** Name */
+      name: string;
+      /** Label */
+      label: string;
+      /**
+       * Kind
+       * @enum {string}
+       */
+      kind: "choice" | "boolean";
+      /**
+       * Choices
+       * @default []
+       */
+      choices?: string[];
+    };
     /** SharePointFixturePreviewResponse */
     SharePointFixturePreviewResponse: {
       /** Items */
@@ -18824,6 +18899,27 @@ export interface components {
      * @enum {string}
      */
     SharePointFixtureScenario: "representative" | "large_tenant" | "empty";
+    /** SharePointFixtureSearchResponse */
+    SharePointFixtureSearchResponse: {
+      /** Items */
+      items: components["schemas"]["SharePointTreeItem"][];
+      /**
+       * Truncated
+       * @default false
+       */
+      truncated?: boolean;
+      /** Drive Id */
+      drive_id: string;
+      /** Site Id */
+      site_id?: string | null;
+      /**
+       * Fixture
+       * @default true
+       * @constant
+       */
+      fixture?: true;
+      scenario: components["schemas"]["SharePointFixtureScenario"];
+    };
     /** SharePointFixtureTreeResponse */
     SharePointFixtureTreeResponse: {
       /** Items */
@@ -18837,12 +18933,34 @@ export interface components {
       /** Site Id */
       site_id?: string | null;
       /**
+       * Columns
+       * @default []
+       */
+      columns?: components["schemas"]["SharePointFilterColumn"][];
+      /**
        * Fixture
        * @default true
        * @constant
        */
       fixture?: true;
       scenario: components["schemas"]["SharePointFixtureScenario"];
+    };
+    /**
+     * SharePointSearchResponse
+     * @description Files anywhere in a library that match a text and column filters.
+     */
+    SharePointSearchResponse: {
+      /** Items */
+      items: components["schemas"]["SharePointTreeItem"][];
+      /**
+       * Truncated
+       * @default false
+       */
+      truncated?: boolean;
+      /** Drive Id */
+      drive_id: string;
+      /** Site Id */
+      site_id?: string | null;
     };
     /**
      * SharePointSubscriptionPublic
@@ -18934,6 +19052,11 @@ export interface components {
       modified?: string | null;
       /** Web Url */
       web_url?: string | null;
+      /**
+       * Source Metadata
+       * @default []
+       */
+      source_metadata?: components["schemas"]["SourceMetadataEntry"][];
     };
     /** SharePointTreeResponse */
     SharePointTreeResponse: {
@@ -18947,6 +19070,11 @@ export interface components {
       drive_id: string;
       /** Site Id */
       site_id?: string | null;
+      /**
+       * Columns
+       * @default []
+       */
+      columns?: components["schemas"]["SharePointFilterColumn"][];
     };
     /** SignedURLRequest */
     SignedURLRequest: {
@@ -19677,6 +19805,29 @@ export interface components {
      * @enum {string}
      */
     SortOrder: "asc" | "desc";
+    /**
+     * SourceMetadataEntry
+     * @description One document property from the source system, e.g. a SharePoint column.
+     *
+     *     ``name`` is the source's stable identifier for the property, ``label`` the
+     *     human readable name the source shows, ``value`` the normalised value as
+     *     text (a list for multi-value properties). ``kind`` lets presentation format
+     *     dates and booleans without re-parsing the value.
+     */
+    SourceMetadataEntry: {
+      /** Name */
+      name: string;
+      /** Label */
+      label: string;
+      /** Value */
+      value: string | string[];
+      /**
+       * Kind
+       * @default text
+       * @enum {string}
+       */
+      kind?: "text" | "choice" | "date" | "number" | "boolean" | "url";
+    };
     /** SpaceDashboard */
     SpaceDashboard: {
       /**
@@ -27502,6 +27653,11 @@ export interface operations {
                 website_id?: string | null;
                 /** Original Available */
                 original_available: boolean;
+                /**
+                 * Source Metadata
+                 * @default []
+                 */
+                source_metadata?: components["schemas"]["SourceMetadataEntry"][];
                 /** Score */
                 score: number;
               };
@@ -27594,6 +27750,29 @@ export interface operations {
                 description: string | null;
                 /** Security Level */
                 security_level: number;
+              };
+              /**
+               * SourceMetadataEntry
+               * @description One document property from the source system, e.g. a SharePoint column.
+               *
+               *     ``name`` is the source's stable identifier for the property, ``label`` the
+               *     human readable name the source shows, ``value`` the normalised value as
+               *     text (a list for multi-value properties). ``kind`` lets presentation format
+               *     dates and booleans without re-parsing the value.
+               */
+              SourceMetadataEntry: {
+                /** Name */
+                name: string;
+                /** Label */
+                label: string;
+                /** Value */
+                value: string | string[];
+                /**
+                 * Kind
+                 * @default text
+                 * @enum {string}
+                 */
+                kind?: "text" | "choice" | "date" | "number" | "boolean" | "url";
               };
               /** SupportedModelKwargs */
               SupportedModelKwargs: {
@@ -27918,6 +28097,11 @@ export interface operations {
                 website_id?: string | null;
                 /** Original Available */
                 original_available: boolean;
+                /**
+                 * Source Metadata
+                 * @default []
+                 */
+                source_metadata?: components["schemas"]["SourceMetadataEntry"][];
                 /** Score */
                 score: number;
               };
@@ -28010,6 +28194,29 @@ export interface operations {
                 description: string | null;
                 /** Security Level */
                 security_level: number;
+              };
+              /**
+               * SourceMetadataEntry
+               * @description One document property from the source system, e.g. a SharePoint column.
+               *
+               *     ``name`` is the source's stable identifier for the property, ``label`` the
+               *     human readable name the source shows, ``value`` the normalised value as
+               *     text (a list for multi-value properties). ``kind`` lets presentation format
+               *     dates and booleans without re-parsing the value.
+               */
+              SourceMetadataEntry: {
+                /** Name */
+                name: string;
+                /** Label */
+                label: string;
+                /** Value */
+                value: string | string[];
+                /**
+                 * Kind
+                 * @default text
+                 * @enum {string}
+                 */
+                kind?: "text" | "choice" | "date" | "number" | "boolean" | "url";
               };
               /** SupportedModelKwargs */
               SupportedModelKwargs: {
@@ -28783,6 +28990,11 @@ export interface operations {
                     website_id?: string | null;
                     /** Original Available */
                     original_available: boolean;
+                    /**
+                     * Source Metadata
+                     * @default []
+                     */
+                    source_metadata?: components["schemas"]["SourceMetadataEntry"][];
                     /** Score */
                     score: number;
                   };
@@ -28799,6 +29011,29 @@ export interface operations {
                     embedding_model_id: string;
                     /** Size */
                     size: number;
+                  };
+                  /**
+                   * SourceMetadataEntry
+                   * @description One document property from the source system, e.g. a SharePoint column.
+                   *
+                   *     ``name`` is the source's stable identifier for the property, ``label`` the
+                   *     human readable name the source shows, ``value`` the normalised value as
+                   *     text (a list for multi-value properties). ``kind`` lets presentation format
+                   *     dates and booleans without re-parsing the value.
+                   */
+                  SourceMetadataEntry: {
+                    /** Name */
+                    name: string;
+                    /** Label */
+                    label: string;
+                    /** Value */
+                    value: string | string[];
+                    /**
+                     * Kind
+                     * @default text
+                     * @enum {string}
+                     */
+                    kind?: "text" | "choice" | "date" | "number" | "boolean" | "url";
                   };
                 };
               }
@@ -29255,6 +29490,11 @@ export interface operations {
                     website_id?: string | null;
                     /** Original Available */
                     original_available: boolean;
+                    /**
+                     * Source Metadata
+                     * @default []
+                     */
+                    source_metadata?: components["schemas"]["SourceMetadataEntry"][];
                     /** Score */
                     score: number;
                   };
@@ -29347,6 +29587,29 @@ export interface operations {
                     description: string | null;
                     /** Security Level */
                     security_level: number;
+                  };
+                  /**
+                   * SourceMetadataEntry
+                   * @description One document property from the source system, e.g. a SharePoint column.
+                   *
+                   *     ``name`` is the source's stable identifier for the property, ``label`` the
+                   *     human readable name the source shows, ``value`` the normalised value as
+                   *     text (a list for multi-value properties). ``kind`` lets presentation format
+                   *     dates and booleans without re-parsing the value.
+                   */
+                  SourceMetadataEntry: {
+                    /** Name */
+                    name: string;
+                    /** Label */
+                    label: string;
+                    /** Value */
+                    value: string | string[];
+                    /**
+                     * Kind
+                     * @default text
+                     * @enum {string}
+                     */
+                    kind?: "text" | "choice" | "date" | "number" | "boolean" | "url";
                   };
                   /** SupportedModelKwargs */
                   SupportedModelKwargs: {
@@ -42681,6 +42944,60 @@ export interface operations {
       };
     };
   };
+  search_sharepoint_fixture_api_v1_integrations_sharepoint_fixtures__scenario__search__get: {
+    parameters: {
+      query?: {
+        site_id?: string | null;
+        drive_id?: string | null;
+        q?: string;
+        filter?: string[];
+      };
+      header?: never;
+      path: {
+        scenario: components["schemas"]["SharePointFixtureScenario"];
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["SharePointFixtureSearchResponse"];
+        };
+      };
+      /** @description Bad Request */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Not Found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
   get_integrations_api_v1_integrations__get: {
     parameters: {
       query?: never;
@@ -43016,6 +43333,75 @@ export interface operations {
         };
         content: {
           "application/json": components["schemas"]["IntegrationPreviewDataList"];
+        };
+      };
+      /** @description Bad Request */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Not Found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  search_sharepoint_library_api_v1_integrations__user_integration_id__sharepoint_search__get: {
+    parameters: {
+      query: {
+        /** @description Space ID (requires integration import rights) */
+        space_id: string;
+        /** @description SharePoint site ID (required for SharePoint) */
+        site_id?: string | null;
+        /** @description Drive ID (required for OneDrive) */
+        drive_id?: string | null;
+        /** @description Free text matched against names, content and properties */
+        q?: string;
+        /** @description Column filter as `Column:value`, repeatable. Columns come from the tree response; yes/no columns take true or false. */
+        filter?: string[];
+      };
+      header?: never;
+      path: {
+        user_integration_id: string;
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["SharePointSearchResponse"];
         };
       };
       /** @description Bad Request */
@@ -48064,6 +48450,11 @@ export interface operations {
                 website_id?: string | null;
                 /** Original Available */
                 original_available: boolean;
+                /**
+                 * Source Metadata
+                 * @default []
+                 */
+                source_metadata?: components["schemas"]["SourceMetadataEntry"][];
                 /** Score */
                 score: number;
               };
@@ -48080,6 +48471,29 @@ export interface operations {
                 embedding_model_id: string;
                 /** Size */
                 size: number;
+              };
+              /**
+               * SourceMetadataEntry
+               * @description One document property from the source system, e.g. a SharePoint column.
+               *
+               *     ``name`` is the source's stable identifier for the property, ``label`` the
+               *     human readable name the source shows, ``value`` the normalised value as
+               *     text (a list for multi-value properties). ``kind`` lets presentation format
+               *     dates and booleans without re-parsing the value.
+               */
+              SourceMetadataEntry: {
+                /** Name */
+                name: string;
+                /** Label */
+                label: string;
+                /** Value */
+                value: string | string[];
+                /**
+                 * Kind
+                 * @default text
+                 * @enum {string}
+                 */
+                kind?: "text" | "choice" | "date" | "number" | "boolean" | "url";
               };
             };
           };
@@ -48218,6 +48632,11 @@ export interface operations {
                 website_id?: string | null;
                 /** Original Available */
                 original_available: boolean;
+                /**
+                 * Source Metadata
+                 * @default []
+                 */
+                source_metadata?: components["schemas"]["SourceMetadataEntry"][];
                 /** Score */
                 score: number;
               };
@@ -48234,6 +48653,29 @@ export interface operations {
                 embedding_model_id: string;
                 /** Size */
                 size: number;
+              };
+              /**
+               * SourceMetadataEntry
+               * @description One document property from the source system, e.g. a SharePoint column.
+               *
+               *     ``name`` is the source's stable identifier for the property, ``label`` the
+               *     human readable name the source shows, ``value`` the normalised value as
+               *     text (a list for multi-value properties). ``kind`` lets presentation format
+               *     dates and booleans without re-parsing the value.
+               */
+              SourceMetadataEntry: {
+                /** Name */
+                name: string;
+                /** Label */
+                label: string;
+                /** Value */
+                value: string | string[];
+                /**
+                 * Kind
+                 * @default text
+                 * @enum {string}
+                 */
+                kind?: "text" | "choice" | "date" | "number" | "boolean" | "url";
               };
             };
           };

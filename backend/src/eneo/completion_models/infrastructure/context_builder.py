@@ -1,7 +1,7 @@
 import json
 import logging
 from collections import defaultdict
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Any, Collection, Optional, Protocol, Sequence
 from uuid import UUID
 
@@ -29,6 +29,8 @@ from eneo.completion_models.infrastructure.static_prompts import (
     TRANSCRIPTION_PROMPT,
 )
 from eneo.files.file_models import File, FileType
+from eneo.info_blobs.info_blob import SourceMetadataEntry
+from eneo.info_blobs.source_metadata import format_source_metadata_lines
 from eneo.questions.question import ToolCallInfo
 from eneo.sessions.session import SessionInDB
 from eneo.tokens.token_utils import (
@@ -154,11 +156,33 @@ class _InfoBlobChunkLike(Protocol):
     info_blob_id: UUID
     info_blob_title: str | None
 
+    @property
+    def info_blob_source_metadata(self) -> Sequence[SourceMetadataEntry]: ...
+
 
 class _InformationChunkLike(Protocol):
     id: UUID
     title: str
     content: str
+
+    @property
+    def source_metadata(self) -> Sequence[SourceMetadataEntry]: ...
+
+
+def _source_header(
+    title: str | None, source_id: UUID, source_metadata: Sequence[SourceMetadataEntry]
+) -> str:
+    """The attribution line(s) a source carries in the prompt.
+
+    Source properties follow the title so the model can tell a policy from a
+    meeting note and say so, in the same words retrieval matched on and the
+    reference UI shows.
+    """
+    header = "source_title: {}, source_id: {}".format(title, str(source_id)[:8])
+    properties = format_source_metadata_lines(source_metadata)
+    if properties:
+        header += "\nsource_properties: " + "; ".join(properties)
+    return header
 
 
 USER_FILES_PREAMBLE = (
@@ -275,6 +299,9 @@ class ChunkGrouping:
     content: str
     chunk_count: int
     relevance_score: float = 0.0
+    source_metadata: list[SourceMetadataEntry] = field(
+        default_factory=list[SourceMetadataEntry]
+    )
 
 
 class _Prompt:
@@ -386,44 +413,79 @@ class _Prompt:
         chunks: list[_InfoBlobChunkLike],
         max_tokens: int,
     ) -> str:
+        selected: list[_InfoBlobChunkLike] = []
+        chunk_numbers: dict[UUID, set[int]] = {}
+        header_tokens: dict[UUID, int] = {}
+        estimated_tokens = 0
+        for chunk in chunks:
+            numbers = chunk_numbers.setdefault(chunk.info_blob_id, set())
+            if chunk.info_blob_id not in header_tokens:
+                header = (
+                    _source_header(
+                        chunk.info_blob_title,
+                        chunk.info_blob_id,
+                        chunk.info_blob_source_metadata,
+                    )
+                    if self.version == 2
+                    else ""
+                )
+                header_tokens[chunk.info_blob_id] = count_tokens(
+                    f'"""{header}\n"""\n', self.model_name
+                )
+            # Adding a chunk creates a group, extends one, or joins two.
+            # Repeated chunk numbers split a coherent group in the renderer.
+            group_delta = (
+                1
+                if chunk.chunk_no in numbers
+                else 1
+                - int(chunk.chunk_no - 1 in numbers)
+                - int(chunk.chunk_no + 1 in numbers)
+            )
+            candidate_tokens = (
+                estimated_tokens
+                + count_tokens(chunk.text, self.model_name)
+                + group_delta * header_tokens[chunk.info_blob_id]
+            )
+            if candidate_tokens > max_tokens:
+                # Summing chunk bodies is conservative when they overlap. Only
+                # render at the boundary, rather than tokenizing every prefix
+                # of a potentially very large retrieval candidate set.
+                candidate = self._render_reconstructed_chunks([*selected, chunk])
+                candidate_tokens = count_tokens(candidate, self.model_name)
+                if candidate_tokens > max_tokens:
+                    break
+            selected.append(chunk)
+            numbers.add(chunk.chunk_no)
+            estimated_tokens = candidate_tokens
+
+        # Tokenization at joined boundaries can differ from the running sum.
+        # The stored cost and final admission always use the actual rendering.
+        while selected:
+            rendered = self._render_reconstructed_chunks(selected)
+            used_tokens = count_tokens(rendered, self.model_name)
+            if used_tokens <= max_tokens:
+                self._knowledge_tokens = used_tokens
+                return rendered
+            selected.pop()
+        self._knowledge_tokens = 0
+        return ""
+
+    def _render_reconstructed_chunks(self, chunks: list[_InfoBlobChunkLike]) -> str:
         # Create a dictionary to store chunk indices
         chunk_indices = {id(chunk): i for i, chunk in enumerate(chunks)}
 
         # Group chunks by info_blob
         chunks_by_info_blob: dict[UUID, list[_InfoBlobChunkLike]] = {}
-        used_tokens = 0
         for chunk in chunks:
-            chunk_tokens = count_tokens(chunk.text, self.model_name)
-
             if chunks_by_info_blob.get(chunk.info_blob_id) is None:
                 chunks_by_info_blob[chunk.info_blob_id] = []
-
-                # Count the tokens for the metadata
-                chunk_tokens += count_tokens(
-                    '"""source_title: {}, source_id: {}\n"""'.format(
-                        chunk.info_blob_title, str(chunk.info_blob_id)[:8]
-                    ),
-                    self.model_name,
-                )
-
-            if chunk_tokens + used_tokens > max_tokens:
-                break
-
             chunks_by_info_blob[chunk.info_blob_id].append(chunk)
-            used_tokens += chunk_tokens
-
-        # Save the used_tokens for later
-        self._knowledge_tokens = used_tokens
 
         # Process each document
         chunk_groupings: list[ChunkGrouping] = []
         grouping_scores: defaultdict[int, float] = defaultdict(float)
 
         for doc_id, doc_chunks in chunks_by_info_blob.items():
-            # Edgecase if the first chunk of a new info-blob is the cutoff point
-            if not doc_chunks:
-                continue
-
             # Sort chunks by their order in the original document
             doc_chunks.sort(key=lambda x: x.chunk_no)
 
@@ -451,6 +513,7 @@ class _Prompt:
                     end_chunk=group[-1].chunk_no,
                     content=full_text,
                     chunk_count=len(group),
+                    source_metadata=list(group[0].info_blob_source_metadata),
                 )
 
                 # Calculate score based on the position of chunks in the original input
@@ -485,9 +548,8 @@ class _Prompt:
             return ""
 
         return "\n".join(
-            '"""source_title: {}, source_id: {}\n{}"""'.format(
-                chunk.title,
-                str(chunk.id)[:8],
+            '"""{}\n{}"""'.format(
+                _source_header(chunk.title, chunk.id, chunk.source_metadata),
                 chunk.content,
             )
             for chunk in information_chunks
