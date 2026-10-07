@@ -2,6 +2,9 @@ from __future__ import annotations
 
 import asyncio
 import io
+import logging
+import traceback
+from collections.abc import Iterator
 from datetime import datetime, timezone
 from types import SimpleNamespace
 from unittest.mock import AsyncMock
@@ -34,15 +37,29 @@ from eneo.main.exceptions import (
     ProviderRejectedRequestException,
     TypedIOValidationException,
 )
+from eneo.model_providers.domain.provider_call_observer import (
+    TranscriptionCallRequestFacts,
+)
 from eneo.transcription_models.infrastructure.adapters.litellm_transcription import (
     TranscriptSegment,
     TranscriptWord,
 )
+from tests.unit.main.test_config_flow_transcription_service import make_settings
 from tests.unittests.flows import audio_spool_test_support
 
 spool_contract = audio_spool_test_support.spool_contract
 
 JOB_ID = "abc123"
+
+PROVIDER_TARGETS = [
+    pytest.param("http://tolka.test", "external/tolka.test", id="standard"),
+    pytest.param(
+        "https://dummy-user:dummy-url-secret@tolka.test:8443",
+        "external/tolka.test:8443",
+        id="private-userinfo",
+    ),
+    pytest.param("http://[::1]:8100", "external/[::1]:8100", id="ipv6-port"),
+]
 
 RESULT_BODY = {
     "language": "sv",
@@ -62,6 +79,19 @@ RESULT_BODY = {
 }
 
 
+@pytest.fixture
+def remote_logs(caplog: pytest.LogCaptureFixture) -> Iterator[pytest.LogCaptureFixture]:
+    logger = remote_transcription.logger
+    previous_level = logger.level
+    logger.addHandler(caplog.handler)
+    logger.setLevel(logging.INFO)
+    try:
+        yield caplog
+    finally:
+        logger.removeHandler(caplog.handler)
+        logger.setLevel(previous_level)
+
+
 class ScriptedService:
     """Plays back a scripted sequence of responses per endpoint."""
 
@@ -69,10 +99,10 @@ class ScriptedService:
         self,
         *,
         submit_responses: list[httpx.Response] | None = None,
-        status_responses: list[httpx.Response] | None = None,
+        status_responses: list[httpx.Response | Exception] | None = None,
         result_responses: list[httpx.Response] | None = None,
         cancel_responses: list[httpx.Response] | None = None,
-        ready_responses: list[httpx.Response] | None = None,
+        ready_responses: list[httpx.Response | Exception] | None = None,
     ) -> None:
         self.submit_responses = submit_responses or []
         self.status_responses = status_responses or []
@@ -87,7 +117,10 @@ class ScriptedService:
         if request.method == "POST" and path == "/v1/jobs":
             return self.submit_responses.pop(0)
         if request.method == "GET" and path == f"/v1/jobs/{JOB_ID}":
-            return self.status_responses.pop(0)
+            response = self.status_responses.pop(0)
+            if isinstance(response, Exception):
+                raise response
+            return response
         if request.method == "GET" and path == f"/v1/jobs/{JOB_ID}/result":
             return self.result_responses.pop(0)
         if request.method == "DELETE" and path == f"/v1/jobs/{JOB_ID}":
@@ -97,7 +130,10 @@ class ScriptedService:
                 202, json={"job_id": JOB_ID, "cancellation_requested": True}
             )
         if request.method == "GET" and path == "/v1/health/ready":
-            return self.ready_responses.pop(0)
+            response = self.ready_responses.pop(0)
+            if isinstance(response, Exception):
+                raise response
+            return response
         raise AssertionError(f"unexpected request: {request.method} {path}")
 
     @property
@@ -133,10 +169,13 @@ def status(value: str, *, queue_position: int | None = None) -> httpx.Response:
 
 
 def make_client(
-    service: ScriptedService, **overrides: float
+    service: ScriptedService,
+    *,
+    base_url: str = "http://tolka.test",
+    **overrides: float,
 ) -> RemoteTranscriptionClient:
     return RemoteTranscriptionClient(
-        base_url="http://tolka.test",
+        base_url=base_url,
         api_key="devtoken",
         submit_timeout_seconds=overrides.get("submit_timeout_seconds", 5.0),
         poll_interval_seconds=overrides.get("poll_interval_seconds", 0.001),
@@ -201,7 +240,11 @@ async def test_submit_sends_multipart_job_contract() -> None:
     assert b'name="diarize"' in body and b"true" in body
 
 
-async def test_accepted_job_is_recorded_before_the_first_poll(spool_contract) -> None:
+@pytest.mark.parametrize("base_url,expected_model", PROVIDER_TARGETS)
+async def test_accepted_job_is_recorded_before_the_first_poll(
+    spool_contract, base_url: str, expected_model: str
+) -> None:
+    # Mutant: configured URL userinfo reaches observable provider-call facts.
     observer = RecordingObserver()
 
     class Service(ScriptedService):
@@ -216,13 +259,16 @@ async def test_accepted_job_is_recorded_before_the_first_poll(spool_contract) ->
         status_responses=[status("completed")],
         result_responses=[httpx.Response(200, json=RESULT_BODY)],
     )
-    await RemoteFlowTranscriber(make_client(service)).transcribe(
+    await RemoteFlowTranscriber(make_client(service, base_url=base_url)).transcribe(
         await audio_file(spool_contract),
         SimpleNamespace(),
         observer=observer,
         file_id=UUID(int=1),
     )
     assert observer.completed_calls[0][0] == observer.accepted_calls[0][0]
+    [facts] = observer.started_facts
+    assert isinstance(facts, TranscriptionCallRequestFacts)
+    assert facts.requested_model == expected_model
 
 
 @pytest.mark.parametrize("error", [httpx.WriteError, httpx.ReadTimeout])
@@ -456,29 +502,59 @@ async def test_poll_timeout_retains_last_progress_in_error_details(monkeypatch):
     assert service.cancel_count == 1
 
 
-async def test_unknown_submission_is_repeated_only_once(spool_contract):
+@pytest.mark.parametrize(
+    "base_url,observed,expected_requests,expected_error",
+    [
+        ("http://tolka.test", True, 2, OpenAIException),
+        (
+            "http://tolka.test:invalid-port",
+            True,
+            0,
+            remote_transcription.TranscriptionProviderError,
+        ),
+        (
+            "http://tolka.test:invalid-port",
+            False,
+            0,
+            remote_transcription.TranscriptionProviderError,
+        ),
+    ],
+)
+async def test_failed_submission_preserves_typed_errors_and_receipts(
+    spool_contract,
+    base_url: str,
+    observed: bool,
+    expected_requests: int,
+    expected_error: type[Exception],
+):
+    # Mutant: target metadata parsing escapes the submission error boundary.
     requests = []
 
     def handle(request):
         requests.append(request)
         raise httpx.ReadTimeout("response lost", request=request)
 
-    client = make_client(ScriptedService())
+    client = make_client(ScriptedService(), base_url=base_url)
     client._transport = httpx.MockTransport(handle)
     observer = RecordingObserver()
-    with pytest.raises(OpenAIException):
+    with pytest.raises(expected_error):
         await RemoteFlowTranscriber(client).transcribe(
             await audio_file(spool_contract),
             SimpleNamespace(),
-            observer=observer,
+            observer=observer if observed else None,
             file_id=UUID(int=1),
         )
-    assert len(requests) == 2
+    assert len(requests) == expected_requests
     assert all(request.method == "POST" for request in requests)
-    assert (
-        requests[0].headers["Idempotency-Key"] == requests[1].headers["Idempotency-Key"]
+    if expected_requests == 2:
+        assert (
+            requests[0].headers["Idempotency-Key"]
+            == requests[1].headers["Idempotency-Key"]
+        )
+    assert len(observer.started_facts) == int(observed)
+    assert [reason for _, reason in observer.unknown_calls] == (
+        ["provider_error"] if observed else []
     )
-    assert [reason for _, reason in observer.unknown_calls] == ["provider_error"]
     assert observer.accepted_calls == []
 
 
@@ -714,15 +790,17 @@ async def test_submit_diarize_job_requires_words() -> None:
         )
 
 
+@pytest.mark.parametrize("base_url,expected_model", PROVIDER_TARGETS)
 async def test_label_speakers_returns_service_text_and_records_its_own_call(
-    spool_contract,
+    spool_contract, base_url: str, expected_model: str
 ) -> None:
     service = ScriptedService(
         submit_responses=[accepted()],
         status_responses=[status("completed")],
         result_responses=[httpx.Response(200, json=RESULT_BODY)],
     )
-    transcriber = RemoteFlowTranscriber(make_client(service))
+    # Mutant: the diarization suffix leaves URL credentials in provider-call facts.
+    transcriber = RemoteFlowTranscriber(make_client(service, base_url=base_url))
     observer = RecordingObserver()
 
     result = await transcriber.label_speakers(
@@ -736,7 +814,8 @@ async def test_label_speakers_returns_service_text_and_records_its_own_call(
 
     assert result.text == RESULT_BODY["text"]
     [facts] = observer.started_facts
-    assert facts.requested_model.endswith("#diarize")
+    assert isinstance(facts, TranscriptionCallRequestFacts)
+    assert facts.requested_model == f"{expected_model}#diarize"
     assert len(observer.completed_calls) == 1
 
 
@@ -1154,48 +1233,187 @@ async def test_cancel_is_best_effort() -> None:
 
 
 @pytest.mark.parametrize(
-    ("response", "ready", "accepting"),
+    ("response", "ready", "accepting", "base_url"),
     [
-        (httpx.Response(200, json={"queue_accepting_jobs": True}), True, True),
-        (httpx.Response(200, json={"queue_accepting_jobs": False}), True, False),
-        (httpx.Response(503), False, False),
+        (
+            httpx.Response(200, json={"queue_accepting_jobs": True}),
+            True,
+            True,
+            "http://tolka.test",
+        ),
+        (
+            httpx.Response(200, json={"queue_accepting_jobs": False}),
+            True,
+            False,
+            "http://tolka.test",
+        ),
+        (httpx.Response(503), False, False, "http://tolka.test"),
+        (
+            httpx.Response(200, json={"queue_accepting_jobs": True}),
+            True,
+            True,
+            "http://dummy-user:dummy-url-secret@tolka.test",
+        ),
+        (
+            httpx.Response(503),
+            False,
+            False,
+            "http://dummy-user:dummy-url-secret@tolka.test",
+        ),
+        (
+            httpx.ConnectError("dummy-readiness-secret"),
+            False,
+            False,
+            "http://tolka.test",
+        ),
+        (httpx.Response(503), False, False, "http://tolka.test:invalid-port"),
+    ],
+    ids=[
+        "ready",
+        "admission-refused",
+        "unavailable",
+        "private-ready-url",
+        "private-unavailable-url",
+        "private-transport-detail",
+        "invalid-target-is-not-ready",
     ],
 )
 async def test_readiness_reports_service_and_admission_state(
-    response: httpx.Response, ready: bool, accepting: bool
+    response: httpx.Response | Exception,
+    ready: bool,
+    accepting: bool,
+    base_url: str,
+    remote_logs: pytest.LogCaptureFixture,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    service = ScriptedService(ready_responses=[response])
-    client = make_client(service)
+    # Mutants: raw transport detail or configured URL escapes into startup diagnostics.
+    service = ScriptedService(ready_responses=[response, response])
+    client = make_client(service, base_url=base_url)
 
     readiness = await client.check_readiness()
 
     assert (readiness.ready, readiness.accepting_jobs) == (ready, accepting)
-    assert service.requests[0].headers["authorization"] == "Bearer devtoken"
+    assert "dummy-readiness-secret" not in readiness.detail
+    if base_url == "http://tolka.test":
+        assert service.requests[0].headers["authorization"] == "Bearer devtoken"
+    monkeypatch.setattr(
+        remote_transcription,
+        "build_remote_flow_transcriber",
+        lambda _: RemoteFlowTranscriber(client),
+    )
+    await remote_transcription.log_remote_transcription_readiness(
+        make_settings(
+            flow_transcription_service_url=base_url,
+            flow_transcription_service_api_key="devtoken",
+        )
+    )
+    records = [
+        r for r in remote_logs.records if r.name == remote_transcription.__name__
+    ]
+    assert len(records) == 1
+    assert f"ready={ready} accepting_jobs={accepting}" in records[0].getMessage()
+    assert "dummy-url-secret" not in remote_logs.text
+    assert "dummy-readiness-secret" not in remote_logs.text
+    assert records[0].exc_info is None
 
 
-async def test_readiness_rejected_credentials_are_a_configuration_error() -> None:
-    service = ScriptedService(ready_responses=[httpx.Response(401)])
-    client = make_client(service)
+@pytest.mark.parametrize(
+    "base_url", ["http://tolka.test", "http://dummy-user:dummy-url-secret@tolka.test"]
+)
+async def test_readiness_rejected_credentials_are_a_configuration_error(
+    base_url: str,
+    remote_logs: pytest.LogCaptureFixture,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # Mutant: the credential-rejection diagnostic prints URL credentials.
+    service = ScriptedService(
+        ready_responses=[httpx.Response(401), httpx.Response(401)]
+    )
+    client = make_client(service, base_url=base_url)
 
     with pytest.raises(APIKeyNotConfiguredException):
         await client.check_readiness()
+    monkeypatch.setattr(
+        remote_transcription,
+        "build_remote_flow_transcriber",
+        lambda _: RemoteFlowTranscriber(client),
+    )
+    await remote_transcription.log_remote_transcription_readiness(
+        make_settings(
+            flow_transcription_service_url=base_url,
+            flow_transcription_service_api_key="devtoken",
+        )
+    )
+    records = [
+        r for r in remote_logs.records if r.name == remote_transcription.__name__
+    ]
+    assert len(records) == 1
+    assert "credentials rejected" in records[0].getMessage()
+    assert "dummy-url-secret" not in remote_logs.text
+    assert records[0].exc_info is None
 
 
-async def test_poll_tolerates_transient_failures() -> None:
+@pytest.mark.parametrize(
+    "polls,recovers,expected_failure_counts",
+    [
+        ([httpx.Response(500), httpx.Response(503), status("completed")], True, [1, 2]),
+        (
+            [httpx.Response(503)] * 4
+            + [status("running")]
+            + [httpx.Response(503)] * 4
+            + [status("completed")],
+            True,
+            [1, 2, 3, 4, 1, 2, 3, 4],
+        ),
+        ([httpx.Response(403)] * 5, False, [1, 2, 3, 4, 5]),
+        ([httpx.Response(503)] * 5, False, [1, 2, 3, 4, 5]),
+        ([httpx.ReadTimeout("dummy-poll-secret")] * 5, False, [1, 2, 3, 4, 5]),
+    ],
+    ids=[
+        "recover",
+        "reset-after-progress",
+        "unchanged-403-retries",
+        "bounded-503",
+        "private-transport-cause",
+    ],
+)
+async def test_poll_tolerates_transient_failures(
+    polls, recovers, expected_failure_counts, remote_logs
+) -> None:
+    # Mutants: silent retry, missing/sensitive final cause, no counter reset or early exhaustion.
     service = ScriptedService(
-        submit_responses=[accepted()],
-        status_responses=[
-            httpx.Response(500),
-            httpx.Response(503),
-            status("completed"),
-        ],
+        status_responses=polls.copy(),
         result_responses=[httpx.Response(200, json=RESULT_BODY)],
     )
     client = make_client(service)
-
-    result = await client.wait_for_result(JOB_ID)
-
-    assert result.text == RESULT_BODY["text"]
+    if recovers:
+        result = await client.wait_for_result(JOB_ID)
+        assert result.text == RESULT_BODY["text"]
+    else:
+        with pytest.raises(remote_transcription.TranscriptionProviderError) as raised:
+            await client.wait_for_result(JOB_ID)
+        error = raised.value
+        assert error.details == {"reason": "provider_error", "retryable": True}
+        cause = error.__cause__
+        assert isinstance(cause, remote_transcription.TranscriptionProviderError)
+        assert cause.__traceback__ is not None
+        assert cause.__context__ is None and error.__context__ is None
+        diagnostic = "".join(traceback.format_exception(error))
+        assert (
+            "ReadTimeout" in diagnostic
+            if isinstance(polls[-1], httpx.ReadTimeout)
+            else "HTTPStatusError" in diagnostic
+        )
+        assert "dummy-poll-secret" not in diagnostic
+    failures = [
+        r
+        for r in remote_logs.records
+        if r.name == remote_transcription.__name__ and r.levelno == logging.WARNING
+    ]
+    assert [r.args[0] for r in failures] == expected_failure_counts
+    assert all(r.exc_info is None for r in failures)
+    assert "dummy-poll-secret" not in remote_logs.text
+    assert not service.status_responses
 
 
 async def test_poll_404_means_job_vanished() -> None:
