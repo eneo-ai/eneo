@@ -176,8 +176,7 @@ describe("FlowRunDialog recording upload reconciliation", () => {
         await vi.waitFor(() =>
           expect(
             screen.getByText(
-              m.flow_run_upload_timeout_not_started({ seconds: "2", name: "interview.webm" }),
-              { exact: false }
+              m.flow_run_upload_timeout_not_started({ seconds: "2", name: "interview.webm" })
             )
           ).toBeTruthy()
         );

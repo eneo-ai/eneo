@@ -7,8 +7,6 @@ import {
   describeFlowRunError,
   describeFlowApiError,
   getFlowRuntimeErrorMessage,
-  classifyUploadError,
-  getUploadErrorHint,
   friendlyMimeNames,
   FLOW_API_ERROR_CODE,
   FLOW_API_ERROR_CODES,
@@ -501,40 +499,6 @@ describe("review policy run error helpers", () => {
         review_policy: { mode: "view" }
       }
     ]);
-  });
-});
-
-describe("classifyUploadError", () => {
-  it("detects timeout errors", () => {
-    expect(classifyUploadError("Upload timed out after 120s")).toBe("timeout");
-    expect(classifyUploadError("Request timeout")).toBe("timeout");
-    expect(classifyUploadError("Upload did not start within 600s")).toBe("timeout");
-    expect(classifyUploadError("Upload stalled for 120s")).toBe("timeout");
-    expect(classifyUploadError("Server did not respond within 120s")).toBe("timeout");
-  });
-
-  it("detects file size errors", () => {
-    expect(classifyUploadError("File too large")).toBe("file_too_large");
-    expect(classifyUploadError("Max filstorlek: 195 MB")).toBe("file_too_large");
-  });
-
-  it("detects network errors", () => {
-    expect(classifyUploadError("Network error")).toBe("network");
-    expect(classifyUploadError("Failed to fetch")).toBe("network");
-  });
-
-  it("returns unknown for unrecognised errors", () => {
-    expect(classifyUploadError("Something went wrong")).toBe("unknown");
-  });
-});
-
-describe("getUploadErrorHint", () => {
-  it("returns a hint for timeout", () => {
-    expect(getUploadErrorHint("timeout")).toContain("Försök igen");
-  });
-
-  it("returns empty string for unknown", () => {
-    expect(getUploadErrorHint("unknown")).toBe("");
   });
 });
 
