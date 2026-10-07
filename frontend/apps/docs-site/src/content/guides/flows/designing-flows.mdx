@@ -211,7 +211,7 @@ Goal: Turn an audio upload into structured sections and a filled DOCX template.
 | Compose report   | Section JSON         | Report text                     | `{{step_b.output.structured.sections}}` | Step knowledge |
 | Fill template    | Report text          | DOCX artifact (`template_fill`) | `{{step_c.output.text}}`                | Template asset |
 
-The flow keeps speech, structure, prose, and template rendering in separate steps so each failure is visible and rerunnable.
+The flow keeps speech, structure, prose, and template rendering in separate steps so a failure can be traced to the stage that produced it.
 
 ### Document intake with human gate
 

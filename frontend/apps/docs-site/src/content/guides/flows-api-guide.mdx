@@ -77,7 +77,7 @@ That distinction matters because service keys and ordinary human members are int
 | Run creation                                              | Allowed for published flows                                                                                                                                |
 | Live transcription sessions                               | Allowed for published flows                                                                                                                                |
 | List / get / cancel / redispatch runs                     | Own runs only                                                                                                                                              |
-| Rerun a completed step                                    | Own runs only                                                                                                                                              |
+| Retry a failed run | Own runs only; the source must have an eligible completed prefix |
 | Review checkpoints: active, edit, approve, reject, resume | Own runs only, and the key needs `resource_permissions.flows = write`                                                                                      |
 | Step outputs                                              | Own runs only                                                                                                                                              |
 | Artifact downloads                                        | Own runs only                                                                                                                                              |
@@ -254,8 +254,8 @@ For most consumer apps, the safest order is:
 6. poll the content-free run status endpoint
 7. if the run reaches `awaiting_review`, load the active review checkpoint
 8. edit, approve, reject, or resume the checkpoint
-9. optionally rerun a completed step when a reviewer accepts a correction
-10. fetch audited run detail, artifacts, or evidence when your principal needs them
+9. fetch audited run detail, artifacts, or evidence when your principal needs them
+10. after a failure, inspect earlier effects and use failed-run retry if its completed prefix is eligible
 
 ## Tenant flow settings for runtime operators
 
@@ -809,7 +809,7 @@ Key endpoints:
 | Get audited run detail  | `GET /api/v1/flows/{flow_id}/runs/{run_id}/`                        |
 | Cancel a run            | `POST /api/v1/flows/{flow_id}/runs/{run_id}/cancel/`                |
 | Redispatch a run        | `POST /api/v1/flows/{flow_id}/runs/{run_id}/redispatch/`            |
-| Rerun a completed step  | `POST /api/v1/flows/{flow_id}/runs/{run_id}/steps/{step_id}/rerun/` |
+| Retry a failed run | `POST /api/v1/flows/{flow_id}/runs/{run_id}/retry/` |
 
 Repeat the `status` query key to filter by more than one run status. The SDK
 keeps caller order and duplicates instead of comma-encoding the array:
@@ -844,10 +844,9 @@ The runtime API is asynchronous: create the run first, then poll for completion.
 Use `GET /api/v1/flows/runs/status-capabilities/` when building run-history,
 polling, cancellation, redispatch, and review UI logic. It returns canonical
 booleans such as `should_poll`, `is_terminal`, `is_cancellable`,
-`is_awaiting_review`, `can_request_redispatch`, and `is_rerun_eligible`, so your
-client does not need to hard-code lifecycle groups. Rerun eligibility means the
-run status can enter rerun validation; the endpoint still checks the step,
-revision, caller permission, and replacement inputs.
+`is_awaiting_review`, and `can_request_redispatch`, so your client does not need
+to hard-code lifecycle groups. Failed-run retry is validated separately against
+the source principal, current publication and reusable completed prefix.
 
 Current run status values:
 
@@ -1444,7 +1443,6 @@ Use this when you want the rich evidence payload for one run, including:
 - `definition_integrity`, containing `status`, `expected_checksum`, and `current_checksum`
 - step results
 - step attempts
-- rerun operations, input revisions, and invalidated-step lineage
 - the debug export payload
 
 Every admitted item in `step_attempts` has a required
@@ -1697,7 +1695,8 @@ Use this table as the canonical quick-reference for runtime access decisions.
 | Run contract / runtime-safe graph                             | Yes                                                          | Yes                                 | Yes                                  | Yes                         | Yes                       |
 | Runtime uploads / orphan cleanup                              | Own uploads for published Flows                              | Yes                                 | No                                   | Yes                         | Yes                       |
 | Create run / start a live transcription session               | Yes                                                          | Yes                                 | No                                   | Yes                         | Yes                       |
-| List / get / cancel / redispatch / rerun runs                 | Own runs only                                                | Own runs only                       | No                                   | In-scope runs               | Tenant-wide runs          |
+| List / get / cancel / redispatch runs                 | Own runs only                                                | Own runs only                       | No                                   | In-scope runs               | Tenant-wide runs          |
+| Retry a failed run | Own runs only | Own runs only | No | Own runs only | Own runs only |
 | Review checkpoints: active / edit / approve / reject / resume | Own runs only, `resource_permissions.flows = write` required | Own runs only                       | No                                   | In-scope runs               | Tenant-wide runs          |
 | Step outputs / artifacts                                      | Own runs only                                                | Own runs only                       | No                                   | In-scope runs               | Tenant-wide runs          |
 | Evidence view / export                                        | Own runs only, explicit `flow_evidence` capability required  | Own runs, policy-gated              | No                                   | In-scope runs, policy-gated | Tenant-wide, policy-gated |
@@ -1783,7 +1782,7 @@ GET  /api/v1/flows/{flow_id}/runs/{run_id}/review-checkpoints/active/ (when awai
 PATCH/POST review checkpoint edit/approve/reject/resume endpoints     (when awaiting_review)
 GET  /api/v1/flows/{flow_id}/runs/{run_id}/                  (audited final detail)
 GET  /api/v1/flows/{flow_id}/runs/{run_id}/steps/
-POST /api/v1/flows/{flow_id}/runs/{run_id}/steps/{step_id}/rerun/      (optional correction)
+POST /api/v1/flows/{flow_id}/runs/{run_id}/retry/          (eligible failed run; Idempotency-Key required)
 POST /api/v1/flows/{flow_id}/runs/{run_id}/artifacts/{file_id}/signed-url/ (optional)
 GET  /api/v1/flows/{flow_id}/runs/{run_id}/evidence/        (optional)
 ```
@@ -1794,14 +1793,14 @@ For short capability answers and operational choices, see [Flows FAQ](/guides/fl
 
 | Status | What it means on the Flow runtime surface                                                                                                                                                                                             | What to do                                                                                                      |
 | ------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------- |
-| `200`  | Success. Also returned by `cancel` on an already-terminal run, and by the active-checkpoint endpoint with a body of literal `null` when no checkpoint is open                                                                         | Read the response body; do not infer state from the status alone                                                |
-| `201`  | A run, a runtime file, or a live transcription session was created                                                                                                                                                                    | Keep the returned id. A live transcription session returns a ticket to use within 30 seconds                    |
-| `202`  | Resume and step rerun were accepted for asynchronous execution                                                                                                                                                                        | Poll the run; the work has not finished                                                                         |
+| `200`  | Success. Also returned by failed-run retry replay (`created: false`), `cancel` on an already-terminal run, and the active-checkpoint endpoint with literal `null` when none is open                                                                         | Read the response body; do not infer state from the status alone                                                |
+| `201`  | A run (including a retry child), a runtime file, or a live transcription session was created                                                                                                                                                                    | Keep the returned id. A live transcription session returns a ticket to use within 30 seconds                    |
+| `202`  | Review resume or approve-and-continue was accepted for asynchronous execution                                                                                                                                                                        | Poll the run; the work has not finished                                                                         |
 | `204`  | A runtime file or template file was deleted                                                                                                                                                                                           | No body to read                                                                                                 |
 | `400`  | The request shape, a state precondition, or the Flow contract is invalid. This is also where stale revisions and idempotency conflicts land                                                                                           | Read the Flow error `code` and follow its recovery. Reuse an idempotency key only for the request it belongs to |
 | `401`  | No credential (`authentication_error`) or an unusable one (`invalid_api_key`)                                                                                                                                                         | Fix the credential; do not retry the same key                                                                   |
 | `403`  | Scope, space permission, run ownership, or evidence policy refused the request, before the resource was resolved                                                                                                                      | Fix the principal or policy. A `403` does not tell you whether the resource exists                              |
-| `409`  | The request conflicts with current state, for example deleting an attached runtime file (`flow_runtime_file_attached`), redispatch (`flow_run_redispatch_conflict`), deleting a template in use (`flow_template_in_use`), the operator audit-outbox redrive, or starting live text for a flow that cannot offer it (`flow_live_transcription_unavailable`) | Reload the resource and retry. Stale runs and checkpoints use `400`, not `409`. For `flow_live_transcription_unavailable`, record without live text |
+| `409`  | The request conflicts with current state, for example failed-run retry source/version/prefix refusal, deleting an attached runtime file (`flow_runtime_file_attached`), redispatch (`flow_run_redispatch_conflict`), deleting a template in use (`flow_template_in_use`), or starting live text for a flow that cannot offer it (`flow_live_transcription_unavailable`) | Follow the error code. For a retry with a stale version or unusable prefix, create a new run; repeating the request does not fix it. Stale review-checkpoint revisions use `400`. For `flow_live_transcription_unavailable`, record without live text |
 | `410`  | The artifact's bytes were purged by retention; only its metadata remains                                                                                                                                                              | Show the file as unavailable. `availability` already said `content_purged`                                      |
 | `413`  | An upload exceeded the step's `max_file_size_bytes`, or an evidence export exceeded its bound                                                                                                                                         | Read the effective limit from the run contract; page `provider-calls/` instead of exporting                     |
 | `415`  | An upload's declared or sniffed `Content-Type` is not in the step's `accepted_mimetypes`                                                                                                                                              | Set the part's `Content-Type` from the run contract                                                             |
