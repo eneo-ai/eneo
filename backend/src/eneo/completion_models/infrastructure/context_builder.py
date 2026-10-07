@@ -413,48 +413,40 @@ class _Prompt:
         chunks: list[_InfoBlobChunkLike],
         max_tokens: int,
     ) -> str:
+        selected: list[_InfoBlobChunkLike] = []
+        rendered = ""
+        used_tokens = 0
+        for chunk in chunks:
+            # A new chunk can create another attributed group or join two
+            # groups. Budget the exact rendered candidate, including repeated
+            # property headers and text overlap, rather than each document once.
+            candidate = self._render_reconstructed_chunks([*selected, chunk])
+            candidate_tokens = count_tokens(candidate, self.model_name)
+            if candidate_tokens > max_tokens:
+                break
+            selected.append(chunk)
+            rendered = candidate
+            used_tokens = candidate_tokens
+
+        self._knowledge_tokens = used_tokens
+        return rendered
+
+    def _render_reconstructed_chunks(self, chunks: list[_InfoBlobChunkLike]) -> str:
         # Create a dictionary to store chunk indices
         chunk_indices = {id(chunk): i for i, chunk in enumerate(chunks)}
 
         # Group chunks by info_blob
         chunks_by_info_blob: dict[UUID, list[_InfoBlobChunkLike]] = {}
-        used_tokens = 0
         for chunk in chunks:
-            chunk_tokens = count_tokens(chunk.text, self.model_name)
-
             if chunks_by_info_blob.get(chunk.info_blob_id) is None:
                 chunks_by_info_blob[chunk.info_blob_id] = []
-
-                # Count the tokens for the metadata
-                chunk_tokens += count_tokens(
-                    '"""{}\n"""'.format(
-                        _source_header(
-                            chunk.info_blob_title,
-                            chunk.info_blob_id,
-                            chunk.info_blob_source_metadata,
-                        )
-                    ),
-                    self.model_name,
-                )
-
-            if chunk_tokens + used_tokens > max_tokens:
-                break
-
             chunks_by_info_blob[chunk.info_blob_id].append(chunk)
-            used_tokens += chunk_tokens
-
-        # Save the used_tokens for later
-        self._knowledge_tokens = used_tokens
 
         # Process each document
         chunk_groupings: list[ChunkGrouping] = []
         grouping_scores: defaultdict[int, float] = defaultdict(float)
 
         for doc_id, doc_chunks in chunks_by_info_blob.items():
-            # Edgecase if the first chunk of a new info-blob is the cutoff point
-            if not doc_chunks:
-                continue
-
             # Sort chunks by their order in the original document
             doc_chunks.sort(key=lambda x: x.chunk_no)
 
