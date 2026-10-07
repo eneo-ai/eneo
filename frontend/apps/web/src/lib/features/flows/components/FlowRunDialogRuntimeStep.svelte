@@ -20,11 +20,7 @@
   import * as Field from "$lib/components/ui/field/index.js";
   import { Switch } from "$lib/components/ui/switch/index.js";
   import { m } from "$lib/paraglide/messages";
-  import {
-    classifyUploadError,
-    getUploadErrorHint,
-    friendlyMimeNames
-  } from "$lib/features/flows/flowRuntimeErrorMapping";
+  import { friendlyMimeNames } from "$lib/features/flows/flowRuntimeErrorMapping";
   import AudioRecorder, { type RecorderHandle } from "$lib/features/audio/AudioRecorder.svelte";
   import LiveTranscriptPanel from "$lib/features/audio/live/LiveTranscriptPanel.svelte";
   import type {
@@ -703,9 +699,7 @@
         role="alert"
         aria-live="assertive"
       >
-        <p>
-          {uploadError}{getUploadErrorHint(classifyUploadError(uploadError ?? ""))}
-        </p>
+        <p>{uploadError}</p>
         <Button
           variant="link"
           size="sm"
