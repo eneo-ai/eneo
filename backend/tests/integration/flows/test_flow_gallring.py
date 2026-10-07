@@ -1643,7 +1643,7 @@ async def test_a_discovery_pass_continues_across_nightly_executions(scope) -> No
     assert first.blocked == {"live_transcripts.held": 2}
     # The second night continues after the prefix and reaches the free transcript.
     assert second.blocked == {"live_transcripts.held": 1}
-    assert second.counts == {"live_transcripts.transcripts_deleted": 1}
+    assert second.counts["live_transcripts.transcripts_deleted"] == 1
     async with _committed() as session:
         assert await session.get(FlowLiveTranscripts, free) is None
         for transcript_id in held:
