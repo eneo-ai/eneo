@@ -11,7 +11,7 @@ from eneo.flows.domain.flow_step_attempt_input import (
     FlowStepAttemptStart,
 )
 from eneo.flows.domain.rag_evidence import (
-    RetrievedKnowledgeEvidence,
+    RagRetrievalRecord,
     build_step_result_citation_state,
 )
 from eneo.flows.domain.runtime import RuntimeStep, StepExecutionOutput
@@ -282,23 +282,6 @@ def build_completed_step_result(
 
 
 def build_transcribe_only_rag_metadata(*, timeout_seconds: float) -> dict[str, Any]:
-    return {
-        "attempted": False,
-        "status": "skipped_transcribe_only",
-        "version": 1,
-        "timeout_seconds": int(timeout_seconds),
-        "include_info_blobs": False,
-        "chunks_retrieved": 0,
-        "raw_chunks_count": 0,
-        "deduped_chunks_count": 0,
-        "unique_sources": 0,
-        "source_ids": [],
-        "source_ids_short": [],
-        "error_code": None,
-        "retrieval_duration_ms": None,
-        "retrieval_error_type": None,
-        "embedding_model": None,
-        "embedding_model_status": "not_reported",
-        **RetrievedKnowledgeEvidence().aggregate_payload(),
-        "references": [],
-    }
+    return RagRetrievalRecord(
+        status="skipped_transcribe_only", timeout_seconds=int(timeout_seconds)
+    ).to_payload()

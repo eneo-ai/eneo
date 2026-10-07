@@ -13,6 +13,7 @@ from dataclasses import dataclass, replace
 from typing import Any, cast
 
 from eneo.flows.domain.flow import FlowRun, FlowStepResult
+from eneo.flows.domain.rag_evidence import RagRetrievalRecord
 from eneo.flows.domain.runtime import (
     RunExecutionState,
     RuntimeStep,
@@ -79,7 +80,7 @@ async def _no_rag(
 ) -> tuple[list[Any], dict[str, Any] | None, list[StepDiagnostic]]:
     return (
         [],
-        {"attempted": False, "status": "skipped", "reason": "speaker_mapping"},
+        RagRetrievalRecord(status="skipped", reason="speaker_mapping").to_payload(),
         [],
     )
 

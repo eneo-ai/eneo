@@ -9,10 +9,12 @@ import pytest
 
 from eneo.assistants.references import ReferencesService
 from eneo.collections.domain.collection import Collection
-from eneo.flows.domain.rag_evidence_policy import FlowRagEvidencePolicy
-from eneo.flows.runtime.rag_retrieval import (
+from eneo.flows.domain.rag_evidence import (
     RAG_RETRIEVAL_FAIL_CLOSED_STATUSES,
     RAG_RETRIEVAL_STATUSES,
+)
+from eneo.flows.domain.rag_evidence_policy import FlowRagEvidencePolicy
+from eneo.flows.runtime.rag_retrieval import (
     RagRetrievalDeps,
     retrieve_rag_chunks,
 )
