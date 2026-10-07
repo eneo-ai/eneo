@@ -189,25 +189,27 @@ For files, `write` allows a user key to upload files owned by that user. `admin`
 
 Service keys are not space members, so `SpaceActor` derives a synthetic role:
 
-1. **Tenant-scoped**: The key's permission maps to a role that applies to **every space** in the tenant
+1. **Tenant-scoped**: The key's permission maps to a role that applies to **every space** in the key's own tenant
 2. **Space-scoped**: The role applies only if `scope_id` matches the current space
 3. **Assistant/app-scoped**: The role applies only if the scoped resource exists in the current space
 
-This means a service key with `scope: space, permission: write` gets `EDITOR` access to exactly one space, and no access to any other space.
+A key never derives a role in a space that belongs to another tenant, whatever its scope. This means a service key with `scope: space, permission: write` gets `EDITOR` access to exactly one space, and no access to any other space.
 
 ### Scope Enforcement Details
 
 Scope enforcement distinguishes between **list endpoints** (no resource ID in URL) and **single-resource endpoints** (resource ID in URL):
 
 **List endpoints**:
-- Tenant-scoped keys: always pass
+- Tenant-scoped keys: pass (service layer filters by tenant)
 - Space-scoped keys: pass (service layer filters by space)
 - Assistant/app-scoped keys: pass only for their resource type (e.g., an assistant-scoped key can list conversations but not apps)
 
 **Single-resource endpoints**:
 - The system resolves the target resource's parent space
-- Compares the resolved space against the key's `scope_id`
-- Denies access if the resource is outside the key's scope
+- Tenant-scoped keys: denies access (`403 insufficient_scope`) if that space belongs to another tenant
+- Narrower scopes: compares the resolved space against the key's `scope_id` and denies access if the resource is outside the key's scope
+
+Space lookups made on behalf of a request also resolve only within the caller's tenant, so a resource id from another tenant behaves like an unknown id (`404`) even where no route-level scope check applies. Moving or linking assistants, collections and websites between spaces is likewise restricted to spaces of the caller's own tenant.
 
 **Strict mode** adds additional safety for list endpoints: if the endpoint cannot deterministically filter results to the key's scope, the request is denied rather than returning potentially over-broad results.
 

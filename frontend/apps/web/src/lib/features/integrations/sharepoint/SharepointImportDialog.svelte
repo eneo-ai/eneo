@@ -15,6 +15,7 @@
     Trash2,
     Users
   } from "@lucide/svelte";
+  import HighlightedText from "$lib/components/HighlightedText.svelte";
   import * as Alert from "$lib/components/ui/alert/index.js";
   import { Badge } from "$lib/components/ui/badge/index.js";
   import { Button } from "$lib/components/ui/button/index.js";
@@ -352,6 +353,31 @@
     selectedItems = [...remainingItems, { selectionKey, item, importName: item.name }];
   }
 
+  /** Adds every item not already selected or covered by a selected folder; a folder replaces its selected contents. */
+  function selectManyItems(items: SelectedTreeItem[]) {
+    let next = selectedItems;
+    for (const item of items) {
+      const selectionKey = getSelectionKey(item);
+      if (next.some((entry) => entry.selectionKey === selectionKey)) continue;
+      const covered = next.some(
+        (entry) =>
+          (entry.item.type === "folder" || entry.item.type === "site_root") &&
+          isSharePointDescendantPath(item.path, entry.item.path)
+      );
+      if (covered) continue;
+      if (item.type === "folder") {
+        next = next.filter((entry) => !isSharePointDescendantPath(entry.item.path, item.path));
+      }
+      next = [...next, { selectionKey, item, importName: item.name }];
+    }
+    selectedItems = next;
+  }
+
+  function deselectManyItems(items: SelectedTreeItem[]) {
+    const keys = new Set(items.map(getSelectionKey));
+    selectedItems = selectedItems.filter((entry) => !keys.has(entry.selectionKey));
+  }
+
   let selectedItemKeys = $derived(selectedItems.map((entry) => entry.selectionKey));
   let selectedPaths = $derived(selectedItems.map((entry) => entry.item.path));
   let dedupedSelection = $derived.by(() => {
@@ -574,11 +600,15 @@
           >
             <Command.Input
               bind:value={sourceFilter}
+              variant="field"
               placeholder={m.find_sharepoint_site()}
               aria-label={m.find_sharepoint_site()}
             />
+            <!-- The shared list caps its height at 18rem and hides the scrollbar
+                 for the command palette; here the list owns the rest of the box
+                 and a tenant with hundreds of sites must be visibly scrollable. -->
             <Command.List
-              class="min-h-0 flex-1 border-t"
+              class="mt-2 min-h-0 max-h-none flex-1 border-t [scrollbar-width:thin]! [&::-webkit-scrollbar]:block!"
               aria-busy={loadPreview.isLoading}
               aria-label={m.sharepoint_available_sources()}
             >
@@ -611,7 +641,12 @@
                         onSelect={() => handleSiteSelect(previewItem.value)}
                       >
                         <CategoryIcon class="text-muted-foreground size-4" aria-hidden="true" />
-                        <span class="min-w-0 flex-1 truncate">{previewItem.label}</span>
+                        <span class="min-w-0 flex-1 truncate">
+                          <HighlightedText
+                            text={previewItem.label}
+                            query={sourceFilter.trim().toLowerCase()}
+                          />
+                        </span>
                       </Command.Item>
                     {/each}
                   </Command.Group>
@@ -651,6 +686,8 @@
             {selectedItemKeys}
             {selectedPaths}
             onToggleSelect={toggleSelectedItem}
+            onSelectMany={selectManyItems}
+            onDeselectMany={deselectManyItems}
           />
 
           {#if dedupedSelection.skippedCount > 0}

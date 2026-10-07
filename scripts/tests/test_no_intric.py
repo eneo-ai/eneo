@@ -92,6 +92,60 @@ class NoIntricGuardTests(unittest.TestCase):
         self.assertEqual(result.returncode, 1)
         self.assertIn("backend/.env.template", result.stdout)
 
+    def add_file(self, root: Path, relative: str, content: str) -> None:
+        target = root / relative
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_text(content, encoding="utf-8")
+        subprocess.run(
+            ["git", "add", relative],
+            cwd=root,
+            check=True,
+            capture_output=True,
+            text=True,
+        )
+
+    def test_allows_removed_env_names_in_the_startup_checks(self) -> None:
+        root = self.make_repo()
+        self.add_file(
+            root,
+            "backend/src/eneo/main/removed_env.py",
+            'RemovedVariable("INTRIC_SUPER_API_KEY", replacement="ENEO_SUPER_API_KEY")\n',
+        )
+        self.add_file(
+            root,
+            "frontend/apps/web/src/lib/core/deploymentEnv.server.ts",
+            '{ removed: "PUBLIC_INTRIC_BACKEND_URL", replacement: "PUBLIC_ENEO_BACKEND_URL" }\n',
+        )
+
+        result = self.run_check(root)
+
+        self.assertEqual(result.returncode, 0, result.stdout)
+
+    def test_startup_check_allowance_covers_only_env_names(self) -> None:
+        root = self.make_repo()
+        self.add_file(
+            root,
+            "backend/src/eneo/main/removed_env.py",
+            "from intric.main.config import Settings\n",
+        )
+
+        result = self.run_check(root)
+
+        self.assertEqual(result.returncode, 1)
+        self.assertIn("backend/src/eneo/main/removed_env.py", result.stdout)
+
+    def test_allows_old_names_only_in_the_2_2_upgrade_guide(self) -> None:
+        root = self.make_repo()
+        line = "| Error response field | `intric_error_code` | `eneo_error_code` |\n"
+        self.add_file(root, "frontend/apps/docs-site/src/content/guides/upgrade-2-2-0.mdx", line)
+        self.add_file(root, "frontend/apps/docs-site/src/content/guides/deployment.mdx", line)
+
+        result = self.run_check(root)
+
+        self.assertEqual(result.returncode, 1)
+        self.assertIn("guides/deployment.mdx", result.stdout)
+        self.assertNotIn("upgrade-2-2-0.mdx", result.stdout)
+
 
 if __name__ == "__main__":
     unittest.main()

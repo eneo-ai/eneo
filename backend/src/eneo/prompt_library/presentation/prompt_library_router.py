@@ -11,6 +11,7 @@ from fastapi import APIRouter, Depends
 from eneo.audit.application.audit_metadata import AuditMetadata
 from eneo.audit.domain.action_types import ActionType
 from eneo.audit.domain.entity_types import EntityType
+from eneo.authentication.endpoint_access import Authentication, endpoint_access
 from eneo.main.container.container import Container
 from eneo.main.models import PaginatedResponse, is_provided
 from eneo.prompt_library.domain.prompt_library import PromptLibraryEntry
@@ -21,6 +22,7 @@ from eneo.prompt_library.presentation.prompt_library_models import (
     PromptLibraryEntryUpdate,
     PromptLibraryVersionPublic,
 )
+from eneo.roles.permissions import Permission
 from eneo.server.dependencies.container import get_container
 from eneo.server.protocol import responses
 
@@ -63,6 +65,11 @@ def _update_changes(
     response_model=PaginatedResponse[PromptLibraryEntrySparse],
     responses=responses.get_responses([403]),
 )
+@endpoint_access(
+    authentication=Authentication.USER,
+    authorization=Permission.ADMIN,
+    reason="Organization administration requires the admin permission.",
+)
 async def list_prompt_library_entries(container: _ContainerWithUser):
     service = container.prompt_library_service()
     entries = await service.list_entries()
@@ -79,6 +86,11 @@ async def list_prompt_library_entries(container: _ContainerWithUser):
     responses=responses.get_responses([400, 403]),
     status_code=201,
     description="Create a prompt library entry",
+)
+@endpoint_access(
+    authentication=Authentication.USER,
+    authorization=Permission.ADMIN,
+    reason="Organization administration requires the admin permission.",
 )
 async def create_prompt_library_entry(
     payload: PromptLibraryEntryCreate,
@@ -113,6 +125,11 @@ async def create_prompt_library_entry(
     response_model=PromptLibraryEntryPublic,
     responses=responses.get_responses([403, 404]),
 )
+@endpoint_access(
+    authentication=Authentication.USER,
+    authorization=Permission.ADMIN,
+    reason="Organization administration requires the admin permission.",
+)
 async def get_prompt_library_entry(id: UUID, container: _ContainerWithUser):
     service = container.prompt_library_service()
     entry = await service.get_entry(id)
@@ -123,6 +140,11 @@ async def get_prompt_library_entry(id: UUID, container: _ContainerWithUser):
     "/{id}/versions/",
     response_model=PaginatedResponse[PromptLibraryVersionPublic],
     responses=responses.get_responses([403, 404]),
+)
+@endpoint_access(
+    authentication=Authentication.USER,
+    authorization=Permission.ADMIN,
+    reason="Organization administration requires the admin permission.",
 )
 async def list_prompt_library_entry_versions(id: UUID, container: _ContainerWithUser):
     service = container.prompt_library_service()
@@ -138,6 +160,11 @@ async def list_prompt_library_entry_versions(id: UUID, container: _ContainerWith
     response_model=PromptLibraryEntryPublic,
     responses=responses.get_responses([400, 403, 404]),
     description="Update a prompt library entry",
+)
+@endpoint_access(
+    authentication=Authentication.USER,
+    authorization=Permission.ADMIN,
+    reason="Organization administration requires the admin permission.",
 )
 async def update_prompt_library_entry(
     id: UUID,
@@ -181,6 +208,11 @@ async def update_prompt_library_entry(
     status_code=204,
     responses=responses.get_responses([403, 404, 409]),
     description="Delete a prompt library entry",
+)
+@endpoint_access(
+    authentication=Authentication.USER,
+    authorization=Permission.ADMIN,
+    reason="Organization administration requires the admin permission.",
 )
 async def delete_prompt_library_entry(id: UUID, container: _ContainerWithUser):
     service = container.prompt_library_service()

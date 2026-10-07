@@ -317,6 +317,9 @@ export function initConversations(client) {
      * @param {import("../types/resources").ConversationSettings} [params.settings] Initial choices for a new conversation
      * @param {number} [params.settingsRevision] Expected revision for an existing conversation
      * for config-time baseline estimates
+     * @param {{id: string, inline_text?: boolean}[]} [params.attachments] Unsaved persistent
+     * attachments with their mode, for config-time estimates; ones marked "open with tool"
+     * are excluded from the count
      * @returns {Promise<import('../types/resources').PreflightResponse>}
      * @throws {EneoError}
      */
@@ -328,7 +331,8 @@ export function initConversations(client) {
       tools,
       assistantPrompt,
       settings,
-      settingsRevision
+      settingsRevision,
+      attachments
     }) => {
       /** @type {{session_id?: string, assistant_id?: string, group_chat_id?: string}} */
       const target = { session_id: undefined, assistant_id: undefined, group_chat_id: undefined };
@@ -358,7 +362,8 @@ export function initConversations(client) {
             tools,
             assistant_prompt: assistantPrompt,
             settings,
-            settings_revision: settingsRevision
+            settings_revision: settingsRevision,
+            attachments: attachments?.map((a) => ({ id: a.id, inline_text: a.inline_text ?? true }))
           }
         }
       });

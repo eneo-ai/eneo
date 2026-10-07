@@ -2,7 +2,11 @@ from typing import Annotated
 
 from fastapi import APIRouter, Depends, Request, status
 
-from eneo.authentication.auth_dependencies import require_session_auth
+from eneo.authentication.endpoint_access import (
+    Authentication,
+    Authorization,
+    endpoint_access,
+)
 from eneo.main.container.container import Container
 from eneo.main.exceptions import UnauthorizedException
 from eneo.modules.module_auth import (
@@ -47,7 +51,11 @@ _ModuleRequestContainer = Annotated[
         "the browser session that initiated the login (login-CSRF protection)."
     ),
     responses=responses.get_responses([400, 401, 403, 404]),
-    dependencies=[Depends(require_session_auth)],
+)
+@endpoint_access(
+    authentication=Authentication.SESSION,
+    authorization=Authorization.AUTHENTICATED,
+    reason="ModuleAuthBroker enforces module assignment, ticket ownership and credential binding.",
 )
 async def issue_module_ticket(
     payload: ModuleTicketRequest,
@@ -73,6 +81,11 @@ async def issue_module_ticket(
         "module; the ticket is consumed atomically and cannot be reused."
     ),
     responses=responses.get_responses([401, 403]),
+)
+@endpoint_access(
+    authentication=Authentication.API_KEY,
+    authorization=Authorization.AUTHENTICATED,
+    reason="ModuleAuthBroker enforces module assignment, ticket ownership and credential binding.",
 )
 async def exchange_module_ticket(
     payload: ModuleTokenRequest,
@@ -107,6 +120,11 @@ async def exchange_module_ticket(
         "security": [{"OAuth2PasswordBearer": [], "APIKeyHeader": []}],
     },
 )
+@endpoint_access(
+    authentication=Authentication.MODULE,
+    authorization=Authorization.MODULE,
+    reason="ModuleAuthBroker enforces module assignment, ticket ownership and credential binding.",
+)
 async def refresh_module_token(
     request: Request,
     container: _ModuleRequestContainer,
@@ -129,6 +147,11 @@ async def refresh_module_token(
     openapi_extra={
         "security": [{"OAuth2PasswordBearer": [], "APIKeyHeader": []}],
     },
+)
+@endpoint_access(
+    authentication=Authentication.MODULE,
+    authorization=Authorization.MODULE,
+    reason="ModuleAuthBroker enforces module assignment, ticket ownership and credential binding.",
 )
 async def validate_module_resource_session(
     request: Request,

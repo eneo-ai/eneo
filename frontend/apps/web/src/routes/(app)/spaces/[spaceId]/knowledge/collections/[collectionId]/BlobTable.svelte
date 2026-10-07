@@ -3,12 +3,15 @@
   import * as Table from "$lib/components/resource-table/index.js";
   import BlobPreview from "$lib/features/knowledge/components/BlobPreview.svelte";
   import BlobActions from "./BlobActions.svelte";
+  import { formatDateTime } from "$lib/core/formatting/dateTime";
   import { formatBytes } from "$lib/core/formatting/formatBytes";
   import { PAGINATION } from "$lib/core/constants";
   import { m } from "$lib/paraglide/messages";
 
   export let blobs: InfoBlob[];
   export let canEdit: boolean;
+  export let resourceName = m.resource_file();
+  export let emptyMessage = m.no_files_uploaded_yet();
   const table = Table.createWithResource(blobs, PAGINATION.PAGE_SIZE);
 
   const viewModel = table.createViewModel([
@@ -20,6 +23,15 @@
           blob: item.value,
           isTableView: true
         });
+      }
+    }),
+
+    table.column({
+      header: m.created(),
+      accessor: (item) => item,
+      cell: (item) => formatDateTime(item.value.created_at) || "—",
+      plugins: {
+        sort: { getSortValue: (item) => item.created_at ?? "" }
       }
     }),
 
@@ -45,5 +57,4 @@
   $: table.update(blobs);
 </script>
 
-<Table.Root {viewModel} filter resourceName="file" emptyMessage={m.no_files_uploaded_yet()}
-></Table.Root>
+<Table.Root {viewModel} filter {resourceName} {emptyMessage}></Table.Root>

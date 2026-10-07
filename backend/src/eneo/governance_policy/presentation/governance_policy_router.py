@@ -11,6 +11,7 @@ from fastapi import APIRouter, Depends, HTTPException, Request, status
 from eneo.audit.application.audit_metadata import AuditMetadata
 from eneo.audit.domain.action_types import ActionType
 from eneo.audit.domain.entity_types import EntityType
+from eneo.authentication.endpoint_access import Authentication, endpoint_access
 from eneo.governance_policy.domain.governance_policy import (
     GovernancePolicy,
     PolicyCapability,
@@ -22,6 +23,7 @@ from eneo.governance_policy.presentation.governance_policy_models import (
     GovernancePolicyUpdate,
 )
 from eneo.main.container.container import Container
+from eneo.roles.permissions import Permission
 from eneo.server.dependencies.container import get_container
 from eneo.server.protocol import responses
 from eneo.skills.domain.skill import ResolvedSkillBinding
@@ -156,6 +158,11 @@ def _policy_changes(
     response_model=GovernancePolicyPublic,
     responses=responses.get_responses([403]),
 )
+@endpoint_access(
+    authentication=Authentication.USER,
+    authorization=Permission.ADMIN,
+    reason="Organization administration requires the admin permission.",
+)
 async def get_governance_policy(container: _ContainerWithUser):
     service = container.governance_policy_service()
     assembler = container.governance_policy_assembler()
@@ -169,6 +176,11 @@ async def get_governance_policy(container: _ContainerWithUser):
     response_model=GovernancePolicyPublic,
     responses=responses.get_responses([400, 403]),
     description="Update the personal assistant governance policy",
+)
+@endpoint_access(
+    authentication=Authentication.USER,
+    authorization=Permission.ADMIN,
+    reason="Organization administration requires the admin permission.",
 )
 async def update_governance_policy(
     payload: GovernancePolicyUpdate,

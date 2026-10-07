@@ -75,6 +75,32 @@ class AssistantTemplateRepository:
 
         return self.factory.create_assistant_template(item=record)
 
+    async def get_consumable(
+        self, assistant_template_id: "UUID", tenant_id: "UUID"
+    ) -> Optional["AssistantTemplate"]:
+        """Get a template the tenant may create an assistant from.
+
+        Matches id AND deleted_at IS NULL AND (tenant_id = ? OR tenant_id IS NULL):
+        the tenant's own templates and global templates, never another
+        tenant's or a deleted one. Consumption goes through here, not get_by_id.
+        """
+        base_query = select(self._db_model).where(
+            self._db_model.id == assistant_template_id,
+            self._db_model.deleted_at.is_(None),
+            or_(
+                self._db_model.tenant_id == tenant_id,
+                self._db_model.tenant_id.is_(None),
+            ),
+        )
+        query = self._apply_options(query=base_query)
+
+        record = await self.session.scalar(query)
+
+        if not record:
+            return None
+
+        return self.factory.create_assistant_template(item=record)
+
     async def get_assistant_template_list(
         self, tenant_id: Optional["UUID"] = None
     ) -> list["AssistantTemplate"]:

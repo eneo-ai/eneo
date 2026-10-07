@@ -835,7 +835,7 @@ async def test_get_assistant_with_effective_config_enforces_read_auth():
     space.get_assistant.return_value = assistant
 
     actor = MagicMock()
-    actor.can_read_assistants.return_value = False
+    actor.can_read_assistant.return_value = False
     actor.can_read_default_assistant.return_value = False
 
     service = _service_with_actor(actor)

@@ -1,16 +1,16 @@
 from datetime import datetime
 from typing import Annotated, cast
 
-from fastapi import APIRouter, Depends, Request
+from fastapi import APIRouter, Depends
 from pydantic import BaseModel, Field
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from eneo.authentication.auth_dependencies import (
-    require_session_auth,
-    require_storage_administration,
+    require_active_storage_identity,
     require_user_identity,
 )
+from eneo.authentication.endpoint_access import Authentication, endpoint_access
 from eneo.main.container.container import Container
 from eneo.main.logging import get_logger
 from eneo.object_content.content import (
@@ -39,7 +39,7 @@ from eneo.object_content.runtime import (
     ObjectContentReadinessCode,
     object_content_runtime,
 )
-from eneo.roles.permissions import Permission, validate_permission
+from eneo.roles.permissions import Permission
 from eneo.server.dependencies.container import get_container
 from eneo.server.protocol import responses
 
@@ -56,23 +56,16 @@ _PolicyAdminContainer = Annotated[
 ]
 
 
-async def _require_policy_session_auth(
-    request: Request,
-    container: _PolicyAdminContainer,
-) -> None:
-    await require_session_auth(container.user(), request)
-
-
 async def _require_policy_user_identity(
     container: _PolicyAdminContainer,
 ) -> None:
     await require_user_identity(container.user())
 
 
-async def _require_policy_storage_admin(
+async def _require_policy_active_identity(
     container: _PolicyAdminContainer,
 ) -> None:
-    await require_storage_administration(container.user())
+    await require_active_storage_identity(container.user())
 
 
 class CapabilityPublic(BaseModel):
@@ -276,6 +269,11 @@ async def _read_moves(session: AsyncSession) -> ObjectContentMovesPublic:
     ),
     responses=responses.get_responses([403]),
 )
+@endpoint_access(
+    authentication=Authentication.USER,
+    authorization=Permission.ADMIN,
+    reason="Tenant administrators may read sanitized deployment storage settings.",
+)
 async def get_deployment_policy(
     container: Annotated[
         Container,
@@ -284,7 +282,6 @@ async def get_deployment_policy(
 ) -> DeploymentPolicyPublic:
     # Keep this tenant-admin read on its sole authenticated container while it
     # awaits object-store readiness.
-    validate_permission(container.user(), Permission.ADMIN)
     return await _read_projection(cast(AsyncSession, container.session()))
 
 
@@ -296,11 +293,15 @@ async def get_deployment_policy(
         "Requires the storage administration permission (held by the Owner role by default)."
     ),
     dependencies=[
-        Depends(_require_policy_session_auth),
         Depends(_require_policy_user_identity),
-        Depends(_require_policy_storage_admin),
+        Depends(_require_policy_active_identity),
     ],
     responses=responses.get_responses([403]),
+)
+@endpoint_access(
+    authentication=Authentication.SESSION,
+    authorization=Permission.STORAGE,
+    reason="Storage administration requires an active user session with storage permission.",
 )
 async def get_object_content_inventory(
     container: _PolicyAdminContainer,
@@ -316,11 +317,15 @@ async def get_object_content_inventory(
         "object-content moves. Requires the storage administration permission (held by the Owner role by default)."
     ),
     dependencies=[
-        Depends(_require_policy_session_auth),
         Depends(_require_policy_user_identity),
-        Depends(_require_policy_storage_admin),
+        Depends(_require_policy_active_identity),
     ],
     responses=responses.get_responses([403]),
+)
+@endpoint_access(
+    authentication=Authentication.SESSION,
+    authorization=Permission.STORAGE,
+    reason="Storage administration requires an active user session with storage permission.",
 )
 async def get_object_content_moves(
     container: _PolicyAdminContainer,
@@ -336,11 +341,15 @@ async def get_object_content_moves(
         "This never starts an automatic fleet migration."
     ),
     dependencies=[
-        Depends(_require_policy_session_auth),
         Depends(_require_policy_user_identity),
-        Depends(_require_policy_storage_admin),
+        Depends(_require_policy_active_identity),
     ],
     responses=responses.get_responses([403, 503]),
+)
+@endpoint_access(
+    authentication=Authentication.SESSION,
+    authorization=Permission.STORAGE,
+    reason="Storage administration requires an active user session with storage permission.",
 )
 async def queue_object_content_moves(
     request: MoveQueueRequest,
@@ -400,11 +409,15 @@ async def queue_object_content_moves(
         "deployment-policy revision."
     ),
     dependencies=[
-        Depends(_require_policy_session_auth),
         Depends(_require_policy_user_identity),
-        Depends(_require_policy_storage_admin),
+        Depends(_require_policy_active_identity),
     ],
     responses=responses.get_responses([403, 409]),
+)
+@endpoint_access(
+    authentication=Authentication.SESSION,
+    authorization=Permission.STORAGE,
+    reason="Storage administration requires an active user session with storage permission.",
 )
 async def set_object_content_moves_paused(
     replacement: DeploymentPolicyPauseUpdate,
@@ -443,11 +456,15 @@ async def set_object_content_moves_paused(
         "and never moves existing content."
     ),
     dependencies=[
-        Depends(_require_policy_session_auth),
         Depends(_require_policy_user_identity),
-        Depends(_require_policy_storage_admin),
+        Depends(_require_policy_active_identity),
     ],
     responses=responses.get_responses([403, 409]),
+)
+@endpoint_access(
+    authentication=Authentication.SESSION,
+    authorization=Permission.STORAGE,
+    reason="Storage administration requires an active user session with storage permission.",
 )
 async def replace_deployment_policy(
     replacement: DeploymentPolicyUpdate,

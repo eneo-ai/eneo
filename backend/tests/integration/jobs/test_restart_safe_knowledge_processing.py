@@ -41,7 +41,7 @@ pytestmark = pytest.mark.integration
 
 
 class StubExtractor:
-    def extract(
+    async def extract_bounded(
         self, filepath: Path, mimetype: str, filename: str | None = None
     ) -> str:
         return "replacement knowledge"
@@ -396,19 +396,19 @@ async def test_heartbeat_advances_updated_at_during_each_compute_phase(
         assert allow_sync_phase_to_finish.wait(timeout=10)
 
     class PhaseExtractor:
-        def extract(
+        async def extract_bounded(
             self, filepath: Path, mimetype: str, filename: str | None = None
         ) -> str:
             if stalled_phase == "extraction":
-                stall_sync_phase()
+                await asyncio.to_thread(stall_sync_phase)
             return "replacement knowledge"
 
     original_chunk_text = Datastore._chunk_text
 
-    def chunk_text(datastore: Datastore, info_blob: InfoBlobInDB):
+    def chunk_text(datastore: Datastore, info_blob: InfoBlobInDB, embedding_model):
         if stalled_phase == "chunking":
             stall_sync_phase()
-        return original_chunk_text(datastore, info_blob)
+        return original_chunk_text(datastore, info_blob, embedding_model)
 
     monkeypatch.setattr(Datastore, "_chunk_text", chunk_text)
 
@@ -441,7 +441,9 @@ async def test_heartbeat_advances_updated_at_during_each_compute_phase(
                 text="replacement knowledge",
                 group_id=uuid4(),
             ),
-            embedding_model=object(),
+            embedding_model=SimpleNamespace(
+                name="test-model", family=None, max_input=8191
+            ),
         )
         return SimpleNamespace(id=uuid4())
 

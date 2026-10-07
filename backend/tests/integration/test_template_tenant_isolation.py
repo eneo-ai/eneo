@@ -961,3 +961,227 @@ async def test_gallery_endpoint_accessible_to_regular_users(
     assert response.status_code == 403, (
         "Regular user should not be able to delete templates"
     )
+
+
+# ---------------------------------------------------------------------------
+# Consumption: templates can only be instantiated by their own tenant
+# (or by anyone, when global). Ids come from fixtures; the tests establish
+# authorization once an id is known, not that ids are discoverable.
+# ---------------------------------------------------------------------------
+
+
+async def _tenant_admin_with_email(
+    client, super_admin_token: str, label: str
+) -> tuple[str, str]:
+    tenant = await _create_tenant(client, super_admin_token, f"{label}-{uuid4()}")
+    admin = await _create_user(
+        client,
+        super_admin_token,
+        tenant["id"],
+        f"{label}-{uuid4().hex[:8]}@test.com",
+        TEST_PASSWORD,
+        is_admin=True,
+    )
+    return await _login_user(client, admin["email"], TEST_PASSWORD), admin["email"]
+
+
+async def _tenant_admin(client, super_admin_token: str, label: str) -> str:
+    token, _ = await _tenant_admin_with_email(client, super_admin_token, label)
+    return token
+
+
+async def _create_space(client, token: str) -> str:
+    response = await client.post(
+        "/api/v1/spaces/",
+        json={"name": f"space-{uuid4().hex[:8]}"},
+        headers={"Authorization": f"Bearer {token}"},
+    )
+    assert response.status_code == 201, response.text
+    return response.json()["id"]
+
+
+async def _create_assistant_template(client, token: str, prompt: str) -> str:
+    response = await client.post(
+        "/api/v1/admin/templates/assistants/",
+        json={
+            "name": f"template-{uuid4().hex[:8]}",
+            "description": "private",
+            "category": "private",
+            "prompt": prompt,
+            "wizard": {"attachments": None, "collections": None},
+        },
+        headers={"Authorization": f"Bearer {token}"},
+    )
+    assert response.status_code == 201, response.text
+    return response.json()["id"]
+
+
+async def _create_app_template(client, token: str, prompt: str) -> str:
+    response = await client.post(
+        "/api/v1/admin/templates/apps/",
+        json={
+            "name": f"app-template-{uuid4().hex[:8]}",
+            "description": "private",
+            "category": "private",
+            "prompt": prompt,
+            "input_type": "text-field",
+            "input_description": "Text",
+            "wizard": {"attachments": None, "collections": None},
+        },
+        headers={"Authorization": f"Bearer {token}"},
+    )
+    assert response.status_code == 201, response.text
+    return response.json()["id"]
+
+
+async def _create_global_assistant_template(prompt: str) -> str:
+    async with sessionmanager.session() as session, session.begin():
+        result = await session.execute(
+            text(
+                "INSERT INTO assistant_templates "
+                "(name, description, category, prompt_text, "
+                "completion_model_kwargs, wizard, tenant_id) "
+                "VALUES (:name, 'global', 'global', :prompt, "
+                "'{}'::jsonb, '{}'::jsonb, NULL) RETURNING id"
+            ),
+            {"name": f"global-{uuid4().hex[:8]}", "prompt": prompt},
+        )
+        return str(result.scalar_one())
+
+
+async def _assistant_from_template(client, token: str, space_id: str, template_id):
+    return await client.post(
+        f"/api/v1/spaces/{space_id}/applications/assistants/",
+        json={
+            "name": "from-template",
+            "from_template": {"id": str(template_id), "additional_fields": []},
+        },
+        headers={"Authorization": f"Bearer {token}"},
+    )
+
+
+async def _app_from_template(client, token: str, space_id: str, template_id):
+    return await client.post(
+        f"/api/v1/spaces/{space_id}/applications/apps/",
+        json={
+            "name": "from-template",
+            "from_template": {"id": str(template_id), "additional_fields": []},
+        },
+        headers={"Authorization": f"Bearer {token}"},
+    )
+
+
+async def test_assistant_cannot_be_created_from_foreign_tenant_template(
+    client, super_admin_token, patch_auth_service_jwt, mock_transcription_models
+):
+    token_a = await _tenant_admin(client, super_admin_token, "owner")
+    token_b = await _tenant_admin(client, super_admin_token, "other")
+    await _enable_templates_feature(client, token_a)
+    await _enable_templates_feature(client, token_b)
+    secret = f"secret-{uuid4().hex}"
+    template_a = await _create_assistant_template(client, token_a, secret)
+    space_b = await _create_space(client, token_b)
+
+    response = await _assistant_from_template(client, token_b, space_b, template_a)
+
+    assert response.status_code == 404, response.text
+    assert secret not in response.text
+
+
+async def test_own_tenant_templates_remain_consumable(
+    client, super_admin_token, patch_auth_service_jwt, mock_transcription_models
+):
+    token = await _tenant_admin(client, super_admin_token, "owner")
+    await _enable_templates_feature(client, token)
+    prompt = f"prompt-{uuid4().hex}"
+    assistant_template = await _create_assistant_template(client, token, prompt)
+    space = await _create_space(client, token)
+
+    assistant = await _assistant_from_template(client, token, space, assistant_template)
+    assert assistant.status_code == 201, assistant.text
+    assert assistant.json()["prompt"]["text"] == prompt
+
+
+async def test_global_template_is_consumable_by_any_tenant(
+    client, super_admin_token, patch_auth_service_jwt, mock_transcription_models
+):
+    token = await _tenant_admin(client, super_admin_token, "other")
+    await _enable_templates_feature(client, token)
+    prompt = f"prompt-{uuid4().hex}"
+    template = await _create_global_assistant_template(prompt)
+    space = await _create_space(client, token)
+
+    response = await _assistant_from_template(client, token, space, template)
+
+    assert response.status_code == 201, response.text
+    assert response.json()["prompt"]["text"] == prompt
+
+
+async def test_deleted_and_unknown_templates_are_not_consumable(
+    client, super_admin_token, patch_auth_service_jwt, mock_transcription_models
+):
+    token = await _tenant_admin(client, super_admin_token, "owner")
+    await _enable_templates_feature(client, token)
+    template = await _create_assistant_template(client, token, "prompt")
+    space = await _create_space(client, token)
+    deleted = await client.delete(
+        f"/api/v1/admin/templates/assistants/{template}",
+        headers={"Authorization": f"Bearer {token}"},
+    )
+    assert deleted.status_code == 204, deleted.text
+
+    response = await _assistant_from_template(client, token, space, template)
+    assert response.status_code == 404, response.text
+
+    response = await _assistant_from_template(client, token, space, uuid4())
+    assert response.status_code == 404, response.text
+
+
+async def test_consumption_requires_templates_entitlement(
+    client, super_admin_token, patch_auth_service_jwt, mock_transcription_models
+):
+    token = await _tenant_admin(client, super_admin_token, "owner")
+    await _enable_templates_feature(client, token)
+    template = await _create_assistant_template(client, token, "prompt")
+    space = await _create_space(client, token)
+    disabled = await client.patch(
+        "/api/v1/settings/templates",
+        json={"enabled": False},
+        headers={"Authorization": f"Bearer {token}"},
+    )
+    assert disabled.status_code == 200, disabled.text
+
+    response = await _assistant_from_template(client, token, space, template)
+
+    assert response.status_code == 400, response.text
+
+
+async def test_app_template_consumable_lookup_is_tenant_scoped(
+    client, super_admin_token, patch_auth_service_jwt, db_container
+):
+    """App creation over HTTP needs a transcription model the test environment
+    cannot provide, so the app path is checked at the lookup it consumes."""
+    from uuid import UUID
+
+    token_a, email_a = await _tenant_admin_with_email(
+        client, super_admin_token, "owner"
+    )
+    _, email_b = await _tenant_admin_with_email(client, super_admin_token, "other")
+    await _enable_templates_feature(client, token_a)
+    template_a = UUID(await _create_app_template(client, token_a, "prompt"))
+
+    async with db_container() as container:
+        user_a = await container.user_repo().get_user_by_email(email_a)
+        user_b = await container.user_repo().get_user_by_email(email_b)
+
+    async with db_container(user=user_b) as container:
+        foreign = await container.app_template_repo().get_consumable(
+            app_template_id=template_a, tenant_id=user_b.tenant_id
+        )
+    assert foreign is None
+
+    async with db_container(user=user_a) as container:
+        own = await container.app_template_repo().get_consumable(
+            app_template_id=template_a, tenant_id=user_a.tenant_id
+        )
+    assert own is not None and own.id == template_a

@@ -5,7 +5,11 @@
 <!-- Why was this needed? -->
 
 ## Planning
-<!-- Link the development task this PR closes. The task owns the parent epic link. -->
+<!-- Link the issue this PR closes: write `Fixes #123` below, or link it under Development in the sidebar.
+     PRs into release or feature branches need no link; the PR into develop carries it. -->
+<!-- Apply the actual GitHub labels before requesting review: one primary change
+     type and at least one area. See .github/PROJECT_WORKFLOW.md#required-labels.
+     Labels written only in this description do not satisfy the required check. -->
 
 - Task: Fixes #
 

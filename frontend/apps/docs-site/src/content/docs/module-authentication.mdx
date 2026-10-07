@@ -55,7 +55,7 @@ lifetimes. None of them can substitute for another.
 
 | Credential | Held by | Lifetime | Purpose |
 | --- | --- | --- | --- |
-| Eneo session JWT (`aud` = Eneo) | Browser cookie on the Eneo domain | Deployment-configured (`JWT_EXPIRY_TIME`) | The user's normal Eneo login; authorizes ticket issuance |
+| Eneo session JWT (`aud` = Eneo) | Browser cookie on the Eneo domain | Deployment-configured (`JWT_EXPIRY_TIME`, minutes) | The user's normal Eneo login; authorizes ticket issuance |
 | Login ticket | Redirect URL only, then gone | **30 s**, single use (`MODULE_AUTH_TICKET_TTL_SECONDS`) | One-time handoff from the Eneo session to the module |
 | Module user token (`aud` = `eneo-module:<module_key>`) | Module server session, never the browser | **60 min**, refreshable up to a fixed **8 h** session ceiling (`MODULE_AUTH_TOKEN_EXPIRY_MINUTES`, `MODULE_AUTH_MAX_SESSION_HOURS`) | Proves *which user* the module acts for |
 | `sk_` service key | Module server environment | Until rotated/expired/revoked | Proves *which module deployment* is calling |
@@ -336,3 +336,7 @@ configuration changes and organization assignment changes all produce audit even
   ticket exchange and preserved across refresh. If the account is deleted, its
   tokens stop authenticating — even when the same email is later re-assigned
   to a replacement account.
+  This is the same [session identity contract](/docs/authentication-architecture#eneo-session-identity)
+  used by the Eneo API and internal MCP tools. Tokens require `token_version: 2`;
+  pre-upgrade tokens and pending tickets cannot be exchanged or renewed after
+  the upgrade. Restart the Eneo login handoff when authentication is rejected.

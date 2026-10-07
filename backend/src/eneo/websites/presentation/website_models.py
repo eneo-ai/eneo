@@ -1,5 +1,6 @@
 from datetime import datetime
 from typing import Optional, Union
+from urllib.parse import urlparse
 from uuid import UUID
 
 from pydantic import BaseModel, Field, ValidationInfo, field_serializer, field_validator
@@ -11,6 +12,7 @@ from eneo.embedding_models.presentation.embedding_model_models import (
 from eneo.main.models import (
     NOT_PROVIDED,
     BaseResponse,
+    CursorPaginatedResponse,
     IdAndName,
     InDB,
     ModelId,
@@ -19,9 +21,36 @@ from eneo.main.models import (
     Status,
     is_provided,
 )
-from eneo.websites.crawl_dependencies.crawl_models import CrawlRunSparse
-from eneo.websites.domain.crawl_run import CrawlRun, CrawlType
+from eneo.websites.application.website_crud_service import WebsiteBulkErrorCode
+from eneo.websites.domain.crawl_run import (
+    CrawlFailureCode,
+    CrawlOrigin,
+    CrawlOutcome,
+    CrawlPhase,
+    CrawlResourceKind,
+    CrawlRun,
+    CrawlType,
+)
 from eneo.websites.domain.website import UpdateInterval, Website
+
+
+def _require_http_url(url: str) -> str:
+    """Accept only http(s) URLs with a host name; returns the trimmed URL.
+
+    Early feedback for the API. The crawler enforces its own destination
+    policy at connection time, so stored URLs are covered regardless.
+    """
+    url = url.strip()
+    parsed = urlparse(url)
+    if parsed.scheme.lower() not in ("http", "https") or not parsed.hostname:
+        raise ValueError(
+            "URL must start with http:// or https:// and include a host name"
+        )
+    try:
+        parsed.port
+    except ValueError:
+        raise ValueError("URL port must be a number between 0 and 65535") from None
+    return url
 
 
 class WebsiteBase(BaseModel):
@@ -59,23 +88,34 @@ class WebsiteMetadata(BaseModel):
     size: int
 
 
-class WebsiteSparse(ResourcePermissionsMixin, WebsiteBase, InDB):
-    url: str
-    latest_crawl: Optional[CrawlRunSparse] = None
-    user_id: UUID
-    embedding_model: IdAndName
-    metadata: WebsiteMetadata
-
-
-class CrawlRunPublic(BaseResponse):
-    pages_crawled: Optional[int]
+class CrawlRunPublic(InDB):
+    pages_crawled: Optional[int] = Field(
+        description="Pages that were (re)indexed in this run."
+    )
     files_downloaded: Optional[int]
     pages_failed: Optional[int]
     files_failed: Optional[int]
+    pages_unchanged: Optional[int] = Field(
+        default=None,
+        description="Pages verified unchanged and left as they were (HTTP 304 "
+        "or identical content). Null for runs recorded before this was tracked.",
+    )
+    files_unchanged: Optional[int] = Field(
+        default=None,
+        description="Files verified unchanged and left as they were. Null for "
+        "runs recorded before this was tracked.",
+    )
     failure_summary: Optional[dict[str, int]] = None
     status: Status
+    phase: CrawlPhase
+    outcome: CrawlOutcome | None
+    origin: CrawlOrigin
     result_location: Optional[str]
     finished_at: Optional[datetime]
+    failure_code: CrawlFailureCode | None
+    failure_detail: str | None
+    cancel_requested_at: datetime | None
+    attempt_count: int
 
     @classmethod
     def from_domain(cls, crawl_run: CrawlRun):
@@ -87,11 +127,48 @@ class CrawlRunPublic(BaseResponse):
             files_downloaded=crawl_run.files_downloaded,
             pages_failed=crawl_run.pages_failed,
             files_failed=crawl_run.files_failed,
+            pages_unchanged=crawl_run.pages_unchanged,
+            files_unchanged=crawl_run.files_unchanged,
             failure_summary=crawl_run.failure_summary,
             status=crawl_run.status,
+            phase=crawl_run.phase,
+            outcome=crawl_run.outcome,
+            origin=crawl_run.origin,
             result_location=crawl_run.result_location,
             finished_at=crawl_run.finished_at,
+            failure_code=CrawlFailureCode(crawl_run.failure_code)
+            if crawl_run.failure_code
+            else None,
+            failure_detail=crawl_run.failure_detail,
+            cancel_requested_at=crawl_run.cancel_requested_at,
+            attempt_count=crawl_run.attempt_count,
         )
+
+
+class CrawlResourceFailurePublic(BaseModel):
+    id: UUID
+    url: str
+    reason: str = Field(description="Failure reason code, localized by the client.")
+    kind: CrawlResourceKind
+
+
+class CrawlFailurePagePublic(CursorPaginatedResponse[CrawlResourceFailurePublic]):
+    run: CrawlRunPublic
+    details_available: bool = Field(
+        description="False when this run predates collection of failed resource addresses."
+    )
+
+
+class WebsiteSparse(ResourcePermissionsMixin, WebsiteBase, InDB):
+    url: str
+    latest_crawl: Optional[CrawlRunPublic] = None
+    last_indexed_at: datetime | None = Field(
+        default=None,
+        description="Completion time of the latest successful, unchanged, empty, or partial indexing run.",
+    )
+    user_id: UUID
+    embedding_model: IdAndName
+    metadata: WebsiteMetadata
 
 
 class WebsitePublic(ResourcePermissionsMixin, BaseResponse):
@@ -102,6 +179,9 @@ class WebsitePublic(ResourcePermissionsMixin, BaseResponse):
     crawl_type: CrawlType
     update_interval: UpdateInterval
     latest_crawl: Optional[CrawlRunPublic]
+    last_indexed_at: datetime | None = Field(
+        description="Completion time of the latest successful, unchanged, empty, or partial indexing run. A later active or failed run does not replace it."
+    )
     embedding_model: EmbeddingModelPublic
     metadata: WebsiteMetadata
     requires_http_auth: bool = Field(
@@ -141,6 +221,7 @@ class WebsitePublic(ResourcePermissionsMixin, BaseResponse):
             crawl_type=website.crawl_type,
             update_interval=website.update_interval,
             latest_crawl=latest_crawl,
+            last_indexed_at=website.last_indexed_at,
             embedding_model=EmbeddingModelPublic.from_domain(website.embedding_model),
             metadata=WebsiteMetadata(size=website.size),
             permissions=website.permissions,
@@ -171,6 +252,11 @@ class WebsiteCreate(BaseModel):
         "Must be provided together with username.",
     )
     """Password for HTTP Basic Authentication. Must be provided with username."""
+
+    @field_validator("url")
+    @classmethod
+    def validate_url_is_http(cls, v: str) -> str:
+        return _require_http_url(v)
 
     @field_validator("http_auth_password")
     @classmethod
@@ -207,6 +293,15 @@ class WebsiteUpdate(BaseModel):
         "Set to null to remove auth. Must be provided with username.",
     )
 
+    @field_validator("url")
+    @classmethod
+    def validate_url_is_http(
+        cls, v: Union[str, NotProvided]
+    ) -> Union[str, NotProvided]:
+        if not is_provided(v):
+            return v
+        return _require_http_url(v)
+
     @field_validator("http_auth_password")
     @classmethod
     def validate_auth_update_together(
@@ -233,8 +328,17 @@ class WebsiteUpdate(BaseModel):
 class BulkCrawlRequest(BaseModel):
     """Request model for triggering crawls on multiple websites."""
 
-    website_ids: list[UUID]
+    website_ids: list[UUID] = Field(min_length=1, max_length=50)
     """List of website IDs to crawl (max 50 per request for safety)"""
+
+
+class WebsiteBulkActionError(BaseModel):
+    """One website-level failure in a bounded bulk action."""
+
+    website_id: UUID
+    error: WebsiteBulkErrorCode = Field(
+        description="Stable machine-readable website action error code"
+    )
 
 
 class BulkCrawlResponse(BaseModel):
@@ -252,8 +356,29 @@ class BulkCrawlResponse(BaseModel):
     crawl_runs: list[CrawlRunPublic]
     """Details of successfully queued crawl runs"""
 
-    errors: list[dict[str, str]]
+    errors: list[WebsiteBulkActionError]
     """List of errors for failed websites (website_id and error message)"""
+
+
+class BulkCrawlStopResponse(BaseModel):
+    """Result of stopping active crawls for a bounded website selection."""
+
+    total: int
+    stopped: int
+    not_running: int
+    failed: int
+    crawl_runs: list[CrawlRunPublic]
+    errors: list[WebsiteBulkActionError]
+
+
+class BulkWebsiteDeleteResponse(BaseModel):
+    """Result of permanently deleting a bounded website selection."""
+
+    total: int
+    deleted: int
+    not_found: int
+    failed: int
+    errors: list[WebsiteBulkActionError]
 
 
 class WebsiteExistsResponse(BaseModel):

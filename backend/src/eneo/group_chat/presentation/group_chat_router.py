@@ -7,6 +7,11 @@ from uuid import UUID
 
 from fastapi import APIRouter, Depends
 
+from eneo.authentication.endpoint_access import (
+    Authentication,
+    Authorization,
+    endpoint_access,
+)
 from eneo.group_chat.domain.entities.group_chat import GroupChatAssistantData
 from eneo.group_chat.presentation.models import GroupChatPublic, GroupChatUpdateSchema
 from eneo.main.container.container import Container
@@ -25,6 +30,11 @@ ContainerDep = Annotated[Container, Depends(get_container(with_user=True))]
     description="Updates an existing group chat. Omitted fields are not updated",
     status_code=200,
     responses=responses.get_responses([400, 403, 404]),
+)
+@endpoint_access(
+    authentication=Authentication.USER,
+    authorization=Authorization.AUTHENTICATED,
+    reason="GroupChatService enforces group chat and space permissions.",
 )
 async def update_group_chat(
     id: UUID,
@@ -75,6 +85,11 @@ async def update_group_chat(
     status_code=200,
     responses=responses.get_responses([403, 404]),
 )
+@endpoint_access(
+    authentication=Authentication.USER,
+    authorization=Authorization.AUTHENTICATED,
+    reason="GroupChatService enforces group chat and space permissions.",
+)
 async def get_group_chat(
     id: UUID,
     container: ContainerDep,
@@ -95,6 +110,11 @@ async def get_group_chat(
     status_code=204,
     responses=responses.get_responses([403, 404]),
 )
+@endpoint_access(
+    authentication=Authentication.USER,
+    authorization=Authorization.AUTHENTICATED,
+    reason="GroupChatService enforces group chat and space permissions.",
+)
 async def delete_group_chat(
     id: UUID,
     container: ContainerDep,
@@ -109,6 +129,11 @@ async def delete_group_chat(
     response_model=GroupChatPublic,
     description="Publishes or unpublishes an existing group chat by its ID.",
     responses=responses.get_responses([403, 404]),
+)
+@endpoint_access(
+    authentication=Authentication.USER,
+    authorization=Authorization.AUTHENTICATED,
+    reason="GroupChatService enforces group chat and space permissions.",
 )
 async def publish_group_chat(
     id: UUID,

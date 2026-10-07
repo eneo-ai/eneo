@@ -179,11 +179,11 @@ main() {
         -e API_KEY_HEADER_NAME=dummy \
         -e JWT_AUDIENCE=dummy \
         -e JWT_ISSUER=dummy \
-        -e JWT_EXPIRY_TIME=86000 \
+        -e JWT_EXPIRY_TIME=1440 \
         -e JWT_ALGORITHM=HS256 \
         -e JWT_SECRET=dummy \
         -e JWT_TOKEN_PREFIX=dummy \
-        -e URL_SIGNING_KEY=dummy \
+        -e URL_SIGNING_KEY=openapi-only-url-signing-key-with-at-least-32-bytes \
         -e ENCRYPTION_KEY=yPIAaWTENh5knUuz75NYHblR3672X-7lH-W6AD4F1hs= \
         -e NUM_WORKERS=1 \
         "$BACKEND_IMAGE" > /dev/null
@@ -193,7 +193,9 @@ main() {
     local attempt=0
     while [ $attempt -lt 30 ]; do
         echo "Attempt $((attempt + 1)): Testing http://localhost:$backend_port/openapi.json" >&2
-        if curl -s "http://localhost:$backend_port/openapi.json" | jq -e '.info.version' >/dev/null 2>&1; then
+        # gunicorn accepts connections before a worker is ready; without a
+        # timeout, a crash-looping worker leaves curl waiting forever.
+        if curl -s --connect-timeout 2 --max-time 10 "http://localhost:$backend_port/openapi.json" | jq -e '.info.version' >/dev/null 2>&1; then
             echo "Backend OpenAPI endpoint ready" >&2
             break
         fi

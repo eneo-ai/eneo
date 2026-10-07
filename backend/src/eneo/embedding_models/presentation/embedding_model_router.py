@@ -8,13 +8,14 @@ from eneo.audit.application.audit_metadata import AuditMetadata
 from eneo.audit.domain.action_types import ActionType
 from eneo.audit.domain.entity_types import EntityType
 from eneo.authentication.auth_dependencies import get_current_active_user
+from eneo.authentication.endpoint_access import Authentication, endpoint_access
 from eneo.embedding_models.presentation.embedding_model_models import (
     EmbeddingModelPublic,
     EmbeddingModelUpdate,
 )
 from eneo.main.container.container import Container
 from eneo.main.models import PaginatedResponse, is_provided
-from eneo.roles.permissions import Permission, validate_permission
+from eneo.roles.permissions import Permission
 from eneo.server.dependencies.container import get_container
 from eneo.server.protocol import responses
 from eneo.users.user import UserInDB
@@ -28,12 +29,15 @@ router = APIRouter()
     description="List all embedding models for the tenant.",
     responses=responses.get_responses([403]),
 )
+@endpoint_access(
+    authentication=Authentication.USER,
+    authorization=Permission.ADMIN,
+    reason="This operation requires Permission.ADMIN before accessing tenant resources.",
+)
 async def get_embedding_models(
     user: Annotated[UserInDB, Depends(get_current_active_user)],
     container: Annotated[Container, Depends(get_container(with_user=True))],
 ):
-    validate_permission(user, Permission.ADMIN)
-
     service = container.embedding_model_crud_service()
     models = await service.get_embedding_models()
 
@@ -47,13 +51,16 @@ async def get_embedding_models(
     response_model=EmbeddingModelPublic,
     responses=responses.get_responses([403, 404]),
 )
+@endpoint_access(
+    authentication=Authentication.USER,
+    authorization=Permission.ADMIN,
+    reason="This operation requires Permission.ADMIN before accessing tenant resources.",
+)
 async def get_embedding_model(
     id: UUID,
     user: Annotated[UserInDB, Depends(get_current_active_user)],
     container: Annotated[Container, Depends(get_container(with_user=True))],
 ):
-    validate_permission(user, Permission.ADMIN)
-
     service = container.embedding_model_crud_service()
     model = await service.get_embedding_model(model_id=id)
 
@@ -66,6 +73,11 @@ async def get_embedding_model(
     description="Update an embedding model's settings.",
     responses=responses.get_responses([403, 404]),
 )
+@endpoint_access(
+    authentication=Authentication.USER,
+    authorization=Permission.ADMIN,
+    reason="This operation requires Permission.ADMIN before accessing tenant resources.",
+)
 async def update_embedding_model(
     id: UUID,
     update: EmbeddingModelUpdate,
@@ -73,9 +85,6 @@ async def update_embedding_model(
 ):
     service = container.embedding_model_crud_service()
     user = container.user()
-
-    # Validate admin permissions first
-    validate_permission(user, Permission.ADMIN)
 
     # Get old state for change tracking (bypass access check since admin is already validated)
     embedding_model_repo = container.embedding_model_repo2()

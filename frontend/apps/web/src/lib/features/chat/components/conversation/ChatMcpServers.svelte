@@ -10,6 +10,9 @@
     listed too, but they are always active and cannot be toggled. The tenant's
     capability providers (web search, image generation) are real MCP servers
     under the hood but are presented as togglable capability rows, not servers.
+    When the partner's model cannot call tools, the backend attaches nothing:
+    every row is then rendered unavailable and the run-automatically choice is
+    hidden, since there is no tool call for it to govern.
 -->
 <script lang="ts">
   import { buttonVariants } from "$lib/components/ui/button/index.js";
@@ -46,6 +49,8 @@
     capabilityServers?: McpServer[];
     /** Eneo's built-in loopback servers active for this partner (not togglable). */
     internalServers?: InternalMcpServer[];
+    /** Whether the partner's model can call tools at all; false renders every row unavailable. */
+    modelSupportsTools?: boolean;
     /** Server ids disabled by defaults or the user for this conversation. */
     disabledServerIds: ReadonlySet<string>;
     /** Called after the user changes the external server selection. */
@@ -61,6 +66,7 @@
     servers,
     capabilityServers = [],
     internalServers = [],
+    modelSupportsTools = true,
     disabledServerIds,
     onSelectionChange,
     autoAcceptTools,
@@ -130,7 +136,7 @@
       <Popover.Title class="text-sm">{m.tools()}</Popover.Title>
       <div class="text-muted-foreground mt-0.5 flex items-center justify-between gap-2 text-xs">
         <span>{m.mcp_servers_active_count({ active: activeCount, total })}</span>
-        {#if servers.length > 1}
+        {#if servers.length > 1 && modelSupportsTools}
           <span class="flex items-center gap-0.5">
             <button
               type="button"
@@ -148,6 +154,11 @@
           </span>
         {/if}
       </div>
+      {#if !modelSupportsTools}
+        <p class="text-warning-stronger mt-1 text-xs">
+          {readinessMessage("model_no_tool_calling")}
+        </p>
+      {/if}
     </div>
 
     {#if internalServers.length > 0}
@@ -260,7 +271,7 @@
       </div>
     {/if}
 
-    {#if showApproval && (servers.length > 0 || capabilityServers.length > 0)}
+    {#if showApproval && modelSupportsTools && (servers.length > 0 || capabilityServers.length > 0)}
       <Separator />
 
       <div class="p-1">

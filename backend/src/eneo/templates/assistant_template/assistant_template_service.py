@@ -67,6 +67,33 @@ class AssistantTemplateService:
 
         return assistant_template
 
+    async def get_consumable_assistant_template(
+        self, assistant_template_id: "UUID"
+    ) -> "AssistantTemplate":
+        """Resolve a template the current user may create an assistant from.
+
+        Consumption is gated on the tenant's templates entitlement and resolves
+        only the caller's own templates and global templates. A foreign,
+        deleted or unknown id is not found.
+        """
+        is_enabled = await self.feature_flag_service.check_is_feature_enabled(
+            feature_name="using_templates", tenant_id=self.user.tenant_id
+        )
+        if not is_enabled:
+            raise BadRequestException(
+                "Templates feature is not enabled for this tenant. Enable in settings first."
+            )
+
+        assistant_template = await self.repo.get_consumable(
+            assistant_template_id=assistant_template_id,
+            tenant_id=self.user.tenant_id,
+        )
+
+        if assistant_template is None:
+            raise NotFoundException("Template not found")
+
+        return assistant_template
+
     async def get_assistant_templates(
         self, tenant_id: "UUID"
     ) -> list["AssistantTemplate"]:

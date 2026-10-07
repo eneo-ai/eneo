@@ -1,7 +1,7 @@
 import copy
 import re
 from collections import defaultdict
-from collections.abc import AsyncGenerator, Callable, Sequence
+from collections.abc import AsyncGenerator, Callable, Collection, Sequence
 from dataclasses import dataclass, replace
 from datetime import datetime
 from typing import TYPE_CHECKING, Optional, TypeVar, Union, cast
@@ -35,8 +35,12 @@ from eneo.files.attachment_budget import (
     attachment_token_ceiling,
 )
 from eneo.files.file_models import File, FileType
-from eneo.files.file_reference import inline_file_text_for_model, url_only_file_ids
-from eneo.files.file_service import FileService
+from eneo.files.file_reference import (
+    inline_file_text_for_model,
+    inlined_attachments,
+    url_only_file_ids,
+)
+from eneo.files.file_service import FileService, require_requested_files
 from eneo.governance_policy.domain.policy_resolver import (
     select_effective_completion_model,
     select_effective_inline_file_text,
@@ -683,8 +687,10 @@ class AssistantService:
         name: str | None = None,
         enabled_capabilities: list[CapabilityPurpose] | None = None,
     ):
-        template = await self.assistant_template_service.get_assistant_template(
-            assistant_template_id=template_data.id
+        template = (
+            await self.assistant_template_service.get_consumable_assistant_template(
+                assistant_template_id=template_data.id
+            )
         )
 
         if (
@@ -747,7 +753,16 @@ class AssistantService:
         self,
         persistent_attachments: list[File],
         completion_model: Optional["CompletionModel"],
+        url_only_ids: Collection[UUID] = (),
     ) -> list[File]:
+        """Persistent attachments as the completion layer receives them.
+
+        Vision models also get the rendered page images, except for URL-only
+        attachments: those reach the model as a signed URL, so their pages
+        must not ride along or they alone defeat the mode. The URL-only TEXT
+        files themselves stay in the list; the send path needs them to mint
+        their references.
+        """
         if (
             completion_model is None
             or not completion_model.vision
@@ -755,7 +770,10 @@ class AssistantService:
         ):
             return persistent_attachments
 
-        return await self.file_service.with_derived_images(persistent_attachments)
+        expanded = await self.file_service.with_derived_images(persistent_attachments)
+        if not url_only_ids:
+            return expanded
+        return [file for file in expanded if file.parent_file_id not in url_only_ids]
 
     async def _validate_skill_activation_fit(
         self,
@@ -939,9 +957,16 @@ class AssistantService:
                 )
             return
 
-        completion_prompt_files = await self._completion_prompt_files_for_model(
-            persistent_attachments=assistant.attachments,
-            completion_model=model,
+        # Attachments marked "open with tool" are sent as signed URLs and cost
+        # nothing here; the same predicate decides what ask() inlines.
+        url_only_attachments = assistant.url_only_attachment_ids(model)
+        completion_prompt_files = inlined_attachments(
+            await self._completion_prompt_files_for_model(
+                persistent_attachments=assistant.attachments,
+                completion_model=model,
+                url_only_ids=url_only_attachments,
+            ),
+            url_only_attachments,
         )
         if effective_config is not None and effective_config.mcp_enforced:
             effective_mcp_servers = effective_config.available_mcp_servers
@@ -1045,7 +1070,9 @@ class AssistantService:
                 validation_plan=validation_plan,
                 candidate_skill_ids=candidate_skill_ids,
                 model=model,
-                completion_prompt_files=list(completion_prompt_files),
+                completion_prompt_files=inlined_attachments(
+                    completion_prompt_files, assistant.url_only_attachment_ids(model)
+                ),
                 effective_mcp_servers=effective_mcp_servers,
                 preflight_adapter=(
                     preflight_adapters[model.id]
@@ -1266,13 +1293,14 @@ class AssistantService:
             model = models_by_assistant_id.get(assistant.id)
             if model is None:
                 continue
-            completion_prompt_files = list(
+            completion_prompt_files = inlined_attachments(
                 await self.repo.hydrate_completion_files_for_validation(
                     assistant=assistant,
                     derived_image_metadata=completion_file_projections_by_assistant_id[
                         assistant.id
                     ].derived_image_metadata,
-                )
+                ),
+                assistant.url_only_attachment_ids(model),
             )
             effective_mcp_servers = effective_mcp_servers_by_assistant_id[assistant.id]
             preflight_adapter = (
@@ -1312,16 +1340,22 @@ class AssistantService:
         downstream."""
         if not files and not validate_persistent_baseline:
             return
-        # URL-only uploads are sent as a signed URL — no inlined text, no
-        # derived images — so they cost ~nothing. Count only the files whose
-        # content is actually inlined; otherwise a large stored CSV would be
-        # rejected here even though URL-only mode exists precisely to let it
-        # through.
+        # URL-only files are sent as a signed URL — no inlined text, no derived
+        # images — so they cost ~nothing. Count only the files whose content is
+        # actually inlined; otherwise a large stored CSV would be rejected here
+        # even though URL-only mode exists precisely to let it through. Uploads
+        # follow the assistant-wide toggle, persistent attachments their own
+        # per-file mode.
         url_only = url_only_file_ids(files, assistant.inline_file_text)
         countable = [f for f in files if f.id not in url_only]
-        persistent_files = await self._completion_prompt_files_for_model(
-            persistent_attachments=assistant.attachments,
-            completion_model=model,
+        url_only_attachments = assistant.url_only_attachment_ids(model)
+        persistent_files = inlined_attachments(
+            await self._completion_prompt_files_for_model(
+                persistent_attachments=assistant.attachments,
+                completion_model=model,
+                url_only_ids=url_only_attachments,
+            ),
+            url_only_attachments,
         )
         message_files = (
             await self.file_service.with_derived_images(countable)
@@ -1382,7 +1416,7 @@ class AssistantService:
         mcp_server_ids: list[UUID] | None = None,
         enabled_capabilities: list[CapabilityPurpose] | None = None,
         mcp_tools: list[tuple[UUID, bool]] | None = None,
-        attachment_ids: list[UUID] | None = None,
+        attachments: list[tuple[UUID, bool]] | None = None,
         description: Union[str, None, NotProvided] = NOT_PROVIDED,
         insight_enabled: Optional[bool] = None,
         inline_file_text: Optional[bool] = None,
@@ -1402,6 +1436,17 @@ class AssistantService:
         if insight_enabled is not None:
             if not actor.can_toggle_insight():
                 raise UnauthorizedException("Only admins can toggle insights")
+
+        if is_provided(data_retention_days) and not actor.can_edit_retention():
+            raise UnauthorizedException(
+                "Only space admins can change conversation retention",
+                code="forbidden_action",
+                context={
+                    "resource_type": "assistant",
+                    "action": "update_retention",
+                    "auth_layer": "domain_policy",
+                },
+            )
 
         assistant = space.get_assistant(assistant_id=assistant_id)
 
@@ -1451,7 +1496,7 @@ class AssistantService:
                 mcp_server_ids,
                 enabled_capabilities,
                 mcp_tools,
-                attachment_ids,
+                attachments,
                 insight_enabled,
                 inline_file_text,
                 knowledge_mode,
@@ -1576,9 +1621,15 @@ class AssistantService:
                     }
                 )
 
-        attachments = None
-        if attachment_ids is not None:
-            attachments = await self.file_service.get_files_by_ids(attachment_ids)
+        attachment_files = None
+        attachment_inline_text = None
+        if attachments is not None:
+            attachment_files = await self.file_service.get_files_by_ids(
+                [file_id for file_id, _ in attachments]
+            )
+            attachment_inline_text = {
+                file_id: inline_text for file_id, inline_text in attachments
+            }
 
         group_entities = None
         if groups is not None:
@@ -1750,7 +1801,8 @@ class AssistantService:
             prompt=prompt_obj,
             completion_model=completion_model,
             completion_model_kwargs=completion_model_kwargs,
-            attachments=attachments,
+            attachments=attachment_files,
+            attachment_inline_text=attachment_inline_text,
             logging_enabled=logging_enabled,
             collections=group_entities,
             websites=website_entities,
@@ -1848,7 +1900,7 @@ class AssistantService:
         can_read = (
             actor.can_read_default_assistant()
             if is_personal_default
-            else actor.can_read_assistants()
+            else actor.can_read_assistant(assistant=assistant)
         )
         if not can_read:
             raise UnauthorizedException(
@@ -1955,10 +2007,19 @@ class AssistantService:
                 model.get_model_route(),
             ).tokens
 
+        # URL-only attachments cost nothing in the prompt; report only what the
+        # send path inlines so the meter matches the request.
+        inlined = (
+            inlined_attachments(
+                assistant.attachments, assistant.url_only_attachment_ids(model)
+            )
+            if model is not None
+            else assistant.attachments
+        )
         return AssistantPreflightBaseline(
             prompt_tokens=prompt_tokens,
             skill_context_tokens=skill_context_tokens,
-            attachments=assistant.attachments,
+            attachments=inlined,
         )
 
     async def get_skill_configuration(
@@ -2032,7 +2093,7 @@ class AssistantService:
         Help Assistants live in the org-space, whose only members are the
         tenant admins added by ``SpaceService.ensure_org_admin_members`` —
         regular users are never org-space members and therefore cannot pass
-        the ``actor.can_read_assistants()`` check in :meth:`get_assistant`.
+        the ``actor.can_read_assistant()`` check in :meth:`get_assistant`.
         But the Prompt Guide is, by design (PRD §5/§6/§10), usable by *any*
         authenticated user who has ``EDIT`` rights on the *target* assistant:
         their authorization is governed by those target-edit rights plus the
@@ -2333,6 +2394,7 @@ class AssistantService:
                                                 result=tc.result,
                                                 mcp_tool_name=tc.mcp_tool_name,
                                                 purpose=tc.purpose,
+                                                is_internal=tc.is_internal,
                                                 meta=tc.meta,
                                             )
                                         )
@@ -2377,6 +2439,7 @@ class AssistantService:
                                                 result_status=tc.result_status,
                                                 mcp_tool_name=tc.mcp_tool_name,
                                                 purpose=tc.purpose,
+                                                is_internal=tc.is_internal,
                                             )
                                         )
                             yield chunk
@@ -2414,6 +2477,7 @@ class AssistantService:
                                                 or "timeout_denied",
                                                 mcp_tool_name=tc.mcp_tool_name,
                                                 purpose=tc.purpose,
+                                                is_internal=tc.is_internal,
                                             )
                                         )
                             yield chunk
@@ -2616,6 +2680,7 @@ class AssistantService:
                             result=tc.result,
                             mcp_tool_name=tc.mcp_tool_name,
                             purpose=tc.purpose,
+                            is_internal=tc.is_internal,
                             meta=tc.meta,
                         )
                         for tc in non_streaming_tool_metadata
@@ -2760,6 +2825,7 @@ class AssistantService:
         completion_prompt_files = await self._completion_prompt_files_for_model(
             persistent_attachments=assistant.attachments,
             completion_model=completion_model,
+            url_only_ids=assistant.url_only_attachment_ids(completion_model),
         )
 
         await self._attach_history_derivatives(
@@ -2770,8 +2836,8 @@ class AssistantService:
         # text is skipped by the context builder, so its rendered page images
         # must be skipped here too — otherwise the images alone defeat the
         # toggle's purpose of keeping large documents out of the context
-        # window. Assistant attachments are exempt: they are always inlined
-        # and get no URL references.
+        # window. Persistent attachments got the same treatment above via
+        # their per-file mode.
         completion_message_files = await self.file_service.with_derived_images(files)
         url_only = url_only_file_ids(files, assistant.inline_file_text)
         if url_only:
@@ -2923,6 +2989,7 @@ class AssistantService:
 
         cleaned_question = clean_eneo_tag(question)
         files = await self.file_service.get_files_by_ids(file_ids=file_ids or [])
+        require_requested_files(file_ids or [], files)
 
         # Personal assistant governance runtime enforcement.
         # Resolve before creating a session/question placeholder so invalid
@@ -3283,10 +3350,21 @@ class AssistantService:
             for _question in session.questions
             for file in [*_question.files, *_question.generated_files]
         ]
+        # Persistent attachments marked "open with tool" are URL-only, so the
+        # files server must attach for them exactly as for URL-only uploads.
+        url_only_attachment_ids = assistant_to_ask.url_only_attachment_ids(
+            effective_completion_model
+        )
+        url_only_attachments = [
+            file
+            for file in assistant_to_ask.attachments
+            if file.id in url_only_attachment_ids
+        ]
+        referenceable_files = [*files, *history_files, *url_only_attachments]
         internal_mcp = resolve_internal_mcp_availability(
             assistant=assistant_to_ask,
             completion_model=effective_completion_model,
-            conversation_files=[*files, *history_files],
+            conversation_files=referenceable_files,
         )
 
         # Tool-mode knowledge: attach an ephemeral loopback MCP server whose
@@ -3310,7 +3388,7 @@ class AssistantService:
         if internal_mcp.files:
             seen_labels: set[str] = set()
             attachment_labels: list[str] = []
-            for file in [*files, *history_files]:
+            for file in referenceable_files:
                 if file.id not in internal_mcp.referenced_file_ids:
                     continue
                 if file.name in seen_labels:
@@ -3487,7 +3565,7 @@ class AssistantService:
         assistant = space.get_assistant(assistant_id=assistant_id)
         actor = self.actor_manager.get_space_actor_from_space(space=space)
 
-        if not actor.can_read_assistants():
+        if not actor.can_read_assistant(assistant=assistant):
             raise UnauthorizedException(
                 "You do not have permission to read assistants in this space.",
                 code="forbidden_action",

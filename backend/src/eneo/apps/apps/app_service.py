@@ -15,7 +15,7 @@ from eneo.authentication.api_key_scope_revoker import ApiKeyScopeRevoker
 from eneo.authentication.auth_models import ApiKeyScopeType, ApiKeyStateReasonCode
 from eneo.files.attachment_budget import assert_prompt_and_files_fit_context
 from eneo.files.file_models import File
-from eneo.files.file_service import FileService
+from eneo.files.file_service import FileService, require_requested_files
 from eneo.files.transcriber import Transcriber
 from eneo.icons.icon_repo import IconRepository
 from eneo.main.exceptions import (
@@ -24,7 +24,13 @@ from eneo.main.exceptions import (
     UnauthorizedException,
 )
 from eneo.main.logging import get_logger
-from eneo.main.models import NOT_PROVIDED, ModelId, NotProvided, ResourcePermission
+from eneo.main.models import (
+    NOT_PROVIDED,
+    ModelId,
+    NotProvided,
+    ResourcePermission,
+    is_provided,
+)
 from eneo.prompts.prompt_service import PromptService
 from eneo.skills.domain.skill import (
     AppPinAdvanceIncompatibleReason,
@@ -278,7 +284,7 @@ class AppService:
         name: str | None = None,
         transcription_model: "TranscriptionModel | None" = None,
     ):
-        template = await self.app_template_service.get_app_template(
+        template = await self.app_template_service.get_consumable_app_template(
             app_template_id=template_data.id
         )
 
@@ -357,7 +363,7 @@ class AppService:
         app = space.get_app(app_id=app_id)
         actor = self.actor_manager.get_space_actor_from_space(space)
 
-        if not actor.can_read_apps():
+        if not actor.can_read_app(app=app):
             raise UnauthorizedException(
                 "You do not have permission to read apps in this space.",
                 code="forbidden_action",
@@ -400,6 +406,17 @@ class AppService:
                 context={
                     "resource_type": "app",
                     "action": "update",
+                    "auth_layer": "domain_policy",
+                },
+            )
+
+        if is_provided(data_retention_days) and not actor.can_edit_retention():
+            raise UnauthorizedException(
+                "Only space admins can change conversation retention",
+                code="forbidden_action",
+                context={
+                    "resource_type": "app",
+                    "action": "update_retention",
                     "auth_layer": "domain_policy",
                 },
             )
@@ -595,6 +612,7 @@ class AppService:
         files = await self.file_service.get_files_by_ids(
             file_ids=file_ids, include_transcription=True
         )
+        require_requested_files(file_ids, files)
 
         # Document-derived images (e.g. rendered PDF pages) enrich the
         # completion payload only — the run's recorded input files stay the

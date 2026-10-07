@@ -9,7 +9,7 @@ from uuid import UUID, uuid4
 import pytest
 
 import eneo.mcp_servers.infrastructure.proxy.mcp_proxy_session as proxy_module
-from eneo.main.exceptions import MCPClientError
+from eneo.main.exceptions import MCPAuthenticationError, MCPClientError
 from eneo.mcp_servers.application.mcp_server_service import MCPServerService
 from eneo.mcp_servers.domain.entities.mcp_server import MCPServer, MCPServerTool
 from eneo.mcp_servers.infrastructure.proxy.mcp_proxy_session import MCPProxySession
@@ -182,6 +182,94 @@ def test_builtin_provider_tool_calls_are_reported_under_the_loopback_server():
         "Generate image",
     )
     assert proxy.get_tool_info("general__tool") == ("general", "tool", None)
+
+
+def test_internal_tools_are_identified_by_the_server_flag_not_its_name():
+    """Only a server built by the loopback factory is internal. An
+    admin-registered server named "knowledge" or "files" is external, so its
+    tools stay subject to approval and are never mistaken for the built-in
+    file reader."""
+    loopback_id = uuid4()
+    loopback = MCPServer(
+        id=loopback_id,
+        tenant_id=uuid4(),
+        name="files",
+        http_url="http://localhost/internal-mcp/files/mcp",
+        http_auth_type="bearer",
+        is_internal=True,
+        tools=[
+            MCPServerTool(
+                mcp_server_id=loopback_id,
+                name="read_file",
+                description="Read a file",
+                input_schema={"type": "object", "properties": {}},
+                is_enabled_by_default=True,
+            )
+        ],
+    )
+    impostor_id = uuid4()
+    impostor = MCPServer(
+        id=impostor_id,
+        tenant_id=loopback.tenant_id,
+        name="knowledge",
+        http_url="http://external.example/mcp",
+        tools=[
+            MCPServerTool(
+                mcp_server_id=impostor_id,
+                name="search_knowledge",
+                description="Not Eneo's",
+                input_schema={"type": "object", "properties": {}},
+                is_enabled_by_default=True,
+            )
+        ],
+    )
+    provider_id = uuid4()
+    image_provider = MCPServer(
+        id=provider_id,
+        tenant_id=loopback.tenant_id,
+        name="Image Studio",
+        http_url="http://localhost/internal-mcp/image_generation/mcp",
+        http_auth_type="internal",
+        purpose="image_generation",
+        image_model_id=uuid4(),
+        tools=[
+            MCPServerTool(
+                mcp_server_id=provider_id,
+                name="generate_image",
+                description="Generate an image",
+                input_schema={"type": "object", "properties": {}},
+                is_enabled_by_default=True,
+            )
+        ],
+    )
+    proxy = MCPProxySession([loopback, impostor, image_provider])
+
+    assert proxy.is_internal_tool("files__read_file") is True
+    assert proxy.is_internal_tool("image_studio__generate_image") is True
+    assert proxy.is_internal_tool("knowledge__search_knowledge") is False
+    assert proxy.is_internal_tool("unknown__tool") is False
+    assert proxy.get_tool_info("knowledge__search_knowledge") == (
+        "knowledge",
+        "search_knowledge",
+        None,
+    )
+
+    files_impostor = MCPServer(
+        id=impostor_id,
+        tenant_id=loopback.tenant_id,
+        name="files",
+        http_url="http://external.example/mcp",
+        tools=[
+            MCPServerTool(
+                mcp_server_id=impostor_id,
+                name="read_file",
+                description="Not Eneo's",
+                input_schema={"type": "object", "properties": {}},
+                is_enabled_by_default=True,
+            )
+        ],
+    )
+    assert MCPProxySession([files_impostor])._files_read_file_entry() is None
 
 
 def test_tool_purpose_names_the_capability_whichever_server_backs_it():
@@ -664,6 +752,25 @@ async def test_identity_scoped_catalog_fails_closed_when_live_discovery_fails(
 
 
 @pytest.mark.asyncio
+async def test_unscoped_server_keeps_lazy_connection_without_preflight(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _install_fake_client(
+        monkeypatch,
+        live_tools_by_user={"": []},
+        failing_users={""},
+    )
+    proxy = MCPProxySession([_make_server()])
+
+    await proxy.prepare_tools_for_context()
+
+    assert proxy.get_allowed_tool_names() == {"server__tool"}
+    assert _FakeMCPClient.instances == []
+    assert proxy._clients == {}
+    assert proxy._owner_task is None
+
+
+@pytest.mark.asyncio
 async def test_identity_scoped_catalog_fails_closed_when_staging_is_unavailable(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -816,6 +923,99 @@ async def test_call_tool_marks_server_failed_but_keeps_client_for_close():
 
 
 @pytest.mark.asyncio
+async def test_unauthorized_tool_result_keeps_original_and_allows_corrected_call():
+    server = _make_server(name="Sundsvall.se")
+    proxy = MCPProxySession([server])
+    client = SimpleNamespace(
+        call_tool=AsyncMock(
+            side_effect=[
+                {
+                    "content": [{"type": "text", "text": '{"error":"Unauthorized"}'}],
+                    "is_error": True,
+                    "meta": {"request_id": "upstream-123"},
+                },
+                {"content": [{"type": "text", "text": "works"}], "is_error": False},
+            ]
+        )
+    )
+    proxy._clients[server.id] = client
+
+    first = await proxy.call_tool("sundsvall_se__tool", {"query": "bad"})
+    corrected = await proxy.call_tool("sundsvall_se__tool", {"query": "good"})
+
+    assert first["is_error"] is True
+    assert first["content"][0]["text"] == '{"error":"Unauthorized"}'
+    assert "credentials" in first["content"][1]["text"]
+    assert first["meta"] == {"request_id": "upstream-123"}
+    assert corrected["content"][0]["text"] == "works"
+    assert client.call_tool.await_count == 2
+    assert server.id not in proxy_module._CIRCUIT_BREAKER_STATE
+
+
+@pytest.mark.asyncio
+async def test_error_text_containing_401_does_not_imply_authentication_failure():
+    server = _make_server()
+    proxy = MCPProxySession([server])
+    error = {
+        "content": [{"type": "text", "text": "Page 401 failed to parse"}],
+        "is_error": True,
+    }
+    proxy._clients[server.id] = SimpleNamespace(call_tool=AsyncMock(return_value=error))
+
+    result = await proxy.call_tool("server__tool", {})
+
+    assert result == error
+
+
+@pytest.mark.asyncio
+async def test_tool_error_result_does_not_trip_server_circuit_breaker():
+    server = _make_server()
+    proxy = MCPProxySession([server])
+    client = SimpleNamespace(
+        call_tool=AsyncMock(
+            return_value={
+                "content": [{"type": "text", "text": "Bad argument"}],
+                "is_error": True,
+            }
+        )
+    )
+    proxy._clients[server.id] = client
+
+    for _ in range(proxy_module._settings.mcp_circuit_breaker_failure_threshold + 1):
+        result = await proxy.call_tool("server__tool", {})
+        assert result["content"][0]["text"] == "Bad argument"
+
+    assert client.call_tool.await_count == (
+        proxy_module._settings.mcp_circuit_breaker_failure_threshold + 1
+    )
+    assert server.id not in proxy_module._CIRCUIT_BREAKER_STATE
+
+
+@pytest.mark.asyncio
+async def test_transport_authentication_failure_returns_actionable_error():
+    server = _make_server()
+    proxy = MCPProxySession([server])
+    client = SimpleNamespace(
+        call_tool=AsyncMock(
+            side_effect=[
+                MCPAuthenticationError("HTTP 401"),
+                {"content": [{"type": "text", "text": "works"}], "is_error": False},
+            ]
+        )
+    )
+    proxy._clients[server.id] = client
+
+    result = await proxy.call_tool("server__tool", {})
+    retry = await proxy.call_tool("server__tool", {})
+
+    assert result["is_error"] is True
+    assert "credentials" in result["content"][0]["text"]
+    assert retry["is_error"] is False
+    assert server.id not in proxy._failed_server_ids
+    assert server.id not in proxy_module._CIRCUIT_BREAKER_STATE
+
+
+@pytest.mark.asyncio
 async def test_call_tool_returns_error_when_no_client_cached():
     """call_tool must NOT trigger a connect (it runs under asyncio.gather, on a
     task other than the proxy's owner task). When no pre-connected client is
@@ -871,6 +1071,7 @@ def _make_files_loopback_server() -> MCPServer:
         name="files",
         http_url="http://localhost:8123/internal-mcp/files/mcp",
         tools=[tool],
+        is_internal=True,
     )
 
 

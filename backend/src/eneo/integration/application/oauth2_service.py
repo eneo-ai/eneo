@@ -28,6 +28,7 @@ if TYPE_CHECKING:
     from eneo.integration.infrastructure.auth_service.sharepoint_auth_service import (
         SharepointAuthService,
     )
+    from eneo.users.user import UserInDB
 
 logger = get_logger(__name__)
 
@@ -47,6 +48,7 @@ class Oauth2Service:
         oauth_token_repo: "OauthTokenRepository",
         sharepoint_auth_service: "SharepointAuthService",
         redis_client: "redis.Redis",
+        user: "UserInDB",
     ) -> None:
         super().__init__()
         self.confluence_auth_service = confluence_auth_service
@@ -55,6 +57,7 @@ class Oauth2Service:
         self.oauth_token_repo = oauth_token_repo
         self.sharepoint_auth_service = sharepoint_auth_service
         self.redis_client = redis_client
+        self.user = user
 
         self._auth_mapper = {
             IntegrationType.Confluence.value: self.confluence_auth_service,
@@ -62,13 +65,13 @@ class Oauth2Service:
         }
 
     async def _store_oauth_state(
-        self, state: str, user_id: "UUID", tenant_integration_id: "UUID"
+        self, state: str, tenant_integration_id: "UUID"
     ) -> None:
         await self.redis_client.set(
             f"{_OAUTH_STATE_PREFIX}{state}",
             json.dumps(
                 {
-                    "user_id": str(user_id),
+                    "user_id": str(self.user.id),
                     "tenant_integration_id": str(tenant_integration_id),
                 }
             ),
@@ -94,10 +97,9 @@ class Oauth2Service:
     async def start_auth(
         self,
         tenant_integration_id: "UUID",
-        user_id: "UUID",
     ) -> dict[str, str]:
         tenant_integration = await self.tenant_integration_repo.one(
-            id=tenant_integration_id
+            id=tenant_integration_id, tenant_id=self.user.tenant_id
         )
         integration_type = tenant_integration.integration_type
 
@@ -108,7 +110,6 @@ class Oauth2Service:
         state = secrets.token_urlsafe(32)
         await self._store_oauth_state(
             state=state,
-            user_id=user_id,
             tenant_integration_id=tenant_integration_id,
         )
 
@@ -125,7 +126,6 @@ class Oauth2Service:
 
     async def auth_integration(
         self,
-        user_id: "UUID",
         tenant_integration_id: "UUID",
         auth_code: str,
         state: str,
@@ -136,23 +136,23 @@ class Oauth2Service:
             raise BadRequestException(
                 "Invalid or expired OAuth state. Please restart the authentication flow."
             )
-        if stored.get("user_id") != str(user_id) or stored.get(
+        if stored.get("user_id") != str(self.user.id) or stored.get(
             "tenant_integration_id"
         ) != str(tenant_integration_id):
             logger.warning(
                 "Rejected OAuth callback with mismatched state binding (user=%s, "
                 "tenant_integration=%s)",
-                user_id,
+                self.user.id,
                 tenant_integration_id,
             )
             raise BadRequestException("OAuth state does not match the request.")
 
         tenant_integration = await self.tenant_integration_repo.one(
-            id=tenant_integration_id
+            id=tenant_integration_id, tenant_id=self.user.tenant_id
         )
 
         authenticated_integration = await self.user_integration_repo.one_or_none(
-            user_id=user_id,
+            user_id=self.user.id,
             tenant_integration_id=tenant_integration.id,
             authenticated=True,
         )
@@ -161,7 +161,7 @@ class Oauth2Service:
 
         authenticated_integration = await self.user_integration_repo.add(
             obj=UserIntegration(
-                user_id=user_id,
+                user_id=self.user.id,
                 tenant_integration=tenant_integration,
                 authenticated=True,
             )

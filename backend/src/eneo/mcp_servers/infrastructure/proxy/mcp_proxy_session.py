@@ -13,7 +13,7 @@ import json
 import re
 import time
 from types import TracebackType
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, cast
 from uuid import UUID
 
 from eneo.authentication.signed_urls import looks_like_reference_url
@@ -26,10 +26,10 @@ from eneo.main.logging import get_logger
 from eneo.mcp_servers.domain.entities.mcp_server import (
     MCPServer,
     MCPServerTool,
-    is_builtin_provider,
     is_capability_purpose,
 )
 from eneo.mcp_servers.infrastructure.client.mcp_client import (
+    MCPAuthenticationError,
     MCPClient,
     MCPClientError,
     validate_tool_catalog,
@@ -61,6 +61,14 @@ REFERENCE_URL_VALID_NOTICE = (
     "references: tell the user that the tool cannot access the file from where "
     "it runs."
 )
+AUTH_DENIED_NOTICE = (
+    "Access was denied by this MCP tool. Check its permissions or the "
+    "credentials used by its server."
+)
+_AUTH_DENIED_ERROR = re.compile(
+    r"(?:error:\s*)?(?:unauthorized|(?:http\s*)?401(?:\s+unauthorized)?)",
+    re.IGNORECASE,
+)
 MCP_IDENTITY_CATALOG_PREPARATION_TIMEOUT_SECONDS = float(
     _settings.mcp_client_connect_timeout_seconds
     + _settings.mcp_client_list_tools_timeout_seconds
@@ -79,7 +87,8 @@ def _trace_server_name(server: MCPServer) -> str:
     files servers are; that lets the chat label them in the UI language
     instead of showing the server-side English title under the row's name.
     """
-    if is_builtin_provider(server.http_auth_type) and server.purpose:
+    if server.is_internal and is_capability_purpose(server.purpose):
+        assert server.purpose is not None
         return server.purpose
     return server.name
 
@@ -90,9 +99,7 @@ def _tool_call_timeout_for(server: MCPServer) -> int | None:
     The built-in image generation provider runs an image model whose calls
     routinely outlast a general MCP tool call, so it gets its own budget.
     """
-    if is_builtin_provider(server.http_auth_type) and (
-        server.purpose == IMAGE_GENERATION_SERVER_NAME
-    ):
+    if server.is_internal and server.purpose == IMAGE_GENERATION_SERVER_NAME:
         return _settings.image_generation_timeout_seconds
     return None
 
@@ -773,6 +780,19 @@ class MCPProxySession:
         server, original_tool_name, title = self._tool_registry[prefixed_tool_name]
         return (_trace_server_name(server), original_tool_name, title)
 
+    def is_internal_tool(self, prefixed_tool_name: str) -> bool:
+        """Whether a prefixed tool belongs to one of Eneo's own loopback servers.
+
+        Decided by ``MCPServer.is_internal`` (the ephemeral knowledge and
+        files servers, and built-in provider rows), never by the server's
+        name: an admin-registered server named like an internal one is still
+        external. Unknown tools are external.
+        """
+        entry = self._tool_registry.get(prefixed_tool_name)
+        if entry is None:
+            return False
+        return bool(entry[0].is_internal)
+
     def get_tool_purpose(self, prefixed_tool_name: str) -> str | None:
         """The capability a tool call serves, or None for general servers.
 
@@ -872,7 +892,11 @@ class MCPProxySession:
         stale.
         """
         for prefixed_name, (server, name, title) in self._tool_registry.items():
-            if server.name == FILES_SERVER_NAME and name == "read_file":
+            if (
+                server.is_internal
+                and server.name == FILES_SERVER_NAME
+                and name == "read_file"
+            ):
                 return prefixed_name, title
         return None
 
@@ -922,6 +946,37 @@ class MCPProxySession:
             "content": [{"type": "text", "text": text}],
             "is_error": True,
         }
+
+    @staticmethod
+    def _is_auth_denied_result(result: dict[str, Any]) -> bool:
+        if not result.get("is_error"):
+            return False
+        content: object = result.get("content")
+        if not isinstance(content, list):
+            return False
+        for block in cast("list[object]", content[:3]):
+            if not isinstance(block, dict):
+                continue
+            block_values = cast("dict[str, object]", block)
+            raw_text = block_values.get("text")
+            if not isinstance(raw_text, str):
+                continue
+            text = raw_text.strip()
+            if len(text) > 512:
+                continue
+            if _AUTH_DENIED_ERROR.fullmatch(text):
+                return True
+            try:
+                payload: object = json.loads(text)
+            except json.JSONDecodeError:
+                continue
+            if isinstance(payload, dict):
+                error = cast("dict[str, object]", payload).get("error")
+                if isinstance(error, str) and _AUTH_DENIED_ERROR.fullmatch(
+                    error.strip()
+                ):
+                    return True
+        return False
 
     async def call_tool(
         self,
@@ -987,21 +1042,30 @@ class MCPProxySession:
             logger.debug(
                 f"[MCPProxy] {original_tool_name} completed in {elapsed_ms:.0f}ms [{status}]"
             )
-            if is_error:
-                await self._record_failure(server.id)
-            else:
-                await self._record_success(server.id)
+            # A protocol-level result proves the server responded, even when
+            # its tool reports an application or permission error. Only client
+            # failures count toward the server-wide circuit breaker.
+            await self._record_success(server.id)
+            auth_denied = self._is_auth_denied_result(result)
             result = self._truncate_tool_result(result)
             if is_error:
+                blocks: list[Any] = list(result.get("content") or [])
+                if auth_denied:
+                    blocks.append({"type": "text", "text": AUTH_DENIED_NOTICE})
                 # A tool that failed on a reference URL should not be retried
                 # into a loop; appended after truncation so the pointer to the
                 # built-in reader survives it.
                 hint = self._reference_fallback_hint(tool_name, arguments)
                 if hint:
-                    blocks: list[Any] = list(result.get("content") or [])
                     blocks.append({"type": "text", "text": hint})
+                if auth_denied or hint:
                     result = {**result, "content": blocks}
             return result
+        except MCPAuthenticationError:
+            return {
+                "content": [{"type": "text", "text": AUTH_DENIED_NOTICE}],
+                "is_error": True,
+            }
         except MCPClientError:
             self._mark_server_failed(server.id)
             await self._record_failure(server.id)

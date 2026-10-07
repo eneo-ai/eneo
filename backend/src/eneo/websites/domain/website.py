@@ -7,7 +7,10 @@ from eneo.base.base_entity import Entity
 from eneo.embedding_models.domain.embedding_model import EmbeddingModel
 from eneo.main.models import NOT_PROVIDED, NotProvided, is_provided
 from eneo.websites.domain.crawl_run import CrawlRun, CrawlType
-from eneo.websites.domain.http_auth_credentials import HttpAuthCredentials
+from eneo.websites.domain.http_auth_credentials import (
+    HttpAuthCredentials,
+    HttpAuthDestinationError,
+)
 
 if TYPE_CHECKING:
     from datetime import datetime
@@ -57,6 +60,7 @@ class Website(Entity):
         http_auth: Optional[HttpAuthCredentials] = None,
         consecutive_failures: int = 0,
         next_retry_at: Optional["datetime"] = None,
+        last_indexed_at: Optional["datetime"] = None,
     ):
         super().__init__(id=id, created_at=created_at, updated_at=updated_at)
         self.space_id = space_id
@@ -74,6 +78,7 @@ class Website(Entity):
         self.http_auth = http_auth
         self.consecutive_failures = consecutive_failures
         self.next_retry_at = next_retry_at
+        self.last_indexed_at = last_indexed_at
 
     @property
     def requires_auth(self) -> bool:
@@ -284,6 +289,7 @@ class Website(Entity):
             if latest_crawl
             else None,
             last_crawled_at=record.last_crawled_at,
+            last_indexed_at=record.last_indexed_at,
             http_auth=http_auth,
             consecutive_failures=record.consecutive_failures,
             next_retry_at=record.next_retry_at,
@@ -299,6 +305,16 @@ class Website(Entity):
         http_auth_username: Union[str, None, NotProvided] = NOT_PROVIDED,
         http_auth_password: Union[str, None, NotProvided] = NOT_PROVIDED,
     ) -> "Website":
+        if is_provided(url) and url != self.url and self.http_auth is not None:
+            auth_is_explicit = is_provided(http_auth_username) and is_provided(
+                http_auth_password
+            )
+            if not auth_is_explicit:
+                if HttpAuthCredentials.origin_for_url(
+                    url
+                ) != HttpAuthCredentials.origin_for_url(self.url):
+                    raise HttpAuthDestinationError()
+                HttpAuthCredentials.require_destination(self.http_auth.auth_domain, url)
         if is_provided(url):
             self.url = url
         if is_provided(name):
@@ -354,7 +370,7 @@ class WebsiteSparse(Entity):
         tenant_id: "UUID",
         embedding_model_id: "UUID",
         space_id: "UUID",
-        name: str,
+        name: str | None,
         url: str,
         download_files: bool,
         crawl_type: CrawlType,
@@ -415,9 +431,7 @@ class WebsiteSparse(Entity):
             space_id=cast(
                 "UUID", record.space_id
             ),  # DB invariant: space_id is non-null for persisted websites
-            name=cast(
-                str, record.name
-            ),  # DB invariant: name is non-null for sparse website records
+            name=record.name,
             url=record.url,
             download_files=record.download_files,
             crawl_type=record.crawl_type,

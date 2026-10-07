@@ -102,6 +102,7 @@ async def test_preflight_router_returns_service_result():
         assistant_prompt=None,
         settings=None,
         settings_revision=None,
+        attachments=None,
     )
 
 

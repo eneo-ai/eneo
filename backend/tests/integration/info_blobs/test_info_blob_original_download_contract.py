@@ -315,7 +315,7 @@ async def test_original_download_reresolves_reference_and_closes_lazy_stream(
 
 @pytest.mark.integration
 @pytest.mark.asyncio
-async def test_federated_reader_downloads_original_owned_by_source_tenant(
+async def test_original_download_follows_space_membership_within_the_tenant(
     client,
     db_container,
     patch_auth_service_jwt,
@@ -323,7 +323,7 @@ async def test_federated_reader_downloads_original_owned_by_source_tenant(
     tenant_factory,
     user_factory,
 ):
-    payload = b"federated source bytes"
+    payload = b"shared source bytes"
     async with db_container() as container:
         source_tenant_id = container.user().tenant_id
         organization_space = await container.session().scalar(
@@ -335,7 +335,7 @@ async def test_federated_reader_downloads_original_owned_by_source_tenant(
         )
         assert organization_space is not None
         source_space = Spaces(
-            name="Federated source space",
+            name="Shared source space",
             tenant_id=source_tenant_id,
             user_id=None,
             tenant_space_id=organization_space.id,
@@ -343,11 +343,11 @@ async def test_federated_reader_downloads_original_owned_by_source_tenant(
         container.session().add(source_space)
         await container.session().flush()
         shared_model = await embedding_model_factory(
-            container.session(), name="Federated download model"
+            container.session(), name="Shared download model"
         )
         blob = await _seed_blob(
             container,
-            title="federated download",
+            title="shared download",
             space=source_space,
             embedding_model=shared_model,
         )
@@ -373,45 +373,51 @@ async def test_federated_reader_downloads_original_owned_by_source_tenant(
             await InfoBlobRepository(container.session()).add_original_reference(
                 info_blob_id=blob.id,
                 content_id=prepared.id,
-                original_filename="federated.txt",
+                original_filename="shared.txt",
             )
 
-        reader_tenant = await tenant_factory(
-            container.session(), name="Federated reader tenant"
+        member = await user_factory(container.session(), tenant_id=source_tenant_id)
+        non_member = await user_factory(container.session(), tenant_id=source_tenant_id)
+        foreign_tenant = await tenant_factory(
+            container.session(), name="Foreign reader tenant"
         )
-        reader = await user_factory(container.session(), tenant_id=reader_tenant.id)
-        unrelated_reader = await user_factory(
-            container.session(), tenant_id=reader_tenant.id
+        foreign_member = await user_factory(
+            container.session(), tenant_id=foreign_tenant.id
         )
-        await container.session().execute(
-            sa.text(
-                """
-                INSERT INTO spaces_users (space_id, user_id, role)
-                VALUES (:space_id, :user_id, 'viewer')
-                """
-            ),
-            {"space_id": source_space_id, "user_id": reader.id},
-        )
-        reader_token = container.auth_service().create_access_token_for_user(reader)
-        unrelated_token = container.auth_service().create_access_token_for_user(
-            unrelated_reader
-        )
+        for user_id in (member.id, foreign_member.id):
+            await container.session().execute(
+                sa.text(
+                    """
+                    INSERT INTO spaces_users (space_id, user_id, role)
+                    VALUES (:space_id, :user_id, 'viewer')
+                    """
+                ),
+                {"space_id": source_space_id, "user_id": user_id},
+            )
+        auth_service = container.auth_service()
+        member_token = auth_service.create_access_token_for_user(member)
+        non_member_token = auth_service.create_access_token_for_user(non_member)
+        foreign_token = auth_service.create_access_token_for_user(foreign_member)
         blob_id = blob.id
 
-    signed = await client.post(
-        f"/api/v1/info-blobs/{blob_id}/original/signed-url/",
-        json={"content_disposition": "attachment"},
-        headers={"Authorization": f"Bearer {reader_token}"},
-    )
+    async def mint(token: str):
+        return await client.post(
+            f"/api/v1/info-blobs/{blob_id}/original/signed-url/",
+            json={"content_disposition": "attachment"},
+            headers={"Authorization": f"Bearer {token}"},
+        )
+
+    signed = await mint(member_token)
     assert signed.status_code == 200, signed.text
     parsed = urlsplit(signed.json()["url"])
     download = await client.get(f"{parsed.path}?{parsed.query}")
     assert download.status_code == 200, download.text
     assert download.content == payload
 
-    unrelated = await client.post(
-        f"/api/v1/info-blobs/{blob_id}/original/signed-url/",
-        json={"content_disposition": "attachment"},
-        headers={"Authorization": f"Bearer {unrelated_token}"},
-    )
+    unrelated = await mint(non_member_token)
     assert unrelated.status_code == 403
+
+    # A membership row does not reach across tenants: the source space is
+    # resolved within the caller's tenant, so the knowledge is not found.
+    foreign = await mint(foreign_token)
+    assert foreign.status_code == 404

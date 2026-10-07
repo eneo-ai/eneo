@@ -1,11 +1,20 @@
-import { dev } from "$app/environment";
+import { building, dev } from "$app/environment";
+import { env as privateEnv } from "$env/dynamic/private";
+import { env as publicEnv } from "$env/dynamic/public";
 import { DASHBOARD_URL } from "$lib/core/constants";
+import { assertDeploymentEnv } from "$lib/core/deploymentEnv.server";
 import { detectMobile } from "$lib/core/detectMobile";
 import { getFeatureFlags } from "$lib/core/flags.server";
 import { authenticateUser, clearFrontendCookies } from "$lib/features/auth/auth.server";
 import { ENEO_RESPONSE_HEADERS } from "@eneo/eneo-js";
 import { toAppError } from "$lib/core/errors";
-import { redirect, type Handle, type HandleFetch, type HandleServerError } from "@sveltejs/kit";
+import {
+  redirect,
+  type Handle,
+  type HandleFetch,
+  type HandleServerError,
+  type ServerInit
+} from "@sveltejs/kit";
 import {
   getEnvironmentConfig,
   getBackendUrl,
@@ -14,6 +23,12 @@ import {
 import { fetchWithTransientRetry } from "./lib/core/transientFetch.server";
 import { sequence } from "@sveltejs/kit/hooks";
 import { paraglideMiddleware } from "$lib/paraglide/server";
+
+export const init: ServerInit = () => {
+  // Builds and prerendering run without the deployment environment.
+  if (building) return;
+  assertDeploymentEnv({ ...privateEnv, ...publicEnv });
+};
 
 function routeRequiresLogin(route: { id: string | null }): boolean {
   const routeIsPublic = route.id?.includes("(public)") ?? false;

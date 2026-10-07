@@ -1,5 +1,10 @@
 from fastapi import APIRouter, Depends
 
+from eneo.authentication.endpoint_access import (
+    Authentication,
+    Authorization,
+    endpoint_access,
+)
 from eneo.main.container.container import Container
 from eneo.server.dependencies.container import get_container
 from eneo.server.protocol import responses
@@ -16,6 +21,11 @@ USER_CONTAINER = Depends(WITH_USER_CONTAINER)
     status_code=200,
     description="List all available templates (assistants and apps).",
     responses=responses.get_responses([]),
+)
+@endpoint_access(
+    authentication=Authentication.USER,
+    authorization=Authorization.AUTHENTICATED,
+    reason="Tenant members may discover their available templates.",
 )
 async def get_templates(container: Container = USER_CONTAINER):
     """Get all types of templates"""

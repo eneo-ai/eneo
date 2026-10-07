@@ -5,7 +5,7 @@ from typing import TYPE_CHECKING, Optional, TypeVar
 from uuid import UUID
 
 from eneo.actors import SpaceAction, SpaceResourceType
-from eneo.admin.quota_service import QuotaService
+from eneo.admin.quota_service import QuotaService, enforce_quota_on_commit
 from eneo.authentication.auth_models import ApiKeyScopeType
 from eneo.groups_legacy.group_service import GroupService
 from eneo.info_blobs.info_blob import (
@@ -22,6 +22,7 @@ from eneo.info_blobs.info_blob import (
 from eneo.info_blobs.info_blob_repo import (
     InfoBlobPublication,
     InfoBlobRepository,
+    WebsiteInfoBlobPage,
 )
 from eneo.main.exceptions import (
     BadRequestException,
@@ -393,11 +394,20 @@ class InfoBlobService:
             case SpaceAction.CREATE:
                 if not actor.can_create_info_blobs():
                     raise UnauthorizedException()
+            case SpaceAction.EDIT:
+                if not actor.can_edit_info_blobs():
+                    raise UnauthorizedException(
+                        "You do not have permission to edit this info blob."
+                    )
             case SpaceAction.DELETE:
                 if not actor.can_delete_info_blobs():
                     raise UnauthorizedException()
             case _:
-                pass  # Other SpaceAction values are not applicable to info blobs
+                # Fail closed: an action this check does not know about must
+                # not pass silently.
+                raise UnauthorizedException(
+                    "This action is not permitted on info blobs."
+                )
 
     async def publish_info_blob_without_validation(
         self,
@@ -470,7 +480,13 @@ class InfoBlobService:
                 )
             updated = await self.update_info_blob_size(published.id)
             await self.quota_service.ensure_capacity(0)
-            return updated
+
+        enforce_quota_on_commit(
+            self.repo.session,
+            tenant_id=info_blob.tenant_id,
+            user_id=info_blob.user_id,
+        )
+        return updated
 
     async def add_info_blobs(
         self,
@@ -492,6 +508,8 @@ class InfoBlobService:
 
     async def update_info_blob(self, info_blob: InfoBlobUpdate):
         current_info_blob = await self.repo.get(info_blob.id)
+        # Authorize on the stored blob before anything is written.
+        await self._validate(current_info_blob, action=SpaceAction.EDIT)
         assert current_info_blob is not None
 
         if info_blob.title:
@@ -509,8 +527,6 @@ class InfoBlobService:
                 )
 
         info_blob_updated = await self.repo.update(info_blob)
-
-        await self._validate(info_blob_updated, action=SpaceAction.EDIT)
 
         return (await self._project_original_availability([info_blob_updated]))[0]
 
@@ -583,15 +599,36 @@ class InfoBlobService:
             await self.repo.get_by_group(group.id)
         )
 
-    async def get_by_website(self, id: UUID) -> list[InfoBlobInDB]:
+    async def _authorize_website_info_blobs(self, id: UUID) -> None:
         space = await self.space_service.get_space_by_website(website_id=id)
         actor = self.actor_manager.get_space_actor_from_space(space)
 
         if not actor.can_read_info_blobs():
             raise UnauthorizedException()
 
+    async def get_by_website(self, id: UUID) -> list[InfoBlobInDBNoText]:
+        await self._authorize_website_info_blobs(id)
         return await self._project_original_availability(
             await self.repo.get_by_website(website_id=id)
+        )
+
+    async def get_by_website_page(
+        self,
+        id: UUID,
+        *,
+        limit: int,
+        cursor: UUID | None = None,
+    ) -> WebsiteInfoBlobPage:
+        await self._authorize_website_info_blobs(id)
+        page = await self.repo.get_by_website_page(
+            website_id=id,
+            limit=limit,
+            cursor=cursor,
+        )
+        return WebsiteInfoBlobPage(
+            items=await self._project_original_availability(page.items),
+            total_count=page.total_count,
+            next_cursor=page.next_cursor,
         )
 
     async def delete(self, id: UUID):

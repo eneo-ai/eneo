@@ -286,6 +286,29 @@ value and a comment.
     | `REDIS_HOST` | `redis` | Compose service name |
     | `REDIS_PORT` | `6379` | |
 
+    **Redis authentication (optional):**
+
+    Redis is only reachable on the internal `data_net` network and runs without a
+    password by default. To require one, define `REDIS_PASSWORD` in the
+    deployment `.env` next to `docker-compose.yml`. The Redis container and the
+    backend, worker and database initialisation services all read that value, so
+    it is set in one place.
+
+    ```bash
+    # .env
+    REDIS_PASSWORD=<output of: openssl rand -hex 32>
+    ```
+
+    Apply the change with `docker compose up -d`. Redis and the backend services
+    restart together; queued jobs and other Redis data stay in the volume. While
+    the password is set, run Redis commands with
+    `docker compose exec redis sh -c 'REDISCLI_AUTH="$REDIS_PASSWORD" redis-cli ping'`.
+
+    | Variable | Default | Description |
+    |----------|---------|-------------|
+    | `REDIS_PASSWORD` | unset | Password the backend and workers present to Redis. Unset or blank connects without authentication |
+    | `REDIS_USERNAME` | unset | Redis ACL user, for a Redis managed outside the bundled stack. Requires `REDIS_PASSWORD` |
+
     **Security (required):**
 
     | Variable | Template value | Description |
@@ -328,6 +351,8 @@ value and a comment.
     | `OIDC_DISCOVERY_ENDPOINT` | empty | IdP discovery URL (`.../.well-known/openid-configuration`) for single-tenant mode |
     | `OIDC_CLIENT_ID` | empty | OIDC client ID |
     | `OIDC_CLIENT_SECRET` | empty | OIDC client secret |
+    | `OIDC_TENANT_ID` | empty | Eneo tenant UUID required by the global OIDC/MobilityGuard login endpoint |
+    | `OIDC_ALLOWED_DOMAINS` | `[]` | Global OIDC email-domain restriction (JSON array); required for JIT account creation |
     | `FEDERATION_ENABLED` | `false` | Enable per-tenant IdP configuration via API |
     | `ENCRYPTION_KEY` | empty | 44-char base64 Fernet key (required for credentials & federation) |
     | `ENEO_SUPER_API_KEY` | empty | Super admin API access (sent as `X-API-Key`) |
@@ -377,23 +402,28 @@ value and a comment.
 
     | Variable | Default | Description |
     |----------|---------|-------------|
-    | `CRAWL_FEEDER_ENABLED` | `true` | Meters the crawl enqueue rate (keep `true`) |
-    | `CRAWL_MAX_LENGTH` | `36000` | Max crawl duration in seconds (10 hours) |
-    | `CLOSESPIDER_ITEMCOUNT` | `20000` | Max pages per crawl |
-    | `DOWNLOAD_MAX_SIZE` | `10485760` | Max file the crawler downloads (bytes) |
-    | `OBEY_ROBOTS` | `true` | Respect `robots.txt` |
-    | `AUTOTHROTTLE_ENABLED` | `true` | Slow down automatically on busy sites |
+    | `CRAWL_MAX_LENGTH` | `36000` | Max crawl duration in seconds (~10 hours) |
+    | `CLOSESPIDER_ITEMCOUNT` | `20000` | Max pages and linked files per crawl |
+    | `CRAWL_JOB_CONCURRENCY_LIMIT` | `WORKER_MAX_JOBS` | Cluster-wide crawl admission limit across crawler replicas |
+    | `CRAWL_HEARTBEAT_INTERVAL_SECONDS` | `300` | PostgreSQL lease renewal interval |
+    | `CRAWLER_BLOCK_PRIVATE_NETWORKS` | `false` | Also refuse private (intranet) ranges; loopback, link-local and metadata addresses are always refused |
+
+    <Callout type="warning">
+      **Crawler network access.** The crawler only fetches `http(s)` URLs. Loopback, link-local (including the cloud metadata address), unspecified and multicast destinations are always refused at connection time, including after redirects. Private (intranet) ranges are allowed by default so intranet sites can be indexed; set `CRAWLER_BLOCK_PRIVATE_NETWORKS=true` on backend and worker to refuse them as well. The worker's `HTTP_PROXY`/`HTTPS_PROXY` are not used for crawling.
+    </Callout>
 
     **Background Worker:**
 
     | Variable | Default | Description |
     |----------|---------|-------------|
-    | `WORKER_MAX_JOBS` | `15` | Max concurrent background jobs (should be ≤60% of DB pool size) |
-    | `TENANT_WORKER_CONCURRENCY_LIMIT` | `4` | Max concurrent crawl jobs per tenant (prevents one tenant monopolizing workers) |
-    | `TENANT_WORKER_SEMAPHORE_TTL_SECONDS` | `39600` | Slot TTL for crashed workers; must exceed `CRAWL_MAX_LENGTH` |
+    | `WORKER_MAX_JOBS` | `15` | Max concurrent jobs per worker process; general and crawler services apply it independently |
 
     <Callout type="info">
-      **High CPU usage on worker?** Reduce `WORKER_MAX_JOBS` to limit concurrent document processing.
+      Each API or worker process owns its own database pool. Budget PostgreSQL
+      `max_connections` for the sum of every API, general-worker, and
+      crawler-worker process pool, plus operational headroom. Tune
+      `WORKER_MAX_JOBS` per worker process for its CPU, memory, and
+      database-active workload.
     </Callout>
 
     **Dynamic Credential Management:**
@@ -781,7 +811,7 @@ Configure crawling behavior per tenant.
     curl -X PUT "https://eneo.example.com/api/v1/sysadmin/tenants/{tenant_id}/crawler-settings" \
       -H "X-API-Key: your-super-api-key" \
       -H "Content-Type: application/json" \
-      -d '{"crawl_feeder_enabled": true, "closespider_itemcount": 20000}'
+      -d '{"closespider_itemcount": 20000, "crawl_heartbeat_interval_seconds": 300}'
     ```
   </Tabs.Tab>
   <Tabs.Tab>
@@ -807,10 +837,15 @@ After deployment, some features require additional configuration in the Admin pa
 ### Crawler & Document Upload
 
 <Callout type="info">
-  To use the web crawler or upload documents for processing, the **worker
-  service must be running** and at least one **embedding model must be enabled**
-  in Admin → Models → Embedding models.
+  Document uploads require the **general worker**. Web crawls require both the
+  **general worker and crawler worker**. Enable at least one embedding model in
+  Admin → Models → Embeddings. See [how crawling works](/docs/architecture#worker-service-arq-today).
 </Callout>
+
+When applying source-URL migration `202609071200`, stop the API and both workers,
+then restart all publishers on the same version. Old publishers identify website
+documents by title; the new version uses their source URL. The migration preserves
+metadata and citation IDs and reports ambiguous legacy URLs for review.
 
 ### Apps (Voice/Audio Features)
 
@@ -851,8 +886,8 @@ key or a tenant ID. The container side is covered in
 | "Failed to decrypt credential"       | `ENCRYPTION_KEY` missing or changed                  | Set correct key or re-enter credentials                                             |
 | Credentials API returns 404          | `TENANT_CREDENTIALS_ENABLED=false`                   | Set to `true`, requires `ENCRYPTION_KEY`                                            |
 | OIDC redirect fails                  | `PUBLIC_ORIGIN` mismatch                             | Must match in backend, frontend, AND the IdP redirect URI (`{PUBLIC_ORIGIN}/login/callback`) |
-| Scheduled crawls never start         | `CRAWL_FEEDER_ENABLED=false`                         | Set to `true`                                                                       |
-| Crawls/uploads not working           | Worker not running or no embedding model             | Check worker is running, enable embedding model in Admin → Models                   |
+| Crawls not processing                | Crawler worker unavailable or execution leases expired | Check `/api/healthz/crawler`; an increasing `oldest_active_age_seconds` or nonzero `expired_leases` identifies stalled lifecycle work |
+| Crawls/uploads not working           | Worker not running or no embedding model               | Check both workers are running, enable embedding model in Admin → Models                                                              |
 | Can't create Apps                    | No transcription model enabled                       | Admin → Models → Transcription models tab, enable Whisper                           |
 | JWT token invalid                    | Backend `JWT_SECRET` changed since the token was issued | Tokens signed with the old key are rejected; sign in again                       |
 | Worker jobs stuck or slow            | Worker overloaded                                    | Reduce `WORKER_MAX_JOBS` or increase resources                                      |
@@ -895,8 +930,9 @@ curl -fsS https://your-domain.com/api/healthz
 # Readiness alias of /api/healthz on current images (older released images only have /api/healthz)
 curl -fsS https://your-domain.com/api/readyz
 
-# Crawler queue and worker diagnostics
-curl -fsS https://your-domain.com/api/healthz/crawler
+# Detailed crawler diagnostics (requires the deployment's super API key)
+curl -fsS https://your-domain.com/api/healthz/crawler \
+  -H "X-API-Key: $ENEO_SUPER_API_KEY"
 
 # Running backend version
 curl -fsS https://your-domain.com/version
@@ -1009,6 +1045,13 @@ checksum and skew-recovery checks.
 ### Update version tags (if pinned)
 
 Edit `docker-compose.yml` and update the image tags, for example `ghcr.io/eneo-ai/eneo-backend:2.1.1` → `ghcr.io/eneo-ai/eneo-backend:2.2.0`. Eneo image tags have no `v` prefix.
+
+### Rename environment variables that are no longer read
+
+From 2.2, `db-init`, the backend, the worker and the web app refuse to start
+while a renamed variable is set without its replacement, and the web app
+refuses to start without `ENEO_BACKEND_URL`. Before upgrading to 2.2, follow
+[Upgrading to 2.2.0](/guides/upgrade-2-2-0#environment-variables).
 
 ### Review network changes
 

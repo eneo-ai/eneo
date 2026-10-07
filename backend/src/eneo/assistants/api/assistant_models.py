@@ -27,6 +27,7 @@ from eneo.ai_models.completion_models.completion_model import (
 from eneo.ai_models.embedding_models.embedding_model import EmbeddingModelLegacy
 from eneo.collections.presentation.collection_models import CollectionPublic
 from eneo.completion_models.domain.completion_model import CompletionModel
+from eneo.data_retention.constants import MAX_RETENTION_DAYS, MIN_RETENTION_DAYS
 from eneo.files.file_models import File, FilePublic, FileRestrictions
 from eneo.groups_legacy.api.group_models import GroupInDBBase
 from eneo.info_blobs.info_blob import InfoBlobInDBWithScore
@@ -55,6 +56,22 @@ from eneo.websites.presentation.website_models import WebsitePublic
 class AssistantType(str, Enum):
     ASSISTANT = "assistant"
     DEFAULT_ASSISTANT = "default-assistant"
+
+
+class AssistantAttachmentInput(ModelId):
+    inline_text: bool = Field(
+        default=True,
+        description=(
+            "True: the attachment's text is placed in the prompt on every turn. "
+            "False: the assistant gets a signed reference URL instead and opens "
+            "the file with a tool when needed (requires a stored original and a "
+            "model that can call tools; otherwise the text is inlined)."
+        ),
+    )
+
+
+class AssistantAttachmentPublic(FilePublic):
+    inline_text: bool = True
 
 
 class KnowledgeMode(str, Enum):
@@ -239,7 +256,7 @@ class AssistantCreatePublic(AssistantBase):
 class AssistantUpdatePublic(AssistantCreatePublic):
     enabled_capabilities: list[CapabilityPurpose] | None = None
     prompt: Optional[PromptCreate] = None
-    attachments: Optional[list[ModelId]] = None
+    attachments: Optional[list[AssistantAttachmentInput]] = None
     groups: Optional[list[ModelId]] = None  # type: ignore[assignment]
     websites: Optional[list[ModelId]] = None  # type: ignore[assignment]
     integration_knowledge_list: Optional[list[ModelId]] = None  # type: ignore[assignment]
@@ -276,7 +293,16 @@ class AssistantUpdatePublic(AssistantCreatePublic):
             "every turn and packs results into the prompt."
         ),
     )
-    data_retention_days: Optional[int] = None
+    data_retention_days: Optional[int] = Field(
+        default=None,
+        ge=MIN_RETENTION_DAYS,
+        le=MAX_RETENTION_DAYS,
+        description=(
+            "Conversation retention override. Requires space administration permission "
+            "in shared and organization spaces. "
+            "Set to null to inherit the space policy; omit to leave unchanged."
+        ),
+    )
     metadata_json: Union[dict[str, object], None, NotProvided] = Field(
         default=NOT_PROVIDED,
         description="Metadata for the assistant",
@@ -377,7 +403,7 @@ class AssistantPublic(InDB, ResourcePermissionsMixin):
     space_id: UUID
     completion_model_kwargs: ModelKwargs
     logging_enabled: bool | None
-    attachments: list[FilePublic]
+    attachments: list[AssistantAttachmentPublic]
     allowed_attachments: FileRestrictions
     groups: list[CollectionPublic]
     websites: list[WebsitePublic]

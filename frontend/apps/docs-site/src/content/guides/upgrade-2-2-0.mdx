@@ -1,0 +1,216 @@
+# Upgrade Guide: Eneo 2.2.0
+
+Eneo 2.2 completes the rename from Intric to Eneo. The old `INTRIC_*`
+environment variable names are no longer read, and the API uses Eneo names
+throughout. This page lists what to change before you deploy and how to
+recognise a deployment that still uses an old name.
+
+import { Callout } from 'nextra/components'
+
+<Callout type="warning">
+  **Rename environment variables before you deploy 2.2.** `db-init`, the
+  backend, the worker and the web app refuse to start while a renamed variable
+  is set without its replacement.
+</Callout>
+
+For the rest of the procedure (backups, draining work, File and Icon storage),
+follow [Updating Eneo](/guides/deployment#updating-eneo).
+
+---
+
+## Environment variables
+
+Earlier releases accepted the old names as aliases. From 2.2 only the new names
+are read.
+
+| Old variable                | New variable              | File               |
+| --------------------------- | ------------------------- | ------------------ |
+| `INTRIC_SUPER_API_KEY`      | `ENEO_SUPER_API_KEY`      | `env_backend.env`  |
+| `INTRIC_BACKEND_URL`        | `ENEO_BACKEND_URL`        | `env_frontend.env` |
+| `INTRIC_BACKEND_SERVER_URL` | `ENEO_BACKEND_SERVER_URL` | `env_frontend.env` |
+| `PUBLIC_INTRIC_BACKEND_URL` | `PUBLIC_ENEO_BACKEND_URL` | `env_frontend.env` |
+
+`ENEO_SUPER_DUPER_API_KEY` and `INTRIC_SUPER_DUPER_API_KEY` are removed without
+a replacement. Module administration happens in **Admin → Modules** by an
+administrator with the `modules` permission; see
+[Module administration](/guides/deployment#module-administration). Delete the
+variable.
+
+Find old names in the environment files:
+
+```bash
+grep -n -E 'INTRIC_|SUPER_DUPER' env_backend.env env_frontend.env
+```
+
+If you pass variables another way, such as Compose `environment:` entries or a
+secret store, check there too.
+
+### Session lifetime
+
+`JWT_EXPIRY_TIME` is the login session lifetime in **minutes**. Earlier
+environment templates labelled the value as seconds while the backend applied
+it as minutes, so the template value `86400` produced sessions of roughly 60
+days. The unit has not changed and existing values are not reinterpreted, but
+the backend now refuses to start when the value is zero, negative, or above
+`43200` (30 days). A deployment that still has `86400` must set the value it
+intends before upgrading, for example `1440` for 24 hours:
+
+```
+JWT_EXPIRY_TIME=1440
+```
+
+A shorter lifetime applies to sessions issued after the restart. Sessions
+issued earlier stay valid until they expire, unless the user changes their
+password, an administrator resets it, or the user calls
+`POST /api/v1/users/me/sessions/invalidate/`, each of which rejects every
+session issued before that moment.
+
+### What you see at startup
+
+| Situation                                         | `db-init`, backend and worker                   | Web app                                    |
+| ------------------------------------------------- | ----------------------------------------------- | ------------------------------------------ |
+| An old name is set and its new name is not        | Does not start; names the replacement           | Does not start; names the replacement      |
+| Both the old and the new name are set             | Starts; warns that the old name is ignored      | Starts; warns that the old name is ignored |
+| `ENEO_SUPER_DUPER_API_KEY` or its old name is set | Starts; logs an error that it is no longer read | —                                          |
+| `ENEO_BACKEND_URL` is not set                     | —                                               | Does not start; says that it is required   |
+| `JWT_EXPIRY_TIME` is above `43200` (30 days)      | Does not start; names the limit and `1440`      | —                                          |
+
+A service that does not start logs, for example:
+
+```text
+Eneo cannot start while removed environment variables are set:
+  INTRIC_SUPER_API_KEY is no longer read (removed in Eneo 2.2). Rename it to ENEO_SUPER_API_KEY.
+```
+
+`db-init` runs the migrations, so it is usually the first to stop. With
+`docker compose run --rm db-init`, the message appears directly above
+`Error running alembic migrations`. Services that restart automatically keep
+restarting until the variable is renamed.
+
+To check a deployment for leftovers:
+
+```bash
+docker compose logs db-init backend worker frontend | grep -E 'no longer read|is ignored|cannot start'
+```
+
+---
+
+### Signed download links
+
+Signed download links (file downloads, exact-original downloads and knowledge
+originals) are stateless bearer credentials signed with `URL_SIGNING_KEY`.
+From this release:
+
+- The backend refuses to start when `URL_SIGNING_KEY` is blank or shorter
+  than 32 bytes. Generate a key from at least 32 random bytes, for example
+  `openssl rand -hex 32`, and set it in `env_backend.env`. A key that already
+  meets this length can stay as it is.
+- Every signed link now carries its purpose, the owning tenant, its issuance
+  time and its expiry, and the backend enforces a maximum lifetime per
+  purpose: seven days for file downloads and one hour for exact-original and
+  knowledge-original downloads.
+- Links issued before the upgrade are rejected immediately; there is no grace
+  period. Integrations that stored signed links must request new ones after
+  the upgrade.
+
+When the API runs on several replicas, cut them all over together: replicas
+on the previous release keep accepting the old link format and reject the
+new one, so a mixed fleet serves inconsistent answers until the rollout
+completes.
+
+A valid link is still a bearer credential. Binding it to a tenant stops it
+from being redeemed against another tenant's copy of a file; it does not stop
+another person from using a leaked, unexpired link.
+
+## OIDC account provisioning
+
+Both OIDC login paths now use the tenant's `provisioning` setting. The older global OIDC/MobilityGuard path no longer creates accounts when it is `false`.
+
+Before upgrading:
+
+- **SCIM-managed tenants:** explicitly keep `provisioning: false`. Ensure intended users have been provisioned before their first sign-in. OIDC remains the sign-in method for existing active members.
+- **Global OIDC:** configure a valid `OIDC_TENANT_ID`. Existing accounts must belong to that tenant; the older endpoint no longer accepts accounts from another tenant or a missing tenant configuration.
+- **Tenants using JIT:** require a non-empty domain list and an ID token containing boolean `email_verified: true` for `email`. Per-tenant federation uses `allowed_domains`; global OIDC uses the new `OIDC_ALLOWED_DOMAINS` environment variable, for example `OIDC_ALLOWED_DOMAINS=["your-company.com"]`.
+- **IdPs without verified-email claims:** use SCIM or administrative provisioning. Missing claims, strings such as `"true"`, and custom mapped addresses that differ from the standard `email` claim do not authorize JIT creation.
+
+An empty domain list still applies no domain restriction to existing active members, but blocks new JIT accounts. Inactive and removed users cannot be recreated by signing in; restore them through SCIM or an administrator. Existing active accounts do not gain a new `email_verified` requirement.
+
+No database migration or automatic change of tenant settings is needed. For affected users who cannot be created through JIT after upgrading, provision their account through SCIM or administration while correcting IdP/domain configuration. Keep all backend replicas on the same version so admission rules are consistent.
+
+See [Single-tenant OIDC](/guides/oidc-federation/single-tenant#user-provisioning), [Multi-tenant federation](/guides/oidc-federation/multi-tenant) and [SCIM provisioning](/guides/scim-provisioning).
+
+## API changes for integrations
+
+Clients that call the Eneo API directly must use the new names. The API no
+longer uses the old ones.
+
+| Area                       | Before 2.2                     | From 2.2                   |
+| -------------------------- | ------------------------------ | -------------------------- |
+| Error response field       | `intric_error_code`            | `eneo_error_code`          |
+| Streaming event name       | `intric_event`                 | `eneo_event`               |
+| Streaming event type field | `intric_event_type`            | `eneo_event_type`          |
+| WebSocket subprotocol      | `intric`                       | `eneo`                     |
+| OpenAPI schema names       | `IntricEventType`, `intric__…` | `EneoEventType`, `eneo__…` |
+
+The event type field changed on every streaming event that carries it: tool
+calls, tool approvals, token usage and image generation. Regenerate clients that
+are generated from the OpenAPI schema. The error envelope is described in
+[API](/docs/api).
+
+---
+
+## Files nothing uses anymore
+
+Eneo 2.2 deletes uploaded files after their last use. Deleting a conversation or
+app run, by hand or through conversation retention, deletes the files only it
+used, including audio recordings and transcriptions. A daily cleanup at 03:30
+UTC deletes every other file that no chat, assistant, app or app run uses and
+that is older than 24 hours. Knowledge is not affected: documents in
+collections and the originals retained for them are not uploaded files.
+
+The first cleanup after the upgrade also deletes files left behind by earlier
+versions, for example recordings from app runs that retention already removed.
+This cannot be undone, so take the backup in [Updating
+Eneo](/guides/deployment#updating-eneo) as usual. To see what the cleanup will
+delete, run the preview in the worker container after deploying and before
+03:30 UTC:
+
+```bash
+docker compose exec worker python -m eneo.files.unused_file_cleanup preview
+```
+
+API integrations that delete a conversation
+and then each of its files now receive `404` for files already deleted with the
+conversation. A chat message, app run or service call that names a deleted file
+is refused with `400` and the missing file id instead of being sent without it;
+upload the file again. See [Files nothing uses
+anymore](/guides/object-content-storage#files-nothing-uses-anymore).
+
+---
+
+## Open browser tabs
+
+Reload open Eneo tabs after the upgrade. A tab loaded before the upgrade keeps
+the old app code until it is reloaded: live updates stop, and chat no longer
+shows image generation progress or token usage.
+
+---
+
+## Commands and monitoring
+
+Detailed crawler diagnostics at `GET /api/healthz/crawler` now require the deployment's `ENEO_SUPER_API_KEY`, sent in `X-API-Key` (or your configured `API_KEY_HEADER_NAME`). Update diagnostic scripts and monitoring clients to send that credential. The regular `/api/livez`, `/api/healthz`, and `/api/readyz` probes remain public.
+
+Assistant/app conversation-retention overrides in shared and organization spaces now require space administration permission, including clearing an override to restore inheritance. Editors can still change other assistant/app settings. Personal-space owners retain their existing retention controls. Stored overrides, the existing 1–2555-day range, and the precedence of assistant/app values over the space default are unchanged.
+
+If you override the container commands, use the new module paths:
+
+```bash
+gunicorn src.eneo.server.main:app
+arq src.eneo.worker.arq.WorkerSettings
+python -m eneo.cli.<command>
+```
+
+Log records use `eneo.*` logger names and worker traces use the `eneo.worker`
+tracer. Update log filters, alerts and dashboards that match `intric.*`.
+
+Background jobs queued before the upgrade still run after it.

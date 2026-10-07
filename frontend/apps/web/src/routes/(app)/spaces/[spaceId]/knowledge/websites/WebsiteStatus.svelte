@@ -1,98 +1,22 @@
 <script lang="ts">
-  import { formatDateTime, formatRelativeTime, DAY_MS } from "$lib/core/formatting/dateTime";
-  import type { WebsiteSparse } from "@eneo/eneo-js";
-  import StatusBadge, { type StatusBadgeColor } from "$lib/components/StatusBadge.svelte";
+  import type { CrawlResourceFailure, WebsiteSparse } from "@eneo/eneo-js";
+  import { Badge } from "$lib/components/ui/badge/index.js";
+  import CrawlRunStatus from "$lib/features/knowledge/CrawlRunStatus.svelte";
+  import CrawlFailureActions from "$lib/features/knowledge/CrawlFailureActions.svelte";
   import { m } from "$lib/paraglide/messages";
 
   export let website: WebsiteSparse;
-  const SKIPPED_PREFIX = "skipped duplicate crawl";
-
-  /* TODO colours */
-  function statusInfo(): { label: string; color: StatusBadgeColor; tooltip?: string } {
-    const skipReason = website.latest_crawl?.result_location;
-    const skipTooltip = skipReason?.toLowerCase().startsWith(SKIPPED_PREFIX)
-      ? m.crawl_skipped_duplicate()
-      : skipReason;
-
-    // Check if there are failures in the latest crawl
-    const pagesFailed = website.latest_crawl?.pages_failed ?? 0;
-    const filesFailed = website.latest_crawl?.files_failed ?? 0;
-    const hasFailures = pagesFailed > 0 || filesFailed > 0;
-
-    if (
-      website.latest_crawl?.status === "failed" &&
-      skipReason?.toLowerCase().startsWith(SKIPPED_PREFIX)
-    ) {
-      return {
-        color: "gray",
-        label: m.sync_skipped(),
-        tooltip: skipTooltip
-      };
-    }
-
-    switch (website.latest_crawl?.status) {
-      case "complete": {
-        const completed = website.latest_crawl?.finished_at ?? Date.now();
-        const label = m.synced_ago({ timeAgo: formatRelativeTime(completed) });
-
-        // If there are failures, show warning color and include failure info in tooltip
-        if (hasFailures) {
-          let failureText: string;
-          if (pagesFailed > 0 && filesFailed > 0) {
-            failureText = m.pages_and_files_failed({
-              pages: pagesFailed.toString(),
-              files: filesFailed.toString()
-            });
-          } else if (pagesFailed > 0) {
-            failureText = m.pages_failed({ count: pagesFailed.toString() });
-          } else {
-            failureText = m.files_failed({ count: filesFailed.toString() });
-          }
-
-          return {
-            color: "yellow",
-            label: m.synced_with_warnings(),
-            tooltip: `${m.synced_on({ date: formatDateTime(completed) })} - ${failureText}`
-          };
-        }
-
-        return {
-          color: Date.now() - new Date(completed).getTime() < 10 * DAY_MS ? "green" : "yellow",
-          label,
-          tooltip: m.synced_on({ date: formatDateTime(completed) })
-        };
-      }
-      case "in progress":
-        return {
-          color: "yellow",
-          label: m.sync_in_progress(),
-          tooltip: m.started_on({
-            date: formatDateTime(website.latest_crawl?.created_at)
-          })
-        };
-      case "failed":
-        return {
-          color: "orange",
-          label: m.sync_failed(),
-          tooltip: skipTooltip
-        };
-      case "not found":
-        return {
-          color: "orange",
-          label: m.sync_failed(),
-          tooltip: skipTooltip
-        };
-      case "queued":
-        return {
-          color: "blue",
-          label: m.queued()
-        };
-    }
-    return {
-      color: "orange",
-      label: "error"
-    };
-  }
+  export let onshowFailures: ((kind: CrawlResourceFailure["kind"] | null) => void) | undefined =
+    undefined;
 </script>
 
-<StatusBadge item={statusInfo()} />
+<div class="flex flex-col items-start gap-1">
+  {#if website.latest_crawl}
+    <CrawlRunStatus run={website.latest_crawl} />
+    {#if onshowFailures}
+      <CrawlFailureActions run={website.latest_crawl} onselect={onshowFailures} />
+    {/if}
+  {:else}
+    <Badge variant="secondary">{m.not_synced()}</Badge>
+  {/if}
+</div>

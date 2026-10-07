@@ -6,6 +6,7 @@ from uuid import UUID, uuid4
 
 from typing_extensions import TypedDict
 
+from eneo.authentication.auth_models import is_service_api_key
 from eneo.integration.domain.entities.integration_knowledge import (
     IntegrationKnowledge,
 )
@@ -26,11 +27,15 @@ from eneo.main.exceptions import (
 )
 from eneo.main.logging import get_logger
 from eneo.roles.permissions import Permission
+from eneo.spaces.space_repo import INTEGRATION_KNOWLEDGE_SOURCE
 
 if TYPE_CHECKING:
     from eneo.actors import ActorManager
     from eneo.embedding_models.domain.embedding_model_repo import (
         EmbeddingModelRepository,
+    )
+    from eneo.integration.application.user_integration_service import (
+        UserIntegrationService,
     )
     from eneo.integration.domain.entities.tenant_sharepoint_app import (
         TenantSharePointApp,
@@ -40,9 +45,6 @@ if TYPE_CHECKING:
     )
     from eneo.integration.domain.repositories.oauth_token_repo import (
         OauthTokenRepository,
-    )
-    from eneo.integration.domain.repositories.user_integration_repo import (
-        UserIntegrationRepository,
     )
     from eneo.integration.infrastructure.auth_service.service_account_auth_service import (
         ServiceAccountAuthService,
@@ -124,7 +126,7 @@ class IntegrationKnowledgeService:
         space_repo: "SpaceRepository",
         integration_knowledge_repo: "IntegrationKnowledgeRepository",
         embedding_model_repo: "EmbeddingModelRepository",
-        user_integration_repo: "UserIntegrationRepository",
+        user_integration_service: "UserIntegrationService",
         actor_manager: "ActorManager",
         sharepoint_subscription_service: "SharePointSubscriptionService",
         tenant_sharepoint_app_repo: TenantSharePointAppRepositoryProtocol,
@@ -138,7 +140,7 @@ class IntegrationKnowledgeService:
         self.space_repo = space_repo
         self.integration_knowledge_repo = integration_knowledge_repo
         self.embedding_model_repo = embedding_model_repo
-        self.user_integration_repo = user_integration_repo
+        self.user_integration_service = user_integration_service
         self.actor_manager = actor_manager
         self.sharepoint_subscription_service = sharepoint_subscription_service
         self.tenant_sharepoint_app_repo: TenantSharePointAppRepositoryProtocol = (
@@ -146,6 +148,23 @@ class IntegrationKnowledgeService:
         )
         self.tenant_app_auth_service = tenant_app_auth_service
         self.service_account_auth_service = service_account_auth_service
+
+    async def require_sync_log_access(self, integration_knowledge_id: UUID) -> None:
+        """Sync history follows knowledge read access, not connection ownership."""
+        if is_service_api_key(self.user):
+            owner = await self.space_repo.get_knowledge_source_owner_access(
+                INTEGRATION_KNOWLEDGE_SOURCE, integration_knowledge_id
+            )
+            access = [owner] if owner is not None else []
+        else:
+            access = await self.space_repo.get_knowledge_source_read_access(
+                INTEGRATION_KNOWLEDGE_SOURCE, integration_knowledge_id
+            )
+        for space in access:
+            actor = self.actor_manager.get_space_actor(space)
+            if actor.can_read_space() and actor.can_read_integrations():
+                return
+        raise NotFoundException("Integration knowledge not found")
 
     async def _get_tenant_app_access_token(
         self, tenant_app: "TenantSharePointApp"
@@ -187,25 +206,16 @@ class IntegrationKnowledgeService:
     ) -> tuple[IntegrationKnowledge, "JobInDb"]:
         space = await self.space_repo.one(id=space_id)
 
-        actor = self.actor_manager.get_space_actor_from_space(space)
-        if not actor.can_create_integrations():
-            raise UnauthorizedException()
+        connection = await self.user_integration_service.get_authorized_integration(
+            user_integration_id, space=space
+        )
+        user_integration = connection.integration
 
         if not space.is_embedding_model_in_space(embedding_model_id=embedding_model_id):
             raise BadRequestException("No valid embedding model")
 
-        user_integration = await self.user_integration_repo.one(id=user_integration_id)
-
         if not key:
             raise BadRequestException("Integration key is required")
-
-        # SECURITY: tenant_app integrations (Sites.Read.All) require admin permission
-        if user_integration.auth_type == "tenant_app":
-            if Permission.ADMIN not in self.user.permissions:
-                raise UnauthorizedException(
-                    "Admin permission is required to import from organization-wide SharePoint integrations. "
-                    "Please contact your administrator."
-                )
 
         embedding_model = await self.embedding_model_repo.one(
             model_id=embedding_model_id
@@ -243,15 +253,8 @@ class IntegrationKnowledgeService:
 
         await self._distribute_knowledge_if_org_space(knowledge, space)
 
-        if user_integration.auth_type == "tenant_app":
-            if not user_integration.tenant_app_id:
-                raise BadRequestException(
-                    "Tenant app ID is required for tenant_app integrations"
-                )
-
-            tenant_app = await self.tenant_sharepoint_app_repo.one(
-                id=user_integration.tenant_app_id
-            )
+        if connection.tenant_app is not None:
+            tenant_app = connection.tenant_app
             access_token = await self._get_tenant_app_access_token(tenant_app)
             token = SimpleToken(access_token=access_token)
             token_id = None

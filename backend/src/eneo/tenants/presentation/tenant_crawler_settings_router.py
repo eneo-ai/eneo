@@ -13,9 +13,14 @@ from typing import Annotated, Any
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, status
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 
 from eneo.authentication import auth
+from eneo.authentication.endpoint_access import (
+    Authentication,
+    Authorization,
+    endpoint_access,
+)
 from eneo.main.container.container import Container
 from eneo.main.exceptions import NotFoundException
 from eneo.server.dependencies.container import get_container
@@ -53,13 +58,8 @@ class CrawlerSettingsUpdate(BaseModel):
             "closespider_itemcount": 20000,
             "obey_robots": true,
             "autothrottle_enabled": true,
-            "tenant_worker_concurrency_limit": 4,
-            "crawl_stale_threshold_minutes": 30,
             "crawl_heartbeat_interval_seconds": 300,
-            "crawl_feeder_enabled": false,
-            "crawl_feeder_interval_seconds": 10,
-            "crawl_feeder_batch_size": 10,
-            "crawl_job_max_age_seconds": 1800
+            "crawl_page_batch_size": 100
         }
 
     Example - Partial update (adjust timeouts only):
@@ -68,6 +68,8 @@ class CrawlerSettingsUpdate(BaseModel):
             "dns_timeout": 45
         }
     """
+
+    model_config = ConfigDict(extra="forbid")
 
     # Timeout settings (seconds)
     crawl_max_length: int | None = Field(
@@ -129,23 +131,7 @@ class CrawlerSettingsUpdate(BaseModel):
         examples=[True],
     )
 
-    # Concurrency settings
-    tenant_worker_concurrency_limit: int | None = Field(
-        None,
-        ge=_SPECS["tenant_worker_concurrency_limit"]["min"],
-        le=_SPECS["tenant_worker_concurrency_limit"]["max"],
-        description=_SPECS["tenant_worker_concurrency_limit"]["description"],
-        examples=[4],
-    )
-
     # Reliability settings
-    crawl_stale_threshold_minutes: int | None = Field(
-        None,
-        ge=_SPECS["crawl_stale_threshold_minutes"]["min"],
-        le=_SPECS["crawl_stale_threshold_minutes"]["max"],
-        description=_SPECS["crawl_stale_threshold_minutes"]["description"],
-        examples=[30],
-    )
     crawl_heartbeat_interval_seconds: int | None = Field(
         None,
         ge=_SPECS["crawl_heartbeat_interval_seconds"]["min"],
@@ -154,34 +140,12 @@ class CrawlerSettingsUpdate(BaseModel):
         examples=[300],
     )
 
-    # Feeder settings
-    crawl_feeder_enabled: bool | None = Field(
+    crawl_page_batch_size: int | None = Field(
         None,
-        description=_SPECS["crawl_feeder_enabled"]["description"],
-        examples=[False],
-    )
-    crawl_feeder_interval_seconds: int | None = Field(
-        None,
-        ge=_SPECS["crawl_feeder_interval_seconds"]["min"],
-        le=_SPECS["crawl_feeder_interval_seconds"]["max"],
-        description=_SPECS["crawl_feeder_interval_seconds"]["description"],
-        examples=[10],
-    )
-    crawl_feeder_batch_size: int | None = Field(
-        None,
-        ge=_SPECS["crawl_feeder_batch_size"]["min"],
-        le=_SPECS["crawl_feeder_batch_size"]["max"],
-        description=_SPECS["crawl_feeder_batch_size"]["description"],
-        examples=[10],
-    )
-
-    # Job age limit
-    crawl_job_max_age_seconds: int | None = Field(
-        None,
-        ge=_SPECS["crawl_job_max_age_seconds"]["min"],
-        le=_SPECS["crawl_job_max_age_seconds"]["max"],
-        description=_SPECS["crawl_job_max_age_seconds"]["description"],
-        examples=[1800],
+        ge=_SPECS["crawl_page_batch_size"]["min"],
+        le=_SPECS["crawl_page_batch_size"]["max"],
+        description=_SPECS["crawl_page_batch_size"]["description"],
+        examples=[100],
     )
 
 
@@ -204,13 +168,8 @@ class CrawlerSettingsResponse(BaseModel):
                 "closespider_itemcount": 20000,
                 "obey_robots": true,
                 "autothrottle_enabled": true,
-                "tenant_worker_concurrency_limit": 4,
-                "crawl_stale_threshold_minutes": 30,
                 "crawl_heartbeat_interval_seconds": 300,
-                "crawl_feeder_enabled": false,
-                "crawl_feeder_interval_seconds": 10,
-                "crawl_feeder_batch_size": 10,
-                "crawl_job_max_age_seconds": 1800
+                "crawl_page_batch_size": 100
             },
             "overrides": ["download_timeout", "dns_timeout"],
             "updated_at": "2025-10-22T10:00:00+00:00"
@@ -231,13 +190,8 @@ class CrawlerSettingsResponse(BaseModel):
                 "closespider_itemcount": 20000,
                 "obey_robots": True,
                 "autothrottle_enabled": True,
-                "tenant_worker_concurrency_limit": 4,
-                "crawl_stale_threshold_minutes": 30,
                 "crawl_heartbeat_interval_seconds": 300,
-                "crawl_feeder_enabled": False,
-                "crawl_feeder_interval_seconds": 10,
-                "crawl_feeder_batch_size": 10,
-                "crawl_job_max_age_seconds": 1800,
+                "crawl_page_batch_size": 100,
             }
         ],
     )
@@ -280,6 +234,11 @@ class DeleteSettingsResponse(BaseModel):
     "Settings persist across server restarts and override environment defaults. "
     "System admin only.",
     responses=responses.get_responses([404]),
+)
+@endpoint_access(
+    authentication=Authentication.SYSADMIN,
+    authorization=Authorization.SYSADMIN,
+    reason="Deployment administration requires the configured super API key.",
 )
 async def update_crawler_settings(
     tenant_id: UUID,
@@ -338,6 +297,11 @@ async def update_crawler_settings(
     "System admin only.",
     responses=responses.get_responses([404]),
 )
+@endpoint_access(
+    authentication=Authentication.SYSADMIN,
+    authorization=Authorization.SYSADMIN,
+    reason="Deployment administration requires the configured super API key.",
+)
 async def get_crawler_settings(
     tenant_id: UUID,
     container: Annotated[Container, Depends(get_container())],
@@ -383,6 +347,11 @@ async def get_crawler_settings(
     description="Delete all tenant-specific crawler settings, reverting to environment defaults. "
     "System admin only.",
     responses=responses.get_responses([404]),
+)
+@endpoint_access(
+    authentication=Authentication.SYSADMIN,
+    authorization=Authorization.SYSADMIN,
+    reason="Deployment administration requires the configured super API key.",
 )
 async def delete_crawler_settings(
     tenant_id: UUID,

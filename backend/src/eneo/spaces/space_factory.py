@@ -248,6 +248,7 @@ class SpaceFactory:
         return SpaceApplicationsProjection(
             access=SpaceAccessFacts(
                 id=space_in_db.id,
+                tenant_id=space_in_db.tenant_id,
                 user_id=space_in_db.user_id,
                 tenant_space_id=space_in_db.tenant_space_id,
                 members={

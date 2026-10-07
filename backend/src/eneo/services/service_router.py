@@ -3,6 +3,11 @@ from uuid import UUID
 
 from fastapi import APIRouter, Depends
 
+from eneo.authentication.endpoint_access import (
+    Authentication,
+    Authorization,
+    endpoint_access,
+)
 from eneo.main.container.container import Container
 from eneo.main.models import PaginatedResponse
 from eneo.server.dependencies.container import get_container
@@ -28,6 +33,11 @@ router = APIRouter()
     response_model=ServicePublicWithUser,
     responses=responses.get_responses([400, 403, 404]),
     description="Create a service.",
+)
+@endpoint_access(
+    authentication=Authentication.USER,
+    authorization=Authorization.AUTHENTICATED,
+    reason="ServiceService enforces service permissions and space membership.",
 )
 async def create_service(
     service_model: ServiceCreatePublic,
@@ -56,6 +66,11 @@ async def create_service(
     responses=responses.get_responses([]),
     description="List services, optionally filtered by name.",
 )
+@endpoint_access(
+    authentication=Authentication.USER,
+    authorization=Authorization.AUTHENTICATED,
+    reason="ServiceService enforces service permissions and space membership.",
+)
 async def get_services(
     container: Annotated[Container, Depends(get_container(with_user=True))],
     name: str | None = None,
@@ -80,6 +95,11 @@ async def get_services(
     response_model=ServicePublicWithUser,
     responses=responses.get_responses([403, 404]),
 )
+@endpoint_access(
+    authentication=Authentication.USER,
+    authorization=Authorization.AUTHENTICATED,
+    reason="ServiceService enforces service permissions and space membership.",
+)
 async def get_service(
     id: UUID,
     container: Annotated[Container, Depends(get_container(with_user=True))],
@@ -100,6 +120,11 @@ async def get_service(
     response_model=ServicePublicWithUser,
     responses=responses.get_responses([400, 403, 404]),
     description="Update a service. Omitted fields are not updated.",
+)
+@endpoint_access(
+    authentication=Authentication.USER,
+    authorization=Authorization.AUTHENTICATED,
+    reason="ServiceService enforces service permissions and space membership.",
 )
 async def update_service(
     id: UUID,
@@ -126,6 +151,11 @@ async def update_service(
     responses=responses.get_responses([403, 404]),
     description="Delete a service.",
 )
+@endpoint_access(
+    authentication=Authentication.USER,
+    authorization=Authorization.AUTHENTICATED,
+    reason="ServiceService enforces service permissions and space membership.",
+)
 async def delete_service(
     id: UUID,
     container: Annotated[Container, Depends(get_container(with_user=True))],
@@ -139,6 +169,11 @@ async def delete_service(
     response_model=ServiceOutput,
     responses=responses.get_responses([400, 403, 404]),
     description="Run a service. The output schema depends on the service's output validation.",
+)
+@endpoint_access(
+    authentication=Authentication.USER,
+    authorization=Authorization.AUTHENTICATED,
+    reason="ServiceService enforces service permissions and space membership.",
 )
 async def run_service(
     input: RunService,
@@ -154,6 +189,11 @@ async def run_service(
     "/{id}/run/",
     response_model=PaginatedResponse[ServiceRun],
     responses=responses.get_responses([403, 404]),
+)
+@endpoint_access(
+    authentication=Authentication.USER,
+    authorization=Authorization.AUTHENTICATED,
+    reason="ServiceService enforces service permissions and space membership.",
 )
 async def get_service_runs(
     id: UUID,
@@ -178,6 +218,11 @@ async def get_service_runs(
     status_code=204,
     responses=responses.get_responses([400, 403, 404]),
     description="Transfer a service to another space.",
+)
+@endpoint_access(
+    authentication=Authentication.USER,
+    authorization=Authorization.AUTHENTICATED,
+    reason="ServiceService enforces service permissions and space membership.",
 )
 async def transfer_service_to_space(
     id: UUID,

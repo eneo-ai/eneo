@@ -67,6 +67,12 @@ class ConversationTurnTarget(ConversationTarget):
 _MAX_FILES_PER_PREFLIGHT = 50
 
 
+class PreflightAttachment(ModelId):
+    """A persistent attachment as the assistant editor is about to save it."""
+
+    inline_text: bool = True
+
+
 class PreflightRequest(ConversationTurnTarget):
     """Request shape for /conversations/preflight.
 
@@ -82,6 +88,12 @@ class PreflightRequest(ConversationTurnTarget):
     file_ids: list[UUID] = Field(default=[], max_length=_MAX_FILES_PER_PREFLIGHT)
     tools: Optional[UseTools] = None
     assistant_prompt: Optional[str] = None
+    # Config-time only: the editor's unsaved attachment set with each file's
+    # mode, so the meter excludes attachments marked "open with tool" exactly
+    # as the send path will. Counted into `file_tokens`.
+    attachments: Optional[list[PreflightAttachment]] = Field(
+        default=None, max_length=_MAX_FILES_PER_PREFLIGHT
+    )
 
     @model_validator(mode="after")
     def _require_question_or_files(self) -> "PreflightRequest":
