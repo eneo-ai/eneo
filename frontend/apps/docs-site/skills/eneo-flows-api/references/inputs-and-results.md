@@ -65,7 +65,7 @@ The multipart field must be `upload_file`. Bind the result to the same logical s
 
 A file ID may be reused under multiple compatible step IDs when the same binary should feed multiple steps. Keep per-step file order stable between key derivation and run creation. Do not rely on file order to express business meaning; model semantic ordering in the published Flow.
 
-There is no chunked or resumable upload and no general mid-run file injection. A supported step rerun may accept replacement input for that step only.
+There is no chunked or resumable upload and no general mid-run file injection. An eligible failed-run child retry preserves the original inputs and file selections. To replace a file, upload it through the step-specific runtime-file endpoint and bind it in a new run's `step_inputs`. Human review can edit a permitted inline text or JSON output, not replace input files; see [review handling](review-evidence-and-retention.md).
 
 ## Live text while recording
 

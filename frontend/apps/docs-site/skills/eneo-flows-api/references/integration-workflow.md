@@ -95,9 +95,9 @@ Use run lists and status for routine views. They omit content. Read detail only 
 
 ## 5. Finish or recover
 
-On `completed`, fetch detail and branch on `result.kind`. On `failed`, fetch detail once for the typed terminal error and decide whether a new logical run is safe.
+On `completed`, fetch detail and branch on `result.kind`. On `failed`, fetch detail once for the typed terminal error. Let the user decide whether an [eligible child retry](endpoints-and-errors.md#retry-a-failed-run) with the original inputs is safe. For replacement inputs or files, create a new run through `POST /flows/{flow_id}/runs/` after collecting new input values and uploading any replacement files.
 
-Do not automatically rerun an ambiguous model, transcription, or outbound request. A provider may have performed work before the failure was observed. A step rerun repeats that step's provider work and can add cost.
+Do not automatically retry ambiguous model, transcription, or outbound work. A provider may have performed work before the failure was observed. A child retry can repeat work from the first unfinished step; a new run can repeat all provider work. Either can add cost.
 
 `redispatch` is only for a stale queued run whose bounded broker dispatch budget was exhausted before a worker claimed it. It is not a general retry endpoint and requires the observed `dispatch_exhausted_at` compare value.
 
