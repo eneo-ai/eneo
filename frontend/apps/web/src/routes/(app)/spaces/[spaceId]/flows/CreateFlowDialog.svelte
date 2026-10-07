@@ -4,12 +4,12 @@
   import { getAppContext } from "$lib/core/AppContext";
   import { getSpacesManager } from "$lib/features/spaces/SpacesManager";
   import { getFlowsManager } from "$lib/features/flows/FlowsManager";
-  import { EneoError } from "@eneo/eneo-js";
   import { Button } from "$lib/components/ui/button/index.js";
   import * as Dialog from "$lib/components/ui/dialog/index.js";
   import { Input } from "$lib/components/ui/input/index.js";
   import ChevronRight from "@lucide/svelte/icons/chevron-right";
   import { m } from "$lib/paraglide/messages";
+  import { getFlowRuntimeErrorMessage } from "$lib/features/flows/flowRuntimeErrorMapping";
 
   interface Props {
     open?: boolean;
@@ -61,7 +61,7 @@
         goto(resolve(`/spaces/${$currentSpace.routeId}/flows/${created.id}`));
       }
     } catch (error) {
-      createError = error instanceof EneoError ? error.getReadableMessage() : String(error);
+      createError = getFlowRuntimeErrorMessage(error, m.request_failed());
     } finally {
       isCreating = false;
     }

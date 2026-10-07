@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { EneoError, type Eneo, type Flow, type FlowPackageExportResponse } from "@eneo/eneo-js";
+  import { type Eneo, type Flow, type FlowPackageExportResponse } from "@eneo/eneo-js";
   import AlertTriangle from "@lucide/svelte/icons/triangle-alert";
   import CheckCircle2 from "@lucide/svelte/icons/circle-check";
   import Download from "@lucide/svelte/icons/download";
@@ -23,6 +23,7 @@
     normalizeFlowPackageId
   } from "$lib/features/flows/flowPackageTransfer";
   import { m } from "$lib/paraglide/messages";
+  import { getFlowRuntimeErrorMessage } from "$lib/features/flows/flowRuntimeErrorMapping";
 
   let {
     flow,
@@ -129,8 +130,7 @@
       }
     } catch (error) {
       const message =
-        mapFlowPackageExportError(error) ??
-        (error instanceof EneoError ? error.getReadableMessage() : String(error));
+        mapFlowPackageExportError(error) ?? getFlowRuntimeErrorMessage(error, m.request_failed());
       exportError = m.flow_package_export_failed({ message });
     } finally {
       exporting = false;

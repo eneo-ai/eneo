@@ -13,7 +13,6 @@
   import { Button } from "$lib/components/ui/button/index.js";
   import { Skeleton } from "$lib/components/ui/skeleton/index.js";
   import * as Alert from "$lib/components/ui/alert/index.js";
-  import { EneoError } from "@eneo/eneo-js";
   import { toast } from "$lib/components/toast";
   import { m } from "$lib/paraglide/messages";
   import { getLocale } from "$lib/paraglide/runtime";
@@ -483,10 +482,7 @@
       focusPageHeading({ onlyFrom: dialogTitleEl() });
     } catch (error) {
       runContract = null;
-      runContractError = getFlowRuntimeErrorMessage(
-        error,
-        error instanceof EneoError ? error.getReadableMessage() : String(error)
-      );
+      runContractError = getFlowRuntimeErrorMessage(error, m.flow_run_contract_load_failed_desc());
     }
   }
 
@@ -840,7 +836,10 @@
           transient &&= isTransientUploadFailure(error);
           fileInputState.recordUploadFailure(
             step.step_id,
-            getFlowRuntimeErrorMessage(error, String(error))
+            getFlowRuntimeErrorMessage(
+              error,
+              error instanceof UploadTimeoutError ? error.message : m.file_upload_error()
+            )
           );
         }
       }
@@ -1617,12 +1616,7 @@
       fileInputState.resetAfterRunAccepted();
       discardLivePreviews();
     } catch (error) {
-      toast.error(
-        getFlowRuntimeErrorMessage(
-          error,
-          error instanceof EneoError ? error.getReadableMessage() : String(error)
-        )
-      );
+      toast.error(getFlowRuntimeErrorMessage(error, m.flow_error_flow_dispatch_failed()));
     } finally {
       isSubmitting = false;
     }
