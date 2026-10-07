@@ -6473,9 +6473,11 @@ async def test_saved_step_drift_outside_the_selected_step_is_a_server_defect(
     assert isinstance(result, outcome), result
     if isinstance(result, TerminalFailure):
         assert result.code == AIBuilderErrorCode.ARCHITECTURE_MATERIALIZATION_FAILED
-        assert result.details["failure_code"] == "scoped_edit_preservation_failed"
-        assert result.details["reason"] == reason
-        assert result.details["architecture_repair_disposition"] == "server_defect"
+        assert result.details == {
+            "architecture_error_code": "architecture_materialization_failed",
+            "architecture_repair_disposition": "server_defect",
+            "failure_code": "scoped_edit_preservation_failed",
+        }
     else:
         assert result.feedback == f"rejected: {reason}"
 

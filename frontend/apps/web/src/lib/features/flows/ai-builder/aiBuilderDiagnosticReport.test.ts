@@ -1,5 +1,7 @@
 import { describe, expect, it } from "vitest";
 
+import { parseAIBuilderError } from "./aiBuilderError";
+import type { AIBuilderErrorDetails } from "./protocol";
 import {
   AIBuilderIssueKind,
   buildAIBuilderDiagnosticReport,
@@ -20,6 +22,66 @@ const session: AIBuilderDiagnosticReportSession = {
 };
 
 describe("aiBuilderDiagnosticReport", () => {
+  it.each<{ name: string; code: string; details: AIBuilderErrorDetails }>([
+    {
+      name: "new template repair fields",
+      code: "architecture_materialization_failed",
+      details: {
+        architecture_error_code: "architecture_materialization_failed",
+        architecture_repair_disposition: "user_action",
+        failure_code: "template_placeholder_unresolved",
+        unresolved_placeholders: "diarienummer, handläggare"
+      }
+    },
+    {
+      name: "new critic IDs and count",
+      code: "architecture_critic_invariant_failed",
+      details: {
+        architecture_error_code: "architecture_critic_invariant_failed",
+        architecture_repair_disposition: "server_defect",
+        critic_issue_ids: "invariant-a,invariant-b",
+        critic_issue_count: 2
+      }
+    },
+    {
+      name: "previously persisted scalar diagnostics",
+      code: "architecture_materialization_failed",
+      details: {
+        architecture_error_detail: "OLD_PERSISTED_DIAGNOSTIC_SENTINEL",
+        failure_code: "template_attachment_selection_invalid",
+        step_index: 3
+      }
+    }
+  ])("keeps $name through the error reader and technical copy", ({ code, details }) => {
+    // Kill narrowing the legacy reader or dropping current repair/critic copy fields.
+    const error = parseAIBuilderError({
+      transport: "sse",
+      payload: JSON.stringify({
+        schema_version: 2,
+        code,
+        category: "bad_request",
+        phase: "proposal",
+        message: "The AI planner could not build this flow.",
+        eneo_error_code: 9000,
+        request_id: "request-error",
+        diagnostic_context: {},
+        details
+      })
+    });
+    const report = buildAIBuilderDiagnosticReport({
+      kind: "error",
+      surface: "chat_stream",
+      session,
+      error
+    });
+    expect(error.details).toEqual(details);
+    expect(report.details).toEqual(details);
+    const rendered = formatAIBuilderDiagnosticReport(report);
+    for (const [key, value] of Object.entries(details)) {
+      expect(rendered).toContain(`- ${key}: ${value}`);
+    }
+  });
+
   it("formats public errors with diagnostic_context and details kept separate", () => {
     const report = buildAIBuilderDiagnosticReport({
       generated_at: "2026-05-21T20:00:00.000Z",
