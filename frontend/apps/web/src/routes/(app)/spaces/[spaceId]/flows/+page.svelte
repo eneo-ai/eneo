@@ -3,7 +3,6 @@
   import { goto } from "$app/navigation";
   import { resolve } from "$app/paths";
   import type { FlowSparse, Eneo } from "@eneo/eneo-js";
-  import { EneoError } from "@eneo/eneo-js";
   import type { RecoverableAIBuilderDraftSession } from "$lib/features/flows/ai-builder/protocol";
   import { Page } from "$lib/components/layout";
   import { getSpacesManager } from "$lib/features/spaces/SpacesManager";
@@ -11,6 +10,7 @@
   import { getAppContext } from "$lib/core/AppContext";
   import { toast } from "$lib/components/toast";
   import { m } from "$lib/paraglide/messages";
+  import { getFlowRuntimeErrorMessage } from "$lib/features/flows/flowRuntimeErrorMapping";
   import FlowsTable from "./FlowsTable.svelte";
   import CreateFlowDialog from "./CreateFlowDialog.svelte";
   import FlowPackageImportDialog from "$lib/features/flows/components/FlowPackageImportDialog.svelte";
@@ -53,9 +53,7 @@
       await discardAIBuilderDraft(data.eneo, sessionId);
       drafts = drafts.filter((draft) => draft.session_id !== sessionId);
     } catch (error) {
-      toast.error(
-        error instanceof EneoError ? error.getReadableMessage() : m.flow_list_discard_draft_failed()
-      );
+      toast.error(getFlowRuntimeErrorMessage(error, m.flow_list_discard_draft_failed()));
     }
   }
 </script>

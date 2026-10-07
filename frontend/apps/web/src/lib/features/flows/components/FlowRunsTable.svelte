@@ -1,11 +1,5 @@
 <script lang="ts">
-  import {
-    EneoError,
-    type Eneo,
-    type Flow,
-    type FlowRun,
-    type FlowRunSummary
-  } from "@eneo/eneo-js";
+  import { type Eneo, type Flow, type FlowRun, type FlowRunSummary } from "@eneo/eneo-js";
   import { untrack } from "svelte";
   import { Button } from "$lib/components/ui/button/index.js";
   import { Input } from "$lib/components/ui/input/index.js";
@@ -201,11 +195,7 @@
         shouldPollRun: (run) => shouldPollFlowRunStatus(run.status)
       },
       getErrorMessage: (error) =>
-        error instanceof EneoError
-          ? getFlowRuntimeErrorMessage(error, error.getReadableMessage())
-          : error instanceof Error
-            ? error.message
-            : m.flow_history_load_failed_desc()
+        getFlowRuntimeErrorMessage(error, m.flow_history_load_failed_desc())
     });
 
     if (result.kind === "loaded") {

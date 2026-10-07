@@ -27,6 +27,8 @@ import type { SegmentRecord, SessionRecoveryHint } from "$lib/features/audio/rec
 import { toast } from "$lib/components/toast";
 import { m } from "$lib/paraglide/messages";
 import FlowRunDialog from "./FlowRunDialog.svelte";
+import { createFlowRuntimeUploadTimeoutController } from "@eneo/eneo-js";
+import { withLocale } from "$lib/features/flows/testLocale";
 
 const recordingMocks = vi.hoisted(() => ({
   markSegmentUploaded: vi.fn(async () => undefined),
@@ -103,10 +105,10 @@ vi.mock("@eneo/eneo-js", async (importOriginal) => {
   const actual = await importOriginal<typeof import("@eneo/eneo-js")>();
   return {
     ...actual,
-    createFlowRuntimeUploadTimeoutController: () => ({
+    createFlowRuntimeUploadTimeoutController: vi.fn(() => ({
       onProgress: () => undefined,
       clear: () => undefined
-    })
+    }))
   };
 });
 
@@ -144,6 +146,48 @@ beforeEach(() => {
 });
 
 describe("FlowRunDialog recording upload reconciliation", () => {
+  it.each(["sv", "en"] as const)(
+    "keeps the typed local upload timeout detail in %s",
+    async (locale) => {
+      const restore = withLocale(locale);
+      try {
+        const actual = await vi.importActual<typeof import("@eneo/eneo-js")>("@eneo/eneo-js");
+        vi.mocked(createFlowRuntimeUploadTimeoutController).mockImplementationOnce(
+          actual.createFlowRuntimeUploadTimeoutController
+        );
+        const upload = vi.fn(() => new Promise<UploadedFile>(() => {}));
+        const eneo = buildEneo({ upload });
+        const contract = await eneo.flows.runContract.get({ id: "flow-1" });
+        contract.runtime_upload_policy = {
+          min_timeout_seconds: 2,
+          seconds_per_mebibyte: 1,
+          max_timeout_seconds: 2,
+          idle_timeout_seconds: 2,
+          response_timeout_seconds: 2
+        };
+        renderDialog(eneo);
+        await screen.findByText("Audio input");
+        vi.useFakeTimers();
+        await fireEvent.drop(screen.getByRole("button", { name: /Audio input/ }), {
+          dataTransfer: { files: [new File(["audio"], "interview.webm", { type: "audio/webm" })] }
+        });
+        await vi.waitFor(() => expect(upload).toHaveBeenCalledOnce());
+        await vi.advanceTimersByTimeAsync(2_000);
+        await vi.waitFor(() =>
+          expect(
+            screen.getByText(
+              m.flow_run_upload_timeout_not_started({ seconds: "2", name: "interview.webm" }),
+              { exact: false }
+            )
+          ).toBeTruthy()
+        );
+      } finally {
+        vi.useRealTimers();
+        restore();
+      }
+    }
+  );
+
   it("opens on its page heading, as a page change does, not on the close button", async () => {
     renderDialog(buildEneo({ upload: vi.fn() }));
     await screen.findByText("Audio input");
