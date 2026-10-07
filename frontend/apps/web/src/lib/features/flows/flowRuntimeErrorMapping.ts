@@ -265,35 +265,6 @@ const FLOW_API_ERROR_MESSAGES = {
   flow_assistant_snapshot_resource_invalid: m.flow_error_flow_assistant_snapshot_resource_invalid
 } satisfies Record<FlowApiErrorCode, () => string>;
 
-const UPLOAD_ERROR_HINTS: Record<string, string> = {
-  timeout: " Försök igen med en mindre fil eller kontrollera din internetanslutning.",
-  file_too_large: " Välj en mindre fil.",
-  network: " Kontrollera din internetanslutning och försök igen."
-};
-
-export function classifyUploadError(
-  message: string
-): "timeout" | "file_too_large" | "network" | "unknown" {
-  const lower = message.toLowerCase();
-  if (
-    lower.includes("timeout") ||
-    lower.includes("timed out") ||
-    lower.includes("did not start") ||
-    lower.includes("stalled") ||
-    lower.includes("server did not respond")
-  )
-    return "timeout";
-  if (lower.includes("too large") || lower.includes("max") || lower.includes("storlek"))
-    return "file_too_large";
-  if (lower.includes("network") || lower.includes("fetch") || lower.includes("nät"))
-    return "network";
-  return "unknown";
-}
-
-export function getUploadErrorHint(errorKind: ReturnType<typeof classifyUploadError>): string {
-  return UPLOAD_ERROR_HINTS[errorKind] ?? "";
-}
-
 const MISSING_TEMPLATE_CONTENT_PATTERNS = [
   "selected template file has no binary content",
   "published docx template file has no binary content",
