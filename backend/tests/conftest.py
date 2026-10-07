@@ -183,9 +183,21 @@ def pytest_terminal_summary(
 SCRIPT_TESTS_DIR = Path(__file__).parent / "scripts"
 
 
+def pytest_addoption(parser: pytest.Parser) -> None:
+    parser.addoption(
+        "--include-script-tests",
+        action="store_true",
+        default=False,
+        help="Include backend tooling tests alongside other selected tests.",
+    )
+
+
 def _scripts_requested(config: pytest.Config) -> bool:
-    """True when -m names the ``scripts`` marker as a token."""
-    return re.search(r"\bscripts\b", config.getoption("-m", default="")) is not None
+    """Include tooling tests through an explicit marker or collection option."""
+    return (
+        config.getoption("--include-script-tests") is True
+        or re.search(r"\bscripts\b", config.getoption("-m", default="")) is not None
+    )
 
 
 def _run_covers_script_tests(config: pytest.Config) -> bool:
@@ -203,12 +215,14 @@ def _run_covers_script_tests(config: pytest.Config) -> bool:
 
 @pytest.hookimpl(tryfirst=True)  # the -m filter must see the scripts marker
 def pytest_collection_modifyitems(config, items):
-    """Auto-skip tests with opt-in markers unless explicitly requested via -m.
+    """Auto-skip tests with opt-in markers unless explicitly requested.
 
     Tests under tests/scripts/ cover backend/scripts (measurement and release
     tooling), including its product-module dependencies. They are marked
     ``scripts`` and left out of the default run. Run them with ``-m scripts
     tests/scripts`` when changing the tooling, its tests, or imported product modules.
+    Mixed unit/script node selections use ``--include-script-tests`` so a
+    marker filter does not exclude their unit witnesses.
     """
     OPT_IN_MARKERS = {"api_key_matrix"}
 
