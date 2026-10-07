@@ -80,26 +80,24 @@ stateDiagram-v2
   awaiting_review --> cancelled: review rejected
   awaiting_review --> cancelled: review expired
   awaiting_review --> cancelled: user cancel or deleted flow
-  completed --> queued: rerun accepted
-  failed --> queued: rerun accepted
 ```
 
 </div>
 
-_Run status transitions. `completed` and `failed` are terminal for the original execution but can re-enter `queued` through an explicit step rerun; `cancelled` cannot._
+_Run status transitions. Terminal runs stay terminal. An eligible failed-run retry creates a separate child run; the source run does not re-enter `queued`._
 
 Do not hardcode this table: `GET /api/v1/flows/runs/status-capabilities/` returns the same matrix as JSON, so a client can drive its UI from the live contract.
 
-| Status            | Active | Keep polling | Terminal | Can cancel | Awaiting review | Can redispatch | Can rerun a step |
-| ----------------- | ------ | ------------ | -------- | ---------- | --------------- | -------------- | ---------------- |
-| `queued`          | yes    | yes          | no       | yes        | no              | yes            | no               |
-| `running`         | yes    | yes          | no       | yes        | no              | no             | no               |
-| `awaiting_review` | no     | yes          | no       | yes        | yes             | no             | no               |
-| `completed`       | no     | no           | yes      | no         | no              | no             | yes              |
-| `failed`          | no     | no           | yes      | no         | no              | no             | yes              |
-| `cancelled`       | no     | no           | yes      | no         | no              | no             | no               |
+| Status            | Active | Keep polling | Terminal | Can cancel | Awaiting review | Can redispatch |
+| ----------------- | ------ | ------------ | -------- | ---------- | --------------- | -------------- |
+| `queued`          | yes    | yes          | no       | yes        | no              | yes |
+| `running`         | yes    | yes          | no       | yes        | no              | no |
+| `awaiting_review` | no     | yes          | no       | yes        | yes             | no |
+| `completed`       | no     | no           | yes      | no         | no              | no |
+| `failed`          | no     | no           | yes      | no         | no              | no |
+| `cancelled`       | no     | no           | yes      | no         | no              | no |
 
-The full state map, including review-checkpoint and rerun-operation states, is on [The run lifecycle](/docs/flows-for-developers/run-lifecycle).
+The full state map, including review-checkpoint states, is on [The run lifecycle](/docs/flows-for-developers/run-lifecycle).
 
 ### How to wait for a run
 
@@ -134,7 +132,7 @@ Use this table to choose the right runtime journey before you read the detailed 
 | Human-in-the-loop pause and resume  | Runs pause only at review-marked steps and resume through review checkpoint endpoints.                                    | `GET /api/v1/flows/{id}/runs/{run_id}/review-checkpoints/active/` (`get_active_flow_run_review_checkpoint`)      |
 | Sending files mid-run               | Eneo Flows does not accept arbitrary file injection while a run is executing.                                             | `PATCH /api/v1/flows/{id}/runs/{run_id}/review-checkpoints/{checkpoint_id}/` (`edit_flow_run_review_checkpoint`) |
 | Results                             | Drive the UI from the typed final result, step details, artifact links, and status capabilities.                          | `GET /api/v1/flows/{id}/runs/{run_id}/` (`get_flow_run`)                                                         |
-| Reruns                              | Reruns invalidate downstream work and preserve lineage so clients can explain what changed.                               | `POST /api/v1/flows/{id}/runs/{run_id}/steps/{step_id}/rerun/` (`rerun_flow_run_step`)                           |
+| Failed-run retry | Reuse an eligible completed prefix in a child run, then execute from the first unfinished step. | `POST /api/v1/flows/{id}/runs/{run_id}/retry/` (`retry_flow_run_from_failed_step`) |
 | Robustness                          | Use idempotency, version pins, cancellation, redispatch, polling backoff, and status capabilities for retry-safe clients. | `POST /api/v1/flows/{id}/runs/` (`create_flow_run`)                                                              |
 | Failures                            | Branch on typed `FlowApiErrorCode` values and show the user the specific recovery action.                                 | `GET /api/v1/flows/{id}/runs/{run_id}/` (`get_flow_run`)                                                         |
 | Service keys and tenancy guarantees | Service keys can drive published runtime paths inside their scope and cannot inspect another principal's runs.            | `POST /api/v1/flows/{id}/runs/` (`create_flow_run`)                                                              |
@@ -636,7 +634,7 @@ Response:
 
 ### 8. Resume run
 
-Resume the run after approval so the worker can continue. `Idempotency-Key` is required here and nowhere else; send the same value on every retry of this one resume, because a different key against an already-resumed checkpoint returns `400 flow_review_already_resumed`.
+Resume the run after approval so the worker can continue. `Idempotency-Key` is required for this resume and for failed-run retry; send the same value on every retry of this one resume, because a different key against an already-resumed checkpoint returns `400 flow_review_already_resumed`.
 
 Resume within 30 days of `approved_at`. After that deadline, an approval the
 sweep has not yet processed refuses resume with `400 flow_run_abandoned`,
@@ -1059,26 +1057,33 @@ Common errors in this sequence: `flow_review_stale_revision`, `flow_review_expir
 
 Use the [Flow error reference](/guides/flows/reference/errors) for the complete code catalog and recovery actions.
 
-If a user asks for files during execution, route the product design through review or rerun instead of inventing an unsupported upload path.
+A review checkpoint can change text or structured output; it cannot attach a different input file. For different files, upload and bind them in a new run.
+
+### Retry a failed run
+
+`POST /api/v1/flows/{id}/runs/{run_id}/retry/` creates a child run from an eligible failed run. Send `Idempotency-Key` and no request body. The server reuses the contiguous completed prefix and selects the first unfinished step. Poll the returned child's id; the source stays failed. Creation returns `201`; replaying an accepted request with the same key returns `200` and `created: false`, without dispatching another child.
+
+The source must belong to the same user or service principal and use the current published version. Prefix outputs must be inline, and prefix review checkpoints must be approved. The child preserves the inputs and ordered file selections. Different inputs or a changed publication require a new run rather than a retry.
+
+A non-failed source returns `409 flow_run_retry_source_not_failed`. Version or prefix refusals also return `409`; creation still obeys input-size and concurrency limits. See [Retry a failed run from the first unfinished step](/guides/flows-api-guide#retry-a-failed-run-from-the-first-unfinished-step) for the response, SDK call and full refusal contract.
 
 ### Sending files mid-run
 
 Eneo Flows does not accept arbitrary file injection while a run is executing.
 
-1. If the flow needs new files, design a review-marked step before the file-consuming step.
+1. Use a review-marked step for a human decision or a text/structured correction.
 2. At the checkpoint, edit the reviewed output or reject/cancel the run based on your product rules.
-3. For different runtime files, create a rerun with explicit step input overrides after the original step has completed.
+3. For different runtime files, create a new run and bind the selected uploads in its creation request. A failed-run retry preserves the original selections.
 
 Endpoint facts:
 
 | Endpoint                                                               | Method  | Success        | Operation                         |
 | ---------------------------------------------------------------------- | ------- | -------------- | --------------------------------- |
 | `/api/v1/flows/{id}/runs/{run_id}/review-checkpoints/{checkpoint_id}/` | `PATCH` | `200 OK`       | `edit_flow_run_review_checkpoint` |
-| `/api/v1/flows/{id}/runs/{run_id}/steps/{step_id}/rerun/`              | `POST`  | `202 Accepted` | `rerun_flow_run_step`             |
 
 Contract coverage: These endpoints are contract-tested.
 
-Common errors in this sequence: `flow_review_not_active`, `flow_run_rerun_step_inputs_invalid`.
+Common errors in this sequence: `flow_review_not_active`.
 
 Use the [Flow error reference](/guides/flows/reference/errors) for the complete code catalog and recovery actions.
 
@@ -1983,8 +1988,8 @@ This table checks workloads against the default limits. It does not establish pr
 - **Dispatch to the worker is retried up to 5 times**, with fixed delays of 30, 120, 300, and 900 seconds. A sweep looks for stale queued runs every 30 seconds. `dispatch_attempt_count`, `dispatch_next_attempt_at`, and `dispatch_exhausted_at` on the run report where that budget stands.
 - **`redispatch` is for a stale queued run only**, and needs the observed `dispatch_exhausted_at` echoed back as `expected_dispatch_exhausted_at`. A `redispatched_count` of `0` means nothing was eligible.
 - **Exhausted queued dispatches have a 30-day limit**, measured from `dispatch_pending_since`. After that deadline, redrive returns `400 flow_run_abandoned`; the maintenance sweep fails the run while keeping its history and files.
-- **`rerun` is for a completed or failed run**, re-executes one completed step, invalidates everything downstream, and requires a `reason`.
-- Never auto-retry a step whose provider work may have started. A rerun repeats every provider call in that step, including calls that already succeeded, and spends again.
+- **Failed-run retry creates a child run** from an eligible completed prefix. The server selects the first unfinished step; completed source outputs are imported without new provider calls.
+- Inspect earlier effects before retrying a failure whose provider work may have started. The unfinished step can make new provider calls or repeat external effects; missing terminal evidence does not prove that remote work did not happen.
 
 ### Concurrency and rate
 
@@ -2011,7 +2016,7 @@ These are product limits, not documentation gaps. Design around them rather than
 - **No global machine-readable catalogue of accepted media types.** The accepted list is per flow and per step, and `GET /api/v1/flows/{id}/run-contract/` is the only authoritative source. Do not hardcode one.
 - **No rate-limit introspection.** Nothing reports an API key's remaining hourly quota; you discover exhaustion from a `429`.
 - **No stable format for transcription chunk markers.** The per-chunk headers a long transcript carries are a rendering detail of the transcription step, not a contract. Strip them defensively rather than parsing them.
-- **No mid-run file injection.** A review checkpoint edit changes only `text` and `structured`; it cannot attach a file. The one way to rebind uploaded files after a run starts is a step rerun with explicit `step_inputs` overrides.
+- **No mid-run file injection.** A review checkpoint edit changes only `text` and `structured`; it cannot attach a file. For different files, create a new run with the selected uploads; failed-run retry keeps the original file selections.
 - **CORS is deployment configuration, not an API contract.** A browser app calling Eneo directly depends on the operator's allowed origins; a server-side proxy avoids the question entirely, and is the right place to keep a service key anyway.
 
 <Callout type="warning">
@@ -2020,7 +2025,7 @@ These are product limits, not documentation gaps. Design around them rather than
 
 Runs pause only at steps configured for human review.
 
-Closest supported alternative: Design a review-marked step where your app needs human input, or rerun a completed step with explicit overrides.
+Closest supported alternative: Design a review-marked step where your app needs human input. Submit changed inputs in a new run.
 
 </Callout>
 
