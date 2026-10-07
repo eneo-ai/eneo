@@ -55,9 +55,10 @@ Run-history policy resolves Flow → Space → Organization from dedicated
 `flow_run_history_retention_mode` and `flow_run_history_retention_days` columns.
 A child either inherits or replaces the complete pair. `preserve` marks manual
 purge eligibility; `review_required` adds a human-review requirement. Neither
-mode authorizes scheduled deletion, and the current settings surface has no
-purge action. A later administrator purge owns preview, confirmation, approval,
-reason, bounded execution, and the immutable audit receipt. The product has no
+mode authorizes scheduled deletion. The existing administrator settings API
+can preview or explicitly purge eligible history; review-required and held runs
+remain stored. [Flow run-history retention](/guides/flows/retention-policy) owns
+the permissions, eligibility, and audit contract. The product has no
 classification retention plane, minimum-retention barriers, or tombstones.
 
 ## 8. Tenant ownership is relational
