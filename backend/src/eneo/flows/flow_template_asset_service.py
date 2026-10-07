@@ -245,6 +245,17 @@ class FlowTemplateAssetService:
         )
         return asset
 
+    async def get_asset_for_publication(
+        self,
+        *,
+        flow_id: UUID,
+        asset_id: UUID,
+    ) -> tuple[FlowTemplateAsset, File, tuple[str, ...]]:
+        asset, file = await self.get_asset_with_file(flow_id=flow_id, asset_id=asset_id)
+        # Publication preserves its existing archive error for absent bytes.
+        names = docx_template_placeholder_names(file.blob or b"", filename=file.name)
+        return asset, file, names
+
     async def get_asset_with_file(
         self,
         *,

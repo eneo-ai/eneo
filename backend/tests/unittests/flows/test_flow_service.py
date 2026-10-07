@@ -4,7 +4,7 @@ from dataclasses import dataclass
 from datetime import datetime, timezone
 from types import SimpleNamespace
 from typing import Any
-from unittest.mock import AsyncMock, MagicMock
+from unittest.mock import AsyncMock
 from uuid import uuid4
 
 import pytest
@@ -40,7 +40,6 @@ from eneo.flows.variable_resolver import iter_template_expressions
 from eneo.main.exceptions import BadRequestException, NotFoundException
 from eneo.main.models import NOT_PROVIDED
 from eneo.prompts.api.prompt_models import PromptCreate
-from tests.docx_template_fixtures import control_template_bytes
 
 
 class _FakeEncryptionService:
@@ -166,24 +165,27 @@ def _stub_template_asset_lookup(
     asset_id=None,
     checksum: str = "abc123",
     name: str = "rapport.docx",
-    blob: bytes | None = b"template-bytes",
+    placeholder_names: tuple[str, ...] = ("section",),
 ):
     resolved_asset_id = asset_id or uuid4()
     asset = SimpleNamespace(
         id=resolved_asset_id,
         flow_id=flow_id,
         file_id=file_id,
-        name=name,
-        checksum=checksum,
+        name="old-template.docx",
+        checksum="old-checksum",
     )
     file = SimpleNamespace(
         id=file_id,
         checksum=checksum,
         name=name,
         tenant_id=service.user.tenant_id,
-        blob=blob,
     )
-    service.template_asset_service.get_asset_with_file.return_value = (asset, file)
+    service.template_asset_service.get_asset_for_publication.return_value = (
+        asset,
+        file,
+        placeholder_names,
+    )
     return asset
 
 
@@ -253,7 +255,7 @@ async def test_template_file_reference_requires_persisted_flow_id(user) -> None:
     with pytest.raises(FlowPersistedIdMissingError):
         await service._resolve_template_asset_reference(step=step, flow=flow)
 
-    service.template_asset_service.get_asset_with_file.assert_not_awaited()
+    service.template_asset_service.get_asset_for_publication.assert_not_awaited()
 
 
 @pytest.mark.asyncio
@@ -1508,9 +1510,6 @@ async def test_publish_flow_pins_template_metadata_for_template_fill(user):
         file_id=template_file_id,
         asset_id=template_asset_id,
     )
-    service._inspect_docx_template = MagicMock(  # type: ignore[attr-defined]
-        return_value=[{"name": "section", "location": "body", "preview": "{{section}}"}]
-    )
 
     await service.publish_flow(flow_id=flow_id)
 
@@ -1575,13 +1574,7 @@ async def test_publish_flow_preserves_template_placeholder_order(user):
         flow_id=flow_id,
         file_id=template_file_id,
         asset_id=template_asset_id,
-    )
-    service._inspect_docx_template = MagicMock(  # type: ignore[attr-defined]
-        return_value=[
-            {"name": "bakgrund", "location": "body", "preview": "{{bakgrund}}"},
-            {"name": "analys", "location": "body", "preview": "{{analys}}"},
-            {"name": "slutsats", "location": "body", "preview": "{{slutsats}}"},
-        ]
+        placeholder_names=("bakgrund", "analys", "slutsats"),
     )
 
     await service.publish_flow(flow_id=flow_id)
@@ -1589,24 +1582,6 @@ async def test_publish_flow_preserves_template_placeholder_order(user):
     definition = version_repo.create.await_args.kwargs["definition_json"]
     output_config = definition["steps"][1]["output_config"]
     assert output_config["placeholders"] == ["bakgrund", "analys", "slutsats"]
-
-
-@pytest.mark.asyncio
-async def test_get_owned_docx_template_file_reports_missing_blob_clearly(user):
-    flow_repo = AsyncMock()
-    version_repo = AsyncMock()
-    service = _service(user=user, flow_repo=flow_repo, version_repo=version_repo)
-    asset = SimpleNamespace(id=uuid4(), flow_id=uuid4())
-    service.template_asset_service.get_asset_with_file.side_effect = BadRequestException(
-        "The selected DOCX template could not be read because the file content is missing.",
-        code=FlowApiErrorCode.TEMPLATE_MISSING_CONTENT.value,
-    )
-
-    with pytest.raises(
-        BadRequestException,
-        match="could not be read because the file content is missing",
-    ):
-        await service._get_template_asset_file(flow_id=asset.flow_id, asset_id=asset.id)
 
 
 @pytest.mark.asyncio
@@ -1651,10 +1626,24 @@ async def test_update_flow_allows_incomplete_template_fill_during_draft_editing(
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize(
-    ("targets", "message"),
-    [(["section"], "missing bindings"), ([], "at least one")],
+    ("asset_error", "expected_code"),
+    [
+        (None, None),
+        (NotFoundException("Missing asset"), FlowApiErrorCode.TEMPLATE_NOT_ACCESSIBLE),
+        (
+            BadRequestException(
+                "Missing content", code=FlowApiErrorCode.TEMPLATE_MISSING_CONTENT.value
+            ),
+            FlowApiErrorCode.TEMPLATE_MISSING_CONTENT,
+        ),
+    ],
+    ids=["missing_bindings", "inaccessible_asset", "missing_content"],
 )
-async def test_publish_flow_rejects_incomplete_template(user, targets, message):
+async def test_publish_flow_rejects_invalid_template_before_version_write(
+    user,
+    asset_error: NotFoundException | BadRequestException | None,
+    expected_code: FlowApiErrorCode | None,
+):
     flow_repo = AsyncMock()
     version_repo = AsyncMock()
     service = _service(user=user, flow_repo=flow_repo, version_repo=version_repo)
@@ -1694,11 +1683,17 @@ async def test_publish_flow_rejects_incomplete_template(user, targets, message):
         flow_id=flow_id,
         file_id=template_file_id,
         asset_id=template_asset_id,
-        blob=control_template_bytes(rich=targets),
     )
 
-    with pytest.raises(BadRequestException, match=message):
+    service.template_asset_service.get_asset_for_publication.side_effect = asset_error
+    with pytest.raises(BadRequestException) as exc_info:
         await service.publish_flow(flow_id=flow_id)
+    if asset_error is None:
+        assert "missing bindings" in str(exc_info.value)
+    else:
+        assert exc_info.value.code == expected_code.value
+        if isinstance(asset_error, BadRequestException):
+            assert exc_info.value is asset_error
     version_repo.create.assert_not_awaited()
 
 
@@ -1747,15 +1742,7 @@ async def test_publish_flow_allows_explicit_empty_template_binding(user):
         flow_id=flow_id,
         file_id=template_file_id,
         asset_id=template_asset_id,
-    )
-    service._inspect_docx_template = MagicMock(  # type: ignore[attr-defined]
-        return_value=[
-            {
-                "name": "optional_section",
-                "location": "body",
-                "preview": "{{optional_section}}",
-            }
-        ]
+        placeholder_names=("optional_section",),
     )
 
     await service.publish_flow(flow_id=flow_id)

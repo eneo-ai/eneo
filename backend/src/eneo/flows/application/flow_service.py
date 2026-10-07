@@ -76,10 +76,6 @@ from eneo.flows.published_definition import (
     build_published_definition_json,
     parse_published_runtime_steps,
 )
-from eneo.flows.runtime.docx_template_runtime import (
-    extract_docx_template_text_preview,
-    inspect_docx_template_bytes,
-)
 from eneo.main.exceptions import BadRequestException, NotFoundException
 from eneo.main.models import NOT_PROVIDED, NotProvided, ResourcePermission
 from eneo.settings.encryption_service import EncryptionService
@@ -569,26 +565,6 @@ class FlowService:
             tenant_id=self.user.tenant_id,
             expected_revision=flow.draft_revision,
         )
-
-    async def inspect_template_file(
-        self,
-        *,
-        flow_id: UUID,
-        file_id: UUID,
-    ) -> dict[str, Any]:
-        _, template_file = await self._get_template_asset_file(
-            flow_id=flow_id,
-            asset_id=file_id,
-        )
-        return {
-            "asset_id": file_id,
-            "file_id": template_file.id,
-            "file_name": template_file.name,
-            "placeholders": self._inspect_docx_template(template_file),
-            "extracted_text_preview": extract_docx_template_text_preview(
-                template_file.blob or b""
-            ),
-        }
 
     async def publish_flow(self, *, flow_id: UUID) -> Flow:
         flow = await self.get_flow(flow_id)
@@ -1267,12 +1243,15 @@ class FlowService:
                 f"Step {step.step_order}: output_config must be an object for output_mode 'template_fill'."
             )
 
-        template_asset, template_file = await self._resolve_template_asset_reference(
+        (
+            template_asset,
+            template_file,
+            names,
+        ) = await self._resolve_template_asset_reference(
             step=step,
             flow=flow,
         )
-        placeholders = self._inspect_docx_template(template_file)
-        placeholder_names = self._placeholder_names(placeholders)
+        placeholder_names = list(names)
         validate_template_placeholder_bindings(
             step_order=step.step_order,
             placeholder_names=placeholder_names,
@@ -1286,27 +1265,12 @@ class FlowService:
         next_output_config["placeholders"] = placeholder_names
         return next_output_config
 
-    async def _get_template_asset_file(
-        self,
-        *,
-        flow_id: UUID | None,
-        asset_id: UUID,
-    ) -> tuple[FlowTemplateAsset, File]:
-        if flow_id is None:
-            raise RuntimeError(
-                "A persisted Flow is required to resolve a template asset"
-            )
-        return await self._require_template_asset_service().get_asset_with_file(
-            flow_id=flow_id,
-            asset_id=asset_id,
-        )
-
     async def _resolve_template_asset_reference(
         self,
         *,
         step: FlowStep,
         flow: Flow,
-    ) -> tuple[FlowTemplateAsset, File]:
+    ) -> tuple[FlowTemplateAsset, File, tuple[str, ...]]:
         if not isinstance(step.output_config, dict):
             raise BadRequestException(
                 f"Step {step.step_order}: output_config must be an object for output_mode 'template_fill'."
@@ -1322,7 +1286,7 @@ class FlowService:
                     f"Step {step.step_order}: output_config.template_asset_id must be a UUID."
                 ) from exc
             try:
-                return await self._get_template_asset_file(
+                return await self._require_template_asset_service().get_asset_for_publication(
                     flow_id=flow_id,
                     asset_id=template_asset_id,
                 )
@@ -1335,24 +1299,12 @@ class FlowService:
             f"Step {step.step_order}: output_config.template_asset_id must be configured."
         )
 
-    def _inspect_docx_template(self, file: File) -> list[dict[str, Any]]:
-        return inspect_docx_template_bytes(file.blob or b"", filename=file.name)
-
     @staticmethod
     def _template_not_accessible_error(*, step_order: int) -> BadRequestException:
         return BadRequestException(
             f"Step {step_order}: selected DOCX template is no longer available for this flow. Upload the template again or choose another DOCX file.",
             code=FlowApiErrorCode.TEMPLATE_NOT_ACCESSIBLE.value,
         )
-
-    @staticmethod
-    def _placeholder_names(placeholders: list[dict[str, Any]]) -> list[str]:
-        names: list[str] = []
-        for item in placeholders:
-            name = str(item["name"])
-            if name not in names:
-                names.append(name)
-        return names
 
 
 def _with_saved_form_fields(
