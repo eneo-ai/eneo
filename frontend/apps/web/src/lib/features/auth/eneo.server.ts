@@ -5,8 +5,7 @@
 
 import { readTraceId } from "@eneo/eneo-js";
 import { setFrontendAuthCookie } from "./auth.server";
-import { getRequestEvent } from "$app/server";
-import { getBackendUrl } from "$lib/core/environment.server";
+import { getBackendServerUrl } from "$lib/core/environment.server";
 
 export type EneoLoginResult = {
   success: boolean;
@@ -50,18 +49,17 @@ async function readAttemptLimit(
 export async function loginWithEneo(username: string, password: string): Promise<EneoLoginResult> {
   // Endpoint wants urlencoded data
   const body = new URLSearchParams();
-
   body.append("username", username);
   body.append("password", password);
 
-  const { fetch } = getRequestEvent();
-
-  const response = await fetch(`${getBackendUrl()}/api/v1/users/login/token/`, {
-    body: body,
+  // Server-to-server call: use the internal backend URL with native fetch.
+  // Do NOT use getRequestEvent().fetch + getBackendUrl() (public/same-origin):
+  // SvelteKit resolves same-origin event.fetch internally, so it never reaches
+  // the backend (400) behind a reverse proxy.
+  const response = await fetch(`${getBackendServerUrl()}/api/v1/users/login/token/`, {
+    body,
     method: "POST",
-    headers: {
-      "Content-Type": "application/x-www-form-urlencoded;charset=UTF-8"
-    }
+    headers: { "Content-Type": "application/x-www-form-urlencoded;charset=UTF-8" }
   });
 
   // Available on both success and failure.
@@ -83,7 +81,6 @@ export async function loginWithEneo(username: string, password: string): Promise
 
   try {
     const { access_token } = await response.json();
-    // Bit weird renaming going on here, but that is how it is, as the backend calls this "access token"
     await setFrontendAuthCookie({ id_token: access_token });
     return { success: true, traceId, correlationId: traceId };
   } catch (e) {
