@@ -1,11 +1,17 @@
-"""A provider's stored key is never sent to a destination it was not entered for."""
+"""A provider's stored key, and any secret header, is never sent to a destination
+it was not entered for."""
 
+from copy import deepcopy
 from datetime import datetime, timezone
+from types import SimpleNamespace
+from typing import Any
 from unittest.mock import AsyncMock, MagicMock
 from uuid import uuid4
 
 import pytest
+from cryptography.fernet import Fernet
 
+from eneo.audit.domain.action_types import ActionType
 from eneo.main.exceptions import BadRequestException
 from eneo.model_providers.domain import model_provider_service
 from eneo.model_providers.domain.model_provider import ModelProvider
@@ -14,6 +20,12 @@ from eneo.model_providers.domain.model_provider_service import (
     effective_endpoint,
     normalize_destination,
 )
+from eneo.model_providers.domain.outbound_header_writes import OutboundHeaderWrite
+from eneo.model_providers.presentation.model_provider_models import (
+    ModelProviderUpdate,
+)
+from eneo.model_providers.presentation.model_provider_router import update_provider
+from eneo.settings.encryption_service import EncryptionService
 
 
 @pytest.fixture(autouse=True)
@@ -210,3 +222,209 @@ class TestUpdateWithNewDestination:
 
         repository.update.assert_awaited_once()
         assert updated.config["endpoint"] == "http://vllm-b:8000"
+
+
+GATEWAY = "https://gateway-a.internal/v1"
+ELSEWHERE = "https://elsewhere.example/v1"
+
+
+def _secret_header(**overrides: Any) -> dict[str, Any]:
+    return {
+        "id": "h1",
+        "name": "X-Credential",
+        "value": "enc(sk-a)",
+        "encoding": "none",
+        "secret": True,
+        "on_missing": "omit",
+        "fallback": None,
+        "classification": None,
+        **overrides,
+    }
+
+
+def _keep(**kwargs: Any) -> OutboundHeaderWrite:
+    """The stored secret, sent back as an editor does."""
+    return OutboundHeaderWrite(
+        id="h1", name="X-Credential", encoding="none", secret=True, **kwargs
+    )
+
+
+def _header_service(
+    header: dict[str, Any] | None = None,
+) -> tuple[ModelProvider, ModelProviderService, AsyncMock]:
+    """A completion-only gateway authenticated solely by a secret header."""
+    provider = _provider("hosted_vllm", config={"endpoint": GATEWAY}, credentials={})
+    provider.outbound_headers = [header or _secret_header()]
+    service, repository = _service(provider)
+    service.encryption.decrypt.side_effect = lambda value: value[4:-1]
+    return provider, service, repository
+
+
+class TestSecretHeadersOnNewDestination:
+    """Like the API key, a stored secret header value or fallback is never sent
+    to a destination it was not entered for."""
+
+    @pytest.mark.parametrize(
+        "edit",
+        [
+            {"config": {"endpoint": ELSEWHERE}},
+            {"config": {"endpoint": ELSEWHERE}, "outbound_headers": [_keep()]},
+            # The request resolves `endpoint` from credentials before config.
+            {"credentials": {"endpoint": ELSEWHERE}},
+        ],
+    )
+    async def test_moving_without_re_entering_is_rejected_before_writing(
+        self, edit: dict[str, Any]
+    ):
+        _, service, repository = _header_service()
+
+        with pytest.raises(BadRequestException, match="'X-Credential'"):
+            await service.update(uuid4(), **edit)
+
+        repository.update.assert_not_awaited()
+
+    async def test_a_stored_secret_fallback_must_be_re_entered_too(self):
+        _, service, repository = _header_service(
+            _secret_header(fallback="enc(fb-a)", on_missing="fallback")
+        )
+
+        with pytest.raises(BadRequestException, match="'X-Credential'"):
+            await service.update(
+                uuid4(),
+                config={"endpoint": ELSEWHERE},
+                outbound_headers=[
+                    _keep(on_missing="fallback", value="sk-b", value_supplied=True)
+                ],
+            )
+
+        repository.update.assert_not_awaited()
+
+    @pytest.mark.parametrize(
+        ("writes", "stored_values"),
+        [
+            ([_keep(value="sk-b", value_supplied=True)], ["enc(sk-b)"]),
+            ([], []),
+        ],
+    )
+    async def test_re_entering_or_removing_the_secret_allows_the_move(
+        self, writes: list[OutboundHeaderWrite], stored_values: list[str]
+    ):
+        _, service, repository = _header_service()
+
+        updated = await service.update(
+            uuid4(), config={"endpoint": ELSEWHERE}, outbound_headers=writes
+        )
+
+        repository.update.assert_awaited_once()
+        assert updated.config["endpoint"] == ELSEWHERE
+        assert [header["value"] for header in updated.outbound_headers] == (
+            stored_values
+        )
+
+    @pytest.mark.parametrize(
+        "edit",
+        [
+            {"name": "renamed"},
+            {"config": {"endpoint": "HTTPS://GATEWAY-A.internal/v1/"}},
+            {"outbound_headers": [_keep()]},
+        ],
+    )
+    async def test_edits_that_keep_the_destination_keep_the_secret(
+        self, edit: dict[str, Any]
+    ):
+        _, service, repository = _header_service()
+
+        updated = await service.update(uuid4(), **edit)
+
+        repository.update.assert_awaited_once()
+        assert updated.outbound_headers[0]["value"] == "enc(sk-a)"
+
+
+def _encryption() -> EncryptionService:
+    return EncryptionService(Fernet.generate_key().decode())
+
+
+def _key_from_a_previous_encryption_key(
+    credentials: dict[str, Any] | None = None,
+) -> tuple[ModelProvider, ModelProviderService, AsyncMock]:
+    """A gateway with a plain header, whose stored API key was encrypted
+    before ENCRYPTION_KEY changed and no longer decrypts."""
+    provider = _provider(
+        "hosted_vllm",
+        config={"endpoint": GATEWAY},
+        credentials={
+            "api_key": _encryption().encrypt("sk-old-key"),
+            **(credentials or {}),
+        },
+    )
+    provider.outbound_headers = [
+        _secret_header(id="h2", name="X-Region", value="eu-north", secret=False)
+    ]
+    repository = AsyncMock()
+    # Each load is its own snapshot, as rows read from the database are.
+    repository.get_by_id.side_effect = lambda *_, **__: deepcopy(provider)
+    repository.get_by_name.return_value = None
+    repository.update.side_effect = lambda p: p
+    repository.session = MagicMock()
+    service = ModelProviderService(repository=repository, encryption=_encryption())
+    return provider, service, repository
+
+
+class TestReplacingAnUndecryptableKey:
+    """Resolving the destination never decrypts the key, so the edit that
+    replaces an undecryptable key commits instead of rolling back."""
+
+    @pytest.mark.parametrize(
+        ("credentials", "expected"),
+        [
+            ({}, GATEWAY),
+            # The request resolves `endpoint` from credentials before config.
+            ({"endpoint": ELSEWHERE}, ELSEWHERE),
+        ],
+    )
+    def test_endpoint_resolves_without_the_key(
+        self, credentials: dict[str, Any], expected: str
+    ):
+        provider, service, _ = _key_from_a_previous_encryption_key(credentials)
+
+        assert service.effective_endpoint(provider) == expected
+
+    @pytest.mark.parametrize(
+        ("headers", "kept", "audited"),
+        [
+            (None, ["X-Region"], []),
+            ([], [], [ActionType.MODEL_PROVIDER_HEADERS_UPDATED]),
+        ],
+        ids=["headers-kept", "headers-cleared"],
+    )
+    async def test_the_update_replacing_it_commits(
+        self,
+        headers: list[dict[str, Any]] | None,
+        kept: list[str],
+        audited: list[ActionType],
+    ):
+        stored, service, repository = _key_from_a_previous_encryption_key()
+        audit = AsyncMock()
+        admin = SimpleNamespace(
+            id=uuid4(), tenant_id=stored.tenant_id, username="admin", email=None
+        )
+
+        public = await update_provider(
+            provider_id=stored.id,
+            data=ModelProviderUpdate(
+                credentials={"api_key": "sk-new-key"}, outbound_headers=headers
+            ),
+            user=admin,
+            service=service,
+            audit=audit,
+        )
+
+        [written] = repository.update.await_args.args
+        assert service.encryption.decrypt(written.credentials["api_key"]) == (
+            "sk-new-key"
+        )
+        assert [header["name"] for header in written.outbound_headers] == kept
+        assert public.config == {"endpoint": GATEWAY}
+        assert [
+            call.kwargs["action"] for call in audit.log_async.await_args_list
+        ] == audited

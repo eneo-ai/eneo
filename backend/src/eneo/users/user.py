@@ -299,9 +299,12 @@ class UserInDB(UserInDBBase):
     )
     # IdP provisioning data, readable in-process only. `exclude=True` keeps both
     # out of every response built from this model (e.g. sysadmin endpoints that
-    # return UserInDB), so no tenant- or admin-facing API starts exposing them.
-    external_id: Optional[str] = Field(default=None, exclude=True)
-    scim_extensions: Optional[dict[str, Any]] = Field(default=None, exclude=True)
+    # return UserInDB), so no tenant- or admin-facing API starts exposing them;
+    # `repr=False` keeps the attributes out of any log line that formats a user.
+    external_id: Optional[str] = Field(default=None, exclude=True, repr=False)
+    scim_extensions: Optional[dict[str, Any]] = Field(
+        default=None, exclude=True, repr=False
+    )
 
     @computed_field
     @property

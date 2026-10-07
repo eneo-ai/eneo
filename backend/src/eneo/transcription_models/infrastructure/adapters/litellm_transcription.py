@@ -17,8 +17,14 @@ from eneo.model_providers.infrastructure import litellm_transport
 from eneo.model_providers.infrastructure.litellm_provider import (
     build_litellm_provider_kwargs,
 )
+from eneo.model_providers.infrastructure.outbound_headers_runtime import (
+    apply_outbound_headers,
+)
 
 if TYPE_CHECKING:
+    from eneo.model_providers.infrastructure.outbound_headers_runtime import (
+        ProviderOutboundHeaders,
+    )
     from eneo.model_providers.infrastructure.tenant_model_credential_resolver import (
         TenantModelCredentialResolver,
     )
@@ -40,11 +46,15 @@ class LiteLLMTranscriptionAdapter:
         model: "TranscriptionModel",
         credential_resolver: "TenantModelCredentialResolver",
         provider_type: str,
+        outbound_headers: "ProviderOutboundHeaders | None" = None,
     ) -> None:
         super().__init__()
         self.model = model
         self.credential_resolver = credential_resolver
         self.provider_type = provider_type
+        # Decrypted when the adapter is built (inside the job's session
+        # scope); resolved per chunk request, which needs no database.
+        self.outbound_headers = outbound_headers
 
         # Construct LiteLLM model name with provider prefix
         # LiteLLM requires the provider prefix to know which client to use
@@ -68,6 +78,13 @@ class LiteLLMTranscriptionAdapter:
         Prepare kwargs for LiteLLM transcription call with credentials.
         """
         kwargs = build_litellm_provider_kwargs(self.credential_resolver)
+        if self.outbound_headers is not None and self.outbound_headers.headers:
+            # LiteLLM 1.101's OpenAI-compatible transcription route drops
+            # extra_headers (transport-capture tests pin this). Sending the
+            # request without the configured headers would be a silently
+            # weaker request, so it is refused before anything is sent.
+            self.outbound_headers.reject(None, "transcription_unsupported")
+        apply_outbound_headers(kwargs, self.outbound_headers)
 
         api_key = kwargs.get("api_key")
         if isinstance(api_key, str):

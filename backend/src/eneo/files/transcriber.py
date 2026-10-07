@@ -25,6 +25,7 @@ if TYPE_CHECKING:
     from eneo.transcription_models.domain.transcription_model import (
         TranscriptionModel,
     )
+    from eneo.users.user import UserInDB
 
 logger = get_logger(__name__)
 
@@ -37,10 +38,13 @@ class Transcriber:
         config: Optional[Settings] = None,
         encryption_service: Optional["EncryptionService"] = None,
         session: Optional["AsyncSession"] = None,
+        user: Optional["UserInDB"] = None,
     ):
         super().__init__()
         self.file_service = file_service
         self.tenant = tenant
+        # Source of dynamic outbound-header values for the provider request.
+        self.user = user
         self.config = config or SETTINGS
         self.encryption_service = encryption_service
         self.session = session
@@ -140,6 +144,9 @@ class Transcriber:
             model=model,
             credential_resolver=credential_resolver,
             provider_type=provider.provider_type,
+            outbound_headers=provider.create_outbound_headers(
+                self.encryption_service, self.user
+            ),
         )
 
     async def transcribe_from_filepath(

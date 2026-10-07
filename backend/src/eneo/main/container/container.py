@@ -886,6 +886,7 @@ class Container(containers.DeclarativeContainer):
     create_embeddings_service = providers.Factory(
         CreateEmbeddingsService,
         tenant=tenant,
+        user=user,
         config=config,
         encryption_service=encryption_service,
         session=session,
@@ -1624,6 +1625,7 @@ class Container(containers.DeclarativeContainer):
         Transcriber,
         file_service=file_service,
         tenant=tenant,
+        user=user,
         config=config,
         encryption_service=encryption_service,
         session=session,

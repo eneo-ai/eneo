@@ -551,6 +551,30 @@ class Settings(BaseSettings):
     # Tenant credential management
     tenant_credentials_enabled: bool = False
 
+    # Endpoints that configured outbound provider headers may be sent to, as a
+    # JSON list of URLs (e.g. ["https://gateway.internal/v1"]). Empty (default):
+    # any explicitly configured provider endpoint. See
+    # model_providers/domain/outbound_header_destinations.py for matching.
+    outbound_headers_allowed_destinations: list[str] = []
+
+    @field_validator("outbound_headers_allowed_destinations")
+    @classmethod
+    def validate_outbound_headers_allowed_destinations(cls, v: list[str]) -> list[str]:
+        from eneo.model_providers.domain.outbound_header_destinations import (
+            InvalidDestination,
+            parse_destination,
+        )
+
+        for index, entry in enumerate(v):
+            try:
+                parse_destination(entry)
+            except InvalidDestination as exc:
+                # The entry is not echoed: a malformed URL may carry credentials.
+                raise ValueError(
+                    f"OUTBOUND_HEADERS_ALLOWED_DESTINATIONS entry {index}: {exc}"
+                ) from exc
+        return v
+
     @field_validator("export_dir", mode="before")
     @classmethod
     def validate_export_dir_not_empty(cls, v: object) -> object:
