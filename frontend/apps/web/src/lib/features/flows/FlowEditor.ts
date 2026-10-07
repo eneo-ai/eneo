@@ -23,6 +23,7 @@ import { remapStepOrderTemplateTokens, replaceExactTemplateToken } from "./flowV
 import { getFlowStepValidationIssues } from "./flowStepTypes";
 import { buildSpeakerMappingOutputConfig } from "./speakerMappingConfig";
 import { m } from "$lib/paraglide/messages";
+import { getFlowRuntimeErrorMessage } from "$lib/features/flows/flowRuntimeErrorMapping";
 import { parseServerValidationIdentity } from "$lib/features/flows/flowStepValidationMessages";
 
 /**
@@ -426,7 +427,7 @@ function createFlowEditor(data: FlowEditorInitData) {
     shouldSaveImmediately: shouldSaveAssistantImmediately,
     isDisabled: () => get(isPublished),
     getErrorMessage: (error) =>
-      error instanceof EneoError ? error.getReadableMessage() : "assistant_save_failed",
+      getFlowRuntimeErrorMessage(error, m.flow_validation_msg_assistant_save_failed()),
     onValidationError: setAssistantValidationError,
     onSaved: () => {
       assistantRevision.update((value) => value + 1);
