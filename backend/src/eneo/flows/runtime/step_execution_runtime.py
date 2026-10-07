@@ -43,7 +43,10 @@ from eneo.flows.citation_sidecar import (
 from eneo.flows.domain.flow import FlowRun, FlowStepResult, FlowStepResultStatus
 from eneo.flows.domain.mapped_execution_policy import SummarizationBudget
 from eneo.flows.domain.provider_call import SummarizationCallInput
-from eneo.flows.domain.rag_evidence import build_step_result_citation_state
+from eneo.flows.domain.rag_evidence import (
+    RAG_RETRIEVAL_FAIL_CLOSED_STATUSES,
+    build_step_result_citation_state,
+)
 from eneo.flows.domain.review_edit_references import reviewed_edit_prompt_block
 from eneo.flows.domain.runtime import (
     RunExecutionState,
@@ -89,7 +92,6 @@ from eneo.flows.runtime.output_formats.base import (
 )
 from eneo.flows.runtime.output_runtime import TypedOutputProcessingResult
 from eneo.flows.runtime.protocols import RuntimeAssistantProtocol
-from eneo.flows.runtime.rag_retrieval import RAG_RETRIEVAL_FAIL_CLOSED_STATUSES
 from eneo.flows.runtime.run_cancellation import (
     FlowStepCancelledError,
     run_cancel_probe_scope,

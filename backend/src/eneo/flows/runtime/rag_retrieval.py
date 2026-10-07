@@ -9,14 +9,15 @@ from typing import (
     Any,
     Awaitable,
     Callable,
-    Literal,
-    TypeAlias,
     cast,
-    get_args,
 )
 from uuid import UUID
 
-from eneo.flows.domain.rag_evidence import RetrievedKnowledgeEvidence
+from eneo.flows.domain.rag_evidence import (
+    RagEmbeddingModel,
+    RagEmbeddingModelStatus,
+    RagRetrievalRecord,
+)
 from eneo.flows.domain.rag_evidence_policy import FlowRagEvidencePolicy
 from eneo.flows.domain.runtime import StepDiagnostic
 from eneo.flows.flow_run_provenance import default_rag_tracking
@@ -26,29 +27,6 @@ from eneo.info_blobs.info_blob import InfoBlobChunkInDBWithScore
 
 if TYPE_CHECKING:
     from eneo.assistants.references import ReferencesService
-
-
-RagRetrievalStatus: TypeAlias = Literal[
-    "skipped_no_service",
-    "skipped_no_knowledge",
-    "skipped_no_input",
-    "skipped_transcribe_only",
-    "success",
-    "no_chunks",
-    "timeout",
-    "error",
-]
-RAG_RETRIEVAL_STATUSES: frozenset[RagRetrievalStatus] = frozenset(
-    cast(tuple[RagRetrievalStatus, ...], get_args(RagRetrievalStatus))
-)
-RAG_RETRIEVAL_FAIL_CLOSED_STATUSES: frozenset[RagRetrievalStatus] = frozenset(
-    status
-    for status in RAG_RETRIEVAL_STATUSES
-    if status not in {"success", "skipped_transcribe_only"}
-)
-
-
-RagEmbeddingModelStatus: TypeAlias = Literal["recorded", "not_reported"]
 
 
 @dataclass(frozen=True)
@@ -61,7 +39,7 @@ class RagRetrievalDeps:
 
 def _embedding_model_evidence(
     datastore_result: object,
-) -> tuple[dict[str, str | None] | None, RagEmbeddingModelStatus]:
+) -> tuple[RagEmbeddingModel | None, RagEmbeddingModelStatus]:
     """Read back the embedding model retrieval actually embedded the query with.
 
     The retrieval service owns which model a query runs against; Flows records
@@ -87,40 +65,22 @@ async def retrieve_rag_chunks(
 ) -> tuple[list[InfoBlobChunkInDBWithScore], dict[str, Any], list[StepDiagnostic]]:
     info_blob_chunks: list[InfoBlobChunkInDBWithScore] = []
     rag_diagnostics: list[StepDiagnostic] = []
-    rag_metadata: dict[str, Any] = {
-        "attempted": False,
-        "status": "skipped_no_service",
-        "version": 1,
-        "timeout_seconds": int(deps.rag_retrieval_timeout_seconds),
-        "include_info_blobs": False,
-        "chunks_retrieved": 0,
-        "raw_chunks_count": 0,
-        "deduped_chunks_count": 0,
-        "unique_sources": 0,
-        "source_ids": [],
-        "source_ids_short": [],
-        "error_code": None,
-        "retrieval_duration_ms": None,
-        "retrieval_error_type": None,
-        "embedding_model": None,
-        "embedding_model_status": "not_reported",
-        "reference_metadata_status": "skipped_unavailable",
-        "reference_metadata_error_type": None,
-        "tracking": default_rag_tracking(),
-        **RetrievedKnowledgeEvidence().aggregate_payload(),
-        "references": [],
-    }
+    rag_record = RagRetrievalRecord(
+        timeout_seconds=int(deps.rag_retrieval_timeout_seconds),
+        reference_metadata_status="skipped_unavailable",
+        tracking=default_rag_tracking(),
+    )
     if deps.references_service is None:
-        rag_metadata["status"] = "skipped_no_service"
-        return info_blob_chunks, rag_metadata, rag_diagnostics
+        rag_record.status = "skipped_no_service"
+        return info_blob_chunks, rag_record.to_payload(), rag_diagnostics
     if not assistant.has_knowledge():
-        rag_metadata["status"] = "skipped_no_knowledge"
-        return info_blob_chunks, rag_metadata, rag_diagnostics
+        rag_record.status = "skipped_no_knowledge"
+        return info_blob_chunks, rag_record.to_payload(), rag_diagnostics
     if not question.strip():
-        rag_metadata["status"] = "skipped_no_input"
-        return info_blob_chunks, rag_metadata, rag_diagnostics
+        rag_record.status = "skipped_no_input"
+        return info_blob_chunks, rag_record.to_payload(), rag_diagnostics
 
-    rag_metadata["attempted"] = True
+    rag_record.attempted = True
     retrieval_started = time.monotonic()
     try:
         datastore_result = await asyncio.wait_for(
@@ -167,10 +127,8 @@ async def retrieve_rag_chunks(
                         info_blob_ids=metadata_ids
                     )
                 except Exception as exc:
-                    rag_metadata["reference_metadata_status"] = "error"
-                    rag_metadata["reference_metadata_error_type"] = (
-                        exc.__class__.__name__
-                    )
+                    rag_record.reference_metadata_status = "error"
+                    rag_record.reference_metadata_error_type = exc.__class__.__name__
                     deps.logger.warning(
                         "flow_executor.rag_reference_metadata_failed run_id=%s step_order=%d",
                         run_id,
@@ -186,28 +144,28 @@ async def retrieve_rag_chunks(
                             ).items()
                             if isinstance(value, dict)
                         }
-                    rag_metadata["reference_metadata_status"] = "success"
+                    rag_record.reference_metadata_status = "success"
         evidence = build_retrieved_knowledge_evidence(
             info_blob_chunks,
             source_metadata_by_id=source_metadata_by_id,
             policy=deps.evidence_policy,
         )
-        rag_metadata["status"] = "success" if info_blob_chunks else "no_chunks"
-        rag_metadata["retrieval_duration_ms"] = int(
+        rag_record.status = "success" if info_blob_chunks else "no_chunks"
+        rag_record.retrieval_duration_ms = int(
             (time.monotonic() - retrieval_started) * 1000
         )
-        rag_metadata["chunks_retrieved"] = len(info_blob_chunks)
-        rag_metadata["raw_chunks_count"] = len(info_blob_chunks)
-        rag_metadata["deduped_chunks_count"] = len(no_duplicate_chunks)
-        rag_metadata["unique_sources"] = len(source_ids)
-        rag_metadata["source_ids"] = source_ids
-        rag_metadata["source_ids_short"] = [source_id[:8] for source_id in source_ids]
+        rag_record.chunks_retrieved = len(info_blob_chunks)
+        rag_record.raw_chunks_count = len(info_blob_chunks)
+        rag_record.deduped_chunks_count = len(no_duplicate_chunks)
+        rag_record.unique_sources = len(source_ids)
+        rag_record.source_ids = source_ids
+        rag_record.source_ids_short = [source_id[:8] for source_id in source_ids]
         embedding_model, embedding_model_status = _embedding_model_evidence(
             datastore_result
         )
-        rag_metadata["embedding_model"] = embedding_model
-        rag_metadata["embedding_model_status"] = embedding_model_status
-        evidence.write_into(rag_metadata)
+        rag_record.embedding_model = embedding_model
+        rag_record.embedding_model_status = embedding_model_status
+        rag_record.evidence = evidence
         if not info_blob_chunks:
             rag_diagnostics.append(
                 StepDiagnostic(
@@ -219,10 +177,10 @@ async def retrieve_rag_chunks(
                 )
             )
     except asyncio.TimeoutError:
-        rag_metadata["status"] = "timeout"
-        rag_metadata["error_code"] = "rag_retrieval_timeout"
-        rag_metadata["retrieval_error_type"] = "TimeoutError"
-        rag_metadata["retrieval_duration_ms"] = int(
+        rag_record.status = "timeout"
+        rag_record.error_code = "rag_retrieval_timeout"
+        rag_record.retrieval_error_type = "TimeoutError"
+        rag_record.retrieval_duration_ms = int(
             (time.monotonic() - retrieval_started) * 1000
         )
         rag_diagnostics.append(
@@ -238,10 +196,10 @@ async def retrieve_rag_chunks(
             deps.rag_retrieval_timeout_seconds,
         )
     except Exception as exc:
-        rag_metadata["status"] = "error"
-        rag_metadata["error_code"] = "rag_retrieval_failed"
-        rag_metadata["retrieval_error_type"] = exc.__class__.__name__
-        rag_metadata["retrieval_duration_ms"] = int(
+        rag_record.status = "error"
+        rag_record.error_code = "rag_retrieval_failed"
+        rag_record.retrieval_error_type = exc.__class__.__name__
+        rag_record.retrieval_duration_ms = int(
             (time.monotonic() - retrieval_started) * 1000
         )
         rag_diagnostics.append(
@@ -256,4 +214,4 @@ async def retrieve_rag_chunks(
             step_order,
             exc_info=True,
         )
-    return info_blob_chunks, rag_metadata, rag_diagnostics
+    return info_blob_chunks, rag_record.to_payload(), rag_diagnostics
