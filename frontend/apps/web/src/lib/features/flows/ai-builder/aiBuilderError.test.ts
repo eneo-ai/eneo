@@ -1,42 +1,51 @@
 import { describe, expect, it } from "vitest";
+import { m } from "$lib/paraglide/messages";
 
 import { isStaleApplyError, parseAIBuilderError } from "./aiBuilderError";
 
 describe("parseAIBuilderError", () => {
-  it("parses SSE and HTTP apply errors to the same public contract", () => {
-    const payload = {
-      schema_version: 2,
-      code: "planner_upstream_error",
-      category: "upstream",
-      message: "The AI planner failed. Please try again.",
-      phase: "planner",
-      eneo_error_code: 9024,
-      request_id: "req-1",
-      diagnostic_context: {
+  it.each([
+    ["planner_upstream_error", "upstream", "The AI planner failed. Please try again."],
+    ["flow_owner_required", "unauthorized", m.flow_error_flow_owner_required()]
+  ])(
+    "preserves %s in SSE and HTTP errors with localized owner refusal",
+    (code, category, message) => {
+      const payload = {
+        schema_version: 2,
+        code,
+        category,
+        message: "The AI planner failed. Please try again.",
+        phase: "planner",
+        eneo_error_code: 9024,
         request_id: "req-1",
-        session_id: "session-1",
-        error_code: "planner_upstream_error",
-        error_category: "upstream",
-        error_phase: "planner"
-      },
-      details: { retryable: true }
-    };
+        diagnostic_context: {
+          request_id: "req-1",
+          session_id: "session-1",
+          error_code: code,
+          error_category: category,
+          error_phase: "planner"
+        },
+        details: { retryable: true }
+      };
 
-    const sseError = parseAIBuilderError({
-      transport: "sse",
-      payload: JSON.stringify(payload)
-    });
-    const httpError = parseAIBuilderError({
-      transport: "apply",
-      payload: { status: 502, response: payload }
-    });
+      const sseError = parseAIBuilderError({
+        transport: "sse",
+        payload: JSON.stringify(payload)
+      });
+      const httpError = parseAIBuilderError({
+        transport: "apply",
+        payload: { status: 502, response: payload }
+      });
 
-    expect(sseError).toEqual(httpError);
-    expect(sseError.category).toBe("upstream");
-    expect(sseError.request_id).toBe("req-1");
-    expect(sseError.diagnostic_context?.session_id).toBe("session-1");
-    expect(sseError.details.retryable).toBe(true);
-  });
+      expect(sseError).toEqual(httpError);
+      expect(sseError.code).toBe(code);
+      expect(sseError.category).toBe(category);
+      expect(sseError.message).toBe(message);
+      expect(sseError.request_id).toBe("req-1");
+      expect(sseError.diagnostic_context?.session_id).toBe("session-1");
+      expect(sseError.details.retryable).toBe(true);
+    }
+  );
 
   it("maps unmatched 409 responses to stale revision", () => {
     const parsed = parseAIBuilderError({

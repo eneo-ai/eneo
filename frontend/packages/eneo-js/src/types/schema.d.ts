@@ -11352,6 +11352,7 @@ export interface components {
       | "edit_session_flow_required"
       | "flow_is_published"
       | "flow_not_published"
+      | "flow_owner_required"
       | "review_stale"
       | "review_finding_unknown"
       | "review_flow_too_large"
@@ -54643,7 +54644,7 @@ export interface operations {
           "application/json": components["schemas"]["AIBuilderPublicError"];
         };
       };
-      /** @description Caller lacks space permission or API key scope for the plan's session. */
+      /** @description Caller lacks space permission, API key scope or target draft ownership. flow_owner_required refuses editing another member's draft unless the caller is a tenant admin or space owner. */
       403: {
         headers: {
           [name: string]: unknown;
