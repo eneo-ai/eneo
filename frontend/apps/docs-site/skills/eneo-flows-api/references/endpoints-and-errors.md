@@ -28,7 +28,7 @@ Paths are relative to the deployment API base. Prefer `runtime_paths` from `GET 
 | Approve, reject, or resume          | `POST` the corresponding `.../{checkpoint_id}/{action}/` path              |
 | Approve and continue in one request | `POST .../{checkpoint_id}/approve-and-continue/` with `Idempotency-Key`    |
 | Step outputs                        | `GET /flows/{flow_id}/runs/{run_id}/steps/`                                |
-| Rerun one step                      | `POST /flows/{flow_id}/runs/{run_id}/steps/{step_id}/rerun/`               |
+| Retry a failed run                  | `POST /flows/{flow_id}/runs/{run_id}/retry/`                               |
 | Artifact authorization              | `POST /flows/{flow_id}/runs/{run_id}/artifacts/{file_id}/signed-url/`      |
 | Evidence                            | `GET /flows/{flow_id}/runs/{run_id}/evidence/`                             |
 | Provider calls                      | `GET /flows/{flow_id}/runs/{run_id}/provider-calls/`                       |
@@ -37,6 +37,16 @@ Paths are relative to the deployment API base. Prefer `runtime_paths` from `GET 
 Run creation returns a content-bearing run. Run lists and status return summaries. Detail is the audited content-bearing read.
 
 Cancel on a terminal run is a successful no-op and returns the unchanged terminal status. Read the body instead of assuming `cancelled`.
+
+## Retry a failed run
+
+`POST /flows/{flow_id}/runs/{run_id}/retry/` creates a child run, with no request body and a required `Idempotency-Key`. The source must be `failed`, belong to the same principal, and use the currently published Flow version.
+
+The source must have a non-empty, contiguous completed prefix that can be reused. Prefix results must be inline and fit the server's limits; file-backed outputs and artifact files cannot be imported. Any prefix review must have been approved or resumed. The server selects the first unfinished step, and earlier steps do not execute again.
+
+The child preserves the source's semantic inputs, ordered file selections, label, and purpose. Creation returns `201` with `created: true`; replaying an accepted request with the same key returns the same child with `200` and `created: false`. Poll the returned `run.id`. The source run remains unchanged.
+
+To change input values or replace files, use `POST /flows/{flow_id}/runs/` with the current contract and a new create key. Upload any replacement files through the step-specific runtime-file endpoint and bind their IDs in `step_inputs`. Use new run creation also when no completed prefix can be reused or the source version is no longer published. A retry does not accept a caller-selected step or replacement inputs.
 
 ## Error envelope
 
@@ -91,4 +101,4 @@ Always keep an unknown-code branch that shows a generic failure, records the raw
 | `flow_run_artifact_content_unavailable`     | Show retained metadata and mark bytes unavailable.                          |
 | `flow_evidence_export_too_large`            | Use inline evidence or paginate provider calls.                             |
 
-Run execution errors also appear in terminal run detail. Do not automatically retry timeouts or ambiguous provider failures: the external work may have started. Let an operator or user choose whether to submit a new run or rerun an eligible step.
+Run execution errors also appear in terminal run detail. Do not automatically retry timeouts or ambiguous provider failures: the external work may have started. Let an operator or user choose an eligible failed-run child retry or a new run; either can repeat provider work and add cost.

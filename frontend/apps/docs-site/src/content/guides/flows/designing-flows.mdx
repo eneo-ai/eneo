@@ -16,15 +16,25 @@ Flow input can use HTTP GET, but Flow does not support HTTP POST input or MCP se
 
 HTTP steps send to `http` or `https` URLs without credentials in the address, and only to public addresses. An administrator can allow private networks; loopback, link-local and cloud-metadata addresses are never allowed. Redirects are not followed. An HTTP input step that points at a blocked destination fails with `typed_io_http_ssrf_blocked`. A webhook delivery to one is not retried: it is dead-lettered on the first attempt and the run fails with `flow_webhook_delivery_failed`.
 
-| Input mode | Output artifact | Output types | Output modes                | Use it when                                                                       |
-| ---------- | --------------- | ------------ | --------------------------- | --------------------------------------------------------------------------------- |
-| text       | structured_text | text         | pass_through                | Use for form fields, pasted text, and final text answers.                         |
-| text       | structured_json | json         | pass_through                | Use when later steps or your app need structured fields.                          |
-| documents  | structured_text | text         | pass_through                | Use for summaries, analyses, and human-readable reports.                          |
-| documents  | structured_json | json         | pass_through                | Use for extraction before comparison, review, or artifacts.                       |
-| documents  | pdf_document    | pdf          | pass_through                | Use when the final result should be a generated PDF artifact.                     |
-| documents  | docx_document   | docx         | pass_through, template_fill | Use generated DOCX for free-form documents and template fill for fixed templates. |
-| audio      | structured_text | text         | transcribe_only             | Use for transcription before later text, JSON, or artifact steps.                 |
+These examples use the API's `input_type`, `output_type`, and `output_mode` values. They are step configurations, not a complete list of supported combinations. The published run contract determines which runtime inputs the Flow requires.
+
+| `input_type` | `output_type` | `output_mode`     | Use it when                                                   |
+| ------------ | ------------- | ----------------- | ------------------------------------------------------------- |
+| `text`       | `text`        | `pass_through`    | Process form fields or pasted text into a text answer.         |
+| `text`       | `json`        | `pass_through`    | Produce structured fields for later steps or your app.        |
+| `document`   | `text`        | `pass_through`    | Read documents into human-readable text.                       |
+| `document`   | `json`        | `pass_through`    | Extract structured fields before comparison or review.        |
+| `audio`      | `text`        | `transcribe_only` | Transcribe audio before later text, JSON, or artifact steps.   |
+
+### Artifact steps the Builder creates
+
+For generated PDF and DOCX outputs, the Builder prepares text in earlier steps and adds a separate `render_verbatim` step. For a fixed DOCX template, it creates a `template_fill` step using prepared text. These saved step shapes use the same API enum values:
+
+| `input_type` | `output_type` | `output_mode`    | Use it when                                      |
+| ------------ | ------------- | ---------------- | ------------------------------------------------ |
+| `text`       | `pdf`         | `render_verbatim` | Render prepared text as a generated PDF.        |
+| `text`       | `docx`        | `render_verbatim` | Render prepared text as a generated DOCX.       |
+| `text`       | `docx`        | `template_fill`   | Fill a fixed DOCX template from prepared text.  |
 
 <Callout type="warning">
 
