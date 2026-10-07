@@ -288,6 +288,19 @@
           }
         },
         {
+          "id": "unused-files-deleted",
+          "type": "fixed",
+          "area": "platform",
+          "title": {
+            "en": "Files are deleted after their last use",
+            "sv": "Filer raderas efter sista användningen"
+          },
+          "body": {
+            "en": "When a conversation or app run is deleted, by you or by a retention setting, the files only it used are deleted too, including recordings and transcriptions. Files nothing uses anymore are removed daily.",
+            "sv": "När en konversation eller appkörning raderas, av dig eller av en gallringsinställning, raderas även filerna som bara den använde, inklusive inspelningar och transkriberingar. Filer som inget längre använder tas bort dagligen."
+          }
+        },
+        {
           "id": "modules-admin",
           "type": "new",
           "area": "admin",
