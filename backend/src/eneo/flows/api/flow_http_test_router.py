@@ -54,8 +54,9 @@ router = APIRouter()
         "It does not persist the config or publish the flow; it is for authoring UIs that "
         "need to validate URL, auth, timeout, headers, body mode, and SSRF guard behavior "
         "before saving an HTTP input or output step. `test_variables` is the raw "
-        "template context used for URL, header, auth, and body interpolation; callers "
-        "can send flat keys such as `name` or runtime-shaped keys such as `flow_input` "
+        "template context used for URL, non-secret header values, Basic-auth username, "
+        "API-key header name, and body interpolation. Credential values are literal. "
+        "Callers can send flat keys such as `name` or runtime-shaped keys such as `flow_input` "
         "and `step_1`."
     ),
     responses={
@@ -68,7 +69,10 @@ router = APIRouter()
             ),
         },
         400: error_response(
-            description="The selected saved step has an invalid authored HTTP config.",
+            description=(
+                "The submitted HTTP config or the selected saved step's HTTP config "
+                "is invalid."
+            ),
             message="Stored HTTP step configuration is invalid.",
             eneo_error_code=ErrorCodes.BAD_REQUEST,
         ),

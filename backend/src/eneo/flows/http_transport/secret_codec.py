@@ -4,6 +4,7 @@ from collections.abc import Mapping, Sequence
 from typing import Protocol
 
 from eneo.flows.enums import FlowInputSource, FlowOutputMode
+from eneo.flows.flow_api_error_code import FlowApiErrorCode
 from eneo.flows.http_transport.authored_config import (
     SECRET_SENTINEL,
     CustomHeader,
@@ -23,6 +24,7 @@ from eneo.flows.http_transport.errors import AuthoredSecretEncryptionUnavailable
 from eneo.flows.http_transport.normalizer import is_authored_config
 from eneo.flows.http_transport.step_configs import sent_step_http_configs
 from eneo.flows.variable_resolver import iter_template_expressions
+from eneo.main.exceptions import TypedIOValidationException
 
 
 class SupportsDecryption(Protocol):
@@ -272,6 +274,7 @@ def protect_authored_secrets(
     Raises:
         AuthoredSecretEncryptionUnavailableError: encryption is unavailable and
             the config carries at least one newly authored secret.
+        TypedIOValidationException: a credential is rejected by encryption.
     """
     if encryption_service is None or not encryption_service.is_active():
         unprotectable = authored_secret_fields(config)
@@ -282,7 +285,13 @@ def protect_authored_secrets(
     def _encrypt(value: SecretValue) -> SecretValue:
         if not isinstance(value, str) or not value:
             return value
-        return encryption_service.encrypt(value)
+        try:
+            return encryption_service.encrypt(value)
+        except ValueError:
+            raise TypedIOValidationException(
+                "HTTP credential has an invalid value or length.",
+                code=FlowApiErrorCode.TYPED_IO_HTTP_INVALID_CONFIG.value,
+            ) from None
 
     auth = config.auth
     match auth:

@@ -6,6 +6,7 @@ import httpx
 import pytest
 from cryptography.fernet import Fernet
 
+from eneo.flows.flow_api_error_code import FlowApiErrorCode
 from eneo.flows.http_transport.authored_config import (
     SECRET_SENTINEL,
     CustomHeader,
@@ -129,28 +130,27 @@ async def test_execute_http_test_returns_typed_variable_failure() -> None:
 
 
 @pytest.mark.asyncio
-async def test_execute_http_test_refuses_a_template_in_a_credential(
+async def test_execute_http_test_rejects_invalid_credentials_with_typed_config_error(
     encryption_service,
 ) -> None:
     async def _send_http_request(**_kwargs: Any) -> httpx.Response:
-        raise AssertionError("request should not be sent with a templated credential")
+        raise AssertionError("request should not be sent with an invalid credential")
 
-    result = await execute_http_test(
-        config=_config(auth=HttpAuthBearer(token="{{ step_1.output.text }}")),
-        direction="output",
-        method="POST",
-        test_variables={"step_1": {"output": {"text": "classified"}}},
-        interpolate=_transport_interpolate,
-        send_http_request=_send_http_request,
-        encryption_service=encryption_service,
-        max_timeout=120,
-    )
-
-    assert result.success is False
-    assert result.error_code == HttpTransportError.VARIABLE_RESOLUTION_FAILED
-    assert result.error_message == "Variable resolution failed"
-    assert "classified" not in (result.error_message or "")
-    assert result.request_preview is None
+    # Mutant: mislabel a literal-credential policy failure as interpolation.
+    with pytest.raises(TypedIOValidationException) as caught:
+        await execute_http_test(
+            config=_config(auth=HttpAuthBearer(token="{{ step_1.output.text }}")),
+            direction="output",
+            method="POST",
+            test_variables={"step_1": {"output": {"text": "classified"}}},
+            interpolate=_transport_interpolate,
+            send_http_request=_send_http_request,
+            encryption_service=encryption_service,
+            max_timeout=120,
+        )
+    assert caught.value.code == FlowApiErrorCode.TYPED_IO_HTTP_INVALID_CONFIG.value
+    assert "classified" not in str(caught.value)
+    assert "test-only-secret" not in str(caught.value)
 
 
 @pytest.mark.asyncio
@@ -263,7 +263,8 @@ async def test_execute_http_test_returns_typed_failure_for_oversized_response() 
 
 
 @pytest.mark.asyncio
-async def test_execute_http_test_reraises_unknown_typed_codes() -> None:
+@pytest.mark.parametrize("failure_phase", ["compile", "send"])
+async def test_execute_http_test_reraises_unknown_typed_codes(failure_phase) -> None:
     """An unmapped typed failure is a server defect; it must escape rather
     than masquerade as a connection problem."""
 
@@ -273,6 +274,13 @@ async def test_execute_http_test_reraises_unknown_typed_codes() -> None:
             code="typed_io_http_something_new",
         )
 
+    def _interpolate_or_raise(template: str, context: dict[str, object]) -> str:
+        if failure_phase == "compile":
+            raise TypedIOValidationException(
+                "internal invariant broke", code="typed_io_http_something_new"
+            )
+        return _transport_interpolate(template, context)
+
     with pytest.raises(TypedIOValidationException):
         await execute_http_test(
             config=_config(url="https://example.org/data"),
@@ -281,7 +289,7 @@ async def test_execute_http_test_reraises_unknown_typed_codes() -> None:
             test_variables={},
             stored_config=None,
             encryption_service=None,
-            interpolate=_transport_interpolate,
+            interpolate=_interpolate_or_raise,
             send_http_request=_raise_unknown,
             max_timeout=120.0,
         )

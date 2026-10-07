@@ -41,6 +41,13 @@ from eneo.main.exceptions import (
     TypedIOValidationException,
 )
 
+_TYPED_TRANSPORT_ERRORS: dict[str, HttpTransportError] = {
+    FlowApiErrorCode.TYPED_IO_HTTP_INVALID_URL.value: HttpTransportError.INVALID_URL,
+    FlowApiErrorCode.TYPED_IO_HTTP_SSRF_BLOCKED.value: HttpTransportError.BLOCKED_URL,
+    FlowApiErrorCode.TYPED_IO_HTTP_RESPONSE_TOO_LARGE.value: HttpTransportError.RESPONSE_TOO_LARGE,
+    FlowApiErrorCode.TYPED_IO_HTTP_CONNECTION_ERROR.value: HttpTransportError.CONNECTION_REFUSED,
+}
+
 
 @dataclass(frozen=True)
 class HttpTestResult:
@@ -117,12 +124,21 @@ async def execute_http_test(
             error_code=HttpTransportError.CREDENTIALS_REQUIRE_HTTPS,
             error_message=_error_message(HttpTransportError.CREDENTIALS_REQUIRE_HTTPS),
         )
-    except (HttpTemplateInterpolationError, TypedIOValidationException):
+    except HttpTemplateInterpolationError:
         return HttpTestResult(
             success=False,
             error_code=HttpTransportError.VARIABLE_RESOLUTION_FAILED,
             error_message=_error_message(HttpTransportError.VARIABLE_RESOLUTION_FAILED),
             request_preview=None,
+        )
+    except TypedIOValidationException as exc:
+        error_code = _TYPED_TRANSPORT_ERRORS.get(exc.code or "")
+        if error_code is None:
+            raise
+        return HttpTestResult(
+            success=False,
+            error_code=error_code,
+            error_message=_error_message(error_code),
         )
 
     request_preview = _request_preview(effective)
@@ -157,13 +173,7 @@ async def execute_http_test(
         )
     except TypedIOValidationException as exc:
         duration_ms = (time.monotonic() - start) * 1000
-        typed_error_codes = {
-            FlowApiErrorCode.TYPED_IO_HTTP_INVALID_URL.value: HttpTransportError.INVALID_URL,
-            FlowApiErrorCode.TYPED_IO_HTTP_SSRF_BLOCKED.value: HttpTransportError.BLOCKED_URL,
-            FlowApiErrorCode.TYPED_IO_HTTP_RESPONSE_TOO_LARGE.value: HttpTransportError.RESPONSE_TOO_LARGE,
-            FlowApiErrorCode.TYPED_IO_HTTP_CONNECTION_ERROR.value: HttpTransportError.CONNECTION_REFUSED,
-        }
-        error_code = typed_error_codes.get(exc.code or "")
+        error_code = _TYPED_TRANSPORT_ERRORS.get(exc.code or "")
         if error_code is None:
             # An unmapped typed failure is a server-side defect; hiding it as
             # a connection problem would bury the signal.
