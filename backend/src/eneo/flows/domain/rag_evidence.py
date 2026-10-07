@@ -21,7 +21,8 @@ the transparency this evidence exists to provide.
 from __future__ import annotations
 
 from collections.abc import Iterator, Mapping, Sequence
-from typing import Any, Final, Literal, cast
+from dataclasses import dataclass, field
+from typing import Any, Final, Literal, TypeAlias, TypedDict, cast, get_args
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
@@ -72,6 +73,32 @@ MAPPED_CALLS_COMPLETE_KEY: Final[str] = "mapped_calls_complete"
 CITATION_SOURCES_KEY: Final[str] = "citation_sources"
 PASSAGE_EVIDENCE_LOCATION_KEY: Final[str] = "passage_evidence_location"
 PASSAGE_EVIDENCE_LOCATION: Final[str] = "attempt_provenance"
+
+
+RagRetrievalStatus: TypeAlias = Literal[
+    "skipped_no_service",
+    "skipped_no_knowledge",
+    "skipped_no_input",
+    "skipped_transcribe_only",
+    "success",
+    "no_chunks",
+    "timeout",
+    "error",
+]
+RAG_RETRIEVAL_STATUSES: frozenset[RagRetrievalStatus] = frozenset(
+    cast(tuple[RagRetrievalStatus, ...], get_args(RagRetrievalStatus))
+)
+RAG_RETRIEVAL_FAIL_CLOSED_STATUSES: frozenset[RagRetrievalStatus] = frozenset(
+    status
+    for status in RAG_RETRIEVAL_STATUSES
+    if status not in {"success", "skipped_transcribe_only"}
+)
+RagEmbeddingModelStatus: TypeAlias = Literal["recorded", "not_reported"]
+
+
+class RagEmbeddingModel(TypedDict):
+    id: str | None
+    name: str
 
 
 class RetrievedPassage(BaseModel):
@@ -429,6 +456,77 @@ class RetrievedKnowledgeEvidence(BaseModel):
                 rag_payload.get(EVIDENCE_BYTES_OMITTED_KEY)
             ),
         )
+
+
+@dataclass
+class RagRetrievalRecord:
+    """Producer metadata before the runtime adds query and prompt provenance."""
+
+    status: RagRetrievalStatus | Literal["skipped"] = "skipped_no_service"
+    attempted: bool = False
+    timeout_seconds: int = 0
+    reason: Literal["speaker_mapping"] | None = None
+    chunks_retrieved: int = 0
+    raw_chunks_count: int = 0
+    deduped_chunks_count: int = 0
+    unique_sources: int = 0
+    source_ids: list[str] = field(default_factory=list[str])
+    source_ids_short: list[str] = field(default_factory=list[str])
+    error_code: Literal["rag_retrieval_timeout", "rag_retrieval_failed"] | None = None
+    retrieval_duration_ms: int | None = None
+    retrieval_error_type: str | None = None
+    embedding_model: RagEmbeddingModel | None = None
+    embedding_model_status: RagEmbeddingModelStatus = "not_reported"
+    reference_metadata_status: (
+        Literal["skipped_unavailable", "error", "success"] | None
+    ) = None
+    reference_metadata_error_type: str | None = None
+    tracking: Mapping[str, object] | None = None
+    evidence: RetrievedKnowledgeEvidence = field(
+        default_factory=RetrievedKnowledgeEvidence
+    )
+
+    def to_payload(self) -> dict[str, object]:
+        payload: dict[str, object] = {
+            "attempted": self.attempted,
+            "status": self.status,
+        }
+        if self.reason is not None:
+            payload["reason"] = self.reason
+        # Speaker mapping's bare skipped record is a distinct existing shape;
+        # adding retrieval fields would change its persisted reader semantics.
+        if self.status == "skipped":
+            return payload
+        payload.update(
+            {
+                "version": 1,
+                "timeout_seconds": self.timeout_seconds,
+                "include_info_blobs": False,
+                "chunks_retrieved": self.chunks_retrieved,
+                "raw_chunks_count": self.raw_chunks_count,
+                "deduped_chunks_count": self.deduped_chunks_count,
+                "unique_sources": self.unique_sources,
+                "source_ids": self.source_ids,
+                "source_ids_short": self.source_ids_short,
+                "error_code": self.error_code,
+                "retrieval_duration_ms": self.retrieval_duration_ms,
+                "retrieval_error_type": self.retrieval_error_type,
+                "embedding_model": self.embedding_model,
+                "embedding_model_status": self.embedding_model_status,
+            }
+        )
+        if self.reference_metadata_status is not None:
+            payload["reference_metadata_status"] = self.reference_metadata_status
+            payload["reference_metadata_error_type"] = (
+                self.reference_metadata_error_type
+            )
+        if self.tracking is not None:
+            payload["tracking"] = dict(self.tracking)
+        payload.update(self.evidence.aggregate_payload())
+        payload["references"] = [
+            source.to_payload() for source in self.evidence.sources
+        ]
+        return payload
 
 
 def _non_negative_int(value: object) -> int:
