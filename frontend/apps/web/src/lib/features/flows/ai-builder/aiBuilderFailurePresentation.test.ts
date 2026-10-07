@@ -398,7 +398,6 @@ describe("describeFailure", () => {
         phase: "proposal" as const,
         details: {
           architecture_error_code: "architecture_materialization_failed",
-          architecture_error_detail: "template fill requires exactly one template",
           architecture_repair_disposition: "user_action",
           failure_code: "template_attachment_selection_invalid"
         }
