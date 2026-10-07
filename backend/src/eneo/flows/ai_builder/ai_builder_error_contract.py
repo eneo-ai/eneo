@@ -150,6 +150,7 @@ class AIBuilderErrorCode(StrEnum):
     EDIT_SESSION_FLOW_REQUIRED = "edit_session_flow_required"
     FLOW_IS_PUBLISHED = "flow_is_published"
     FLOW_NOT_PUBLISHED = "flow_not_published"
+    FLOW_OWNER_REQUIRED = "flow_owner_required"
     REVIEW_STALE = "review_stale"
     REVIEW_FINDING_UNKNOWN = "review_finding_unknown"
     REVIEW_FLOW_TOO_LARGE = "review_flow_too_large"
@@ -971,6 +972,11 @@ AI_BUILDER_ERROR_REGISTRY: _AIBuilderErrorRegistry = MappingProxyType(
             category=AIBuilderErrorCategory.BAD_REQUEST,
             http_status=400,
             eneo_error_code=ErrorCodes.BAD_REQUEST,
+        ),
+        AIBuilderErrorCode.FLOW_OWNER_REQUIRED: _entry(
+            category=AIBuilderErrorCategory.UNAUTHORIZED,
+            http_status=403,
+            eneo_error_code=ErrorCodes.UNAUTHORIZED,
         ),
         AIBuilderErrorCode.INSUFFICIENT_SCOPE: _entry(
             category=AIBuilderErrorCategory.UNAUTHORIZED,
