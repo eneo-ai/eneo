@@ -1,12 +1,7 @@
 <script lang="ts">
   import FlowStepSection from "$lib/features/flows/components/FlowStepSection.svelte";
   import FlowStepChapter from "$lib/features/flows/components/FlowStepChapter.svelte";
-  import {
-    EneoError,
-    type FlowStep,
-    type SecurityClassification,
-    type UploadedFile
-  } from "@eneo/eneo-js";
+  import { type FlowStep, type SecurityClassification, type UploadedFile } from "@eneo/eneo-js";
   import { Settings } from "$lib/components/layout";
   import { getFlowUserMode } from "$lib/features/flows/FlowUserMode";
   import { getFlowEditor } from "$lib/features/flows/FlowEditor";
@@ -24,6 +19,7 @@
   import { Input } from "$lib/components/ui/input/index.js";
   import { toast } from "$lib/components/toast";
   import { m } from "$lib/paraglide/messages";
+  import { getFlowRuntimeErrorMessage } from "$lib/features/flows/flowRuntimeErrorMapping";
   import { getLocale } from "$lib/paraglide/runtime";
   import {
     getAvailableOutputModes,
@@ -460,10 +456,7 @@
         newName
       });
     } catch (error) {
-      const message =
-        error instanceof EneoError
-          ? error.getReadableMessage()
-          : m.flow_step_rename_rewrite_failed();
+      const message = getFlowRuntimeErrorMessage(error, m.flow_step_rename_rewrite_failed());
       toast.error(message);
     }
   }

@@ -25,9 +25,9 @@
   import * as Card from "$lib/components/ui/card/index.js";
   import * as Select from "$lib/components/ui/select/index.js";
   import * as Tooltip from "$lib/components/ui/tooltip/index.js";
-  import { EneoError } from "@eneo/eneo-js";
   import { toast } from "$lib/components/toast";
   import { m } from "$lib/paraglide/messages";
+  import { getFlowRuntimeErrorMessage } from "$lib/features/flows/flowRuntimeErrorMapping";
   import { getChipClasses } from "$lib/features/flows/flowVariableTokens";
   import Info from "@lucide/svelte/icons/info";
   import ArrowUp from "@lucide/svelte/icons/arrow-up";
@@ -328,10 +328,7 @@
     try {
       await flowEditor.rewriteInputFieldVariableReferences(oldName, newName);
     } catch (error) {
-      const message =
-        error instanceof EneoError
-          ? error.getReadableMessage()
-          : m.flow_step_rename_rewrite_failed();
+      const message = getFlowRuntimeErrorMessage(error, m.flow_step_rename_rewrite_failed());
       toast.error(message);
     } finally {
       fieldRenameRewriteInFlight = false;

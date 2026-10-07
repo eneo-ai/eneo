@@ -37,9 +37,10 @@
   import CheckCircle2 from "@lucide/svelte/icons/circle-check";
   import CircleAlert from "@lucide/svelte/icons/circle-alert";
   import ListTree from "@lucide/svelte/icons/list-tree";
-  import { EneoError, type FlowRun, type FlowStep, type TranscriptionModel } from "@eneo/eneo-js";
+  import { type FlowRun, type FlowStep, type TranscriptionModel } from "@eneo/eneo-js";
   import { toast } from "$lib/components/toast";
   import { m } from "$lib/paraglide/messages";
+  import { getFlowRuntimeErrorMessage } from "$lib/features/flows/flowRuntimeErrorMapping";
   import { getLocale } from "$lib/paraglide/runtime";
   import { stepSourceLines } from "$lib/features/flows/flowStepMaterial";
   import {
@@ -188,11 +189,7 @@
       await flowEditor.flushSaves();
     } catch (error) {
       if (!surfaceRoutedSaveRejection(error)) {
-        toast.error(
-          error instanceof EneoError
-            ? error.getReadableMessage()
-            : m.flow_ai_builder_save_before_edit_failed()
-        );
+        toast.error(getFlowRuntimeErrorMessage(error, m.flow_ai_builder_save_before_edit_failed()));
       }
       return;
     }
@@ -250,9 +247,7 @@
       await flowEditor.moveStepAtIndex(index, direction);
     } catch (error) {
       if (!surfaceRoutedSaveRejection(error)) {
-        toast.error(
-          error instanceof EneoError ? error.getReadableMessage() : m.flow_step_reorder_failed()
-        );
+        toast.error(getFlowRuntimeErrorMessage(error, m.flow_step_reorder_failed()));
       }
     }
   }
@@ -262,9 +257,7 @@
       await flowEditor.removeStepAtIndex(index);
     } catch (error) {
       if (!surfaceRoutedSaveRejection(error)) {
-        toast.error(
-          error instanceof EneoError ? error.getReadableMessage() : m.flow_step_remove_failed()
-        );
+        toast.error(getFlowRuntimeErrorMessage(error, m.flow_step_remove_failed()));
       }
     }
   }
@@ -674,7 +667,7 @@
               if (surfaceRoutedSaveRejection(e)) {
                 return;
               }
-              const msg = e instanceof EneoError ? e.getReadableMessage() : String(e);
+              const msg = getFlowRuntimeErrorMessage(e, m.request_failed());
               console.error("Publish failed:", msg);
               toast.error(m.flow_publish_failed({ message: msg }));
               if ($validationErrors.size > 0) {
@@ -1573,7 +1566,7 @@
             const updated = await data.eneo.flows.unpublish({ id: $resource.id });
             flowEditor.setResource(updated);
           } catch (e) {
-            const msg = e instanceof EneoError ? e.getReadableMessage() : String(e);
+            const msg = getFlowRuntimeErrorMessage(e, m.request_failed());
             console.error("Unpublish failed:", msg);
             toast.error(m.flow_unpublish_failed({ message: msg }));
           } finally {

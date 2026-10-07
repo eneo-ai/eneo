@@ -2,7 +2,6 @@
   import { goto } from "$app/navigation";
   import { resolve } from "$app/paths";
   import {
-    EneoError,
     type FlowPackageDependencyResolution,
     type FlowPackageTemplateUpload,
     type FlowPackageImportResult,
@@ -42,6 +41,7 @@
     type FlowPackageImportSelectionState
   } from "$lib/features/flows/flowPackageTransfer";
   import { m } from "$lib/paraglide/messages";
+  import { getFlowRuntimeErrorMessage } from "$lib/features/flows/flowRuntimeErrorMapping";
 
   let {
     eneo,
@@ -116,7 +116,7 @@
         if (oninstalled) await oninstalled(result);
         else await goto(resolve(`/spaces/${spaceRouteId}/flows/${result.flow_id}`));
       } catch (error) {
-        toast.error(error instanceof EneoError ? error.getReadableMessage() : String(error));
+        toast.error(getFlowRuntimeErrorMessage(error, m.request_failed()));
       }
     })();
   });
@@ -205,8 +205,7 @@
     } catch (error) {
       if (!isCurrentPlanLoad(requestId, signal)) return;
       const message =
-        mapFlowPackageImportError(error) ??
-        (error instanceof EneoError ? error.getReadableMessage() : String(error));
+        mapFlowPackageImportError(error) ?? getFlowRuntimeErrorMessage(error, m.request_failed());
       if (templateSlot)
         templateErrors = {
           ...templateErrors,
@@ -294,8 +293,7 @@
       installed = result;
     } catch (error) {
       const message =
-        mapFlowPackageImportError(error) ??
-        (error instanceof EneoError ? error.getReadableMessage() : String(error));
+        mapFlowPackageImportError(error) ?? getFlowRuntimeErrorMessage(error, m.request_failed());
       importError = m.flow_package_import_failed({ message });
     } finally {
       importing = false;
