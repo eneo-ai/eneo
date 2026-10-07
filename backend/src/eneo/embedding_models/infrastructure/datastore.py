@@ -3,10 +3,10 @@ import time
 from typing import TYPE_CHECKING, Optional
 from uuid import UUID
 
-from langchain_text_splitters import RecursiveCharacterTextSplitter
-from pydantic_settings import BaseSettings
-
-from eneo.completion_models.infrastructure.context_builder import count_tokens
+from eneo.embedding_models.domain.chunking import (
+    build_text_splitter,
+    effective_chunk_config,
+)
 from eneo.embedding_models.infrastructure.adapters.base import (
     PartialEmbeddingBatchError,
 )
@@ -23,6 +23,7 @@ from eneo.integration.domain.entities.integration_knowledge import (
     IntegrationKnowledge,
 )
 from eneo.main.logging import get_logger
+from eneo.tokens.token_utils import count_tokens
 from eneo.users.user import UserInDB
 
 if TYPE_CHECKING:
@@ -35,13 +36,6 @@ if TYPE_CHECKING:
 
 logger = get_logger(__name__)
 
-
-class ChunkSettings(BaseSettings):
-    chunk_size: int = 200
-    chunk_overlap: int = 40
-
-
-settings = ChunkSettings()
 
 # Share of a chunk's token budget the source metadata header may take when it
 # is prepended for embedding. The rest stays for the chunk's own text.
@@ -95,7 +89,9 @@ class Datastore:
         self.create_embeddings_service = create_embeddings_service
 
     @staticmethod
-    def _source_header(info_blob: InfoBlobInDB) -> str:
+    def _source_header(
+        info_blob: InfoBlobInDB, embedding_model: "EmbeddingModel"
+    ) -> str:
         """Title and source properties prepended to every chunk for embedding.
 
         Stored chunk text stays the document's own words: the header is only
@@ -105,25 +101,20 @@ class Datastore:
         """
         if not info_blob.source_metadata:
             return ""
+        config = effective_chunk_config(embedding_model)
         return build_source_header(
             title=info_blob.title,
             entries=info_blob.source_metadata,
-            token_budget=max(1, int(settings.chunk_size * SOURCE_HEADER_BUDGET_SHARE)),
+            token_budget=int(config.chunk_size * SOURCE_HEADER_BUDGET_SHARE),
             count_tokens=count_tokens,
         )
 
-    def _chunk_text(self, info_blob: InfoBlobInDB) -> list[InfoBlobChunk]:
-        # Leave room for the source header so header + chunk stays within the
-        # configured chunk size; the overlap must stay smaller than the chunk.
-        header = self._source_header(info_blob)
-        reserved_tokens = count_tokens(header) if header else 0
-        chunk_size = max(
-            settings.chunk_size - reserved_tokens, settings.chunk_size // 2
-        )
-        splitter = RecursiveCharacterTextSplitter(
-            chunk_size=chunk_size,
-            chunk_overlap=min(settings.chunk_overlap, chunk_size // 2),
-            length_function=count_tokens,
+    def _chunk_text(
+        self, info_blob: InfoBlobInDB, embedding_model: "EmbeddingModel"
+    ) -> list[InfoBlobChunk]:
+        header = self._source_header(info_blob, embedding_model)
+        splitter = build_text_splitter(
+            embedding_model, reserved_tokens=count_tokens(header) if header else 0
         )
 
         info_blob_chunks = [
@@ -163,8 +154,10 @@ class Datastore:
 
     async def add(self, info_blob: InfoBlobInDB, embedding_model: "EmbeddingModel"):
         logger.debug("Chunking text.")
-        header = self._source_header(info_blob)
-        info_blob_chunks = await asyncio.to_thread(self._chunk_text, info_blob)
+        header = self._source_header(info_blob, embedding_model)
+        info_blob_chunks = await asyncio.to_thread(
+            self._chunk_text, info_blob, embedding_model
+        )
 
         if not info_blob_chunks:
             raise ValueError(

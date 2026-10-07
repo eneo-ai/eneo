@@ -357,7 +357,7 @@ class Websites(BasePublic):
         String, nullable=True, comment="Fernet-encrypted password (base64 encoded)"
     )
     http_auth_domain: Mapped[Optional[str]] = mapped_column(
-        String, nullable=True, comment="Domain for auth (from URL netloc)"
+        String, nullable=True, comment="HTTP auth origin (legacy rows contain netloc)"
     )
 
     # Circuit breaker fields for failure handling

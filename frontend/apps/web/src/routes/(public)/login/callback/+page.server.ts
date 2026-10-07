@@ -1,6 +1,6 @@
 import { DEFAULT_LANDING_PAGE } from "$lib/core/constants";
 import {
-  consumeOidcLoginDestination,
+  consumeOidcLoginAttempt,
   decodeState,
   resolveOptionalLoginStateDestination,
   type LoginStateParam
@@ -13,15 +13,21 @@ import {
 import { clearZitadelCookie, loginWithZitadel } from "$lib/features/auth/zitadel.server";
 import { loginWithOidc } from "$lib/features/auth/oidc.server";
 import { redirect } from "@sveltejs/kit";
+import type { PageServerLoad } from "./$types";
 
-export const load = async (event) => {
+export const load = (async (event) => {
   const code = event.url.searchParams.get("code");
   const state = event.url.searchParams.get("state");
   const error = event.url.searchParams.get("error");
   const errorDescription = event.url.searchParams.get("error_description");
-  // One-shot fallback for generic OIDC. The helper validates the cookie as a
-  // local-only destination and deletes it before any callback branch returns.
-  const rememberedLoginDestination = await consumeOidcLoginDestination(event.cookies, state);
+  const decodedState = decodeState<LoginStateParam>(state);
+  const isLegacyLogin =
+    decodedState?.loginMethod === "mobilityguard" || decodedState?.loginMethod === "zitadel";
+  // Legacy providers bind the browser with their existing local PKCE cookies.
+  // Generic OIDC must consume its own binding before exchanging any code.
+  const oidcAttempt = isLegacyLogin ? null : await consumeOidcLoginAttempt(event.cookies, state);
+  const rememberedLoginDestination =
+    oidcAttempt?.status === "matched" ? oidcAttempt.destination : null;
 
   // Log callback parameters
   console.debug("[OIDC Callback] Received callback", {
@@ -84,10 +90,17 @@ export const load = async (event) => {
     return redirect(302, `/login?${params.toString()}`);
   }
 
+  if (!isLegacyLogin && oidcAttempt?.status !== "matched") {
+    console.warn("[OIDC Callback] Browser login attempt rejected", {
+      reason: oidcAttempt?.status,
+      origin: event.url.origin
+    });
+    return redirect(302, "/login?message=oidc_attempt_rejected");
+  }
+
   let success = false;
   let errorInfo = "";
   let errorDetails = "";
-  const decodedState = decodeState<LoginStateParam>(state);
   let redirectUrl =
     resolveOptionalLoginStateDestination(state) ??
     rememberedLoginDestination ??
@@ -222,4 +235,4 @@ export const load = async (event) => {
     (rememberedLoginDestination ? `&next=${encodeURIComponent(rememberedLoginDestination)}` : "");
 
   redirect(302, failedUrl);
-};
+}) satisfies PageServerLoad;

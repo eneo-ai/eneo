@@ -18,12 +18,10 @@ from uuid import UUID, uuid4
 
 import numpy as np
 import sqlalchemy as sa
-from langchain_text_splitters import RecursiveCharacterTextSplitter
 from sqlalchemy.exc import SQLAlchemyError
 from typing_extensions import NotRequired, TypedDict
 
 from eneo.admin.quota_service import enforce_quota_on_commit, ensure_quota_capacity
-from eneo.completion_models.infrastructure.context_builder import count_tokens
 from eneo.crawler.cpu_work import run_cpu_work
 from eneo.database.tables.info_blob_chunk_table import InfoBlobChunks
 from eneo.database.tables.info_blobs_table import (
@@ -34,6 +32,7 @@ from eneo.database.tables.info_blobs_table import (
 )
 from eneo.database.tables.tenant_table import Tenants
 from eneo.database.tables.users_table import Users
+from eneo.embedding_models.domain.chunking import build_text_splitter
 from eneo.embedding_models.infrastructure.adapters.base import (
     PartialEmbeddingBatchError,
 )
@@ -64,10 +63,6 @@ if TYPE_CHECKING:
     from eneo.main.container.container import Container
 
 logger = get_logger(__name__)
-
-# Chunking settings (matching datastore.py pattern)
-_CHUNK_SIZE = 200
-_CHUNK_OVERLAP = 40
 
 # EMBEDDING SEMAPHORE: Module-level bounded concurrency
 #
@@ -550,11 +545,7 @@ async def persist_batch(
             )
         return 0, len(page_buffer), [], failures_by_reason, 0
 
-    splitter = RecursiveCharacterTextSplitter(
-        chunk_size=_CHUNK_SIZE,
-        chunk_overlap=_CHUNK_OVERLAP,
-        length_function=count_tokens,
-    )
+    splitter = build_text_splitter(embedding_model)
     plans: list[_EmbeddingPagePlan] = []
     validator_refreshes: list[CrawlPageData] = []
 
