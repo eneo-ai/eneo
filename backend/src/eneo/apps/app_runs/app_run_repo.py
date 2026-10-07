@@ -13,6 +13,7 @@ from eneo.database.database import AsyncSession
 from eneo.database.tables.app_table import AppRuns, AppRunsFiles
 from eneo.files.file_models import FileInfo
 from eneo.files.file_repo import FileRepository
+from eneo.files.unused_file_cleanup import delete_unused_root_files
 from eneo.skills.domain.skill import SkillExecutionReference
 
 _SKILL_PROVENANCE_ADAPTER = TypeAdapter(tuple[SkillExecutionReference, ...])
@@ -173,5 +174,12 @@ class AppRunRepository:
         return await self._to_domain(app_run_in_db)
 
     async def delete(self, id: UUID) -> None:
+        """Delete a run and the input Files nothing else uses anymore."""
+        file_ids = list(
+            await self.session.scalars(
+                sa.select(AppRunsFiles.file_id).where(AppRunsFiles.app_run_id == id)
+            )
+        )
         stmt = sa.delete(AppRuns).where(AppRuns.id == id)
         await self.session.execute(stmt)
+        await delete_unused_root_files(self.session, file_ids)
