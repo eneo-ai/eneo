@@ -41,7 +41,12 @@ def _is_value_attribute(node: ast.AST) -> bool:
 
 def test_ai_builder_public_exceptions_use_typed_error_classes() -> None:
     violations: list[str] = []
-    for path in sorted(AI_BUILDER_SOURCE.glob("*.py")):
+    for path in sorted(
+        (
+            *AI_BUILDER_SOURCE.glob("*.py"),
+            AI_BUILDER_SOURCE.parent / "api" / "flow_ai_builder_router.py",
+        )
+    ):
         if path.name in EXCLUDED_FILES:
             continue
         tree = ast.parse(path.read_text(), filename=str(path))
@@ -54,7 +59,7 @@ def test_ai_builder_public_exceptions_use_typed_error_classes() -> None:
             call_name = _call_name(node)
             if call_name in RAW_EXCEPTION_NAMES:
                 violations.append(
-                    f"{path.relative_to(AI_BUILDER_SOURCE)}:{node.lineno}: "
+                    f"{path.relative_to(AI_BUILDER_SOURCE.parent)}:{node.lineno}: "
                     f"raise {call_name}; use typed AI Builder exception"
                 )
                 continue
@@ -64,14 +69,14 @@ def test_ai_builder_public_exceptions_use_typed_error_classes() -> None:
             )
             if code_keyword is None:
                 violations.append(
-                    f"{path.relative_to(AI_BUILDER_SOURCE)}:{node.lineno}: "
+                    f"{path.relative_to(AI_BUILDER_SOURCE.parent)}:{node.lineno}: "
                     f"{call_name} missing code="
                 )
                 continue
             code_value = code_keyword.value
             if isinstance(code_value, ast.Constant):
                 violations.append(
-                    f"{path.relative_to(AI_BUILDER_SOURCE)}:{code_value.lineno}: "
+                    f"{path.relative_to(AI_BUILDER_SOURCE.parent)}:{code_value.lineno}: "
                     f"{call_name} code must be AIBuilderErrorCode member"
                 )
                 continue
@@ -79,14 +84,14 @@ def test_ai_builder_public_exceptions_use_typed_error_classes() -> None:
                 code_value
             ):
                 violations.append(
-                    f"{path.relative_to(AI_BUILDER_SOURCE)}:{code_value.lineno}: "
+                    f"{path.relative_to(AI_BUILDER_SOURCE.parent)}:{code_value.lineno}: "
                     f"{call_name} code must be AIBuilderErrorCode member"
                 )
                 continue
             for keyword in node.keywords:
                 if keyword.arg == "code" and isinstance(keyword.value, ast.Constant):
                     violations.append(
-                        f"{path.relative_to(AI_BUILDER_SOURCE)}:{keyword.value.lineno}: "
+                        f"{path.relative_to(AI_BUILDER_SOURCE.parent)}:{keyword.value.lineno}: "
                         f"{call_name} code must not be literal"
                     )
 

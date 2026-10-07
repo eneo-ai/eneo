@@ -3,6 +3,7 @@ from __future__ import annotations
 import ast
 import json
 from pathlib import Path
+from time import monotonic_ns
 from types import SimpleNamespace
 from typing import get_args
 from unittest.mock import MagicMock
@@ -30,6 +31,7 @@ from eneo.completion_models.infrastructure.completion_service import (
     CompletionEvidenceField,
     CompletionRouteEvidence,
 )
+from eneo.flows.ai_builder import ai_builder_proposal_telemetry as telemetry_module
 from eneo.flows.ai_builder.ai_builder_domain_models import (
     TargetKind,
 )
@@ -1979,7 +1981,9 @@ def test_a_refused_request_keeps_the_timing_of_its_own_request() -> None:
     assert (replacement.provider_elapsed_ms, replacement.first_chunk_ms) == (30, 10)
 
 
-def test_a_failure_without_an_open_attempt_changes_no_recorded_attempt() -> None:
+def test_a_failure_without_an_open_attempt_changes_no_recorded_attempt(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     tracker = ProposalTurnTelemetry(
         request_id="req-closed", model="gpt-test", target_kind=TargetKind.CREATE
     )
@@ -1992,6 +1996,9 @@ def test_a_failure_without_an_open_attempt_changes_no_recorded_attempt() -> None
         failure_codes=frozenset({"c1"}),
         producers=frozenset({"critic"}),
     )
+    # Freeze snapshot time so equality detects state changes in a refused call.
+    frozen_now = monotonic_ns()
+    monkeypatch.setattr(telemetry_module, "monotonic_ns", lambda: frozen_now)
     before = tracker.build_planner_telemetry()
 
     with pytest.raises(ValueError, match="open attempt"):

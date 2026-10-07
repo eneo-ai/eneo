@@ -190,9 +190,7 @@ from eneo.server.exception_handlers import extract_request_id
 from eneo.users.user import UserInDB
 
 if TYPE_CHECKING:
-    from eneo.audit.application.audit_service import AuditService
     from eneo.spaces.space import Space
-    from eneo.tenants.tenant_repo import TenantRepository
 
 logger = get_logger(__name__)
 _FAILURE_PRODUCERS = frozenset(get_args(FailureProducer))
@@ -424,18 +422,6 @@ async def _active_provider_ids(container: Container) -> set[UUID]:
     off."""
     providers = await container.model_provider_repository().all(active_only=True)
     return {provider.id for provider in providers}
-
-
-def _get_ai_builder_service(container: Container) -> AIBuilderService:
-    return container.ai_builder_service()
-
-
-def _get_audit_service(container: Container) -> "AuditService":
-    return container.audit_service()
-
-
-def _get_tenant_repo(container: Container) -> "TenantRepository":
-    return container.tenant_repo()
 
 
 def _to_plan_response(plan: BuilderPlan) -> PlanResponse:
@@ -958,7 +944,7 @@ async def report_client_error(
             # A replay, a late initial report, a conflicting action or another
             # reporter: nothing was stored, and it was audited when it was.
             return
-        audit_service = _get_audit_service(container)
+        audit_service = container.audit_service()
         reported = record.outcome == "inserted"
         await audit_service.log(
             tenant_id=user.tenant_id,
@@ -1178,7 +1164,7 @@ async def post_flow_review_suggestions(
             space_id=space_id,
         )
         space = _authorized_space(authorization)
-        tenant = await _get_tenant_repo(container).get(user.tenant_id)
+        tenant = await container.tenant_repo().get(user.tenant_id)
         active_provider_ids = await _active_provider_ids(container)
         review_service = container.ai_builder_flow_review_service()
         packet = await review_service.build_packet(flow_id=flow_id, space_id=space_id)
@@ -1250,7 +1236,7 @@ async def create_session(
         )
         _authorized_space(authorization)
 
-        service = _get_ai_builder_service(container)
+        service = container.ai_builder_service()
         session: BuilderSession = await service.create_session(
             space_id=body.space_id,
             target_kind=body.target_kind,
@@ -1262,7 +1248,7 @@ async def create_session(
         )
 
         user = container.user()
-        audit_service = _get_audit_service(container)
+        audit_service = container.audit_service()
         await audit_service.log(
             tenant_id=user.tenant_id,
             actor_id=user.id,
@@ -1338,7 +1324,7 @@ async def list_sessions(
         action=FlowApiAction.BUILDER_SESSION_LIST,
         filter_mode=FlowAccessFilterMode.VISIBLE,
     )
-    service = _get_ai_builder_service(container)
+    service = container.ai_builder_service()
     sessions: list[SessionListItemResponse] = await service.list_sessions(
         space_id=space_id,
         target_kind=target_kind,
@@ -1431,7 +1417,7 @@ async def send_message(
     container: ContainerWithUserExplicitTransactionDep,
 ):
     body = body.canonical()
-    service = _get_ai_builder_service(container)
+    service = container.ai_builder_service()
     database_session = cast(AsyncSession, container.session())
     async with database_session.begin():
         session: BuilderSession = await service.get_session(session_id)
@@ -1454,7 +1440,7 @@ async def send_message(
             require_creator=True,
         )
         space = _authorized_space(authorization)
-        tenant = await _get_tenant_repo(container).get(container.user().tenant_id)
+        tenant = await container.tenant_repo().get(container.user().tenant_id)
         request_fingerprint = body.request_fingerprint()
         turn_preflight = await service.preflight_message_turn(
             session_id=session_id,
@@ -1772,7 +1758,7 @@ async def get_session(
     ],
     container: ContainerWithUserDep,
 ):
-    service = _get_ai_builder_service(container)
+    service = container.ai_builder_service()
     session: BuilderSession = await service.get_session(session_id)
     attachment_snapshot = await service.get_session_attachment_snapshot(
         session_id=session.id
@@ -1827,7 +1813,7 @@ async def get_session_classifier_diagnostics(
     ],
     container: ContainerWithUserDep,
 ) -> AIBuilderClassifierDiagnosticsResponse:
-    service = _get_ai_builder_service(container)
+    service = container.ai_builder_service()
     session: BuilderSession = await service.get_session(session_id)
     await _authorize_ai_builder_request(
         request,
@@ -1879,7 +1865,7 @@ async def get_session_proposal_telemetry_diagnostics(
     ],
     container: ContainerWithUserDep,
 ) -> AIBuilderProposalTelemetryDiagnosticsResponse:
-    service = _get_ai_builder_service(container)
+    service = container.ai_builder_service()
     session: BuilderSession = await service.get_session(session_id)
     await _authorize_ai_builder_request(
         request,
@@ -1940,7 +1926,7 @@ async def detach_session_attachment(
     file_id: UUID,
     container: ContainerWithUserDep,
 ):
-    service = _get_ai_builder_service(container)
+    service = container.ai_builder_service()
     session: BuilderSession = await service.get_session(session_id)
     await _authorize_ai_builder_request(
         request,
@@ -1953,7 +1939,7 @@ async def detach_session_attachment(
     await service.detach_session_attachment(session_id=session.id, file_id=file_id)
 
     user = container.user()
-    audit_service = _get_audit_service(container)
+    audit_service = container.audit_service()
     await audit_service.log(
         tenant_id=user.tenant_id,
         user=user,
@@ -2024,7 +2010,7 @@ async def get_session_models(
     ] = 0,
 ):
     """Return eligible models, their availability and the ready default."""
-    service = _get_ai_builder_service(container)
+    service = container.ai_builder_service()
     session: BuilderSession = await service.get_session(session_id)
     authorization = await _authorize_ai_builder_request(
         request,
@@ -2042,7 +2028,7 @@ async def get_session_models(
     # and what the caller is about to read. Without it the composer shows one
     # model and the turn silently runs another.
     floor = max(conversation_evidence_floor(session.conversation), evidence_level)
-    tenant = await _get_tenant_repo(container).get(container.user().tenant_id)
+    tenant = await container.tenant_repo().get(container.user().tenant_id)
     budget_policy = resolve_ai_builder_budget_policy(
         tenant.flow_settings if tenant else None
     )
@@ -2120,7 +2106,7 @@ async def get_plan(
     ],
     container: ContainerWithUserDep,
 ):
-    service = _get_ai_builder_service(container)
+    service = container.ai_builder_service()
     plan: BuilderPlan = await service.get_plan(plan_id)
     session: BuilderSession = await service.get_session(plan.session_id)
     await _authorize_ai_builder_request(
@@ -2171,7 +2157,7 @@ async def list_session_plans(
     ],
     container: ContainerWithUserDep,
 ):
-    service = _get_ai_builder_service(container)
+    service = container.ai_builder_service()
     session: BuilderSession = await service.get_session(session_id)
     await _authorize_ai_builder_request(
         request,
@@ -2219,7 +2205,7 @@ async def cancel_session(
     ],
     container: ContainerWithUserDep,
 ):
-    service = _get_ai_builder_service(container)
+    service = container.ai_builder_service()
     session: BuilderSession = await service.get_session(session_id)
     await _authorize_ai_builder_request(
         request,
@@ -2232,7 +2218,7 @@ async def cancel_session(
     session = await service.cancel_session(session_id)
 
     user = container.user()
-    audit_service = _get_audit_service(container)
+    audit_service = container.audit_service()
     await audit_service.log(
         tenant_id=user.tenant_id,
         actor_id=user.id,
@@ -2286,7 +2272,7 @@ async def approve_plan(
     ],
     container: ContainerWithUserDep,
 ):
-    service = _get_ai_builder_service(container)
+    service = container.ai_builder_service()
     plan: BuilderPlan = await service.get_plan(plan_id)
     session: BuilderSession = await service.get_session(plan.session_id)
     await _authorize_ai_builder_request(
@@ -2300,7 +2286,7 @@ async def approve_plan(
 
     # Audit
     user = container.user()
-    audit_service = _get_audit_service(container)
+    audit_service = container.audit_service()
     await audit_service.log(
         tenant_id=user.tenant_id,
         actor_id=user.id,
@@ -2376,7 +2362,7 @@ async def apply_plan(
     body: ApplyPlanRequest,
     container: ContainerWithUserDep,
 ):
-    service = _get_ai_builder_service(container)
+    service = container.ai_builder_service()
 
     plan: BuilderPlan = await service.get_plan(plan_id)
     session: BuilderSession = await service.get_session(plan.session_id)
@@ -2395,7 +2381,7 @@ async def apply_plan(
 
     # Audit
     user = container.user()
-    audit_service = _get_audit_service(container)
+    audit_service = container.audit_service()
     await audit_service.log(
         tenant_id=user.tenant_id,
         actor_id=user.id,
@@ -2475,7 +2461,7 @@ async def approve_and_apply_create_plan(
 ):
     database_session = cast(AsyncSession, container.session())
     async with database_session.begin():
-        service = _get_ai_builder_service(container)
+        service = container.ai_builder_service()
 
         plan: BuilderPlan = await service.get_plan(plan_id)
         session: BuilderSession = await service.get_session(plan.session_id)
@@ -2494,7 +2480,7 @@ async def approve_and_apply_create_plan(
         # it must not emit a second creation event.
         if not outcome.replayed:
             user = container.user()
-            audit_service = _get_audit_service(container)
+            audit_service = container.audit_service()
             await audit_service.log(
                 tenant_id=user.tenant_id,
                 actor_id=user.id,
@@ -2555,7 +2541,7 @@ async def revise_plan(
     body: RevisePlanRequest,
     container: ContainerWithUserDep,
 ):
-    service = _get_ai_builder_service(container)
+    service = container.ai_builder_service()
 
     plan: BuilderPlan = await service.get_plan(plan_id)
     session: BuilderSession = await service.get_session(plan.session_id)
@@ -2573,7 +2559,7 @@ async def revise_plan(
     )
 
     user = container.user()
-    audit_service = _get_audit_service(container)
+    audit_service = container.audit_service()
     await audit_service.log(
         tenant_id=user.tenant_id,
         user=user,
@@ -2593,3 +2579,6 @@ async def revise_plan(
     )
 
     return _to_plan_response(new_plan)
+
+
+__all__ = ["router"]

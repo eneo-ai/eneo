@@ -117,7 +117,6 @@ from eneo.flows.ai_builder.ai_builder_proposal_tool_contracts import (
     CompiledProposal,
 )
 from eneo.flows.ai_builder.ai_builder_repo import AIBuilderRepository
-from eneo.flows.ai_builder.ai_builder_router import send_message
 from eneo.flows.ai_builder.ai_builder_schema_evidence import (
     build_schema_evidence,
 )
@@ -161,6 +160,7 @@ from eneo.flows.ai_builder.planning_state import (
 from eneo.flows.ai_builder.planning_state_builder import (
     build_planning_state_from_conversation,
 )
+from eneo.flows.api.flow_ai_builder_router import send_message
 from eneo.flows.application.flow_authoring_command import FlowAuthoringCommandService
 from eneo.flows.domain.flow import FlowStep
 from eneo.flows.flow_authoring_spec import (
@@ -2342,7 +2342,7 @@ async def test_ai_builder_message_and_attachments_are_committed_before_first_pro
             assert before_response.json()["attachments"] == []
 
             with patch(
-                "eneo.flows.ai_builder.ai_builder_router.logger.error"
+                "eneo.flows.api.flow_ai_builder_router.logger.error"
             ) as log_error:
                 events = await _send_builder_message(
                     client=client,

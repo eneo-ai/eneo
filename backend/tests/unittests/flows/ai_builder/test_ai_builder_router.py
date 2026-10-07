@@ -30,7 +30,6 @@ from eneo.completion_models.infrastructure.completion_service import (
 )
 from eneo.files.file_models import FilePublic
 from eneo.flows.ai_builder import ai_builder_read_access
-from eneo.flows.ai_builder import ai_builder_router as ai_builder_router_module
 from eneo.flows.ai_builder.ai_builder_api_models import (
     ApplyPlanRequest,
     ApplyResultResponse,
@@ -79,7 +78,22 @@ from eneo.flows.ai_builder.ai_builder_provider_call import (
     ProviderSilenceExpired,
 )
 from eneo.flows.ai_builder.ai_builder_read_access import BuilderAccessSnapshot
-from eneo.flows.ai_builder.ai_builder_router import (
+from eneo.flows.ai_builder.ai_builder_session_turn import (
+    SessionTurnPreflight,
+    SessionTurnPreparationBaseline,
+)
+from eneo.flows.ai_builder.ai_builder_slot_classification_contract import (
+    SLOT_CLASSIFICATION_SCHEMA_VERSION,
+)
+from eneo.flows.ai_builder.ai_builder_telemetry_models import SessionTelemetrySummary
+from eneo.flows.ai_builder.ai_builder_token_usage import CompletionTokenUsage
+from eneo.flows.ai_builder.planning_state import (
+    ArchitectureCommit,
+    PlanningState,
+    StepTriple,
+)
+from eneo.flows.api import flow_ai_builder_router as ai_builder_router_module
+from eneo.flows.api.flow_ai_builder_router import (
     AIBuilderEnvelopedError,
     AIBuilderPublicErrorRoute,
     _authorize_ai_builder_request,
@@ -103,22 +117,8 @@ from eneo.flows.ai_builder.ai_builder_router import (
     revise_plan,
     send_message,
 )
-from eneo.flows.ai_builder.ai_builder_router import (
+from eneo.flows.api.flow_ai_builder_router import (
     router as ai_builder_router,
-)
-from eneo.flows.ai_builder.ai_builder_session_turn import (
-    SessionTurnPreflight,
-    SessionTurnPreparationBaseline,
-)
-from eneo.flows.ai_builder.ai_builder_slot_classification_contract import (
-    SLOT_CLASSIFICATION_SCHEMA_VERSION,
-)
-from eneo.flows.ai_builder.ai_builder_telemetry_models import SessionTelemetrySummary
-from eneo.flows.ai_builder.ai_builder_token_usage import CompletionTokenUsage
-from eneo.flows.ai_builder.planning_state import (
-    ArchitectureCommit,
-    PlanningState,
-    StepTriple,
 )
 from eneo.flows.flow_access_policy import (
     FlowAccessFilterMode,
@@ -1322,7 +1322,7 @@ class TestGetSessionEndpoint:
         from eneo.flows.ai_builder.ai_builder_plan_edit_context import (
             AIBuilderSavedFlowStepEditContext,
         )
-        from eneo.flows.ai_builder.ai_builder_router import get_session
+        from eneo.flows.api.flow_ai_builder_router import get_session
 
         container = _make_container()
         session = _make_session_domain(actor_user_id=container.user.return_value.id)
@@ -4505,7 +4505,7 @@ class TestReviewSuggestionsEndpoint:
 
 @pytest.mark.anyio
 async def test_failure_launch_requires_review_permission_without_audit():
-    from eneo.flows.ai_builder.ai_builder_router import get_run_failure_launch
+    from eneo.flows.api.flow_ai_builder_router import get_run_failure_launch
 
     container = _review_container(session=_SnapshotSession())
     container.user.return_value.permissions = [Permission.FLOWS]
@@ -4530,7 +4530,7 @@ async def test_failure_launch_returns_identity_and_level_without_text():
         FlowReviewFailureFact,
         FlowReviewStep,
     )
-    from eneo.flows.ai_builder.ai_builder_router import get_run_failure_launch
+    from eneo.flows.api.flow_ai_builder_router import get_run_failure_launch
     from eneo.flows.domain.step_output import RejectedOutput
 
     container = _review_container(session=_SnapshotSession())
@@ -4591,7 +4591,7 @@ async def test_failure_launch_returns_identity_and_level_without_text():
 )
 async def test_failure_launch_surfaces_typed_unavailable_reason(reason):
     from eneo.flows.ai_builder.ai_builder_flow_review import AIBuilderRunFailureContext
-    from eneo.flows.ai_builder.ai_builder_router import get_run_failure_launch
+    from eneo.flows.api.flow_ai_builder_router import get_run_failure_launch
 
     container = _review_container(session=_SnapshotSession())
     reference = AIBuilderRunFailureContext(

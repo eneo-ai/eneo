@@ -23,7 +23,7 @@ from eneo.authentication.endpoint_access import (
 from eneo.flow_packages.api.flow_package_models import (
     FLOW_PACKAGE_OMITTED_MCP_ASSISTANT_COUNT_HEADER,
 )
-from eneo.flows.ai_builder.ai_builder_router import (
+from eneo.flows.api.flow_ai_builder_router import (
     AIBuilderEnvelopedError,
     ai_builder_enveloped_error_handler,
 )

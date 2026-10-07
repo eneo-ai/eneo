@@ -48,13 +48,13 @@ from eneo.flows.ai_builder.ai_builder_read_access import (
     BuilderReadAccess,
     scope_for_session,
 )
-from eneo.flows.ai_builder.ai_builder_router import (
-    audited_evidence_snapshot,
-    send_message,
-)
 from eneo.flows.ai_builder.ai_builder_session_turn import (
     SessionTurnPreflight,
     SessionTurnPreparationBaseline,
+)
+from eneo.flows.api.flow_ai_builder_router import (
+    audited_evidence_snapshot,
+    send_message,
 )
 from eneo.flows.domain.flow import Flow
 from eneo.flows.flow_access_policy import FlowApiAction
