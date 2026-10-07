@@ -34,7 +34,8 @@
       "assertions": [
         "Uses run status rather than content-bearing detail for routine polling",
         "Explains that audited content reads can fail closed instead of bypassing audit",
-        "Does not automatically rerun ambiguous provider work",
+        "Does not automatically retry ambiguous provider work",
+        "Uses an eligible failed-run child retry only with the original inputs and files; replacement files require upload and new run creation",
         "Treats signed URLs as short-lived secrets",
         "Handles content_purged metadata and HTTP 410 without presenting a preview as complete",
         "Branches on string code and preserves unknown codes plus request IDs for support"
