@@ -197,3 +197,13 @@ source_modules =
     eneo.flows.infrastructure
 forbidden_modules =
     eneo.flows.runtime
+
+[importlinter:contract:flow-publication-no-docx-runtime]
+# Template assets own byte inspection; publication consumes their typed names.
+name = Flow publication must not inspect DOCX bytes directly
+type = forbidden
+allow_indirect_imports = true
+source_modules =
+    eneo.flows.application.flow_service
+forbidden_modules =
+    eneo.flows.runtime.docx_template_runtime

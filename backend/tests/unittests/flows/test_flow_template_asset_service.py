@@ -143,7 +143,9 @@ def _asset_for_flow(flow: Flow, user) -> FlowTemplateAsset:
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("operation", ["list", "upload", "get", "delete"])
+@pytest.mark.parametrize(
+    "operation", ["list", "upload", "get", "publication", "delete"]
+)
 async def test_template_asset_operations_require_persisted_parent_flow_id(
     user,
     operation: str,
@@ -173,6 +175,8 @@ async def test_template_asset_operations_require_persisted_parent_flow_id(
                 flow_id=uuid4(),
                 upload_file=_upload("template.docx", _build_template_bytes()),
             )
+        elif operation == "publication":
+            await service.get_asset_for_publication(flow_id=uuid4(), asset_id=uuid4())
         elif operation == "delete":
             await service.delete_asset(flow_id=uuid4(), asset_id=uuid4())
         else:
@@ -187,15 +191,29 @@ async def test_template_asset_operations_require_persisted_parent_flow_id(
 
 
 @pytest.mark.asyncio
-async def test_get_asset_with_file_hydrates_relationship_content(user) -> None:
+@pytest.mark.parametrize(
+    ("operation", "template_bytes", "error_code"),
+    [
+        ("get", _build_template_bytes(), None),
+        ("publication", control_template_bytes(rich=["Second", "First"]), None),
+        ("publication", b"not-a-docx", "flow_template_invalid_archive"),
+        ("publication", control_template_bytes(), "flow_template_no_controls"),
+    ],
+    ids=["hydrate", "fresh_names_in_document_order", "invalid_archive", "no_controls"],
+)
+async def test_get_asset_with_file_hydrates_relationship_content(
+    user, operation: str, template_bytes: bytes, error_code: str | None
+) -> None:
     flow = _flow_for_user(user)
-    asset = _asset_for_flow(flow, user)
+    asset = _asset_for_flow(flow, user).model_copy(
+        update={"placeholders": ["Stale"], "checksum": "stale", "name": "old.docx"}
+    )
     now = datetime.now(timezone.utc)
     metadata = FileMetadata(
         id=asset.file_id,
         created_at=now,
         updated_at=now,
-        name=asset.name,
+        name="current.docx",
         file_type=FileType.DOCUMENT,
         mimetype=asset.mimetype,
         owner_type=PrincipalType.USER,
@@ -203,7 +221,6 @@ async def test_get_asset_with_file_hydrates_relationship_content(user) -> None:
         owner_service_id=None,
         tenant_id=user.tenant_id,
     )
-    template_bytes = _build_template_bytes()
     hydrated_file = File(
         id=metadata.id,
         created_at=metadata.created_at,
@@ -237,9 +254,23 @@ async def test_get_asset_with_file_hydrates_relationship_content(user) -> None:
         flow_version_repo=AsyncMock(),
     )
 
-    result = await service.get_asset_with_file(flow_id=flow.id, asset_id=asset.id)
-
-    assert result == (asset, hydrated_file)
+    if operation == "get":
+        assert await service.get_asset_with_file(
+            flow_id=flow.id, asset_id=asset.id
+        ) == (asset, hydrated_file)
+    elif error_code is not None:
+        with pytest.raises(BadRequestException) as exc_info:
+            await service.get_asset_for_publication(flow_id=flow.id, asset_id=asset.id)
+        assert exc_info.value.code == error_code
+    else:
+        result_asset, result_file, names = await service.get_asset_for_publication(
+            flow_id=flow.id, asset_id=asset.id
+        )
+        assert result_asset is asset
+        assert result_file is hydrated_file
+        assert names == ("Second", "First")
+        assert result_file.name == "current.docx"
+        assert result_file.checksum == hashlib.sha256(template_bytes).hexdigest()
     file_repo.get_by_id.assert_awaited_once_with(
         file_id=asset.file_id,
         tenant_id=user.tenant_id,
