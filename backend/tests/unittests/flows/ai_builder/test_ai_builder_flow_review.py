@@ -1724,7 +1724,7 @@ def test_a_turn_stored_in_an_older_shape_loads_without_an_offer_to_retry_it():
         BuilderTurnLifecycle,
         BuilderTurnState,
     )
-    from eneo.flows.ai_builder.ai_builder_router import _to_session_response
+    from eneo.flows.api.flow_ai_builder_router import _to_session_response
 
     def _session(request: dict[str, object]) -> BuilderSession:
         return BuilderSession(
@@ -1783,7 +1783,7 @@ def test_a_turn_that_cannot_be_replayed_asks_for_no_spend_acknowledgement():
         BuilderTurnLifecycle,
         BuilderTurnState,
     )
-    from eneo.flows.ai_builder.ai_builder_router import _to_session_response
+    from eneo.flows.api.flow_ai_builder_router import _to_session_response
 
     response = _to_session_response(
         edit_scope=None,

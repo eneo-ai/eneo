@@ -1996,7 +1996,7 @@ async def test_failure_launch_denial_writes_no_audit_row(
     from starlette.requests import Request
 
     from eneo.database.tables.audit_log_table import AuditLog
-    from eneo.flows.ai_builder.ai_builder_router import get_run_failure_launch
+    from eneo.flows.api.flow_ai_builder_router import get_run_failure_launch
     from eneo.main.exceptions import UnauthorizedException
 
     run_id = uuid4()

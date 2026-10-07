@@ -1257,7 +1257,7 @@ async def _run_child(command: _ChildCommand) -> NoReturn:
             new=exit_after_provider_return,
         )
     else:
-        from eneo.flows.ai_builder import ai_builder_router
+        from eneo.flows.api import flow_ai_builder_router as ai_builder_router
 
         original_encode = ai_builder_router.encode_ai_builder_stream_event
 

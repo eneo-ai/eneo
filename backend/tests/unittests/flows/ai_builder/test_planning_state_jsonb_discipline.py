@@ -43,7 +43,12 @@ _FORBIDDEN_READ_PATTERNS = (
 
 def _iter_ai_builder_python_files() -> list[Path]:
     return sorted(
-        path for path in AI_BUILDER_DIR.rglob("*.py") if "__pycache__" not in path.parts
+        path
+        for path in (
+            *AI_BUILDER_DIR.rglob("*.py"),
+            AI_BUILDER_DIR.parent / "api" / "flow_ai_builder_router.py",
+        )
+        if "__pycache__" not in path.parts
     )
 
 

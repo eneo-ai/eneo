@@ -1541,7 +1541,12 @@ def test_persisted_tool_call_fields_are_not_read_from_raw_mappings() -> None:
 
 def _source_hits(pattern: re.Pattern[str], *, exclude: set[str]) -> list[str]:
     hits: list[str] = []
-    for path in sorted(_AI_BUILDER_SRC.glob("*.py")):
+    for path in sorted(
+        (
+            *_AI_BUILDER_SRC.glob("*.py"),
+            _AI_BUILDER_SRC.parent / "api" / "flow_ai_builder_router.py",
+        )
+    ):
         if path.name in exclude:
             continue
         for line_number, line in enumerate(path.read_text().splitlines(), start=1):

@@ -59,7 +59,7 @@ import sys
 import eneo.flows.api.flow_run_contract_models
 
 assert "eneo.flows.api.flow_router" not in sys.modules
-assert "eneo.flows.ai_builder.ai_builder_router" not in sys.modules
+assert "eneo.flows.api.flow_ai_builder_router" not in sys.modules
 """
 
     result = _run_in_fresh_python(script)

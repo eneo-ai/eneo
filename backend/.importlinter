@@ -3,10 +3,8 @@ root_package = eneo
 include_external_packages = False
 
 [importlinter:contract:flows-engine-no-ai-builder]
-# The flows engine (everything under `eneo.flows` except the AI Builder
-# plugin itself) must not import from the AI Builder. This contract locks
-# the boundary so no new direct imports from the engine into the plugin
-# slip in.
+# The HTTP adapter composes the Builder plugin. Other engine and API modules
+# must not depend directly on the plugin.
 name = Flows engine must not import AI Builder
 type = forbidden
 allow_indirect_imports = true
@@ -82,7 +80,7 @@ source_modules =
 forbidden_modules =
     eneo.flows.ai_builder
 ignore_imports =
-    eneo.flows.api.flow_router -> eneo.flows.ai_builder.ai_builder_router
+    eneo.flows.api.flow_ai_builder_router -> eneo.flows.ai_builder.*
 
 [importlinter:contract:fcm-no-ai-builder]
 # The Flow Capability Manifest is engine truth. Even though the broader

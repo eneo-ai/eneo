@@ -17,7 +17,7 @@ from eneo.flows.ai_builder.ai_builder_domain_models import (
     SessionStatus,
     TargetKind,
 )
-from eneo.flows.ai_builder.ai_builder_router import (
+from eneo.flows.api.flow_ai_builder_router import (
     AIBuilderEnvelopedError,
     ai_builder_enveloped_error_handler,
     router,
