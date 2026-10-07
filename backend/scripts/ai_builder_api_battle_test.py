@@ -10176,6 +10176,30 @@ def _rescored_evidence(
     return summary, event_summary, journey, report
 
 
+def _quality_check_changes(before: object, after: object) -> list[dict[str, object]]:
+    indexed: list[dict[str, Mapping[str, object]]] = []
+    for checks in (before, after):
+        if not isinstance(checks, list):
+            raise ValueError("Quality checks must be a list of uniquely named objects.")
+        named: dict[str, Mapping[str, object]] = {}
+        for check in _mapping_list(checks):
+            name = check.get("name")
+            if not isinstance(name, str) or not name or name in named:
+                raise ValueError(
+                    "Quality checks must be a list of uniquely named objects."
+                )
+            named[name] = check
+        if len(named) != len(checks):
+            raise ValueError("Quality checks must be a list of uniquely named objects.")
+        indexed.append(named)
+    source, current = indexed
+    return [
+        {"name": name, "before": source.get(name), "after": current.get(name)}
+        for name in sorted(source.keys() | current.keys())
+        if _canonical_sha256(source.get(name)) != _canonical_sha256(current.get(name))
+    ]
+
+
 def _reanalyze_bundles(
     *,
     bundle_paths: list[Path],
@@ -10249,6 +10273,9 @@ def _reanalyze_bundles(
                 "failure_summary": _failure_summary(event_summary),
                 "runtime_metrics": _runtime_metrics_from_quality_report(report),
                 "quality_report": report,
+                "quality_report_changes": _quality_check_changes(
+                    bundle["quality_report"].get("checks"), report.get("checks")
+                ),
             }
             output_path = _write_reanalysis_bundle(
                 output_dir, bundle_path, seal_observation(refreshed)
