@@ -5,6 +5,7 @@ from uuid import UUID, uuid4
 
 import pytest
 
+from eneo.completion_models.infrastructure import context_builder
 from eneo.completion_models.infrastructure.context_builder import (
     ChunkGrouping,
     _Prompt,
@@ -106,3 +107,54 @@ def test_adjacent_passages_share_one_header_and_budget_the_joined_text():
     assert expected.count("source_properties:") == 1
     assert "Start and shared ending" in expected
     assert prompt.get_tokens_of_knowledge() == count_tokens(expected)
+
+
+def test_large_candidate_sets_do_not_retokenize_every_rendered_prefix(monkeypatch):
+    processed_characters = 0
+
+    def measured_count(text: str, model_name: str = "") -> int:
+        nonlocal processed_characters
+        processed_characters += len(text)
+        return count_tokens(text, model_name)
+
+    monkeypatch.setattr(context_builder, "count_tokens", measured_count)
+    source_id = uuid4()
+    chunks = [RetrievedChunk(f"word{i} ", i, source_id) for i in range(600)]
+    prompt = _Prompt(version=2)
+
+    prompt.add_knowledge(chunks, max_tokens=100_000)
+
+    rendered = prompt.knowledge or ""
+    assert "word0 " in rendered and "word599 " in rendered
+    assert prompt.get_tokens_of_knowledge() == count_tokens(rendered)
+    # Measure real tokenizer input volume, rather than elapsed time or private
+    # helper calls: work remains proportional to the accepted text volume.
+    assert processed_characters < 10 * sum(len(chunk.text) for chunk in chunks)
+
+
+def test_many_overlapping_chunks_fit_an_exact_budget_without_quadratic_tokenization(
+    monkeypatch,
+):
+    source_id = uuid4()
+    words = [f"word{i}" for i in range(4802)]
+    chunks = [
+        RetrievedChunk(" ".join(words[8 * i : 8 * i + 10]), i, source_id)
+        for i in range(600)
+    ]
+    full = _Prompt(version=2)
+    full.add_knowledge(chunks, max_tokens=100_000)
+    processed_characters = 0
+
+    def measured_count(text: str, model_name: str = "") -> int:
+        nonlocal processed_characters
+        processed_characters += len(text)
+        return count_tokens(text, model_name)
+
+    monkeypatch.setattr(context_builder, "count_tokens", measured_count)
+    prompt = _Prompt(version=2)
+
+    prompt.add_knowledge(chunks, max_tokens=full.get_tokens_of_knowledge())
+
+    assert prompt.knowledge == full.knowledge
+    assert prompt.get_tokens_of_knowledge() == count_tokens(prompt.knowledge or "")
+    assert processed_characters < 20 * sum(len(chunk.text) for chunk in chunks)

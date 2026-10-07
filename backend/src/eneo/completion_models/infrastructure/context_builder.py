@@ -414,22 +414,61 @@ class _Prompt:
         max_tokens: int,
     ) -> str:
         selected: list[_InfoBlobChunkLike] = []
-        rendered = ""
-        used_tokens = 0
+        chunk_numbers: dict[UUID, set[int]] = {}
+        header_tokens: dict[UUID, int] = {}
+        estimated_tokens = 0
         for chunk in chunks:
-            # A new chunk can create another attributed group or join two
-            # groups. Budget the exact rendered candidate, including repeated
-            # property headers and text overlap, rather than each document once.
-            candidate = self._render_reconstructed_chunks([*selected, chunk])
-            candidate_tokens = count_tokens(candidate, self.model_name)
+            numbers = chunk_numbers.setdefault(chunk.info_blob_id, set())
+            if chunk.info_blob_id not in header_tokens:
+                header = (
+                    _source_header(
+                        chunk.info_blob_title,
+                        chunk.info_blob_id,
+                        chunk.info_blob_source_metadata,
+                    )
+                    if self.version == 2
+                    else ""
+                )
+                header_tokens[chunk.info_blob_id] = count_tokens(
+                    f'"""{header}\n"""\n', self.model_name
+                )
+            # Adding a chunk creates a group, extends one, or joins two.
+            # Repeated chunk numbers split a coherent group in the renderer.
+            group_delta = (
+                1
+                if chunk.chunk_no in numbers
+                else 1
+                - int(chunk.chunk_no - 1 in numbers)
+                - int(chunk.chunk_no + 1 in numbers)
+            )
+            candidate_tokens = (
+                estimated_tokens
+                + count_tokens(chunk.text, self.model_name)
+                + group_delta * header_tokens[chunk.info_blob_id]
+            )
             if candidate_tokens > max_tokens:
-                break
+                # Summing chunk bodies is conservative when they overlap. Only
+                # render at the boundary, rather than tokenizing every prefix
+                # of a potentially very large retrieval candidate set.
+                candidate = self._render_reconstructed_chunks([*selected, chunk])
+                candidate_tokens = count_tokens(candidate, self.model_name)
+                if candidate_tokens > max_tokens:
+                    break
             selected.append(chunk)
-            rendered = candidate
-            used_tokens = candidate_tokens
+            numbers.add(chunk.chunk_no)
+            estimated_tokens = candidate_tokens
 
-        self._knowledge_tokens = used_tokens
-        return rendered
+        # Tokenization at joined boundaries can differ from the running sum.
+        # The stored cost and final admission always use the actual rendering.
+        while selected:
+            rendered = self._render_reconstructed_chunks(selected)
+            used_tokens = count_tokens(rendered, self.model_name)
+            if used_tokens <= max_tokens:
+                self._knowledge_tokens = used_tokens
+                return rendered
+            selected.pop()
+        self._knowledge_tokens = 0
+        return ""
 
     def _render_reconstructed_chunks(self, chunks: list[_InfoBlobChunkLike]) -> str:
         # Create a dictionary to store chunk indices
