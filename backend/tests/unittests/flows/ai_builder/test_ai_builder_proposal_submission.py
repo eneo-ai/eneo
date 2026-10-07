@@ -947,20 +947,11 @@ async def test_create_propose_flow_ambiguous_structured_source_returns_event_wit
     payload = json.loads(events[0]["data"])
     assert payload["code"] == "architecture_materialization_failed"
     assert payload["phase"] == "proposal"
-    assert payload["details"]["architecture_error_code"] == (
-        "architecture_materialization_failed"
-    )
-    assert payload["details"]["architecture_error_detail"] == (
-        "Step 3: Consolidate the required facts into one structured preparation "
-        "step, or use one supported terminal aggregate before adding section writers."
-    )
-    assert payload["details"]["failure_code"] == (
-        "section_writer_structured_source_ambiguous"
-    )
-    assert payload["details"]["reason"] == (
-        "section_writer_structured_source_ambiguous"
-    )
-    assert payload["details"]["step_index"] == 3
+    assert payload["details"] == {
+        "architecture_error_code": "architecture_materialization_failed",
+        "architecture_repair_disposition": "server_defect",
+        "failure_code": "section_writer_structured_source_ambiguous",
+    }
 
     telemetry = tracker.build_planner_telemetry()
     assert telemetry["proposal_first_attempt_success"] is False
