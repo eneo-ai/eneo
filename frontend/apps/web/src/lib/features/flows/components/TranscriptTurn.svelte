@@ -13,6 +13,7 @@
     type TurnPart
   } from "$lib/features/flows/transcriptTurns";
   import TranscriptSpeakerBadge, { type SpeakerOption } from "./TranscriptSpeakerBadge.svelte";
+  import { effectiveSpeakerLabel } from "$lib/features/flows/speakerReview";
 
   let {
     turn,
@@ -254,10 +255,11 @@
   data-turn-index={turn.index}
 >
   <div class="flex flex-col items-start gap-0.5 pt-0.5">
-    {#if turn.speaker || editable}
+    {#if turn.speaker.kind !== "unlabelled" || editable}
       <TranscriptSpeakerBadge
-        display={turn.speaker ? displayName(turn.speaker) : "Okänd talare"}
-        colorClass={turn.speaker ? speakerClass(turn.speaker) : ""}
+        display={effectiveSpeakerLabel(turn.speaker, displayName) ??
+          m.flow_run_transcript_unknown_speaker()}
+        colorClass={turn.speaker.kind === "named" ? speakerClass(turn.speaker.label) : ""}
         editable={speakerEditable}
         {overridden}
         changedFrom={null}

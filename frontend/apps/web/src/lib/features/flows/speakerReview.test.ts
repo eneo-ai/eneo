@@ -1,12 +1,8 @@
 import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
-import {
-  effectiveSpeaker,
-  PROVISIONAL_SPEAKER,
-  UNRESOLVED_SPEAKER,
-  renderReviewedTranscript
-} from "./speakerReview";
-import { segmentsFromMetadata, attachWords } from "./transcriptSegments";
+import { withLocale } from "./testLocale";
+import { renderReviewedTranscript } from "./speakerReview";
+import { segmentsFromMetadata, attachWords, parseTranscript } from "./transcriptSegments";
 import { applySpeakerEditOverlay } from "./transcriptRuns";
 import { computeTurns } from "./transcriptTurns";
 
@@ -55,7 +51,7 @@ describe("shared Vemsa speaker-review contract", () => {
         );
         const reloaded = JSON.parse(JSON.stringify(edits));
         const turns = computeTurns(segments, [], reloaded);
-        expect(turns.some((turn) => turn.speaker === UNRESOLVED_SPEAKER)).toBe(true);
+        expect(turns.some((turn) => turn.speaker.kind === "unresolved")).toBe(true);
         expect(renderReviewedTranscript(segments, [], reloaded)).toContain(
           `[Talare går inte att avgöra]: ${segment.text}`
         );
@@ -118,9 +114,9 @@ it("keeps a same-label confirmation bounded inside provisional words", () => {
     segments
   );
   expect(computeTurns(segments, [], edits).map((turn) => turn.speaker)).toEqual([
-    PROVISIONAL_SPEAKER,
-    "SPEAKER_00",
-    PROVISIONAL_SPEAKER
+    { kind: "provisional" },
+    { kind: "named", label: "SPEAKER_00" },
+    { kind: "provisional" }
   ]);
   expect(renderReviewedTranscript(segments, [], edits, { SPEAKER_00: "Anna" })).toBe(
     "[00:00:00 - 00:00:03] [Överlappande tal – osäker talare]: Hej\n" +
@@ -140,7 +136,50 @@ it("does not mistake a model assignment for human confirmation", () => {
     speakerAttribution: "assigned"
   };
   expect(computeTurns([segment], [], [])[0].parts[0].overridden).toBe(false);
-  expect(effectiveSpeaker({ ...segment, speakerAttribution: "provisional" })).toBe(
-    PROVISIONAL_SPEAKER
-  );
 });
+
+it.each<["sv" | "en", string, string, boolean, string, boolean]>([
+  ["sv", "Överlappande tal – osäker talare", "assigned", false, "Anna: Hej", false],
+  ["sv", "Talare går inte att avgöra", "assigned", false, "Anna: Hej", false],
+  [
+    "en",
+    "SPEAKER_00",
+    "provisional",
+    false,
+    "[Overlapping speech – uncertain speaker]: Hej",
+    false
+  ],
+  ["en", "SPEAKER_00", "assigned", true, "[Speaker cannot be determined]: Hej", false],
+  ["en", "SPEAKER_00", "assigned", false, "## Part 1", true]
+])(
+  "keeps named speakers distinct and localizes exports (%s, %s, %s, %s)",
+  (locale, speaker, attribution, unresolved, expected, multipart) => {
+    // Mutants: a real name is treated as a marker, or exports ignore the active locale.
+    const restore = withLocale(locale);
+    try {
+      const segments = parseTranscript(`[00:00:00 - 00:00:01] ${speaker}: Hej`);
+      segments[0].speakerAttribution = attribution;
+      if (multipart) segments.push({ ...segments[0], index: 1, fileIndex: 1 });
+      const edits = unresolved
+        ? applySpeakerEditOverlay(
+            [],
+            [
+              {
+                segment_index: 0,
+                char_start: null,
+                char_end: null,
+                speaker: null,
+                decision: "unresolved"
+              }
+            ],
+            segments
+          )
+        : [];
+      expect(renderReviewedTranscript(segments, [], edits, { [speaker]: "Anna" })).toContain(
+        expected
+      );
+    } finally {
+      restore();
+    }
+  }
+);

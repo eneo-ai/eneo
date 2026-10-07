@@ -3,6 +3,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import TranscriptPlayer from "./TranscriptPlayer.svelte";
 import { attachWords, parseTranscript } from "$lib/features/flows/transcriptSegments";
+import { withLocale } from "../testLocale";
 
 const TRANSCRIPT = [
   "[00:00:00 - 00:00:04] SPEAKER_00: Hej och välkomna.",
@@ -90,18 +91,33 @@ describe("TranscriptPlayer turns", () => {
     await waitFor(() => expect(getAudioUrl).toHaveBeenCalledWith(0));
   });
 
-  it("shows the reviewer's names on the raw labels", () => {
-    render(TranscriptPlayer, {
-      props: {
-        segments: parseTranscript(TRANSCRIPT),
-        getAudioUrl: signed(),
-        speakerNames: { SPEAKER_00: "Anna" }
-      }
-    });
+  it.each<["sv" | "en", string, boolean, string]>([
+    ["sv", "SPEAKER_00", false, "Anna"],
+    ["sv", "Överlappande tal – osäker talare", false, "Anna"],
+    ["sv", "Talare går inte att avgöra", false, "Anna"],
+    ["en", "SPEAKER_00", true, "Overlapping speech – uncertain speaker"]
+  ])(
+    "shows speaker names and localized review badges (%s, %s)",
+    (locale, speaker, provisional, expected) => {
+      // Mutant: badge presentation uses a raw status string or a named alias for a marker.
+      const restore = withLocale(locale);
+      try {
+        const segments = parseTranscript(TRANSCRIPT);
+        for (const segment of segments.slice(0, 2)) {
+          segment.speaker = speaker;
+          segment.speakerAttribution = provisional ? "provisional" : "assigned";
+        }
+        render(TranscriptPlayer, {
+          props: { segments, getAudioUrl: signed(), speakerNames: { [speaker]: "Anna" } }
+        });
 
-    expect(screen.getByText("Anna")).toBeTruthy();
-    expect(screen.getByText("SPEAKER_01")).toBeTruthy();
-  });
+        expect(screen.getAllByText(expected)).toHaveLength(provisional ? 2 : 1);
+        expect(screen.getByText("SPEAKER_01")).toBeTruthy();
+      } finally {
+        restore();
+      }
+    }
+  );
 
   it("re-flows a reassigned segment into the neighboring turn", () => {
     const { container } = render(TranscriptPlayer, {

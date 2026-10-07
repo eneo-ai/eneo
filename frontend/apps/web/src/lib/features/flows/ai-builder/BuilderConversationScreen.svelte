@@ -4,7 +4,6 @@
   import { Button } from "$lib/components/ui/button/index.js";
   import IconArrowLeft from "@lucide/svelte/icons/arrow-left";
   import FlowAIBuilderChat from "./FlowAIBuilderChat.svelte";
-  import type { AIBuilderSuggestChangeIntent } from "./protocol";
 
   /**
    * The whole conversation, in the same column as every other phase screen.
@@ -21,9 +20,9 @@
 
   let chatRef = $state<FlowAIBuilderChat | undefined>();
 
-  export async function focusComposer(intent?: string | AIBuilderSuggestChangeIntent) {
+  export async function focusComposer() {
     await new Promise((resolve) => requestAnimationFrame(resolve));
-    chatRef?.focusInput(intent);
+    chatRef?.focusInput();
   }
 
   export async function focusAttachControl() {

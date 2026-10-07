@@ -385,13 +385,18 @@ export function syncFlowRunHistoryPolling(
           if (state.inFlightGeneration !== state.requestGeneration) {
             await loadRuns();
           }
-        } finally {
-          state.pollTimeout = null;
+        } catch (error) {
+          if (state.pollTimeout === handle) state.pollTimeout = null;
+          throw error;
         }
+        if (state.pollTimeout !== handle) return;
+        state.pollTimeout = null;
         if (hasRunsToPoll() && visible()) {
           scheduleNextPoll();
         }
       }, pollIntervalMs);
+      // Capture the stored handle because reactive state can proxy timer objects.
+      const handle = state.pollTimeout;
     };
     scheduleNextPoll();
     return;

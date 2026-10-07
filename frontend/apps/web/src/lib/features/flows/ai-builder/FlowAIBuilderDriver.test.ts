@@ -1,10 +1,10 @@
 import { describe, expect, it, vi, type Mock } from "vitest";
+import { EneoError } from "@eneo/eneo-js";
 
 import { m } from "$lib/paraglide/messages";
 import { getLocale, setLocale } from "$lib/paraglide/runtime";
 
 import { FlowAIBuilderDriver, type AIBuilderClientTransport } from "./FlowAIBuilderDriver";
-import { parseAIBuilderStreamEvent } from "./protocol";
 import type {
   AIBuilderConversationMessage,
   AIBuilderDraftSession,
@@ -253,22 +253,6 @@ describe("FlowAIBuilderDriver", () => {
 
     expect(Object.keys(publicRoles)).toEqual(["user", "assistant"]);
     expect(publicContractHasNoInternalFields).toBe(true);
-  });
-
-  it("rejects unknown raw stream event names", () => {
-    expect(() => parseAIBuilderStreamEvent({ event: "garbage", data: "{}" })).toThrow(
-      /Unknown AI Builder stream event/
-    );
-  });
-
-  it("rejects malformed stream event JSON", () => {
-    expect(() => parseAIBuilderStreamEvent({ event: "text", data: "{not json" })).toThrow();
-  });
-
-  it("rejects non-empty done event data frames", () => {
-    expect(() => parseAIBuilderStreamEvent({ event: "done", data: "{}" })).toThrow(
-      /empty data frame/
-    );
   });
 
   it("keeps the first phase for the reading and understanding statuses", () => {
@@ -1707,31 +1691,71 @@ describe("FlowAIBuilderDriver", () => {
     await expect(pending).resolves.toBe("delivered");
   });
 
-  it("records protocol validation failures and clears them only through a new clean stream", async () => {
-    const stream = vi
-      .fn()
-      .mockImplementationOnce(async (_path, _init, handlers) => {
-        handlers.onMessage({ event: "text", data: "{}" });
-      })
-      .mockImplementationOnce(async (_path, _init, handlers) => {
-        completeStream(handlers);
+  it.each([
+    { event: "text", data: "{not json" },
+    { event: "text", data: "{}" },
+    { event: "unknown", data: "{}" },
+    { event: "done", data: "{}" }
+  ])(
+    "aborts a $event contract failure before SDK wrapping and refreshes the session",
+    async (rawEvent) => {
+      // Mutants: omitted abort, lost typed fault after SDK wrapping, skipped authoritative refresh.
+      let streamController: AbortController | undefined;
+      const stream = vi
+        .fn()
+        .mockImplementationOnce(async (_path, _init, handlers, controller: AbortController) => {
+          streamController = controller;
+          try {
+            handlers.onMessage(rawEvent, controller);
+          } catch (error) {
+            EneoError.throw(error, {
+              endpoint: "STREAM@/api/v1/flows/ai-builder/sessions/session-1/messages"
+            });
+          }
+        })
+        .mockImplementationOnce(async (_path, _init, handlers) => {
+          completeStream(handlers);
+        });
+      const { driver } = makeDriver({
+        fetchImpl: vi.fn().mockResolvedValue(
+          makeSession({
+            conversation: [
+              {
+                message_id: "user-turn-1",
+                role: "user",
+                content: "Server retained request",
+                timestamp: "2026-07-10T20:00:00Z"
+              }
+            ]
+          })
+        ),
+        streamImpl: stream
       });
-    const { driver } = makeDriver({
-      fetchImpl: vi.fn().mockResolvedValue(makeSession()),
-      streamImpl: stream
-    });
-    driver.seedState({ session: makeSession() });
+      driver.seedState({ session: makeSession() });
 
-    expect(await driver.sendMessage("Build a flow")).toBe("failed");
-    expect(driver.state).toMatchObject({ streamState: "failed" });
-    expect(driver.state.error).not.toBeNull();
-    expect(driver.state.messages).not.toContainEqual(
-      expect.objectContaining({ role: "assistant" })
-    );
+      expect(await driver.sendMessage("Build a flow")).toBe("failed");
+      expect(streamController?.signal.aborted).toBe(true);
+      expect(driver.state).toMatchObject({
+        streamState: "failed",
+        error: {
+          code: "stream_contract_violation",
+          category: "internal",
+          phase: "client",
+          message: m.ai_builder_error_fallback_stream(),
+          details: {}
+        }
+      });
+      expect(driver.state.messages).toContainEqual(
+        expect.objectContaining({ role: "user", content: "Server retained request" })
+      );
+      expect(driver.state.messages).not.toContainEqual(
+        expect.objectContaining({ role: "assistant" })
+      );
 
-    expect(await driver.sendMessage("Try again")).toBe("delivered");
-    expect(driver.state).toMatchObject({ streamState: "idle" });
-  });
+      expect(await driver.sendMessage("Try again")).toBe("delivered");
+      expect(driver.state).toMatchObject({ streamState: "idle" });
+    }
+  );
 
   it("retries a pre-provider failure with the exact persisted turn request", async () => {
     const session = makeRecoverableSession("failed_before_provider");

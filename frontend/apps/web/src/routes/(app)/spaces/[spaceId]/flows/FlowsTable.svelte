@@ -10,6 +10,7 @@
   import { Input } from "$lib/components/ui/input/index.js";
   import * as DropdownMenu from "$lib/components/ui/dropdown-menu/index.js";
   import * as AlertDialog from "$lib/components/ui/alert-dialog/index.js";
+  import * as Alert from "$lib/components/ui/alert/index.js";
   import * as Empty from "$lib/components/ui/empty/index.js";
   import * as ToggleGroup from "$lib/components/ui/toggle-group/index.js";
   import { IconEllipsis } from "@eneo/icons/ellipsis";
@@ -32,6 +33,9 @@
     drafts: RecoverableAIBuilderDraftSession[];
     /** The drafts request failed; the list must say so instead of hiding rows. */
     draftsUnavailable?: boolean;
+    refreshFailed?: boolean;
+    refreshing?: boolean;
+    onretry?: () => Promise<void>;
     canCreate?: boolean;
     oncreate?: () => void;
     ondiscarddraft?: (sessionId: string) => Promise<void> | void;
@@ -41,6 +45,9 @@
     flows,
     drafts,
     draftsUnavailable = false,
+    refreshFailed = false,
+    refreshing = false,
+    onretry,
     canCreate = false,
     oncreate,
     ondiscarddraft
@@ -187,6 +194,14 @@
 {/snippet}
 
 <div class="@container/list flex flex-col gap-3">
+  {#if refreshFailed}
+    <Alert.Root variant="destructive">
+      <Alert.Description>
+        {m.flow_list_refresh_failed()}
+        <Button variant="outline" disabled={refreshing} onclick={onretry}>{m.retry()}</Button>
+      </Alert.Description>
+    </Alert.Root>
+  {/if}
   {#if !isEmpty}
     <div class="flex flex-wrap items-center gap-2">
       <div class="relative w-full max-w-[16rem]">

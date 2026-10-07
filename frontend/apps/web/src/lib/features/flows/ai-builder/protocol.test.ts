@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  AIBuilderStreamContractError,
   parseAIBuilderStreamEvent,
   type AIBuilderPublicErrorPayload,
   type AIBuilderStreamEvent
@@ -79,6 +80,9 @@ const validEvents: AIBuilderStreamEvent[] = [
 ];
 
 const invalidPayloads: AIBuilderStreamEvent[] = [
+  { event: "unknown", data: "{}" },
+  { event: "text", data: "{not json" },
+  { event: "done", data: "{}" },
   { event: "text", data: "{}" },
   { event: "status", data: JSON.stringify({ status: "unknown" }) },
   {
@@ -297,7 +301,7 @@ describe("AI Builder stream protocol", () => {
 
     expect(() =>
       parseAIBuilderStreamEvent({ event: "requirements_summary", data: JSON.stringify(data) })
-    ).toThrow(/Invalid AI Builder requirements_summary event payload/);
+    ).toThrow(AIBuilderStreamContractError);
   });
 
   it.each(["", "   "])("rejects a requirements summary with a blank output (%j)", (blank) => {
@@ -307,19 +311,17 @@ describe("AI Builder stream protocol", () => {
 
     expect(() =>
       parseAIBuilderStreamEvent({ event: "requirements_summary", data: JSON.stringify(data) })
-    ).toThrow(/Invalid AI Builder requirements_summary event payload/);
+    ).toThrow(AIBuilderStreamContractError);
   });
 
   it.each(invalidPayloads)("rejects an invalid $event payload", (rawEvent) => {
-    expect(() => parseAIBuilderStreamEvent(rawEvent)).toThrow(
-      new RegExp(`Invalid AI Builder ${rawEvent.event} event payload`)
-    );
+    expect(() => parseAIBuilderStreamEvent(rawEvent)).toThrow(AIBuilderStreamContractError);
   });
 
   it("rejects a syntactically valid non-object payload", () => {
     expect(() =>
       parseAIBuilderStreamEvent({ event: "text", data: JSON.stringify("text") })
-    ).toThrow(/Invalid AI Builder text event payload/);
+    ).toThrow(AIBuilderStreamContractError);
   });
 
   it("rejects an invalid nested plan step", () => {
@@ -332,7 +334,7 @@ describe("AI Builder stream protocol", () => {
           input_source: "unsupported"
         })
       )
-    ).toThrow(/Invalid AI Builder plan event payload at proposal.spec.steps.0.input_source/);
+    ).toThrow(AIBuilderStreamContractError);
   });
 
   it.each([59, 7_776_001])("rejects review expiry %i outside the backend contract", (expiry) => {
@@ -346,9 +348,7 @@ describe("AI Builder stream protocol", () => {
           review_policy: { mode: "view", expires_after_seconds: expiry }
         })
       )
-    ).toThrow(
-      /Invalid AI Builder plan event payload at proposal.spec.steps.0.review_policy.expires_after_seconds/
-    );
+    ).toThrow(AIBuilderStreamContractError);
   });
 
   it.each([60, 7_776_000])("accepts review expiry %i at the backend boundary", (expiry) => {

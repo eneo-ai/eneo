@@ -262,12 +262,9 @@
       : m.ai_builder_edit_context_step_without_number({ name });
   });
 
-  export function focus(options?: string | { placeholder?: string; prefill?: string }) {
-    // Support both legacy string signature (treated as placeholder) and options object
+  export function focus(options?: { placeholder?: string; prefill?: string }) {
     const sessionId = service.session?.session_id ?? null;
-    if (typeof options === "string") {
-      activePlaceholder = { sessionId, text: options };
-    } else if (options) {
+    if (options) {
       if (options.prefill) inputValue = options.prefill;
       if (options.placeholder) activePlaceholder = { sessionId, text: options.placeholder };
     }

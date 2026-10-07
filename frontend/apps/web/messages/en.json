@@ -7103,6 +7103,7 @@
   "flow_transcript_download": "Download transcript",
   "flow_transcript_review_choose": "Confirm or change speaker",
   "flow_transcript_review_unresolved": "Speaker cannot be determined",
+  "flow_transcript_review_provisional": "Overlapping speech – uncertain speaker",
   "flow_transcript_review_details": "Review details",
   "flow_transcript_review_model_suggestion": "Model suggestion: {speaker}",
   "flow_transcript_review_no_suggestion": "No speaker",
@@ -7344,5 +7345,7 @@
   "flow_package_template_replacement_help": "The original file was omitted. Choose a template with the fields below; the package mappings will be used.",
   "flow_package_template_expected_fields": "Word tags: {fields}",
   "flow_package_error_flow_package_export_template_bindings_incomplete": "Open the Word step. Map every template field and remove obsolete mappings before exporting again.",
-  "flow_package_error_flow_package_export_template_file_invalid": "The Word template is missing or cannot be read. Upload it again in the Word step, then retry the export."
+  "flow_package_error_flow_package_export_template_file_invalid": "The Word template is missing or cannot be read. Upload it again in the Word step, then retry the export.",
+  "flow_list_refresh_failed": "The flow list could not be refreshed. The previous list is shown and may be out of date. Try again.",
+  "flow_list_load_failed": "The flow list could not be loaded. Try again."
 }

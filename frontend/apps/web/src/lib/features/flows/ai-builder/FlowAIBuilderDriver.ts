@@ -22,7 +22,12 @@ import {
   toAIBuilderError
 } from "./aiBuilderError";
 import { classifyAIBuilderConflict } from "./aiBuilderConflict";
-import { isDiscoveryStatus, isRecoverableCreateDraft, parseAIBuilderStreamEvent } from "./protocol";
+import {
+  AIBuilderStreamContractError,
+  isDiscoveryStatus,
+  isRecoverableCreateDraft,
+  parseAIBuilderStreamEvent
+} from "./protocol";
 import type {
   AIBuilderClientErrorFirstAction,
   AIBuilderClientErrorPresentation,
@@ -1133,6 +1138,7 @@ export class FlowAIBuilderDriver {
     let receivedDurableStreamEvent = false;
     let receivedStaleQuestionEvent = false;
     let receivedStreamError = false;
+    let streamContractFailure: AIBuilderStreamContractError | null = null;
     let receivedDone = false;
     let settledStreamState: AIBuilderStreamState = "failed";
 
@@ -1148,7 +1154,16 @@ export class FlowAIBuilderDriver {
         {
           onMessage: (rawEvent: AIBuilderStreamEvent) => {
             if (!ownsCurrentStream()) return;
-            const event = parseAIBuilderStreamEvent(rawEvent);
+            let event: ReturnType<typeof parseAIBuilderStreamEvent>;
+            try {
+              event = parseAIBuilderStreamEvent(rawEvent);
+            } catch (error) {
+              if (error instanceof AIBuilderStreamContractError) {
+                streamContractFailure = error;
+                abortController.abort();
+              }
+              throw error;
+            }
             switch (event.event) {
               case "text": {
                 assistantText += event.data.text;
@@ -1295,11 +1310,14 @@ export class FlowAIBuilderDriver {
       }
       return receivedDone && !receivedStreamError ? "delivered" : "failed";
     } catch (e) {
-      if (!abortController.signal.aborted && ownsCurrentStream()) {
+      if (
+        ownsCurrentStream() &&
+        (streamContractFailure !== null || !abortController.signal.aborted)
+      ) {
         this.#requiresAuthoritativeRefresh = true;
         this.#state.error = this.#parseError({
           transport: "apply",
-          payload: e,
+          payload: streamContractFailure ?? e,
           fallbackMessage: m.ai_builder_error_fallback_stream()
         });
         this.#notify();
@@ -1846,11 +1864,11 @@ export class FlowAIBuilderDriver {
   }
 
   #ownsSession(owner: SessionOperationOwner): boolean {
+    // Transport abort keeps reconciliation valid; abort() fences user cancellation by clearing the owner.
     return (
       this.#sessionGeneration === owner.sessionGeneration &&
       this.#state.session?.session_id === owner.sessionId &&
-      this.#abortController === owner.abortController &&
-      owner.abortController?.signal.aborted !== true
+      this.#abortController === owner.abortController
     );
   }
 

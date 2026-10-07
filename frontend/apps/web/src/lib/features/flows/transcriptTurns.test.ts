@@ -42,8 +42,8 @@ describe("computeTurns", () => {
     const turns = computeTurns(segments, [], []);
 
     expect(turns.map((turn) => [turn.speaker, turn.parts.length])).toEqual([
-      ["SPEAKER_00", 2],
-      ["SPEAKER_01", 1]
+      [{ kind: "named", label: "SPEAKER_00" }, 2],
+      [{ kind: "named", label: "SPEAKER_01" }, 1]
     ]);
     expect(turns[0].start).toBe(0);
     expect(turns[0].parts.map((part) => part.segmentIndex)).toEqual([0, 1]);
@@ -58,7 +58,7 @@ describe("computeTurns", () => {
     const turns = computeTurns(segments, [], [wholeEdit(0, "SPEAKER_00", "SPEAKER_01")]);
 
     expect(turns).toHaveLength(1);
-    expect(turns[0].speaker).toBe("SPEAKER_01");
+    expect(turns[0].speaker).toEqual({ kind: "named", label: "SPEAKER_01" });
     expect(turns[0].parts.map((part) => part.text)).toEqual([
       "Det",
       "är inte helt lätt med allt det där."
@@ -80,8 +80,8 @@ describe("computeTurns", () => {
     const turns = computeTurns(segments, [], [spanEdit]);
 
     expect(turns.map((turn) => [turn.speaker, turn.parts.map((part) => part.text)])).toEqual([
-      ["SPEAKER_00", ["Hej där. "]],
-      ["SPEAKER_01", ["Vad bra.", "Precis så."]]
+      [{ kind: "named", label: "SPEAKER_00" }, ["Hej där. "]],
+      [{ kind: "named", label: "SPEAKER_01" }, ["Vad bra.", "Precis så."]]
     ]);
     expect(turns[1].parts[0]).toMatchObject({ segmentIndex: 0, rawStart: 9, rawEnd: 17 });
   });
@@ -114,8 +114,8 @@ describe("computeTurns", () => {
     const turns = computeTurns([timed], [], [edit]);
 
     expect(turns.map((turn) => [turn.speaker, turn.start])).toEqual([
-      ["SPEAKER_00", 0],
-      ["SPEAKER_01", 2.4]
+      [{ kind: "named", label: "SPEAKER_00" }, 0],
+      [{ kind: "named", label: "SPEAKER_01" }, 2.4]
     ]);
     expect(turns[1].parts[0].start).toBe(2.4);
   });

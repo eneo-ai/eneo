@@ -1,10 +1,9 @@
 import type { FlowRun } from "@eneo/eneo-js";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import {
   createFlowRunHistoryState,
   destroyFlowRunHistoryPolling,
   FLOW_RUN_HISTORY_PAGE_SIZE,
-  type FlowRunHistoryPollTimeout,
   loadFlowRunHistory,
   MAX_LOADED_FLOW_RUNS,
   syncFlowRunHistoryFlow,
@@ -704,36 +703,42 @@ describe("syncFlowRunHistoryPolling", () => {
     expect(state.pollTimeout).toBeNull();
   });
 
-  it("clears an existing polling timeout when the history is hidden", () => {
-    const state = createFlowRunHistoryState();
-    const timeout = 1;
-    let clearedTimeout: FlowRunHistoryPollTimeout | null = null;
-    state.pollTimeout = timeout;
-
-    syncFlowRunHistoryPolling(state, {
-      visible: () => false,
-      hasRunsToPoll: () => true,
-      loadRuns: async () => {},
-      clearTimeoutFn: (value) => {
-        clearedTimeout = value;
+  it.each([
+    { action: "destroy", inFlight: false },
+    { action: "destroy", inFlight: true },
+    { action: "replace", inFlight: false },
+    { action: "replace", inFlight: true }
+  ])("keeps one owned poll after $action, in-flight=$inFlight", async ({ action, inFlight }) => {
+    vi.useFakeTimers();
+    try {
+      const state = createFlowRunHistoryState();
+      let visible = true;
+      let finish = () => {};
+      const loading = new Promise<void>((resolve) => {
+        finish = resolve;
+      });
+      const options = {
+        visible: () => visible,
+        hasRunsToPoll: () => true,
+        loadRuns: () => loading
+      };
+      syncFlowRunHistoryPolling(state, options);
+      if (inFlight) vi.advanceTimersByTime(5000);
+      if (action === "destroy") destroyFlowRunHistoryPolling(state);
+      else {
+        visible = false;
+        syncFlowRunHistoryPolling(state, options);
+        visible = true;
+        syncFlowRunHistoryPolling(state, options);
       }
-    });
-
-    expect(clearedTimeout).toBe(timeout);
-    expect(state.pollTimeout).toBeNull();
-  });
-
-  it("clears polling on destroy", () => {
-    const state = createFlowRunHistoryState();
-    const timeout = 1;
-    let clearedTimeout: FlowRunHistoryPollTimeout | null = null;
-    state.pollTimeout = timeout;
-
-    destroyFlowRunHistoryPolling(state, (value) => {
-      clearedTimeout = value;
-    });
-
-    expect(clearedTimeout).toBe(timeout);
-    expect(state.pollTimeout).toBeNull();
+      const currentHandle = state.pollTimeout;
+      finish();
+      await loading;
+      expect(state.pollTimeout).toBe(currentHandle);
+      expect(vi.getTimerCount()).toBe(action === "destroy" ? 0 : 1);
+    } finally {
+      vi.clearAllTimers();
+      vi.useRealTimers();
+    }
   });
 });

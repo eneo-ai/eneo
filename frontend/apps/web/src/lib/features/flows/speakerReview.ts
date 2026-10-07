@@ -2,17 +2,38 @@ import { computeSegmentDetails, buildOffsetMap, type SpeakerEdit } from "./trans
 import { formatClock } from "./transcriptSegments";
 import type { CorrectionOccurrence } from "./transcriptCorrections";
 import type { TranscriptSegment } from "./transcriptSegments";
+import { m } from "$lib/paraglide/messages";
 export type SpeakerDecision = "confirmed" | "unresolved";
-export const PROVISIONAL_SPEAKER = "Överlappande tal – osäker talare";
-export const UNRESOLVED_SPEAKER = "Talare går inte att avgöra";
+export type EffectiveSpeaker =
+  | { kind: "named"; label: string }
+  | { kind: "unlabelled" }
+  | { kind: "provisional" }
+  | { kind: "unresolved" };
 
 export function effectiveSpeaker(
   segment: TranscriptSegment,
   decision?: { speaker: string | null; decision?: SpeakerDecision }
+): EffectiveSpeaker {
+  if (decision?.decision === "unresolved") return { kind: "unresolved" };
+  if (!decision && segment.speakerAttribution === "provisional") return { kind: "provisional" };
+  const label = decision ? decision.speaker : segment.speaker;
+  return label ? { kind: "named", label } : { kind: "unlabelled" };
+}
+
+export function effectiveSpeakerLabel(
+  speaker: EffectiveSpeaker,
+  displayName: (label: string) => string = (label) => label
 ): string | null {
-  if (decision) return decision.decision === "unresolved" ? UNRESOLVED_SPEAKER : decision.speaker;
-  if (segment.speakerAttribution === "provisional") return PROVISIONAL_SPEAKER;
-  return segment.speaker;
+  switch (speaker.kind) {
+    case "named":
+      return displayName(speaker.label);
+    case "provisional":
+      return m.flow_transcript_review_provisional();
+    case "unresolved":
+      return m.flow_transcript_review_unresolved();
+    case "unlabelled":
+      return null;
+  }
 }
 
 /** Plain-text export of the same overlay the player displays. */
@@ -29,7 +50,7 @@ export function renderReviewedTranscript(
   for (const segment of segments) {
     if (multipleFiles && fileIndex !== segment.fileIndex) {
       if (lines.length) lines.push("");
-      lines.push(`## Del ${segment.fileIndex + 1}`, "");
+      lines.push(`## ${m.flow_run_transcript_part({ n: segment.fileIndex + 1 })}`, "");
       fileIndex = segment.fileIndex;
     }
     const detail = details.get(segment.index);
@@ -52,12 +73,9 @@ export function renderReviewedTranscript(
       const start = words.length ? Math.min(...words.map((word) => word.start)) : segment.start;
       const end = words.length ? Math.max(...words.map((word) => word.end)) : segment.end;
       const effective = effectiveSpeaker(segment, run.overridden ? run : undefined);
-      const marker = effective === PROVISIONAL_SPEAKER || effective === UNRESOLVED_SPEAKER;
-      const label = marker
-        ? `[${effective}]`
-        : effective
-          ? names[effective]?.trim() || effective
-          : null;
+      const marker = effective.kind === "provisional" || effective.kind === "unresolved";
+      const display = effectiveSpeakerLabel(effective, (label) => names[label]?.trim() || label);
+      const label = marker ? `[${display}]` : display;
       lines.push(
         `[${formatClock(start, true)} - ${formatClock(end, true)}] ${label ? label + ": " : ""}${text}`
       );
