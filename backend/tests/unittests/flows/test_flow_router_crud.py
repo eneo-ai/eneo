@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 from types import SimpleNamespace
 from unittest.mock import (
     AsyncMock,
@@ -63,6 +64,7 @@ from eneo.main.exceptions import (
     UnauthorizedException,
 )
 from eneo.roles.permissions import Permission
+from eneo.server.exception_handlers import add_exception_handlers
 from eneo.settings.encryption_service import EncryptionService
 from tests.unit.api_key_test_utils import flatten_routes
 from tests.unittests.flows.test_flow_router import (
@@ -75,9 +77,10 @@ from tests.unittests.flows.test_flow_router import (
 )
 
 
-def _http_test_client(container, monkeypatch) -> TestClient:
+def _http_test_client(container) -> TestClient:
     app = FastAPI()
     app.include_router(flow_http_test_router)
+    add_exception_handlers(app)
 
     for route in flatten_routes(list(app.routes)):
         if not isinstance(route.route, APIRoute):
@@ -85,20 +88,12 @@ def _http_test_client(container, monkeypatch) -> TestClient:
         for dependency in route.dependant.dependencies:
             app.dependency_overrides[dependency.call] = lambda: container
 
-    async def _allow_flow_edit_access(*_args, **_kwargs):
-        return None
-
-    monkeypatch.setattr(
-        flow_http_test_router_module,
-        "require_flow_edit_access",
-        _allow_flow_edit_access,
-    )
     return TestClient(app)
 
 
-def test_test_flow_http_rejects_malformed_config_at_request_boundary(monkeypatch):
+def test_test_flow_http_rejects_malformed_config_at_request_boundary():
     container = MagicMock()
-    client = _http_test_client(container, monkeypatch)
+    client = _http_test_client(container)
 
     response = client.post(
         f"/{uuid4()}/http-test",
@@ -116,8 +111,8 @@ def test_test_flow_http_rejects_malformed_config_at_request_boundary(monkeypatch
 
     assert response.status_code == 422
     assert any(
-        error["loc"][:3] == ["body", "config", "auth"]
-        for error in response.json()["detail"]
+        error["location"][:3] == ["body", "config", "auth"]
+        for error in response.json()["details"]["errors"]
     )
 
 
@@ -298,8 +293,26 @@ async def test_http_test_restored_first_step_secret_does_not_replace_selected_se
     assert sent["headers"] == {"Authorization": "Bearer second-step-token"}
 
 
-@pytest.mark.asyncio
-async def test_test_flow_http_interpolates_variables_with_real_executor(monkeypatch):
+@pytest.mark.parametrize(
+    ("credential", "invalid_query"),
+    [
+        pytest.param(None, None, id="anonymous-interpolation-control"),
+        pytest.param("{{ step_1.output.text }}", None, id="credential-template"),
+        pytest.param(
+            "test-only-secret" + "a" * EncryptionService.MAX_CREDENTIAL_LENGTH,
+            None,
+            id="credential-over-limit",
+        ),
+        pytest.param("test-only-secret-\ud800", None, id="credential-invalid-encoding"),
+        pytest.param(None, "a\nb", id="anonymous-invalid-interpolated-query"),
+        pytest.param(
+            "test-only-secret", "a\nb", id="credential-invalid-interpolated-query"
+        ),
+    ],
+)
+def test_test_flow_http_uses_real_executor_and_public_config_errors(
+    monkeypatch, credential, invalid_query
+):
     container = MagicMock()
     flow_id = uuid4()
     user = _user()
@@ -310,7 +323,9 @@ async def test_test_flow_http_interpolates_variables_with_real_executor(monkeypa
     container.flow_service.return_value = flow_service
     container.audit_service.return_value = AsyncMock()
     container.user.return_value = user
-    container.encryption_service.return_value = None
+    container.encryption_service.return_value = EncryptionService(
+        Fernet.generate_key().decode()
+    )
     _enable_space_access(container)
 
     guard_calls: dict[str, object] = {}
@@ -341,38 +356,62 @@ async def test_test_flow_http_interpolates_variables_with_real_executor(monkeypa
         _FakeRuntimeHelper,
         raising=False,
     )
-    response = await flow_definition_test_flow_http(
-        id=flow_id,
-        request=_request(),
-        body=HttpTestRequest(
-            step_id=flow.steps[0].id,
-            config={
-                "url": "{{base_url}}/api/{{name}}",
-                "auth": {"mode": "none"},
-                "body": {
-                    "mode": "json_template",
-                    "template": '{"message":"{{text}}"}',
-                },
-                "custom_headers": [
-                    {"name": "X-Case", "value": "{{flow_input.case_id}}"}
-                ],
-                "timeout_seconds": 30,
+    body = HttpTestRequest(
+        step_id=flow.steps[0].id,
+        config={
+            "url": "https://example.org/api?q={{q}}"
+            if invalid_query is not None
+            else "{{base_url}}/api/{{name}}"
+            if credential is None
+            else "https://example.org/api",
+            "auth": {"mode": "none"}
+            if credential is None
+            else {"mode": "bearer_token", "token": credential},
+            "body": {
+                "mode": "json_template",
+                "template": '{"message":"{{text}}"}',
             },
-            direction="output",
-            method="POST",
-            test_variables={
-                "base_url": "https://example.org",
-                "name": "alex",
-                "flow_input": {"case_id": "CASE-1"},
-                "text": "hello",
-            },
-        ),
-        container=container,
+            "custom_headers": [{"name": "X-Case", "value": "{{flow_input.case_id}}"}],
+            "timeout_seconds": 30,
+        },
+        direction="output",
+        method="POST",
+        test_variables={
+            "base_url": "https://example.org",
+            "name": "alex",
+            "flow_input": {"case_id": "CASE-1"},
+            "text": "hello",
+            "step_1": {"output": {"text": "test-only-secret"}},
+            "q": invalid_query or "",
+        },
     )
+    response = _http_test_client(container).post(
+        f"/{flow_id}/http-test",
+        content=json.dumps(body.model_dump(mode="json"), ensure_ascii=True),
+        headers={"Content-Type": "application/json"},
+    )
+    payload = response.json()
+    if invalid_query is not None:
+        # Mutant: compiler URL refusal escapes its typed connection-test result.
+        assert response.status_code == 200
+        assert payload["success"] is False
+        assert payload["error_code"] == HttpTransportError.INVALID_URL.value
+        assert "test-only-secret" not in response.text
+        assert not sent
+        return
+    if credential is not None:
+        # Mutants: swallow invalid credential config as a 200 variable failure,
+        # or let encryption input rejection escape the public typed 400 owner.
+        assert response.status_code == 400
+        assert payload["code"] == FlowApiErrorCode.TYPED_IO_HTTP_INVALID_CONFIG.value
+        assert payload["eneo_error_code"] == 9007
+        assert "test-only-secret" not in response.text
+        assert not sent
+        return
 
-    assert response.success is True
-    assert response.request_preview is not None
-    assert response.request_preview.model_dump() == {
+    assert response.status_code == 200
+    assert payload["success"] is True
+    assert payload["request_preview"] == {
         "method": "POST",
         "url": "https://example.org/api/alex",
         "headers": {"X-Case": "CASE-1"},
