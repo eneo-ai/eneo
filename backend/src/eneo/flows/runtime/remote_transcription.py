@@ -28,7 +28,6 @@ from datetime import datetime, timezone
 from email.utils import parsedate_to_datetime
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, BinaryIO, Literal, NoReturn, cast
-from urllib.parse import urlsplit
 from uuid import UUID, uuid4
 
 import httpx
@@ -390,63 +389,71 @@ class RemoteTranscriptionClient:
                     OpenAIException,
                 ):
                     raise
-                except Exception:
+                except Exception as exc:
                     consecutive_failures += 1
-                    if consecutive_failures >= _MAX_CONSECUTIVE_POLL_FAILURES:
-                        raise TranscriptionProviderError(
-                            litellm_transport.PROVIDER_ERROR_MESSAGE,
-                            code="provider_error",
+                    logger.warning(
+                        "remote_transcription.poll_failed consecutive_failures=%s error_type=%s",
+                        consecutive_failures,
+                        type(exc).__name__,
+                    )
+                    # Transport messages can contain credentials; retain type and frames only.
+                    poll_failure = TranscriptionProviderError(
+                        f"External transcription poll failed: {type(exc).__name__}.",
+                        code="provider_error",
+                    ).with_traceback(exc.__traceback__)
+                else:
+                    consecutive_failures = 0
+                    record_step_progress(
+                        seen.describe(),
+                        transcription_stage=seen.stage,
+                        transcription_queue_position=seen.queue_position,
+                    )
+                    if seen != last_seen:
+                        logger.info(
+                            "remote_transcription.progress job_id=%s state=%s",
+                            job_id,
+                            seen.describe(),
+                        )
+                        last_seen = seen
+                    if seen.status == _TERMINAL_COMPLETED:
+                        result = await self._fetch_result(client, job_id)
+                        if result is not None:
+                            require_step_budget(phase="transcription result")
+                            return result
+                        # A raced 409: the status flapped; keep polling.
+                    elif seen.status == _TERMINAL_FAILED:
+                        raise TranscriptionProviderRejectedError(
+                            litellm_transport.INVALID_REQUEST_MESSAGE,
+                            failure_kind=seen.failure_kind
+                            or TranscriptionFailureKind.PROVIDER,
+                            service_reason=seen.service_reason,
+                            code="provider_rejected_request",
                             details={
-                                "reason": "provider_error",
-                                "retryable": True,
+                                "reason": "provider_rejected_request",
+                                "retryable": False,
                             },
-                        ) from None
+                        )
+                    elif seen.status == _TERMINAL_CANCELLED:
+                        # Cancelled service-side (operator, retention, or a cancel
+                        # eneo sent that raced this poll). No result will come; the
+                        # audio was not transcribed, so a re-run is reasonable.
+                        raise RemoteTranscriptionCancelledException(
+                            litellm_transport.PROVIDER_ERROR_MESSAGE,
+                            failure_kind=seen.failure_kind
+                            or TranscriptionFailureKind.CANCELLED,
+                            service_reason=seen.service_reason,
+                            code="provider_error",
+                            details={"reason": "provider_cancelled", "retryable": True},
+                        )
                     await asyncio.sleep(self.poll_interval_seconds)
                     continue
 
-                consecutive_failures = 0
-                record_step_progress(
-                    seen.describe(),
-                    transcription_stage=seen.stage,
-                    transcription_queue_position=seen.queue_position,
-                )
-                if seen != last_seen:
-                    logger.info(
-                        "remote_transcription.progress job_id=%s state=%s",
-                        job_id,
-                        seen.describe(),
-                    )
-                    last_seen = seen
-                if seen.status == _TERMINAL_COMPLETED:
-                    result = await self._fetch_result(client, job_id)
-                    if result is not None:
-                        require_step_budget(phase="transcription result")
-                        return result
-                    # A raced 409: the status flapped; keep polling.
-                elif seen.status == _TERMINAL_FAILED:
-                    raise TranscriptionProviderRejectedError(
-                        litellm_transport.INVALID_REQUEST_MESSAGE,
-                        failure_kind=seen.failure_kind
-                        or TranscriptionFailureKind.PROVIDER,
-                        service_reason=seen.service_reason,
-                        code="provider_rejected_request",
-                        details={
-                            "reason": "provider_rejected_request",
-                            "retryable": False,
-                        },
-                    )
-                elif seen.status == _TERMINAL_CANCELLED:
-                    # Cancelled service-side (operator, retention, or a cancel
-                    # eneo sent that raced this poll). No result will come; the
-                    # audio was not transcribed, so a re-run is reasonable.
-                    raise RemoteTranscriptionCancelledException(
+                if consecutive_failures >= _MAX_CONSECUTIVE_POLL_FAILURES:
+                    raise TranscriptionProviderError(
                         litellm_transport.PROVIDER_ERROR_MESSAGE,
-                        failure_kind=seen.failure_kind
-                        or TranscriptionFailureKind.CANCELLED,
-                        service_reason=seen.service_reason,
                         code="provider_error",
-                        details={"reason": "provider_cancelled", "retryable": True},
-                    )
+                        details={"reason": "provider_error", "retryable": True},
+                    ) from poll_failure
                 await asyncio.sleep(self.poll_interval_seconds)
 
     async def cancel(
@@ -503,7 +510,9 @@ class RemoteTranscriptionClient:
                 )
         except Exception as exc:
             return RemoteServiceReadiness(
-                ready=False, accepting_jobs=False, detail=f"unreachable: {exc!r}"
+                ready=False,
+                accepting_jobs=False,
+                detail=f"unreachable: {type(exc).__name__}",
             )
         if response.status_code == 401:
             self._raise_bad_credentials()
@@ -674,8 +683,6 @@ class RemoteFlowTranscriber:
 
     def __init__(self, client: RemoteTranscriptionClient) -> None:
         self.client = client
-        host = urlsplit(client.base_url).netloc or "transcription-service"
-        self._requested_model = f"{REMOTE_TRANSCRIPTION_PROVIDER}/{host}"
 
     async def transcribe(
         self,
@@ -982,12 +989,19 @@ class RemoteFlowTranscriber:
             )
         call_id: UUID | None = None
         if observer is not None:
+            try:
+                host = (
+                    httpx.URL(self.client.base_url).netloc.decode("ascii")
+                    or "transcription-service"
+                )
+            except httpx.InvalidURL:
+                # Submission owns typed URL rejection and receipt settlement.
+                host = "transcription-service"
+            provider_model = f"{REMOTE_TRANSCRIPTION_PROVIDER}/{host}"
             # A diarize job is its own provider call on the same audio; the
             # suffix keeps it distinguishable from a full transcription of it.
             requested_model = (
-                f"{self._requested_model}#diarize"
-                if task == "diarize"
-                else self._requested_model
+                f"{provider_model}#diarize" if task == "diarize" else provider_model
             )
             call_id = await observer.started(
                 build_transcription_call_request_facts(
@@ -1219,16 +1233,14 @@ async def log_remote_transcription_readiness(settings: "Settings") -> None:
         readiness = await transcriber.client.check_readiness()
     except APIKeyNotConfiguredException:
         logger.error(
-            "remote_transcription.readiness url=%s credentials rejected",
-            transcriber.client.base_url,
+            "remote_transcription.readiness credentials rejected",
         )
         return
     log = (
         logger.info if readiness.ready and readiness.accepting_jobs else logger.warning
     )
     log(
-        "remote_transcription.readiness url=%s ready=%s accepting_jobs=%s detail=%s",
-        transcriber.client.base_url,
+        "remote_transcription.readiness ready=%s accepting_jobs=%s detail=%s",
         readiness.ready,
         readiness.accepting_jobs,
         readiness.detail,
