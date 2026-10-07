@@ -1,5 +1,5 @@
 from datetime import datetime, timezone
-from uuid import uuid4
+from uuid import UUID, uuid4
 
 import pytest
 
@@ -224,11 +224,11 @@ async def test_published_and_pinned_run_models_use_execution_dimensions_and_skip
             ["pass_through", "pass_through", "compose_text"],
         ),
     }
-    for status in FlowRunStatus:
+    for run_index, status in enumerate(FlowRunStatus):
         run_flow = uuid4() if is_terminal_flow_run_status(status) else flow_id
         repository.runs.append(
             FlowRunStatusSnapshot(
-                id=uuid4(),
+                id=UUID(int=len(FlowRunStatus) - run_index),
                 flow_id=run_flow,
                 flow_version=1,
                 tenant_id=owner.id,
