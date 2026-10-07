@@ -30,6 +30,7 @@ from eneo.sessions.conversation_settings import (
 )
 from eneo.sessions.session import (
     SessionAdd,
+    SessionContext,
     SessionFeedback,
     SessionInDB,
     SessionUpdate,
@@ -219,7 +220,7 @@ class SessionService:
             return None, key.id
         return self.user.id, None
 
-    def _is_owner(self, session: SessionInDB) -> bool:
+    def _is_owner(self, session: SessionInDB | SessionContext) -> bool:
         """Match the session's principal against the current request's principal.
 
         Both branches require a non-None match; we never treat NULL == NULL
@@ -276,6 +277,14 @@ class SessionService:
             session, assistant_id=assistant_id, group_chat_id=group_chat_id
         )
 
+    async def get_context(self, id: UUID) -> SessionContext:
+        session = await self.session_repo.get_context(id, tenant_id=self.user.tenant_id)
+        if session is None:
+            raise NotFoundException("Session not found")
+        if not self._is_owner(session):
+            raise UnauthorizedException("Session belongs to other principal")
+        return session
+
     async def get_tool_call_result(
         self,
         session: SessionInDB,
@@ -310,7 +319,7 @@ class SessionService:
     async def update_settings(
         self, id: UUID, settings: ConversationSettings, expected_revision: int
     ) -> ConversationSettingsState:
-        await self.get_session_by_uuid(id)
+        await self.get_context(id)
         # A short transaction avoids holding the parent row lock while a
         # streaming turn commits its question in a separate transaction.
         async with sessionmanager.session() as db_session, db_session.begin():

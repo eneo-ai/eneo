@@ -10,6 +10,7 @@ from eneo.database.database import AsyncSession
 from eneo.database.repositories.base import BaseRepositoryDelegate
 from eneo.database.tables.api_keys_v2_table import ApiKeysV2
 from eneo.database.tables.assistant_table import Assistants
+from eneo.database.tables.group_chats_table import GroupChatsTable
 from eneo.database.tables.help_assistant_runs_table import HelpAssistantRuns
 from eneo.database.tables.info_blobs_table import InfoBlobs
 from eneo.database.tables.questions_table import (
@@ -30,6 +31,7 @@ from eneo.sessions.conversation_settings import (
 )
 from eneo.sessions.session import (
     SessionAdd,
+    SessionContext,
     SessionFeedback,
     SessionInDB,
     SessionMetadataPublic,
@@ -207,6 +209,30 @@ class SessionRepository:
         return await self._hydrate_optional(
             await self.delegate.get_model_from_query(query)
         )
+
+    async def get_context(self, id: UUID, tenant_id: UUID) -> SessionContext | None:
+        """Read bounded metadata for settings and scope checks, without hydration."""
+        query = (
+            sa.select(
+                Sessions.id,
+                Sessions.user_id,
+                Sessions.api_key_id,
+                Sessions.assistant_id,
+                Sessions.group_chat_id,
+                sa.func.coalesce(Assistants.space_id, GroupChatsTable.space_id).label(
+                    "space_id"
+                ),
+                Sessions.settings,
+            )
+            .outerjoin(Assistants, Sessions.assistant_id == Assistants.id)
+            .outerjoin(GroupChatsTable, Sessions.group_chat_id == GroupChatsTable.id)
+            .where(Sessions.id == id)
+        )
+        query = self._exclude_helper_run_sessions(
+            self._filter_by_tenant(query, tenant_id)
+        )
+        row = (await self.session.execute(query)).mappings().one_or_none()
+        return SessionContext.model_validate(row) if row is not None else None
 
     async def get_owned_chat_partner(
         self,

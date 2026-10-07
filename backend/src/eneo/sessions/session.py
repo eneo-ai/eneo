@@ -62,6 +62,18 @@ class SessionInDB(SessionBase, InDB):
     group_chat_id: Optional[UUID] = None
 
 
+class SessionContext(BaseModel):
+    """Conversation identity and settings, without history or file content."""
+
+    id: UUID
+    user_id: UUID | None
+    api_key_id: UUID | None
+    assistant_id: UUID | None
+    group_chat_id: UUID | None
+    space_id: UUID | None
+    settings: ConversationSettingsState | None
+
+
 class SessionUpdateRequest(SessionBase):
     id: UUID
 

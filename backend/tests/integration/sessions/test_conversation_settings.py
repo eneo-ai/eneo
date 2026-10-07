@@ -63,3 +63,26 @@ async def test_concurrent_settings_writes_have_one_winner(
             await session.scalar(sa.select(Sessions.id).where(Sessions.id == saved.id))
             is None
         )
+
+
+async def test_settings_update_is_independent_of_history_hydration(
+    db_container, db_session, monkeypatch
+):
+    async with db_container() as container:
+        saved = await container.session_service().create_session(name="Metadata only")
+        tenant_id = container.user().tenant_id
+
+    async def unavailable_history(*_args, **_kwargs):
+        raise AssertionError("Settings must not hydrate chat history or file contents")
+
+    monkeypatch.setattr(SessionRepository, "_hydrate_sessions", unavailable_history)
+    async with db_container() as container:
+        state = await container.session_service().update_settings(
+            saved.id, ConversationSettings(require_tool_approval=True), 0
+        )
+        context = await container.session_service().get_context(saved.id)
+    assert context.settings == state
+    async with db_session() as session:
+        repo = SessionRepository(session)
+        assert (await repo.get_context(saved.id, tenant_id)).settings == state
+        assert await repo.get_context(saved.id, uuid4()) is None

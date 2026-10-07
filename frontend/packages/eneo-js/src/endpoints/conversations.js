@@ -313,10 +313,9 @@ export function initConversations(client) {
      * @param {string} params.question The pending input
      * @param {{id: string}[]} [params.files] Pending file attachments
      * @param {import("../types/resources").ConversationTools} [params.tools] Pending assistant target
-     * @param {string} [params.assistantPrompt] Unsaved assistant prompt override
+     * @param {string} [params.assistantPrompt] Unsaved assistant prompt override for config-time baseline estimates
      * @param {import("../types/resources").ConversationSettings} [params.settings] Initial choices for a new conversation
      * @param {number} [params.settingsRevision] Expected revision for an existing conversation
-     * for config-time baseline estimates
      * @param {{id: string, inline_text?: boolean}[]} [params.attachments] Unsaved persistent
      * attachments with their mode, for config-time estimates; ones marked "open with tool"
      * are excluded from the count

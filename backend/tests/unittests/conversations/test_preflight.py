@@ -60,7 +60,13 @@ def _make_service(
 
     session_service = AsyncMock()
     if session is not None:
-        session_service.get_session_by_uuid = AsyncMock(return_value=session)
+        session_service.get_context = AsyncMock(
+            return_value=SimpleNamespace(
+                assistant_id=session.assistant.id if session.assistant else None,
+                group_chat_id=session.group_chat_id,
+                settings=session.settings,
+            )
+        )
 
     file_service = AsyncMock()
     file_service.get_files_by_ids = AsyncMock(return_value=files or [])
@@ -71,7 +77,11 @@ def _make_service(
         group_chat_service=group_chat_service,
         session_service=session_service,
         completion_service=MagicMock(),
-        space_service=MagicMock(),
+        space_service=SimpleNamespace(
+            get_space_by_assistant=AsyncMock(
+                return_value=SimpleNamespace(is_personal=lambda: False)
+            )
+        ),
         file_service=file_service,
     )
 
@@ -272,7 +282,14 @@ async def test_preflight_honors_governed_file_policy_over_assistant_flag(monkeyp
 
     assistant = _make_assistant()
     assistant.inline_file_text = True
-    effective_config = SimpleNamespace(models_enforced=False, inline_file_text=False)
+    effective_config = SimpleNamespace(
+        models_enforced=False,
+        inline_file_text=False,
+        mcp_enforced=False,
+        default_disabled_mcp_server_ids=[],
+        default_disabled_capabilities=[],
+        reasoning_effort_user_configurable=False,
+    )
 
     service = _make_service(
         assistant=assistant, files=[text_file], effective_config=effective_config
@@ -687,8 +704,8 @@ async def test_preflight_resolves_session_assistant_model():
 
     assert result.input_tokens > 0
     assert result.model_name == "gpt-4o"
-    service.session_service.get_session_by_uuid.assert_awaited_once_with(session_id)
-    service.assistant_service.get_assistant_with_effective_config.assert_awaited_once_with(
+    service.session_service.get_context.assert_awaited_once_with(session_id)
+    service.assistant_service.get_assistant_with_effective_config.assert_awaited_with(
         assistant_id
     )
 
@@ -722,7 +739,7 @@ async def test_preflight_resolves_session_to_group_chat_model():
 
     assert result.model_name == "claude-3-5-sonnet"
     assert result.context_window == 200000
-    service.group_chat_service.get_group_chat.assert_awaited_once_with(group_chat_id)
+    service.group_chat_service.get_group_chat.assert_awaited_with(group_chat_id)
 
 
 @pytest.mark.asyncio

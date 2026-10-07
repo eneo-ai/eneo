@@ -2,7 +2,7 @@
 #
 # Licensed under the MIT License.
 
-from typing import TYPE_CHECKING, Collection, Optional, get_args
+from typing import TYPE_CHECKING, Collection, Optional
 
 from eneo.completion_models.infrastructure.context_builder import (
     count_attachment_tokens,
@@ -50,7 +50,7 @@ if TYPE_CHECKING:
     from eneo.files.file_models import File
     from eneo.files.file_service import FileService
     from eneo.group_chat.application.group_chat_service import GroupChatService
-    from eneo.sessions.session import SessionInDB
+    from eneo.sessions.session import SessionContext, SessionInDB
     from eneo.sessions.session_service import SessionService
     from eneo.spaces.space_service import SpaceService
 
@@ -95,10 +95,9 @@ class ConversationService:
         group_chat_id: "UUID | None" = None,
     ) -> ConversationSettings:
         if session_id is not None:
-            session = await self.session_service.get_session_by_uuid(session_id)
-            assert session is not None
+            session = await self.session_service.get_context(session_id)
             group_chat_id = session.group_chat_id
-            assistant_id = session.assistant.id if session.assistant else None
+            assistant_id = session.assistant_id
         if group_chat_id is not None:
             await self.group_chat_service.get_group_chat(group_chat_id)
             return ConversationSettings()
@@ -128,6 +127,11 @@ class ConversationService:
             if config and config.mcp_enforced
             else assistant.mcp_servers
         )
+        capabilities = (
+            config.enabled_capabilities
+            if config and config.mcp_enforced
+            else assistant.enabled_capabilities
+        )
         disabled_servers = config.default_disabled_mcp_server_ids if config else []
         disabled_capabilities = config.default_disabled_capabilities if config else []
         return ConversationSettings(
@@ -142,7 +146,7 @@ class ConversationService:
             },
             capability_states={
                 purpose: purpose not in disabled_capabilities
-                for purpose in get_args(CapabilityPurpose)
+                for purpose in capabilities
             },
         )
 
@@ -152,6 +156,7 @@ class ConversationService:
         *,
         assistant_id: "UUID | None",
         group_chat_id: "UUID | None",
+        previous_settings: ConversationSettings | None = None,
     ) -> None:
         if group_chat_id is not None:
             await self.group_chat_service.get_group_chat(group_chat_id)
@@ -185,7 +190,15 @@ class ConversationService:
             model = select_effective_completion_model(
                 current_model=assistant.completion_model, effective_config=config
             )
-        if settings.reasoning_effort is not None:
+        # A stored preference may become inactive after a policy/model change.
+        # Runtime policy resolution still governs its use; validate new choices
+        # without blocking unrelated edits to an existing conversation.
+        reasoning_changed = (
+            previous_settings is None
+            or settings.reasoning_effort != previous_settings.reasoning_effort
+            or settings.completion_model_id != previous_settings.completion_model_id
+        )
+        if settings.reasoning_effort is not None and reasoning_changed:
             if (
                 not config
                 or not config.reasoning_effort_user_configurable
@@ -205,12 +218,12 @@ class ConversationService:
     async def update_settings(
         self, session_id: "UUID", settings: ConversationSettings, expected_revision: int
     ) -> ConversationSettingsState:
-        session = await self.session_service.get_session_by_uuid(session_id)
-        assert session is not None
+        session = await self.session_service.get_context(session_id)
         await self.validate_settings(
             settings,
-            assistant_id=session.assistant.id if session.assistant else None,
+            assistant_id=session.assistant_id,
             group_chat_id=session.group_chat_id,
+            previous_settings=session.settings.settings if session.settings else None,
         )
         return await self.session_service.update_settings(
             session_id, settings, expected_revision
@@ -234,9 +247,9 @@ class ConversationService:
     ) -> "AssistantResponse":
         state = None
         if session_id is not None:
-            session = await self.session_service.get_session_by_uuid(session_id)
+            session = await self.session_service.get_context(session_id)
             assert session is not None
-            assistant_id = session.assistant.id if session.assistant else None
+            assistant_id = session.assistant_id
             group_chat_id = session.group_chat_id
             state = session.settings
         if state is None:
@@ -318,8 +331,9 @@ class ConversationService:
         """
         session = None
         if session_id is not None:
-            session = await self.session_service.get_session_by_uuid(session_id)
-            assert session is not None
+            session = await self.session_service.get_context(session_id)
+            assistant_id = session.assistant_id
+            group_chat_id = session.group_chat_id
             if session.settings:
                 if (
                     settings_revision is not None
@@ -329,6 +343,11 @@ class ConversationService:
                         "Conversation settings changed elsewhere. Reload the conversation and try again."
                     )
                 settings = session.settings.settings
+        if settings is None:
+            settings = await self.settings_defaults(
+                assistant_id=assistant_id,
+                group_chat_id=group_chat_id,
+            )
         completion_model_id = (
             settings.completion_model_id
             if settings and tool_assistant_id is None
@@ -499,7 +518,7 @@ class ConversationService:
         group_chat_id: Optional["UUID"],
         tool_assistant_id: Optional["UUID"] = None,
         completion_model_id: Optional["UUID"] = None,
-        session: "SessionInDB | None" = None,
+        session: "SessionContext | None" = None,
     ) -> "tuple[CompletionModel, int, bool]":
         """Resolve the completion model the next chat request would target.
 
@@ -524,7 +543,7 @@ class ConversationService:
             )
         if session_id:
             if session is None:
-                session = await self.session_service.get_session_by_uuid(session_id)
+                session = await self.session_service.get_context(session_id)
             assert session is not None
             if session.group_chat_id:
                 if completion_model_id is not None:
@@ -537,9 +556,9 @@ class ConversationService:
                     tool_assistant_id=tool_assistant_id,
                 )
             else:
-                assert session.assistant is not None
+                assert session.assistant_id is not None
                 model, inline_file_text = await self._assistant_preflight_settings(
-                    session.assistant.id,
+                    session.assistant_id,
                     completion_model_id=completion_model_id,
                     tool_assistant_id=tool_assistant_id,
                 )

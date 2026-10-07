@@ -110,3 +110,25 @@ test("saving conversation choices uses the expected revision", async () => {
     settings: { require_tool_approval: true }
   });
 });
+
+test("preflight preserves attachment modes alongside conversation revision", async () => {
+  let body;
+  const conversations = initConversations({
+    fetch: async (_endpoint, request) => {
+      body = request.requestBody["application/json"];
+      return {};
+    }
+  });
+  await conversations.preflight({
+    conversation: { id: "saved" },
+    question: "Hello",
+    settingsRevision: 3,
+    attachments: [{ id: "on-demand", inline_text: false }, { id: "inlined" }]
+  });
+  assert.equal(body.session_id, "saved");
+  assert.equal(body.settings_revision, 3);
+  assert.deepEqual(body.attachments, [
+    { id: "on-demand", inline_text: false },
+    { id: "inlined", inline_text: true }
+  ]);
+});

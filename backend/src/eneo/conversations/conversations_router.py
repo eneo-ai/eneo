@@ -138,7 +138,7 @@ async def _validate_conversation_scope(
     if session_id is not None:
         session_service = container.session_service()
         try:
-            session = await session_service.get_session_by_uuid(session_id)
+            session = await session_service.get_context(session_id)
         except NotFoundException:
             # Session doesn't exist — return 403 (not 404) to prevent
             # scoped keys from enumerating session existence.
@@ -158,7 +158,7 @@ async def _validate_conversation_scope(
 
         assert session is not None
         if scope_type == "assistant":
-            session_assistant_id = session.assistant.id if session.assistant else None
+            session_assistant_id = session.assistant_id
             if session_assistant_id != scope_id:
                 _raise_conversation_scope_denied(
                     http_request,
@@ -168,19 +168,7 @@ async def _validate_conversation_scope(
                     ),
                 )
         elif scope_type == "space":
-            # Resolve session to space via assistant or group_chat
-            try:
-                space = await space_repo.get_space_by_session(session_id)
-                assert space is not None
-                if space.id != scope_id:
-                    _raise_conversation_scope_denied(
-                        http_request,
-                        (
-                            f"API key is scoped to space '{scope_id}'. "
-                            f"The requested resource belongs to a different scope."
-                        ),
-                    )
-            except NotFoundException:
+            if session.space_id != scope_id:
                 _raise_conversation_scope_denied(
                     http_request,
                     (
@@ -681,9 +669,6 @@ async def update_conversation_settings(
         assistant_id=None,
         group_chat_id=None,
     )
-    session = await container.session_service().get_session_by_uuid(session_id)
-    assert session is not None
-    await _authorize_session_access(container, session)
     return await container.conversation_service().update_settings(
         session_id,
         request.settings,
