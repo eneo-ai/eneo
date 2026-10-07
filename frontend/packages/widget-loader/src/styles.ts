@@ -1,5 +1,5 @@
 /**
- * Where the panel fills the screen as a modal dialog: a phone, or a viewport
+ * Where the panel becomes a modal dialog: a phone, or a viewport
  * too short for the floating panel, such as a laptop zoomed to 200 %. In `em`
  * so a larger default font size switches earlier.
  */
@@ -80,6 +80,7 @@ export const styles = `
   border-radius: var(--eneo-widget-radius, 16px);
   overflow: hidden;
   background: #ffffff;
+  color: #111111;
   box-shadow: 0 12px 40px rgba(0, 0, 0, 0.3);
   opacity: 0;
   transform: translateY(8px) scale(0.98);
@@ -87,30 +88,102 @@ export const styles = `
 }
 .panel.open { opacity: 1; transform: none; }
 .panel[hidden] { display: none; }
+.backdrop, .loading-close { display: none; }
+.loading-state {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 16px;
+  padding: 24px;
+  line-height: 1.5;
+}
+.loading-state p { margin: 0; font-size: 14px; }
+.loading-indicator {
+  width: 24px;
+  height: 24px;
+  box-sizing: border-box;
+  border: 2px solid currentColor;
+  border-inline-end-color: transparent;
+  border-radius: 50%;
+  opacity: 0.6;
+  animation: eneo-spin 1s linear infinite;
+}
+@keyframes eneo-spin { to { transform: rotate(360deg); } }
+:host(:not([loaded]):not([ready])) iframe { visibility: hidden; }
+:host([loaded]) .loading-state, :host([ready]) .loading-state { display: none; }
 :host([position="bottom-left"]) .panel { inset-inline-end: auto; inset-inline-start: 0; }
-:host([color-scheme="dark"]) .panel { background: #111111; }
+:host([color-scheme="dark"]) .panel { background: #111111; color: #f5f5f5; }
 @supports (height: 100dvh) {
   .panel { height: min(700px, calc(100dvh - 112px)); }
 }
 @media (prefers-color-scheme: dark) {
-  :host(:not([color-scheme="light"])) .panel { background: #111111; }
+  :host(:not([color-scheme="light"])) .panel { background: #111111; color: #f5f5f5; }
 }
 @media ${FULL_SCREEN_MEDIA} {
+  :host([open]) .backdrop {
+    display: block;
+    position: fixed;
+    inset: 0;
+    background: rgba(0, 0, 0, 0.3);
+    overscroll-behavior: contain;
+  }
   .panel {
+    display: flex;
+    flex-direction: column;
     position: fixed;
     inset: 0;
     width: 100%;
     height: 100%;
     border-radius: 0;
+    opacity: 1;
+    transform: translateY(100%);
+    transition: transform 0.18s cubic-bezier(0.2, 0.8, 0.2, 1);
+    overscroll-behavior: contain;
   }
-  /* The chat's own header closes the panel once the embed page is ready.
-     Until then (loading, a paused notice, a page that never loads) the
-     launcher stays on top of the full-screen panel as the way out. */
-  :host([open]) .launcher { z-index: 1; }
-  :host([open][ready]) .launcher { display: none; }
+  .panel.open { transform: none; }
+  :host([open]) .launcher { display: none; }
+  /* A separate, reserved row stays reachable even if the iframe never
+     loads. Once ready, the chat's own header owns the close control. */
+  :host(:not([ready])) .loading-close {
+    display: flex;
+    flex: 0 0 48px;
+    align-items: center;
+    justify-content: flex-end;
+    padding-inline: 12px;
+  }
+  .loading-state { inset-block-start: 48px; }
+  .loading-close button {
+    display: grid;
+    place-items: center;
+    width: 44px;
+    height: 44px;
+    border: 0;
+    border-radius: 50%;
+    background: transparent;
+    color: inherit;
+    cursor: pointer;
+  }
+  .loading-close svg { width: 24px; height: 24px; }
+  .loading-close button:focus-visible {
+    outline: 2px solid currentColor;
+    outline-offset: -4px;
+  }
+  .panel iframe { flex: 1; min-height: 0; height: 0; }
+}
+@media (max-width: 40em) {
+  .panel {
+    --_eneo-sheet-gap: min(24px, 4svh);
+    inset-block-start: var(--_eneo-sheet-gap);
+    height: calc(100% - var(--_eneo-sheet-gap));
+    border-radius: 20px 20px 0 0;
+  }
 }
 @media (prefers-reduced-motion: reduce) {
   .launcher, .panel { transition: none; }
+  .loading-indicator { animation: none; }
   .launcher:hover { transform: none; }
 }
 iframe {

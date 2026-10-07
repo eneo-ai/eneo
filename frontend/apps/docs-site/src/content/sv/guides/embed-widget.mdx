@@ -1,6 +1,6 @@
 ---
 title: Bädda in en chattwidget på webbplatsen
-translationSource: guides/embed-widget.mdx@67c5ef2fd62a
+translationSource: guides/embed-widget.mdx@bb36d9a456dc
 ---
 
 # Bädda in en chattwidget på webbplatsen
@@ -193,8 +193,9 @@ verktygsanrop, verktygsnamn eller servernamn Eneo. Verktygen används ändå, oc
 källor de returnerar listas fortfarande när källor visas.
 
 **Återkoppling.** När widgeten sparar konversationer (lagringstid över `0`) kan
-besökaren ge konversationen tumme upp eller ner under det senaste svaret och
-ändra sig senare; rösten ligger kvar vid följdfrågor. Rösterna räknas i
+besökaren ge hela konversationen tumme upp eller ner. Efter en röst fälls
+frågan och tummarna ihop till en bekräftelse och **Ändra omdöme**. Bekräftelsen
+ligger kvar vid följdfrågor i stället för att frågan ställs igen. Rösterna räknas i
 widgetens användningsstatistik och i organisationens översikt på den dag
 konversationen började, även när en röst ändras senare. Med **Spara
 fritextåterkoppling** påslaget (av som standard) följs rösten av en länk ("Vill
@@ -202,7 +203,8 @@ du berätta mer?", efter tumme ner "Berätta gärna vad som saknades") som öppn
 en dialog med en kommentarsruta (högst 2 000 tecken). Besökaren kan låta bli
 att svara. Kommentaren sparas med konversationen bara så länge inställningen
 är påslagen och tas bort tillsammans med konversationen. Om besökaren ändrar
-sin röst efteråt ligger kommentaren kvar.
+sin röst efteråt ligger kommentaren kvar. **Redigera kommentar** öppnar den
+sparade texten igen och ersätter den när besökaren skickar.
 
 ### Attribut och API [#optional-attributes-and-api]
 
@@ -545,11 +547,22 @@ Widgeten är byggd för WCAG 2.2 AA:
   färdiga svaret en gång, och de meddelar när en referens har kopierats. Svaret
   läses aldrig upp ord för ord medan det skrivs.
 - Bredvid sidan är panelen en icke-modal dialogruta, så sidan går att använda
-  under tiden. På små skärmar och i låga fönster, till exempel en bärbar dator
-  med 200 % förstoring, fyller den skärmen som en modal dialogruta: resten av
-  sidan döljs för skärmläsare och tangentbord tills chatten stängs.
-- Texten går att förstora: när panelen är låg rullar hela chatten i stället
-  för att konversationen trycks ihop.
+  under tiden. På telefoner öppnas den från nederkanten som en rundad modal
+  panel som behåller sina rundade överhörn när tangentbordet öppnas. Breda, låga fönster, till exempel en bärbar dator med 200 % förstoring,
+  använder hela höjden. Sidan bakom kan inte rullas och döljs för skärmläsare
+  och tangentbord tills chatten stängs. Den flytande chattknappen är dold medan
+  chatten är öppen; en stängknapp upptill finns även under laddning. När chatten
+  stängs återställs sidans scrollposition. Öppningsanimationen stängs av för
+  besökare som har valt minskad rörelse.
+- Medan den inbäddade sidan laddas visas en liten indikator och ett laddningsmeddelande
+  på widgetens språk. Animationen stängs av vid minskad rörelse. En felsida förblir
+  synlig om chatten inte kan starta.
+- Förslagen på frågor ligger under hälsningen i den rullbara konversationen,
+  inte ovanför skrivfältet. De döljs när besökaren börjar skriva. På pekskärmar döljs
+  de även medan skrivfältet har fokus, så att tangentbordet får plats.
+- Skrivfältet ligger kvar vid nederkanten när telefonens tangentbord öppnas.
+  Texten går att förstora: om sidhuvud, skrivfält och en minsta läsyta inte
+  längre får plats rullar hela panelen, så att alla kontroller kan nås.
 - Allt fungerar med tangentbord, färgerna uppfyller kontrastkraven och chatten
   följer webbläsarens inställningar för färgschema och minskad rörelse.
   Redaktörer får en kontrastkontroll av färgen de väljer.
@@ -566,9 +579,10 @@ AI-plattform. Chatten öppnas som en dialogruta med en knapp som går att nå me
 tangentbord och skärmläsare. Den kan stängas med Escape-tangenten, och fokus
 återvänder då till knappen. Skärmläsare meddelar när en fråga har skickats och
 läser upp varje svar när det är klart. Chatten följer webbläsarens
-inställningar för ljust och mörkt läge och för minskad rörelse. På små skärmar,
-och när sidan förstoras så mycket att panelen inte får plats, fyller chatten
-hela skärmen, och resten av sidan döljs för skärmläsare tills chatten stängs.
+inställningar för ljust och mörkt läge och för minskad rörelse. På telefoner
+öppnas chatten som en rundad panel från nederkanten, även när tangentbordet
+visas. I breda, låga fönster används hela
+höjden. Sidan bakom låses och döljs för skärmläsare tills chatten stängs.
 
 Kända begränsningar: svaren skapas av en AI-modell och kan vara felaktiga. Svar
 kan innehålla länkar till källor som öppnas i en ny flik.

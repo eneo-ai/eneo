@@ -51,6 +51,8 @@
   let altchaElement = $state<AltchaWidgetElement | null>(null);
   let challengeReady = $state(untrack(() => config.bot_protection === "altcha"));
   let composer = $state<WidgetComposer | null>(null);
+  let draft = $state("");
+  let title = $state<HTMLHeadingElement | null>(null);
   let chatRoot = $state<HTMLElement | null>(null);
   let log = $state<HTMLElement | null>(null);
   let newQuestionButton = $state<HTMLButtonElement | null>(null);
@@ -96,7 +98,12 @@
   const bridge = createEmbedBridge({
     hostOrigin: initial.hostOrigin,
     handlers: {
-      onOpen: () => composer?.focus(),
+      onOpen: () => {
+        // A touch device should open the conversation before its keyboard.
+        // The heading gives screen readers context without panning the iframe.
+        if (matchMedia("(pointer: coarse)").matches) title?.focus({ preventScroll: true });
+        else composer?.focus();
+      },
       onTheme: (scheme) => initial.onTheme?.(scheme)
     }
   });
@@ -286,6 +293,9 @@
   ): Promise<string | null> {
     const sessionId = chat.currentConversation.id;
     if (!sessionId) return m.widget_error_generic();
+    // Feedback owns the next error location, just as sending a question
+    // clears an older feedback error. Never keep two attempts' alerts.
+    errorMessage = null;
     try {
       await session.ensureToken();
       await client.conversations.leaveFeedback({ conversation: { id: sessionId }, feedback });
@@ -330,7 +340,9 @@
         </span>
       {/if}
       <div class="min-w-0">
-        <h1 class="text-base font-semibold break-words">{config.texts.title || config.name}</h1>
+        <h1 bind:this={title} tabindex="-1" class="text-base font-semibold break-words">
+          {config.texts.title || config.name}
+        </h1>
         <p class="widget-header-muted text-xs">{subtitle}</p>
       </div>
     </div>
@@ -368,6 +380,23 @@
     {:else if messages.length === 0 && !showPending}
       {#if config.texts.welcome}
         <p class="text-primary text-base whitespace-pre-wrap">{config.texts.welcome}</p>
+      {/if}
+      {#if !busy && draft.length === 0 && config.texts.suggested_questions?.length}
+        <ul
+          class="widget-suggestions mt-4 flex flex-col gap-2"
+          aria-label={m.widget_suggested_questions()}
+        >
+          {#each config.texts.suggested_questions as suggestion, index (index)}
+            <li>
+              <button
+                type="button"
+                class="border-default bg-primary text-primary hover:bg-secondary min-h-[44px] w-full rounded-lg border px-3 py-2 text-left text-sm"
+                disabled={unavailable || coolingDown}
+                onclick={() => void send(suggestion)}>{suggestion}</button
+              >
+            </li>
+          {/each}
+        </ul>
       {/if}
     {:else}
       <!-- The list keeps its semantics; the log role sits on a wrapper so list
@@ -438,8 +467,7 @@
       maxLength={config.max_question_chars}
       disabled={unavailable || answered || coolingDown}
       {busy}
-      suggestions={config.texts.suggested_questions ?? []}
-      showSuggestions={messages.length === 0}
+      bind:value={draft}
       onSend={(question) => void send(question)}
     />
     {#if config.texts.footer_text || config.texts.footer_link_url}
@@ -491,16 +519,27 @@
 </div>
 
 <style>
-  /* A short panel (a phone on its side, a zoomed page): header, conversation
-     and composer scroll as one page instead of squeezing the conversation
-     away (WCAG 1.4.4, 1.4.10). In em so larger text switches earlier. */
-  @media (max-height: 26em) {
-    .widget-chat {
-      overflow-y: auto;
-    }
-    .widget-log {
-      flex: none;
-      overflow-y: visible;
+  .widget-chat {
+    overscroll-behavior: contain;
+    overflow-y: auto;
+  }
+  header,
+  footer {
+    flex-shrink: 0;
+  }
+  .widget-log {
+    /* Keep the conversation flexible when the keyboard shortens the panel.
+       A minimum reading area makes oversized text scroll the whole panel
+       instead of clipping the header/composer or losing the conversation. */
+    min-height: 6rem;
+    overscroll-behavior-y: contain;
+  }
+  footer {
+    padding-bottom: max(0.75rem, env(safe-area-inset-bottom));
+  }
+  @media (pointer: coarse) {
+    .widget-chat:has(:global(.widget-composer textarea:focus)) .widget-suggestions {
+      display: none;
     }
   }
   /* A tinted header uses the widget's own colours; text is derived for contrast. */
@@ -511,8 +550,8 @@
   }
   .widget-header-button {
     display: flex;
-    width: 2.25rem;
-    height: 2.25rem;
+    width: max(44px, 2.75rem);
+    height: max(44px, 2.75rem);
     align-items: center;
     justify-content: center;
     border-radius: 9999px;

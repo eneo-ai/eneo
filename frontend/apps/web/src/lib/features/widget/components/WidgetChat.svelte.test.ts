@@ -51,6 +51,8 @@ const fake = vi.hoisted(() => ({
   sessions: 0,
   // Rejects the next feedback call when set, then clears itself.
   failNextFeedback: false,
+  holdNextFeedback: false,
+  releaseFeedback: null as null | (() => void),
   // Rejects the next question when set, then clears itself.
   failNextAsk: false,
   // A stored conversation the fake returns on restore, when set.
@@ -164,6 +166,10 @@ vi.mock("@eneo/eneo-js", async (importOriginal) => {
           return fake.restored;
         },
         leaveFeedback: async (args: unknown) => {
+          if (fake.holdNextFeedback) {
+            fake.holdNextFeedback = false;
+            await new Promise<void>((resolve) => (fake.releaseFeedback = resolve));
+          }
           if (fake.failNextFeedback) {
             fake.failNextFeedback = false;
             throw new Error("boom");
@@ -304,6 +310,8 @@ beforeEach(() => {
   fake.holdNextRestore = false;
   fake.releaseRestore = null;
   fake.failNextFeedback = false;
+  fake.holdNextFeedback = false;
+  fake.releaseFeedback = null;
   fake.failNextAsk = false;
   fake.answers.length = 0;
   fake.breakOffNext = false;
@@ -317,16 +325,25 @@ beforeEach(() => {
 });
 
 describe("WidgetChat", () => {
+  test("hides suggestions while composing and restores them when an unsent draft is cleared", async () => {
+    renderApp();
+    await expect.element(suggestion()).toBeVisible();
+    await userEvent.fill(composer(), "Jag vill fråga om biblioteket");
+    await expect.element(suggestion()).not.toBeInTheDocument();
+    expect(fake.asks).toHaveLength(0);
+    await userEvent.fill(composer(), "");
+    await expect.element(suggestion()).toBeVisible();
+  });
+
   test("repeated suggestion clicks before the first chunk start one ask", async () => {
     renderApp();
     const button = suggestion();
     await expect.element(button).toBeEnabled();
     const element = button.element() as HTMLButtonElement;
-    // Two synchronous clicks: the second lands before the DOM disables the button.
+    // Two synchronous clicks: the second lands before the DOM hides the suggestions.
     element.click();
     element.click();
-    await expect.element(button).toBeDisabled();
-    await userEvent.click(button, { force: true });
+    await expect.element(button).not.toBeInTheDocument();
     await vi.waitFor(() => expect(fake.release).not.toBeNull());
     expect(fake.asks).toHaveLength(1);
 
@@ -351,6 +368,8 @@ describe("WidgetChat", () => {
     await expect
       .element(page.getByRole("button", { name: "widget_feedback_more_negative" }))
       .toBeVisible();
+    await expect.element(page.getByText("widget_feedback_prompt")).not.toBeInTheDocument();
+    await userEvent.click(page.getByRole("button", { name: "widget_feedback_change" }));
     await userEvent.click(page.getByRole("button", { name: "widget_feedback_helpful" }));
     expect(fake.feedback.at(-1)).toEqual({
       conversation: { id: "session-1" },
@@ -374,6 +393,63 @@ describe("WidgetChat", () => {
     });
     await vi.waitFor(() => expect(page.getByRole("dialog").elements()).toHaveLength(0));
     expect(page.getByRole("button", { name: "widget_feedback_more" }).elements()).toHaveLength(0);
+  });
+
+  test("a new question clears an old feedback error so a failed ask has one alert", async () => {
+    renderApp();
+    await userEvent.click(suggestion());
+    await releaseAnswer();
+    fake.failNextFeedback = true;
+    await userEvent.click(page.getByRole("button", { name: "widget_feedback_helpful" }));
+    await expect.element(page.getByRole("alert")).toHaveTextContent("widget_error_generic");
+
+    fake.failNextAsk = true;
+    await userEvent.fill(composer(), "Vad är klockan?");
+    await userEvent.keyboard("{Enter}");
+    await vi.waitFor(() => {
+      expect(page.getByRole("alert").elements()).toHaveLength(1);
+      expect(document.querySelector("footer [role='alert']")?.textContent).toContain(
+        "widget_error_generic"
+      );
+    });
+    expect(document.querySelector("main [role='alert']")).toBeNull();
+  });
+
+  test("feedback clears a previous question error before showing its own failure", async () => {
+    renderApp();
+    await userEvent.click(suggestion());
+    await releaseAnswer();
+    fake.failNextAsk = true;
+    await userEvent.fill(composer(), "Vad är klockan?");
+    await userEvent.keyboard("{Enter}");
+    await expect.element(page.getByRole("alert")).toHaveTextContent("widget_error_generic");
+    fake.failNextFeedback = true;
+    await userEvent.click(page.getByRole("button", { name: "widget_feedback_helpful" }));
+    await vi.waitFor(() => {
+      expect(page.getByRole("alert").elements()).toHaveLength(1);
+      expect(document.querySelector("main [role='alert']")?.textContent).toContain(
+        "widget_error_generic"
+      );
+    });
+    expect(document.querySelector("footer [role='alert']")).toBeNull();
+  });
+
+  test("a late feedback failure cannot add a second alert after the next question", async () => {
+    renderApp();
+    await userEvent.click(suggestion());
+    await releaseAnswer();
+    fake.failNextFeedback = true;
+    fake.holdNextFeedback = true;
+    await userEvent.click(page.getByRole("button", { name: "widget_feedback_helpful" }));
+    await vi.waitFor(() => expect(fake.releaseFeedback).not.toBeNull());
+    fake.failNextAsk = true;
+    await userEvent.fill(composer(), "Vad är klockan?");
+    await userEvent.keyboard("{Enter}");
+    await expect.element(page.getByRole("alert")).toHaveTextContent("widget_error_generic");
+    fake.releaseFeedback!();
+    await new Promise((resolve) => setTimeout(resolve, 100));
+    expect(page.getByRole("alert").elements()).toHaveLength(1);
+    expect(document.querySelector("main [role='alert']")).toBeNull();
   });
 
   test("a failed comment keeps the dialog open and says so inside it", async () => {
@@ -430,9 +506,7 @@ describe("WidgetChat", () => {
     };
     renderApp();
 
-    await expect
-      .element(page.getByRole("button", { name: "widget_feedback_unhelpful" }))
-      .toHaveAttribute("aria-pressed", "true");
+    await expect.element(page.getByText("widget_feedback_prompt")).not.toBeInTheDocument();
     await expect.element(page.getByRole("status")).toHaveTextContent("widget_feedback_thanks");
     await expect
       .element(page.getByRole("button", { name: "widget_feedback_more_negative" }))
@@ -446,10 +520,12 @@ describe("WidgetChat", () => {
     await releaseAnswer();
     const helpful = page.getByRole("button", { name: "widget_feedback_helpful" });
     await userEvent.click(helpful);
-    await expect.element(helpful).toHaveAttribute("aria-pressed", "true");
+    await expect.element(helpful).not.toBeInTheDocument();
 
     await askFollowUp("Och på lördagar?", "Lördagar har biblioteket stängt.");
 
+    await expect.element(page.getByText("widget_feedback_prompt")).not.toBeInTheDocument();
+    await userEvent.click(page.getByRole("button", { name: "widget_feedback_change" }));
     await expect.element(helpful).toHaveAttribute("aria-pressed", "true");
     await expect.element(page.getByRole("status")).toHaveTextContent("widget_feedback_thanks");
     expect(fake.feedback).toHaveLength(1);
@@ -484,11 +560,13 @@ describe("WidgetChat", () => {
     renderApp();
     const helpful = page.getByRole("button", { name: "widget_feedback_helpful" });
     const unhelpful = page.getByRole("button", { name: "widget_feedback_unhelpful" });
+    await userEvent.click(page.getByRole("button", { name: "widget_feedback_change" }));
     await expect.element(unhelpful).toHaveAttribute("aria-pressed", "true");
     await userEvent.click(helpful);
-    await expect.element(helpful).toHaveAttribute("aria-pressed", "true");
+    await expect.element(helpful).not.toBeInTheDocument();
 
     await askFollowUp("En fråga till", "Ett svar till.");
+    await userEvent.click(page.getByRole("button", { name: "widget_feedback_change" }));
 
     await expect.element(helpful).toHaveAttribute("aria-pressed", "true");
     await expect.element(unhelpful).toHaveAttribute("aria-pressed", "false");
@@ -507,19 +585,28 @@ describe("WidgetChat", () => {
     await vi.waitFor(() => expect(page.getByRole("dialog").elements()).toHaveLength(0));
 
     await askFollowUp("Och på lördagar?", "Lördagar har biblioteket stängt.");
+    await userEvent.click(page.getByRole("button", { name: "widget_feedback_change" }));
     await userEvent.click(page.getByRole("button", { name: "widget_feedback_helpful" }));
 
     // The server keeps the stored comment for a vote without text, so the
-    // acknowledgement still holds and no second comment is offered.
+    // acknowledgement still holds and the saved comment can be edited.
     expect(fake.feedback.at(-1)).toEqual({
       conversation: { id: "session-1" },
       feedback: { value: 1 }
     });
     await expect.element(page.getByRole("status")).toHaveTextContent("widget_feedback_received");
-    expect(page.getByRole("button", { name: /widget_feedback_more/ }).elements()).toHaveLength(0);
+    await userEvent.click(page.getByRole("button", { name: "widget_feedback_edit_comment" }));
+    await expect.element(dialog.getByRole("textbox")).toHaveValue("Fel öppettider.");
+    await userEvent.fill(dialog.getByRole("textbox"), "Tack, nu är öppettiderna tydliga.");
+    await userEvent.click(dialog.getByRole("button", { name: "widget_feedback_send" }));
+    await vi.waitFor(() => expect(page.getByRole("dialog").elements()).toHaveLength(0));
+    expect(fake.feedback.at(-1)).toEqual({
+      conversation: { id: "session-1" },
+      feedback: { value: 1, text: "Tack, nu är öppettiderna tydliga." }
+    });
   });
 
-  test("the comment dialog closes in the widget's language and leaves focus on the vote", async () => {
+  test("the comment dialog closes in the widget's language and returns focus to change rating", async () => {
     renderApp();
     await userEvent.click(suggestion());
     await releaseAnswer();
@@ -533,7 +620,11 @@ describe("WidgetChat", () => {
     await userEvent.keyboard("{Tab}{Tab}{Enter}");
 
     await vi.waitFor(() => expect(page.getByRole("dialog").elements()).toHaveLength(0));
-    await vi.waitFor(() => expect(document.activeElement).toBe(helpful.element()));
+    await vi.waitFor(() =>
+      expect(document.activeElement).toBe(
+        page.getByRole("button", { name: "widget_feedback_change" }).element()
+      )
+    );
   });
 
   test("an answer that breaks off keeps what arrived and says it is incomplete", async () => {
@@ -757,8 +848,8 @@ describe("WidgetChat", () => {
       await releaseAnswer();
       await userEvent.click(page.getByRole("button", { name: "widget_feedback_helpful" }));
       await userEvent.fill(composer(), "En till fråga");
-      // New conversation, thumbs, "tell us more", question field, send, footer link.
-      expect(await checkEveryControl(chat)).toBeGreaterThanOrEqual(7);
+      // New conversation, change rating, comment, question field, send, footer link.
+      expect(await checkEveryControl(chat)).toBeGreaterThanOrEqual(6);
 
       await userEvent.click(page.getByRole("button", { name: "widget_feedback_more" }));
       const dialog = page.getByRole("dialog");
@@ -893,13 +984,13 @@ describe("WidgetChat for screen reader users", () => {
         "paragraph",
         "Hej! Vad kan jag hjälpa dig med?",
         "end of paragraph",
-        "end of main",
-        "contentinfo",
         "list, widget_suggested_questions",
         "listitem, level 1, position 1, set size 1",
         "button, Vad har biblioteket för öppettider?",
         "end of listitem, level 1, position 1, set size 1",
         "end of list, widget_suggested_questions",
+        "end of main",
+        "contentinfo",
         "form",
         "widget_input_label",
         "textbox, widget_input_label, placeholder widget_input_placeholder",
@@ -1010,7 +1101,8 @@ describe("WidgetChat against WCAG 2.2 A and AA", () => {
     await expect.element(page.getByRole("alert")).toHaveTextContent("widget_error_generic");
     expect(JSON.stringify(await wcagViolations())).toBe("[]");
 
-    await userEvent.click(suggestion());
+    await expect.element(composer()).toHaveValue("Vad har biblioteket för öppettider?");
+    await userEvent.click(page.getByRole("button", { name: "widget_send", exact: true }));
     await releaseAnswer();
     await expect.element(page.getByRole("button", { name: "widget_new_question" })).toBeVisible();
     expect(JSON.stringify(await wcagViolations())).toBe("[]");
@@ -1071,6 +1163,28 @@ describe("WidgetChat when text is enlarged or spaced out", () => {
       await page.viewport(before.width, before.height);
     }
   }
+
+  test("keeps the composer at the bottom when a phone keyboard shortens the panel", async () => {
+    await atViewport(390, 360, async () => {
+      renderApp();
+      await expect.element(composer()).toBeVisible();
+      const chat = document.querySelector<HTMLElement>("[data-widget-chat]")!;
+      const footer = chat.querySelector("footer")!;
+      expect(footer.querySelector(".widget-suggestions")).toBeNull();
+      expect(chat.querySelector("main .widget-suggestions")).not.toBeNull();
+      expect(footer.getBoundingClientRect().bottom).toBeCloseTo(
+        chat.getBoundingClientRect().bottom,
+        0
+      );
+      await userEvent.fill(composer(), "Min fråga");
+      expect(footer.getBoundingClientRect().bottom).toBeCloseTo(
+        chat.getBoundingClientRect().bottom,
+        0
+      );
+      expect(chat.querySelector("main")!.getBoundingClientRect().height).toBeGreaterThan(100);
+      await expectReadable();
+    });
+  });
 
   test("reflows at 320 px without scrolling sideways (1.4.10)", async () => {
     await atViewport(320, 480, async () => {

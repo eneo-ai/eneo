@@ -52,9 +52,17 @@ Optional `data-*` attributes (also usable as attributes on a hand-written
 The launcher takes the widget's primary colour (and its dark-mode colour when
 the page is dark) from the saved settings, and again when the embed page
 reports ready. On viewports up to 40em wide or 31.25em high (a phone, a laptop
-zoomed to 200 %) the panel fills the viewport; the launcher then stays on top
-of it as the close button until the embed page has reported ready and the
-chat's own header can close the panel. CSS custom
+zoomed to 200 %) the panel is modal and locks the host page's scroll. On phones
+it slides up as a rounded bottom sheet, including while the keyboard is open;
+wide, short viewports use the full height. Suggested questions sit below the
+welcome text in the scrollable conversation, away from the composer. They
+disappear when the visitor types, and on touch screens when the input receives focus.
+The floating launcher is hidden while open. A close button above the frame
+works during loading, beside a localized loading status and a small indicator. The
+indicator clears when the frame document loads (including an error page) or
+the chat reports ready; the chat's own header then takes over the close control. Closing or removing
+the widget restores the host page's scroll position and styles. Reduced-motion
+preferences disable the animation. CSS custom
 properties on the element or `:root` override it: `--eneo-widget-color`,
 `--eneo-widget-on-color`, `--eneo-widget-radius`, `--eneo-widget-z`,
 `--eneo-widget-offset-x`, `--eneo-widget-offset-y`. Parts: `launcher`, `panel`.

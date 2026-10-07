@@ -27,13 +27,20 @@ const SETTINGS_TIMEOUT_MS = 3000;
 const SANDBOX =
   "allow-scripts allow-same-origin allow-forms allow-popups allow-popups-to-escape-sandbox";
 
-type Labels = { open: string; close: string; title: string; unread: (count: number) => string };
+type Labels = {
+  open: string;
+  close: string;
+  title: string;
+  loading: string;
+  unread: (count: number) => string;
+};
 
 const LABELS: Record<string, Labels> = {
   sv: {
     open: "Öppna chatt",
     close: "Stäng chatt",
     title: "Chatt",
+    loading: "Laddar chatten…",
     unread: (count) =>
       `Öppna chatt, ${count} ${count === 1 ? "nytt meddelande" : "nya meddelanden"}`
   },
@@ -41,6 +48,7 @@ const LABELS: Record<string, Labels> = {
     open: "Open chat",
     close: "Close chat",
     title: "Chat",
+    loading: "Loading chat…",
     unread: (count) => `Open chat, ${count} new ${count === 1 ? "message" : "messages"}`
   }
 };
@@ -92,6 +100,12 @@ export class EneoWidgetElement extends HTMLElement {
   private closeTimer: ReturnType<typeof setTimeout> | null = null;
   /** Host elements made inert while the panel covers the page. */
   private inerted: Element[] = [];
+  private viewportFrame: number | null = null;
+  private scrollLock: {
+    x: number;
+    y: number;
+    styles: { element: HTMLElement; name: string; value: string; priority: string }[];
+  } | null = null;
   private settings: WidgetSettings | null = null;
   private unavailable = false;
   private settling = false;
@@ -100,7 +114,13 @@ export class EneoWidgetElement extends HTMLElement {
   private prefetchWhenSettled = false;
 
   private readonly onMessage = (event: MessageEvent) => this.receive(event);
-  private readonly onViewport = () => this.layout();
+  private readonly onViewport = () => {
+    if (this.viewportFrame !== null) return;
+    this.viewportFrame = requestAnimationFrame(() => {
+      this.viewportFrame = null;
+      this.layout();
+    });
+  };
   private readonly onHostKeydown = (event: KeyboardEvent) => this.hostKeydown(event);
   private readonly onSchemeChange = () => {
     this.paintLauncher();
@@ -283,7 +303,8 @@ export class EneoWidgetElement extends HTMLElement {
     const root = this.attachShadow({ mode: "open" });
     root.innerHTML =
       `<button type="button" part="launcher" class="launcher" aria-haspopup="dialog" aria-expanded="false" aria-controls="eneo-panel">${CHAT_ICON}${CLOSE_ICON}<span class="badge" aria-hidden="true" hidden></span></button>` +
-      `<div id="eneo-panel" part="panel" class="panel" role="dialog" hidden></div>`;
+      `<div class="backdrop" aria-hidden="true"></div>` +
+      `<div id="eneo-panel" part="panel" class="panel" role="dialog" hidden><div class="loading-close"><button type="button">${CLOSE_ICON}</button></div><div class="loading-state"><span class="loading-indicator" aria-hidden="true"></span><p role="status"></p></div></div>`;
     // A host with a strict style-src blocks <style> in this shadow root. The
     // CSS ships beside this exact loader version, including pinned installs.
     const stylesheet = document.createElement("link");
@@ -296,6 +317,7 @@ export class EneoWidgetElement extends HTMLElement {
     this.panel = root.querySelector(".panel") as HTMLDivElement;
     this.badge = root.querySelector(".badge") as HTMLSpanElement;
     this.launcher.addEventListener("click", () => this.toggle());
+    root.querySelector(".loading-close button")!.addEventListener("click", () => this.closePanel());
     this.syncLauncher();
   }
 
@@ -324,6 +346,10 @@ export class EneoWidgetElement extends HTMLElement {
     this.launcher.setAttribute("aria-label", label);
     this.launcher.title = label;
     this.panel.setAttribute("aria-label", this.labels.title);
+    this.panel
+      .querySelector(".loading-close button")!
+      .setAttribute("aria-label", this.labels.close);
+    this.panel.querySelector(".loading-state p")!.textContent = this.labels.loading;
     this.launcher.hidden =
       !this.settled || this.unavailable || this.getAttribute("launcher") === "none";
     this.badge.hidden = this.unread === 0 || this.isOpen;
@@ -337,6 +363,9 @@ export class EneoWidgetElement extends HTMLElement {
     frame.setAttribute("sandbox", SANDBOX);
     frame.setAttribute("referrerpolicy", "strict-origin");
     frame.setAttribute("allow", "clipboard-write");
+    // Document load also releases the loading indicator for an unavailable/error page
+    // which cannot complete the interactive chat's ready handshake.
+    frame.addEventListener("load", () => this.setAttribute("loaded", ""), { once: true });
     frame.src = this.frameUrl;
     this.panel.appendChild(frame);
     this.frame = frame;
@@ -383,6 +412,8 @@ export class EneoWidgetElement extends HTMLElement {
       frame.focus();
     } else {
       this.pendingOpen = true;
+      if (this.fullScreen)
+        this.panel.querySelector<HTMLButtonElement>(".loading-close button")!.focus();
     }
     this.emit("open");
   }
@@ -445,8 +476,7 @@ export class EneoWidgetElement extends HTMLElement {
     switch (message.type) {
       case "ready":
         this.frameReady = true;
-        // Reflected for the styles: on small screens the launcher stays on top
-        // of the full-screen panel as the close control until the chat is up.
+        // The embed header replaces the loader's mobile close row when ready.
         this.setAttribute("ready", "");
         this.colors = message.payload?.colors ?? null;
         this.widgetTitle = message.payload?.title ?? null;
@@ -502,6 +532,8 @@ export class EneoWidgetElement extends HTMLElement {
   }
 
   private unwatch(): void {
+    if (this.viewportFrame !== null) cancelAnimationFrame(this.viewportFrame);
+    this.viewportFrame = null;
     window.removeEventListener("keydown", this.onHostKeydown);
     window.removeEventListener("resize", this.onViewport);
     window.visualViewport?.removeEventListener("resize", this.onViewport);
@@ -509,7 +541,7 @@ export class EneoWidgetElement extends HTMLElement {
   }
 
   /**
-   * Full screen, the panel follows the visual viewport so the on-screen
+   * In modal mode, the panel follows the visual viewport so the on-screen
    * keyboard never covers the composer, and it is a modal dialog: the rest of
    * the page is inert, so neither Tab nor a screen reader's cursor can reach
    * content hidden behind it. Beside the page it stays a non-modal dialog.
@@ -517,11 +549,16 @@ export class EneoWidgetElement extends HTMLElement {
   private layout(): void {
     const viewport = window.visualViewport;
     const full = this.isOpen && this.fullScreen;
-    this.panel.style.height = full && viewport ? `${viewport.height}px` : "";
-    this.panel.style.top = full && viewport ? `${viewport.offsetTop}px` : "";
+    this.panel.style.height =
+      full && viewport ? `calc(${viewport.height}px - var(--_eneo-sheet-gap, 0px))` : "";
+    this.panel.style.top =
+      full && viewport ? `calc(${viewport.offsetTop}px + var(--_eneo-sheet-gap, 0px))` : "";
     if (full) {
       this.panel.setAttribute("aria-modal", "true");
-      this.inertAround(this);
+      if (!this.scrollLock) {
+        this.lockScroll();
+        this.inertAround(this);
+      }
     } else {
       this.panel.removeAttribute("aria-modal");
       this.releasePage();
@@ -544,5 +581,38 @@ export class EneoWidgetElement extends HTMLElement {
   private releasePage(): void {
     for (const element of this.inerted) element.removeAttribute("inert");
     this.inerted = [];
+    if (this.scrollLock) {
+      const { x, y, styles } = this.scrollLock;
+      this.scrollLock = null;
+      for (const { element, name, value, priority } of styles) {
+        if (value) element.style.setProperty(name, value, priority);
+        else element.style.removeProperty(name);
+      }
+      window.scrollTo({ left: x, top: y, behavior: "instant" });
+    }
+  }
+
+  /** Keep iOS from panning the host behind the iframe when its keyboard opens. */
+  private lockScroll(): void {
+    const x = window.scrollX;
+    const y = window.scrollY;
+    const changes: [HTMLElement, string, string][] = [
+      [document.documentElement, "overflow", "hidden"],
+      [document.body, "position", "fixed"],
+      [document.body, "top", `${-y}px`],
+      [document.body, "left", `${-x}px`],
+      [document.body, "width", "100%"]
+    ];
+    this.scrollLock = {
+      x,
+      y,
+      styles: changes.map(([element, name]) => ({
+        element,
+        name,
+        value: element.style.getPropertyValue(name),
+        priority: element.style.getPropertyPriority(name)
+      }))
+    };
+    for (const [element, name, value] of changes) element.style.setProperty(name, value);
   }
 }

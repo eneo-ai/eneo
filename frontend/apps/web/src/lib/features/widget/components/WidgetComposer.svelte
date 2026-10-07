@@ -8,8 +8,7 @@
     maxLength: number;
     disabled: boolean;
     busy: boolean;
-    suggestions: string[];
-    showSuggestions: boolean;
+    value?: string;
     onSend: (question: string) => void;
     onEscape?: () => void;
   };
@@ -19,13 +18,11 @@
     maxLength,
     disabled,
     busy,
-    suggestions,
-    showSuggestions,
+    value = $bindable(""),
     onSend,
     onEscape
   }: Props = $props();
 
-  let value = $state("");
   let textarea = $state<HTMLTextAreaElement | null>(null);
 
   export function focus() {
@@ -71,25 +68,7 @@
   }
 </script>
 
-<div class="flex flex-col gap-2">
-  {#if showSuggestions && suggestions.length > 0}
-    <ul class="flex flex-wrap gap-2" aria-label={m.widget_suggested_questions()}>
-      <!-- Keyed by position: a repeated question must never take the panel down. -->
-      {#each suggestions as suggestion, index (index)}
-        <li>
-          <button
-            type="button"
-            class="widget-chip bg-primary text-primary hover:bg-secondary border px-3 py-1.5 text-sm"
-            disabled={disabled || busy}
-            onclick={() => onSend(suggestion)}
-          >
-            {suggestion}
-          </button>
-        </li>
-      {/each}
-    </ul>
-  {/if}
-
+<div class="widget-input flex flex-col gap-2">
   <form
     class="widget-composer border-default bg-primary focus-within:border-stronger flex items-end gap-2 border px-3 py-2"
     onsubmit={(event) => {
@@ -106,12 +85,12 @@
       maxlength={maxLength}
       {placeholder}
       {disabled}
-      class="text-primary placeholder:text-secondary max-h-40 min-h-[2.25rem] flex-1 resize-none bg-transparent py-1 text-base leading-6 disabled:opacity-60"
+      class="text-primary placeholder:text-secondary max-h-40 min-h-11 flex-1 resize-none bg-transparent py-1 text-base leading-6 disabled:opacity-60"
       oninput={resize}
       onkeydown={onKeydown}></textarea>
     <button
       type="submit"
-      class="widget-send flex h-9 w-9 shrink-0 items-center justify-center rounded-full disabled:opacity-50"
+      class="widget-send flex size-11 shrink-0 items-center justify-center rounded-full disabled:opacity-50"
       aria-label={m.widget_send()}
       disabled={!canSend}
     >
@@ -121,12 +100,13 @@
 </div>
 
 <style>
-  .widget-chip {
-    border-color: var(--widget-accent);
-    border-radius: var(--widget-radius);
-  }
   .widget-composer {
     border-radius: calc(var(--widget-radius) + 4px);
+  }
+  .widget-composer textarea {
+    /* The app root is 15px. Keep phone inputs readable without disabling zoom. */
+    font-size: max(16px, 1rem);
+    min-height: max(44px, 2.75rem);
   }
   /* The field is the whole box, so the box carries the focus indicator. */
   .widget-composer:has(textarea:focus-visible) {
@@ -137,6 +117,8 @@
     outline: none;
   }
   .widget-send {
+    min-width: 44px;
+    min-height: 44px;
     background: var(--widget-accent);
     color: var(--widget-on-accent);
   }

@@ -538,25 +538,109 @@ describe("small screens", () => {
     return element.shadowRoot!.elementFromPoint(box.left + box.width / 2, box.top + box.height / 2);
   }
 
-  it("keeps the launcher on top of the full-screen panel as the close control until the chat is up", async () => {
+  it("shows a loading status until the iframe document loads, even without a ready handshake", async () => {
+    const element = await mount();
+    element.openPanel();
+    const loading = element.shadowRoot!.querySelector<HTMLElement>(".loading-state")!;
+    expect(loading.querySelector("[role='status']")!.textContent).toBe("Laddar chatten…");
+    expect(getComputedStyle(loading).display).not.toBe("none");
+    expect(getComputedStyle(frameOf(element)!).visibility).toBe("hidden");
+    // An unavailable/error document must remain visible without chat JS.
+    frameOf(element)!.dispatchEvent(new Event("load"));
+    expect(element.hasAttribute("ready")).toBe(false);
+    expect(getComputedStyle(loading).display).toBe("none");
+    expect(getComputedStyle(frameOf(element)!).visibility).toBe("visible");
+  });
+
+  it("keeps a close control above the chat while loading, without a floating button over the composer", async () => {
     await atViewport(375, 812, async () => {
       const element = await mount();
       element.openPanel();
       const launcher = launcherOf(element);
-      // A page that is still loading, or never loads, sends no ready message:
-      // the launcher is visible, labelled as the close control and is what
-      // a tap on it reaches, not the panel covering the page.
-      expect(getComputedStyle(launcher).display).not.toBe("none");
-      expect(launcher.getAttribute("aria-label")).toBe("Stäng chatt");
-      expect(launcher.contains(hitAtCenter(element, launcher))).toBe(true);
-      launcher.click();
+      const close = element.shadowRoot!.querySelector<HTMLButtonElement>(".loading-close button")!;
+      // This must work even if the iframe never sends ready, including when
+      // the host uses its own trigger and configures launcher="none".
+      expect(getComputedStyle(launcher).display).toBe("none");
+      expect(close.getAttribute("aria-label")).toBe("Stäng chatt");
+      expect(element.shadowRoot!.activeElement).toBe(close);
+      await vi.waitFor(() => expect(close.contains(hitAtCenter(element, close))).toBe(true));
+      await vi.waitFor(() =>
+        expect(panelOf(element).getBoundingClientRect().bottom).toBeCloseTo(window.innerHeight, 0)
+      );
+      const panel = panelOf(element).getBoundingClientRect();
+      const frame = frameOf(element)!.getBoundingClientRect();
+      expect(panel.top).toBeGreaterThan(0);
+      expect(panel.bottom).toBeCloseTo(window.innerHeight, 0);
+      expect(close.getBoundingClientRect().bottom).toBeLessThanOrEqual(frame.top);
+      close.click();
       expect(element.open).toBe(false);
 
       // Once the embed page is ready its own header closes the panel.
       element.openPanel();
       deliver(element, frameMessage("ready"));
       expect(element.hasAttribute("ready")).toBe(true);
+      expect(getComputedStyle(element.shadowRoot!.querySelector(".loading-state")!).display).toBe(
+        "none"
+      );
       expect(getComputedStyle(launcher).display).toBe("none");
+      expect(getComputedStyle(close.parentElement!).display).toBe("none");
+    });
+  });
+
+  it("can close an unresponsive mobile frame when the host hides the launcher", async () => {
+    await atViewport(375, 812, async () => {
+      const element = await mount({ launcher: "none" });
+      element.openPanel();
+      element.shadowRoot!.querySelector<HTMLButtonElement>(".loading-close button")!.click();
+      expect(element.open).toBe(false);
+    });
+  });
+
+  it("keeps the phone sheet's rounded top when the visible window gets shorter", async () => {
+    await atViewport(375, 812, async () => {
+      const element = await mount();
+      element.openPanel();
+      await page.viewport(375, 360);
+      const panel = panelOf(element);
+      await vi.waitFor(() => expect(panel.getBoundingClientRect().bottom).toBeCloseTo(360, 0));
+      expect(panel.getBoundingClientRect().top).toBeGreaterThan(0);
+      expect(getComputedStyle(panel).borderTopLeftRadius).toBe("20px");
+      expect(getComputedStyle(panel).borderTopRightRadius).toBe("20px");
+      expect(getComputedStyle(launcherOf(element)).display).toBe("none");
+    });
+  });
+
+  it("restores the host's scroll position and inline styles after closing or removal", async () => {
+    await atViewport(375, 812, async () => {
+      const before = document.body.getAttribute("style");
+      const overflow = document.documentElement.style.overflow;
+      const content = document.createElement("div");
+      content.style.height = "3000px";
+      document.body.append(content);
+      document.body.style.position = "relative";
+      document.body.style.top = "3px";
+      document.documentElement.style.overflow = "scroll";
+      const element = await mount();
+      try {
+        for (const remove of [false, true]) {
+          window.scrollTo({ top: 400, behavior: "instant" });
+          element.openPanel();
+          expect(getComputedStyle(document.body).position).toBe("fixed");
+          expect(document.documentElement.style.overflow).toBe("hidden");
+          if (remove) element.remove();
+          else element.closePanel();
+          expect(document.body.style.position).toBe("relative");
+          expect(document.body.style.top).toBe("3px");
+          expect(document.documentElement.style.overflow).toBe("scroll");
+          expect(window.scrollY).toBe(400);
+        }
+      } finally {
+        element.remove();
+        if (before === null) document.body.removeAttribute("style");
+        else document.body.setAttribute("style", before);
+        document.documentElement.style.overflow = overflow;
+        window.scrollTo({ top: 0, behavior: "instant" });
+      }
     });
   });
 
