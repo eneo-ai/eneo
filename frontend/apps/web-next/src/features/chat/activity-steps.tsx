@@ -1,9 +1,6 @@
 "use client";
 
-import { ChatToolCalls, type ChatToolCallStatus } from "@astryxdesign/core/Chat";
 import { Collapsible } from "@astryxdesign/core/Collapsible";
-import { ScrollableArea } from "@astryxdesign/core/ScrollableArea";
-import { useQuery } from "@tanstack/react-query";
 import {
   Ban,
   Check,
@@ -20,13 +17,12 @@ import {
 } from "lucide-react";
 import { useLocale, useTranslations } from "next-intl";
 import { MessageResponse } from "@/components/ai-elements/message";
-import { browserApi } from "@/lib/api/browser";
-import { unwrap } from "@/lib/api/errors";
 import { cn } from "@/lib/utils";
-import type { Activity, ActivityStep, StepStatus, ToolPart } from "./activity";
+import type { Activity, ActivityStep, StepStatus, ToolCall } from "./activity";
 import type { TurnDurations } from "./activity-timings";
 import { formatSeconds } from "./format";
-import { eneoToolMetadata, skillName, toolPresentation } from "./tool-presentation";
+import { ToolCallList } from "./tool-call-list";
+import { skillName, toolPresentation } from "./tool-presentation";
 
 /**
  * The Aktivitet panel's Steg tab: a vertical timeline of an answer's steps
@@ -85,7 +81,7 @@ export function stepTitle(step: ActivityStep, t: Translate): string {
     case "knowledge":
       return t("chat_activity_knowledge_title");
     case "tool":
-      return toolPresentation(step.part, t, step.status === "done").label;
+      return toolStepTitle(step.calls, done, t);
     case "skill":
       return t(
         step.status === "error" || step.status === "denied"
@@ -100,17 +96,18 @@ export function stepTitle(step: ActivityStep, t: Translate): string {
   }
 }
 
-function toolArguments(part: ToolPart): string {
-  const input = part.input;
-  if (!input || typeof input !== "object" || Array.isArray(input)) return "";
-  return Object.entries(input as Record<string, unknown>)
-    .map(([key, value]) => `${key}: ${JSON.stringify(value)}`)
-    .join(", ");
-}
-
-function toolServer(part: ToolPart): string | null {
-  const server = eneoToolMetadata(part).server_name;
-  return typeof server === "string" && server ? server : null;
+/**
+ * A tool step's title: the call's own label, or for several calls the shared
+ * label with the count ("Läste bifogad fil · 4 anrop") when they are all the
+ * same tool, else just the count.
+ */
+function toolStepTitle(calls: ToolCall[], done: boolean, t: Translate): string {
+  const labels = calls.map((call) => toolPresentation(call.part, t, done).label);
+  const first = labels[0] ?? "";
+  if (calls.length === 1) return first;
+  return labels.every((label) => label === first)
+    ? t("chat_activity_tool_group", { label: first, count: calls.length })
+    : t("chat_activity_tool_calls", { count: calls.length });
 }
 
 function StatusCircle({ status }: { status: StepStatus }) {
@@ -137,78 +134,17 @@ function StatusCircle({ status }: { status: StepStatus }) {
 const PANEL_COLLAPSIBLE_CLASS =
   "[&_.astryx-collapsible-trigger]:text-ax-text-secondary [&_.astryx-collapsible-trigger]:min-h-8 [&_.astryx-collapsible-trigger]:text-[12.5px] [&_.astryx-collapsible-trigger]:font-medium";
 
-const CALL_STATUS: Record<StepStatus, ChatToolCallStatus> = {
-  waiting: "pending",
-  running: "running",
-  done: "complete",
-  error: "error",
-  denied: "error",
-  stopped: "error"
-};
-
-/**
- * A tool call's arguments and (loaded when the row is expanded) its result.
- * Mounted by ChatToolCalls only while the row is open.
- */
-function ToolCallDetail({ part, sessionId }: { part: ToolPart; sessionId: string | null }) {
-  const t = useTranslations();
-  const finished = part.state === "output-available" || part.state === "output-error";
-  const canLoad = Boolean(sessionId && part.toolCallId && finished);
-  const result = useQuery({
-    queryKey: ["conversations", "tool-call-result", sessionId, part.toolCallId],
-    enabled: canLoad,
-    staleTime: Infinity,
-    queryFn: async () => {
-      const response = await unwrap(
-        browserApi.GET("/api/v1/conversations/{session_id}/tool-calls/{tool_call_id}/result/", {
-          params: { path: { session_id: sessionId!, tool_call_id: part.toolCallId } }
-        })
-      );
-      return response.result ?? null;
-    }
-  });
-  const errorText = part.state === "output-error" ? part.errorText : undefined;
-  const hasInput =
-    part.input != null && typeof part.input === "object" && Object.keys(part.input).length > 0;
-  const body = !canLoad
-    ? null
-    : result.isPending
-      ? t("loading_ellipsis")
-      : result.isError
-        ? t("mcp_tool_response_load_error")
-        : typeof result.data === "string" && result.data.trim()
-          ? result.data
-          : (errorText ?? t("mcp_tool_response_empty"));
-  const label = "text-ax-text-secondary text-[11px] font-semibold";
-  const pre = "font-mono text-[11.5px] break-words whitespace-pre-wrap";
-
-  return (
-    <div className="flex flex-col gap-2 pb-1">
-      {hasInput && (
-        <div>
-          <p className={label}>{t("chat_tool_arguments")}</p>
-          <pre className={pre}>{JSON.stringify(part.input, null, 2)}</pre>
-        </div>
-      )}
-      {body !== null ? (
-        <div>
-          <p className={label}>{t("chat_tool_result")}</p>
-          <ScrollableArea
-            axis="block"
-            label={t("chat_tool_result")}
-            className="focus-visible:outline-ring max-h-48 focus-visible:outline-2 focus-visible:-outline-offset-2"
-          >
-            <pre className={pre}>{body}</pre>
-          </ScrollableArea>
-        </div>
-      ) : (
-        errorText && <p className="text-ax-error text-[12.5px]">{errorText}</p>
-      )}
-    </div>
-  );
-}
-
-function StepDetails({ step, sessionId }: { step: ActivityStep; sessionId: string | null }) {
+function StepDetails({
+  step,
+  activity,
+  sessionId,
+  durations
+}: {
+  step: ActivityStep;
+  activity: Activity;
+  sessionId: string | null;
+  durations: TurnDurations | null;
+}) {
   const t = useTranslations();
 
   switch (step.kind) {
@@ -252,33 +188,22 @@ function StepDetails({ step, sessionId }: { step: ActivityStep; sessionId: strin
         </div>
       );
     case "tool": {
-      const server = toolServer(step.part);
-      const args = toolArguments(step.part);
-      const problem =
-        step.status === "error"
-          ? (step.part.errorText ?? t("chat_step_status_error"))
-          : step.status === "denied" || step.status === "stopped"
-            ? t(STATUS_KEY[step.status])
-            : undefined;
+      const references = step.calls.flatMap((call) => call.references);
+      // One approval line when every call got the same decision; a mixed
+      // group shows each denial on its row instead.
+      const approvals = new Set(step.calls.map((call) => call.approval));
+      const approval = approvals.size === 1 ? (step.calls[0]?.approval ?? null) : null;
       return (
         <div className="flex flex-col gap-1.5">
-          <ChatToolCalls
-            className="bg-ax-card border-ax-border rounded-ax-element border px-1"
-            calls={[
-              {
-                key: step.part.toolCallId,
-                name: step.part.toolName,
-                node: server ?? undefined,
-                target: args || undefined,
-                status: CALL_STATUS[step.status],
-                errorMessage: problem,
-                resultDetail: <ToolCallDetail part={step.part} sessionId={sessionId} />
-              }
-            ]}
+          <ToolCallList
+            calls={step.calls}
+            files={activity.files}
+            sessionId={sessionId}
+            durations={durations}
           />
-          {step.references.length > 0 && (
+          {references.length > 0 && (
             <ul className="flex flex-col gap-1 text-[12.5px]">
-              {step.references.map((reference) => {
+              {references.map((reference) => {
                 const meta = (reference.meta ?? {}) as { title?: unknown; pageRange?: unknown };
                 const title =
                   typeof meta.title === "string" && meta.title ? meta.title : reference.uri;
@@ -300,19 +225,19 @@ function StepDetails({ step, sessionId }: { step: ActivityStep; sessionId: strin
               })}
             </ul>
           )}
-          {step.approval && (
+          {approval && (
             <p
               className={cn(
                 "flex items-center gap-1.5 text-xs",
-                step.approval === "approved" ? "text-ax-success" : "text-ax-error"
+                approval === "approved" ? "text-ax-success" : "text-ax-error"
               )}
             >
-              {step.approval === "approved" ? (
+              {approval === "approved" ? (
                 <ShieldCheck aria-hidden="true" className="size-3.5" />
               ) : (
                 <ShieldX aria-hidden="true" className="size-3.5" />
               )}
-              {step.approval === "approved" ? t("chat_tool_approved") : t("chat_tool_denied")}
+              {approval === "approved" ? t("chat_tool_approved") : t("chat_tool_denied")}
             </p>
           )}
         </div>
@@ -395,7 +320,12 @@ export function StepList({
                   </span>
                 )}
               </div>
-              <StepDetails step={step} sessionId={sessionId} />
+              <StepDetails
+                step={step}
+                activity={activity}
+                sessionId={sessionId}
+                durations={durations}
+              />
             </div>
           </li>
         );

@@ -5,7 +5,9 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { expectNoAxeViolations } from "@/test/axe";
 import { renderInApp } from "@/test/render";
 import { ComposerAttachments } from "./attachments";
-import { ChatMcpServers, type McpServerSummary } from "./mcp-controls";
+import type { Capability } from "@/features/capabilities/capabilities";
+import type { ChatCapability } from "./chat-capabilities";
+import { ChatTools, type McpServerSummary } from "./mcp-controls";
 import { McpSnippetButton } from "./message-parts";
 
 afterEach(() => {
@@ -22,21 +24,37 @@ const servers: McpServerSummary[] = [
   { id: "diarium", name: "Diarium", description: null, icon_url: null }
 ];
 
+const capabilities: ChatCapability[] = [
+  { purpose: "web_search", available: true, reason: null },
+  { purpose: "image_generation", available: false, reason: "no_active_provider" }
+];
+
 function McpHarness({
   onDisabled = vi.fn(),
+  onDisabledCapabilities = vi.fn(),
+  withCapabilities = false,
   modelSupportsTools
 }: {
   onDisabled?: (ids: Set<string>) => void;
+  onDisabledCapabilities?: (purposes: Set<Capability>) => void;
+  withCapabilities?: boolean;
   modelSupportsTools?: boolean;
 }) {
   const [disabled, setDisabled] = useState<Set<string>>(new Set(["diarium"]));
+  const [disabledCapabilities, setDisabledCapabilities] = useState<Set<Capability>>(new Set());
   const [autoAccept, setAutoAccept] = useState(false);
   return (
-    <ChatMcpServers
+    <ChatTools
+      capabilities={withCapabilities ? capabilities : []}
+      disabledCapabilities={disabledCapabilities}
       servers={servers}
       disabledServerIds={disabled}
       autoAcceptTools={autoAccept}
       modelSupportsTools={modelSupportsTools}
+      onDisabledCapabilitiesChange={(next) => {
+        onDisabledCapabilities(next);
+        setDisabledCapabilities(next);
+      }}
       onDisabledServerIdsChange={(next) => {
         onDisabled(next);
         setDisabled(next);
@@ -46,14 +64,14 @@ function McpHarness({
   );
 }
 
-describe("ChatMcpServers", () => {
+describe("ChatTools", () => {
   it("switches servers and tool approval from the tools popover", async () => {
     const onDisabled = vi.fn();
     renderInChat(<McpHarness onDisabled={onDisabled} />);
     const trigger = screen.getByRole("button", { name: "Verktyg: 1 av 2 aktiva" });
     expect(trigger.getAttribute("aria-expanded")).toBe("false");
     fireEvent.click(trigger);
-    const popover = await screen.findByRole("dialog", { name: "MCP-servrar" });
+    const popover = await screen.findByRole("dialog", { name: "Verktyg" });
     expect(trigger.getAttribute("aria-expanded")).toBe("true");
 
     const diarium = within(popover).getByRole("switch", { name: "Diarium" });
@@ -75,7 +93,7 @@ describe("ChatMcpServers", () => {
   it("renders every tool unavailable when the model cannot call tools", async () => {
     renderInChat(<McpHarness modelSupportsTools={false} />);
     fireEvent.click(screen.getByRole("button", { name: "Verktyg: 0 av 2 aktiva" }));
-    const popover = await screen.findByRole("dialog", { name: "MCP-servrar" });
+    const popover = await screen.findByRole("dialog", { name: "Verktyg" });
 
     for (const name of ["LOU-register", "Diarium"]) {
       const row = within(popover).getByRole("switch", { name });
@@ -88,6 +106,47 @@ describe("ChatMcpServers", () => {
     expect(within(popover).getAllByText("Modellen stödjer inte verktygsanrop.")).toHaveLength(3);
     expect(within(popover).queryByRole("button", { name: "Alla av" })).toBeNull();
     expect(within(popover).queryByRole("switch", { name: "Kör verktyg automatiskt" })).toBeNull();
+    await expectNoAxeViolations(popover);
+  });
+
+  it("lists capabilities as a group of switches above the servers and counts them", async () => {
+    const onDisabled = vi.fn();
+    const onDisabledCapabilities = vi.fn();
+    renderInChat(
+      <McpHarness
+        withCapabilities
+        onDisabled={onDisabled}
+        onDisabledCapabilities={onDisabledCapabilities}
+      />
+    );
+    // One available capability on, plus one of two servers.
+    fireEvent.click(screen.getByRole("button", { name: "Verktyg: 2 av 4 aktiva" }));
+    const popover = await screen.findByRole("dialog", { name: "Verktyg" });
+
+    const groups = within(popover).getAllByRole("list");
+    expect(groups.map((group) => group.getAttribute("aria-label"))).toEqual([
+      "Funktioner",
+      "MCP-servrar"
+    ]);
+    const web = within(popover).getByRole("switch", { name: "Webbsökning" });
+    expect((web as HTMLInputElement).checked).toBe(true);
+    fireEvent.click(web);
+    expect(onDisabledCapabilities).toHaveBeenLastCalledWith(new Set(["web_search"]));
+    expect(screen.getByRole("button", { name: "Verktyg: 1 av 4 aktiva" })).toBeTruthy();
+
+    // Unavailable: off, disabled and described by its reason.
+    const image = within(popover).getByRole("switch", { name: "Bildgenerering" });
+    expect((image as HTMLInputElement).checked).toBe(false);
+    expect(image.hasAttribute("disabled") || image.getAttribute("aria-disabled") === "true").toBe(
+      true
+    );
+    expect(within(popover).getByText("Ingen källa är aktiv.")).toBeTruthy();
+
+    // All on sweeps both groups, skipping what cannot be used.
+    fireEvent.click(within(popover).getByRole("button", { name: "Alla på" }));
+    expect(onDisabledCapabilities).toHaveBeenLastCalledWith(new Set());
+    expect(onDisabled).toHaveBeenLastCalledWith(new Set());
+    expect(screen.getByRole("button", { name: "Verktyg: 3 av 4 aktiva" })).toBeTruthy();
     await expectNoAxeViolations(popover);
   });
 });

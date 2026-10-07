@@ -292,7 +292,7 @@ export function WebsiteDetail({
   }
 
   return (
-    <div className="flex w-full max-w-5xl flex-col gap-6">
+    <div className="flex w-full flex-col gap-6">
       <div className="flex flex-col gap-1">
         <Link
           href={`/spaces/${routeId}/knowledge?tab=websites`}

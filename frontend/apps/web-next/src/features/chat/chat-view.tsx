@@ -29,7 +29,7 @@ import { createChatTransport, type ChatSendOptions } from "@/lib/chat/transport"
 import type { AnswerRating, ChatPartner, EneoUIMessage } from "@/lib/chat/types";
 import { deriveContextUsage, usePreflight } from "@/lib/chat/use-preflight";
 import { rescueFocus } from "@/lib/focus-rescue";
-import { deriveActivity } from "./activity";
+import { conversationFiles, deriveActivity } from "./activity";
 import { ActivityPanel, type ActivityTab } from "./activity-panel";
 import { ActivityTimings } from "./activity-timings";
 import { useAnswerFeedback } from "./answer-feedback";
@@ -37,7 +37,7 @@ import { disabledCapabilitiesForRequest } from "./chat-capabilities";
 import { ChatMessage, PendingAnswer, type ActivityRequest } from "./chat-message";
 import { Composer } from "./composer";
 import { ContextUsageBar } from "./context-usage-bar";
-import { ChatMcpServers, mcpConversationOptions } from "./mcp-controls";
+import { ChatTools, mcpConversationOptions } from "./mcp-controls";
 import { awaitPartnerUpdates, hasPendingPartnerUpdates } from "./partner-updates";
 import { historyQueryKey } from "./session-actions";
 import { StartState } from "./start-state";
@@ -451,7 +451,8 @@ export function ChatView({
     ? deriveActivity(activityMessage, {
         streaming: busy && activityMessage.id === messages.at(-1)?.id,
         knowledge: partner.knowledge,
-        tokens: timings.durations(activityMessage.id)?.tokens ?? null
+        tokens: timings.durations(activityMessage.id)?.tokens ?? null,
+        files: conversationFiles(messages)
       })
     : null;
 
@@ -497,17 +498,19 @@ export function ChatView({
       />
     ) : null;
 
-  const tools =
-    toolChoices.mcpServers.length > 0 ? (
-      <ChatMcpServers
-        servers={toolChoices.mcpServers}
-        disabledServerIds={toolChoices.disabledMcpServerIds}
-        autoAcceptTools={toolChoices.autoAcceptTools}
-        modelSupportsTools={toolChoices.modelSupportsTools}
-        onDisabledServerIdsChange={toolChoices.setDisabledMcpServerIds}
-        onAutoAcceptToolsChange={toolChoices.setAutoAcceptTools}
-      />
-    ) : null;
+  const tools = (
+    <ChatTools
+      capabilities={toolChoices.capabilities}
+      disabledCapabilities={toolChoices.disabledCapabilities}
+      servers={toolChoices.mcpServers}
+      disabledServerIds={toolChoices.disabledMcpServerIds}
+      autoAcceptTools={toolChoices.autoAcceptTools}
+      modelSupportsTools={toolChoices.modelSupportsTools}
+      onDisabledCapabilitiesChange={toolChoices.setDisabledCapabilities}
+      onDisabledServerIdsChange={toolChoices.setDisabledMcpServerIds}
+      onAutoAcceptToolsChange={toolChoices.setAutoAcceptTools}
+    />
+  );
 
   const composerLabel = t("chat_composer_label", { name: partnerName });
   const composerProps = {
@@ -521,9 +524,6 @@ export function ChatView({
     placeholder: t("chat_composer_placeholder"),
     attachments,
     onOpenFileDialog: openAttachmentDialog,
-    capabilities: toolChoices.capabilities,
-    disabledCapabilities: toolChoices.disabledCapabilities,
-    onToggleCapability: toolChoices.toggleCapability,
     knowledge: partner.knowledge,
     tools,
     mention,

@@ -3,7 +3,6 @@
 import { Button } from "@astryxdesign/core/Button";
 import { ChatComposer, ChatComposerDrawer, useChatComposerContext } from "@astryxdesign/core/Chat";
 import { Popover } from "@astryxdesign/core/Popover";
-import { Tooltip } from "@astryxdesign/core/Tooltip";
 import {
   ArrowUp,
   BookOpen,
@@ -12,8 +11,7 @@ import {
   Globe,
   Plus,
   ShieldCheck,
-  Square,
-  type LucideIcon
+  Square
 } from "lucide-react";
 import { useTranslations } from "next-intl";
 import {
@@ -26,19 +24,16 @@ import {
   type ReactNode,
   type Ref
 } from "react";
-import { CAPABILITIES, readinessKey, type Capability } from "@/features/capabilities/capabilities";
 import type { KnowledgeOrigin } from "@/lib/chat/types";
 import { cn } from "@/lib/utils";
 import { ComposerAttachments } from "./attachments";
-import type { ChatCapability } from "./chat-capabilities";
 import type { useAttachments } from "./use-attachments";
 
 type Attachments = ReturnType<typeof useAttachments>;
 
-/** Shared look of the composer's pill buttons (attach, capabilities, tools, knowledge). */
+/** Shared look of the composer's pill buttons (attach, knowledge). */
 const PILL_CLASS =
   "focus-visible:outline-ring inline-flex h-8 shrink-0 items-center gap-1.5 rounded-full px-2.5 text-[13px] font-semibold transition-colors focus-visible:outline-2 focus-visible:outline-offset-2 disabled:cursor-not-allowed disabled:text-ax-text-disabled pointer-coarse:h-11 pointer-coarse:min-w-11";
-const PILL_IDLE_CLASS = "text-ax-text-secondary hover:bg-ax-hover hover:text-ax-text";
 const PILL_ACTIVE_CLASS = "bg-ax-accent-muted text-ax-text-accent";
 
 /**
@@ -155,50 +150,6 @@ function useFileDrop(onFiles: (files: File[]) => void, enabled: boolean) {
   };
 }
 
-function CapabilityPill({
-  capability,
-  enabled,
-  onToggle
-}: {
-  capability: ChatCapability;
-  enabled: boolean;
-  onToggle: () => void;
-}) {
-  const t = useTranslations();
-  const ref = useRef<HTMLButtonElement>(null);
-  const descriptor = CAPABILITIES.find((item) => item.purpose === capability.purpose);
-  if (!descriptor) return null;
-  const Icon: LucideIcon = descriptor.icon;
-  const unavailable = !capability.available;
-  return (
-    <>
-      {/* aria-disabled (not disabled) keeps an unavailable capability focusable,
-          so its reason (tooltip, also the description) reaches keyboard users. */}
-      <button
-        ref={ref}
-        type="button"
-        aria-pressed={enabled}
-        aria-disabled={unavailable || undefined}
-        onClick={() => {
-          if (!unavailable) onToggle();
-        }}
-        className={cn(
-          PILL_CLASS,
-          unavailable
-            ? "text-ax-text-disabled cursor-not-allowed"
-            : enabled
-              ? PILL_ACTIVE_CLASS
-              : PILL_IDLE_CLASS
-        )}
-      >
-        <Icon aria-hidden="true" className="size-[15px]" />
-        <span className="max-sm:sr-only">{t(capability.purpose)}</span>
-      </button>
-      {unavailable && <Tooltip anchorRef={ref} content={t(readinessKey(capability.reason))} />}
-    </>
-  );
-}
-
 /**
  * "Kunskap: <källa>" pill for partners with knowledge attached. Knowledge is
  * always searched (there is no per-message switch in the backend), so this is
@@ -266,11 +217,8 @@ export type ComposerProps = {
   placeholder: string;
   attachments: Attachments;
   onOpenFileDialog: () => void;
-  capabilities: ChatCapability[];
-  disabledCapabilities: Set<Capability>;
-  onToggleCapability: (purpose: Capability) => void;
   knowledge?: KnowledgeOrigin[];
-  /** MCP tools pill (popover with per-server switches). */
+  /** Verktyg pill: the popover with a switch per capability and MCP server. */
   tools?: ReactNode;
   /** Group chats: @-mention picker. */
   mention?: ReactNode;
@@ -286,8 +234,8 @@ export type ComposerProps = {
 
 /**
  * The chat composer (Astryx ChatComposer): drawer with attachment cards,
- * a textarea, and a row with attach, capability pills (active = accent tint,
- * clearly lighter than Send), tools, the model picker and send/stop. Files
+ * a textarea, and a row with attach, the knowledge pill (accent tint, clearly
+ * lighter than Send), tools, the model picker and send/stop. Files
  * can be dropped anywhere on it; the attach button is the non-drag
  * alternative (WCAG 2.5.7). Footer: data-sovereignty note.
  */
@@ -302,9 +250,6 @@ export function Composer({
   placeholder,
   attachments,
   onOpenFileDialog,
-  capabilities,
-  disabledCapabilities,
-  onToggleCapability,
   knowledge = [],
   tools,
   mention,
@@ -386,14 +331,6 @@ export function Composer({
                 </button>
               )}
               <KnowledgePill knowledge={knowledge} />
-              {capabilities.map((capability) => (
-                <CapabilityPill
-                  key={capability.purpose}
-                  capability={capability}
-                  enabled={capability.available && !disabledCapabilities.has(capability.purpose)}
-                  onToggle={() => onToggleCapability(capability.purpose)}
-                />
-              ))}
               {tools}
               {mention}
             </div>

@@ -1,10 +1,16 @@
 import { describe, expect, it } from "vitest";
 import { mapSessionMessages } from "@/lib/chat/map-session";
 import type { Schema } from "@/lib/api/models";
-import { humanizeToolName, isSkillCall, skillName, toolPresentation } from "./tool-presentation";
+import {
+  humanizeToolName,
+  isSkillCall,
+  skillName,
+  toolPresentation,
+  toolTarget
+} from "./tool-presentation";
 
-const t = (key: string, values?: Record<string, string>) =>
-  `${key}${values?.query ? `:${values.query}` : ""}`;
+const t = (key: string, values?: Record<string, string | number>) =>
+  `${key}${values?.query ? `:${values.query}` : ""}${values?.offset ? `:${values.offset}` : ""}`;
 
 describe("chat tool presentation", () => {
   it("labels a capability by purpose even when an external provider names the tool differently", () => {
@@ -195,5 +201,53 @@ describe("eneo tool metadata", () => {
     expect(eneoToolMetadata({ toolName: "x", resultProviderMetadata: { eneo } })).toEqual(eneo);
     expect(isSkillCall({ toolName: "x", callProviderMetadata: { eneo } })).toBe(true);
     expect(eneoToolMetadata({ toolName: "x" })).toEqual({});
+  });
+});
+
+describe("toolTarget", () => {
+  const files = [{ id: "3021a3ac-86a3-4bb8-a0dc-d3c600f994e7", name: "kostnader-2025.xlsx" }];
+  const read = (offset: number) => ({
+    toolName: "read_file",
+    input: {
+      url: "http://host.docker.internal:8123/api/v1/files/3021a3ac-86a3-4bb8-a0dc-d3c600f994e7/original/download/?token=REDACTED",
+      offset
+    },
+    providerMetadata: { eneo: { server_name: "files", is_internal: true } }
+  });
+
+  it("names the attachment and the position for a read, never the signed url", () => {
+    expect(toolTarget(read(0), t, { files })).toBe(
+      "kostnader-2025.xlsx · chat_tool_read_from_start"
+    );
+    expect(toolTarget(read(16384), t, { files, locale: "sv" })).toBe(
+      "kostnader-2025.xlsx · chat_tool_read_from:16\u00a0384"
+    );
+    // A file the session does not list still shows no url.
+    expect(toolTarget(read(0), t, { files: [] })).toBe(
+      "internal_files_server · chat_tool_read_from_start"
+    );
+  });
+
+  it("shows the query for searches and the readable arguments otherwise", () => {
+    expect(
+      toolTarget(
+        {
+          toolName: "search",
+          input: { query: "lou tröskelvärden" },
+          providerMetadata: { eneo: { server_name: "web_search", purpose: "web_search" } }
+        },
+        t
+      )
+    ).toBe("lou tröskelvärden");
+    expect(
+      toolTarget(
+        {
+          toolName: "create_issue",
+          input: { project: "LOU", summary: "x".repeat(60), labels: ["a"] },
+          providerMetadata: { eneo: { server_name: "jira", is_internal: false } }
+        },
+        t
+      )
+    ).toBe(`project: LOU · summary: ${"x".repeat(48)}…`);
   });
 });

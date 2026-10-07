@@ -6,9 +6,10 @@ import { Switch } from "@/components/astryx/switch";
 import { Plug, ShieldCheck } from "lucide-react";
 import { useTranslations } from "next-intl";
 import { useState } from "react";
-import { readinessKey } from "@/features/capabilities/capabilities";
+import { CAPABILITIES, readinessKey, type Capability } from "@/features/capabilities/capabilities";
 import type { Schema } from "@/lib/api/models";
 import type { ChatPartner, ConversationBody } from "@/lib/chat/types";
+import type { ChatCapability } from "./chat-capabilities";
 
 export type McpServerSummary = Pick<
   Schema<"MCPServerPublicDict">,
@@ -49,6 +50,16 @@ export function pruneDisabledMcpServerIds(
   return new Set([...disabledServerIds].filter((id) => validIds.has(id)));
 }
 
+/** Capabilities that will be offered: switched on and available. */
+export function activeCapabilityCount(
+  capabilities: ChatCapability[],
+  disabledCapabilities: Set<Capability>
+): number {
+  return capabilities.filter(
+    (capability) => capability.available && !disabledCapabilities.has(capability.purpose)
+  ).length;
+}
+
 /** Servers that will be called: switched on and available (an unavailable server is off regardless). */
 export function activeMcpServerCount(
   servers: McpServerSummary[],
@@ -83,54 +94,97 @@ export function mcpConversationOptions({
   };
 }
 
+const ROW_CLASS = "flex items-center gap-2.5 py-1.5";
+const ROW_ICON_CLASS =
+  "bg-ax-muted text-ax-text-secondary rounded-ax-inner flex size-7 shrink-0 items-center justify-center overflow-hidden text-xs font-semibold";
+
+function ToolGroup({ title, children }: { title: string; children: React.ReactNode }) {
+  return (
+    <div className="flex flex-col gap-0.5 py-1">
+      <p className="text-ax-text-secondary text-xs font-semibold">{title}</p>
+      <ul aria-label={title} className="flex flex-col">
+        {children}
+      </ul>
+    </div>
+  );
+}
+
 /**
- * The composer's Verktyg pill: a popover with a switch per MCP server (and
- * all on / all off), plus whether tools run without asking for approval.
+ * The composer's Verktyg pill: a popover with a switch per capability (web
+ * search, image generation, …) and per MCP server, all on / all off, plus
+ * whether tools run without asking for approval. One control however many
+ * functions the tenant offers: the pill carries the count of what is on.
  * When the partner's model cannot call tools, the backend attaches nothing:
  * every row is then rendered unavailable and the run-automatically choice is
  * hidden, since there is no tool call for it to govern.
  */
-export function ChatMcpServers({
-  servers,
-  disabledServerIds,
+export function ChatTools({
+  capabilities = [],
+  disabledCapabilities = new Set(),
+  servers = [],
+  disabledServerIds = new Set(),
   autoAcceptTools,
   modelSupportsTools = true,
+  onDisabledCapabilitiesChange,
   onDisabledServerIdsChange,
   onAutoAcceptToolsChange
 }: {
-  servers: McpServerSummary[];
-  disabledServerIds: Set<string>;
+  capabilities?: ChatCapability[];
+  disabledCapabilities?: Set<Capability>;
+  servers?: McpServerSummary[];
+  disabledServerIds?: Set<string>;
   autoAcceptTools: boolean;
   /** Whether the partner's model can call tools at all; false renders every row unavailable. */
   modelSupportsTools?: boolean;
-  onDisabledServerIdsChange: (next: Set<string>) => void;
+  onDisabledCapabilitiesChange?: (next: Set<Capability>) => void;
+  onDisabledServerIdsChange?: (next: Set<string>) => void;
   onAutoAcceptToolsChange: (next: boolean) => void;
 }) {
   const t = useTranslations();
   const [open, setOpen] = useState(false);
-  const total = servers.length;
-  const activeCount = activeMcpServerCount(servers, disabledServerIds, modelSupportsTools);
+  const total = capabilities.length + servers.length;
+  const activeCount =
+    activeCapabilityCount(capabilities, disabledCapabilities) +
+    activeMcpServerCount(servers, disabledServerIds, modelSupportsTools);
   const activeLabel = t("mcp_servers_active_count", { active: activeCount, total });
+
+  function setCapability(purpose: Capability, enabled: boolean) {
+    const next = new Set(disabledCapabilities);
+    if (enabled) next.delete(purpose);
+    else next.add(purpose);
+    onDisabledCapabilitiesChange?.(next);
+  }
 
   function setServer(id: string, enabled: boolean) {
     const next = new Set(disabledServerIds);
     if (enabled) next.delete(id);
     else next.add(id);
-    onDisabledServerIdsChange(next);
+    onDisabledServerIdsChange?.(next);
   }
 
-  // All-on / all-off only sweeps the servers that can be used.
+  // All-on / all-off only sweeps the rows that can be used.
   function setAll(enabled: boolean) {
-    const next = new Set(disabledServerIds);
-    for (const server of servers) {
-      if (mcpServerUnavailableReason(server, modelSupportsTools) !== null) continue;
-      if (enabled) next.delete(server.id);
-      else next.add(server.id);
+    if (capabilities.length > 0) {
+      const next = new Set(disabledCapabilities);
+      for (const capability of capabilities) {
+        if (!capability.available) continue;
+        if (enabled) next.delete(capability.purpose);
+        else next.add(capability.purpose);
+      }
+      onDisabledCapabilitiesChange?.(next);
     }
-    onDisabledServerIdsChange(next);
+    if (servers.length > 0) {
+      const next = new Set(disabledServerIds);
+      for (const server of servers) {
+        if (mcpServerUnavailableReason(server, modelSupportsTools) !== null) continue;
+        if (enabled) next.delete(server.id);
+        else next.add(server.id);
+      }
+      onDisabledServerIdsChange?.(next);
+    }
   }
 
-  if (servers.length === 0) return null;
+  if (total === 0) return null;
 
   return (
     <Popover
@@ -139,12 +193,12 @@ export function ChatMcpServers({
       placement="above"
       alignment="start"
       width={320}
-      label={t("mcp_servers")}
+      label={t("chat_tools")}
       closeButtonLabel={t("close")}
       content={
         <div className="flex flex-col">
           <div className="border-ax-border flex flex-col gap-1 border-b pb-2">
-            <p className="text-sm font-semibold">{t("mcp_servers")}</p>
+            <p className="text-sm font-semibold">{t("chat_tools")}</p>
             <div className="text-ax-text-secondary flex items-center justify-between gap-2 text-xs">
               <span>{activeLabel}</span>
               {total > 1 && modelSupportsTools && (
@@ -171,43 +225,79 @@ export function ChatMcpServers({
             )}
           </div>
 
-          <ul aria-label={t("mcp_servers")} className="flex max-h-64 flex-col overflow-y-auto py-1">
-            {servers.map((server) => {
-              const reason = mcpServerUnavailableReason(server, modelSupportsTools);
-              return (
-                <li key={server.id} className="flex items-center gap-2.5 py-1.5">
-                  <span
-                    aria-hidden="true"
-                    className="bg-ax-muted text-ax-text-secondary rounded-ax-inner flex size-7 shrink-0 items-center justify-center overflow-hidden text-xs font-semibold"
-                  >
-                    {server.icon_url ? (
-                      // Backend-served MCP icon URL.
-                      // eslint-disable-next-line @next/next/no-img-element
-                      <img src={server.icon_url} alt="" className="size-full object-cover" />
-                    ) : (
-                      server.name.charAt(0).toUpperCase()
-                    )}
-                  </span>
-                  <div className="min-w-0 flex-1">
-                    {/* An unavailable server is off whatever the switch says: the
-                        backend never calls it. The reason replaces the description. */}
-                    <Switch
-                      label={server.name}
-                      description={
-                        reason ? t(readinessKey(reason)) : (server.description ?? undefined)
-                      }
-                      labelPosition="start"
-                      labelSpacing="spread"
-                      size="sm"
-                      value={reason === null && !disabledServerIds.has(server.id)}
-                      isDisabled={reason !== null}
-                      onChange={(value) => setServer(server.id, value)}
-                    />
-                  </div>
-                </li>
-              );
-            })}
-          </ul>
+          <div className="flex max-h-72 flex-col overflow-y-auto">
+            {capabilities.length > 0 && (
+              <ToolGroup title={t("capabilities")}>
+                {capabilities.map((capability) => {
+                  const Icon = CAPABILITIES.find(
+                    (item) => item.purpose === capability.purpose
+                  )?.icon;
+                  return (
+                    <li key={capability.purpose} className={ROW_CLASS}>
+                      <span aria-hidden="true" className={ROW_ICON_CLASS}>
+                        {Icon ? <Icon className="size-4" /> : null}
+                      </span>
+                      <div className="min-w-0 flex-1">
+                        {/* An unavailable capability is off whatever the switch
+                            says; its reason replaces the description. */}
+                        <Switch
+                          label={t(capability.purpose)}
+                          description={
+                            capability.available ? undefined : t(readinessKey(capability.reason))
+                          }
+                          labelPosition="start"
+                          labelSpacing="spread"
+                          size="sm"
+                          value={
+                            capability.available && !disabledCapabilities.has(capability.purpose)
+                          }
+                          isDisabled={!capability.available}
+                          onChange={(value) => setCapability(capability.purpose, value)}
+                        />
+                      </div>
+                    </li>
+                  );
+                })}
+              </ToolGroup>
+            )}
+
+            {servers.length > 0 && (
+              <ToolGroup title={t("mcp_servers")}>
+                {servers.map((server) => {
+                  const reason = mcpServerUnavailableReason(server, modelSupportsTools);
+                  return (
+                    <li key={server.id} className={ROW_CLASS}>
+                      <span aria-hidden="true" className={ROW_ICON_CLASS}>
+                        {server.icon_url ? (
+                          // Backend-served MCP icon URL.
+                          // eslint-disable-next-line @next/next/no-img-element
+                          <img src={server.icon_url} alt="" className="size-full object-cover" />
+                        ) : (
+                          server.name.charAt(0).toUpperCase()
+                        )}
+                      </span>
+                      <div className="min-w-0 flex-1">
+                        {/* An unavailable server is off whatever the switch says: the
+                            backend never calls it. The reason replaces the description. */}
+                        <Switch
+                          label={server.name}
+                          description={
+                            reason ? t(readinessKey(reason)) : (server.description ?? undefined)
+                          }
+                          labelPosition="start"
+                          labelSpacing="spread"
+                          size="sm"
+                          value={reason === null && !disabledServerIds.has(server.id)}
+                          isDisabled={reason !== null}
+                          onChange={(value) => setServer(server.id, value)}
+                        />
+                      </div>
+                    </li>
+                  );
+                })}
+              </ToolGroup>
+            )}
+          </div>
 
           {modelSupportsTools && (
             <div className="border-ax-border flex items-start gap-2.5 border-t pt-2">

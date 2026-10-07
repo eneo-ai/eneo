@@ -2,11 +2,9 @@
 import { cleanup, fireEvent, screen } from "@testing-library/react";
 import { useState } from "react";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import type { Capability } from "@/features/capabilities/capabilities";
 import type { ChatPartner } from "@/lib/chat/types";
 import { expectNoAxeViolations } from "@/test/axe";
 import { renderInApp } from "@/test/render";
-import type { ChatCapability } from "./chat-capabilities";
 import { Composer } from "./composer";
 import { useAttachments } from "./use-attachments";
 
@@ -18,11 +16,6 @@ const partner: ChatPartner = {
   name: "Upphandlingsassistenten",
   knowledge: [{ id: "g1", name: "Upphandling", kind: "collection" }]
 };
-
-const CAPABILITIES: ChatCapability[] = [
-  { purpose: "web_search", available: true, reason: null },
-  { purpose: "image_generation", available: false, reason: "no_active_provider" }
-];
 
 function Harness({
   busy = false,
@@ -36,7 +29,6 @@ function Harness({
   initial?: string;
 }) {
   const [value, setValue] = useState(initial);
-  const [disabled, setDisabled] = useState<Set<Capability>>(new Set());
   const attachments = useAttachments(partner);
   return (
     <Composer
@@ -50,16 +42,6 @@ function Harness({
       placeholder="Fråga, klistra in text eller släpp filer här"
       attachments={attachments}
       onOpenFileDialog={vi.fn()}
-      capabilities={CAPABILITIES}
-      disabledCapabilities={disabled}
-      onToggleCapability={(purpose) =>
-        setDisabled((current) => {
-          const next = new Set(current);
-          if (next.has(purpose)) next.delete(purpose);
-          else next.add(purpose);
-          return next;
-        })
-      }
       knowledge={partner.knowledge}
     />
   );
@@ -122,27 +104,8 @@ describe("Composer", () => {
     expect(onSubmit).not.toHaveBeenCalled();
   });
 
-  it("shows capabilities as pressed/unpressed pills and explains unavailable ones", () => {
+  it("shows the knowledge and attach pills and the data-sovereignty note", () => {
     renderComposer();
-    const web = screen.getByRole("button", { name: "Webbsökning" });
-    expect(web.getAttribute("aria-pressed")).toBe("true");
-    fireEvent.click(web);
-    expect(web.getAttribute("aria-pressed")).toBe("false");
-
-    // Unavailable: still focusable (aria-disabled) and described by its reason.
-    const image = screen.getByRole("button", { name: "Bildgenerering" });
-    expect(image.hasAttribute("disabled")).toBe(false);
-    expect(image.getAttribute("aria-disabled")).toBe("true");
-    expect(image.getAttribute("aria-pressed")).toBe("false");
-    fireEvent.click(image);
-    expect(image.getAttribute("aria-pressed")).toBe("false");
-    const reason = image
-      .getAttribute("aria-describedby")
-      ?.split(" ")
-      .map((id) => document.getElementById(id)?.textContent ?? "")
-      .join(" ");
-    expect(reason?.trim()).toBeTruthy();
-
     expect(screen.getByRole("button", { name: /Kunskap: Upphandling/ })).toBeTruthy();
     expect(screen.getByRole("button", { name: "Bifoga filer" })).toBeTruthy();
     expect(

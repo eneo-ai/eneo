@@ -37,7 +37,7 @@ import { browserApi } from "@/lib/api/browser";
 import { toastApiError } from "@/lib/api/toast";
 import { cn } from "@/lib/utils";
 import { McpServerDialog } from "./mcp-dialog";
-import { hostFromUrl, initials, isQuarantined, pendingTools } from "./mcp-helpers";
+import { hostFromUrl, initials, pendingTools } from "./mcp-helpers";
 import {
   deleteMcpServer,
   MCP_KEY,
@@ -108,10 +108,8 @@ function McpServerCard({
   const invalidate = () => queryClient.invalidateQueries({ queryKey: MCP_KEY });
   const tools = server.tools ?? [];
   const pending = pendingTools(tools).length;
-  const quarantined = isQuarantined(server, securityEnabled);
   const detailHref = `/admin/mcp-servers/${server.id}`;
   const host = hostFromUrl(server.http_url);
-  const quarantineId = `mcp-quarantine-${server.id}`;
 
   // Saves on toggle and keeps focus while it saves (see useSettingSwitch).
   const [enabled, setEnabled, saving] = useSettingSwitch(
@@ -130,11 +128,6 @@ function McpServerCard({
     onError: (error) => toastApiError(error, t)
   });
 
-  // Quarantine: an unclassified server can't be enabled while classifications
-  // are enforced. An already-enabled one stays toggleable so it can be turned
-  // off (by the saved value: turning it off must not disable it mid-save).
-  const toggleBlocked = quarantined && !server.is_org_enabled;
-
   return (
     <Card className="gap-0 overflow-hidden p-0">
       <div className="flex items-center gap-3 px-4 py-3.5">
@@ -150,21 +143,15 @@ function McpServerCard({
             <Link href={detailHref} className="font-medium hover:underline">
               {server.name}
             </Link>
-            {securityEnabled &&
-              (server.security_classification ? (
-                <Badge
-                  variant="outline"
-                  className="border-border text-muted-foreground gap-1 font-normal"
-                >
-                  <Lock className="size-3" aria-hidden="true" />
-                  {server.security_classification.name}
-                </Badge>
-              ) : (
-                <Badge className="border-warning/30 bg-warning/15 text-warning gap-1 font-normal">
-                  <ShieldAlert className="size-3" aria-hidden="true" />
-                  {t("mcp_unclassified")}
-                </Badge>
-              ))}
+            {securityEnabled && server.security_classification && (
+              <Badge
+                variant="outline"
+                className="border-border text-muted-foreground gap-1 font-normal"
+              >
+                <Lock className="size-3" aria-hidden="true" />
+                {server.security_classification.name}
+              </Badge>
+            )}
           </div>
           <div className="text-muted-foreground mt-0.5 flex flex-wrap items-center gap-x-3 gap-y-0.5 text-xs">
             <Link
@@ -183,20 +170,14 @@ function McpServerCard({
             <span className="inline-flex">
               <Switch
                 checked={enabled}
-                disabled={toggleBlocked}
                 aria-busy={saving || undefined}
                 aria-label={t("mcp_toggle_server", { name: server.name })}
-                aria-describedby={toggleBlocked ? quarantineId : undefined}
                 onCheckedChange={setEnabled}
               />
             </span>
           </TooltipTrigger>
           <TooltipContent>
-            {toggleBlocked
-              ? t("mcp_quarantine_blocks_enable")
-              : enabled
-                ? t("mcp_toggle_to_disable")
-                : t("mcp_toggle_to_enable")}
+            {enabled ? t("mcp_toggle_to_disable") : t("mcp_toggle_to_enable")}
           </TooltipContent>
         </Tooltip>
 
@@ -239,22 +220,6 @@ function McpServerCard({
         </DropdownMenu>
       </div>
 
-      {toggleBlocked && (
-        <p
-          id={quarantineId}
-          className="bg-warning/10 text-warning flex items-center gap-2 border-t px-4 py-2 text-sm"
-        >
-          <ShieldAlert className="size-4 shrink-0" aria-hidden="true" />
-          {t("mcp_quarantine_strip")}
-          <Link
-            href={`${detailHref}?tab=security`}
-            className="ml-auto shrink-0 font-medium hover:underline"
-          >
-            {t("mcp_classify")}
-          </Link>
-        </p>
-      )}
-
       {pending > 0 && (
         <Link
           href={`${detailHref}?tab=tools`}
@@ -294,8 +259,7 @@ export function McpServersPage() {
   const [search, setSearch] = useState("");
   const [filter, setFilter] = useState<Filter>("all");
 
-  const needsAttention = (server: McpServer) =>
-    pendingTools(server.tools ?? []).length > 0 || isQuarantined(server, securityEnabled);
+  const needsAttention = (server: McpServer) => pendingTools(server.tools ?? []).length > 0;
 
   const totals = useMemo(() => {
     let enabled = 0;

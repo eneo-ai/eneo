@@ -35,7 +35,7 @@ export function ServiceDetail({ serviceId }: { serviceId: string }) {
 
   return (
     <SaveStatusProvider>
-      <div className="mx-auto flex w-full max-w-5xl flex-col gap-6">
+      <div className="flex w-full flex-col gap-6">
         <div className="flex flex-col gap-1">
           <Link
             href={`/spaces/${routeId}/services`}

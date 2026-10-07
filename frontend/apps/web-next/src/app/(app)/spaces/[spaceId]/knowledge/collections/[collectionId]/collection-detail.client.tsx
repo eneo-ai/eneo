@@ -34,7 +34,7 @@ export function CollectionDetail({ collectionId }: { collectionId: string }) {
   return (
     // A deleted file's row takes its menu button with it: focus goes to the title.
     <RemovalFocusScope target={headingRef}>
-      <div className="flex w-full max-w-5xl flex-col gap-6">
+      <div className="flex w-full flex-col gap-6">
         <div className="flex flex-col gap-1">
           <Link
             href={`/spaces/${routeId}/knowledge?tab=collections`}

@@ -166,7 +166,7 @@ export function SpaceSkillsPage() {
   ];
 
   return (
-    <div className="flex w-full max-w-5xl flex-col gap-6 pb-16">
+    <div className="flex w-full flex-col gap-6 pb-16">
       <PageHeader
         headingLevel={2}
         headingRef={headingRef}

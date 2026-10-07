@@ -12,12 +12,15 @@ describe("server activation", () => {
   } as McpServer;
 
   it("uses tenant enablement for general MCP servers", () => {
-    expect(activationState({ ...base, is_org_enabled: true }, true)).toEqual({
+    expect(activationState({ ...base, is_org_enabled: true })).toEqual({
       capability: false,
       active: true,
       blocked: false
     });
-    expect(activationState({ ...base, security_classification: null }, true).blocked).toBe(true);
+  });
+
+  it("never blocks a general server for lacking a classification", () => {
+    expect(activationState({ ...base, security_classification: null }).blocked).toBe(false);
   });
 
   it("uses provider activation and readiness for function sources", () => {
@@ -26,12 +29,12 @@ describe("server activation", () => {
       purpose: "image_generation" as const,
       readiness_reason: "model_missing"
     };
-    expect(activationState(source, false)).toEqual({
+    expect(activationState(source)).toEqual({
       capability: true,
       active: false,
       blocked: true
     });
-    expect(activationState({ ...source, is_enabled: true }, false).active).toBe(true);
+    expect(activationState({ ...source, is_enabled: true }).active).toBe(true);
   });
 });
 

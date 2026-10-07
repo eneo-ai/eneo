@@ -4,7 +4,7 @@ import { citedSourceIndices } from "@/lib/chat/inref";
 import { asString, hostOf } from "@/lib/chat/metadata";
 import type { EneoUIMessage, KnowledgeOrigin } from "@/lib/chat/types";
 import { mcpReferencesFromParts, mergeSources, type SourceChip } from "./message-parts";
-import { eneoToolMetadata, isSkillCall } from "./tool-presentation";
+import { eneoToolMetadata, isSkillCall, type AttachedFile } from "./tool-presentation";
 
 /**
  * The activity of one assistant turn, derived from its message parts: the
@@ -37,11 +37,12 @@ export type ActivityStep =
       kind: "tool";
       key: string;
       status: StepStatus;
-      part: ToolPart;
-      /** Approval record for tools that needed approval; null when none was needed. */
-      approval: "approved" | "denied" | null;
-      /** MCP resources this call read (documents with page ranges, pages). */
-      references: McpReference[];
+      /**
+       * The calls made in one go: the model's parallel calls, and calls that
+       * followed each other without any text or reasoning between them. A
+       * lone call is a step of one.
+       */
+      calls: ToolCall[];
     }
   | { kind: "skill"; key: string; status: StepStatus; part: ToolPart }
   | {
@@ -51,6 +52,15 @@ export type ActivityStep =
       model: string | null;
       tokens: number | null;
     };
+
+export type ToolCall = {
+  part: ToolPart;
+  status: StepStatus;
+  /** Approval record for tools that needed approval; null when none was needed. */
+  approval: "approved" | "denied" | null;
+  /** MCP resources this call read (documents with page ranges, pages). */
+  references: McpReference[];
+};
 
 export type ActivitySource = SourceChip & {
   /** Where the source lives: collection/website name or web host. */
@@ -62,6 +72,8 @@ export type ActivitySource = SourceChip & {
 export type Activity = {
   steps: ActivityStep[];
   sources: ActivitySource[];
+  /** The files attached to the turn, so a read of one can be named. */
+  files: AttachedFile[];
   /** True when there is something worth opening the panel for. */
   hasActivity: boolean;
   running: boolean;
@@ -93,6 +105,23 @@ function toolStatus(part: ToolPart): StepStatus {
     default:
       return "waiting";
   }
+}
+
+/** The status of a group of calls: whatever is still going on, else the worst outcome. */
+const STATUS_PRIORITY: readonly StepStatus[] = [
+  "running",
+  "waiting",
+  "error",
+  "denied",
+  "stopped",
+  "done"
+];
+
+export function toolGroupStatus(calls: readonly { status: StepStatus }[]): StepStatus {
+  for (const status of STATUS_PRIORITY) {
+    if (calls.some((call) => call.status === status)) return status;
+  }
+  return "done";
 }
 
 /** Approval decisions from the stream's approval parts and persisted tool calls. */
@@ -220,13 +249,40 @@ function activitySources(
  * Derives the activity for an assistant message. `streaming` marks the turn
  * that is still being generated (its last step is running).
  */
+/**
+ * The files attached across a conversation, from every turn's session data:
+ * a later turn reads a file an earlier one attached, so naming it needs all
+ * of them.
+ */
+export function conversationFiles(messages: readonly EneoUIMessage[]): AttachedFile[] {
+  const files = new Map<string, AttachedFile>();
+  const add = (file: { id: string; name: string }) =>
+    files.set(file.id, { id: file.id, name: file.name });
+  for (const message of messages) {
+    // History keeps a question's files on the user message; a live turn
+    // lists them in the answer's session data.
+    for (const file of message.metadata?.files ?? []) add(file);
+    for (const part of message.parts) {
+      if (part.type === "data-session") part.data.files.forEach(add);
+    }
+  }
+  return [...files.values()];
+}
+
 export function deriveActivity(
   message: EneoUIMessage,
   {
     streaming = false,
     knowledge = [],
-    tokens = null
-  }: { streaming?: boolean; knowledge?: KnowledgeOrigin[]; tokens?: number | null } = {}
+    tokens = null,
+    files: knownFiles = []
+  }: {
+    streaming?: boolean;
+    knowledge?: KnowledgeOrigin[];
+    tokens?: number | null;
+    /** Files attached earlier in the conversation (`conversationFiles`). */
+    files?: AttachedFile[];
+  } = {}
 ): Activity {
   const parts = message.parts;
   const decisions = approvals(parts);
@@ -237,17 +293,25 @@ export function deriveActivity(
   if (knowledgeRetrieval) steps.push(knowledgeRetrieval);
 
   let reasoningIndex = 0;
+  // Tool calls join the open group until text, reasoning or a skill comes
+  // between: the group's key is its first call's, so it stays stable while
+  // later calls arrive.
+  let group: Extract<ActivityStep, { kind: "tool" }> | null = null;
   for (const part of parts) {
     if (part.type === "reasoning") {
       if (!part.text.trim() && part.state !== "streaming") continue;
+      group = null;
       steps.push({
         kind: "reasoning",
         key: `reasoning-${reasoningIndex++}`,
         status: part.state === "streaming" ? "running" : "done",
         text: part.text
       });
+    } else if (part.type === "text") {
+      if (part.text.trim()) group = null;
     } else if (part.type === "dynamic-tool") {
       if (isSkillCall(part)) {
+        group = null;
         steps.push({
           kind: "skill",
           key: `skill-${part.toolCallId}`,
@@ -255,18 +319,22 @@ export function deriveActivity(
           part
         });
       } else {
-        steps.push({
-          kind: "tool",
-          key: `tool-${part.toolCallId}`,
-          status: toolStatus(part),
+        const call: ToolCall = {
           part,
+          status: toolStatus(part),
           approval: toolApproval(part, decisions),
           references: mcpReferences.filter(
             (reference) =>
               reference.tool_call_id === part.toolCallId &&
               !(reference.mime_type ?? "").startsWith("image/")
           )
-        });
+        };
+        if (!group) {
+          group = { kind: "tool", key: `tool-${part.toolCallId}`, status: call.status, calls: [] };
+          steps.push(group);
+        }
+        group.calls.push(call);
+        group.status = toolGroupStatus(group.calls);
       }
     }
   }
@@ -290,17 +358,32 @@ export function deriveActivity(
 
   // A finished turn has no running steps: whatever did not complete was cut off.
   if (!streaming) {
+    const cutOff = (status: StepStatus) =>
+      status === "running" || status === "waiting" ? "stopped" : status;
     for (const step of steps) {
-      if (step.status === "running" || step.status === "waiting") step.status = "stopped";
+      step.status = cutOff(step.status);
+      if (step.kind === "tool") for (const call of step.calls) call.status = cutOff(call.status);
     }
   }
 
   const sources = activitySources(message, knowledge, text);
+  const files = [
+    ...knownFiles,
+    ...conversationFiles([message]).filter((file) => !knownFiles.some((k) => k.id === file.id))
+  ];
   const meaningfulSteps = steps.filter((step) => step.kind !== "answer");
-  const errorCount = steps.filter((step) => step.status === "error").length;
+  const errorCount = steps.reduce(
+    (count, step) =>
+      count +
+      (step.kind === "tool"
+        ? step.calls.filter((call) => call.status === "error").length
+        : Number(step.status === "error")),
+    0
+  );
   return {
     steps,
     sources,
+    files,
     hasActivity: meaningfulSteps.length > 0 || sources.length > 0,
     running: streaming,
     errorCount

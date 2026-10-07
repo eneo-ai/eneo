@@ -9,7 +9,10 @@ export function humanizeToolName(name: string): string {
   return words.charAt(0).toUpperCase() + words.slice(1);
 }
 
-type Translate = (key: string, values?: Record<string, string>) => string;
+type Translate = (key: string, values?: Record<string, string | number>) => string;
+
+/** A file attached to the conversation or its assistant, as the session lists them. */
+export type AttachedFile = { id: string; name: string };
 type ToolLike = {
   toolName: string;
   input?: unknown;
@@ -144,4 +147,54 @@ export function toolPresentation(part: ToolLike, t: Translate, done: boolean) {
     server: serverName || null,
     provider: null
   };
+}
+
+const FILE_URL_ID = /\/files\/([0-9a-f-]{36})\//i;
+
+/** The file id in one of Eneo's signed download urls (`…/api/v1/files/<id>/…`). */
+export function fileIdFromUrl(url: unknown): string | null {
+  if (typeof url !== "string") return null;
+  return FILE_URL_ID.exec(url)?.[1] ?? null;
+}
+
+const SCALAR_MAX = 48;
+
+/** Scalar arguments as "key: value", long strings cut: the generic target of a call. */
+export function readableArguments(args: Record<string, unknown>): string | null {
+  const parts: string[] = [];
+  for (const [key, value] of Object.entries(args)) {
+    if (value == null || typeof value === "object") continue;
+    const text = String(value);
+    parts.push(`${key}: ${text.length > SCALAR_MAX ? `${text.slice(0, SCALAR_MAX)}…` : text}`);
+  }
+  return parts.length > 0 ? parts.join(" · ") : null;
+}
+
+/**
+ * What a call acted on, for the row under its label: the file and position
+ * for a read of an attachment, the query for a search, else the readable
+ * arguments. A signed download url never shows; the attachment's name does.
+ */
+export function toolTarget(
+  part: ToolLike,
+  t: Translate,
+  { files = [], locale = "sv" }: { files?: AttachedFile[]; locale?: string } = {}
+): string | null {
+  const { serverName, purpose, ownServer } = metadata(part);
+  const args = argumentsOf(part);
+  const query = searchQuery(args);
+  if (ownServer && serverName === "files" && part.toolName === "read_file") {
+    const id = fileIdFromUrl(args.url);
+    const name = files.find((file) => file.id === id)?.name ?? t("internal_files_server");
+    const offset = typeof args.offset === "number" ? args.offset : 0;
+    const position =
+      offset > 0
+        ? t("chat_tool_read_from", { offset: new Intl.NumberFormat(locale).format(offset) })
+        : t("chat_tool_read_from_start");
+    return `${name} · ${position}`;
+  }
+  if (query && (purpose === "web_search" || (ownServer && serverName === "knowledge"))) {
+    return query;
+  }
+  return readableArguments(args);
 }

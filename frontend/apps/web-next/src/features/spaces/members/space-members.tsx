@@ -488,7 +488,7 @@ export function SpaceMembers() {
   return (
     // Removing a member or group takes its row (and remove button) away: focus goes to the title.
     <RemovalFocusScope target={headingRef}>
-      <div className="flex w-full max-w-5xl flex-col gap-8">
+      <div className="flex w-full flex-col gap-8">
         <PageHeader
           headingLevel={2}
           headingRef={headingRef}

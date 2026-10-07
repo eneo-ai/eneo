@@ -207,9 +207,41 @@ describe("deriveActivity", () => {
         }
       ])
     );
-    const [approved, denied] = activity.steps;
-    expect(approved).toMatchObject({ kind: "tool", status: "done", approval: "approved" });
-    expect(denied).toMatchObject({ kind: "tool", status: "denied", approval: "denied" });
+    // Both calls came back to back: one step, the denial sets its status.
+    const [step] = activity.steps;
+    expect(step).toMatchObject({ kind: "tool", key: "tool-call-1", status: "denied" });
+    expect(step?.kind === "tool" && step.calls.map((call) => call.approval)).toEqual([
+      "approved",
+      "denied"
+    ]);
+  });
+
+  it("groups calls made in one go and splits them on text or reasoning", () => {
+    const activity = deriveActivity(
+      assistant([
+        tool("call-1", "output-available"),
+        tool("call-2", "input-available"),
+        tool("call-3", "output-error", { errorText: "TimeoutError" }),
+        { type: "text", text: "Mellanliggande.", state: "done" },
+        tool("call-4", "output-available"),
+        { type: "reasoning", text: "Vidare.", state: "done" },
+        tool("call-5", "output-available")
+      ]),
+      { streaming: true }
+    );
+    expect(
+      activity.steps.map((step) =>
+        step.kind === "tool" ? [step.key, step.status, step.calls.length] : step.kind
+      )
+    ).toEqual([
+      ["tool-call-1", "running", 3],
+      ["tool-call-4", "done", 1],
+      "reasoning",
+      ["tool-call-5", "done", 1],
+      "answer"
+    ]);
+    // Errors count per call, not per step.
+    expect(activity.errorCount).toBe(1);
   });
 
   it("names the running step while streaming and stops unfinished steps afterwards", () => {
@@ -248,7 +280,9 @@ describe("deriveActivity", () => {
       ])
     );
     const step = activity.steps[0]!;
-    expect(step.kind === "tool" && step.references.map((ref) => ref.id)).toEqual(["ref-1"]);
+    expect(step.kind === "tool" && step.calls[0]?.references.map((ref) => ref.id)).toEqual([
+      "ref-1"
+    ]);
     expect(activity.sources[0]).toMatchObject({ title: "Policy", pageRange: "4, 9" });
   });
 

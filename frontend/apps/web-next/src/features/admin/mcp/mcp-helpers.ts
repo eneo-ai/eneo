@@ -30,20 +30,14 @@ export function activeToolCount(tools: readonly McpServerTool[]): number {
 }
 
 /**
- * A server is quarantined when security classifications are enforced org-wide
- * but this server has none — it must be classified before it can be enabled.
+ * Activation state differs between general MCP servers and function sources.
+ * A security classification is optional: an unclassified server can be enabled
+ * and is then usable in spaces without a classification.
  */
-export function isQuarantined(server: McpServer, securityEnabled: boolean): boolean {
-  return securityEnabled && !server.security_classification;
-}
-
-/** Activation state differs between general MCP servers and function sources. */
-export function activationState(server: McpServer, securityEnabled: boolean) {
+export function activationState(server: McpServer) {
   const capability = server.purpose !== undefined && server.purpose !== "general";
   const active = capability ? server.is_enabled === true : server.is_org_enabled;
-  const blocked =
-    !active &&
-    (capability ? Boolean(server.readiness_reason) : isQuarantined(server, securityEnabled));
+  const blocked = !active && capability && Boolean(server.readiness_reason);
   return { capability, active, blocked };
 }
 

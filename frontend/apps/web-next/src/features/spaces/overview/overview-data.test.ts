@@ -3,12 +3,7 @@ import type { Website } from "@/features/knowledge/knowledge";
 import { makeAssistant, makeCollection, makeSpace, makeWebsite } from "../testing/space-fixture";
 import { websiteStatus } from "@/features/knowledge/website-status";
 import { assistantModelName } from "../space-models";
-import {
-  defaultModelFirst,
-  overviewKnowledgeRows,
-  recentChatItems,
-  uploadTargets
-} from "./overview-data";
+import { overviewKnowledgeRows, recentChatItems, uploadTargets } from "./overview-data";
 
 const compare = new Intl.Collator("sv").compare;
 
@@ -147,25 +142,6 @@ describe("recentChatItems and assistantModelName", () => {
     expect(
       assistantModelName(space, makeAssistant({ completion_model_id: "gone" }) as never)
     ).toBeNull();
-  });
-});
-
-describe("defaultModelFirst", () => {
-  it("puts the organization's default model first and keeps the API order of the rest", () => {
-    const models = [
-      { id: "a", is_org_default: false },
-      { id: "b" },
-      { id: "default", is_org_default: true },
-      { id: "c", is_org_default: false }
-    ];
-    expect(defaultModelFirst(models).map((model) => model.id)).toEqual(["default", "a", "b", "c"]);
-    // A copy: the space's own list keeps its order.
-    expect(models.map((model) => model.id)).toEqual(["a", "b", "default", "c"]);
-  });
-
-  it("leaves models without a default in the API order", () => {
-    const models = [{ id: "b" }, { id: "a", is_org_default: false }];
-    expect(defaultModelFirst(models).map((model) => model.id)).toEqual(["b", "a"]);
   });
 });
 

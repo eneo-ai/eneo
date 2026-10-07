@@ -1,5 +1,5 @@
 import type { EneoUIMessage } from "@/lib/chat/types";
-import { deriveActivity, type StepStatus } from "./activity";
+import { deriveActivity, type ActivityStep, type StepStatus } from "./activity";
 
 /**
  * Client-measured durations for turns streamed in this tab. The backend does
@@ -19,8 +19,24 @@ type TurnTiming = {
   tokens: number | null;
 };
 
+/** The key a tool call's own span is kept under (beside its step's). */
+export function callTimingKey(toolCallId: string): string {
+  return `call-${toolCallId}`;
+}
+
+/** The spans a step contributes: its own, and one per call for a tool step. */
+function timedSpans(step: ActivityStep): { key: string; status: StepStatus }[] {
+  const own = { key: step.key, status: step.status };
+  if (step.kind !== "tool") return [own];
+  return [
+    own,
+    ...step.calls.map((call) => ({ key: callTimingKey(call.part.toolCallId), status: call.status }))
+  ];
+}
+
 export type TurnDurations = {
   totalMs: number | null;
+  /** Step keys, and `callTimingKey(id)` for each tool call. */
   stepMs: Record<string, number>;
   tokens: number | null;
   /** When the turn finished (ISO 8601): the timestamp of a live answer. */
@@ -81,7 +97,7 @@ export class ActivityTimings {
         turn.tokens = this.pendingTokens;
         changed = true;
       }
-      for (const step of deriveActivity(last, { streaming: true }).steps) {
+      for (const step of deriveActivity(last, { streaming: true }).steps.flatMap(timedSpans)) {
         let span = turn.steps.get(step.key);
         if (!span) {
           span = { start: now, end: null };
@@ -90,6 +106,11 @@ export class ActivityTimings {
         }
         if (span.end === null && FINISHED.has(step.status)) {
           span.end = now;
+          changed = true;
+        } else if (span.end !== null && !FINISHED.has(step.status)) {
+          // A tool step grows while it streams: a call that joins after the
+          // earlier ones finished reopens the step until it finishes too.
+          span.end = null;
           changed = true;
         }
       }

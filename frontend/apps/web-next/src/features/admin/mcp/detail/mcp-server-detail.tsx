@@ -73,7 +73,7 @@ export function McpServerDetail({
   const invalidate = () => queryClient.invalidateQueries({ queryKey: MCP_KEY });
 
   const securityEnabled = security.security_enabled;
-  const activation = server ? activationState(server, securityEnabled) : null;
+  const activation = server ? activationState(server) : null;
   // Saves on toggle and keeps focus while it saves (see useSettingSwitch).
   const [active, setActive, saving] = useSettingSwitch(
     `mcp-server:${serverId}`,
@@ -100,7 +100,7 @@ export function McpServerDetail({
   const listHref =
     server.purpose && server.purpose !== "general" ? "/admin/tools" : "/admin/mcp-servers";
 
-  const { capability, blocked } = activationState(server, securityEnabled);
+  const { blocked } = activationState(server);
   // The security tab only exists when classifications are enforced; a deep link
   // to it otherwise falls back to overview so the page never renders blank.
   const activeTab = tab === "security" && !securityEnabled ? "overview" : tab;
@@ -138,9 +138,7 @@ export function McpServerDetail({
               </TooltipTrigger>
               <TooltipContent>
                 {blocked
-                  ? capability
-                    ? t(readinessKey(server.readiness_reason))
-                    : t("mcp_quarantine_blocks_enable")
+                  ? t(readinessKey(server.readiness_reason))
                   : active
                     ? t("mcp_toggle_to_disable")
                     : t("mcp_toggle_to_enable")}

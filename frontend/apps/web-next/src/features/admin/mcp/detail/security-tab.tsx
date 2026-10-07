@@ -1,7 +1,6 @@
 "use client";
 
 import { useQueryClient, useSuspenseQuery } from "@tanstack/react-query";
-import { ShieldAlert } from "lucide-react";
 import { useTranslations } from "next-intl";
 import { SettingsGroup, SettingsRow } from "@/components/composites/settings-rows";
 import { useAutosave } from "@/components/composites/use-autosave";
@@ -45,12 +44,6 @@ export function SecurityTab({ server }: { server: McpServer }) {
       title={t("security_classification")}
       description={t("mcp_security_hint")}
     >
-      {!server.security_classification && (
-        <p className="bg-warning/10 text-warning border-warning/30 flex items-start gap-2 rounded-lg border px-3 py-2 text-sm">
-          <ShieldAlert className="mt-0.5 size-4 shrink-0" aria-hidden="true" />
-          {t("mcp_quarantine_explainer")}
-        </p>
-      )}
       <SettingsRow title={t("security_classification")} htmlFor="mcp-classification-select">
         <Select value={current} onValueChange={change}>
           <SelectTrigger id="mcp-classification-select" className="w-full sm:w-80">
@@ -65,11 +58,13 @@ export function SecurityTab({ server }: { server: McpServer }) {
             ))}
           </SelectContent>
         </Select>
-        {server.security_classification?.description && (
-          <p className="text-muted-foreground text-sm">
-            {server.security_classification.description}
-          </p>
-        )}
+        {/* A classification is optional: without one the server is usable in
+            every space that has no classification of its own. */}
+        <p className="text-muted-foreground text-sm">
+          {server.security_classification
+            ? server.security_classification.description
+            : t("mcp_unclassified_hint")}
+        </p>
       </SettingsRow>
     </SettingsGroup>
   );

@@ -128,14 +128,18 @@ export function useToolChoices(partner: ChatPartner) {
     );
   }
 
-  function setCapabilityEnabled(purpose: Capability) {
-    const next = new Set(disabledCapabilities);
-    if (next.has(purpose)) next.delete(purpose);
-    else next.add(purpose);
+  function setCapabilitiesDisabled(next: Set<Capability>) {
     setLocalDisabledCapabilities(next);
     setLocalDisabledMcpServerIds(disabledMcpServerIds);
     setLocallyEditedPreferences(true);
     persistToolChoices(disabledMcpServerIds, next);
+  }
+
+  function toggleCapability(purpose: Capability) {
+    const next = new Set(disabledCapabilities);
+    if (next.has(purpose)) next.delete(purpose);
+    else next.add(purpose);
+    setCapabilitiesDisabled(next);
   }
 
   function setMcpDisabled(next: Set<string>) {
@@ -165,7 +169,8 @@ export function useToolChoices(partner: ChatPartner) {
     /** Capabilities offered in the composer (web search only when the deployment shows it). */
     capabilities,
     disabledCapabilities,
-    toggleCapability: setCapabilityEnabled,
+    setDisabledCapabilities: setCapabilitiesDisabled,
+    toggleCapability,
     mcpServers,
     /** Disabled MCP servers among those the partner offers. */
     disabledMcpServerIds: activeDisabledMcpServerIds,

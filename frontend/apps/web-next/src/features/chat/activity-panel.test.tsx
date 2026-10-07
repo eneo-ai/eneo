@@ -161,14 +161,17 @@ describe("ActivityPanel", () => {
     fireEvent.click(reasoning);
     expect(reasoning.getAttribute("aria-expanded")).toBe("true");
     expect(screen.getByText("Jämför policyn mot LOU.")).toBeTruthy();
-    // The tool call (Astryx ChatToolCalls): name, server and arguments; the
-    // row expands to the full arguments.
-    const call = screen.getByRole("button", { name: /lou_troskelvarden/ });
+    // The tool call: the server named above the rows, a row with the tool's
+    // readable name and its arguments, which opens to the argument list.
+    expect(screen.getByText("lou")).toBeTruthy();
+    const call = screen.getByRole("button", { name: /Lou troskelvarden/ });
     expect(call.textContent).toContain("ar: 2026");
     expect(call.getAttribute("aria-expanded")).toBe("false");
     fireEvent.click(call);
     expect(call.getAttribute("aria-expanded")).toBe("true");
     expect(screen.getByText("Argument")).toBeTruthy();
+    expect(screen.getByText("ar")).toBeTruthy();
+    expect(screen.getByText("2026")).toBeTruthy();
   });
 
   it("switches to numbered sources with where they come from", () => {
