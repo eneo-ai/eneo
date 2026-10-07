@@ -45,7 +45,38 @@ export function formatSourceMetadataValue(
 
 /** True when a document carries at least one source property. */
 export function hasSourceMetadata(
-  blob: { source_metadata?: SourceMetadataEntry[] | null } | null | undefined
+  blob: { source_metadata?: unknown } | null | undefined
 ): blob is { source_metadata: SourceMetadataEntry[] } {
-  return Array.isArray(blob?.source_metadata) && blob.source_metadata.length > 0;
+  const entries = blob?.source_metadata;
+  if (!Array.isArray(entries) || entries.length === 0 || !entries.every(isSourceMetadataEntry)) {
+    return false;
+  }
+  return new Set(entries.map((entry) => entry.name)).size === entries.length;
+}
+
+/** MCP metadata is free-form JSON; only the document-property contract is renderable. */
+function isSourceMetadataEntry(entry: unknown): entry is SourceMetadataEntry {
+  if (
+    typeof entry !== "object" ||
+    entry === null ||
+    !("name" in entry) ||
+    typeof entry.name !== "string" ||
+    !("label" in entry) ||
+    typeof entry.label !== "string" ||
+    !("value" in entry)
+  )
+    return false;
+  if (
+    typeof entry.value !== "string" &&
+    !(
+      Array.isArray(entry.value) && entry.value.every((value: unknown) => typeof value === "string")
+    )
+  )
+    return false;
+  return (
+    !("kind" in entry) ||
+    entry.kind == null ||
+    (typeof entry.kind === "string" &&
+      ["text", "choice", "date", "number", "boolean", "url"].includes(entry.kind))
+  );
 }

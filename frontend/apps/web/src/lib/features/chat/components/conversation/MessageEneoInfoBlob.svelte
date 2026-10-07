@@ -13,10 +13,7 @@
   } from "../../mcpReferenceDocs";
   import { m } from "$lib/paraglide/messages";
   import SourceMetadataList from "$lib/features/knowledge/components/SourceMetadataList.svelte";
-  import {
-    hasSourceMetadata,
-    type SourceMetadataEntry
-  } from "$lib/features/knowledge/sourceMetadata";
+  import { hasSourceMetadata } from "$lib/features/knowledge/sourceMetadata";
 
   let { token }: EneoInrefCustomComponentProps = $props();
 
@@ -59,7 +56,7 @@
     title?: string;
     pageRange?: string;
     section?: string;
-    source_metadata?: SourceMetadataEntry[];
+    source_metadata?: unknown;
   };
 
   const mcpReference = $derived.by(() => {

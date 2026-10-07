@@ -66,4 +66,29 @@ describe("hasSourceMetadata", () => {
     expect(hasSourceMetadata({})).toBe(false);
     expect(hasSourceMetadata(undefined)).toBe(false);
   });
+
+  it.each([
+    ["wrong"],
+    [null],
+    [{}],
+    [{ name: "t", label: "Type", value: 42 }],
+    [{ name: "t", label: "Type", value: ["Policy", null] }],
+    [{ name: "t", label: "Type", value: "Policy", kind: "unsupported" }],
+    [{ name: "t", value: "Policy" }],
+    [entry({ value: "Policy" }), "wrong"],
+    [entry({ value: "Policy" }), entry({ value: "Other" })]
+  ])(
+    "rejects malformed MCP properties before they reach the formatter (%j)",
+    (...entries: unknown[]) => {
+      expect(hasSourceMetadata({ source_metadata: entries })).toBe(false);
+    }
+  );
+
+  it("accepts valid external properties with scalar or list values and optional kind", () => {
+    const properties = [
+      { name: "type", label: "Type", value: "Policy" },
+      { name: "topics", label: "Topics", value: ["A", "B"], kind: "choice" }
+    ];
+    expect(hasSourceMetadata({ source_metadata: properties })).toBe(true);
+  });
 });
