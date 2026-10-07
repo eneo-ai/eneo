@@ -3214,6 +3214,11 @@ def test_reanalysis_preserves_live_provenance_and_records_source_hash(
 
     assert source_path.read_bytes() == source_bytes
     reanalyzed = json.loads(next(output_dir.iterdir()).read_text())
+    changes = {
+        change["name"]: change for change in reanalyzed["quality_report_changes"]
+    }
+    assert changes["plan_created"]["before"]["passed"] is True
+    assert changes["plan_created"]["after"]["passed"] is False
     assert reanalyzed["artifact_mode"] == "reanalysis"
     assert reanalyzed["live_execution_provenance"] == source_provenance
     assert reanalyzed["reanalysis_provenance"]["source_bundle_sha256"] == (
@@ -3229,6 +3234,14 @@ def test_reanalysis_preserves_live_provenance_and_records_source_hash(
         reanalyzed["reanalysis_provenance"]["scorer_sha256"],
     ) == (harness.SCORER_SEMANTICS_VERSION, harness._scorer_sha256())
     assert "evidence_report" not in reanalyzed
+    source_bundle["quality_report"]["checks"] *= 2
+    source_path.write_text(json.dumps(source_bundle))
+    assert (
+        harness._reanalyze_bundles(
+            bundle_paths=[source_path], output_dir=tmp_path / "duplicate"
+        )
+        == 1
+    )
 
 
 def test_evidence_report_rejects_co_mutated_model_identity() -> None:
@@ -9105,6 +9118,11 @@ def test_reanalysis_can_use_current_case_expectations(tmp_path: Path) -> None:
         encoding="utf-8",
     )
 
+    source = json.loads(bundle_path.read_text())
+    source["quality_report"] = harness._rescored_evidence(
+        source, expected=source["case"]["expected"], path=bundle_path
+    )[3]
+    bundle_path.write_text(json.dumps(source))
     stale_output_dir = tmp_path / "stale"
     assert (
         harness._reanalyze_bundles(
@@ -9114,6 +9132,7 @@ def test_reanalysis_can_use_current_case_expectations(tmp_path: Path) -> None:
         == 0
     )
     stale_bundle = json.loads(next(stale_output_dir.iterdir()).read_text())
+    assert stale_bundle["quality_report_changes"] == []
     stale_checks = {
         check["name"]: check for check in stale_bundle["quality_report"]["checks"]
     }
@@ -9137,6 +9156,12 @@ def test_reanalysis_can_use_current_case_expectations(tmp_path: Path) -> None:
         check["name"]: check for check in current_bundle["quality_report"]["checks"]
     }
     assert current_checks["expected_leaf_output_fields"]["passed"] is True
+    changes = {
+        change["name"]: change for change in current_bundle["quality_report_changes"]
+    }
+    assert set(changes) == {"expected_leaf_output_fields"}
+    assert changes["expected_leaf_output_fields"]["before"]["passed"] is False
+    assert changes["expected_leaf_output_fields"]["after"]["passed"] is True
 
 
 def test_reanalysis_preserves_expected_first_pass_provenance_checks(
