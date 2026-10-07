@@ -6276,6 +6276,9 @@
     {
       "id": "me_utb01_meny_mall",
       "prompt": "Från kostchefen: skolköken vill få de anpassade menyerna i kostenhetens nya mall (bifogad) i stället för som ett meddelande. Kan du ändra så att sista steget fyller i mallen? Innehållet i menyn ska vara detsamma som i dag.",
+      "expected": {
+        "terminal_document_output_mode": "template_fill"
+      },
       "complexity": "flow_edit",
       "domain": "municipal_school_meals",
       "cohorts": [
