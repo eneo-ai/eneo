@@ -195,9 +195,6 @@ class TestLibrarySearchQueries:
             "v1.0/drives/d1/list/items?$expand=fields,driveItem"
             "&$filter=fields/Verksamhet%20eq%20%27HR%20%26%20People%27"
         )
-        assert first_call.kwargs["headers"]["Prefer"] == (
-            "HonorNonIndexedQueriesWarningMayFailRandomly"
-        )
 
     async def test_drive_search_quotes_the_text_and_expands_list_items(self):
         client = _client(include=True, responses=[{"value": [{"id": "1"}]}])

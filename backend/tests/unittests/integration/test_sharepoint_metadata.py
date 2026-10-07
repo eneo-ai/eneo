@@ -68,6 +68,26 @@ class TestColumnCatalog:
     def test_empty_definitions_give_empty_catalog(self):
         assert SharePointColumnCatalog.from_graph([]).is_empty
 
+    def test_catalog_keeps_indexing_and_choice_multiplicity_for_search(self):
+        catalog = SharePointColumnCatalog.from_graph(
+            [
+                {
+                    "name": "Topics",
+                    "indexed": True,
+                    "choice": {"choices": ["A", "B"], "displayAs": "checkBoxes"},
+                },
+                {
+                    "name": "Type",
+                    "choice": {"choices": ["Policy"], "displayAs": "dropDownMenu"},
+                },
+            ]
+        )
+
+        assert catalog.columns["Topics"].indexed is True
+        assert catalog.columns["Topics"].multiple_values is True
+        assert catalog.columns["Type"].indexed is False
+        assert catalog.columns["Type"].multiple_values is False
+
 
 class TestExtractSourceMetadata:
     def test_values_follow_column_order_and_normalise_per_kind(self):

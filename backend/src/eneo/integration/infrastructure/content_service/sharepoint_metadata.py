@@ -117,6 +117,8 @@ class SharePointColumn:
     # The allowed values of a choice column, in the library's order. Empty for
     # other kinds and for managed metadata, whose terms live in the term store.
     choices: tuple[str, ...] = ()
+    indexed: bool = False
+    multiple_values: bool = False
 
     @property
     def filterable(self) -> bool:
@@ -162,11 +164,17 @@ def _column_from_definition(definition: dict[str, Any]) -> SharePointColumn | No
     label = definition.get("displayName")
     if not isinstance(label, str) or not label.strip():
         label = name
+    choice = definition.get("choice")
     return SharePointColumn(
         name=name,
         label=label.strip()[:255],
         kind=_kind_of(definition),
         choices=_choices_of(definition),
+        indexed=definition.get("indexed") is True,
+        multiple_values=(
+            isinstance(choice, dict)
+            and cast(dict[str, object], choice).get("displayAs") == "checkBoxes"
+        ),
     )
 
 

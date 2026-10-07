@@ -15,6 +15,7 @@ from eneo.integration.infrastructure.preview_service.sharepoint_search import (
     clean_search_text,
     drive_item_matches_filters,
     filter_columns,
+    list_item_matches_filters,
     row_from_drive_item,
     row_from_list_item,
 )
@@ -292,13 +293,7 @@ class SharePointTreeService:
                 raise ValueError("Could not resolve drive ID")
 
             catalog = await self._column_catalog(content_client, actual_drive_id)
-            odata_filter, residual = build_odata_filter(catalog, filters)
-            if residual:
-                # A column Graph cannot compare would turn the query into a
-                # capped listing of the whole library, checked locally.
-                raise ValueError(
-                    "Unknown filter column: " + ", ".join(sorted(residual))
-                )
+            odata_filter, _ = build_odata_filter(catalog, filters)
 
             rows: List[Dict[str, Any]] = []
             truncated = False
@@ -313,11 +308,17 @@ class SharePointTreeService:
                     actual_drive_id, text, max_items=max_items, accept=accept_drive_item
                 )
             else:
+
+                def accept_list_item(raw: dict[str, object]) -> bool:
+                    return row_from_list_item(
+                        raw, catalog
+                    ) is not None and list_item_matches_filters(raw, catalog, filters)
+
                 raw_rows, truncated = await content_client.get_list_items_filtered(
                     actual_drive_id,
                     odata_filter,
                     max_items=max_items,
-                    accept=lambda raw: row_from_list_item(raw, catalog) is not None,
+                    accept=accept_list_item,
                 )
             for raw in raw_rows:
                 row = (

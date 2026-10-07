@@ -50,25 +50,32 @@ def _boolean_filter_value(value: str) -> bool:
 def build_odata_filter(
     catalog: SharePointColumnCatalog, filters: dict[str, str]
 ) -> tuple[str | None, dict[str, str]]:
-    """The ``$filter`` Graph can evaluate, and the filters it cannot.
+    """One indexed scalar predicate for Graph, with remaining filters local.
 
-    Yes/no and single-value choice columns are compared server side. Anything
-    else (unknown columns, multi-value choices, free text) is returned for
-    checking against the rows Graph sends back.
+    Graph list-item queries support one indexed field at a time. Multi-value
+    choices and non-indexed columns are checked against raw fields while paging.
+    Unknown or non-filterable columns fail before a request is made.
     """
-    clauses: list[str] = []
+    invalid = [
+        name
+        for name in filters
+        if name not in catalog.columns or not catalog.columns[name].filterable
+    ]
+    if invalid:
+        raise ValueError("Unknown filter column: " + ", ".join(sorted(invalid)))
+    expression: str | None = None
     residual: dict[str, str] = {}
     for name, value in filters.items():
-        column = catalog.columns.get(name)
-        if column is None or not column.filterable:
+        column = catalog.columns[name]
+        if expression is not None or not column.indexed or column.multiple_values:
             residual[name] = value
             continue
         if column.kind == "boolean":
             truthy = _boolean_filter_value(value)
-            clauses.append(f"fields/{name} eq {'true' if truthy else 'false'}")
+            expression = f"fields/{name} eq {'true' if truthy else 'false'}"
         else:
-            clauses.append(f"fields/{name} eq {_odata_string(value)}")
-    return (" and ".join(clauses) or None), residual
+            expression = f"fields/{name} eq {_odata_string(value)}"
+    return expression, residual
 
 
 def drive_item_matches_filters(
@@ -76,17 +83,31 @@ def drive_item_matches_filters(
     catalog: SharePointColumnCatalog,
     filters: dict[str, str],
 ) -> bool:
-    """Compare raw column values on a Graph text hit, before display limits.
-
-    The caller validates filterability through build_odata_filter. Missing
-    fields mean the filter cannot be evaluated, rather than no matching files.
-    """
+    """Compare raw column values on a Graph text hit, before display limits."""
     if not filters:
         return True
     list_item = drive_item.get("listItem")
     if not isinstance(list_item, dict):
         raise ValueError("Could not read column values for filtered search")
-    fields = cast(dict[str, object], list_item).get("fields")
+    return _fields_match_filters(
+        cast(dict[str, object], list_item).get("fields"), catalog, filters
+    )
+
+
+def list_item_matches_filters(
+    list_item: dict[str, object],
+    catalog: SharePointColumnCatalog,
+    filters: dict[str, str],
+) -> bool:
+    """The same filter semantics for a fields/driveItem list-item response."""
+    return _fields_match_filters(list_item.get("fields"), catalog, filters)
+
+
+def _fields_match_filters(
+    fields: object, catalog: SharePointColumnCatalog, filters: dict[str, str]
+) -> bool:
+    if not filters:
+        return True
     if not isinstance(fields, dict):
         raise ValueError("Could not read column values for filtered search")
     fields = cast(dict[str, object], fields)

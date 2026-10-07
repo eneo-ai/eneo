@@ -1,6 +1,7 @@
 """Library search: filter building, row shaping and the fixture's whole-site search."""
 
 from unittest.mock import AsyncMock, MagicMock, patch
+from urllib.parse import parse_qs, urlsplit
 from uuid import uuid4
 
 import aiohttp
@@ -37,9 +38,15 @@ COLUMNS = [
     {
         "name": "Dokumenttyp",
         "displayName": "Dokumenttyp",
+        "indexed": True,
         "choice": {"choices": ["Rutin", "Policy", "Protokoll"]},
     },
-    {"name": "Extern", "displayName": "Extern publicering", "boolean": {}},
+    {
+        "name": "Extern",
+        "displayName": "Extern publicering",
+        "boolean": {},
+        "indexed": True,
+    },
     {"name": "Verksamhet", "displayName": "Verksamhet", "term": {}},
     {"name": "Fritext", "displayName": "Fritext", "text": {}},
 ]
@@ -71,18 +78,27 @@ class TestFilterParsingAndOData:
             },
         ]
 
-    def test_builds_graph_filter_for_choice_and_boolean_and_keeps_the_rest(self):
+    def test_uses_one_indexed_field_and_keeps_remaining_filters_local(self):
         expr, residual = build_odata_filter(
             CATALOG,
             {
                 "Dokumenttyp": "O'Neil",
                 "Extern": "ja",
-                "Verksamhet": "Vård",
-                "Okänd": "x",
             },
         )
-        assert expr == "fields/Dokumenttyp eq 'O''Neil' and fields/Extern eq true"
-        assert residual == {"Verksamhet": "Vård", "Okänd": "x"}
+        assert expr == "fields/Dokumenttyp eq 'O''Neil'"
+        assert residual == {"Extern": "ja"}
+
+    def test_a_boolean_can_be_the_single_server_filter(self):
+        assert build_odata_filter(CATALOG, {"Extern": "ja"}) == (
+            "fields/Extern eq true",
+            {},
+        )
+
+    @pytest.mark.parametrize("name", ["Verksamhet", "Fritext", "Okänd"])
+    def test_unknown_and_nonfilterable_columns_fail_explicitly(self, name):
+        with pytest.raises(ValueError, match="Unknown filter column"):
+            build_odata_filter(CATALOG, {name: "x"})
 
     def test_no_filters_gives_no_expression(self):
         assert build_odata_filter(CATALOG, {}) == (None, {})
@@ -373,9 +389,11 @@ class TestSearchLibrary:
         client.get_list_columns.assert_not_awaited()
 
 
-def _paged_graph_client(responses):
+def _paged_graph_client(responses, *, columns=None):
     transport = MagicMock()
-    transport.get = AsyncMock(side_effect=[{"value": COLUMNS}, *responses])
+    transport.get = AsyncMock(
+        side_effect=[{"value": COLUMNS if columns is None else columns}, *responses]
+    )
     transport.close = AsyncMock()
     with patch(
         "eneo.libs.clients.base_clients.WrappedAiohttpClient", return_value=transport
@@ -394,6 +412,74 @@ def _paged_graph_client(responses):
 
 
 class TestSearchPagination:
+    @pytest.mark.parametrize("mode", ["two_indexed", "nonindexed", "multichoice"])
+    async def test_filters_only_page_past_rejections_before_counting_matches(
+        self, mode
+    ):
+        columns = [dict(column) for column in COLUMNS]
+        filters = {"Dokumenttyp": "Rutin"}
+        if mode == "two_indexed":
+            filters["Extern"] = "ja"
+            rejected_fields = {"Dokumenttyp": "Rutin", "Extern": False}
+            matching_fields = {"Dokumenttyp": "Rutin", "Extern": True}
+        elif mode == "multichoice":
+            columns[0]["choice"] = {
+                "choices": ["Rutin", "Policy"],
+                "displayAs": "checkBoxes",
+            }
+            rejected_fields = {"Dokumenttyp": ["Policy"]}
+            matching_fields = {"Dokumenttyp": ["Policy", "Rutin"]}
+        else:
+            columns[0]["indexed"] = False
+            rejected_fields = {"Dokumenttyp": "Policy"}
+            matching_fields = {"Dokumenttyp": "Rutin"}
+        client = _paged_graph_client(
+            [
+                {
+                    "value": [
+                        {
+                            "fields": rejected_fields,
+                            "driveItem": {
+                                "id": str(i),
+                                "name": "Other.docx",
+                                "file": {},
+                            },
+                        }
+                        for i in range(200)
+                    ],
+                    "@odata.nextLink": "https://graph.microsoft.com/p2",
+                },
+                {
+                    "value": [
+                        {
+                            "fields": matching_fields,
+                            "driveItem": {
+                                "id": "match",
+                                "name": "Match.docx",
+                                "file": {},
+                            },
+                        }
+                    ]
+                },
+            ],
+            columns=columns,
+        )
+
+        with patch(
+            f"{tree_module.__name__}.SharePointContentClient", return_value=client
+        ):
+            result = await SharePointTreeService().search_library(
+                _token(), drive_id="d1", filters=filters, max_items=1
+            )
+
+        assert [row["id"] for row in result["items"]] == ["match"]
+        assert result["truncated"] is False
+        request = client.client.get.await_args_list[1].args[0]
+        query = parse_qs(urlsplit(request).query)
+        assert query.get("$filter") == (
+            ["fields/Dokumenttyp eq 'Rutin'"] if mode == "two_indexed" else None
+        )
+
     @pytest.mark.parametrize("text", ["", "larm"])
     async def test_token_refresh_mid_query_does_not_duplicate_accepted_files(
         self, text

@@ -238,8 +238,7 @@ class SharePointContentClient(BaseClient):
     ) -> tuple[list[dict[str, Any]], bool]:
         """List items of a library with their columns and drive item.
 
-        ``odata_filter`` compares ``fields/<Column>``; Graph evaluates it for
-        indexed columns and, with the Prefer header, tries non-indexed ones too.
+        ``odata_filter`` compares a single indexed ``fields/<Column>``.
         ``accept`` keeps paging past rows a local check rejects.
         """
         endpoint = f"v1.0/drives/{drive_id}/list/items?$expand=fields,driveItem"
@@ -247,16 +246,15 @@ class SharePointContentClient(BaseClient):
             # A column value may hold &, # or %, which would otherwise end or
             # corrupt the query string.
             endpoint += "&$filter=" + quote(odata_filter, safe="/")
-        prefer = {"Prefer": "HonorNonIndexedQueriesWarningMayFailRandomly"}
         try:
             return await self._get_paged_items_capped(
-                endpoint, max_items=max_items, headers=prefer, accept=accept
+                endpoint, max_items=max_items, accept=accept
             )
         except aiohttp.ClientResponseError as e:
             if e.status == 401 and self.token_refresh_callback and self.token_id:
                 await self.refresh_token()
                 return await self._get_paged_items_capped(
-                    endpoint, max_items=max_items, headers=prefer, accept=accept
+                    endpoint, max_items=max_items, accept=accept
                 )
             raise
 
