@@ -5,6 +5,7 @@ from types import MappingProxyType
 from typing import Literal
 
 from eneo.flows.ai_builder.ai_builder_error_contract import (
+    AIBuilderErrorCode,
     AIBuilderErrorPhase,
     coerce_ai_builder_error_code,
 )
@@ -77,6 +78,29 @@ class AIBuilderArchitectureError(Exception):
             **self.log_context,
         }
 
+    def public_details(self) -> dict[str, ArchitectureLogValue]:
+        # Internal feedback and logs retain the complete rejection; only the
+        # terminal browser projection exposes the declared repair diagnostics.
+        details: dict[str, ArchitectureLogValue] = {
+            "architecture_error_code": self.public_code,
+            "architecture_repair_disposition": self.repair_disposition,
+        }
+        code = coerce_ai_builder_error_code(self.public_code)
+        if code is AIBuilderErrorCode.ARCHITECTURE_MATERIALIZATION_FAILED:
+            if self.failure_code is not None:
+                details["failure_code"] = self.failure_code
+            names = self.log_context.get("unresolved_placeholders")
+            if isinstance(names, str):
+                details["unresolved_placeholders"] = names
+        elif code is AIBuilderErrorCode.ARCHITECTURE_CRITIC_INVARIANT_FAILED:
+            issue_ids = self.log_context.get("critic_issue_ids")
+            if isinstance(issue_ids, str):
+                details["critic_issue_ids"] = issue_ids
+            issue_count = self.log_context.get("critic_issue_count")
+            if isinstance(issue_count, int) and not isinstance(issue_count, bool):
+                details["critic_issue_count"] = issue_count
+        return details
+
 
 _TERMINAL_MESSAGES: Mapping[Literal["user_action", "server_defect"], str] = {
     "user_action": (
@@ -113,7 +137,7 @@ def architecture_failure_outcome(
         message=_TERMINAL_MESSAGES[disposition],
         code=coerce_ai_builder_error_code(error.public_code),
         phase=AIBuilderErrorPhase.PROPOSAL,
-        details=error.log_extra(),
+        details=error.public_details(),
         codes=codes,
     )
 

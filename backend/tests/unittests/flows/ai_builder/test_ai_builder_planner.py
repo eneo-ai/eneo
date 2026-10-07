@@ -31,6 +31,13 @@ from eneo.flows.ai_builder.ai_builder_architecture_commit import (
 from eneo.flows.ai_builder.ai_builder_architecture_derivation import (
     derive_architecture_commit_draft,
 )
+from eneo.flows.ai_builder.ai_builder_architecture_errors import (
+    AIBuilderArchitectureError,
+    architecture_failure_outcome,
+)
+from eneo.flows.ai_builder.ai_builder_architecture_errors import (
+    logger as architecture_logger,
+)
 from eneo.flows.ai_builder.ai_builder_attachment_context import (
     AIBuilderAttachmentContext,
     AIBuilderAttachmentContextPolicy,
@@ -106,9 +113,11 @@ from eneo.flows.ai_builder.ai_builder_proposal_intent import (
     FlowInputFieldIntent,
     parse_create_flow_intent_arguments,
 )
+from eneo.flows.ai_builder.ai_builder_proposal_retry import terminal_failure_event
 from eneo.flows.ai_builder.ai_builder_proposal_telemetry import ProposalTurnTelemetry
 from eneo.flows.ai_builder.ai_builder_proposal_tool_contracts import (
     ProposalMessageGroup,
+    TerminalFailure,
     fit_proposal_request_budget,
     flatten_proposal_message_groups,
 )
@@ -4772,20 +4781,91 @@ async def test_a_truncated_provider_response_reaches_the_committed_and_streamed_
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("architecture_error", "own_details"),
+    [
+        (None, {"quality_failure_codes": "missing_source_refs"}),
+        (
+            AIBuilderArchitectureError(
+                public_code="architecture_materialization_failed",
+                repair_disposition="user_action",
+                detail="INTERNAL_ARCHITECTURE_SENTINEL",
+                log_context={
+                    "failure_code": "template_attachment_selection_invalid",
+                    "reason": "INTERNAL_ARCHITECTURE_SENTINEL",
+                    "flow_name": "INTERNAL_ARCHITECTURE_SENTINEL",
+                    "critic_issue_ids": "INTERNAL_ARCHITECTURE_SENTINEL",
+                },
+            ),
+            {
+                "architecture_error_code": "architecture_materialization_failed",
+                "architecture_repair_disposition": "user_action",
+                "failure_code": "template_attachment_selection_invalid",
+            },
+        ),
+        (
+            AIBuilderArchitectureError(
+                public_code="architecture_materialization_failed",
+                repair_disposition="user_action",
+                detail="INTERNAL_ARCHITECTURE_SENTINEL",
+                log_context={
+                    "failure_code": "template_placeholder_unresolved",
+                    "unresolved_placeholders": "diarienummer, handläggare",
+                    "unresolved_count": 2,
+                    "reason": "INTERNAL_ARCHITECTURE_SENTINEL",
+                },
+            ),
+            {
+                "architecture_error_code": "architecture_materialization_failed",
+                "architecture_repair_disposition": "user_action",
+                "failure_code": "template_placeholder_unresolved",
+                "unresolved_placeholders": "diarienummer, handläggare",
+            },
+        ),
+        (
+            AIBuilderArchitectureError(
+                public_code="architecture_critic_invariant_failed",
+                repair_disposition="server_defect",
+                detail="INTERNAL_ARCHITECTURE_SENTINEL",
+                log_context={
+                    "critic_issue_ids": "invariant-a,invariant-b",
+                    "critic_issue_count": 2,
+                    "flow_name": "INTERNAL_ARCHITECTURE_SENTINEL",
+                    "failure_code": "INTERNAL_ARCHITECTURE_SENTINEL",
+                    "unresolved_placeholders": "INTERNAL_ARCHITECTURE_SENTINEL",
+                },
+            ),
+            {
+                "architecture_error_code": "architecture_critic_invariant_failed",
+                "architecture_repair_disposition": "server_defect",
+                "critic_issue_ids": "invariant-a,invariant-b",
+                "critic_issue_count": 2,
+            },
+        ),
+    ],
+)
 async def test_call_evidence_is_added_after_the_errors_own_details(
     monkeypatch: pytest.MonkeyPatch,
+    architecture_error: AIBuilderArchitectureError | None,
+    own_details: dict[str, JsonScalar],
 ) -> None:
+    """Kill forwarding architecture log prose/context into streamed or stored errors."""
     planner = _make_planner()
 
     async def rejected_proposal(
         *, request_id: str, **_: object
     ) -> AsyncGenerator[AIBuilderStreamEvent, None]:
-        yield build_ai_builder_error_event(
-            message="Invalid proposal",
-            code=AIBuilderErrorCode.PLANNER_REJECTED,
-            request_id=request_id,
-            details={"quality_failure_codes": "missing_source_refs"},
-        )
+        if architecture_error is None:
+            yield build_ai_builder_error_event(
+                message="Invalid proposal",
+                code=AIBuilderErrorCode.PLANNER_REJECTED,
+                request_id=request_id,
+                details=own_details,
+            )
+        else:
+            failure = architecture_failure_outcome(architecture_error)
+            assert isinstance(failure, TerminalFailure)
+            yield terminal_failure_event(failure, request_id=request_id)
 
     monkeypatch.setattr(
         planner._proposal_submission,  # pyright: ignore[reportPrivateUsage]
@@ -4793,16 +4873,36 @@ async def test_call_evidence_is_added_after_the_errors_own_details(
         rejected_proposal,
     )
 
-    events = await _stream_proposal_error_turn(
-        planner,
-        usage_tracker=_failed_proposal_tracker(),
-        turn=cast(Any, SimpleNamespace()),
-    )
+    turn = SimpleNamespace()
+    with patch.object(architecture_logger, "error") as logged:
+        events = await _stream_proposal_error_turn(
+            planner,
+            usage_tracker=_failed_proposal_tracker(),
+            turn=turn,
+        )
 
-    details = cast(AIBuilderErrorEvent, events[0]).data.details
+    error_event = events[0]
+    assert isinstance(error_event, AIBuilderErrorEvent)
+    details = error_event.data.details
     assert details is not None
-    assert list(details)[0] == "quality_failure_codes"
-    assert details["turn_reasoning_tokens"] == 3_900
+    evidence = dict(list(_failed_proposal_evidence().items())[: 10 - len(own_details)])
+    assert details == {**own_details, **evidence}
+    planner.repo.complete_session_turn.assert_awaited_once_with(
+        turn=turn, error=error_event.data
+    )
+    if architecture_error is not None:
+        assert error_event.data.code.value == architecture_error.public_code
+        assert error_event.data.category.value == "bad_request"
+        assert error_event.data.phase is AIBuilderErrorPhase.PROPOSAL
+        assert error_event.data.eneo_error_code == ErrorCodes.BAD_REQUEST
+        wire = encode_ai_builder_stream_event(error_event)
+        assert "INTERNAL_ARCHITECTURE_SENTINEL" not in wire["data"]
+        logged.assert_called_once()
+        assert logged.call_args.args == ("ai_builder_architecture_error",)
+        extra = logged.call_args.kwargs["extra"]
+        assert extra["architecture_error_detail"] == architecture_error.detail
+        for key, value in architecture_error.log_context.items():
+            assert extra[key] == value
 
 
 @pytest.mark.asyncio
