@@ -102,6 +102,15 @@ def _can_override_flow_owner(
     return actor.get_current_role() == SpaceRole.OWNER
 
 
+class FlowOwnerRequiredException(UnauthorizedException):
+    def __init__(self) -> None:
+        super().__init__(
+            "You do not have permission to modify another member's draft flow.",
+            code=FlowApiErrorCode.OWNER_REQUIRED.value,
+            context={"auth_layer": "flow_owner"},
+        )
+
+
 def ensure_can_mutate_flow_draft(
     container: Container,
     access_context: flow_access_context.FlowAccessContext,
@@ -114,11 +123,7 @@ def ensure_can_mutate_flow_draft(
         return
     if _can_override_flow_owner(container, access_context):
         return
-    raise UnauthorizedException(
-        "You do not have permission to modify another member's draft flow.",
-        code=FlowApiErrorCode.OWNER_REQUIRED.value,
-        context={"auth_layer": "flow_owner"},
-    )
+    raise FlowOwnerRequiredException()
 
 
 async def require_flow_current_definition_access(
@@ -264,6 +269,7 @@ async def require_flow_unpublish_access(
 
 
 __all__ = [
+    "FlowOwnerRequiredException",
     "PublishedFlowRuntimeAccess",
     "SERVICE_KEY_ADMIN_REQUIRED_MESSAGE",
     "ensure_can_mutate_flow_draft",

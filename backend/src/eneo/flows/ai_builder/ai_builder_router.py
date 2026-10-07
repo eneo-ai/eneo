@@ -135,6 +135,7 @@ from eneo.flows.ai_builder.ai_builder_proposal_telemetry import (
 from eneo.flows.ai_builder.ai_builder_read_access import (
     AIBuilderAuthorization,
     BuilderReadAccess,
+    ensure_flow_in_space,
     scope_for_session,
 )
 from eneo.flows.ai_builder.ai_builder_service import (
@@ -154,6 +155,11 @@ from eneo.flows.ai_builder.ai_builder_tools import (
     AdmissionNormalizerFamily,
 )
 from eneo.flows.ai_builder.planning_state import PlanningState
+from eneo.flows.api import flow_access_context
+from eneo.flows.api.flow_definition_access import (
+    FlowOwnerRequiredException,
+    ensure_can_mutate_flow_draft,
+)
 from eneo.flows.application.flow_run_evidence_snapshot import (
     flow_run_evidence_snapshot_transaction,
 )
@@ -199,6 +205,8 @@ def _public_error_code_from_exception(
     request_id: str | None,
     surface: str,
 ) -> AIBuilderErrorCode:
+    if isinstance(error, FlowOwnerRequiredException):
+        return AIBuilderErrorCode.FLOW_OWNER_REQUIRED
     if isinstance(
         error,
         (
@@ -375,7 +383,7 @@ async def _authorize_ai_builder_request(
     require_creator: bool = False,
     filter_mode: FlowAccessFilterMode | None = None,
 ) -> AIBuilderAuthorization:
-    return await _builder_read_access(container).authorize(
+    authorization = await _builder_read_access(container).authorize(
         get_scope_filter(request),
         action=action,
         space_id=space_id,
@@ -383,6 +391,24 @@ async def _authorize_ai_builder_request(
         require_creator=require_creator,
         filter_mode=filter_mode,
     )
+    if (
+        action is FlowApiAction.BUILDER_PLAN_APPLY
+        and session is not None
+        and session.target_kind is TargetKind.EDIT
+    ):
+        if session.flow_id is None:
+            raise AIBuilderBadRequestException(
+                "Edit session has no flow_id.",
+                code=AIBuilderErrorCode.EDIT_SESSION_FLOW_REQUIRED,
+            )
+        access = await flow_access_context.resolve_flow_access_context(
+            request, container, flow_id=session.flow_id, required_access=action
+        )
+        ensure_flow_in_space(
+            flow_space_id=access.flow.space_id, space_id=session.space_id
+        )
+        ensure_can_mutate_flow_draft(container, access)
+    return authorization
 
 
 def _authorized_space(authorization: AIBuilderAuthorization) -> "Space":
@@ -2313,7 +2339,11 @@ async def approve_plan(
             code=AIBuilderErrorCode.TRANSCRIPTION_MODEL_REQUIRED,
         ),
         403: _ai_builder_error_response(
-            description="Caller lacks space permission or API key scope for the plan's session.",
+            description=(
+                "Caller lacks space permission, API key scope or target draft ownership. "
+                "flow_owner_required refuses editing another member's draft unless the caller "
+                "is a tenant admin or space owner."
+            ),
             message="API key space scope does not match requested AI builder resource.",
             code=AIBuilderErrorCode.INSUFFICIENT_SCOPE,
             details={"auth_layer": "api_key_scope"},

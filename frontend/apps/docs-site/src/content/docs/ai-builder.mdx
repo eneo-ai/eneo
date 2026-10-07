@@ -9,6 +9,10 @@ Use AI Builder when you know the outcome you want but do not want to assemble ev
 <Callout type="info">
   AI Builder requires a user principal with Flow edit permission. Service keys
   can run published Flows, but they cannot author drafts through AI Builder.
+  Applying an edit also requires ownership of the target draft. Tenant admins
+  and space owners may override draft ownership; space admins and editors may
+  not change another member's draft. A refused apply returns `flow_owner_required`
+  in the standard 403 Builder error envelope and makes no draft change.
 </Callout>
 
 ## When to use AI Builder
