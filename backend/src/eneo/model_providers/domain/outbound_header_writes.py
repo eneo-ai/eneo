@@ -13,7 +13,8 @@ never returned, so a client can only keep it by omitting it, and a submitted
 value equal to the mask string is refused. Turning ``secret`` off requires the
 value in the same request: an admin who cannot retype it is not in a position
 to decide it is safe to expose. For the same reason, a secret kept by omission
-is never moved to a new destination (``retained_secret_headers``).
+is never moved to a new destination (``retained_secret_headers``). A kept
+secret that no longer decrypts must be entered again or removed.
 """
 
 from __future__ import annotations
@@ -32,6 +33,11 @@ from eneo.model_providers.domain.outbound_headers import (
     header_classification,
     validate_headers,
 )
+
+
+class StoredSecretUnreadable(Exception):
+    """Raised by a ``decrypt`` callable when a stored secret cannot be read,
+    e.g. after ``ENCRYPTION_KEY`` changed."""
 
 
 @dataclass(frozen=True)
@@ -55,7 +61,10 @@ def apply_header_writes(
     encrypt: Callable[[str], str],
     decrypt: Callable[[str], str],
 ) -> list[dict[str, Any]]:
-    """Return the new stored list. Raises ``OutboundHeaderConfigError``."""
+    """Return the new stored list. Raises ``OutboundHeaderConfigError``.
+
+    ``decrypt`` raises ``StoredSecretUnreadable`` for a secret it cannot read.
+    """
     by_id = {str(entry["id"]): entry for entry in stored}
     seen_ids: set[str] = set()
     planned: list[tuple[OutboundHeader, Mapping[str, Any] | None]] = []
@@ -136,7 +145,9 @@ def _next_value(
             f"Header '{write.name}': re-enter the value to turn off 'secret'"
         )
     stored_value = str(existing["value"])
-    return decrypt(stored_value) if was_secret else stored_value
+    if not was_secret:
+        return stored_value
+    return _read_stored_secret(write.name, "value", stored_value, decrypt)
 
 
 def _next_fallback(
@@ -158,7 +169,22 @@ def _next_fallback(
         raise OutboundHeaderConfigError(
             f"Header '{write.name}': re-enter the fallback to turn off 'secret'"
         )
-    return decrypt(str(stored_fallback)) if was_secret else str(stored_fallback)
+    if not was_secret:
+        return str(stored_fallback)
+    return _read_stored_secret(write.name, "fallback", str(stored_fallback), decrypt)
+
+
+def _read_stored_secret(
+    name: str, part: str, ciphertext: str, decrypt: Callable[[str], str]
+) -> str:
+    try:
+        return decrypt(ciphertext)
+    except StoredSecretUnreadable:
+        # The edit that repairs it is this one, so it is a 400, not a 500.
+        raise OutboundHeaderConfigError(
+            f"Header '{name}': the stored secret {part} cannot be read; "
+            "enter it again or remove the header"
+        ) from None
 
 
 def _to_stored(
@@ -208,12 +234,43 @@ def _audit_view(entry: Mapping[str, Any], masked: bool) -> dict[str, Any]:
     }
 
 
+def _plaintext_changed(
+    old: Mapping[str, Any],
+    new: Mapping[str, Any],
+    key: str,
+    decrypt: Callable[[str], str],
+) -> bool:
+    """Whether the value (or fallback) itself changed. A secret is stored
+    encrypted, so only ticking *Secret* changes the stored form, not the value."""
+    old_stored, new_stored = old.get(key), new.get(key)
+    if old_stored == new_stored:
+        return False
+    if old_stored is None or new_stored is None:
+        return True
+
+    def plaintext(entry: Mapping[str, Any], stored: Any) -> str:
+        return decrypt(str(stored)) if entry.get("secret") else str(stored)
+
+    try:
+        return plaintext(old, old_stored) != plaintext(new, new_stored)
+    except StoredSecretUnreadable:
+        # An unreadable old secret can only have been replaced.
+        return True
+
+
 def header_audit_changes(
-    before: Sequence[Mapping[str, Any]], after: Sequence[Mapping[str, Any]]
+    before: Sequence[Mapping[str, Any]],
+    after: Sequence[Mapping[str, Any]],
+    *,
+    decrypt: Callable[[str], str],
 ) -> dict[str, Any] | None:
     """The change as an audit record: names, templates, encoding and policy in
     clear; value and fallback masked wherever ``secret`` is true on either side,
-    so a ``secret`` true→false transition never surfaces the old value."""
+    so a ``secret`` true→false transition never surfaces the old value.
+
+    The ``*_changed`` flags compare plaintext but record only whether it
+    changed. ``decrypt`` raises ``StoredSecretUnreadable`` for a secret it
+    cannot read."""
     before_by_id = {str(entry["id"]): entry for entry in before}
     after_by_id = {str(entry["id"]): entry for entry in after}
 
@@ -238,8 +295,8 @@ def header_audit_changes(
                 "id": key,
                 "old": _audit_view(old, masked),
                 "new": _audit_view(new, masked),
-                "value_changed": old.get("value") != new.get("value"),
-                "fallback_changed": old.get("fallback") != new.get("fallback"),
+                "value_changed": _plaintext_changed(old, new, "value", decrypt),
+                "fallback_changed": _plaintext_changed(old, new, "fallback", decrypt),
             }
         )
     if not (added or removed or updated):

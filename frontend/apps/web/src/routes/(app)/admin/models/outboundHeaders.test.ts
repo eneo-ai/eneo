@@ -12,6 +12,7 @@ import {
   keepStored,
   newHeaderRow,
   rowsFromHeaders,
+  secretsKeptFromStorage,
   setSecret,
   supportsOutboundHeaders,
   tokenProblems,
@@ -171,6 +172,28 @@ describe("changeStored / keepStored", () => {
   it("has nothing to keep on a header that was never secret", () => {
     expect(canKeepStored(rowsFromHeaders([plainHeader])[0], "value")).toBe(false);
     expect(canKeepStored(newHeaderRow(), "fallback")).toBe(false);
+  });
+});
+
+describe("secretsKeptFromStorage", () => {
+  it("names a stored secret while its value or fallback is kept", () => {
+    const stored = rowsFromHeaders([secretHeader, plainHeader]);
+    expect(secretsKeptFromStorage(stored)).toEqual(["X-Credential"]);
+
+    const valueRetyped = { ...changeStored(stored[0], "value"), value: "typed" };
+    expect(secretsKeptFromStorage([valueRetyped])).toEqual(["X-Credential"]);
+  });
+
+  it("is empty once value and fallback are retyped, or secret is turned off", () => {
+    const [stored] = rowsFromHeaders([secretHeader]);
+    const retyped = {
+      ...changeStored(changeStored(stored, "value"), "fallback"),
+      value: "typed",
+      fallback: "typed"
+    };
+    expect(secretsKeptFromStorage([retyped])).toEqual([]);
+    expect(secretsKeptFromStorage([setSecret(stored, false)])).toEqual([]);
+    expect(secretsKeptFromStorage([{ ...newHeaderRow(), secret: true }])).toEqual([]);
   });
 });
 

@@ -36,6 +36,7 @@
     isRowComplete,
     loadOutboundHeaderOptions,
     rowsFromHeaders,
+    secretsKeptFromStorage,
     supportsOutboundHeaders,
     type HeaderRow
   } from "./outboundHeaders";
@@ -159,6 +160,15 @@
     Boolean(provider?.masked_api_key) && endpointChanged
   );
   const showApiKeyInput = $derived(isEditingApiKey || keyRequiredForEndpointChange);
+  // The same rule for stored secret header values and fallbacks.
+  const secretsRequiredForEndpointChange = $derived(
+    headersEditable && endpointChanged ? secretsKeptFromStorage(headerRows) : []
+  );
+  const secretsRequiredMessage = $derived(
+    m.provider_endpoint_change_requires_secret_headers({
+      names: secretsRequiredForEndpointChange.join(", ")
+    })
+  );
 
   let isSubmitting = $state(false);
   let error = $state<string | null>(null);
@@ -246,6 +256,10 @@
     }
     if (keyRequiredForEndpointChange && !(fieldValues.api_key ?? "").trim()) {
       error = m.provider_endpoint_change_requires_key();
+      return;
+    }
+    if (secretsRequiredForEndpointChange.length > 0) {
+      error = secretsRequiredMessage;
       return;
     }
 
@@ -398,6 +412,10 @@
               </Field.Field>
             {/if}
           {/each}
+
+          {#if secretsRequiredForEndpointChange.length > 0}
+            <p class="text-destructive text-sm" role="status">{secretsRequiredMessage}</p>
+          {/if}
 
           <OutboundHeadersEditor
             providerType={provider.provider_type}

@@ -26,6 +26,7 @@ from eneo.model_providers.domain.model_provider import ModelProvider
 from eneo.model_providers.domain.model_provider_service import (
     LITELLM_MODE_TO_OUR_MODE,
     ModelProviderService,
+    normalize_destination,
     per_image_cost,
 )
 from eneo.model_providers.domain.outbound_header_destinations import (
@@ -196,7 +197,9 @@ async def _audit_header_changes(
     provider that carries headers: repointing the endpoint re-aims every header
     without touching the header configuration."""
     changes = header_audit_changes(
-        before.outbound_headers if before else [], after.outbound_headers
+        before.outbound_headers if before else [],
+        after.outbound_headers,
+        decrypt=service.read_header_secret,
     )
     if changes is not None:
         await audit.log_async(
@@ -212,9 +215,11 @@ async def _audit_header_changes(
         return
     # Credentials are only refused while headers exist, so an endpoint on the
     # other side of the edit that added or cleared them may still carry some.
-    old_endpoint = without_credentials(service.effective_endpoint(before))
-    new_endpoint = without_credentials(service.effective_endpoint(after))
-    if old_endpoint != new_endpoint:
+    old_endpoint = without_credentials(service.request_endpoint(before))
+    new_endpoint = without_credentials(service.request_endpoint(after))
+    # Compared as the secret re-entry rule compares them: another spelling of
+    # the same destination is not a move.
+    if normalize_destination(old_endpoint) != normalize_destination(new_endpoint):
         await audit.log_async(
             tenant_id=user.tenant_id,
             user=user,
@@ -674,7 +679,7 @@ async def preview_outbound_headers(
         raise NotFoundException("User not found")
     provider = await service.get_by_id(provider_id)
     outcomes, problem, blocked, blocked_reason = await service.preview_outbound_headers(
-        provider_id, target
+        provider, target
     )
     # The first surface through which a tenant admin reads another user's
     # provisioned attributes, hence audited: actor, target user, provider —

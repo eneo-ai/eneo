@@ -17,9 +17,6 @@ from eneo.model_providers.infrastructure import litellm_transport
 from eneo.model_providers.infrastructure.litellm_provider import (
     build_litellm_provider_kwargs,
 )
-from eneo.model_providers.infrastructure.outbound_headers_runtime import (
-    apply_outbound_headers,
-)
 
 if TYPE_CHECKING:
     from eneo.model_providers.infrastructure.outbound_headers_runtime import (
@@ -83,8 +80,9 @@ class LiteLLMTranscriptionAdapter:
             # extra_headers (transport-capture tests pin this). Sending the
             # request without the configured headers would be a silently
             # weaker request, so it is refused before anything is sent.
+            # Apply them here (apply_outbound_headers) once LiteLLM forwards
+            # extra_headers on this route.
             self.outbound_headers.reject(None, "transcription_unsupported")
-        apply_outbound_headers(kwargs, self.outbound_headers)
 
         api_key = kwargs.get("api_key")
         if isinstance(api_key, str):

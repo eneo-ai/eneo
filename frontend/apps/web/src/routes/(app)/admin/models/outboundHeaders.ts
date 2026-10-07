@@ -150,6 +150,17 @@ export function keepStored(row: HeaderRow, part: StoredPart): HeaderRow {
     : { ...row, keepsStoredFallback: true, fallback: "" };
 }
 
+/**
+ * Stored secret headers whose value or fallback this edit keeps without
+ * retyping. Like the API key, the server never sends those to a different
+ * destination, so an endpoint change needs them entered again or removed.
+ */
+export function secretsKeptFromStorage(rows: HeaderRow[]): string[] {
+  return rows
+    .filter((row) => row.wasSecret && (row.keepsStoredValue || row.keepsStoredFallback))
+    .map((row) => row.name.trim());
+}
+
 export function headersPayload(rows: HeaderRow[]): OutboundHeaderInput[] {
   return rows.map((row) => {
     const entry: OutboundHeaderInput = {

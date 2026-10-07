@@ -430,6 +430,109 @@ async def test_a_key_that_no_longer_decrypts_can_be_replaced(
     assert _audited(audit_calls, ActionType.MODEL_PROVIDER_DESTINATION_CHANGED) == []
 
 
+async def test_a_secret_header_that_no_longer_decrypts_must_be_re_entered(
+    client, auth, db_session, monkeypatch, admin_user, audit_calls
+):
+    """After ENCRYPTION_KEY changes, keeping the secret is a 400 naming it and
+    the preview reports the provider blocked; re-entering it commits."""
+    provider = (await _create(client, auth)).json()
+    audit_calls.reset_mock()
+    before = await _stored(db_session, provider["id"])
+    new_key = Fernet.generate_key().decode()
+    monkeypatch.setattr(get_settings(), "encryption_key", new_key)
+    url = f"{BASE}/{provider['id']}/"
+
+    kept = await client.put(
+        url,
+        headers=auth,
+        json={
+            "name": "renamed",
+            "outbound_headers": _kept(provider["outbound_headers"]),
+        },
+    )
+    assert kept.status_code == 400, kept.text
+    assert "'X-Credential': the stored secret value cannot be read" in kept.text
+    assert await _stored(db_session, provider["id"]) == before
+
+    preview = await client.post(
+        f"{url}outbound-headers/preview/",
+        headers=auth,
+        json={"user_id": str(admin_user.id)},
+    )
+    assert preview.status_code == 200, preview.text
+    assert (preview.json()["blocked"], preview.json()["blocked_reason"]) == (
+        True,
+        "decryption_failed",
+    )
+
+    re_entered = await client.put(
+        url,
+        headers=auth,
+        json={"outbound_headers": _re_entered(provider["outbound_headers"])},
+    )
+    assert re_entered.status_code == 200, re_entered.text
+    stored = _by_name(await _stored(db_session, provider["id"]))
+    assert EncryptionService(new_key).decrypt(stored["X-Credential"]["value"]) == (
+        "sk-bf-new"
+    )
+    [audit] = _audited(audit_calls, ActionType.MODEL_PROVIDER_HEADERS_UPDATED)
+    assert audit["metadata"]["changes"]["updated"][0]["value_changed"] is True
+
+
+async def test_a_provider_outside_a_narrowed_allow_list_can_still_be_deactivated(
+    client, auth, monkeypatch, audit_calls
+):
+    provider = (await _create(client, auth)).json()
+    monkeypatch.setattr(
+        get_settings(),
+        "outbound_headers_allowed_destinations",
+        ["https://gateway-2.internal/v1"],
+    )
+    url = f"{BASE}/{provider['id']}/"
+
+    # What the edit dialog sends when only "Active" is turned off.
+    deactivated = await client.put(
+        url,
+        headers=auth,
+        json={
+            "name": provider["name"],
+            "config": {"endpoint": ENDPOINT},
+            "is_active": False,
+            "outbound_headers": _kept(provider["outbound_headers"]),
+        },
+    )
+    edited = await client.put(
+        url,
+        headers=auth,
+        json={
+            "outbound_headers": [
+                *_kept(provider["outbound_headers"]),
+                {"name": "X-Region", "value": "eu-north"},
+            ]
+        },
+    )
+
+    assert deactivated.status_code == 200, deactivated.text
+    assert deactivated.json()["is_active"] is False
+    assert edited.status_code == 400
+    assert "allowed destinations" in edited.text
+
+
+async def test_another_spelling_of_the_endpoint_is_not_audited_as_a_move(
+    client, auth, audit_calls
+):
+    provider = (await _create(client, auth)).json()
+
+    response = await client.put(
+        f"{BASE}/{provider['id']}/",
+        headers=auth,
+        json={"config": {"endpoint": "HTTPS://Gateway.internal/v1/"}},
+    )
+
+    assert response.status_code == 200, response.text
+    assert _audited(audit_calls, ActionType.MODEL_PROVIDER_DESTINATION_CHANGED) == []
+
+
 async def test_header_name_ending_in_a_newline_is_refused(
     client, auth, db_session, audit_calls
 ):

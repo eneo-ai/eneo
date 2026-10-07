@@ -8,7 +8,11 @@ from eneo.embedding_models.domain.embedding_model_repo import (
     guard_embedding_provider_update,
 )
 from eneo.main.config import get_settings
-from eneo.main.exceptions import BadRequestException, NameCollisionException
+from eneo.main.exceptions import (
+    BadRequestException,
+    EncryptionNotConfiguredException,
+    NameCollisionException,
+)
 from eneo.model_providers.domain.model_defaults_lookup import resolve_model_defaults
 from eneo.model_providers.domain.model_provider import ModelProvider
 from eneo.model_providers.domain.outbound_header_destinations import (
@@ -18,6 +22,7 @@ from eneo.model_providers.domain.outbound_header_destinations import (
 )
 from eneo.model_providers.domain.outbound_header_writes import (
     OutboundHeaderWrite,
+    StoredSecretUnreadable,
     apply_header_writes,
     retained_secret_headers,
 )
@@ -435,18 +440,30 @@ class ModelProviderService:
                 writes,
                 provider_type=provider_type,
                 encrypt=self.encryption.encrypt,
-                decrypt=self.encryption.decrypt,
+                decrypt=self.read_header_secret,
             )
         except OutboundHeaderConfigError as exc:
             raise BadRequestException(str(exc)) from exc
 
-    def effective_endpoint(self, provider: ModelProvider) -> str | None:
+    def read_header_secret(self, ciphertext: str) -> str:
+        """Decrypt a stored header secret. A rotated or missing key raises
+        ``StoredSecretUnreadable``, which the edit that repairs it turns into
+        a 400 instead of a 500."""
+        try:
+            return self.encryption.decrypt(ciphertext)
+        except (ValueError, EncryptionNotConfiguredException):
+            # Not chained: the message can quote the ciphertext.
+            raise StoredSecretUnreadable from None
+
+    def request_endpoint(self, provider: ModelProvider) -> str | None:
         """The endpoint this provider's requests go to.
 
         Resolved by the same lookup the request kwargs use, so an ``endpoint``
         in ``credentials`` shadowing the visible one in ``config`` is what gets
         checked. Only the endpoint is read: a stored key that no longer
-        decrypts must not block the edit that replaces it.
+        decrypts must not block the edit that replaces it. Unlike the
+        module-level ``effective_endpoint``, which the API-key rule uses, there
+        is no vendor default: headers need an explicitly configured endpoint.
         """
         resolver = TenantModelCredentialResolver(
             provider_id=provider.id,
@@ -461,7 +478,7 @@ class ModelProviderService:
         self, provider: ModelProvider
     ) -> DestinationProblem | None:
         allowed = parse_allow_list(get_settings().outbound_headers_allowed_destinations)
-        return destination_problem(self.effective_endpoint(provider), allowed)
+        return destination_problem(self.request_endpoint(provider), allowed)
 
     def _check_header_destination(self, provider: ModelProvider) -> None:
         """Refuse to save headers aimed at a disallowed destination — including
@@ -528,9 +545,11 @@ class ModelProviderService:
         """Update an existing provider.
 
         ``outbound_headers`` replaces the header list (``None`` leaves it
-        unchanged). The destination is re-validated whenever headers are
-        configured, because an edit to ``config`` or ``credentials`` alone can
-        move where they are sent.
+        unchanged). The destination is re-validated when the header list or
+        the destination changes, because an edit to ``config`` or
+        ``credentials`` alone can move where headers are sent. An edit that
+        changes neither, such as a rename or deactivation, is not refused for
+        a destination the deployment no longer allows: sends stay blocked.
         """
         # Get existing provider
         provider = await self.repository.get_by_id(provider_id, for_update=True)
@@ -538,9 +557,8 @@ class ModelProviderService:
         kept_secrets = retained_secret_headers(
             provider.outbound_headers, outbound_headers
         )
-        previous_destination = (
-            self.effective_endpoint(provider) if kept_secrets else None
-        )
+        previous_headers = list(provider.outbound_headers)
+        previous_destination = self.request_endpoint(provider)
 
         merged_config = {**provider.config, **(config or {})}
         next_credentials = (
@@ -583,7 +601,11 @@ class ModelProviderService:
             provider.outbound_headers = self._apply_header_writes(
                 provider.outbound_headers, outbound_headers, provider.provider_type
             )
-        self._check_header_destination(provider)
+        destination_moved = normalize_destination(
+            previous_destination
+        ) != normalize_destination(self.request_endpoint(provider))
+        if destination_moved or provider.outbound_headers != previous_headers:
+            self._check_header_destination(provider)
         self._require_reentered_secrets_for_new_destination(
             provider, kept_secrets, previous_destination
         )
@@ -591,7 +613,7 @@ class ModelProviderService:
         return await self.repository.update(provider)
 
     async def preview_outbound_headers(
-        self, provider_id: UUID, user: "UserInDB"
+        self, provider: ModelProvider, user: "UserInDB"
     ) -> tuple[list[HeaderOutcome], DestinationProblem | None, bool, str | None]:
         """What this provider's headers would do for ``user``, without sending.
 
@@ -600,10 +622,18 @@ class ModelProviderService:
         block them (e.g. ``total_size_exceeded``, which no single header
         explains). Callers must not return a secret header's value.
         """
-        provider = await self.repository.get_by_id(provider_id)
-        headers = decrypt_stored_headers(provider.outbound_headers, self.encryption)
+        problem = (
+            self._header_destination_problem(provider)
+            if provider.outbound_headers
+            else None
+        )
+        try:
+            headers = decrypt_stored_headers(provider.outbound_headers, self.encryption)
+        except (ValueError, EncryptionNotConfiguredException):
+            # Blocked at send for the same reason. Not logged: the exception
+            # message can quote the ciphertext.
+            return [], problem, True, "decryption_failed"
         outcomes = evaluate_headers(headers, user)
-        problem = self._header_destination_problem(provider) if headers else None
         try:
             request_headers(outcomes)
         except OutboundHeadersBlocked as exc:
@@ -663,7 +693,7 @@ class ModelProviderService:
         if not kept_secrets:
             return
         if normalize_destination(previous_destination) == normalize_destination(
-            self.effective_endpoint(provider)
+            self.request_endpoint(provider)
         ):
             return
         names = ", ".join(f"'{name}'" for name in kept_secrets)

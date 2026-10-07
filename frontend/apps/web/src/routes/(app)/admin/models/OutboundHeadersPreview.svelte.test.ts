@@ -86,6 +86,26 @@ describe("OutboundHeadersPreview", () => {
     await expect.element(page.getByText(m.outbound_headers_reason_total_size())).toBeVisible();
   });
 
+  it("explains a stored secret that can no longer be read", async () => {
+    api.list.mockResolvedValue({ items: [user("ada@example.com")] });
+    api.previewOutboundHeaders.mockResolvedValue({
+      user_id: "id-ada@example.com",
+      blocked: true,
+      destination_problem: null,
+      blocked_reason: "decryption_failed",
+      headers: []
+    });
+    render(OutboundHeadersPreview, { providerId: "p1", hasUnsavedChanges: false });
+
+    await openAndSearch("ada");
+    await page.getByRole("option", { name: "ada@example.com" }).click();
+    await page.getByRole("button", { name: m.outbound_headers_preview_run() }).click();
+
+    await expect
+      .element(page.getByText(m.outbound_headers_reason_decryption_failed()))
+      .toBeVisible();
+  });
+
   it("reports a failed search instead of claiming no users exist", async () => {
     api.list.mockRejectedValue(new Error("offline"));
     render(OutboundHeadersPreview, { providerId: "p1", hasUnsavedChanges: false });

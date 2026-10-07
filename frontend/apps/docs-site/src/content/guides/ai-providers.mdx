@@ -222,17 +222,19 @@ The user sees a message asking them to contact an administrator. The backend log
 
 Tick **Secret** for a header that carries a credential. Its value and fallback are encrypted when saved and never shown again. To keep a secret value when you edit the provider, leave it as it is; to replace it, choose **Change**, and choose **Cancel and keep the current value** to go back. Turning **Secret** off requires entering the value, and any fallback, again.
 
-Like a stored API key, a secret value is only sent to the endpoint it was entered for. When you change the provider's endpoint, enter the value and any fallback of each secret header again, or remove the header; otherwise the change is rejected.
+Like a stored API key, a secret value is only sent to the endpoint it was entered for. When you change the provider's endpoint, enter the value and any fallback of each secret header again, or remove the header; otherwise the change is rejected. The edit dialog names the headers to enter again as soon as you change the endpoint.
+
+If a stored secret can no longer be read, for example because `ENCRYPTION_KEY` changed, every user's requests to the provider are blocked and the preview says why. Saving the provider while keeping that header is refused with the header named: enter its value, and any fallback, again, or remove the header.
 
 ### Where headers may go
 
 - Headers are only sent to the provider's explicitly configured endpoint, and the destination is checked again on every request. An endpoint with credentials in the URL (`https://user:pass@…`) is refused.
 - Eneo does not follow redirects on these requests, so a redirect cannot carry the headers somewhere else.
-- Plain `http` endpoints are allowed, because many internal vLLM servers use them, but header values, secret ones included, then travel unencrypted. Use `https` for any endpoint that is not on the same host. The editor warns when a secret header is configured on a plain `http` endpoint that is not loopback.
+- Plain `http` endpoints are allowed, because many internal vLLM servers use them, but header values, secret ones included, then travel unencrypted. Use `https` for any endpoint that is not on the same host. The editor warns when a secret header, or a header carrying a user attribute, is configured on a plain `http` endpoint that is not loopback.
 - A deployment can restrict destinations further with `OUTBOUND_HEADERS_ALLOWED_DESTINATIONS`, a JSON list of URLs (see [Deployment](/guides/deployment)). Each entry is compared with the provider's endpoint URL, not with the path of individual requests. Matching is exact on scheme, host (case-insensitive, no suffix matching) and port, and an entry's path must match the start of the endpoint's path on `/` boundaries. The entry `https://gateway.internal/v1` allows the endpoints `https://gateway.internal/v1` and `https://gateway.internal/v1/tenant-a`, but not `https://gateway.internal` or `https://gateway.internal/v1beta`.
 - In a multi-tenant deployment, set `OUTBOUND_HEADERS_ALLOWED_DESTINATIONS` so that tenant administrators can only send headers to endpoints you have approved.
 
-If a provider's endpoint stops being an allowed destination, for example after the allow-list changes, every user's requests to that provider are blocked. Any edit to the provider is also refused until you change its endpoint or remove its headers.
+If a provider's endpoint stops being an allowed destination, for example after the allow-list changes, every user's requests to that provider are blocked. Changing its headers or moving it to another endpoint that is not allowed is refused, but you can still rename or deactivate it, change it to an allowed endpoint, or remove its headers.
 
 Some header names are reserved and cannot be configured: `Authorization`, `Proxy-Authorization`, `Proxy-Authenticate`, `Cookie`, `Set-Cookie`, `Host`, `Content-Length`, `Content-Type`, `Transfer-Encoding`, `Connection`, `Keep-Alive`, `Upgrade`, `Expect`, `TE`, `Trailer`, `api-key`, `Accept`, `Accept-Encoding`, `User-Agent`, `traceparent`, `tracestate`, `baggage` and `X-Eneo-Tenant-Id`. Names are case-insensitive, so `X-Org` and `x-org` count as the same header. Names starting with `X-` are recommended.
 
@@ -244,13 +246,14 @@ When you edit a provider that has headers, **Preview for a user** shows what the
 
 ### Audit
 
-Changes are recorded as `model_provider_headers_updated`, with secret values masked. Changing the endpoint of a provider that sends headers is recorded as `model_provider_destination_changed`, with any credentials in the URL removed. Previews are recorded as `model_provider_headers_previewed`, without the resolved values. Like every audit event, these follow your tenant's audit configuration.
+Changes are recorded as `model_provider_headers_updated`, with secret values masked; the record says whether each value and fallback changed, and ticking **Secret** alone changes neither. Changing the endpoint of a provider that sends headers is recorded as `model_provider_destination_changed`, with any credentials in the URL removed. Writing the same endpoint differently, such as with a trailing slash or another letter case in the host, is not a change. Previews are recorded as `model_provider_headers_previewed`, without the resolved values. Like every audit event, these follow your tenant's audit configuration.
 
 ### Whose attributes are sent
 
 - A request a user makes, such as a chat message or a search, uses that user's attributes.
 - A file upload is processed with the attributes of the user who uploaded it.
 - A website crawl, whether started by hand or on schedule, uses the attributes of the website's owner. If the crawl feeder is turned off (`CRAWL_FEEDER_ENABLED=false`), a crawl started by hand uses the attributes of the user who started it.
+- A [SharePoint integration](/guides/sharepoint-integration) connected as a tenant app is not tied to a person, so a synchronisation triggered by a SharePoint webhook uses the attributes of the tenant's oldest administrator: the earliest-created active or invited user with the admin permission.
 
 ### When changes take effect
 

@@ -137,6 +137,7 @@
   // Only reasons no single header row explains.
   function blockedReasonLabel(reason: string | null | undefined): string | null {
     if (reason === "total_size_exceeded") return m.outbound_headers_reason_total_size();
+    if (reason === "decryption_failed") return m.outbound_headers_reason_decryption_failed();
     return null;
   }
 

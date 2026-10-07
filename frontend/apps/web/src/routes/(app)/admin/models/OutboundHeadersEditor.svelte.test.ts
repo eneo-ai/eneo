@@ -129,6 +129,24 @@ describe("states", () => {
     await expect.element(page.getByText(m.outbound_headers_plain_http_warning())).toBeVisible();
   });
 
+  it("warns about non-secret user attributes over plain http", async () => {
+    renderEditor({
+      headers: [{ ...plainHeader, value: "{{user.employeeNumber}}" }],
+      endpoint: "http://vllm.internal:8000/v1"
+    });
+    await expect.element(page.getByText(m.outbound_headers_plain_http_warning())).toBeVisible();
+  });
+
+  it("does not warn about fixed text over plain http", async () => {
+    renderEditor({
+      headers: [{ ...plainHeader, value: "eu-north", classification: null }],
+      endpoint: "http://vllm.internal:8000/v1"
+    });
+    await expect
+      .element(page.getByText(m.outbound_headers_plain_http_warning()))
+      .not.toBeInTheDocument();
+  });
+
   it("does not warn on loopback", async () => {
     renderEditor({ headers: [secretHeader], endpoint: "http://127.0.0.1:8000/v1" });
     await expect

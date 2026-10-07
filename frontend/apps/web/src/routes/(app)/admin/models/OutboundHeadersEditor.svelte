@@ -73,7 +73,10 @@
   const maxHeaders = $derived(options?.max_headers ?? 10);
   const atMax = $derived(rows.length >= maxHeaders);
   const incomplete = $derived(rows.some((row) => !isRowComplete(row, options)));
-  const plainHttp = $derived(rows.some((row) => row.secret) && isUnencryptedRemote(endpoint));
+  // A user attribute is as worth protecting in transit as a secret.
+  const plainHttp = $derived(
+    (classification !== null || rows.some((row) => row.secret)) && isUnencryptedRemote(endpoint)
+  );
   const noticeId = $derived(`${idPrefix}-notice`);
   const addId = $derived(`${idPrefix}-add`);
 

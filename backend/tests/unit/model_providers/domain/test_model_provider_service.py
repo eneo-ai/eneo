@@ -12,6 +12,7 @@ import pytest
 from cryptography.fernet import Fernet
 
 from eneo.audit.domain.action_types import ActionType
+from eneo.main.config import get_settings
 from eneo.main.exceptions import BadRequestException
 from eneo.model_providers.domain import model_provider_service
 from eneo.model_providers.domain.model_provider import ModelProvider
@@ -387,7 +388,7 @@ class TestReplacingAnUndecryptableKey:
     ):
         provider, service, _ = _key_from_a_previous_encryption_key(credentials)
 
-        assert service.effective_endpoint(provider) == expected
+        assert service.request_endpoint(provider) == expected
 
     @pytest.mark.parametrize(
         ("headers", "kept", "audited"),
@@ -425,6 +426,207 @@ class TestReplacingAnUndecryptableKey:
         )
         assert [header["name"] for header in written.outbound_headers] == kept
         assert public.config == {"endpoint": GATEWAY}
+        assert [
+            call.kwargs["action"] for call in audit.log_async.await_args_list
+        ] == audited
+
+
+def _admin(provider: ModelProvider) -> Any:
+    return SimpleNamespace(
+        id=uuid4(), tenant_id=provider.tenant_id, username="admin", email=None
+    )
+
+
+def _snapshots(
+    provider: ModelProvider, encryption: Any
+) -> tuple[ModelProviderService, AsyncMock]:
+    repository = AsyncMock()
+    # Each load is its own snapshot, as rows read from the database are.
+    repository.get_by_id.side_effect = lambda *_, **__: deepcopy(provider)
+    repository.get_by_name.return_value = None
+    repository.update.side_effect = lambda p: p
+    repository.session = MagicMock()
+    return ModelProviderService(
+        repository=repository, encryption=encryption
+    ), repository
+
+
+def _secret_from_a_previous_encryption_key(
+    **overrides: Any,
+) -> tuple[ModelProvider, ModelProviderService, AsyncMock]:
+    """A gateway whose secret header was encrypted before ENCRYPTION_KEY
+    changed and no longer decrypts."""
+    previous = _encryption()
+    provider = _provider("hosted_vllm", config={"endpoint": GATEWAY}, credentials={})
+    provider.outbound_headers = [
+        _secret_header(value=previous.encrypt("sk-a"), **overrides)
+    ]
+    service, repository = _snapshots(provider, _encryption())
+    return provider, service, repository
+
+
+class TestUnreadableSecretHeader:
+    """A secret that no longer decrypts is a 400 naming the header, and the
+    edit that re-enters or removes it commits."""
+
+    @pytest.mark.parametrize(
+        ("overrides", "write", "part"),
+        [
+            ({}, _keep(), "value"),
+            (
+                {"fallback": "enc:fernet:v1:unreadable", "on_missing": "fallback"},
+                _keep(on_missing="fallback", value="sk-b", value_supplied=True),
+                "fallback",
+            ),
+        ],
+    )
+    async def test_keeping_it_is_refused_with_the_header_named(
+        self, overrides: dict[str, Any], write: OutboundHeaderWrite, part: str
+    ):
+        _, service, repository = _secret_from_a_previous_encryption_key(**overrides)
+
+        with pytest.raises(
+            BadRequestException,
+            match=f"'X-Credential': the stored secret {part} cannot be read",
+        ):
+            await service.update(uuid4(), name="renamed", outbound_headers=[write])
+
+        repository.update.assert_not_awaited()
+
+    @pytest.mark.parametrize(
+        ("headers", "stored"),
+        [
+            (
+                [{"id": "h1", "name": "X-Credential", "secret": True, "value": "sk-b"}],
+                ["sk-b"],
+            ),
+            ([], []),
+        ],
+        ids=["re-entered", "removed"],
+    )
+    async def test_re_entering_or_removing_it_commits_and_is_audited(
+        self, headers: list[dict[str, Any]], stored: list[str]
+    ):
+        provider, service, repository = _secret_from_a_previous_encryption_key()
+        audit = AsyncMock()
+
+        await update_provider(
+            provider_id=provider.id,
+            data=ModelProviderUpdate(outbound_headers=headers),
+            user=_admin(provider),
+            service=service,
+            audit=audit,
+        )
+
+        [written] = repository.update.await_args.args
+        assert [
+            service.encryption.decrypt(header["value"])
+            for header in written.outbound_headers
+        ] == stored
+        [call] = audit.log_async.await_args_list
+        assert call.kwargs["action"] == ActionType.MODEL_PROVIDER_HEADERS_UPDATED
+
+    async def test_the_preview_reports_it_as_blocked(self):
+        provider, service, _ = _secret_from_a_previous_encryption_key()
+
+        outcomes, _, blocked, reason = await service.preview_outbound_headers(
+            provider, MagicMock()
+        )
+
+        assert (outcomes, blocked, reason) == ([], True, "decryption_failed")
+
+
+class TestDestinationNoLongerAllowed:
+    """After the allow-list is narrowed, an edit that changes neither the
+    headers nor the destination still saves; sends stay blocked."""
+
+    @pytest.fixture(autouse=True)
+    def _narrowed(self, monkeypatch):
+        monkeypatch.setattr(
+            get_settings(),
+            "outbound_headers_allowed_destinations",
+            ["https://other.internal/v1"],
+        )
+
+    @pytest.mark.parametrize(
+        "edit",
+        [
+            {"is_active": False},
+            {"name": "renamed"},
+            # What the edit dialog sends when only "Active" is turned off.
+            {
+                "name": "provider",
+                "config": {"endpoint": GATEWAY},
+                "is_active": False,
+                "outbound_headers": [_keep()],
+            },
+        ],
+    )
+    async def test_edits_that_change_neither_save(self, edit: dict[str, Any]):
+        _, service, repository = _header_service()
+
+        await service.update(uuid4(), **edit)
+
+        repository.update.assert_awaited_once()
+
+    @pytest.mark.parametrize(
+        "edit",
+        [
+            {
+                "config": {"endpoint": ELSEWHERE},
+                "outbound_headers": [_keep(value="sk-b", value_supplied=True)],
+            },
+            {
+                "outbound_headers": [
+                    _keep(),
+                    OutboundHeaderWrite(
+                        id=None, name="X-Region", value="eu", value_supplied=True
+                    ),
+                ]
+            },
+        ],
+        ids=["destination-moved", "headers-changed"],
+    )
+    async def test_edits_that_change_either_are_refused(self, edit: dict[str, Any]):
+        _, service, repository = _header_service()
+
+        with pytest.raises(BadRequestException, match="allowed destinations"):
+            await service.update(uuid4(), **edit)
+
+        repository.update.assert_not_awaited()
+
+
+class TestDestinationChangeAudit:
+    """Compared the way the secret re-entry rule compares destinations."""
+
+    @pytest.mark.parametrize(
+        ("endpoint", "audited"),
+        [
+            ("HTTPS://GATEWAY-A.internal/v1/", []),
+            (ELSEWHERE, [ActionType.MODEL_PROVIDER_DESTINATION_CHANGED]),
+        ],
+        ids=["another-spelling", "moved"],
+    )
+    async def test_only_a_real_move_is_recorded(
+        self, endpoint: str, audited: list[ActionType]
+    ):
+        provider = _provider(
+            "hosted_vllm", config={"endpoint": GATEWAY}, credentials={}
+        )
+        provider.outbound_headers = [
+            _secret_header(name="X-Region", value="eu-north", secret=False)
+        ]
+        service, _ = _snapshots(provider, _encryption())
+        audit = AsyncMock()
+
+        await update_provider(
+            provider_id=provider.id,
+            data=ModelProviderUpdate(config={"endpoint": endpoint}),
+            user=_admin(provider),
+            service=service,
+            audit=audit,
+        )
+
         assert [
             call.kwargs["action"] for call in audit.log_async.await_args_list
         ] == audited

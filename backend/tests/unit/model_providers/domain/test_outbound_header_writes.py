@@ -1,5 +1,6 @@
 """Writing the header list: id convention, secrets, and the audit diff (S5, S9)."""
 
+from collections.abc import Callable
 from datetime import datetime, timezone
 from typing import Any
 from uuid import uuid4
@@ -12,6 +13,7 @@ from eneo.model_providers.domain.model_provider import (
 )
 from eneo.model_providers.domain.outbound_header_writes import (
     OutboundHeaderWrite,
+    StoredSecretUnreadable,
     apply_header_writes,
     header_audit_changes,
     retained_secret_headers,
@@ -28,16 +30,31 @@ def _decrypt(value: str) -> str:
     return value[4:-1]
 
 
+def _unreadable(value: str) -> str:
+    """A key that changed since the secret was stored."""
+    raise StoredSecretUnreadable
+
+
 def _apply(
-    stored: list[dict[str, Any]], *writes: OutboundHeaderWrite
+    stored: list[dict[str, Any]],
+    *writes: OutboundHeaderWrite,
+    decrypt: Callable[[str], str] = _decrypt,
 ) -> list[dict[str, Any]]:
     return apply_header_writes(
         stored,
         list(writes),
         provider_type="hosted_vllm",
         encrypt=_encrypt,
-        decrypt=_decrypt,
+        decrypt=decrypt,
     )
+
+
+def _audit(
+    before: list[dict[str, Any]],
+    after: list[dict[str, Any]],
+    decrypt: Callable[[str], str] = _decrypt,
+) -> dict[str, Any] | None:
+    return header_audit_changes(before, after, decrypt=decrypt)
 
 
 def _write(
@@ -194,6 +211,49 @@ class TestSecretFlag:
         assert stored["fallback"] is None
 
 
+class TestUnreadableSecret:
+    """A kept secret that no longer decrypts is a config error naming the
+    header, so the edit that repairs it is a 400, not a 500."""
+
+    @pytest.mark.parametrize(
+        ("stored", "write", "part"),
+        [
+            (SECRET, _write(header_id="h1", encoding="none", secret=True), "value"),
+            (
+                SECRET_WITH_FALLBACK,
+                _write(header_id="h1", encoding="none", secret=True, value="sk-new"),
+                "fallback",
+            ),
+        ],
+    )
+    def test_keeping_it_is_refused(
+        self, stored: dict[str, Any], write: OutboundHeaderWrite, part: str
+    ):
+        with pytest.raises(
+            OutboundHeaderConfigError,
+            match=f"'X-Key': the stored secret {part} cannot be read",
+        ):
+            _apply([stored], write, decrypt=_unreadable)
+
+    def test_re_entering_it_never_decrypts(self):
+        [stored] = _apply(
+            [SECRET_WITH_FALLBACK],
+            _write(
+                header_id="h1",
+                encoding="none",
+                secret=True,
+                value="sk-new",
+                fallback="fb-new",
+            ),
+            decrypt=_unreadable,
+        )
+        assert (stored["value"], stored["fallback"]) == ("enc(sk-new)", "enc(fb-new)")
+
+    def test_removing_it_never_decrypts(self):
+        kept = _write(header_id="h2", name="X-Org-Unit", on_missing="fallback")
+        assert _apply([SECRET, PLAIN], kept, decrypt=_unreadable) == [PLAIN]
+
+
 class TestRetainedSecrets:
     """What a write keeps of a secret without the client knowing it; those
     values must not follow the provider to a new destination."""
@@ -285,11 +345,11 @@ class TestClassification:
 
 class TestAuditChanges:
     def test_no_change(self):
-        assert header_audit_changes([PLAIN], [dict(PLAIN)]) is None
+        assert _audit([PLAIN], [dict(PLAIN)]) is None
 
     def test_non_secret_change_is_in_clear(self):
         after = {**PLAIN, "value": "{{user.division}}", "encoding": "none"}
-        changes = header_audit_changes([PLAIN], [after])
+        changes = _audit([PLAIN], [after])
         assert changes is not None
         [update] = changes["updated"]
         assert update["old"]["value"] == "{{user.department}}"
@@ -297,8 +357,8 @@ class TestAuditChanges:
         assert update["new"]["encoding"] == "none"
 
     def test_secret_values_are_masked_on_add_and_remove(self):
-        added = header_audit_changes([], [SECRET])
-        removed = header_audit_changes([SECRET], [])
+        added = _audit([], [SECRET])
+        removed = _audit([SECRET], [])
         assert added is not None and added["added"][0]["value"] == MASKED_HEADER_VALUE
         assert (
             removed is not None
@@ -307,7 +367,7 @@ class TestAuditChanges:
 
     def test_secret_flag_flip_masks_both_sides_and_records_the_transition(self):
         after = {**SECRET, "secret": False, "value": "now-public"}
-        changes = header_audit_changes([SECRET], [after])
+        changes = _audit([SECRET], [after])
         assert changes is not None
         [update] = changes["updated"]
         assert update["old"]["value"] == update["new"]["value"] == MASKED_HEADER_VALUE
@@ -317,8 +377,33 @@ class TestAuditChanges:
     def test_masked_fallback(self):
         before = {**SECRET, "fallback": "enc(fb)"}
         after = {**before, "fallback": "enc(fb2)"}
-        changes = header_audit_changes([before], [after])
+        changes = _audit([before], [after])
         assert changes is not None
         [update] = changes["updated"]
         assert update["new"]["fallback"] == MASKED_HEADER_VALUE
         assert update["fallback_changed"] is True
+
+    def test_ticking_secret_alone_changes_no_value(self):
+        [after] = _apply(
+            [PLAIN],
+            _write(
+                header_id="h2", name="X-Org-Unit", secret=True, on_missing="fallback"
+            ),
+        )
+        changes = _audit([PLAIN], [after])
+        assert changes is not None
+        [update] = changes["updated"]
+        assert (update["old"]["secret"], update["new"]["secret"]) == (False, True)
+        assert (update["value_changed"], update["fallback_changed"]) == (False, False)
+
+    def test_an_unreadable_old_secret_counts_as_changed(self):
+        after = {**SECRET, "value": "enc(sk-new)"}
+
+        def decrypt(value: str) -> str:
+            if value == SECRET["value"]:
+                raise StoredSecretUnreadable
+            return _decrypt(value)
+
+        changes = _audit([SECRET], [after], decrypt=decrypt)
+        assert changes is not None
+        assert changes["updated"][0]["value_changed"] is True

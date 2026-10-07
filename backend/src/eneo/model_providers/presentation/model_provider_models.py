@@ -111,7 +111,8 @@ class OutboundHeaderPreview(BaseModel):
         default=None,
         description=(
             "Why the headers block this user's requests, e.g. "
-            "'missing_required_value' or 'total_size_exceeded'"
+            "'missing_required_value', 'total_size_exceeded' or "
+            "'decryption_failed' (a stored secret cannot be read)"
         ),
     )
 

@@ -20,6 +20,7 @@ from __future__ import annotations
 
 from collections.abc import Sequence
 from dataclasses import dataclass
+from functools import lru_cache
 from typing import Literal
 from urllib.parse import urlsplit
 
@@ -91,7 +92,15 @@ def without_credentials(url: str | None) -> str | None:
 
 
 def parse_allow_list(entries: Sequence[str]) -> tuple[Destination, ...]:
-    """Entries are validated when settings load, so parsing cannot fail here."""
+    """Entries are validated when settings load, so parsing cannot fail here.
+
+    Called for every request and embedding batch, so the parse is cached,
+    keyed on the entries themselves."""
+    return _parse_allow_list(tuple(entries))
+
+
+@lru_cache(maxsize=8)
+def _parse_allow_list(entries: tuple[str, ...]) -> tuple[Destination, ...]:
     return tuple(parse_destination(entry) for entry in entries)
 
 
