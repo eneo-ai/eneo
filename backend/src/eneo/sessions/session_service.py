@@ -24,8 +24,13 @@ from eneo.main.exceptions import (
 from eneo.main.logging import get_logger
 from eneo.questions.question import QuestionAdd, ToolCallInfo
 from eneo.questions.questions_repo import QuestionRepository
+from eneo.sessions.conversation_settings import (
+    ConversationSettings,
+    ConversationSettingsState,
+)
 from eneo.sessions.session import (
     SessionAdd,
+    SessionContext,
     SessionFeedback,
     SessionInDB,
     SessionUpdate,
@@ -215,7 +220,7 @@ class SessionService:
             return None, key.id
         return self.user.id, None
 
-    def _is_owner(self, session: SessionInDB) -> bool:
+    def _is_owner(self, session: SessionInDB | SessionContext) -> bool:
         """Match the session's principal against the current request's principal.
 
         Both branches require a non-None match; we never treat NULL == NULL
@@ -272,6 +277,14 @@ class SessionService:
             session, assistant_id=assistant_id, group_chat_id=group_chat_id
         )
 
+    async def get_context(self, id: UUID) -> SessionContext:
+        session = await self.session_repo.get_context(id, tenant_id=self.user.tenant_id)
+        if session is None:
+            raise NotFoundException("Session not found")
+        if not self._is_owner(session):
+            raise UnauthorizedException("Session belongs to other principal")
+        return session
+
     async def get_tool_call_result(
         self,
         session: SessionInDB,
@@ -302,6 +315,17 @@ class SessionService:
             previous=previous,
             name_filter=name_filter,
         )
+
+    async def update_settings(
+        self, id: UUID, settings: ConversationSettings, expected_revision: int
+    ) -> ConversationSettingsState:
+        await self.get_context(id)
+        # A short transaction avoids holding the parent row lock while a
+        # streaming turn commits its question in a separate transaction.
+        async with sessionmanager.session() as db_session, db_session.begin():
+            return await self._session_repository(db_session).update_settings(
+                id, settings, expected_revision
+            )
 
     async def update_session(self, session_update: SessionUpdate) -> SessionInDB:
         session = await self.session_repo.update(session_update)
@@ -404,6 +428,7 @@ class SessionService:
         self,
         *,
         name: str,
+        settings: ConversationSettingsState | None = None,
         question: str,
         files: Sequence[File] | None = None,
         session_assistant_id: UUID | None = None,
@@ -419,6 +444,7 @@ class SessionService:
             assistant_id=session_assistant_id,
             group_chat_id=group_chat_id,
         )
+        session_add.settings = settings
         async with sessionmanager.session() as db_session, db_session.begin():
             session_record = await self._session_repository(db_session).add(session_add)
             question_add = self._build_question_placeholder(

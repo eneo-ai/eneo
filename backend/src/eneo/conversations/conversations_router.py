@@ -27,6 +27,7 @@ from eneo.conversations.conversation_models import (
     ChatTurnDiagnostics,
     ConversationRenameRequest,
     ConversationRequest,
+    ConversationTarget,
     PreflightRequest,
     PreflightResponse,
 )
@@ -42,6 +43,11 @@ from eneo.mcp_servers.infrastructure.tool_approval import (
 from eneo.roles.permissions import Permission
 from eneo.server.dependencies.container import get_container
 from eneo.server.protocol import responses
+from eneo.sessions.conversation_settings import (
+    ConversationSettings,
+    ConversationSettingsState,
+    ConversationSettingsUpdate,
+)
 from eneo.sessions.session import (
     SessionFeedback,
     SessionInDB,
@@ -132,7 +138,7 @@ async def _validate_conversation_scope(
     if session_id is not None:
         session_service = container.session_service()
         try:
-            session = await session_service.get_session_by_uuid(session_id)
+            session = await session_service.get_context(session_id)
         except NotFoundException:
             # Session doesn't exist — return 403 (not 404) to prevent
             # scoped keys from enumerating session existence.
@@ -152,7 +158,7 @@ async def _validate_conversation_scope(
 
         assert session is not None
         if scope_type == "assistant":
-            session_assistant_id = session.assistant.id if session.assistant else None
+            session_assistant_id = session.assistant_id
             if session_assistant_id != scope_id:
                 _raise_conversation_scope_denied(
                     http_request,
@@ -162,19 +168,7 @@ async def _validate_conversation_scope(
                     ),
                 )
         elif scope_type == "space":
-            # Resolve session to space via assistant or group_chat
-            try:
-                space = await space_repo.get_space_by_session(session_id)
-                assert space is not None
-                if space.id != scope_id:
-                    _raise_conversation_scope_denied(
-                        http_request,
-                        (
-                            f"API key is scoped to space '{scope_id}'. "
-                            f"The requested resource belongs to a different scope."
-                        ),
-                    )
-            except NotFoundException:
+            if session.space_id != scope_id:
                 _raise_conversation_scope_denied(
                     http_request,
                     (
@@ -271,7 +265,7 @@ async def _authorize_session_access(container: Container, session: SessionInDB) 
     "/",
     description="Chat with an assistant or group chat; starts or continues a conversation and streams the response as Server-Sent Events when stream is true.",
     responses=responses.streaming_response(
-        response_codes=[400, 403, 404],
+        response_codes=[400, 403, 404, 409],
         models=[
             SSEText,
             SSEEneoEvent,
@@ -371,6 +365,8 @@ async def chat(
             require_tool_approval=request.require_tool_approval,
             disabled_mcp_server_ids=request.disabled_mcp_server_ids,
             disabled_capabilities=request.disabled_capabilities,
+            settings=request.settings,
+            settings_revision=request.settings_revision,
         )
 
     return await to_conversation_response(
@@ -432,7 +428,7 @@ async def get_chat_turn_diagnostics(
     "/preflight",
     response_model=PreflightResponse,
     description="Returns an estimated token cost for the next chat request (excludes knowledge/RAG and web-search content).",
-    responses=responses.get_responses([400, 403, 404, 429]),
+    responses=responses.get_responses([400, 403, 404, 409, 429]),
 )
 @endpoint_access(
     authentication=Authentication.USER,
@@ -508,6 +504,8 @@ async def preflight_tokens(
             group_chat_id=request.group_chat_id,
             tool_assistant_id=tool_assistant_id,
             assistant_prompt=request.assistant_prompt,
+            settings=request.settings,
+            settings_revision=request.settings_revision,
             attachments=(
                 [(a.id, a.inline_text) for a in request.attachments]
                 if request.attachments is not None
@@ -604,6 +602,77 @@ async def list_conversations(
         cursor=cursor,  # pyright: ignore[reportArgumentType]  # session_protocol cursor param has wrong annotation (datetime instead of Optional[datetime])
         previous=previous,
         total_count=total_count,
+    )
+
+
+@router.post(
+    "/settings/defaults/",
+    description="Return the current settings defaults for a new or legacy conversation after checking access to its target.",
+    response_model=ConversationSettings,
+    responses=responses.get_responses([400, 403, 404]),
+    dependencies=[
+        Depends(
+            require_resource_permission_for_method(
+                "conversations",
+                read_override_endpoints=frozenset({"conversation_settings_defaults"}),
+            )
+        )
+    ],
+)
+@endpoint_access(
+    authentication=Authentication.USER,
+    authorization=Authorization.AUTHENTICATED,
+    reason=_CONVERSATION_SERVICE_ACCESS_REASON,
+)
+async def conversation_settings_defaults(
+    request: ConversationTarget,
+    http_request: Request,
+    container: Annotated[Container, Depends(get_container(with_user=True))],
+):
+    """Current defaults for a draft, or for a legacy conversation without settings."""
+    await _validate_conversation_scope(
+        http_request=http_request,
+        container=container,
+        assistant_id=request.assistant_id,
+        group_chat_id=request.group_chat_id,
+        session_id=request.session_id,
+    )
+    return await container.conversation_service().settings_defaults(
+        assistant_id=request.assistant_id,
+        group_chat_id=request.group_chat_id,
+        session_id=request.session_id,
+    )
+
+
+@router.patch(
+    "/{session_id}/settings/",
+    description="Save choices for an owned conversation using its expected revision; reject concurrent changes with HTTP 409.",
+    response_model=ConversationSettingsState,
+    responses=responses.get_responses([400, 403, 404, 409]),
+    dependencies=[Depends(require_resource_permission_for_method("conversations"))],
+)
+@endpoint_access(
+    authentication=Authentication.USER,
+    authorization=Authorization.AUTHENTICATED,
+    reason=_CONVERSATION_SERVICE_ACCESS_REASON,
+)
+async def update_conversation_settings(
+    session_id: UUID,
+    http_request: Request,
+    request: ConversationSettingsUpdate,
+    container: Annotated[Container, Depends(get_container(with_user=True))],
+):
+    await _validate_conversation_scope(
+        http_request=http_request,
+        container=container,
+        session_id=session_id,
+        assistant_id=None,
+        group_chat_id=None,
+    )
+    return await container.conversation_service().update_settings(
+        session_id,
+        request.settings,
+        request.expected_revision,
     )
 
 

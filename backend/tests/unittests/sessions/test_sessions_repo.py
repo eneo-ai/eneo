@@ -97,3 +97,44 @@ async def test_owned_chat_partner_returns_none_for_an_inaccessible_session():
     )
 
     assert partner is None
+
+
+async def test_context_reads_only_metadata_without_question_or_file_content():
+    session_id, tenant_id, user_id, space_id = uuid4(), uuid4(), uuid4(), uuid4()
+    session = AsyncMock()
+    result = MagicMock()
+    result.mappings.return_value.one_or_none.return_value = {
+        "id": session_id,
+        "user_id": user_id,
+        "api_key_id": None,
+        "assistant_id": uuid4(),
+        "group_chat_id": None,
+        "space_id": space_id,
+        "settings": {"revision": 2, "settings": {"require_tool_approval": True}},
+    }
+    session.execute.return_value = result
+    repo = SessionRepository(session)
+    context = await repo.get_context(session_id, tenant_id)
+    assert context.id == session_id
+    assert context.space_id == space_id
+    assert context.settings.revision == 2
+    assert context.settings.settings.require_tool_approval is True
+    # This query shape is the bounded-read contract: no ORM entity loading,
+    # and tenant isolation includes service-key sessions as well as users.
+    statement = session.execute.await_args.args[0]
+    compiled = statement.compile(dialect=postgresql.dialect())
+    sql = str(compiled)
+    assert "questions" not in sql
+    assert "sessions.name" not in sql
+    assert "coalesce(users.tenant_id, api_keys_v2.tenant_id)" in sql
+    assert "help_assistant_runs" in sql
+    assert {session_id, tenant_id}.issubset(set(compiled.params.values()))
+    session.execute.assert_awaited_once()
+
+
+async def test_context_returns_none_for_missing_or_filtered_session():
+    session = AsyncMock()
+    result = MagicMock()
+    result.mappings.return_value.one_or_none.return_value = None
+    session.execute.return_value = result
+    assert await SessionRepository(session).get_context(uuid4(), uuid4()) is None

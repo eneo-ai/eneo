@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { ChatService, type ChatPartner } from "./ChatService.svelte";
 import { projectTurnDebugDetails } from "./turnDebugProjection";
-import type { Conversation } from "@eneo/eneo-js";
+import { EneoError, type Conversation, type ConversationSettings } from "@eneo/eneo-js";
 
 function assistantPartner(overrides: Partial<ChatPartner> = {}): ChatPartner {
   return {
@@ -25,14 +25,29 @@ function chatService(
   overrides: {
     ask?: ReturnType<typeof vi.fn>;
     get?: ReturnType<typeof vi.fn>;
+    settingsDefaults?: ReturnType<typeof vi.fn>;
+    updateSettings?: ReturnType<typeof vi.fn>;
     getTurnDiagnostics?: ReturnType<typeof vi.fn>;
     initialConversation?: Conversation | null;
+    partner?: ChatPartner;
   } = {}
 ) {
   return new ChatService({
     eneo: {
       conversations: {
         preflight,
+        settingsDefaults:
+          overrides.settingsDefaults ??
+          vi.fn().mockResolvedValue({
+            completion_model_id: "model-1",
+            mcp_server_states: { tool: true }
+          }),
+        updateSettings:
+          overrides.updateSettings ??
+          vi.fn().mockImplementation(async (_conversation, settings, revision) => ({
+            settings,
+            revision: revision + 1
+          })),
         ask: overrides.ask ?? vi.fn(),
         get: overrides.get ?? vi.fn(),
         getTurnDiagnostics: overrides.getTurnDiagnostics ?? vi.fn(),
@@ -44,17 +59,18 @@ function chatService(
         })
       }
     } as never,
-    chatPartner: assistantPartner(),
+    chatPartner: overrides.partner ?? assistantPartner(),
     initialConversation: overrides.initialConversation ?? null,
     initialHistory: { items: [], count: 0, total_count: 0 }
   });
 }
 
 function completedAsk() {
-  return vi.fn().mockImplementation(async ({ callbacks }) => {
+  return vi.fn().mockImplementation(async ({ callbacks, settings }) => {
     callbacks.onFirstChunk({
       id: "message-1",
       session_id: "session-1",
+      settings: settings ? { revision: 1, settings } : undefined,
       answer: "",
       references: []
     });
@@ -87,7 +103,9 @@ describe("ChatService assistant baseline preflight", () => {
       conversation: undefined,
       question: "",
       files: [],
-      tools: undefined
+      tools: undefined,
+      settings: undefined,
+      settingsRevision: undefined
     });
     expect(chat.assistantPromptTokens).toBe(125);
     expect(chat.assistantAttachmentTokens).toBe(3500);
@@ -421,6 +439,172 @@ describe("ChatService independent capabilities", () => {
       enabled_capabilities: ["image_generation"],
       available_capabilities: [{ available: false }]
     });
+  });
+});
+
+describe("ChatService personal conversation model", () => {
+  it("restores the saved model even when it differs from the last answer", () => {
+    const partner = assistantPartner({ type: "default-assistant" });
+    if (!("completion_model" in partner) || !partner.completion_model)
+      throw new Error("missing model");
+    const chat = chatService(vi.fn(), {
+      partner,
+      initialConversation: {
+        id: "session-1",
+        name: "Existing chat",
+        settings: { revision: 3, settings: { completion_model_id: "model-1" } },
+        messages: [
+          {
+            id: "message-1",
+            question: "Hello",
+            answer: "Hi",
+            references: [],
+            files: [],
+            generated_files: [],
+            tools: { assistants: [] },
+            completion_model: {
+              ...partner.completion_model,
+              id: "model-2",
+              name: "other-model",
+              token_limit: 64000
+            }
+          }
+        ]
+      } as Conversation
+    });
+
+    expect(chat.selectedPersonalModel?.id).toBe("model-1");
+    chat.newConversation();
+    expect(chat.selectedPersonalModel).toBeNull();
+  });
+
+  it("sends the selected model to preflight and ask, then resets for a new conversation", async () => {
+    vi.useFakeTimers();
+    const preflight = vi.fn().mockResolvedValue({
+      input_tokens: 0,
+      file_tokens: 0,
+      prompt_tokens: 0,
+      assistant_attachment_tokens: 0,
+      skill_context_tokens: 0,
+      model_name: "other-model",
+      context_window: 64000
+    });
+    const ask = completedAsk();
+    const chat = chatService(preflight, { ask });
+    chat.changeChatPartner(assistantPartner({ type: "default-assistant" }));
+    const partner = chat.partner;
+    if (!("completion_model" in partner) || !partner.completion_model)
+      throw new Error("missing model");
+    await chat.loadSettings();
+    const chosenModel = {
+      ...partner.completion_model,
+      id: "model-2",
+      name: "other-model",
+      token_limit: 64000
+    };
+    chat.setModelCatalog([chosenModel]);
+    await chat.selectPersonalModel(chosenModel);
+
+    chat.requestPreflight("hello", [], undefined, 0);
+    await vi.advanceTimersByTimeAsync(0);
+    expect(preflight.mock.calls[0][0]).toMatchObject({
+      settings: { completion_model_id: "model-2" }
+    });
+
+    await chat.askQuestion("hello");
+    expect(ask.mock.calls[0][0]).toMatchObject({ settings: { completion_model_id: "model-2" } });
+    expect(chat.currentConversation.settings?.revision).toBe(1);
+    await chat.updateSettings({ require_tool_approval: true });
+    expect(chat.currentConversation.settings?.revision).toBe(2);
+    chat.newConversation();
+    expect(chat.selectedPersonalModel).toBeNull();
+    vi.useRealTimers();
+  });
+});
+
+describe("ChatService saved conversation choices", () => {
+  it("saves tools, approval and reasoning together, then reloads them in another client", async () => {
+    const conversation: Conversation = {
+      id: "saved",
+      name: "Saved",
+      messages: [],
+      settings: { revision: 1, settings: {} }
+    };
+    const updateSettings = vi
+      .fn()
+      .mockImplementation(async (_id, settings: ConversationSettings, revision: number) => {
+        conversation.settings = { settings, revision: revision + 1 };
+        return conversation.settings;
+      });
+    const chat = chatService(vi.fn(), {
+      initialConversation: structuredClone(conversation),
+      updateSettings
+    });
+    await chat.loadSettings();
+    await chat.updateSettings({
+      mcp_server_states: { tool: false },
+      require_tool_approval: true,
+      reasoning_effort: "high"
+    });
+    expect(conversation.settings?.revision).toBe(2);
+    const reopened = chatService(vi.fn(), { initialConversation: conversation });
+    expect(reopened.settings).toEqual(chat.settings);
+    chat.newConversation();
+    await chat.loadSettings();
+    expect(chat.settings?.mcp_server_states).toEqual({ tool: true });
+    expect(reopened.settings?.mcp_server_states).toEqual({ tool: false });
+  });
+
+  it("does not leak a late save into the next conversation", async () => {
+    let finish!: (value: { revision: number; settings: ConversationSettings }) => void;
+    const chat = chatService(vi.fn(), {
+      initialConversation: {
+        id: "old",
+        name: "Old",
+        messages: [],
+        settings: { revision: 1, settings: {} }
+      },
+      updateSettings: vi.fn().mockImplementation(
+        () =>
+          new Promise((resolve) => {
+            finish = resolve;
+          })
+      )
+    });
+    const save = chat.updateSettings({ require_tool_approval: true });
+    chat.newConversation();
+    await chat.loadSettings();
+    finish({ revision: 2, settings: { require_tool_approval: true } });
+    await save;
+    expect(chat.currentConversation.id).toBe("");
+    expect(chat.settings?.require_tool_approval).toBeUndefined();
+  });
+
+  it("keeps saved choices on a conflict and blocks send until the user reloads", async () => {
+    const ask = completedAsk();
+    const conflict = new EneoError("Changed elsewhere", "RESPONSE", 409, 0);
+    const latest: Conversation = {
+      id: "saved",
+      name: "Saved",
+      messages: [],
+      settings: { revision: 3, settings: { require_tool_approval: true } }
+    };
+    const chat = chatService(vi.fn(), {
+      ask,
+      initialConversation: { ...latest, settings: { revision: 2, settings: {} } },
+      updateSettings: vi.fn().mockRejectedValue(conflict),
+      get: vi.fn().mockResolvedValue(latest)
+    });
+    await chat.loadSettings();
+    await chat.updateSettings({ reasoning_effort: "high" });
+    expect(chat.settingsError).toBe(conflict);
+    expect(chat.settings?.reasoning_effort).toBeUndefined();
+    await expect(chat.askQuestion("hello")).rejects.toThrow("Changed elsewhere");
+    expect(ask).not.toHaveBeenCalled();
+    await chat.loadSettings(true);
+    expect(chat.settingsError).toBeNull();
+    expect(chat.currentConversation.settings?.revision).toBe(3);
+    expect(chat.settings?.require_tool_approval).toBe(true);
   });
 });
 
