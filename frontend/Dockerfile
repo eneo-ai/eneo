@@ -11,8 +11,8 @@ COPY . .
 # Install dependencies with Bun (uses frozen lockfile)
 RUN bun install --frozen-lockfile
 
-# Build the application
-RUN bun run build
+# Match frontend CI's heap budget for adapter-node bundling.
+RUN NODE_OPTIONS=--max-old-space-size=8192 bun run build
 
 # Stage 2: Production runtime using Node.js
 # Required ENV vars, see README.md
