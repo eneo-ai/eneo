@@ -16,7 +16,7 @@
   "dependencies": {
     "@duckdb/node-api": "1.5.2-r.1",
     "@jitl/quickjs-ng-wasmfile-release-sync": "0.32.0",
-    "@modelcontextprotocol/sdk": "1.29.0",
+    "@modelcontextprotocol/sdk": "1.31.0",
     "@resvg/resvg-js": "^2.6.2",
     "docx": "^9.7.1",
     "echarts": "6.1.0",
