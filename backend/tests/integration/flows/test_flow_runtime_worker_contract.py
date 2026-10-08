@@ -501,8 +501,12 @@ async def _create_runtime_worker_context(
         template_asset_repo=worker_container.flow_template_asset_repo(),
         encryption_service=worker_container.encryption_service(),
         audit_service=audit_service,
-        references_service=worker_container.references_service(),
-        transcriber=worker_container.transcriber(file_service=file_service),
+        references_service=worker_container.references_service(
+            datastore__create_embeddings_service__user=admin_user
+        ),
+        transcriber=worker_container.transcriber(
+            file_service=file_service, user=admin_user
+        ),
         config=FlowRunExecutorConfig(
             max_inline_text_bytes=1024 * 1024,
             http_request_timeout_seconds=2.0,
@@ -2024,3 +2028,84 @@ async def test_failure_launch_denial_writes_no_audit_row(
             .where(AuditLog.entity_id == run_id)
         )
         assert count == 0
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("service_identity", [False, True])
+async def test_task_bootstrap_binds_embedding_identity_for_user_and_service_runs(
+    setup_database,
+    admin_user,
+    test_tenant,
+    completion_model_factory,
+    space_factory,
+    assistant_factory,
+    monkeypatch,
+    service_identity,
+):
+    from eneo.authentication.principal_types import PrincipalType
+    from eneo.database.tables.service_principals_table import ServicePrincipals
+
+    service_id = None
+    async with sessionmanager.session() as session:
+        context = await _create_runtime_worker_context(
+            session=session,
+            admin_user=admin_user,
+            test_tenant=test_tenant,
+            completion_model_factory=completion_model_factory,
+            space_factory=space_factory,
+            assistant_factory=assistant_factory,
+            completion_service=SimpleNamespace(get_response=AsyncMock()),
+        )
+        if service_identity:
+            service_id = uuid4()
+            await session.execute(
+                sa.insert(ServicePrincipals).values(
+                    id=service_id,
+                    tenant_id=test_tenant.id,
+                    display_name="Flow worker",
+                    scope_type="tenant",
+                    state="active",
+                )
+            )
+            await session.execute(
+                sa.update(FlowRuns)
+                .where(FlowRuns.id == context.run_id)
+                .values(
+                    principal_type="service_key",
+                    principal_user_id=None,
+                    principal_service_id=service_id,
+                    runtime_service_permission="write",
+                )
+            )
+        await session.commit()
+
+    async def execute_after_bootstrap(executor, **kwargs):
+        references = executor.references_service
+        assert references is not None
+        embeddings = references.datastore.create_embeddings_service
+        assert embeddings.tenant.id == test_tenant.id
+        if service_identity:
+            assert embeddings.user is None
+        else:
+            assert embeddings.user.id == admin_user.id
+        return {"status": "completed"}
+
+    monkeypatch.setattr(FlowRunExecutor, "execute_claimed", execute_after_bootstrap)
+    try:
+        result = await flow_runtime_tasks._execute_flow_run_async(
+            run_id=context.run_id,
+            flow_id=context.flow_id,
+            tenant_id=context.tenant_id,
+            run_revision=context.run_revision,
+            principal_type=PrincipalType.SERVICE_KEY
+            if service_identity
+            else PrincipalType.USER,
+            principal_user_id=None if service_identity else admin_user.id,
+            principal_service_id=service_id,
+            task_id=None,
+            retry_count=0,
+            invocation_deadline=None,
+        )
+        assert result == {"status": "completed"}
+    finally:
+        await flow_runtime_tasks.execution_heartbeats().stop()

@@ -381,8 +381,12 @@ async def _create_review_pause_runtime_context(
         template_asset_repo=worker_container.flow_template_asset_repo(),
         encryption_service=worker_container.encryption_service(),
         audit_service=audit_service,
-        references_service=worker_container.references_service(),
-        transcriber=worker_container.transcriber(file_service=file_service),
+        references_service=worker_container.references_service(
+            datastore__create_embeddings_service__user=admin_user
+        ),
+        transcriber=worker_container.transcriber(
+            file_service=file_service, user=admin_user
+        ),
         config=FlowRunExecutorConfig(
             max_inline_text_bytes=1024 * 1024,
             http_request_timeout_seconds=2.0,

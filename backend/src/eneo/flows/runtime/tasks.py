@@ -368,9 +368,13 @@ async def _execute_flow_run_async_traced(
                     template_asset_repo=runtime_container.flow_template_asset_repo(),
                     encryption_service=runtime_container.encryption_service(),
                     audit_service=runtime_container.audit_service(),
-                    references_service=runtime_container.references_service(),
+                    references_service=runtime_container.references_service(
+                        datastore__create_embeddings_service__user=run_actor.user
+                    ),
                     transcriber=_build_flow_transcriber(
-                        runtime_container.transcriber(file_service=runtime_file_service)
+                        runtime_container.transcriber(
+                            file_service=runtime_file_service, user=run_actor.user
+                        )
                     ),
                     transcript_words_repo=runtime_container.flow_transcript_words_repo(),
                     config=FlowRunExecutorConfig.from_settings(
