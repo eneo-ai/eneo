@@ -14,6 +14,8 @@ type ToolCallLike = {
   server_name: string;
   purpose?: string | null;
   is_internal?: boolean | null;
+  /** Stamped by the backend for a server built into Eneo (the bundled tool runtime). */
+  is_bundled?: boolean | null;
 };
 
 type CatalogLabels = { title: () => string; description: () => string };
@@ -148,7 +150,19 @@ const CAPABILITY_STEPS: Record<
       return query ? m.tool_web_search_query_done({ query }) : m.tool_web_search_done();
     }
   },
-  image_generation: INTERNAL_SERVERS.image_generation.tools.generate_image
+  image_generation: INTERNAL_SERVERS.image_generation.tools.generate_image,
+  file_analysis: {
+    running: () => m.tool_file_analysis(),
+    done: () => m.tool_file_analysis_done()
+  },
+  charts: {
+    running: () => m.tool_charts(),
+    done: () => m.tool_charts_done()
+  },
+  file_creation: {
+    running: () => m.tool_file_creation(),
+    done: () => m.tool_file_creation_done()
+  }
 };
 
 function capabilityPurpose(purpose: string | null | undefined): CapabilityPurpose | null {
@@ -260,12 +274,16 @@ export function serverDisplayName(
 /**
  * The provider's own name for a capability call served by an external
  * provider ("GDM Safe Search"), shown as the step's detail so the source
- * stays visible; null for Eneo's own servers and general tools.
+ * stays visible; null for Eneo's own servers (loopback or built in), and
+ * for general tools.
  */
 export function capabilityProviderDetail(call: ToolCallLike): string | null {
   if (capabilityPurpose(call.purpose) === null || isInternalToolCall(call)) {
     return null;
   }
+  // A provider built into Eneo is Eneo's own, like the loopback servers: the
+  // step label already says what happened, so no provider is named.
+  if (call.is_bundled) return null;
   return call.server_name;
 }
 

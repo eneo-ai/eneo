@@ -1,9 +1,14 @@
 name: Release SBOM
 
 on:
-  release:
-    types:
-      - published
+  workflow_call:
+    inputs:
+      tag:
+        required: true
+        type: string
+      upload_release_assets:
+        default: true
+        type: boolean
   workflow_dispatch:
     inputs:
       tag:
@@ -17,12 +22,13 @@ on:
         type: boolean
 
 concurrency:
-  group: ${{ github.workflow }}-${{ github.event.release.tag_name || inputs.tag }}
+  group: ${{ github.workflow }}-${{ inputs.tag }}
   cancel-in-progress: false
 
 env:
   BACKEND_IMAGE: ghcr.io/eneo-ai/eneo-backend
   FRONTEND_IMAGE: ghcr.io/eneo-ai/eneo-frontend
+  TOOL_RUNTIME_IMAGE: ghcr.io/eneo-ai/eneo-tool-runtime
   SEAWEEDFS_IMAGE: ghcr.io/eneo-ai/eneo-seaweedfs
   PLATFORM: linux/amd64
   PLATFORM_OS: linux
@@ -50,7 +56,7 @@ jobs:
         id: release
         env:
           EVENT_NAME: ${{ github.event_name }}
-          RELEASE_TAG: ${{ github.event.release.tag_name || inputs.tag }}
+          RELEASE_TAG: ${{ inputs.tag }}
           WORKFLOW_UPLOAD_RELEASE_ASSETS: ${{ inputs.upload_release_assets || false }}
         run: |
           set -euo pipefail
@@ -81,6 +87,22 @@ jobs:
         with:
           ref: ${{ steps.release.outputs.tag }}
           persist-credentials: false
+
+      - name: Download the completed application bundle
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: ${{ steps.release.outputs.tag }}
+        run: |
+          gh release download "$RELEASE_TAG" --pattern release.json --dir completed-bundle
+          gh attestation verify completed-bundle/release.json --repo "$GITHUB_REPOSITORY"
+          python3 - <<'PY'
+          import json, subprocess
+          from scripts.release_bundle import bundle
+          from pathlib import Path
+          recorded = json.loads(Path("completed-bundle/release.json").read_text())
+          assert recorded == bundle(recorded["version"], recorded["revision"], recorded["images"])
+          assert recorded["revision"] == subprocess.check_output(["git", "rev-parse", "HEAD"], text=True).strip()
+          PY
 
       - name: Resolve the bundled store version this release was verified against
         id: seaweedfs
@@ -184,6 +206,9 @@ jobs:
             local platform_os="${5:-$PLATFORM_OS}"
             local platform_arch="${6:-$PLATFORM_ARCH}"
             local image_ref="$image:$image_tag"
+            if [[ "$component" != "seaweedfs" ]]; then
+              image_ref="$(jq -er --arg component "$component" '.images[$component]' completed-bundle/release.json)"
+            fi
             local digest
             local digest_ref
             local asset_prefix
@@ -360,6 +385,8 @@ jobs:
           generate_component_sbom "backend" "$BACKEND_IMAGE"
           generate_backend_python_runtime_sbom "$backend_digest_ref"
           generate_component_sbom "frontend" "$FRONTEND_IMAGE"
+          generate_component_sbom "tool-runtime" "$TOOL_RUNTIME_IMAGE" "$IMAGE_TAG" "linux/amd64" "linux" "amd64"
+          generate_component_sbom "tool-runtime" "$TOOL_RUNTIME_IMAGE" "$IMAGE_TAG" "linux/arm64" "linux" "arm64"
           seaweedfs_tag="$SEAWEEDFS_VERSION"
           generate_component_sbom \
             "seaweedfs" "$SEAWEEDFS_IMAGE" "$seaweedfs_tag" \
@@ -512,8 +539,14 @@ jobs:
             "release-sbom/eneo-seaweedfs-${RELEASE_TAG}-linux-arm64.cyclonedx.json#SeaweedFS linux/arm64 image SBOM - CycloneDX JSON"
             "release-sbom/eneo-seaweedfs-${RELEASE_TAG}-linux-arm64.spdx.json#SeaweedFS linux/arm64 image SBOM - SPDX JSON"
             "release-sbom/eneo-seaweedfs-${RELEASE_TAG}-linux-arm64.table.txt#SeaweedFS linux/arm64 image packages - readable table"
+            "release-sbom/eneo-tool-runtime-${RELEASE_TAG}-linux-amd64.cyclonedx.json#Tool runtime amd64 SBOM - CycloneDX JSON" \
+            "release-sbom/eneo-tool-runtime-${RELEASE_TAG}-linux-amd64.spdx.json#Tool runtime amd64 SBOM - SPDX JSON" \
+            "release-sbom/eneo-tool-runtime-${RELEASE_TAG}-linux-amd64.table.txt#Tool runtime amd64 packages" \
+            "release-sbom/eneo-tool-runtime-${RELEASE_TAG}-linux-arm64.cyclonedx.json#Tool runtime arm64 SBOM - CycloneDX JSON" \
+            "release-sbom/eneo-tool-runtime-${RELEASE_TAG}-linux-arm64.spdx.json#Tool runtime arm64 SBOM - SPDX JSON" \
+            "release-sbom/eneo-tool-runtime-${RELEASE_TAG}-linux-arm64.table.txt#Tool runtime arm64 packages" \
             "release-sbom/IMAGE-DIGESTS.txt#Image digests scanned"
             "release-sbom/SBOM-SHA256SUMS.txt#SBOM file checksums"
           )
 
-          gh release upload "$RELEASE_TAG" "${release_assets[@]}" --repo "$GITHUB_REPOSITORY"
+          gh release upload "$RELEASE_TAG" "${release_assets[@]}" --repo "$GITHUB_REPOSITORY" --clobber

@@ -5,6 +5,20 @@
       "version": "2.3.0",
       "entries": [
         {
+          "id": "bundled-tool-status",
+          "type": "improved",
+          "area": "admin",
+          "audience": "admin",
+          "title": {
+            "en": "Check built-in tool availability",
+            "sv": "Se status för inbyggda verktyg"
+          },
+          "body": {
+            "en": "You can see the tool service status in Admin > Tools, with guidance for connection and version problems. Your operator can install the application and tool service together, while you keep control over which functions are enabled.",
+            "sv": "Under Administration > Verktyg ser du verktygstjänstens status och får hjälp vid anslutnings- och versionsproblem. Driftansvarig kan installera Eneo och verktygstjänsten tillsammans, medan du fortsatt väljer vilka funktioner som ska vara aktiva."
+          }
+        },
+        {
           "id": "sharepoint-document-properties",
           "type": "improved",
           "area": "knowledge",

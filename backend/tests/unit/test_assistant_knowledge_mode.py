@@ -356,4 +356,8 @@ class TestKnowledgeServerCollisionDefense:
             if t["function"]["name"] == f"{prefix}__search_knowledge"
         ]
         assert len(surviving) == 1
-        assert surviving[0]["function"]["description"] == "Built-in knowledge search"
+        from eneo.files.model_file_references import FILE_HANDLE_INSTRUCTION
+
+        assert surviving[0]["function"]["description"] == (
+            FILE_HANDLE_INSTRUCTION + "\n\nBuilt-in knowledge search"
+        )

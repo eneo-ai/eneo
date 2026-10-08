@@ -20,7 +20,7 @@ RUN mkdir source \
     && test "$(sha256sum /tmp/seaweedfs.tar.gz | cut -d ' ' -f 1)" \
         = "2e37f5d8980256e490324e3759d38437ecfee734f60aa3e75528b05f7d19460e" \
     && test "$(sha256sum /tmp/seaweedfs-security.patch | cut -d ' ' -f 1)" \
-        = "61e69dc77847b5dad578b3796ecb00fadc9430cc71247dd114d9987382ff442d" \
+        = "1c1b5669f609c5a26159088bb5530b52d5bbe82206c3c1960f0d7a068e89f8e7" \
     && git -C source apply --check /tmp/seaweedfs-security.patch \
     && git -C source apply /tmp/seaweedfs-security.patch
 
@@ -56,7 +56,7 @@ LABEL org.opencontainers.image.title="Eneo SeaweedFS object-content store" \
       io.eneo.upstream.commit="875cd1f67ea25e8965a4f5ba1e6aaf501ba6b6fa" \
       io.eneo.upstream.tree="f6590c71c41ec414fc193b89e9d9dd586d39ad17" \
       io.eneo.upstream.archive.sha256="2e37f5d8980256e490324e3759d38437ecfee734f60aa3e75528b05f7d19460e" \
-      io.eneo.downstream.patch.sha256="61e69dc77847b5dad578b3796ecb00fadc9430cc71247dd114d9987382ff442d"
+      io.eneo.downstream.patch.sha256="1c1b5669f609c5a26159088bb5530b52d5bbe82206c3c1960f0d7a068e89f8e7"
 
 COPY --from=builder --chown=65532:65532 /out/weed /usr/local/bin/weed
 COPY --from=builder /out/SEAWEEDFS-LICENSE /licenses/seaweedfs/LICENSE

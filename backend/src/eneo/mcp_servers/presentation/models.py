@@ -4,6 +4,7 @@ from uuid import UUID
 from pydantic import AnyHttpUrl, BaseModel, Field, computed_field, model_validator
 
 from eneo.main.models import NOT_PROVIDED, ModelId, NotProvided
+from eneo.mcp_servers.application.runtime_status import RuntimeStatus
 from eneo.mcp_servers.domain.entities.mcp_server import (
     DEFAULT_AUDIENCE_PRIORITY,
     MCP_TOOL_CATALOG_DEFAULT_MAX_BYTES,
@@ -19,7 +20,14 @@ from eneo.security_classifications.presentation.security_classification_models i
 
 T = TypeVar("T", bound=BaseModel)
 
-MCPServerPurpose = Literal["general", "web_search", "image_generation"]
+MCPServerPurpose = Literal[
+    "general",
+    "web_search",
+    "image_generation",
+    "file_analysis",
+    "file_creation",
+    "charts",
+]
 MCPServerAudience = Literal["everyone", "groups"]
 
 
@@ -34,6 +42,8 @@ class MCPServerAudienceGroupPublic(BaseModel):
 # "internal" marks a built-in provider: the endpoint is one of Eneo's own
 # loopback MCP servers, authenticated with a per-request scoped token, and
 # ``image_model_id`` names the catalog image model it calls.
+# A fifth, read-only type, "bundled", marks a server of the bundled tool
+# runtime; only POST /mcp-servers/bundled/{tool}/ creates it.
 MCPServerAuthType = Literal["none", "bearer", "api_key_header", "internal"]
 
 
@@ -62,7 +72,7 @@ class MCPServerPublic(BaseModel):
     name: str
     description: Optional[str]
     http_url: str
-    http_auth_type: str  # "none", "bearer", "api_key_header", "internal"
+    http_auth_type: str  # "none", "bearer", "api_key_header", "internal", "bundled"
     purpose: MCPServerPurpose = "general"
     # Built-in providers only: the image model the loopback tool calls.
     image_model_id: Optional[UUID] = None
@@ -91,6 +101,27 @@ class MCPServerPublic(BaseModel):
 
 class MCPServerList(BaseListModel[MCPServerPublic]):
     pass
+
+
+class BundledToolPublic(BaseModel):
+    """A server the bundled tool runtime offers to this tenant."""
+
+    tool: str
+    # "general", or the capability purpose the server provides.
+    purpose: str
+    # False when the deployment has no tool runtime configured.
+    available: bool
+    # Set once an admin has added it; the server is then managed like any other.
+    mcp_server_id: Optional[UUID] = None
+
+
+class BundledToolList(BaseListModel[BundledToolPublic]):
+    runtime: RuntimeStatus | None = None
+
+
+class BundledServerCreate(BaseModel):
+    # Capability providers only: switch it in as the tenant default right away.
+    activate: bool = False
 
 
 class MCPServerCreate(BaseModel):

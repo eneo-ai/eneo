@@ -18,6 +18,11 @@ tasks:
       - npm run dev
     dir: ./frontend
 
+  tool-runtime:
+    cmds:
+      - bun run dev
+    dir: ./tool-runtime
+
   migrate:
     cmds:
       - uv run alembic upgrade head

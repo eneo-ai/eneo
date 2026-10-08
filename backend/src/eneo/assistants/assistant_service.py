@@ -9,7 +9,7 @@ from uuid import UUID
 
 from eneo.ai_models.completion_models.completion_model import (
     Completion,
-    GeneratedImage,
+    GeneratedFile,
     McpToolReference,
     ModelKwargs,
     ResponseType,
@@ -41,6 +41,7 @@ from eneo.files.file_reference import (
     url_only_file_ids,
 )
 from eneo.files.file_service import FileService, require_requested_files
+from eneo.files.generated_documents import GeneratedDocumentRejected
 from eneo.governance_policy.domain.policy_resolver import (
     select_effective_completion_model,
     select_effective_inline_file_text,
@@ -63,6 +64,7 @@ from eneo.internal_mcp.builtin_tools import with_live_builtin_tools
 from eneo.logging.logging import LoggingDetails
 from eneo.main.exceptions import (
     BadRequestException,
+    FileTooLargeException,
     NotFoundException,
     UnauthorizedException,
 )
@@ -73,6 +75,7 @@ from eneo.main.models import (
     ResourcePermission,
     is_provided,
 )
+from eneo.mcp_servers.application.bundled_tools import with_live_bundled_tools
 from eneo.mcp_servers.application.capability_resolver import (
     general_servers_for_space,
     resolve_capability_servers,
@@ -85,6 +88,7 @@ from eneo.mcp_servers.domain.entities.mcp_server import (
     allowed_capability_purposes,
     duplicate_capability_purposes,
     is_builtin_provider,
+    is_bundled_server,
     is_capability_purpose,
 )
 from eneo.prompts.api.prompt_models import PromptCreate
@@ -405,8 +409,26 @@ class AssistantService:
         authenticated.tools = await with_live_builtin_tools(server)
         return authenticated
 
-    async def _save_generated_image(self, image: "GeneratedImage") -> "File":
-        """Persist a tool-produced image as a generated file."""
+    async def _save_generated_image(self, image: "GeneratedFile") -> "File | None":
+        """Persist a tool-produced image or document as a generated file.
+
+        Returns None for a document the file store refuses (wrong format,
+        active content, too large): the answer continues without it.
+        """
+        if image.filename is not None:
+            # A document or spreadsheet the proxy admitted from a provider of
+            # that purpose; the file store checks its format before keeping it.
+            try:
+                return await self.file_service.save_generated_document(
+                    image.data, name=image.filename, mimetype=image.mime_type
+                )
+            except (GeneratedDocumentRejected, FileTooLargeException) as exc:
+                logger.warning(
+                    "Rejected a generated document from %s: %s",
+                    image.mcp_tool_name,
+                    exc,
+                )
+                return None
         extension = _extension_for_mime(image.mime_type)
         return await self.file_service.save_image_from_bytes(
             image.data,
@@ -2288,6 +2310,8 @@ class AssistantService:
                             and chunk.image is not None
                         ):
                             image_file = await self._save_generated_image(chunk.image)
+                            if image_file is None:
+                                continue
                             generated_files.append(image_file)
                             # The image chunk precedes the tool-call chunk that
                             # references it; the ids are attached to the tool
@@ -2300,6 +2324,11 @@ class AssistantService:
                             yield chunk
 
                         if chunk.response_type == ResponseType.ENEO_EVENT:
+                            yield chunk
+
+                        if chunk.response_type == ResponseType.TOOL_CALL_DELTA:
+                            # Shown while the call is written; the complete
+                            # arguments are persisted from its TOOL_CALL chunk.
                             yield chunk
 
                         if chunk.response_type == ResponseType.TOOL_CALL:
@@ -2359,6 +2388,7 @@ class AssistantService:
                                                 mcp_tool_name=tc.mcp_tool_name,
                                                 purpose=tc.purpose,
                                                 is_internal=tc.is_internal,
+                                                is_bundled=tc.is_bundled,
                                                 meta=tc.meta,
                                             )
                                         )
@@ -2404,6 +2434,7 @@ class AssistantService:
                                                 mcp_tool_name=tc.mcp_tool_name,
                                                 purpose=tc.purpose,
                                                 is_internal=tc.is_internal,
+                                                is_bundled=tc.is_bundled,
                                             )
                                         )
                             yield chunk
@@ -2442,6 +2473,7 @@ class AssistantService:
                                                 mcp_tool_name=tc.mcp_tool_name,
                                                 purpose=tc.purpose,
                                                 is_internal=tc.is_internal,
+                                                is_bundled=tc.is_bundled,
                                             )
                                         )
                             yield chunk
@@ -2572,6 +2604,7 @@ class AssistantService:
                     if not completed and (
                         response_string
                         or reasoning_string
+                        or generated_files
                         or skill_runtime.snapshot().changed
                     ):
                         from eneo.sessions.session_service import (
@@ -2592,6 +2625,9 @@ class AssistantService:
                         skill_provenance, skill_activation = (
                             _final_skill_runtime_state()
                         )
+                        _attach_generated_file_ids(
+                            tool_calls, generated_file_ids_by_call
+                        )
                         schedule_background_save(
                             persist_partial_question_answer(
                                 tenant_id=tenant_id,
@@ -2601,6 +2637,8 @@ class AssistantService:
                                 reasoning=reasoning_string or None,
                                 skill_provenance=skill_provenance,
                                 skill_activation=skill_activation,
+                                generated_files=list(generated_files),
+                                tool_calls=tool_calls or None,
                             )
                         )
                         logger.info(
@@ -2645,6 +2683,7 @@ class AssistantService:
                             mcp_tool_name=tc.mcp_tool_name,
                             purpose=tc.purpose,
                             is_internal=tc.is_internal,
+                            is_bundled=tc.is_bundled,
                             meta=tc.meta,
                         )
                         for tc in non_streaming_tool_metadata
@@ -2652,10 +2691,12 @@ class AssistantService:
                     final_reasoning = getattr(answer, "reasoning_content", None)
                     generated_file_ids_by_call: dict[str, list[UUID]] = {}
                     for image in cast(
-                        list[GeneratedImage],
+                        list[GeneratedFile],
                         getattr(answer, "generated_images", None) or [],
                     ):
                         image_file = await self._save_generated_image(image)
+                        if image_file is None:
+                            continue
                         generated_files.append(image_file)
                         if image.tool_call_id:
                             generated_file_ids_by_call.setdefault(
@@ -3316,6 +3357,20 @@ class AssistantService:
                 else "no knowledge"
             ),
         )
+
+        # Servers built into Eneo expose the running runtime's tool catalog,
+        # not the snapshot the admin last synced; the admin's per-tool
+        # decisions are kept. Other servers pass through untouched.
+        if any(
+            is_bundled_server(getattr(server, "http_auth_type", None))
+            for server in mcp_servers_override
+        ):
+            mcp_servers_override = [
+                await with_live_bundled_tools(server) for server in mcp_servers_override
+            ]
+        capability_mcp_servers = [
+            await with_live_bundled_tools(server) for server in capability_mcp_servers
+        ]
 
         try:
             response, datastore_result = await assistant_to_ask.ask(

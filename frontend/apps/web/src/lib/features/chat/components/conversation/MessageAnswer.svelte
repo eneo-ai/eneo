@@ -21,6 +21,7 @@
   import { getAttachmentUrlService } from "$lib/features/attachments/AttachmentUrlService.svelte";
   import { getMessageContext } from "../../MessageContext.svelte";
   import AsyncImage from "$lib/components/AsyncImage.svelte";
+  import GeneratedFileChip from "./GeneratedFileChip.svelte";
   import { m } from "$lib/paraglide/messages";
   import { ChevronRight, Check, X, Wrench } from "@lucide/svelte";
   import { SvelteMap, SvelteSet } from "svelte/reactivity";
@@ -54,6 +55,7 @@
           result_status?: string;
           purpose?: string | null;
           is_internal?: boolean | null;
+          is_bundled?: boolean | null;
         }>
       | undefined
   );
@@ -536,6 +538,11 @@
 <McpImageAttachments />
 
 {#each message.generated_files as file (file.id)}
-  {@const url = attachmentUrls.getUrl(file) ?? null}
-  <AsyncImage {url}></AsyncImage>
+  <!-- An empty mimetype is the placeholder of an image still being generated. -->
+  {#if !file.mimetype || file.mimetype.startsWith("image/")}
+    <AsyncImage url={attachmentUrls.getUrl(file) ?? null}></AsyncImage>
+  {:else}
+    <!-- Documents download their exact bytes, never the extracted text. -->
+    <GeneratedFileChip {file} url={attachmentUrls.getOriginalUrl(file) ?? null} />
+  {/if}
 {/each}

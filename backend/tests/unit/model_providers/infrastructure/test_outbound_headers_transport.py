@@ -337,6 +337,12 @@ class _FakeMCPProxy:
     def is_internal_tool(self, prefixed_tool_name: str) -> bool:
         return False
 
+    def is_bundled_tool(self, prefixed_tool_name: str) -> bool:
+        return False
+
+    def model_result_text(self, text: str) -> str:
+        return text
+
     def get_tools_for_llm(self) -> list[dict[str, Any]]:
         return []
 

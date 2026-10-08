@@ -82,7 +82,7 @@ services:
       - "traefik.http.middlewares.redirect-to-https.redirectscheme.permanent=true"
 
   frontend:
-    image: ghcr.io/eneo-ai/eneo-frontend:latest
+    image: ${ENEO_FRONTEND_IMAGE:-ghcr.io/eneo-ai/eneo-frontend:${ENEO_VERSION:?Select one Eneo release or use release.env}}
     container_name: eneo_frontend
     restart: unless-stopped
     env_file:
@@ -105,10 +105,13 @@ services:
       - backend
 
   backend:
-    image: ghcr.io/eneo-ai/eneo-backend:latest
+    image: ${ENEO_BACKEND_IMAGE:-ghcr.io/eneo-ai/eneo-backend:${ENEO_VERSION:?Select one Eneo release or use release.env}}
     container_name: eneo_backend
     restart: unless-stopped
     environment:
+      - TOOL_RUNTIME_URL=${TOOL_RUNTIME_URL:-http://tool-runtime:3010}
+      - TOOL_RUNTIME_TOKEN=${TOOL_RUNTIME_TOKEN:-}
+      - FILE_REFERENCE_BASE_URL=${FILE_REFERENCE_BASE_URL:-http://backend:8000}
       # List form passes these through only when the deployment .env defines
       # them. With every value absent, Eneo runs the PostgreSQL-inline backend.
       - OBJECT_CONTENT_ENDPOINT_URL
@@ -125,6 +128,7 @@ services:
       - eneo_backend_data:/app/data
       - eneo_temp_files:/tmp  # Also used for audit log exports (/tmp/exports)
     networks:
+      - tool_runtime_net
       - proxy_tier
       - data_net
       - module_net
@@ -161,11 +165,14 @@ services:
     # General background task processor (uploads, integrations, and control jobs)
     # Uses same image as backend but runs ARQ worker instead of HTTP server
     # The RUN_AS_WORKER env var tells run.sh to start ARQ instead of Gunicorn
-    image: ghcr.io/eneo-ai/eneo-backend:latest
+    image: ${ENEO_BACKEND_IMAGE:-ghcr.io/eneo-ai/eneo-backend:${ENEO_VERSION:?Select one Eneo release or use release.env}}
     container_name: eneo_worker
     init: true
     restart: unless-stopped
     environment:
+      - TOOL_RUNTIME_URL=${TOOL_RUNTIME_URL:-http://tool-runtime:3010}
+      - TOOL_RUNTIME_TOKEN=${TOOL_RUNTIME_TOKEN:-}
+      - FILE_REFERENCE_BASE_URL=${FILE_REFERENCE_BASE_URL:-http://backend:8000}
       - RUN_AS_WORKER=true  # Runs today's ARQ adapter; task logic is queue-neutral
       - WORKER_ROLE=general
       - OBJECT_CONTENT_ENDPOINT_URL
@@ -182,6 +189,7 @@ services:
       - eneo_backend_data:/app/data
       - eneo_temp_files:/tmp  # Shared with backend for audit log exports (/tmp/exports)
     networks:
+      - tool_runtime_net
       - proxy_tier
       - data_net
     depends_on:
@@ -189,7 +197,7 @@ services:
 
   crawler-worker:
     # Dedicated consumer for long-running website crawls on arq:crawler.
-    image: ghcr.io/eneo-ai/eneo-backend:latest
+    image: ${ENEO_BACKEND_IMAGE:-ghcr.io/eneo-ai/eneo-backend:${ENEO_VERSION:?Select one Eneo release or use release.env}}
     init: true
     restart: unless-stopped
     stop_grace_period: 70s
@@ -266,7 +274,7 @@ services:
   db-init:
     # Runs database migrations and creates default tenant/user on first startup
     # Only runs once - exits after completion (restart: "no")
-    image: ghcr.io/eneo-ai/eneo-backend:latest
+    image: ${ENEO_BACKEND_IMAGE:-ghcr.io/eneo-ai/eneo-backend:${ENEO_VERSION:?Select one Eneo release or use release.env}}
     container_name: eneo_db_init
     command: ["python", "init_db.py"]
     environment:
@@ -282,7 +290,51 @@ services:
         condition: service_healthy
     restart: "no"
 
+  tool-runtime:
+    image: ${ENEO_TOOL_RUNTIME_IMAGE:-ghcr.io/eneo-ai/eneo-tool-runtime:${ENEO_VERSION:?Select one Eneo release or use release.env}}
+    restart: unless-stopped
+    environment:
+      TOOL_RUNTIME_TOKEN: ${TOOL_RUNTIME_TOKEN:-}
+      MAX_QUEUE: ${TOOL_RUNTIME_MAX_QUEUE:-32}
+      MAX_QUEUE_PER_GROUP: ${TOOL_RUNTIME_MAX_QUEUE_PER_GROUP:-8}
+      TABULAR_CACHE_MB: ${TOOL_RUNTIME_TABULAR_CACHE_MB:-256}
+      MAX_CONCURRENCY: ${TOOL_RUNTIME_MAX_CONCURRENCY:-16}
+      # File analysis fetches attachments from the origin Eneo sends with
+      # each call (its FILE_REFERENCE_BASE_URL). Optionally pin it here as
+      # well; a mismatch then fails the call instead of fetching.
+      TOOL_RUNTIME_FILE_ORIGINS: ${TOOL_RUNTIME_FILE_ORIGINS:-${FILE_REFERENCE_BASE_URL:-http://backend:8000}}
+      TABULAR_CONCURRENCY: ${TOOL_RUNTIME_TABULAR_CONCURRENCY:-2}
+      # How long parsed sheets (plaintext) stay in /tmp for follow-up
+      # questions. Lower it, down to 60, where files are sensitive.
+      TABULAR_CACHE_TTL_SECONDS: ${TOOL_RUNTIME_TABULAR_CACHE_TTL_SECONDS:-1800}
+      # Each job runs confined with Landlock where the host kernel offers it
+      # (Linux 5.13 or later). Set true to refuse to start, and to run any
+      # job, on a host that cannot confine them.
+      TOOL_RUNTIME_REQUIRE_CONFINEMENT: ${TOOL_RUNTIME_REQUIRE_CONFINEMENT:-false}
+      # Name shown in the footer of generated documents.
+      DOCUMENT_ORGANISATION_NAME: ${TOOL_RUNTIME_DOCUMENT_ORGANISATION_NAME:-}
+    # The parent can reach Eneo for signed downloads; children have no network.
+    # This network gives the runtime no internet, database, or Redis route.
+    networks:
+      - tool_runtime_net
+    expose:
+      - "3010"
+    read_only: true
+    # Job scratch space plus the parsed-sheet cache (256 MiB by default).
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,nodev,size=512m
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    pids_limit: 256
+    mem_limit: 2g
+    cpus: 2
+
 networks:
+  tool_runtime_net:
+    driver: bridge
+    internal: true
   proxy_tier:
     external: true
   data_net:

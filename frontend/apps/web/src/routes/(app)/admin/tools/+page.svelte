@@ -1,4 +1,6 @@
 <script lang="ts">
+  import RuntimeStatus from "$lib/features/mcp/RuntimeStatus.svelte";
+  import type { RuntimeDiagnostics } from "$lib/features/mcp/runtimeStatus";
   import { Page } from "$lib/components/layout";
   import { Button } from "$lib/components/ui/button/index.js";
   import * as DropdownMenu from "$lib/components/ui/dropdown-menu/index.js";
@@ -9,7 +11,11 @@
   import { writable } from "svelte/store";
   import { untrack } from "svelte";
   import {
+    ChevronDown,
+    Package,
     Plus,
+    Server,
+    ShieldCheck,
     Wrench,
     CircleCheck,
     CircleDashed,
@@ -22,6 +28,7 @@
   } from "@lucide/svelte";
   import { m } from "$lib/paraglide/messages";
   import { CAPABILITIES } from "$lib/features/mcp/capabilities";
+  import { BUNDLED_SERVERS, bundledIdentity, bundledServerLabel } from "$lib/features/mcp/bundled";
   import { readinessMessage } from "$lib/features/mcp/readiness";
   import { getErrorMessage } from "$lib/core/errors/getErrorMessage";
   import { setSecurityContext } from "$lib/features/security-classifications/SecurityContext";
@@ -46,8 +53,23 @@
   let busy = $state<string | null>(null);
   let error = $state("");
   let notice = $state("");
+  // The capability card a notice or error belongs to; null shows it at the top of the tab.
+  let messagePurpose = $state<string | null>(null);
   let reviewing = $state<string | null>(null);
   const servers = $derived(data.mcpSettings.items ?? []);
+  // Servers built into Eneo (the bundled tool runtime) that this tenant has not added yet:
+  // general ones on the MCP servers tab, capability providers on their capability card. A
+  // capability card also shows a provider the deployment has not enabled, so admins learn it
+  // exists; a general server that is not enabled is simply not offered.
+  const bundledToAdd = $derived((data.bundled.items ?? []).filter((tool) => !tool.mcp_server_id));
+  const bundledServersToAdd = $derived(
+    bundledToAdd.filter((tool) => tool.available && tool.purpose === "general")
+  );
+  const bundledProviderFor = (purpose: string) =>
+    bundledToAdd.find((tool) => tool.purpose === purpose);
+  const DEPLOYMENT_GUIDE_URL =
+    "https://docs.eneo.ai/docs/builtin-tool-servers#bundled-isolated-providers";
+  let addingBundled = $state(false);
   let showFunctionServers = $state(false);
   const external = $derived(
     servers.filter(
@@ -61,6 +83,7 @@
     purpose = selectedPurpose;
     editing = provider;
     error = "";
+    messagePurpose = null;
     open.set(true);
   }
 
@@ -84,6 +107,37 @@
     await refresh();
   }
 
+  /**
+   * Adds a server built into Eneo. A capability provider (`capability` given) is activated
+   * as the tenant default when `activate` is set and the message lands on its card; a general
+   * server is enabled per space afterwards, like any other.
+   */
+  async function addBundled(
+    tool: string,
+    activate = false,
+    capability: { purpose: string; label: () => string } | null = null
+  ) {
+    addingBundled = true;
+    error = "";
+    notice = "";
+    messagePurpose = capability?.purpose ?? null;
+    const name = capability ? m.mcp_auth_bundled() : bundledServerLabel(tool);
+    try {
+      await data.eneo.mcpServers.createBundled({ tool, activate });
+      if (!capability) notice = m.tools_bundled_added({ name });
+      else if (activate)
+        notice = m.tools_builtin_turned_on({
+          capability: capability.label().toLocaleLowerCase()
+        });
+      else notice = m.tools_saved_inactive();
+      await refresh();
+    } catch (e) {
+      error = getErrorMessage(e) || m.tools_bundled_add_failed({ name });
+    } finally {
+      addingBundled = false;
+    }
+  }
+
   async function remove(id: string) {
     await data.eneo.mcpServers.delete({ id });
     await refresh();
@@ -92,6 +146,7 @@
   async function toggle(provider: Provider) {
     busy = provider.mcp_server_id;
     error = "";
+    messagePurpose = null;
     try {
       if (provider.is_enabled)
         await data.eneo.mcpServers.deactivate({ id: provider.mcp_server_id });
@@ -105,6 +160,11 @@
   }
 </script>
 
+{#snippet messages()}
+  {#if error}<p class="text-negative-default text-sm" role="alert">{error}</p>{/if}
+  {#if notice}<p class="text-secondary text-sm" role="status">{notice}</p>{/if}
+{/snippet}
+
 <svelte:head><title>Eneo.ai – {m.admin()} – {m.tools()}</title></svelte:head>
 <Page.Root {tabController}>
   <Page.Header>
@@ -115,17 +175,18 @@
     </Page.Tabbar>
   </Page.Header>
   <Page.Main>
+    <RuntimeStatus status={(data.bundled as { runtime?: RuntimeDiagnostics }).runtime} />
     <Page.Tab id="functions">
       <div class="py-6 pr-6">
         <div class="mx-auto flex w-full max-w-5xl flex-col gap-6">
           <p class="text-secondary max-w-[72ch] text-sm">{m.tools_functions_description()}</p>
-          {#if error}<p class="text-negative-default" role="alert">{error}</p>{/if}
-          {#if notice}<p class="text-secondary text-sm" role="status">{notice}</p>{/if}
+          {#if messagePurpose === null}{@render messages()}{/if}
           {#each CAPABILITIES as capability (capability.purpose)}
             {@const sources = servers
               .filter((s) => s.purpose === capability.purpose)
               .sort((a, b) => Number(a.audience === "groups") - Number(b.audience === "groups"))}
             {@const active = sources.find((s) => s.is_enabled && s.audience === "everyone")}
+            {@const bundled = bundledProviderFor(capability.purpose)}
             <section
               class="border-default rounded-xl border"
               aria-labelledby={"capability-" + capability.purpose}
@@ -144,14 +205,134 @@
                       </p>{/if}
                   </div>
                 </div>
-                <Button size="sm" onclick={() => configure(capability.purpose)}>
-                  <Plus class="size-4" />{sources.length
-                    ? m.tools_add_source()
-                    : m.capability_configure({
-                        capability: capability.label().toLocaleLowerCase()
-                      })}
-                </Button>
+                <div class="flex flex-wrap items-center gap-2">
+                  {#if bundled && sources.length === 0}
+                    <!-- The offer below carries both ways to add a first source. -->
+                  {:else if bundled?.available}
+                    <!-- Two kinds of source: the one built into Eneo, or an external server. -->
+                    <DropdownMenu.Root>
+                      <DropdownMenu.Trigger>
+                        {#snippet child({ props })}
+                          <Button {...props} size="sm" disabled={addingBundled}>
+                            <Plus class="size-4" />{m.tools_add_source()}<ChevronDown
+                              class="size-4"
+                            />
+                          </Button>
+                        {/snippet}
+                      </DropdownMenu.Trigger>
+                      <DropdownMenu.Content align="end" class="w-80">
+                        <DropdownMenu.Item
+                          class="items-start py-2 whitespace-normal"
+                          onSelect={() => addBundled(bundled.tool, !active, capability)}
+                        >
+                          <ShieldCheck class="text-accent-default mt-0.5" aria-hidden="true" />
+                          <span class="flex min-w-0 flex-col gap-0.5">
+                            <span class="flex items-center gap-2">
+                              <span class="font-medium">{m.mcp_auth_bundled()}</span>
+                              <span
+                                class="bg-accent-dimmer text-accent-stronger rounded px-2 py-0.5 text-xs font-medium"
+                              >
+                                {m.tools_builtin_recommended()}
+                              </span>
+                            </span>
+                            <span class="text-secondary text-xs leading-relaxed">
+                              {m.tools_builtin_menu_description()}
+                            </span>
+                          </span>
+                        </DropdownMenu.Item>
+                        <DropdownMenu.Item
+                          class="items-start py-2 whitespace-normal"
+                          onSelect={() => configure(capability.purpose)}
+                        >
+                          <Server class="text-accent-default mt-0.5" aria-hidden="true" />
+                          <span class="flex min-w-0 flex-col gap-0.5">
+                            <span class="font-medium">{m.tools_source_external()}</span>
+                            <span class="text-secondary text-xs leading-relaxed">
+                              {m.tools_external_menu_description()}
+                            </span>
+                          </span>
+                        </DropdownMenu.Item>
+                      </DropdownMenu.Content>
+                    </DropdownMenu.Root>
+                  {:else}
+                    <Button size="sm" onclick={() => configure(capability.purpose)}>
+                      <Plus class="size-4" />{sources.length
+                        ? m.tools_add_source()
+                        : m.capability_configure({
+                            capability: capability.label().toLocaleLowerCase()
+                          })}
+                    </Button>
+                  {/if}
+                </div>
               </header>
+              {#if messagePurpose === capability.purpose && (error || notice)}
+                <div class="border-dimmer border-b p-5">{@render messages()}</div>
+              {/if}
+              {#if bundled && sources.length === 0}
+                <!-- First source: the provider built into Eneo, offered ahead of the external form. -->
+                <div class="flex flex-col gap-3 p-5">
+                  <div class="bg-secondary flex flex-wrap items-center gap-4 rounded-lg p-4">
+                    <span
+                      class="flex size-10 shrink-0 items-center justify-center rounded-lg {bundled.available
+                        ? 'bg-accent-dimmer text-accent-stronger'
+                        : 'bg-primary text-secondary'}"
+                    >
+                      <ShieldCheck class="size-5" aria-hidden="true" />
+                    </span>
+                    <div class="flex min-w-0 flex-1 flex-col gap-1">
+                      <div class="flex flex-wrap items-center gap-2">
+                        <span class="text-default text-sm font-semibold"
+                          >{m.mcp_auth_bundled()}</span
+                        >
+                        {#if bundled.available}
+                          <span
+                            class="bg-accent-dimmer text-accent-stronger rounded px-2 py-0.5 text-xs font-medium"
+                          >
+                            {m.tools_builtin_recommended()}
+                          </span>
+                        {:else}
+                          <span
+                            class="bg-primary text-secondary rounded px-2 py-0.5 text-xs font-medium"
+                          >
+                            {m.tools_builtin_unavailable()}
+                          </span>
+                        {/if}
+                      </div>
+                      <p class="text-secondary max-w-[62ch] text-sm">
+                        {#if bundled.available}
+                          {capability.bundledDescription?.() ?? m.tools_builtin_menu_description()}
+                        {:else}
+                          {m.tools_builtin_unavailable_hint()}
+                          <a
+                            href={DEPLOYMENT_GUIDE_URL}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            class="text-default font-medium underline underline-offset-2"
+                          >
+                            {m.tools_builtin_deployment_guide()}
+                          </a>
+                        {/if}
+                      </p>
+                    </div>
+                    <Button
+                      disabled={addingBundled || !bundled.available}
+                      onclick={() => addBundled(bundled.tool, true, capability)}
+                    >
+                      {m.tools_builtin_turn_on()}
+                    </Button>
+                  </div>
+                  <p class="text-secondary text-sm">
+                    {m.tools_prefer_own_service()}
+                    <button
+                      type="button"
+                      class="text-default font-medium underline underline-offset-2"
+                      onclick={() => configure(capability.purpose)}
+                    >
+                      {m.tools_connect_external()}
+                    </button>
+                  </p>
+                </div>
+              {/if}
               {#each sources as source (source.mcp_server_id)}
                 {@const expanded = reviewing === source.mcp_server_id}
                 <div class="border-dimmer border-b p-5 last:border-b-0">
@@ -175,7 +356,14 @@
                     </Button>
                     <div class="min-w-0">
                       <div class="flex flex-wrap items-center gap-2">
-                        <h3 class="text-default text-sm font-medium">{source.name}</h3>
+                        <h3 class="text-default text-sm font-medium">
+                          {bundledIdentity(source)?.name ?? source.name}
+                        </h3>
+                        {#if source.http_auth_type === "bundled"}
+                          <span class="text-secondary bg-secondary rounded px-2 py-0.5 text-xs">
+                            {m.mcp_auth_bundled()}
+                          </span>
+                        {/if}
                         {#if source.audience === "groups"}
                           <span class="text-secondary bg-secondary rounded px-2 py-0.5 text-xs">
                             {m.tools_group_override()}
@@ -189,6 +377,10 @@
                             m.tools_readiness_model_missing()}
                           {#if source.image_model?.provider_name}
                             · {source.image_model.provider_name}{/if}
+                        {:else if source.http_auth_type === "bundled"}
+                          <!-- The runtime address is deployment plumbing; say what the provider does. -->
+                          {bundledIdentity(source)?.description ||
+                            m.tools_builtin_menu_description()}
                         {:else}{m.tools_source_external()} · {source.http_url}{/if}
                       </p>
                       {#if source.audience === "groups"}
@@ -291,6 +483,22 @@
                   {/if}
                 </div>
               {/each}
+              {#if capability.guide && sources.length > 0}
+                <!-- Usage guidance lives here and in the docs, not in assistant settings. -->
+                <p class="border-dimmer text-secondary border-t p-5 text-sm">
+                  {capability.guide.hint()}
+                  <!-- eslint-disable svelte/no-navigation-without-resolve -- external docs link -->
+                  <a
+                    href={capability.guide.url}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    class="text-default font-medium underline underline-offset-2"
+                  >
+                    {capability.guide.label()}
+                  </a>
+                  <!-- eslint-enable svelte/no-navigation-without-resolve -->
+                </p>
+              {/if}
             </section>
           {/each}
         </div>
@@ -299,6 +507,7 @@
     <Page.Tab id="mcp-servers">
       <div class="py-6 pr-6">
         <p class="text-secondary mb-4 max-w-[72ch] text-sm">{m.tools_connections_description()}</p>
+        {#if messagePurpose === null}<div class="mb-4">{@render messages()}</div>{/if}
         <MCPServersTable mcpServers={external}>
           {#snippet filters()}
             <Field.Field orientation="horizontal" class="w-auto gap-4">
@@ -309,9 +518,58 @@
             </Field.Field>
           {/snippet}
           {#snippet actions()}
-            <Button size="sm" onclick={() => configure("general")}
-              ><Wrench class="size-4" />{m.add_mcp_server()}</Button
-            >
+            {#if bundledServersToAdd.length}
+              <!-- One entry point: the servers built into Eneo first, then an external one. -->
+              <DropdownMenu.Root>
+                <DropdownMenu.Trigger>
+                  {#snippet child({ props })}
+                    <Button {...props} size="sm" disabled={addingBundled}>
+                      <Wrench class="size-4" />{m.add_mcp_server()}<ChevronDown class="size-4" />
+                    </Button>
+                  {/snippet}
+                </DropdownMenu.Trigger>
+                <DropdownMenu.Content align="end" class="w-80">
+                  <DropdownMenu.Label class="text-secondary text-xs font-medium">
+                    {m.mcp_auth_bundled()}
+                  </DropdownMenu.Label>
+                  {#each bundledServersToAdd as bundled (bundled.tool)}
+                    {@const server = BUNDLED_SERVERS[bundled.tool]}
+                    {@const Icon = server?.icon ?? Package}
+                    <DropdownMenu.Item
+                      class="items-start py-2 whitespace-normal"
+                      onSelect={() => addBundled(bundled.tool)}
+                    >
+                      <Icon class="text-accent-default mt-0.5" aria-hidden="true" />
+                      <span class="flex min-w-0 flex-col gap-0.5">
+                        <span class="font-medium">{bundledServerLabel(bundled.tool)}</span>
+                        {#if server}
+                          <span class="text-secondary text-xs leading-relaxed">
+                            {server.description()}
+                          </span>
+                        {/if}
+                      </span>
+                    </DropdownMenu.Item>
+                  {/each}
+                  <DropdownMenu.Separator />
+                  <DropdownMenu.Item
+                    class="items-start py-2 whitespace-normal"
+                    onSelect={() => configure("general")}
+                  >
+                    <Server class="text-accent-default mt-0.5" aria-hidden="true" />
+                    <span class="flex min-w-0 flex-col gap-0.5">
+                      <span class="font-medium">{m.tools_source_external()}</span>
+                      <span class="text-secondary text-xs leading-relaxed">
+                        {m.tools_external_menu_description()}
+                      </span>
+                    </span>
+                  </DropdownMenu.Item>
+                </DropdownMenu.Content>
+              </DropdownMenu.Root>
+            {:else}
+              <Button size="sm" onclick={() => configure("general")}
+                ><Wrench class="size-4" />{m.add_mcp_server()}</Button
+              >
+            {/if}
           {/snippet}
         </MCPServersTable>
       </div>

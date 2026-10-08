@@ -9,7 +9,10 @@ from uuid import uuid4
 import httpx
 import pytest
 
-from eneo.ai_models.completion_models.completion_model import ResponseType
+from eneo.ai_models.completion_models.completion_model import (
+    GeneratedFile,
+    ResponseType,
+)
 from eneo.completion_models.infrastructure.adapters.tenant_model_adapter import (
     MCP_IMAGE_PLACEHOLDER_TEMPLATE,
     PROVIDER_UNAVAILABLE_CODE,
@@ -18,8 +21,10 @@ from eneo.completion_models.infrastructure.adapters.tenant_model_adapter import 
     PreparedModelStream,
     TenantModelAdapter,
     _build_tool_result_with_references,
+    _GeneratedFileChunks,
     _ToolResultBudget,
 )
+from eneo.files.model_file_references import file_handle
 from eneo.main.exceptions import OpenAIException
 from eneo.mcp_servers.infrastructure.tool_approval import (
     ToolApprovalDecision,
@@ -110,6 +115,9 @@ def _response_tool_call(tool_call_id: str, arguments: str):
 
 
 class _FakeMCPProxy:
+    def model_result_text(self, text):
+        return text
+
     def __init__(self):
         self.calls = []
 
@@ -120,6 +128,10 @@ class _FakeMCPProxy:
         return ("Server", "tool", "Tool title")
 
     def is_internal_tool(self, prefixed_tool_name: str) -> bool:
+        del prefixed_tool_name
+        return False
+
+    def is_bundled_tool(self, prefixed_tool_name: str) -> bool:
         del prefixed_tool_name
         return False
 
@@ -166,11 +178,19 @@ class _InternalMCPProxy(_FakeMCPProxy):
     def is_internal_tool(self, prefixed_tool_name: str) -> bool:
         return prefixed_tool_name == "knowledge__search_knowledge"
 
+    def is_bundled_tool(self, prefixed_tool_name: str) -> bool:
+        del prefixed_tool_name
+        return False
+
 
 class _ExternalServerNamedKnowledgeProxy(_InternalMCPProxy):
     """An admin-registered server whose name collides with the internal one."""
 
     def is_internal_tool(self, prefixed_tool_name: str) -> bool:
+        del prefixed_tool_name
+        return False
+
+    def is_bundled_tool(self, prefixed_tool_name: str) -> bool:
         del prefixed_tool_name
         return False
 
@@ -186,6 +206,10 @@ class _MixedMCPProxy(_FakeMCPProxy):
 
     def is_internal_tool(self, prefixed_tool_name: str) -> bool:
         return prefixed_tool_name == "knowledge__search_knowledge"
+
+    def is_bundled_tool(self, prefixed_tool_name: str) -> bool:
+        del prefixed_tool_name
+        return False
 
 
 def _make_adapter() -> TenantModelAdapter:
@@ -295,6 +319,62 @@ def test_build_tool_result_with_references_turns_image_blocks_into_generated_ima
     assert llm_text == expected
     assert display_text == expected
     assert encoded not in llm_text
+
+
+def test_build_tool_result_with_references_turns_file_blocks_into_generated_files():
+    pdf = b"%PDF-1.7 report"
+    encoded = base64.b64encode(pdf).decode("ascii")
+    llm_text, _, refs, files = _build_tool_result_with_references(
+        content_list=[
+            {"type": "text", "text": "Done."},
+            {
+                "type": "image",
+                "data": base64.b64encode(b"png").decode(),
+                "mime_type": "image/png",
+            },
+            {
+                "type": "file",
+                "data": encoded,
+                "mime_type": "application/pdf",
+                "filename": "report.pdf",
+            },
+        ],
+        tool_call_id="call_doc",
+        mcp_tool_name="documents__create_document",
+        existing_prefixes=set(),
+    )
+
+    assert refs == []
+    assert [(f.filename, f.mime_type) for f in files] == [
+        (None, "image/png"),
+        ("report.pdf", "application/pdf"),
+    ]
+    assert files[1].data == pdf
+    # Images and files are numbered separately; bytes never reach the model.
+    assert "[Image 1 (image/png)" in llm_text
+    assert "[File 1 (report.pdf) was created" in llm_text
+    assert encoded not in llm_text
+
+
+def test_saved_files_give_the_model_same_turn_handles_without_credentials():
+    csv = GeneratedFile(data=b"a\n1\n", mime_type="text/csv", filename="result.csv")
+    png = GeneratedFile(data=b"png", mime_type="image/png")
+    unsaved = GeneratedFile(data=b"x", mime_type="text/csv", filename="late.csv")
+    generated = _GeneratedFileChunks([csv, png, unsaved])
+    # The ask path saves each file and the service sets its reference URL.
+    generated.chunks[0].reference_url = "https://x/csv"
+    generated.chunks[1].reference_url = "https://x/png"
+    first, second = uuid4(), uuid4()
+    generated.chunks[0].generated_file = SimpleNamespace(id=first)
+    generated.chunks[1].generated_file = SimpleNamespace(id=second)
+
+    text = generated.append_references("[File 1 (result.csv) was created]")
+
+    assert text == (
+        "[File 1 (result.csv) was created]\n"
+        f"File reference for File 1: {file_handle(first)}\n"
+        f"File reference for Image 1: {file_handle(second)}"
+    )
 
 
 def test_build_tool_result_with_references_skips_undecodable_image_blocks():
@@ -805,6 +885,65 @@ async def test_iterate_stream_emits_pending_event_before_arguments_complete():
     statuses = [e.tool_calls_metadata[0].result_status for e in tool_events]
     assert statuses[0] == "pending"
     assert "succeeded" in statuses
+
+
+async def test_iterate_stream_forwards_the_arguments_of_a_pending_call_in_pieces():
+    """A client shows a document while its call is still being written: the
+    argument text follows the pending event in pieces that add up to the
+    whole, and the signed token of a reference link is never among them."""
+    adapter = _make_adapter()
+    mcp_proxy = _FakeMCPProxy()
+    follow_up_stream = _AsyncChunkStream([_text_chunk("done", finish_reason="stop")])
+    mocked_acompletion = AsyncMock(return_value=follow_up_stream)
+    link = (
+        "https://eneo.test/api/v1/files/11111111-2222-3333-4444-555555555555"
+        "/original/download/?token="
+    )
+
+    stream = _AsyncChunkStream(
+        [
+            _tool_call_delta_chunk(tool_call_id="call_1", tool_name="server__tool"),
+            _tool_call_delta_chunk(arguments='{"content":"' + "x" * 40),
+            _tool_call_delta_chunk(arguments='","revises":{"url":"' + link + "sec"),
+            _tool_call_delta_chunk(
+                arguments='ret.sig","filename":"plan.md"}}',
+                finish_reason="tool_calls",
+            ),
+        ],
+        eneo_context={
+            "mcp_proxy": mcp_proxy,
+            "messages": [],
+            "kwargs": {},
+            "has_tools": True,
+        },
+    )
+
+    with patch(
+        "eneo.completion_models.infrastructure.adapters.tenant_model_adapter._acompletion_call",
+        mocked_acompletion,
+    ):
+        completions = await _collect(
+            adapter,
+            stream,
+            require_tool_approval=False,
+            approval_manager=None,
+            approval_context=None,
+            pending_approval_ids=set(),
+        )
+
+    deltas = [c for c in completions if c.response_type == ResponseType.TOOL_CALL_DELTA]
+    assert len(deltas) > 1
+    assert {d.tool_call_id for d in deltas} == {"call_1"}
+    assert "".join(d.arguments_delta for d in deltas) == (
+        '{"content":"' + "x" * 40 + '","revises":{"url":"' + link + "REDACTED"
+        '","filename":"plan.md"}}'
+    )
+    first_tool_event = next(
+        i
+        for i, c in enumerate(completions)
+        if c.response_type == ResponseType.TOOL_CALL
+    )
+    assert completions.index(deltas[0]) > first_tool_event
 
 
 @pytest.mark.asyncio
@@ -1555,3 +1694,73 @@ async def test_forced_final_drops_ignored_tool_calls_without_pending_events():
     # Text streamed by the final response is preserved and the turn stops.
     assert "partial answer" in "".join(c.text for c in completions if c.text)
     assert any(c.stop for c in completions)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("streaming", [False, True])
+async def test_provider_file_echo_is_converted_before_next_model_request(streaming):
+    from eneo.files.model_file_references import model_file_references
+
+    file_id = uuid4()
+    url = f"https://eneo.example/api/v1/files/{file_id}/original/download/?token=synthetic-secret"
+
+    class EchoProxy(_FakeMCPProxy):
+        def model_result_text(self, text):
+            return model_file_references(text, {file_id: url})
+
+        async def call_tools_parallel(self, calls):
+            return [
+                {"content": [{"type": "text", "text": url}], "is_error": False}
+                for _ in calls
+            ]
+
+    proxy = EchoProxy()
+    if streaming:
+        adapter = _make_adapter()
+        messages = []
+        stream = _AsyncChunkStream(
+            [_tool_call_chunk()],
+            eneo_context={
+                "mcp_proxy": proxy,
+                "messages": messages,
+                "kwargs": {},
+                "has_tools": True,
+            },
+        )
+        with patch(
+            "eneo.completion_models.infrastructure.adapters.tenant_model_adapter._acompletion_call",
+            AsyncMock(
+                return_value=_AsyncChunkStream(
+                    [_text_chunk("done", finish_reason="stop")]
+                )
+            ),
+        ):
+            await _collect(
+                adapter,
+                stream,
+                require_tool_approval=False,
+                approval_manager=None,
+                approval_context=None,
+                pending_approval_ids=set(),
+            )
+    else:
+        adapter = _make_completion_adapter()
+        with patch(
+            "eneo.completion_models.infrastructure.adapters.tenant_model_adapter._acompletion_call",
+            AsyncMock(
+                side_effect=[
+                    _response(
+                        tool_calls=[_response_tool_call("call_1", "{}")],
+                        finish_reason="tool_calls",
+                    ),
+                    _response(content="done"),
+                ]
+            ),
+        ) as completion_call:
+            await adapter.get_response(
+                context=SimpleNamespace(), model_kwargs={}, mcp_proxy=proxy
+            )
+        messages = completion_call.await_args.kwargs["messages"]
+    results = [message["content"] for message in messages if message["role"] == "tool"]
+    assert results == [file_handle(file_id)]
+    assert "synthetic-secret" not in str(messages)

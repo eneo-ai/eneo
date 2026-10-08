@@ -48,6 +48,7 @@ class ResponseType(str, Enum):
     REASONING = "reasoning"
     ENEO_EVENT = "eneo_event"
     TOOL_CALL = "tool_call"
+    TOOL_CALL_DELTA = "tool_call_delta"
     TOOL_APPROVAL_REQUIRED = "tool_approval_required"
     TOOL_APPROVAL_TIMEOUT = "tool_approval_timeout"
     FILES = "image"
@@ -118,6 +119,10 @@ class ToolCallMetadata:
     # which an admin is free to set to "files" or "knowledge" on an external
     # server. Clients use it to tell Eneo's tools from look-alikes.
     is_internal: Optional[bool] = None
+    # Whether the call ran on a server built into Eneo (the bundled tool
+    # runtime), decided by the server's auth type, never by its name. Clients
+    # label the provider as Eneo's own in the user's language.
+    is_bundled: Optional[bool] = None
     # The tool result's MCP `_meta` (capped by the client). Servers use it for
     # out-of-band facts about the call, e.g. OpenTelemetry GenAI usage
     # attributes (`gen_ai.usage.input_tokens`) from a model-backed tool.
@@ -144,17 +149,21 @@ class McpToolReference:
 
 
 @dataclass
-class GeneratedImage:
-    """An image produced by a tool call (an MCP ``image`` content block).
+class GeneratedFile:
+    """A file produced by a tool call: an MCP ``image`` content block, or a
+    binary embedded resource from a document or spreadsheet provider.
 
     Carried out of the model adapter as raw bytes; the ask path persists it as
     a generated file. The model itself only ever sees a text placeholder.
+    ``filename`` is the provider's name for a document (images are named by
+    their MIME type).
     """
 
     data: bytes
     mime_type: str
     tool_call_id: Optional[str] = None
     mcp_tool_name: Optional[str] = None
+    filename: Optional[str] = None
 
 
 @dataclass
@@ -165,12 +174,21 @@ class Completion:
     reference_chunks: Optional[list[InfoBlobChunkInDBWithScore]] = None
     tool_call: Optional[FunctionCall] = None
     tool_calls_metadata: Optional[list[ToolCallMetadata]] = None  # For TOOL_CALL events
+    # TOOL_CALL_DELTA events: the next piece of a pending call's argument JSON
+    # as the model writes it, so a client can show the arguments (a document's
+    # text) before the call runs. Never persisted.
+    tool_call_id: Optional[str] = None
+    arguments_delta: Optional[str] = None
     mcp_tool_references: Optional[list[McpToolReference]] = None
     approval_id: Optional[str] = None  # For TOOL_APPROVAL_REQUIRED events
-    image: Optional[GeneratedImage] = None  # For FILES events (streaming)
-    generated_images: Optional[list[GeneratedImage]] = None  # Non-streaming
+    image: Optional[GeneratedFile] = None  # For FILES events (streaming)
+    generated_images: Optional[list[GeneratedFile]] = None  # Non-streaming
     response_type: Optional[ResponseType] = None
     generated_file: Optional[File] = None
+    # FILES events (streaming): a signed reference URL for the saved file,
+    # set once it is stored so the model can hand it to another tool in the
+    # same turn. Never persisted.
+    reference_url: Optional[str] = None
     stop: bool = False
     error: Optional[str] = None
     error_code: Optional[int] = None

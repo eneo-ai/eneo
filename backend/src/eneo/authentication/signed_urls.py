@@ -4,8 +4,9 @@ import hmac
 import json
 import re
 import time
+from collections.abc import Mapping
 from typing import Any, cast
-from urllib.parse import parse_qs, urlsplit
+from urllib.parse import parse_qs, unquote, urlsplit
 from uuid import UUID
 
 from eneo.files.file_models import (
@@ -314,10 +315,48 @@ def parse_file_reference_url(url: str) -> tuple[UUID, str] | None:
 
 
 _REFERENCE_TOKEN = re.compile(
-    r"(?P<prefix>/original/download/?\?(?:[^\s\"'<>]*?&)?token=)"
+    r"(?P<prefix>/original/download[^\s?\"'<>]*\?(?:[^\s\"'<>]*?&)?token=)"
     r"[A-Za-z0-9_\-=.]+"
 )
 REDACTED_TOKEN = "REDACTED"
+
+
+_REDACTED_REFERENCE_URL = re.compile(
+    r"https?://[^\s\"'<>]*?/api/v1/files/(?P<file_id>[0-9a-fA-F-]{36})"
+    r"/original/download/?\?[^\s\"'<>]*?token=" + REDACTED_TOKEN + r"[^\s\"'<>]*"
+)
+
+
+def restore_reference_tokens(value: object, fresh_urls: Mapping[UUID, str]) -> object:
+    """Swap redacted reference URLs for this request's freshly minted ones.
+
+    The inverse of :func:`redact_reference_tokens` for replay: history keeps
+    tool-call arguments with the token redacted, and a model replaying them
+    tends to copy the URL from its own earlier call. Each redacted link to a
+    file with a fresh URL in ``fresh_urls`` becomes that URL, so a copied link
+    works. The fresh URL is minted for this request anyway and is never
+    persisted. Links to files without one stay redacted.
+    """
+    if isinstance(value, str):
+
+        def fresh(match: re.Match[str]) -> str:
+            try:
+                file_id = UUID(match.group("file_id"))
+            except ValueError:
+                return match.group(0)
+            return fresh_urls.get(file_id, match.group(0))
+
+        return _REDACTED_REFERENCE_URL.sub(fresh, value)
+    if isinstance(value, dict):
+        mapping = cast(dict[object, object], value)
+        return {
+            key: restore_reference_tokens(item, fresh_urls)
+            for key, item in mapping.items()
+        }
+    if isinstance(value, list):
+        entries = cast(list[object], value)
+        return [restore_reference_tokens(item, fresh_urls) for item in entries]
+    return value
 
 
 def redact_reference_tokens(value: object) -> object:
@@ -339,6 +378,78 @@ def redact_reference_tokens(value: object) -> object:
         entries = cast(list[object], value)
         return [redact_reference_tokens(item) for item in entries]
     return value
+
+
+# The same link inside JSON text that is still being written, where "/" and
+# "&" may be escaped ("\/", "&").
+_REFERENCE_TOKEN_IN_JSON = re.compile(
+    r"(?P<prefix>\\?/original\\?/download[^\s?\"'<>]*\?"
+    r"(?:[^\s\"'<>]*?(?:&|\\u0026))?token=)"
+    r"[A-Za-z0-9_\-=.]+"
+)
+
+
+def redact_reference_tokens_in_json(text: str) -> str:
+    """Replace the signed token of every reference URL in raw JSON ``text``.
+
+    For tool-call arguments forwarded while the model is still writing them,
+    before they can be parsed. A token that has only begun is replaced as
+    well, so the redacted text of a longer prefix always extends the redacted
+    text of a shorter one.
+    """
+    return _REFERENCE_TOKEN_IN_JSON.sub(rf"\g<prefix>{REDACTED_TOKEN}", text)
+
+
+_REFERENCE_LINK = re.compile(
+    r"/api/v1/files/(?P<file_id>[0-9a-fA-F-]{36})/original/download/?"
+    r"\?(?:[^\s\"'<>]*?&)?token=(?P<token>[A-Za-z0-9_\-=.]+)"
+)
+
+
+# Admission must also recognize tokenless/malformed references. Otherwise a
+# model typo can hide a file identity from the conversation boundary check.
+_REFERENCE_LOCATION = re.compile(
+    r"/api/v1/files/(?P<file_id>[0-9a-fA-F-]{36})/original/download(?=$|[/\s?\"'<>])"
+)
+
+# A structured input can have a missing token or a stray final path component.
+# This is only for lookup in the already-authorized map, never for HTTP access.
+_REPAIRABLE_REFERENCE_PATH = re.compile(
+    r"/api/v1/files/(?P<file_id>[0-9a-fA-F-]{36})/original/download"
+    r"(?P<tail>(?:/[A-Za-z0-9_-]+)?/?)$"
+)
+
+
+def reference_file_ids(value: object, *, include_redacted: bool = False) -> set[UUID]:
+    """File ids of every signed reference link found anywhere in ``value``.
+
+    Walks strings, dicts and lists like :func:`redact_reference_tokens`, so a
+    link nested in an argument object or embedded in longer text is found.
+    Strings are percent-decoded first: the download route decodes its path, so
+    an encoded link reaches the same file. Shape only, no verification. A
+    redacted link carries no credential and is skipped unless asked for.
+    With ``include_redacted``, admission also sees tokenless/malformed references.
+    """
+    file_ids: set[UUID] = set()
+    if isinstance(value, str):
+        pattern = _REFERENCE_LOCATION if include_redacted else _REFERENCE_LINK
+        for match in pattern.finditer(unquote(value)):
+            if not include_redacted and match.group("token") == REDACTED_TOKEN:
+                continue
+            try:
+                file_ids.add(UUID(match.group("file_id")))
+            except ValueError:
+                continue
+        return file_ids
+    if isinstance(value, dict):
+        entries = list(cast(dict[object, object], value).values())
+    elif isinstance(value, list):
+        entries = cast(list[object], value)
+    else:
+        return file_ids
+    for item in entries:
+        file_ids |= reference_file_ids(item, include_redacted=include_redacted)
+    return file_ids
 
 
 def looks_like_reference_url(url: str) -> bool:
@@ -380,3 +491,49 @@ def build_signed_original_download_url(
         f"{base_url.rstrip('/')}/api/v1/files/{file_id}/original/download/"
         f"?token={token}"
     )
+
+
+def use_current_file_references(value: Any, current_urls: Mapping[UUID, str]) -> Any:
+    """Bind exact tool URL inputs to this request's authorized reference links.
+
+    Models can copy an older/damaged token, omit it, or append a stray path
+    component. The trusted completion layer supplies current links only for
+    accessible conversation files. Match file identity, origin and the original
+    download route; replace the entire URL, never mint credentials from model input,
+    attach a token to a foreign host, or resolve arbitrary URLs in prose.
+    The original-download endpoint still performs its normal authorization.
+    """
+    if isinstance(value, str):
+        if not value.startswith(("https://", "http://")):
+            return value
+        # Do not rewrite embedded prose or let urlsplit silently strip controls.
+        if re.search(r"[\s\x00-\x1f\x7f\"'<>]", value):
+            return value
+        try:
+            supplied = urlsplit(value)
+            match = _REPAIRABLE_REFERENCE_PATH.search(supplied.path)
+            current = current_urls.get(UUID(match.group("file_id"))) if match else None
+            if current is None or match is None:
+                return value
+            trusted = urlsplit(current)
+        except ValueError:
+            return value
+        if (
+            supplied.scheme == trusted.scheme
+            and supplied.netloc == trusted.netloc
+            and supplied.path[: match.start("tail")] == trusted.path.rstrip("/")
+            and not supplied.fragment
+        ):
+            return current
+        return value
+    if isinstance(value, dict):
+        return {
+            key: use_current_file_references(item, current_urls)
+            for key, item in cast(dict[str, Any], value).items()
+        }
+    if isinstance(value, list):
+        return [
+            use_current_file_references(item, current_urls)
+            for item in cast(list[Any], value)
+        ]
+    return value

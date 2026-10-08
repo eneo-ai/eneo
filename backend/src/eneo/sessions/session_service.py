@@ -90,12 +90,17 @@ async def persist_partial_question_answer(
     reasoning: str | None = None,
     skill_provenance: Sequence[SkillExecutionReference] | None = None,
     skill_activation: SkillActivationEvidenceV1 | None = None,
+    generated_files: Sequence[File] | None = None,
+    tool_calls: list[ToolCallInfo] | None = None,
 ) -> None:
     """Persist the answer text on a previously-created placeholder question using a fresh
     DB session.
 
     Called from the streaming generator's `finally` on abort. Decoupled from request scope
     so the write survives even when FastAPI tears down the request-scoped AsyncSession.
+    Files a tool already produced are linked to the question (with the tool calls that
+    reference them), so a failed answer never orphans them: they stay visible, keep
+    their access checks and are deleted with the conversation.
     Exceptions are logged and swallowed (except cancellation) — this is best-effort
     cleanup, not a path that should fail the parent task.
     """
@@ -111,6 +116,8 @@ async def persist_partial_question_answer(
                 reasoning=reasoning,
                 skill_provenance=skill_provenance,
                 skill_activation=skill_activation,
+                generated_files=list(generated_files) if generated_files else None,
+                tool_calls=tool_calls or None,
             )
         logger.info(
             "Persisted partial chat answer on stream abort",
