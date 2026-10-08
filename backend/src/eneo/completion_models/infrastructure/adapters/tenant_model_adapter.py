@@ -112,6 +112,11 @@ from eneo.model_providers.infrastructure import litellm_transport
 from eneo.model_providers.infrastructure.litellm_provider import (
     build_litellm_provider_kwargs,
 )
+from eneo.model_providers.infrastructure.outbound_headers_runtime import (
+    ProviderOutboundHeaders,
+    apply_outbound_headers,
+    mask_outbound_headers,
+)
 from eneo.model_providers.infrastructure.tenant_model_credential_resolver import (
     TenantModelCredentialResolver,
 )
@@ -525,6 +530,9 @@ class TenantModelAdapter(CompletionModelAdapter):
 
     MAX_TOOL_ROUNDS = 10
 
+    # Class-level default so adapters built without __init__ (tests) send none.
+    outbound_headers: ProviderOutboundHeaders | None = None
+
     # Tool-result payload for calls refused because the round budget ran out.
     # The forced follow-up runs with tool_choice="none", so the model must
     # produce a final answer from what it already gathered instead of the
@@ -541,6 +549,7 @@ class TenantModelAdapter(CompletionModelAdapter):
         model: "TenantCompletionModel",
         credential_resolver: TenantModelCredentialResolver,
         provider_type: str,
+        outbound_headers: ProviderOutboundHeaders | None = None,
     ):
         """
         Initialize adapter with tenant model.
@@ -549,6 +558,7 @@ class TenantModelAdapter(CompletionModelAdapter):
             model: Tenant completion model (must have provider_id)
             credential_resolver: Resolver for tenant provider credentials
             provider_type: LiteLLM provider type (e.g., "openai", "azure", "anthropic")
+            outbound_headers: The provider's configured headers for the acting user
 
         Raises:
             ValueError: If model is not a tenant model
@@ -563,6 +573,7 @@ class TenantModelAdapter(CompletionModelAdapter):
 
         self.litellm_model = model.get_model_route(provider_type=provider_type)
         self.provider_type = provider_type
+        self.outbound_headers = outbound_headers
 
     def resolve_litellm_params(self) -> tuple[str, dict[str, object]]:
         return self.litellm_model, build_litellm_provider_kwargs(
@@ -616,8 +627,8 @@ class TenantModelAdapter(CompletionModelAdapter):
         ) from exc
 
     def _mask_sensitive_params(self, params: dict[str, Any]) -> dict[str, Any]:
-        """Return copy of params with masked API key for safe logging."""
-        safe_params = params.copy()
+        """Return copy of params with masked API key and header values for safe logging."""
+        safe_params = mask_outbound_headers(params.copy())
         if "api_key" in safe_params:
             key = safe_params["api_key"]
             safe_params["api_key"] = f"...{key[-4:]}" if len(key) > 4 else "***"
@@ -633,6 +644,7 @@ class TenantModelAdapter(CompletionModelAdapter):
             "api_type",
             "organization",
             "deployment_name",
+            "extra_headers",
         }
 
         try:
@@ -1195,6 +1207,11 @@ class TenantModelAdapter(CompletionModelAdapter):
                 model_kwargs=kwargs,
                 openai_absent_effort="low",
             )
+
+        # Last, so the destination check sees the final api_base. Every
+        # _acompletion_call site spreads these kwargs, tool rounds included.
+        apply_outbound_headers(kwargs, self.outbound_headers)
+
         return kwargs
 
     @override

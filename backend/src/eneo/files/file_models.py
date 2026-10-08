@@ -59,6 +59,8 @@ class FileUsageKind(StrEnum):
     APP_RUN_INPUT = "app_run_input"
     FLOW_VERSION = "flow_version"
     FLOW_TEMPLATE_ASSET = "flow_template_asset"
+    FLOW_RUNTIME = "flow_runtime"
+    FLOW_BUILDER_SESSION = "flow_builder_session"
 
 
 class FileUsageSummary(BaseModel):

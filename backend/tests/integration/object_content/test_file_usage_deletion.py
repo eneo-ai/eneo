@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+from datetime import timedelta
 from unittest.mock import AsyncMock
 from uuid import UUID, uuid4
 
@@ -11,6 +12,9 @@ from sqlalchemy.exc import IntegrityError
 from eneo.database.database import DatabaseSessionManager
 from eneo.database.tables.files_table import Files
 from eneo.database.tables.flow_tables import (
+    BuilderSessionFiles,
+    BuilderSessions,
+    FlowRuntimeUploadedFiles,
     Flows,
     FlowTemplateAssets,
     FlowVersionFileReferences,
@@ -28,6 +32,7 @@ from eneo.files.file_models import (
 from eneo.files.file_repo import FileRepository
 from eneo.files.file_service import FileService
 from eneo.files.file_usage import FileUsageRepository
+from eneo.files.unused_file_cleanup import sweep_unused_files
 from eneo.flows.infrastructure.flow_run_history_purge_repo import (
     FlowRunHistoryPurgeRepository,
 )
@@ -804,3 +809,60 @@ async def test_run_history_purge_waits_for_a_publisher_and_then_keeps_the_file(
     assert await asyncio.wait_for(purge_task, timeout=20) == set()
     async with object_content_database.session() as session, session.begin():
         assert await session.get(Files, file_id) is not None
+
+
+@pytest.mark.asyncio
+async def test_unused_sweep_preserves_runtime_and_builder_uploads(
+    object_content_database: DatabaseSessionManager,
+) -> None:
+    tenant_id, user_id = await _owner_ids(object_content_database)
+    async with object_content_database.session() as session, session.begin():
+        space = Spaces(name="Sweep protection", tenant_id=tenant_id, user_id=user_id)
+        session.add(space)
+        await session.flush()
+        flow = Flows(name="Sweep protection", tenant_id=tenant_id, space_id=space.id)
+        builder = BuilderSessions(
+            tenant_id=tenant_id,
+            space_id=space.id,
+            target_kind="create",
+            actor_user_id=user_id,
+        )
+        session.add_all([flow, builder])
+        await session.flush()
+        runtime_file = await _add_file(
+            session, tenant_id=tenant_id, user_id=user_id, name="runtime.txt"
+        )
+        builder_file = await _add_file(
+            session, tenant_id=tenant_id, user_id=user_id, name="builder.txt"
+        )
+        unused_file = await _add_file(
+            session, tenant_id=tenant_id, user_id=user_id, name="unused.txt"
+        )
+        runtime_id, builder_id, unused_id = (
+            runtime_file.id,
+            builder_file.id,
+            unused_file.id,
+        )
+        session.add_all(
+            [
+                FlowRuntimeUploadedFiles(
+                    file_id=runtime_id,
+                    flow_id=flow.id,
+                    tenant_id=tenant_id,
+                    uploaded_for_step_id=uuid4(),
+                    owner_type="user",
+                    owner_user_id=user_id,
+                ),
+                BuilderSessionFiles(
+                    session_id=builder.id, file_id=builder_id, tenant_id=tenant_id
+                ),
+            ]
+        )
+
+    async with object_content_database.session() as session:
+        await sweep_unused_files(session, dry_run=False, older_than=timedelta(0))
+
+    async with object_content_database.session() as session, session.begin():
+        assert await session.get(Files, unused_id) is None
+        assert await session.get(Files, runtime_id) is not None
+        assert await session.get(Files, builder_id) is not None

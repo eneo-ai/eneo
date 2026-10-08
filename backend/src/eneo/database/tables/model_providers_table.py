@@ -1,4 +1,4 @@
-from typing import Any
+from typing import Any, Optional
 from uuid import UUID
 
 from sqlalchemy import ForeignKey, UniqueConstraint
@@ -27,6 +27,10 @@ class ModelProviders(BasePublic):
     config: Mapped[dict[str, Any]] = mapped_column(
         JSONB, nullable=False, server_default="{}"
     )  # Additional config like endpoints
+    # Configured outbound HTTP headers. A dedicated column rather than a key in
+    # `config`, which is unencrypted and returned to admins verbatim; `secret`
+    # entries hold encrypted value/fallback. NULL: no headers configured.
+    outbound_headers: Mapped[Optional[list[dict[str, Any]]]] = mapped_column(JSONB)
     is_active: Mapped[bool] = mapped_column(nullable=False, server_default="true")
 
     __table_args__ = (

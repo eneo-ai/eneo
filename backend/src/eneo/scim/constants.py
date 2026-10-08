@@ -18,3 +18,15 @@ Per RFC 7644 §3.7.3, requests exceeding either limit return HTTP 413.
 SCIM_BULK_MAX_OPERATIONS = 100
 SCIM_BULK_MAX_PAYLOAD_BYTES = 1024 * 1024  # 1 MiB
 SCIM_FILTER_MAX_RESULTS = 200
+
+SCIM_CORE_USER_URN = "urn:ietf:params:scim:schemas:core:2.0:User"
+# RFC 7643 §4.3. The only schema extension Eneo persists; any other extension
+# URN in a request is accepted and ignored (RFC 7644 permits it).
+SCIM_ENTERPRISE_USER_URN = "urn:ietf:params:scim:schemas:extension:enterprise:2.0:User"
+
+# Bounds on an incoming Enterprise User object. Round numbers well clear of
+# real directory data; a breach rejects the whole request rather than
+# truncating, so a client is never told 201/200 about data that was trimmed.
+SCIM_EXTENSION_MAX_BYTES = 16 * 1024
+SCIM_EXTENSION_MAX_VALUE_CHARS = 1024
+SCIM_EXTENSION_MAX_ATTRIBUTES = 64

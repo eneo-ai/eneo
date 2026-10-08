@@ -1,11 +1,12 @@
 # pyright: basic
 # FastMCP's Context surface is largely untyped; this module is a thin adapter
 # over it, so strict unknown-type checking adds noise without safety here.
-"""Internal MCP server exposing conversation attachments as a read tool.
+"""Internal MCP server exposing attachments as a read tool.
 
 Attached text files with a durably stored original reach the model as signed
 reference URLs (alongside their inlined text, or instead of it when the
-assistant runs with ``inline_file_text`` disabled). This server is the
+assistant runs with ``inline_file_text`` disabled). Persistent assistant
+attachments marked "open with tool" arrive the same way, URL-only. This server is the
 built-in consumer of those URLs: ``read_file`` verifies the signed token and
 returns the file's already-extracted text, paged. The URL is a capability
 handle, not a fetch instruction: content is served through the durable
@@ -47,9 +48,9 @@ mcp = FastMCP(
     name="Eneo Files",
     stateless_http=True,
     instructions=(
-        "Tools for reading files the user attached to this conversation. They "
-        "operate only on the signed attachment URLs provided in the "
-        "conversation; scope is fixed by the access token."
+        "Tools for reading files attached to this conversation or to this "
+        "assistant. They operate only on the signed attachment URLs provided "
+        "in the conversation; scope is fixed by the access token."
     ),
 )
 
@@ -117,7 +118,7 @@ async def read_file(
     ctx: Context,
     offset: int = 0,
 ) -> list[TextContent]:
-    """Read the text content of a file the user attached to this conversation.
+    """Read the text content of a file attached to this conversation or assistant.
 
     Pass the exact "url" value from an attached-file reference entry (the
     JSON lines listing filename, mimetype, size_bytes and url); never
@@ -171,8 +172,8 @@ def _attachments_suffix(attachment_labels: Sequence[str]) -> str:
     if not attachment_labels:
         return ""
     return (
-        "\n\nEvery file attached to this conversation is readable here, "
-        "whatever its reference url looks like."
+        "\n\nEvery file attached to this conversation or to this assistant is "
+        "readable here, whatever its reference url looks like."
     )
 
 

@@ -365,7 +365,7 @@ async def test_upload_failure_preserves_committed_prior_knowledge(
         monkeypatch.setattr(
             Datastore,
             "_chunk_text",
-            lambda self, info_blob: (_ for _ in ()).throw(
+            lambda self, info_blob, embedding_model: (_ for _ in ()).throw(
                 RuntimeError("chunking failed")
             ),
         )

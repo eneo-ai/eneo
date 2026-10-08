@@ -25,7 +25,7 @@ AssistantUpdateField: TypeAlias = Literal[
     "mcp_server_ids",
     "enabled_capabilities",
     "mcp_tools",
-    "attachment_ids",
+    "attachments",
     "description",
     "insight_enabled",
     "inline_file_text",
@@ -68,7 +68,7 @@ class AssistantUpdateCommand(BaseModel):
     mcp_server_ids: list[UUID] | None = None
     enabled_capabilities: list[CapabilityPurpose] | None = None
     mcp_tools: list[tuple[UUID, bool]] | None = None
-    attachment_ids: list[UUID] | None = None
+    attachments: list[tuple[UUID, bool]] | None = None
     description: str | None | NotProvided = Field(default=NOT_PROVIDED)
     insight_enabled: bool | None = None
     inline_file_text: bool | None = None

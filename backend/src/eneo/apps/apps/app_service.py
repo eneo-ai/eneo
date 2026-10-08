@@ -18,7 +18,7 @@ from eneo.completion_models.infrastructure.tenant_model_capabilities import (
 )
 from eneo.files.attachment_budget import assert_prompt_and_files_fit_context
 from eneo.files.file_models import File
-from eneo.files.file_service import FileService
+from eneo.files.file_service import FileService, require_requested_files
 from eneo.files.transcriber import Transcriber
 from eneo.icons.icon_repo import IconRepository
 from eneo.main.exceptions import (
@@ -627,6 +627,7 @@ class AppService:
         files = await self.file_service.get_files_by_ids(
             file_ids=file_ids, include_transcription=True
         )
+        require_requested_files(file_ids, files)
 
         # Document-derived images (e.g. rendered PDF pages) enrich the
         # completion payload only — the run's recorded input files stay the

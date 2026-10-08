@@ -23,11 +23,12 @@ from eneo.database.tables.base_class import (
     BasePublic,
     BaseWithTableName,
 )
-from eneo.database.tables.files_table import Files
+from eneo.database.tables.files_table import Files, file_usage
 from eneo.database.tables.job_table import Jobs
 from eneo.database.tables.spaces_table import Spaces
 from eneo.database.tables.tenant_table import Tenants
 from eneo.database.tables.users_table import Users
+from eneo.files.file_models import FileUsageKind
 from eneo.flow_packages.domain.flow_package_import_record import (
     FlowPackageImportSource,
     FlowPackageImportStatus,
@@ -414,7 +415,9 @@ class FlowVersionFileReferences(BaseWithTableName):
     flow_id: Mapped[UUID] = mapped_column(primary_key=True)
     version: Mapped[int] = mapped_column(primary_key=True)
     tenant_id: Mapped[UUID] = mapped_column(nullable=False)
-    file_id: Mapped[UUID] = mapped_column(primary_key=True, index=True)
+    file_id: Mapped[UUID] = mapped_column(
+        info=file_usage(FileUsageKind.FLOW_VERSION), primary_key=True, index=True
+    )
     created_at: Mapped[datetime] = mapped_column(
         sa.DateTime(timezone=True), server_default=sa.func.now(), nullable=False
     )
@@ -459,7 +462,9 @@ class FlowTemplateAssets(BasePublic):
         nullable=False,
         index=True,
     )
-    file_id: Mapped[UUID] = mapped_column(nullable=False, index=True)
+    file_id: Mapped[UUID] = mapped_column(
+        info=file_usage(FileUsageKind.FLOW_TEMPLATE_ASSET), nullable=False, index=True
+    )
     name: Mapped[str] = mapped_column(nullable=False)
     checksum: Mapped[str] = mapped_column(nullable=False)
     mimetype: Mapped[Optional[str]] = mapped_column(nullable=True)
@@ -609,7 +614,9 @@ class FlowLiveTranscripts(BasePublic):
     )
     received_audio_seconds: Mapped[float] = mapped_column(sa.Double)
     expires_at: Mapped[datetime | None] = mapped_column(sa.TIMESTAMP(timezone=True))
-    bound_file_id: Mapped[UUID | None] = mapped_column(index=True)
+    bound_file_id: Mapped[UUID | None] = mapped_column(
+        info=file_usage(FileUsageKind.FLOW_RUNTIME), index=True
+    )
 
     __table_args__ = (
         ForeignKeyConstraint(
@@ -640,7 +647,9 @@ class FlowLiveTranscripts(BasePublic):
 class FlowRuntimeUploadedFiles(BaseCrossReference):
     """Stores reusable runtime upload files. Writer: FlowRuntimeUploadRepository. Purpose: bind pre-run uploads to a Flow, step, tenant, and principal."""
 
-    file_id: Mapped[UUID] = mapped_column(primary_key=True)
+    file_id: Mapped[UUID] = mapped_column(
+        info=file_usage(FileUsageKind.FLOW_RUNTIME), primary_key=True
+    )
     flow_id: Mapped[UUID] = mapped_column(
         nullable=False,
         index=True,
@@ -1846,6 +1855,7 @@ class FlowRunStepInputFiles(BasePublic):
     attempt_no: Mapped[int] = mapped_column(nullable=False)
     file_id: Mapped[UUID] = mapped_column(
         ForeignKey(Files.id, ondelete="RESTRICT"),
+        info=file_usage(FileUsageKind.FLOW_RUNTIME),
         nullable=False,
         index=True,
     )
@@ -1935,7 +1945,9 @@ class FlowRunStepResultFiles(BasePublic):
     step_id: Mapped[UUID] = mapped_column(nullable=False)
     step_order: Mapped[int] = mapped_column(nullable=False)
     attempt_no: Mapped[int] = mapped_column(nullable=False)
-    file_id: Mapped[UUID] = mapped_column(nullable=False, index=True)
+    file_id: Mapped[UUID] = mapped_column(
+        info=file_usage(FileUsageKind.FLOW_RUNTIME), nullable=False, index=True
+    )
     ordinal: Mapped[int] = mapped_column(nullable=False)
     source: Mapped[str] = mapped_column(sa.String(32), nullable=False)
 
@@ -2573,7 +2585,9 @@ class BuilderSessionFiles(BaseCrossReference):
         ForeignKey("builder_sessions.id", ondelete="CASCADE"),
         primary_key=True,
     )
-    file_id: Mapped[UUID] = mapped_column(primary_key=True)
+    file_id: Mapped[UUID] = mapped_column(
+        info=file_usage(FileUsageKind.FLOW_BUILDER_SESSION), primary_key=True
+    )
     tenant_id: Mapped[UUID] = mapped_column(
         ForeignKey(Tenants.id, ondelete="CASCADE"),
         nullable=False,

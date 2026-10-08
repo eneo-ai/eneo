@@ -66,15 +66,58 @@ async def test_service_provider_config_reports_no_password_change(
 
 @pytest.mark.asyncio
 @pytest.mark.integration
-async def test_schemas_returns_user_and_group(client, bypass_scim_auth):
-    """GET /scim/v2/Schemas returns schema definitions for User and Group."""
+async def test_schemas_returns_user_enterprise_user_and_group(client, bypass_scim_auth):
+    """GET /scim/v2/Schemas returns User, the Enterprise User extension, and Group."""
     response = await client.get("/scim/v2/Schemas")
     assert response.status_code == 200
     body = response.json()
-    assert body["totalResults"] == 2
+    assert body["totalResults"] == 3
     schema_ids = {s["id"] for s in body["Resources"]}
-    assert "urn:ietf:params:scim:schemas:core:2.0:User" in schema_ids
-    assert "urn:ietf:params:scim:schemas:core:2.0:Group" in schema_ids
+    assert schema_ids == {
+        "urn:ietf:params:scim:schemas:core:2.0:User",
+        "urn:ietf:params:scim:schemas:extension:enterprise:2.0:User",
+        "urn:ietf:params:scim:schemas:core:2.0:Group",
+    }
+
+
+@pytest.mark.asyncio
+@pytest.mark.integration
+async def test_enterprise_schema_marks_manager_display_name_read_only(
+    client, bypass_scim_auth
+):
+    body = (await client.get("/scim/v2/Schemas")).json()
+    enterprise = next(
+        s
+        for s in body["Resources"]
+        if s["id"] == "urn:ietf:params:scim:schemas:extension:enterprise:2.0:User"
+    )
+    attributes = {a["name"]: a for a in enterprise["attributes"]}
+    assert set(attributes) == {
+        "employeeNumber",
+        "costCenter",
+        "organization",
+        "division",
+        "department",
+        "manager",
+    }
+    manager_subs = {s["name"]: s for s in attributes["manager"]["subAttributes"]}
+    assert manager_subs["displayName"]["mutability"] == "readOnly"
+    assert manager_subs["value"]["mutability"] == "readWrite"
+
+
+@pytest.mark.asyncio
+@pytest.mark.integration
+async def test_user_resource_type_advertises_optional_enterprise_extension(
+    client, bypass_scim_auth
+):
+    body = (await client.get("/scim/v2/ResourceTypes")).json()
+    user = next(r for r in body["Resources"] if r["name"] == "User")
+    assert user["schemaExtensions"] == [
+        {
+            "schema": "urn:ietf:params:scim:schemas:extension:enterprise:2.0:User",
+            "required": False,
+        }
+    ]
 
 
 @pytest.mark.asyncio

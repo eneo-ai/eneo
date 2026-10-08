@@ -1,5 +1,5 @@
 from collections import defaultdict
-from collections.abc import AsyncGenerator, Awaitable, Callable
+from collections.abc import AsyncGenerator, Awaitable, Callable, Iterable, Sequence
 from contextlib import AsyncExitStack, asynccontextmanager
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -49,6 +49,7 @@ from eneo.files.file_repo import (
 from eneo.files.file_usage import FileUsageRepository
 from eneo.files.text import PdfExtractionLimits
 from eneo.main.exceptions import (
+    BadRequestException,
     NotFoundException,
     UnauthorizedException,
 )
@@ -69,6 +70,31 @@ from eneo.object_content.content_service import (
 )
 from eneo.object_content.deployment_policy import UploadAdmissionSnapshot
 from eneo.users.user import UserInDB
+
+
+def require_requested_files(file_ids: Iterable[UUID], files: Sequence[File]) -> None:
+    """Refuse a request that names a File the caller can no longer send.
+
+    ``get_files_by_ids`` returns only the caller's own Files whose content is
+    available. A File that was deleted after its last use (the daily cleanup,
+    or a conversation deleted meanwhile) is simply absent. Sending the message
+    or run without it would hide the loss, so the request fails here with the
+    missing ids and the user uploads the File again.
+    """
+    found = {file.id for file in files}
+    missing = [
+        str(file_id) for file_id in dict.fromkeys(file_ids) if file_id not in found
+    ]
+    if not missing:
+        return
+    if len(missing) == 1:
+        raise BadRequestException(
+            f"The attached file is no longer available: {missing[0]}. Upload it again."
+        )
+    raise BadRequestException(
+        "The attached files are no longer available: "
+        f"{', '.join(missing)}. Upload them again."
+    )
 
 
 @dataclass(frozen=True, slots=True)

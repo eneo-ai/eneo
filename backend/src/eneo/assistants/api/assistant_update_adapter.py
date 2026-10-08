@@ -66,8 +66,9 @@ def _extract_common_update_fields(
             knowledge.id for knowledge in (assistant.integration_knowledge_list or [])
         ]
     if "attachments" in payload:
-        command_fields["attachment_ids"] = [
-            attachment.id for attachment in (assistant.attachments or [])
+        command_fields["attachments"] = [
+            (attachment.id, attachment.inline_text)
+            for attachment in (assistant.attachments or [])
         ]
     if "mcp_servers" in payload:
         command_fields["mcp_server_ids"] = [

@@ -4048,7 +4048,7 @@ async def test_update_flow_assistant_forwards_every_command_field(user):
         groups=[group_id],
         websites=[website_id],
         integration_knowledge_ids=[integration_id],
-        attachment_ids=[attachment_id],
+        attachments=[(attachment_id, True)],
         description=None,
         insight_enabled=True,
         data_retention_days=30,

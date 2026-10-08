@@ -19,6 +19,7 @@ from eneo.database.tables.websites_table import CrawlRuns as CrawlRunsTable
 from eneo.database.tables.websites_table import Websites as WebsitesTable
 from eneo.jobs.job_models import Task
 from eneo.main.exceptions import BadRequestException, NotFoundException
+from eneo.main.logging import get_logger
 from eneo.main.models import Status
 from eneo.websites.crawl_dependencies.crawl_models import CrawlTask
 from eneo.websites.domain.crawl_assessment import (
@@ -35,6 +36,14 @@ from eneo.websites.domain.crawl_run import (
     CrawlResourceKind,
     CrawlRun,
 )
+from eneo.websites.domain.crawl_schedule import AUTO_DISABLE_FAILURE_THRESHOLD
+from eneo.websites.domain.http_auth_credentials import (
+    HttpAuthCredentials,
+    HttpAuthDestinationError,
+)
+from eneo.websites.domain.website import UpdateInterval
+
+logger = get_logger(__name__)
 
 LEASE_SWEEP_BATCH_SIZE = 100
 DISPATCH_PAGE_SIZE = 50
@@ -1438,7 +1447,13 @@ class CrawlRunRepository:
         files_unchanged: int | None = None,
         failure_summary: dict[str, int] | None = None,
         failures: Sequence[CrawlResourceFailure] = (),
+        counts_as_scheduled_run: bool | None = None,
+        http_auth_rejected: bool = False,
     ) -> bool:
+        if http_auth_rejected and (
+            outcome is not CrawlOutcome.FAILED or counts_as_scheduled_run is not None
+        ):
+            raise ValueError("Rejected HTTP auth requires an unclassified failed crawl")
         code = self._validate_terminal_facts(
             outcome,
             failure_code,
@@ -1476,6 +1491,46 @@ class CrawlRunRepository:
             now=now,
         ):
             return False
+
+        if counts_as_scheduled_run is not None or http_auth_rejected:
+            website = await self.session.scalar(
+                sa.select(WebsitesTable)
+                .where(
+                    WebsitesTable.id == run.website_id,
+                    WebsitesTable.tenant_id == run.tenant_id,
+                )
+                .with_for_update()
+                .execution_options(populate_existing=True)
+            )
+            if website is not None:
+                if http_auth_rejected:
+                    # Recheck the current configuration while locked. A stale
+                    # queued URL or a correction made after bootstrap must not
+                    # penalize credentials that now work for the current URL.
+                    has_auth = bool(
+                        website.http_auth_username
+                        or website.encrypted_auth_password
+                        or website.http_auth_domain
+                    )
+                    if has_auth:
+                        try:
+                            HttpAuthCredentials.require_destination(
+                                website.http_auth_domain, website.url
+                            )
+                        except HttpAuthDestinationError:
+                            counts_as_scheduled_run = False
+                        else:
+                            if not (
+                                website.http_auth_username
+                                and website.encrypted_auth_password
+                            ):
+                                counts_as_scheduled_run = False
+                if counts_as_scheduled_run is not None:
+                    self._update_website_circuit_breaker(
+                        website,
+                        counts_as_scheduled_run=counts_as_scheduled_run,
+                        now=now,
+                    )
 
         detail = failure_detail[:512] if failure_detail else None
         self._finish_records(
@@ -1521,6 +1576,59 @@ class CrawlRunRepository:
         )
         await self.session.flush()
         return True
+
+    @staticmethod
+    def _update_website_circuit_breaker(
+        website: WebsitesTable,
+        *,
+        counts_as_scheduled_run: bool,
+        now: datetime,
+    ) -> None:
+        """Apply the existing backoff rule once with the terminal transition."""
+        if counts_as_scheduled_run:
+            logger.info(
+                "Crawl counts as scheduled; resetting failure backoff",
+                extra={"website_id": str(website.id)},
+            )
+            website.consecutive_failures = 0
+            website.next_retry_at = None
+            return
+
+        new_failures = (website.consecutive_failures or 0) + 1
+        website.consecutive_failures = new_failures
+        if new_failures >= AUTO_DISABLE_FAILURE_THRESHOLD:
+            logger.error(
+                "Website %s auto-disabled after %s consecutive failures. "
+                "User action required to re-enable.",
+                website.id,
+                new_failures,
+                extra={
+                    "website_id": str(website.id),
+                    "url": website.url,
+                    "consecutive_failures": new_failures,
+                },
+            )
+            website.update_interval = UpdateInterval.NEVER
+            website.next_retry_at = None
+            return
+
+        backoff_hours = min(2 ** (new_failures - 1), 24)
+        next_retry_at = now + timedelta(hours=backoff_hours)
+        website.next_retry_at = next_retry_at
+        logger.warning(
+            "Crawl failed for website %s. Failure %s/%s, backoff %sh until %s",
+            website.id,
+            new_failures,
+            AUTO_DISABLE_FAILURE_THRESHOLD,
+            backoff_hours,
+            next_retry_at.isoformat(),
+            extra={
+                "website_id": str(website.id),
+                "consecutive_failures": new_failures,
+                "backoff_hours": backoff_hours,
+                "next_retry_at": next_retry_at.isoformat(),
+            },
+        )
 
     async def interrupt_expired_attempts(self) -> int:
         now = await self._database_now()

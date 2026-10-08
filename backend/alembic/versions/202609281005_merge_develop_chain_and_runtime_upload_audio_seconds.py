@@ -1,6 +1,6 @@
 """merge the develop join with the tidy chain's runtime upload audio seconds
 
-Revision ID: 202609281000
+Revision ID: 202609281005
 Revises: 202609271000, 202609271200
 Create Date: 2026-09-28 10:00:00.000000
 
@@ -11,7 +11,7 @@ This revision joins the two; it carries no schema change of its own.
 
 from collections.abc import Sequence
 
-revision: str = "202609281000"
+revision: str = "202609281005"
 down_revision: str | Sequence[str] | None = ("202609271000", "202609271200")
 branch_labels: str | Sequence[str] | None = None
 depends_on: str | Sequence[str] | None = None

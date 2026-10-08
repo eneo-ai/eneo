@@ -148,7 +148,9 @@ async def test_preflight_file_tokens_match_context_builder_output():
     Frontend bases user-visible projections on this number, so it must
     match the wrapper string byte-for-byte rather than be a loose estimate.
     """
+    file_id = uuid4()
     text_file = MagicMock()
+    text_file.id = file_id
     text_file.file_type = FileType.TEXT
     text_file.text = "the quick brown fox"
     text_file.name = "fox.txt"
@@ -158,7 +160,6 @@ async def test_preflight_file_tokens_match_context_builder_output():
         files=[text_file],
     )
 
-    file_id = uuid4()
     result = await service.preflight_tokens(
         question="summarize this",
         file_ids=[file_id],
@@ -170,6 +171,24 @@ async def test_preflight_file_tokens_match_context_builder_output():
     assert result.file_tokens > 0
 
     service.file_service.get_files_by_ids.assert_awaited_once_with(file_ids=[file_id])
+
+
+@pytest.mark.asyncio
+async def test_preflight_refuses_a_file_that_is_no_longer_available():
+    """A file deleted after its last use is reported, not silently dropped.
+
+    The send path applies the same check, so the composer learns before
+    sending that the upload has to be repeated.
+    """
+    service = _make_service(assistant=_make_assistant(), files=[])
+    missing = uuid4()
+
+    with pytest.raises(BadRequestException, match=str(missing)):
+        await service.preflight_tokens(
+            question="summarize this",
+            file_ids=[missing],
+            assistant_id=uuid4(),
+        )
 
 
 @pytest.mark.asyncio
@@ -201,7 +220,7 @@ async def test_preflight_excludes_url_only_file_text_when_inline_disabled(monkey
 
     result = await service.preflight_tokens(
         question="summarize this",
-        file_ids=[uuid4()],
+        file_ids=[text_file.id],
         assistant_id=uuid4(),
     )
 
@@ -237,7 +256,7 @@ async def test_preflight_honors_governed_file_policy_over_assistant_flag(monkeyp
 
     result = await service.preflight_tokens(
         question="summarize this",
-        file_ids=[uuid4()],
+        file_ids=[text_file.id],
         assistant_id=uuid4(),
     )
 
@@ -271,7 +290,7 @@ async def test_preflight_inlines_file_text_when_model_cannot_call_tools(monkeypa
 
     result = await service.preflight_tokens(
         question="summarize this",
-        file_ids=[uuid4()],
+        file_ids=[text_file.id],
         assistant_id=uuid4(),
     )
 
@@ -280,11 +299,12 @@ async def test_preflight_inlines_file_text_when_model_cannot_call_tools(monkeypa
 
 
 @pytest.mark.asyncio
-async def test_preflight_counts_assistant_attachments_despite_inline_disabled(
+async def test_preflight_counts_baseline_attachments_regardless_of_upload_toggle(
     monkeypatch,
 ):
-    """Assistant attachments are always inlined by the send path (they get no
-    URL references), so their token count ignores inline_file_text."""
+    """The assistant-wide inline_file_text toggle governs uploads only. Baseline
+    attachments arrive already reduced to the inlined set (the assistant
+    service applies each attachment's own mode), so they count in full."""
     settings = SimpleNamespace(
         file_reference_base_url="http://host.docker.internal:8123",
         public_origin=None,
@@ -335,7 +355,7 @@ async def test_preflight_skips_image_files_without_vision():
 
     result = await service.preflight_tokens(
         question="what is this",
-        file_ids=[uuid4()],
+        file_ids=[image_file.id],
         assistant_id=uuid4(),
     )
 
@@ -367,7 +387,7 @@ async def test_preflight_counts_image_files_on_vision_model():
 
     result = await service.preflight_tokens(
         question="what is this",
-        file_ids=[uuid4()],
+        file_ids=[image_file.id],
         assistant_id=uuid4(),
     )
 
@@ -399,7 +419,7 @@ async def test_preflight_includes_derived_images_on_vision_model():
 
     result = await service.preflight_tokens(
         question="summarize",
-        file_ids=[uuid4()],
+        file_ids=[text_file.id],
         assistant_id=uuid4(),
     )
 
@@ -436,7 +456,7 @@ async def test_preflight_includes_derived_images_for_image_only_pdf():
 
     result = await service.preflight_tokens(
         question="what is in the pdf?",
-        file_ids=[uuid4()],
+        file_ids=[pdf_file.id],
         assistant_id=uuid4(),
     )
 
@@ -469,7 +489,7 @@ async def test_preflight_counts_file_header_for_textless_documents():
 
     result = await service.preflight_tokens(
         question="what is this?",
-        file_ids=[uuid4()],
+        file_ids=[pdf_file.id],
         assistant_id=uuid4(),
     )
 
@@ -825,3 +845,44 @@ async def test_group_chat_unknown_ceiling_refuses_comparison():
             question="Hello", file_ids=[], group_chat_id=uuid4()
         )
     assert error.value.missing_dimensions == ("max_input_tokens",)
+
+
+@pytest.mark.asyncio
+async def test_preflight_excludes_editor_attachments_marked_open_with_tool(monkeypatch):
+    """The config meter sends the unsaved attachment set with each file's mode;
+    one marked "open with tool" is sent as a signed URL and must not count."""
+    settings = SimpleNamespace(
+        file_reference_base_url="http://host.docker.internal:8123",
+        public_origin=None,
+        attachment_context_reserve_tokens=0,
+    )
+    monkeypatch.setattr(conversation_service_mod, "get_settings", lambda: settings)
+    monkeypatch.setattr(file_reference_mod, "get_settings", lambda: settings)
+
+    kontoplan = MagicMock()
+    kontoplan.id = uuid4()
+    kontoplan.file_type = FileType.TEXT
+    kontoplan.text = "konto 1910 kassa " * 200
+    kontoplan.name = "kontoplan.xlsx"
+    kontoplan.original_available = True
+    kontoplan.parent_file_id = None
+
+    assistant = _make_assistant()
+    service = _make_service(assistant=assistant, files=[kontoplan])
+
+    inlined = await service.preflight_tokens(
+        question="",
+        file_ids=[],
+        assistant_id=uuid4(),
+        attachments=[(kontoplan.id, True)],
+    )
+    opened_with_tool = await service.preflight_tokens(
+        question="",
+        file_ids=[],
+        assistant_id=uuid4(),
+        attachments=[(kontoplan.id, False)],
+    )
+
+    assert inlined.file_tokens > 0
+    assert opened_with_tool.file_tokens == 0
+    assert opened_with_tool.excluded_file_count == 1

@@ -41,9 +41,9 @@ describe("BlobPreview", () => {
 
   it("shows original download separately and opens its signed URL", async () => {
     const initialUrl = window.location.href;
-    generateOriginalSignedUrl.mockResolvedValue({
-      url: `${window.location.origin}${window.location.pathname}#blob-1-original-download`
-    });
+    const downloadUrl = new URL(initialUrl);
+    downloadUrl.hash = "blob-1-original-download";
+    generateOriginalSignedUrl.mockResolvedValue({ url: downloadUrl.href });
 
     try {
       render(BlobPreview, { blob: blob(true) });
@@ -93,5 +93,47 @@ describe("BlobPreview", () => {
 
     await vi.waitFor(() => expect(toastError).toHaveBeenCalledWith(m.error_downloading_original()));
     await expect.element(download).toBeEnabled();
+  });
+});
+
+describe("BlobPreview source properties", () => {
+  beforeEach(() => {
+    getBlob.mockReset();
+    getBlob.mockResolvedValue({ text: "Extracted text" });
+  });
+
+  it("lists the document properties apart from the content", async () => {
+    render(BlobPreview, {
+      blob: {
+        ...blob(false),
+        source_metadata: [
+          { name: "Dokumenttyp", label: "Dokumenttyp", value: "Rutin", kind: "choice" },
+          {
+            name: "Verksamhet",
+            label: "Verksamhet",
+            value: ["Äldreomsorg", "Hemtjänst"],
+            kind: "choice"
+          }
+        ]
+      }
+    });
+
+    await page.getByRole("button", { name: /Source document/ }).click();
+
+    await expect
+      .element(page.getByRole("heading", { name: m.source_metadata_label() }))
+      .toBeVisible();
+    await expect.element(page.getByText("Dokumenttyp")).toBeVisible();
+    await expect.element(page.getByText("Rutin")).toBeVisible();
+    await expect.element(page.getByText("Äldreomsorg, Hemtjänst")).toBeVisible();
+  });
+
+  it("shows no properties section for documents without them", async () => {
+    render(BlobPreview, { blob: blob(false) });
+
+    await page.getByRole("button", { name: /Source document/ }).click();
+
+    await expect.element(page.getByText("Extracted text")).toBeVisible();
+    expect(page.getByRole("heading", { name: m.source_metadata_label() }).query()).toBeNull();
   });
 });

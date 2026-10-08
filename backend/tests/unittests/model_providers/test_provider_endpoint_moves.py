@@ -56,6 +56,7 @@ def _provider(
         credentials=credentials,
         config={"endpoint": endpoint} if endpoint is not None else {},
         is_active=True,
+        outbound_headers=[],
     )
 
 
@@ -257,6 +258,7 @@ async def test_provider_endpoint_change_keeps_token_limits(move):
             credentials={},
             config={"endpoint": "https://old.invalid/v1"},
             is_active=True,
+            outbound_headers=[],
             created_at=None,
             updated_at=None,
         )

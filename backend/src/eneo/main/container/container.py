@@ -1087,6 +1087,7 @@ class Container(containers.DeclarativeContainer):
     create_embeddings_service = providers.Factory(
         CreateEmbeddingsService,
         tenant=tenant,
+        user=user,
         config=config,
         encryption_service=encryption_service,
         session=session,
@@ -1727,6 +1728,8 @@ class Container(containers.DeclarativeContainer):
         space_service=space_service,
         assistant_service=assistant_service,
         space_repo=space_repo,
+        assistant_repo=assistant_repo,
+        effective_config_service=effective_config_service,
     )
     user_group_service = providers.Factory(
         UserGroupsService, user=user, repo=user_groups_repo
@@ -2014,6 +2017,7 @@ class Container(containers.DeclarativeContainer):
         Transcriber,
         file_service=file_service,
         tenant=tenant,
+        user=user,
         config=config,
         encryption_service=encryption_service,
         session=session,

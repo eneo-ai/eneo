@@ -51,6 +51,45 @@ flowchart LR
   model --> answer[Grounded answer and references]
 ```
 
+## Configure material in the assistant editor
+
+The **Assistentens material** (Assistant material) section brings persistent
+file attachments and existing knowledge selectors together. **Bilagor**
+(Attachments) contains all attached files and the file uploader. Each file
+shows whether it is loaded before every answer or opened on demand; changing
+its reading mode does not move it out of Attachments.
+
+**Kunskap** (Knowledge) and **Organisationskunskap** (Organization knowledge)
+are separate sections below the attachments and uploader. The knowledge summary
+states whether searches run on demand or before every answer. Personal and
+organization knowledge retain their existing selectors and origins.
+
+Use **Ändra** (Change) on a file to choose between **Öppna vid behov** (Open
+when needed) and **Läs in inför varje svar** (Load before every answer). The
+editor explains when the selected model, file type, stored original or deployment
+prevents on-demand access. Changing the model does not overwrite
+the saved file preference.
+
+**Hantering av material** (Material handling) shows the knowledge search timing
+and chat-document handling controls directly, without a collapsed section. These
+remain independent: the knowledge setting controls searches for relevant passages, the
+chat setting controls user-uploaded documents, and each persistent attachment
+has its own setting. Rules, tone and procedures are configured in **Prompt** or
+**Skills**, both under **Instruktioner** (Instructions).
+
+This organization does not change knowledge uploads, extraction, indexing or
+the assistant save flow. Newly uploaded assistant attachments default to opening
+on demand. When on-demand access is unavailable, their content is loaded upfront
+instead. Existing attachments retain their saved reading mode. Chat document
+text is still included directly, and knowledge still uses injected retrieval
+unless configured otherwise. On-demand file attachments are not automatically
+indexed as knowledge.
+
+The **Fast kontext** (Fixed context) meter estimates prompt text and directly
+loaded attachments. It is not a total request estimate: chat history, skills,
+tool definitions, references and retrieved content also consume context.
+Including content does not guarantee the assistant will follow it.
+
 ## Keep four concepts separate
 
 Several things are called "knowledge" or "integration" in normal conversation,
@@ -336,6 +375,56 @@ This matters in two cases:
 Image files still reach vision-capable models as images. Audio references report
 that their transcription, when available, is already represented in the
 conversation.
+
+### URL-only attachments
+
+A document is **URL-only** when the model receives its reference entry and
+nothing else: no extracted text and no rendered page images. The model decides
+whether to open it, and reads it through `files__read_file` or another tool
+that accepts the URL. This is what the editor calls opening a file on demand.
+
+Three settings decide it, each for its own kind of file:
+
+| Files | Setting | Default |
+| --- | --- | --- |
+| Documents a user uploads in chat | **Dokument från användare i chatten** (Documents uploaded by users in chat) under **Hantering av material**, stored as `inline_file_text` on the assistant | Loaded directly |
+| Documents a user uploads to the personal assistant | The **Bilagor** (Attachments) governance policy, when it sets a value. It replaces the assistant's own setting for the request | Not set: the personal setting applies |
+| Files attached to the assistant by its author | The reading mode of each file, **Öppnas vid behov** (Opened on demand) or **Läses in inför varje svar** (Loaded before every answer) | On demand for new uploads |
+
+A file selected for on-demand access is still loaded directly when any of the
+following holds. For the assistant's own files the editor shows the reason next
+to the file.
+
+- The effective model does not support tool calling. A model that cannot call
+  the reader would only see a link it cannot open.
+- The file is not a text document. Images and audio are never URL-only.
+- The file has no readable stored original, for example a row that predates
+  durable originals. Upload it again to make it available on demand.
+- The deployment has neither `FILE_REFERENCE_BASE_URL` nor a public origin, so
+  Eneo cannot build a reference.
+
+URL-only mode changes when the text enters the context, not how much of it a
+full read costs:
+
+- `files__read_file` returns the extracted text in pages of at most 20,000
+  characters, or half of `MCP_TOOL_OUTPUT_MAX_CHARS` when that is smaller
+  (16,384 characters with the default settings). Each page ends with the
+  offset for the next one.
+- Every page the model reads is a tool result in the conversation. A request
+  such as "summarise this document" makes the model page through the whole
+  file, so the full text ends up in context anyway. The saving comes from
+  questions that need none or only part of the file, and from turns where the
+  file is not opened at all.
+- Pages that were read follow the replay rules in
+  [Conversation replay of tool use](#conversation-replay-of-tool-use).
+- The check that rejects attachments too large for the model's context window
+  counts only directly loaded files. A URL-only document of any size is
+  accepted, and it is the model's paging that has to fit.
+
+Eneo has no built-in tool that summarises a document outside the context
+window. For files that are too large to read in full, connect a tool that
+processes the file itself and returns a bounded result, and let it take the
+same reference URL.
 
 ## Internal and external MCP servers use one proxy
 

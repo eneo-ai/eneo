@@ -510,6 +510,10 @@ class UsersRepository:
         """
         Returns active, loginable users in tenant that have the 'admin' permission
         via any of their roles. Excludes inactive and deleted users.
+
+        Oldest first, deterministically: callers that act as "a tenant admin"
+        take the first, and that admin's attributes can be sent to a model
+        provider as outbound headers.
         """
         q = (
             sa.select(Users)
@@ -520,5 +524,6 @@ class UsersRepository:
                 Users.tenant_id == tenant_id,
                 Roles.permissions.contains(["admin"]),
             )
+            .order_by(Users.created_at, Users.id)
         )
         return await self._get_models_from_query(q, with_deleted=False)

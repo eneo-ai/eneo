@@ -93,7 +93,8 @@ Eneo sends the available values in these headers:
 - `X-Eneo-Role`
 
 Empty values are omitted. Text values are stripped of control characters and
-percent-encoded as UTF-8; the receiving server must decode them before display
+invisible formatting characters (such as zero-width spaces) and percent-encoded
+as UTF-8; the receiving server must decode them before display
 or matching. Headers are sent during connection checks, tool discovery, and
 tool calls.
 

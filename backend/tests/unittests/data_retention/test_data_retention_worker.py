@@ -47,15 +47,18 @@ class _DataRetentionService:
         self.builder_client_error_now_values: list[datetime] = []
         self.flow_destructive_calls: list[str] = []
 
-    async def delete_old_questions(self) -> int:
+    async def delete_old_questions(self, *, commit_each_batch: bool = False) -> int:
+        assert commit_each_batch
         return 2
 
-    async def delete_old_app_runs(self) -> int:
+    async def delete_old_app_runs(self, *, commit_each_batch: bool = False) -> int:
+        assert commit_each_batch
         if self.app_runs_error is not None:
             raise self.app_runs_error
         return 3
 
-    async def delete_old_sessions(self) -> int:
+    async def delete_old_sessions(self, *, commit_each_batch: bool = False) -> int:
+        assert commit_each_batch
         return 5
 
     async def delete_expired_builder_client_errors_batch(self, *, now: datetime) -> int:
@@ -129,7 +132,7 @@ async def test_cleanup_old_data_preserves_builder_sessions_by_default(
     }
     assert service.flow_destructive_calls == []
     assert len(service.builder_client_error_now_values) == 3
-    assert session.transaction_count == 6
+    assert session.transaction_count == 3
     assert container.session.reset_count == 1
 
 
@@ -163,5 +166,5 @@ async def test_cleanup_old_data_keeps_non_flow_partial_success(
     }
     assert "sensitive value" not in "\n".join(result["errors"])
     assert service.flow_destructive_calls == []
-    assert session.transaction_count == 6
+    assert session.transaction_count == 3
     assert container.session.reset_count == 1

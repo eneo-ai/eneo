@@ -87,6 +87,9 @@ class TestCategoryMappings:
             ActionType.FLOW_RETENTION_HOLD_PLACED,
             ActionType.FLOW_RETENTION_HOLD_RELEASED,
             ActionType.FLOW_RETENTION_HOLD_REVIEW_EXTENDED,
+            ActionType.MODEL_PROVIDER_HEADERS_UPDATED,
+            ActionType.MODEL_PROVIDER_DESTINATION_CHANGED,
+            ActionType.MODEL_PROVIDER_HEADERS_PREVIEWED,
         ]
 
         for action_type in admin_action_types:

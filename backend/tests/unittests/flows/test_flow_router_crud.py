@@ -761,7 +761,7 @@ async def test_update_flow_assistant_forwards_payload():
     update = kwargs["update"]
     assert isinstance(update, AssistantUpdateCommand)
     assert update.name == "Updated assistant"
-    assert update.attachment_ids == [attachment_id]
+    assert update.attachments == [(attachment_id, True)]
     assert update.websites == [website_id]
     assert update.groups == [group_id]
     assert update.integration_knowledge_ids == [integration_knowledge_id]

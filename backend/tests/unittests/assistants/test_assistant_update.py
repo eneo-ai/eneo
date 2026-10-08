@@ -167,7 +167,8 @@ def test_flow_mapper_preserves_explicit_clear_values() -> None:
     assert update.is_set("groups")
 
 
-def test_flow_mapper_converts_nested_ids_and_mcp_tools() -> None:
+@pytest.mark.parametrize("inline_text", [True, False])
+def test_flow_mapper_converts_nested_ids_and_mcp_tools(inline_text: bool) -> None:
     attachment_id = uuid4()
     website_id = uuid4()
     group_id = uuid4()
@@ -179,7 +180,7 @@ def test_flow_mapper_converts_nested_ids_and_mcp_tools() -> None:
     update = to_flow_assistant_update_command(
         AssistantUpdatePublic(
             name="Assistant",
-            attachments=[{"id": attachment_id}],
+            attachments=[{"id": attachment_id, "inline_text": inline_text}],
             websites=[{"id": website_id}],
             groups=[{"id": group_id}],
             integration_knowledge_list=[{"id": integration_knowledge_id}],
@@ -189,7 +190,7 @@ def test_flow_mapper_converts_nested_ids_and_mcp_tools() -> None:
         )
     )
 
-    assert update.attachment_ids == [attachment_id]
+    assert update.attachments == [(attachment_id, inline_text)]
     assert update.websites == [website_id]
     assert update.groups == [group_id]
     assert update.integration_knowledge_ids == [integration_knowledge_id]
@@ -201,7 +202,7 @@ def test_flow_mapper_converts_nested_ids_and_mcp_tools() -> None:
 # Develop treats null on a standalone assistant update as "not provided": the
 # stored list is kept, and only an explicit [] clears it.
 _STANDALONE_LIST_FIELDS = [
-    ("attachments", "attachment_ids", [{"id": uuid4()}]),
+    ("attachments", "attachments", [{"id": uuid4()}]),
     ("groups", "groups", [{"id": uuid4()}]),
     ("websites", "websites", [{"id": uuid4()}]),
     (

@@ -709,6 +709,18 @@ const ACTION_MESSAGES = {
     name: m.audit_action_mcp_server_tool_disabled,
     description: m.audit_action_mcp_server_tool_disabled_description
   },
+  model_provider_headers_updated: {
+    name: m.audit_action_model_provider_headers_updated,
+    description: m.audit_action_model_provider_headers_updated_description
+  },
+  model_provider_destination_changed: {
+    name: m.audit_action_model_provider_destination_changed,
+    description: m.audit_action_model_provider_destination_changed_description
+  },
+  model_provider_headers_previewed: {
+    name: m.audit_action_model_provider_headers_previewed,
+    description: m.audit_action_model_provider_headers_previewed_description
+  },
   retention_policy_applied: {
     name: m.audit_action_retention_policy_applied,
     description: m.audit_action_retention_policy_applied_description

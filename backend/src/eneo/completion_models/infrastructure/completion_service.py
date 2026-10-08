@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from collections.abc import Mapping, Sequence
+from collections.abc import Collection, Mapping, Sequence
 from dataclasses import dataclass, field, replace
 from typing import TYPE_CHECKING, Any, AsyncGenerator, Literal, Optional, TypeAlias
 from uuid import UUID
@@ -424,6 +424,9 @@ class CompletionService:
             model=model,
             credential_resolver=credential_resolver,
             provider_type=provider.provider_type,
+            outbound_headers=provider.create_outbound_headers(
+                self.encryption_service, self.user
+            ),
         )
 
     async def resolve_model_route(
@@ -821,6 +824,7 @@ class CompletionService:
         useful_output_reserve_tokens: int | None = None,
         prepared_request: CompletionRequestPackage | None = None,
         file_reference_urls: dict[UUID, str] | None = None,
+        url_only_prompt_file_ids: Collection[UUID] = (),
     ) -> CompletionModelResponse:
         if files is None:
             files = []
@@ -874,10 +878,26 @@ class CompletionService:
             for question in (session.questions if session else [])
             for file in [*question.files, *question.generated_files]
         ]
+        # Persistent attachments marked "open with tool" are URL-only: their
+        # reference renders on the current message and their text stays out of
+        # the system prompt. Without tools to hand the url to, the mode is
+        # meaningless, so the attachment inlines like any other.
+        tools_advertised = bool(mcp_servers) and model.supports_tool_calling
+        referenced_prompt_files = (
+            [file for file in prompt_files if file.id in url_only_prompt_file_ids]
+            if tools_advertised and url_only_prompt_file_ids
+            else []
+        )
         if file_reference_urls is None:
-            file_reference_urls = self._build_file_reference_urls(files + history_files)
+            file_reference_urls = self._build_file_reference_urls(
+                files + history_files + referenced_prompt_files
+            )
         # The previous turn's generated files are minted for the first time on
-        # this turn, so they are "new" exactly once, here.
+        # this turn, so they are "new" exactly once, here. Persistent
+        # attachments are re-minted every turn of a session but represent one
+        # exposure, audited on the session's first turn (session.questions
+        # never holds the current turn at this point).
+        is_first_turn = session is None or not session.questions
         newly_referenced = [
             *files,
             *(
@@ -885,6 +905,7 @@ class CompletionService:
                 if session and session.questions
                 else []
             ),
+            *(referenced_prompt_files if is_first_turn else []),
         ]
         await self._audit_file_reference_mints(
             files=newly_referenced,
@@ -943,6 +964,9 @@ class CompletionService:
                     reject_over_limit=reject_context_over_limit,
                     file_reference_urls=file_reference_urls,
                     inline_file_text=inline_file_text,
+                    url_only_prompt_file_ids={
+                        file.id for file in referenced_prompt_files
+                    },
                 )
 
             if extended_logging:

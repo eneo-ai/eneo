@@ -10,11 +10,6 @@ from eneo.database.database import AsyncSession
 from eneo.database.repositories.base import BaseRepositoryDelegate
 from eneo.database.tables.api_keys_v2_table import ApiKeysV2
 from eneo.database.tables.assistant_table import Assistants
-from eneo.database.tables.files_table import Files
-from eneo.database.tables.flow_tables import (
-    FlowTemplateAssets,
-    FlowVersionFileReferences,
-)
 from eneo.database.tables.help_assistant_runs_table import HelpAssistantRuns
 from eneo.database.tables.info_blobs_table import InfoBlobs
 from eneo.database.tables.questions_table import (
@@ -25,6 +20,7 @@ from eneo.database.tables.questions_table import (
 from eneo.database.tables.sessions_table import Sessions
 from eneo.database.tables.users_table import Users
 from eneo.files.file_content_loader import FileContentLoader
+from eneo.files.unused_file_cleanup import delete_unused_root_files
 from eneo.info_blobs.info_blob_repo import InfoBlobRepository
 from eneo.questions.question_file_projection import attach_question_files
 from eneo.sessions.session import (
@@ -593,51 +589,21 @@ class SessionRepository:
         return sessions
 
     async def delete(self, id: UUID) -> SessionInDB | None:
-        """Delete a session and the generated files only its answers owned.
+        """Delete a session and the Files nothing else uses anymore.
 
         Questions and their file links cascade with the session, but the
-        ``files`` rows do not: a tool-generated image (linked with type
-        ``assistant``) has no other owner surface, so it is removed here once
-        nothing else references it. Uploads are left alone; the user manages
-        those.
+        ``files`` rows do not. Uploads and tool-generated images that only
+        this conversation used are deleted with it; a File still used by
+        another conversation, Assistant, App or App run is kept.
         """
-        generated_file_ids = list(
+        file_ids = list(
             await self.session.scalars(
                 sa.select(QuestionsFiles.file_id)
                 .join(Questions, Questions.id == QuestionsFiles.question_id)
-                .where(Questions.session_id == id, QuestionsFiles.type == "assistant")
+                .where(Questions.session_id == id)
+                .distinct()
             )
         )
         deleted = await self.delegate.delete(id)
-        if generated_file_ids:
-            # Lock the candidates first, in id order (as FileService.delete_file
-            # does), and only then read the references in a separate statement:
-            # a publisher that holds a file's lock with an uncommitted version
-            # reference makes this wait, and the statement below then sees the
-            # committed reference. A flow version or template asset that names
-            # the file keeps it (their references are RESTRICT).
-            locked_file_ids = list(
-                await self.session.scalars(
-                    sa.select(Files.id)
-                    .where(Files.id.in_(generated_file_ids))
-                    .order_by(Files.id)
-                    .with_for_update(of=Files)
-                )
-            )
-            still_referenced = sa.union(
-                *(
-                    sa.select(column).where(column.in_(locked_file_ids))
-                    for column in (
-                        QuestionsFiles.file_id,
-                        FlowVersionFileReferences.file_id,
-                        FlowTemplateAssets.file_id,
-                    )
-                )
-            )
-            await self.session.execute(
-                sa.delete(Files).where(
-                    Files.id.in_(locked_file_ids),
-                    Files.id.not_in(still_referenced),
-                )
-            )
+        await delete_unused_root_files(self.session, file_ids)
         return await self._hydrate_optional(deleted)

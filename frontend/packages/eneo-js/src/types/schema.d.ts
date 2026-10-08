@@ -755,6 +755,26 @@ export interface paths {
     patch?: never;
     trace?: never;
   };
+  "/api/v1/admin/model-providers/outbound-headers/options/": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /**
+     * Get Outbound Header Options
+     * @description Metadata for the outbound header editor: the dynamic values a header value may use, and the provider types that support outbound headers.
+     */
+    get: operations["get_outbound_header_options_api_v1_admin_model_providers_outbound_headers_options__get"];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
   "/api/v1/admin/model-providers/{provider_id}/": {
     parameters: {
       query?: never;
@@ -797,6 +817,26 @@ export interface paths {
     get: operations["list_provider_models_api_v1_admin_model_providers__provider_id__models__get"];
     put?: never;
     post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/v1/admin/model-providers/{provider_id}/outbound-headers/preview/": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    /**
+     * Preview Outbound Headers
+     * @description Resolve the provider's outbound headers for a user in this tenant, without sending anything. A secret header returns its state only.
+     */
+    post: operations["preview_outbound_headers_api_v1_admin_model_providers__provider_id__outbound_headers_preview__post"];
     delete?: never;
     options?: never;
     head?: never;
@@ -3270,7 +3310,7 @@ export interface paths {
     };
     /**
      * Get per-action audit configuration
-     * @description Retrieve all 188 actions with their enabled status for the modal UI.
+     * @description Retrieve all 191 actions with their enabled status for the modal UI.
      */
     get: operations["get_action_config_api_v1_audit_config_actions_get"];
     put?: never;
@@ -6518,6 +6558,26 @@ export interface paths {
     patch?: never;
     trace?: never;
   };
+  "/api/v1/integrations/sharepoint/fixtures/{scenario}/search/": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /**
+     * Search Sharepoint Fixture
+     * @description Search a development-only SharePoint fixture by text and column values. No Microsoft Graph request is made. Requires SHAREPOINT_FIXTURE_MODE_ENABLED=true.
+     */
+    get: operations["search_sharepoint_fixture_api_v1_integrations_sharepoint_fixtures__scenario__search__get"];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
   "/api/v1/integrations/sharepoint/fixtures/{scenario}/tree/": {
     parameters: {
       query?: never;
@@ -6714,6 +6774,26 @@ export interface paths {
      * @description Get preview data for a user integration.
      */
     get: operations["get_integration_preview_api_v1_integrations__user_integration_id__preview__get"];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/v1/integrations/{user_integration_id}/sharepoint/search/": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /**
+     * Search Sharepoint Library
+     * @description Search a SharePoint library or OneDrive by free text and column values, across every folder.
+     */
+    get: operations["search_sharepoint_library_api_v1_integrations__user_integration_id__sharepoint_search__get"];
     put?: never;
     post?: never;
     delete?: never;
@@ -12076,6 +12156,9 @@ export interface components {
       | "mcp_server_disabled"
       | "mcp_server_tool_enabled"
       | "mcp_server_tool_disabled"
+      | "model_provider_headers_updated"
+      | "model_provider_destination_changed"
+      | "model_provider_headers_previewed"
       | "help_assistant_role_assigned"
       | "help_assistant_role_unassigned"
       | "help_assistant_role_toggled_enabled"
@@ -13519,6 +13602,62 @@ export interface components {
       /** Total Trackable Assistants */
       total_trackable_assistants: number;
     };
+    /** AssistantAttachmentInput */
+    AssistantAttachmentInput: {
+      /**
+       * Id
+       * Format: uuid
+       */
+      id: string;
+      /**
+       * Inline Text
+       * @description True: the attachment's text is placed in the prompt on every turn. False: the assistant gets a signed reference URL instead and opens the file with a tool when needed (requires a stored original and a model that can call tools; otherwise the text is inlined).
+       * @default true
+       */
+      inline_text?: boolean;
+    };
+    /**
+     * AssistantAttachmentPublic
+     * @example {
+     *       "created_at": "2026-03-17T10:04:00Z",
+     *       "id": "00000000-0000-0000-0000-000000000701",
+     *       "mimetype": "audio/mpeg",
+     *       "name": "review-audio.mp3",
+     *       "size": 1843200,
+     *       "updated_at": "2026-03-17T10:04:00Z"
+     *     }
+     */
+    AssistantAttachmentPublic: {
+      /** Created At */
+      created_at?: string | null;
+      /**
+       * Has Download Reference
+       * @default false
+       */
+      has_download_reference?: boolean;
+      /**
+       * Id
+       * Format: uuid
+       */
+      id: string;
+      /**
+       * Inline Text
+       * @default true
+       */
+      inline_text?: boolean;
+      /** Mimetype */
+      mimetype: string;
+      /** Name */
+      name: string;
+      /** Size */
+      size: number;
+      /** Token Count */
+      token_count?: number | null;
+      /** Transcription */
+      transcription?: string | null;
+      /** Updated At */
+      updated_at?: string | null;
+    };
     /** AssistantCreatePublic */
     AssistantCreatePublic: {
       /**
@@ -13709,7 +13848,7 @@ export interface components {
     AssistantPublic: {
       allowed_attachments: components["schemas"]["FileRestrictions"];
       /** Attachments */
-      attachments: components["schemas"]["FilePublic"][];
+      attachments: components["schemas"]["AssistantAttachmentPublic"][];
       /** Available Capabilities */
       available_capabilities?: components["schemas"]["CapabilityAvailability"][];
       completion_model?: components["schemas"]["CompletionModelSparse"] | null;
@@ -14216,7 +14355,7 @@ export interface components {
      * @example {
      *       "categories": [
      *         {
-     *           "action_count": 53,
+     *           "action_count": 56,
      *           "category": "admin_actions",
      *           "enabled": true,
      *           "example_actions": [
@@ -14598,7 +14737,7 @@ export interface components {
      *     Display text is intentionally omitted: the frontend translates ``category``
      *     by key (``audit_category_{category}`` / ``_description``).
      * @example {
-     *       "action_count": 53,
+     *       "action_count": 56,
      *       "category": "admin_actions",
      *       "enabled": true,
      *       "example_actions": [
@@ -16111,7 +16250,7 @@ export interface components {
     DefaultAssistant: {
       allowed_attachments: components["schemas"]["FileRestrictions"];
       /** Attachments */
-      attachments: components["schemas"]["FilePublic"][];
+      attachments: components["schemas"]["AssistantAttachmentPublic"][];
       /** Available Capabilities */
       available_capabilities?: components["schemas"]["CapabilityAvailability"][];
       completion_model?: components["schemas"]["CompletionModelSparse"] | null;
@@ -16352,6 +16491,29 @@ export interface components {
       session_image_limit_bytes: number;
       /** Transcription Audio Limit Bytes */
       transcription_audio_limit_bytes: number;
+    };
+    /** DynamicValuePublic */
+    DynamicValuePublic: {
+      /**
+       * Attribute
+       * @description The provisioned attribute the token reads
+       */
+      attribute: string;
+      /**
+       * Classification
+       * @enum {string}
+       */
+      classification: "identifying" | "organisational";
+      /**
+       * Source
+       * @enum {string}
+       */
+      source: "scim_enterprise" | "external_id";
+      /**
+       * Token
+       * @description Used in a header value as {{token}}
+       */
+      token: string;
     };
     /** EditAdvisory */
     EditAdvisory: {
@@ -16796,6 +16958,7 @@ export interface components {
       | "audit_log"
       | "session"
       | "mcp_server"
+      | "model_provider"
       | "mcp_server_tool"
       | "flow"
       | "flow_run"
@@ -17734,7 +17897,9 @@ export interface components {
       | "app_attachment"
       | "app_run_input"
       | "flow_version"
-      | "flow_template_asset";
+      | "flow_template_asset"
+      | "flow_runtime"
+      | "flow_builder_session";
     /** FileUsageSummary */
     FileUsageSummary: {
       /** Count */
@@ -27964,6 +28129,11 @@ export interface components {
       original_available: boolean;
       /** Score */
       score: number;
+      /**
+       * Source Metadata
+       * @default []
+       */
+      source_metadata?: components["schemas"]["SourceMetadataEntry"][];
       /** Updated At */
       updated_at?: string | null;
       /** Website Id */
@@ -28009,6 +28179,11 @@ export interface components {
       metadata: components["schemas"]["InfoBlobMetadata"];
       /** Original Available */
       original_available: boolean;
+      /**
+       * Source Metadata
+       * @default []
+       */
+      source_metadata?: components["schemas"]["SourceMetadataEntry"][];
       /** Text */
       text: string;
       /** Updated At */
@@ -28030,6 +28205,11 @@ export interface components {
       metadata: components["schemas"]["InfoBlobMetadata"];
       /** Original Available */
       original_available: boolean;
+      /**
+       * Source Metadata
+       * @default []
+       */
+      source_metadata?: components["schemas"]["SourceMetadataEntry"][];
       /** Updated At */
       updated_at?: string | null;
       /** Website Id */
@@ -29411,6 +29591,11 @@ export interface components {
        */
       name: string;
       /**
+       * Outbound Headers
+       * @description Outbound HTTP headers to configure
+       */
+      outbound_headers?: components["schemas"]["OutboundHeaderInput"][];
+      /**
        * Provider Type
        * @description Provider type: openai, azure, or anthropic
        */
@@ -29441,6 +29626,11 @@ export interface components {
       masked_api_key?: string | null;
       /** Name */
       name: string;
+      /**
+       * Outbound Headers
+       * @default []
+       */
+      outbound_headers?: components["schemas"]["OutboundHeaderPublic"][];
       /** Provider Type */
       provider_type: string;
       /**
@@ -29483,6 +29673,11 @@ export interface components {
        * @description User-defined name for this provider instance
        */
       name?: string | null;
+      /**
+       * Outbound Headers
+       * @description Replaces the configured outbound headers; omit to leave them unchanged
+       */
+      outbound_headers?: components["schemas"]["OutboundHeaderInput"][] | null;
     };
     /** ModelUsage */
     ModelUsage: {
@@ -30315,6 +30510,167 @@ export interface components {
       expires_in?: number;
     };
     /**
+     * OutboundHeaderInput
+     * @description One outbound header in a create or update.
+     *
+     *     Write convention (the list replaces the stored one):
+     *     an entry with an `id` and no `value` keeps the stored value; with a `value`,
+     *     replaces it; an entry without an `id` is new and must supply `value`; a
+     *     stored header whose `id` is absent is deleted. `fallback` follows the same
+     *     rule, and `null` clears it.
+     */
+    OutboundHeaderInput: {
+      /**
+       * Encoding
+       * @description percent: percent-encode the resolved value (receiver unquotes); none: send byte-exact (printable ASCII only)
+       * @default percent
+       * @enum {string}
+       */
+      encoding?: "percent" | "none";
+      /**
+       * Fallback
+       * @description Literal sent when on_missing is 'fallback'. Omit to keep the stored one.
+       */
+      fallback?: string | null;
+      /**
+       * Id
+       * @description Server-assigned id; omit for a new header
+       */
+      id?: string | null;
+      /**
+       * Name
+       * @description HTTP header name (RFC 9110 token)
+       */
+      name: string;
+      /**
+       * On Missing
+       * @description What to do when a dynamic value has no value for the user
+       * @default omit
+       * @enum {string}
+       */
+      on_missing?: "omit" | "fallback" | "fail";
+      /**
+       * Secret
+       * @description Encrypt at rest and never return the value
+       * @default false
+       */
+      secret?: boolean;
+      /**
+       * Value
+       * @description Literal text and {{token}} dynamic values. Omit to keep the stored value.
+       */
+      value?: string | null;
+    };
+    /**
+     * OutboundHeaderOptions
+     * @description Server-owned metadata for the outbound header editor.
+     */
+    OutboundHeaderOptions: {
+      /** Dynamic Values */
+      dynamic_values: components["schemas"]["DynamicValuePublic"][];
+      /** Max Headers */
+      max_headers: number;
+      /** Supported Provider Types */
+      supported_provider_types: string[];
+    };
+    /** OutboundHeaderPreview */
+    OutboundHeaderPreview: {
+      /**
+       * Blocked
+       * @description Whether this user's requests would be blocked
+       */
+      blocked: boolean;
+      /**
+       * Blocked Reason
+       * @description Why the headers block this user's requests, e.g. 'missing_required_value', 'total_size_exceeded' or 'decryption_failed' (a stored secret cannot be read)
+       */
+      blocked_reason?: string | null;
+      /**
+       * Destination Problem
+       * @description Why requests to this provider's endpoint would be blocked
+       */
+      destination_problem?: string | null;
+      /** Headers */
+      headers: components["schemas"]["OutboundHeaderPreviewItem"][];
+      /**
+       * User Id
+       * Format: uuid
+       */
+      user_id: string;
+    };
+    /** OutboundHeaderPreviewItem */
+    OutboundHeaderPreviewItem: {
+      /**
+       * Missing Dynamic Values
+       * @default []
+       */
+      missing_dynamic_values?: string[];
+      /** Name */
+      name: string;
+      /**
+       * Policy
+       * @description The missing-value policy applied, when state is 'missing'
+       */
+      policy?: ("omit" | "fallback" | "fail") | null;
+      /**
+       * Reason
+       * @description Why the value is invalid
+       */
+      reason?: string | null;
+      /** Secret */
+      secret: boolean;
+      /**
+       * State
+       * @enum {string}
+       */
+      state: "resolved" | "missing" | "invalid";
+      /**
+       * Value
+       * @description The value as it would be sent. Never returned for a secret header.
+       */
+      value?: string | null;
+    };
+    /** OutboundHeaderPreviewRequest */
+    OutboundHeaderPreviewRequest: {
+      /**
+       * User Id
+       * Format: uuid
+       * @description The tenant user to resolve the headers for
+       */
+      user_id: string;
+    };
+    /**
+     * OutboundHeaderPublic
+     * @description A configured header. A secret header's value and fallback are masked.
+     */
+    OutboundHeaderPublic: {
+      /**
+       * Classification
+       * @description The most sensitive kind of dynamic value the header sends; known for a secret header although its value is masked
+       */
+      classification?: ("identifying" | "organisational") | null;
+      /**
+       * Encoding
+       * @enum {string}
+       */
+      encoding: "percent" | "none";
+      /** Fallback */
+      fallback?: string | null;
+      /** Id */
+      id: string;
+      /** Name */
+      name: string;
+      /**
+       * On Missing
+       * @enum {string}
+       */
+      on_missing: "omit" | "fallback" | "fail";
+      /** Secret */
+      secret: boolean;
+      /** Value */
+      value: string;
+    };
+    /**
      * Outcome
      * @description Indicate success or failure of audited action
      * @enum {string}
@@ -31091,7 +31447,7 @@ export interface components {
      */
     PartialAssistantUpdatePublic: {
       /** Attachments */
-      attachments?: components["schemas"]["ModelId"][] | null;
+      attachments?: components["schemas"]["AssistantAttachmentInput"][] | null;
       /**
        * @deprecated
        * @description This field is deprecated and will be ignored
@@ -31731,6 +32087,22 @@ export interface components {
       total_bytes: number;
     };
     /**
+     * PreflightAttachment
+     * @description A persistent attachment as the assistant editor is about to save it.
+     */
+    PreflightAttachment: {
+      /**
+       * Id
+       * Format: uuid
+       */
+      id: string;
+      /**
+       * Inline Text
+       * @default true
+       */
+      inline_text?: boolean;
+    };
+    /**
      * PreflightRequest
      * @description Request shape for /conversations/preflight.
      *
@@ -31746,6 +32118,8 @@ export interface components {
       assistant_id?: string | null;
       /** Assistant Prompt */
       assistant_prompt?: string | null;
+      /** Attachments */
+      attachments?: components["schemas"]["PreflightAttachment"][] | null;
       /**
        * File Ids
        * @default []
@@ -34302,6 +34676,26 @@ export interface components {
        */
       whats_new_enabled?: boolean;
     };
+    /**
+     * SharePointFilterColumn
+     * @description A library column a person can filter on without typing a value.
+     */
+    SharePointFilterColumn: {
+      /**
+       * Choices
+       * @default []
+       */
+      choices?: string[];
+      /**
+       * Kind
+       * @enum {string}
+       */
+      kind: "choice" | "boolean";
+      /** Label */
+      label: string;
+      /** Name */
+      name: string;
+    };
     /** SharePointFixturePreviewResponse */
     SharePointFixturePreviewResponse: {
       /** Count */
@@ -34321,8 +34715,34 @@ export interface components {
      * @enum {string}
      */
     SharePointFixtureScenario: "representative" | "large_tenant" | "empty";
+    /** SharePointFixtureSearchResponse */
+    SharePointFixtureSearchResponse: {
+      /** Drive Id */
+      drive_id: string;
+      /**
+       * Fixture
+       * @default true
+       * @constant
+       */
+      fixture?: true;
+      /** Items */
+      items: components["schemas"]["SharePointTreeItem"][];
+      scenario: components["schemas"]["SharePointFixtureScenario"];
+      /** Site Id */
+      site_id?: string | null;
+      /**
+       * Truncated
+       * @default false
+       */
+      truncated?: boolean;
+    };
     /** SharePointFixtureTreeResponse */
     SharePointFixtureTreeResponse: {
+      /**
+       * Columns
+       * @default []
+       */
+      columns?: components["schemas"]["SharePointFilterColumn"][];
       /** Current Path */
       current_path: string;
       /** Drive Id */
@@ -34340,6 +34760,23 @@ export interface components {
       scenario: components["schemas"]["SharePointFixtureScenario"];
       /** Site Id */
       site_id?: string | null;
+    };
+    /**
+     * SharePointSearchResponse
+     * @description Files anywhere in a library that match a text and column filters.
+     */
+    SharePointSearchResponse: {
+      /** Drive Id */
+      drive_id: string;
+      /** Items */
+      items: components["schemas"]["SharePointTreeItem"][];
+      /** Site Id */
+      site_id?: string | null;
+      /**
+       * Truncated
+       * @default false
+       */
+      truncated?: boolean;
     };
     /**
      * SharePointSubscriptionPublic
@@ -34427,6 +34864,11 @@ export interface components {
       path: string;
       /** Size */
       size?: number | null;
+      /**
+       * Source Metadata
+       * @default []
+       */
+      source_metadata?: components["schemas"]["SourceMetadataEntry"][];
       /** Type */
       type: string;
       /** Web Url */
@@ -34434,6 +34876,11 @@ export interface components {
     };
     /** SharePointTreeResponse */
     SharePointTreeResponse: {
+      /**
+       * Columns
+       * @default []
+       */
+      columns?: components["schemas"]["SharePointFilterColumn"][];
       /** Current Path */
       current_path: string;
       /** Drive Id */
@@ -35188,6 +35635,29 @@ export interface components {
      * @enum {string}
      */
     SortOrder: "asc" | "desc";
+    /**
+     * SourceMetadataEntry
+     * @description One document property from the source system, e.g. a SharePoint column.
+     *
+     *     ``name`` is the source's stable identifier for the property, ``label`` the
+     *     human readable name the source shows, ``value`` the normalised value as
+     *     text (a list for multi-value properties). ``kind`` lets presentation format
+     *     dates and booleans without re-parsing the value.
+     */
+    SourceMetadataEntry: {
+      /**
+       * Kind
+       * @default text
+       * @enum {string}
+       */
+      kind?: "text" | "choice" | "date" | "number" | "boolean" | "url";
+      /** Label */
+      label: string;
+      /** Name */
+      name: string;
+      /** Value */
+      value: string | string[];
+    };
     /** SpaceDashboard */
     SpaceDashboard: {
       applications?: components["schemas"]["Applications"] | null;
@@ -41348,6 +41818,35 @@ export interface operations {
       };
     };
   };
+  get_outbound_header_options_api_v1_admin_model_providers_outbound_headers_options__get: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["OutboundHeaderOptions"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+    };
+  };
   get_provider_api_v1_admin_model_providers__provider_id___get: {
     parameters: {
       query?: never;
@@ -41578,6 +42077,68 @@ export interface operations {
           "application/json": {
             [key: string]: unknown;
           }[];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Not Found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Service Unavailable */
+      503: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+    };
+  };
+  preview_outbound_headers_api_v1_admin_model_providers__provider_id__outbound_headers_preview__post: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        provider_id: string;
+      };
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["OutboundHeaderPreviewRequest"];
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["OutboundHeaderPreview"];
         };
       };
       /** @description Forbidden */
@@ -49563,6 +50124,11 @@ export interface operations {
                 original_available: boolean;
                 /** Score */
                 score: number;
+                /**
+                 * Source Metadata
+                 * @default []
+                 */
+                source_metadata?: components["schemas"]["SourceMetadataEntry"][];
                 /** Updated At */
                 updated_at?: string | null;
                 /** Website Id */
@@ -49662,6 +50228,29 @@ export interface operations {
                 security_level: number;
                 /** Updated At */
                 updated_at?: string | null;
+              };
+              /**
+               * SourceMetadataEntry
+               * @description One document property from the source system, e.g. a SharePoint column.
+               *
+               *     ``name`` is the source's stable identifier for the property, ``label`` the
+               *     human readable name the source shows, ``value`` the normalised value as
+               *     text (a list for multi-value properties). ``kind`` lets presentation format
+               *     dates and booleans without re-parsing the value.
+               */
+              SourceMetadataEntry: {
+                /**
+                 * Kind
+                 * @default text
+                 * @enum {string}
+                 */
+                kind?: "text" | "choice" | "date" | "number" | "boolean" | "url";
+                /** Label */
+                label: string;
+                /** Name */
+                name: string;
+                /** Value */
+                value: string | string[];
               };
               /** SupportedModelKwargs */
               SupportedModelKwargs: {
@@ -50006,6 +50595,11 @@ export interface operations {
                 original_available: boolean;
                 /** Score */
                 score: number;
+                /**
+                 * Source Metadata
+                 * @default []
+                 */
+                source_metadata?: components["schemas"]["SourceMetadataEntry"][];
                 /** Updated At */
                 updated_at?: string | null;
                 /** Website Id */
@@ -50105,6 +50699,29 @@ export interface operations {
                 security_level: number;
                 /** Updated At */
                 updated_at?: string | null;
+              };
+              /**
+               * SourceMetadataEntry
+               * @description One document property from the source system, e.g. a SharePoint column.
+               *
+               *     ``name`` is the source's stable identifier for the property, ``label`` the
+               *     human readable name the source shows, ``value`` the normalised value as
+               *     text (a list for multi-value properties). ``kind`` lets presentation format
+               *     dates and booleans without re-parsing the value.
+               */
+              SourceMetadataEntry: {
+                /**
+                 * Kind
+                 * @default text
+                 * @enum {string}
+                 */
+                kind?: "text" | "choice" | "date" | "number" | "boolean" | "url";
+                /** Label */
+                label: string;
+                /** Name */
+                name: string;
+                /** Value */
+                value: string | string[];
               };
               /** SupportedModelKwargs */
               SupportedModelKwargs: {
@@ -51824,6 +52441,11 @@ export interface operations {
                     original_available: boolean;
                     /** Score */
                     score: number;
+                    /**
+                     * Source Metadata
+                     * @default []
+                     */
+                    source_metadata?: components["schemas"]["SourceMetadataEntry"][];
                     /** Updated At */
                     updated_at?: string | null;
                     /** Website Id */
@@ -51842,6 +52464,29 @@ export interface operations {
                     title?: string | null;
                     /** Url */
                     url?: string | null;
+                  };
+                  /**
+                   * SourceMetadataEntry
+                   * @description One document property from the source system, e.g. a SharePoint column.
+                   *
+                   *     ``name`` is the source's stable identifier for the property, ``label`` the
+                   *     human readable name the source shows, ``value`` the normalised value as
+                   *     text (a list for multi-value properties). ``kind`` lets presentation format
+                   *     dates and booleans without re-parsing the value.
+                   */
+                  SourceMetadataEntry: {
+                    /**
+                     * Kind
+                     * @default text
+                     * @enum {string}
+                     */
+                    kind?: "text" | "choice" | "date" | "number" | "boolean" | "url";
+                    /** Label */
+                    label: string;
+                    /** Name */
+                    name: string;
+                    /** Value */
+                    value: string | string[];
                   };
                 };
               }
@@ -52328,6 +52973,11 @@ export interface operations {
                     original_available: boolean;
                     /** Score */
                     score: number;
+                    /**
+                     * Source Metadata
+                     * @default []
+                     */
+                    source_metadata?: components["schemas"]["SourceMetadataEntry"][];
                     /** Updated At */
                     updated_at?: string | null;
                     /** Website Id */
@@ -52427,6 +53077,29 @@ export interface operations {
                     security_level: number;
                     /** Updated At */
                     updated_at?: string | null;
+                  };
+                  /**
+                   * SourceMetadataEntry
+                   * @description One document property from the source system, e.g. a SharePoint column.
+                   *
+                   *     ``name`` is the source's stable identifier for the property, ``label`` the
+                   *     human readable name the source shows, ``value`` the normalised value as
+                   *     text (a list for multi-value properties). ``kind`` lets presentation format
+                   *     dates and booleans without re-parsing the value.
+                   */
+                  SourceMetadataEntry: {
+                    /**
+                     * Kind
+                     * @default text
+                     * @enum {string}
+                     */
+                    kind?: "text" | "choice" | "date" | "number" | "boolean" | "url";
+                    /** Label */
+                    label: string;
+                    /** Name */
+                    name: string;
+                    /** Value */
+                    value: string | string[];
                   };
                   /** SupportedModelKwargs */
                   SupportedModelKwargs: {
@@ -61837,6 +62510,11 @@ export interface operations {
                 original_available: boolean;
                 /** Score */
                 score: number;
+                /**
+                 * Source Metadata
+                 * @default []
+                 */
+                source_metadata?: components["schemas"]["SourceMetadataEntry"][];
                 /** Updated At */
                 updated_at?: string | null;
                 /** Website Id */
@@ -61855,6 +62533,29 @@ export interface operations {
                 title?: string | null;
                 /** Url */
                 url?: string | null;
+              };
+              /**
+               * SourceMetadataEntry
+               * @description One document property from the source system, e.g. a SharePoint column.
+               *
+               *     ``name`` is the source's stable identifier for the property, ``label`` the
+               *     human readable name the source shows, ``value`` the normalised value as
+               *     text (a list for multi-value properties). ``kind`` lets presentation format
+               *     dates and booleans without re-parsing the value.
+               */
+              SourceMetadataEntry: {
+                /**
+                 * Kind
+                 * @default text
+                 * @enum {string}
+                 */
+                kind?: "text" | "choice" | "date" | "number" | "boolean" | "url";
+                /** Label */
+                label: string;
+                /** Name */
+                name: string;
+                /** Value */
+                value: string | string[];
               };
             };
           };
@@ -62053,6 +62754,11 @@ export interface operations {
                 original_available: boolean;
                 /** Score */
                 score: number;
+                /**
+                 * Source Metadata
+                 * @default []
+                 */
+                source_metadata?: components["schemas"]["SourceMetadataEntry"][];
                 /** Updated At */
                 updated_at?: string | null;
                 /** Website Id */
@@ -62071,6 +62777,29 @@ export interface operations {
                 title?: string | null;
                 /** Url */
                 url?: string | null;
+              };
+              /**
+               * SourceMetadataEntry
+               * @description One document property from the source system, e.g. a SharePoint column.
+               *
+               *     ``name`` is the source's stable identifier for the property, ``label`` the
+               *     human readable name the source shows, ``value`` the normalised value as
+               *     text (a list for multi-value properties). ``kind`` lets presentation format
+               *     dates and booleans without re-parsing the value.
+               */
+              SourceMetadataEntry: {
+                /**
+                 * Kind
+                 * @default text
+                 * @enum {string}
+                 */
+                kind?: "text" | "choice" | "date" | "number" | "boolean" | "url";
+                /** Label */
+                label: string;
+                /** Name */
+                name: string;
+                /** Value */
+                value: string | string[];
               };
             };
           };
@@ -62887,6 +63616,60 @@ export interface operations {
       };
     };
   };
+  search_sharepoint_fixture_api_v1_integrations_sharepoint_fixtures__scenario__search__get: {
+    parameters: {
+      query?: {
+        site_id?: string | null;
+        drive_id?: string | null;
+        q?: string;
+        filter?: string[];
+      };
+      header?: never;
+      path: {
+        scenario: components["schemas"]["SharePointFixtureScenario"];
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["SharePointFixtureSearchResponse"];
+        };
+      };
+      /** @description Bad Request */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Not Found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+    };
+  };
   get_sharepoint_fixture_tree_api_v1_integrations_sharepoint_fixtures__scenario__tree__get: {
     parameters: {
       query?: {
@@ -63352,6 +64135,75 @@ export interface operations {
         };
         content: {
           "application/json": components["schemas"]["IntegrationPreviewDataList"];
+        };
+      };
+      /** @description Bad Request */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Not Found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+    };
+  };
+  search_sharepoint_library_api_v1_integrations__user_integration_id__sharepoint_search__get: {
+    parameters: {
+      query: {
+        /** @description Space ID (requires integration import rights) */
+        space_id: string;
+        /** @description SharePoint site ID (required for SharePoint) */
+        site_id?: string | null;
+        /** @description Drive ID (required for OneDrive) */
+        drive_id?: string | null;
+        /** @description Free text matched against names, content and properties */
+        q?: string;
+        /** @description Column filter as `Column:value`, repeatable. Columns come from the tree response; yes/no columns take true or false. */
+        filter?: string[];
+      };
+      header?: never;
+      path: {
+        user_integration_id: string;
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["SharePointSearchResponse"];
         };
       };
       /** @description Bad Request */

@@ -134,6 +134,25 @@ space's default embedding model when none is selected).
      default embedding model
 4. Click **Create website**
 
+HTTP Basic Authentication credentials are bound to the website's protocol,
+host, and port. You can change the path on the same site without entering them
+again. To change the protocol, host, or port, enter a new username and password
+or remove authentication in the same update. Explicit default ports (`:443`
+for HTTPS and `:80` for HTTP) are equivalent to omitting the port.
+
+Credentials saved before this protection continue to work at their original
+address over HTTPS. For an HTTP site, enter the credentials again before crawling.
+If a crawl reports that authentication is not bound to the
+URL, enter the credentials again for the intended site or remove authentication.
+You can still rename the website, change other settings, or pause its schedule
+without entering the saved password when its URL remains unchanged.
+
+Unusable authentication for the current URL follows the normal failure backoff:
+retries wait 1, 2, 4, 8, 16, then up to 24 hours, and the schedule stops after
+10 consecutive failures. A queued crawl for an old URL does not increase the
+current website's failure count when its authentication has already been corrected
+or removed.
+
 The scheduler checks every hour on the hour (UTC): a daily website is queued
 once at least 24 hours have passed since its last crawl, an every-other-day
 website after 48 hours, and a weekly website only on Fridays (UTC) once seven
@@ -221,14 +240,22 @@ measured in **tokens**, not characters:
 - **Chunk size**: 200 tokens
 - **Overlap**: 40 tokens
 
-Tokens are counted with LiteLLM's model-aware tokenizer, falling back to a
+The same setting applies to every path: uploaded files, Confluence and SharePoint
+syncs, and crawled pages. If the embedding model's registered `max_input` (in
+tokens) is smaller than the chunk size, chunks are capped so that they fit
+`max_input`, including the `passage:` prefix E5 models receive, and the overlap
+is scaled down in proportion; this is logged once per process and model. A model
+registered without `max_input` is not capped, which is also logged.
+
+Tokens are counted with LiteLLM's tokenizer, falling back to a
 four-characters-per-token estimate if counting fails.
 
 <Callout type="info">
-  The splitter reads `CHUNK_SIZE` and `CHUNK_OVERLAP` from the worker's
-  environment if they are set, but they are not part of the deployment
-  templates and changing them only affects documents processed afterwards.
-  Existing chunks are not rebuilt.
+  `CHUNK_SIZE` and `CHUNK_OVERLAP` are read from the environment if they are
+  set. Set them on both the API and the worker: the worker chunks with them, and
+  the API uses the same values to decide how many chunks to retrieve. They are
+  not part of the deployment templates, and changing them only affects documents
+  processed afterwards. Existing chunks are not rebuilt.
 </Callout>
 
 ### 3. Embedding

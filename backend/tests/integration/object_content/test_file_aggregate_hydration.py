@@ -425,3 +425,51 @@ async def test_selected_knowledge_loads_without_space_hydration(
             embedding_lookup.assert_not_awaited()
         hydrate_space.assert_not_called()
         load_attachments.assert_not_awaited()
+
+
+async def test_assistant_attachment_mode_round_trips(
+    client,
+    admin_user_api_key,
+) -> None:
+    """The per-attachment "open with tool" mode is stored on the link row and
+    defaults to inlined when the client sends a bare id."""
+    headers = {"X-API-Key": admin_user_api_key.key}
+    space_id = await _create_space(client, headers)
+
+    upload = await client.post(
+        "/api/v1/files/",
+        files={"upload_file": ("kontoplan.csv", b"konto;namn\n1910;Kassa", "text/csv")},
+        headers=headers,
+    )
+    assert upload.status_code == 200, upload.text
+    file_id = upload.json()["id"]
+
+    assistant = await client.post(
+        "/api/v1/assistants/",
+        json={"name": "Ekonomi", "space_id": space_id},
+        headers=headers,
+    )
+    assert assistant.status_code == 200, assistant.text
+    assistant_id = assistant.json()["id"]
+
+    marked = await client.post(
+        f"/api/v1/assistants/{assistant_id}/",
+        json={"attachments": [{"id": file_id, "inline_text": False}]},
+        headers=headers,
+    )
+    assert marked.status_code == 200, marked.text
+    (attachment,) = marked.json()["attachments"]
+    assert attachment["id"] == file_id
+    assert attachment["inline_text"] is False
+
+    reloaded = await client.get(f"/api/v1/assistants/{assistant_id}/", headers=headers)
+    assert reloaded.status_code == 200, reloaded.text
+    assert reloaded.json()["attachments"][0]["inline_text"] is False
+
+    reset = await client.post(
+        f"/api/v1/assistants/{assistant_id}/",
+        json={"attachments": [{"id": file_id}]},
+        headers=headers,
+    )
+    assert reset.status_code == 200, reset.text
+    assert reset.json()["attachments"][0]["inline_text"] is True

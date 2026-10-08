@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from collections.abc import Mapping
 from dataclasses import dataclass
+from dataclasses import field as dataclass_field
 from typing import TYPE_CHECKING, Any
 from uuid import UUID
 
@@ -13,6 +14,9 @@ from eneo.main.exceptions import (
     ProviderInactiveException,
     ProviderNotFoundException,
 )
+from eneo.model_providers.infrastructure.outbound_headers_runtime import (
+    ProviderOutboundHeaders,
+)
 from eneo.model_providers.infrastructure.tenant_model_credential_resolver import (
     TenantModelCredentialResolver,
     lookup_provider_field,
@@ -22,6 +26,7 @@ from eneo.tenants.provider_field_config import get_field_definitions
 if TYPE_CHECKING:
     from eneo.database.database import AsyncSession
     from eneo.settings.encryption_service import EncryptionService
+    from eneo.users.user import UserInDB
 
 # Read outside the setup fields by _build_litellm_provider_kwargs below.
 _OPTIONAL_PROVIDER_FIELDS = ("api_type", "organization")
@@ -54,6 +59,22 @@ class ResolvedLiteLLMProvider:
     provider_type: str
     credentials: dict[str, Any]
     config: dict[str, Any]
+    outbound_headers: list[dict[str, Any]] | None = dataclass_field(
+        default=None, repr=False
+    )
+
+    def create_outbound_headers(
+        self,
+        encryption_service: "EncryptionService | None",
+        user: "UserInDB | None",
+    ) -> ProviderOutboundHeaders | None:
+        return ProviderOutboundHeaders.load(
+            provider_id=self.id,
+            provider_type=self.provider_type,
+            stored=self.outbound_headers,
+            encryption=encryption_service,
+            user=user,
+        )
 
     def create_credential_resolver(
         self, encryption_service: "EncryptionService"
@@ -196,4 +217,5 @@ async def load_active_litellm_provider(
         provider_type=provider_db.provider_type,
         credentials=provider_db.credentials,
         config=provider_db.config,
+        outbound_headers=provider_db.outbound_headers,
     )
