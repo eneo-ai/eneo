@@ -777,17 +777,17 @@ async def test_tenant_enabled_but_days_null_keeps_forever(
     )
 
 
-async def test_retention_removes_generated_files_and_keeps_uploads(
+async def test_retention_removes_files_only_the_old_answer_used(
     async_session: AsyncSession,
     test_assistant: Assistants,
     test_tenant,
     admin_user,
     retention_service: DataRetentionService,
 ):
-    """A deleted answer takes the files its tools generated with it.
+    """A deleted answer takes its upload and generated files with it.
 
-    Uploads stay (the user manages those), and so does a generated file that
-    an answer inside the retention period still links.
+    A generated file that an answer inside the retention period still links
+    is kept.
     """
     test_assistant.data_retention_days = 30
     async_session.add(test_assistant)
@@ -835,4 +835,4 @@ async def test_retention_removes_generated_files_and_keeps_uploads(
             select(Files.id).where(Files.id.in_([upload_id, generated_id, shared_id]))
         )
     )
-    assert remaining == {upload_id, shared_id}
+    assert remaining == {shared_id}
