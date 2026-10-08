@@ -173,6 +173,16 @@ source_modules =
 forbidden_modules =
     eneo.flows
 
+[importlinter:contract:transcription-services-no-flows]
+# Admin connection checks and Flow execution share the native service client;
+# Flow orchestration depends on it, never the reverse.
+name = Transcription services must not import flows
+type = forbidden
+source_modules =
+    eneo.transcription_services
+forbidden_modules =
+    eneo.flows
+
 [importlinter:contract:flow-vocabulary-readers-no-orm]
 # Vocabulary belongs to the flows enum owner; these readers do not need
 # table declarations to decide which values are valid.

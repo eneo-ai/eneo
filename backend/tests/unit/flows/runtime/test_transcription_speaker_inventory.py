@@ -11,6 +11,10 @@ import httpx
 import pytest
 
 from eneo.files.transcriber import TranscribedAudio
+from eneo.files.transcript import (
+    TranscriptSegment,
+    TranscriptWord,
+)
 from eneo.flows.api.flow_models import TranscriptSpeakerEditPublic
 from eneo.flows.domain.transcript_corrections import (
     TranscriptSpeakerEdit,
@@ -19,12 +23,8 @@ from eneo.flows.domain.transcript_corrections import (
 )
 from eneo.flows.domain.transcript_source import TranscriptSourceOmissionReason
 from eneo.flows.runtime import transcription
-from eneo.flows.runtime.remote_transcription import _parse_result_segments
 from eneo.flows.runtime.transcription import transcribe_audio_input
-from eneo.transcription_models.infrastructure.adapters.litellm_transcription import (
-    TranscriptSegment,
-    TranscriptWord,
-)
+from eneo.transcription_services.client import parse_result_segments
 from tests.unittests.flows import audio_spool_test_support
 
 spool_contract = audio_spool_test_support.spool_contract
@@ -484,11 +484,10 @@ SHARED_CASES = json.loads(
 async def test_rejected_remote_sidecar_preserves_canonical_text_across_files(
     spool_contract, damage
 ):
-    from eneo.flows.runtime.remote_transcription import RemoteFlowTranscriber
-    from tests.unit.flows.runtime.test_remote_transcription import (
+    from tests.unit.flows.runtime.test_remote_transcription import make_transcriber
+    from tests.unit.transcription_services.scripted_service import (
         ScriptedService,
         accepted,
-        make_client,
         status,
     )
 
@@ -508,9 +507,7 @@ async def test_rejected_remote_sidecar_preserves_canonical_text_across_files(
         result_responses=[httpx.Response(200, json=wire)] * 2,
     )
     files = [_file("a.mp3"), _file("b.mp3")]
-    result = await _run(
-        spool_contract, files, RemoteFlowTranscriber(make_client(service))
-    )
+    result = await _run(spool_contract, files, make_transcriber(service))
 
     assert result.text == (
         f"## Del 1\n\n{canonical}\n\n## Del 2\n\n"
@@ -536,7 +533,7 @@ async def test_shared_vemsa_case_adapter_checkpoint_correction_render(
         wire["text"],
         wire["duration_seconds"],
         diarization="external",
-        transcript_segments=_parse_result_segments(wire["segments"], wire["text"]),
+        transcript_segments=parse_result_segments(wire["segments"]),
         speaker_review=wire["speaker_review"],
     )
     result = await _run(spool_contract, [_file("a.mp3")], _transcriber(source))
@@ -577,7 +574,7 @@ async def test_two_files_namespace_overlap_ids_and_keep_unknown_speakers_in_inve
         wire["text"],
         3,
         diarization="external",
-        transcript_segments=_parse_result_segments(wire["segments"], wire["text"]),
+        transcript_segments=parse_result_segments(wire["segments"]),
         speaker_review=wire["speaker_review"],
     )
     files = [_file("a.mp3"), _file("b.mp3")]
@@ -603,7 +600,7 @@ async def test_review_size_fallback_retains_uncertainty(spool_contract, monkeypa
         wire["text"],
         3,
         diarization="external",
-        transcript_segments=_parse_result_segments(wire["segments"], wire["text"]),
+        transcript_segments=parse_result_segments(wire["segments"]),
         speaker_review=wire["speaker_review"],
     )
     monkeypatch.setattr(transcription, "MAX_SEGMENTS_BYTES", 1)
@@ -669,7 +666,7 @@ async def test_empty_first_file_preserves_review_file_identity(spool_contract):
         wire["text"],
         3,
         diarization="external",
-        transcript_segments=_parse_result_segments(wire["segments"], wire["text"]),
+        transcript_segments=parse_result_segments(wire["segments"]),
         speaker_review=wire["speaker_review"],
     )
     result = await _run(

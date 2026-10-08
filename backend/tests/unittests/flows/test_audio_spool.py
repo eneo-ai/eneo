@@ -15,20 +15,21 @@ from eneo.flows.runtime.diarizing_transcription import (
     DiarizingFlowTranscriber,
     RegistryFlowTranscriber,
 )
-from eneo.flows.runtime.remote_transcription import RemoteFlowTranscriber
 from eneo.main.exceptions import TypedIOValidationException
 from tests.unit.files import test_audio
 from tests.unit.flows.runtime.test_remote_transcription import (
-    RESULT_BODY,
     RecordingObserver,
-    ScriptedService,
-    accepted,
-    make_client,
-    status,
+    make_transcriber,
 )
 from tests.unit.transcription_models.infrastructure.adapters.test_litellm_transcription import (
     TRANSPORT,
     _adapter,
+)
+from tests.unit.transcription_services.scripted_service import (
+    RESULT_BODY,
+    ScriptedService,
+    accepted,
+    status,
 )
 from tests.unittests.flows import audio_spool_test_support
 from tests.unittests.flows.test_flow_transcription import (
@@ -109,7 +110,7 @@ async def test_audio_step_uses_download_and_removes_spool(
             httpx.Response(200, json={**RESULT_BODY, "model": model.model_name})
         ],
     )
-    remote = RemoteFlowTranscriber(make_client(service))
+    remote = make_transcriber(service)
     if outcome == "registry":
         executor.transcriber = RegistryFlowTranscriber(registry)
     elif outcome == "diarize":

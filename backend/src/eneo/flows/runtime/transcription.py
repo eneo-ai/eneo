@@ -18,6 +18,7 @@ from eneo.files.audio import (
     within_decode_limit,
 )
 from eneo.files.transcriber import TranscribedAudio
+from eneo.files.transcript import TranscriptSegment
 from eneo.flows.domain.speaker_labels import (
     build_label_renumbering,
     build_speaker_inventory,
@@ -72,7 +73,6 @@ from eneo.model_providers.domain.provider_call_observer import (
 )
 from eneo.transcription_models.infrastructure.adapters.litellm_transcription import (
     EmptyTranscriptionInterval,
-    TranscriptSegment,
 )
 
 

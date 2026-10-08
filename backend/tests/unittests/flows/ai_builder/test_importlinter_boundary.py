@@ -22,6 +22,7 @@ CRAWLER_BOUNDARY_CONTRACT_NAMES = (
     "Flows must not import the crawler",
     "Crawler must not import flows",
 )
+TRANSCRIPTION_SERVICES_CONTRACT_NAME = "Transcription services must not import flows"
 
 
 def _backend_root() -> Path:
@@ -141,7 +142,10 @@ def test_flows_engine_has_no_new_imports_into_ai_builder() -> None:
         f"Expected contract '{CONTRACT_NAME}' to be evaluated.\n"
         f"lint-imports output:\n{combined}"
     )
-    for name in CRAWLER_BOUNDARY_CONTRACT_NAMES:
+    for name in (
+        *CRAWLER_BOUNDARY_CONTRACT_NAMES,
+        TRANSCRIPTION_SERVICES_CONTRACT_NAME,
+    ):
         assert name in combined, (
             f"Expected contract '{name}' to be evaluated.\n"
             f"lint-imports output:\n{combined}"

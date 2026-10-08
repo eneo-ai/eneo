@@ -14,9 +14,7 @@ from dataclasses import replace
 from typing import TYPE_CHECKING, Any, cast
 
 if TYPE_CHECKING:
-    from eneo.transcription_models.infrastructure.adapters.litellm_transcription import (
-        TranscriptSegment,
-    )
+    from eneo.files.transcript import TranscriptSegment
 
 SPEAKER_LINE_RE = re.compile(
     r"^(?P<prefix>\[\d{2}:\d{2}:\d{2} - \d{2}:\d{2}:\d{2}\] )"

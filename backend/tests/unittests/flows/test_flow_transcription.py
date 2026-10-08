@@ -180,6 +180,7 @@ async def test_remote_failure_facts_survive_executor_terminalization(
     from eneo.flows.flow_run_error import dump_flow_run_error, parse_flow_run_error
     from eneo.flows.runtime import remote_transcription
     from eneo.flows.runtime.transcription import transcribe_audio_input
+    from eneo.transcription_services.client import TranscriptionServiceClient
 
     reason = "No GPU capacity. " * 100 if failure_kind == "capacity" else None
     observer = AsyncMock(operation_scope="tenant/run/step/attempt-1")
@@ -201,14 +202,14 @@ async def test_remote_failure_facts_survive_executor_terminalization(
         )
 
     remote = remote_transcription.RemoteFlowTranscriber(
-        remote_transcription.RemoteTranscriptionClient(
+        TranscriptionServiceClient(
             base_url="http://transcription.test",
             api_key="test",
             submit_timeout_seconds=10,
-            poll_interval_seconds=0.001,
             result_timeout_seconds=10,
             transport=httpx.MockTransport(handle),
-        )
+        ),
+        poll_interval_seconds=0.001,
     )
     file = _audio_file(name="audio.wav")
     with pytest.raises(TypedIOValidationException) as exc_info:
@@ -708,13 +709,11 @@ async def test_vemsa_receives_the_speaker_bound_the_run_settled(
 ):
     import httpx
 
+    from eneo.files.transcript import TranscriptSegment
     from eneo.flows.runtime.diarizing_transcription import DiarizingFlowTranscriber
     from eneo.flows.runtime.remote_transcription import build_remote_flow_transcriber
     from eneo.main.config import Settings
-    from eneo.transcription_models.infrastructure.adapters.litellm_transcription import (
-        TranscriptSegment,
-    )
-    from tests.unit.flows.runtime.test_remote_transcription import (
+    from tests.unit.transcription_services.scripted_service import (
         RESULT_BODY,
         ScriptedService,
         accepted,

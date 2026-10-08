@@ -77,9 +77,7 @@ def test_parse_participants_accepts_lists_and_delimited_text() -> None:
 
 
 def test_label_renumbering_follows_text_order_and_applies_to_segments() -> None:
-    from eneo.transcription_models.infrastructure.adapters.litellm_transcription import (
-        TranscriptSegment,
-    )
+    from eneo.files.transcript import TranscriptSegment
 
     text = "\n".join(
         [

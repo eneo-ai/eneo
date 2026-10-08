@@ -12,22 +12,23 @@ from eneo.flows.flow_error_taxonomy import (
 )
 from eneo.flows.flow_run_error import FlowRunError
 from eneo.flows.runtime.diarizing_transcription import DiarizingFlowTranscriber
-from eneo.flows.runtime.remote_transcription import RemoteFlowTranscriber
 from eneo.flows.runtime.transcription import transcribe_audio_input
 from eneo.main.config import get_settings
 from eneo.main.exceptions import TypedIOValidationException
 from tests.unit.files import test_audio
 from tests.unit.flows.runtime.test_remote_transcription import (
-    RESULT_BODY,
     RecordingObserver,
-    ScriptedService,
-    accepted,
-    make_client,
-    status,
+    make_transcriber,
 )
 from tests.unit.transcription_models.infrastructure.adapters.test_litellm_transcription import (
     TRANSPORT,
     _adapter,
+)
+from tests.unit.transcription_services.scripted_service import (
+    RESULT_BODY,
+    ScriptedService,
+    accepted,
+    status,
 )
 from tests.unittests.flows import audio_spool_test_support
 from tests.unittests.flows.test_flow_transcription import _audio_file
@@ -56,7 +57,7 @@ async def test_oversized_audio_is_a_final_typed_refusal_before_provider_work(
     monkeypatch.setattr(TRANSPORT, provider)
     observer = RecordingObserver()
     service = ScriptedService()
-    remote = RemoteFlowTranscriber(make_client(service))
+    remote = make_transcriber(service)
     registry = Transcriber(file_service=AsyncMock())
     adapter = _adapter()
     monkeypatch.setattr(
@@ -131,7 +132,7 @@ async def test_remote_counts_duration_without_materialising_decoded_audio(
     file.blob = source.read_bytes()
     spool = await spool_contract.spool(file)
     try:
-        await RemoteFlowTranscriber(make_client(service)).transcribe(
+        await make_transcriber(service).transcribe(
             spool, _adapter().model, file_id=file.id, observer=observer
         )
     finally:

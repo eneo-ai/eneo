@@ -7,19 +7,17 @@ from uuid import uuid4
 import pytest
 
 from eneo.files.transcriber import TranscribedAudio
+from eneo.files.transcript import TranscriptSegment
 from eneo.flows.runtime.audio_spool import SpooledAudio
 from eneo.flows.runtime.diarizing_transcription import DiarizingFlowTranscriber
 from eneo.flows.runtime.recording_parts import PartBounds, RecordingAudio
-from eneo.flows.runtime.remote_transcription import (
-    RemoteFlowTranscriber,
-    RemoteTranscriptionResult,
-)
+from eneo.flows.runtime.remote_transcription import RemoteFlowTranscriber
 from eneo.flows.runtime.speaker_enrichment import DIARIZATION_SKIPPED_EMPTY_TRANSCRIPT
 from eneo.main.exceptions import ProviderRejectedRequestException
 from eneo.transcription_models.infrastructure.adapters.litellm_transcription import (
     EmptyTranscriptionInterval,
-    TranscriptSegment,
 )
+from eneo.transcription_services.client import TranscriptionJobResult
 from tests.unittests.flows import audio_spool_test_support
 
 spool_contract = audio_spool_test_support.spool_contract
@@ -39,7 +37,7 @@ def _registry(transcribed: TranscribedAudio) -> SimpleNamespace:
 def _remote(text: str = "[00:00:00 - 00:00:01] SPEAKER_00: hej du") -> SimpleNamespace:
     return SimpleNamespace(
         label_speakers=AsyncMock(
-            return_value=RemoteTranscriptionResult(
+            return_value=TranscriptionJobResult(
                 text=text,
                 duration_seconds=1.0,
                 model="whisper-1",

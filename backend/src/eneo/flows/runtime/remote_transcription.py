@@ -1,19 +1,20 @@
-"""External transcription service client for flow audio steps.
+"""Flow audio steps transcribed by a native transcription service.
 
 Eneo owns transcription administration (flow config, model governance, usage
-accounting) but delegates the transcription itself to an external service with
-an async job API: submit the original audio bytes as a multipart job, poll the
-job until it reaches a terminal state, then fetch the structured result. The
-service transcribes and diarizes server-side, so its rendered transcript
-(speaker-labeled, timestamped lines) is returned verbatim — no client-side
-chunking or timestamp headers.
+accounting) but delegates the transcription itself to a service with an async
+job API (``eneo.transcription_services.client``): submit the original audio
+bytes as a job, poll it until it reaches a terminal state, then fetch the
+structured result. The service transcribes and diarizes server-side, so its
+rendered transcript (speaker-labeled, timestamped lines) is returned verbatim.
 
-Configured through deployment settings (``flow_transcription_service_url`` and
-friends); unset means flows use the model-registry transcription path. Polling
-is a plain idle await: flow execution runs on its own dedicated ARQ worker, so
-a waiting job holds nothing but its job slot. A job eneo stops waiting for
-(run cancelled, worker interrupted, poll deadline) is cancelled service-side
-so it does not keep burning GPU time for a result nobody will read.
+This module owns what a flow attempt adds around those requests: provider-call
+receipts, admission retries within the step budget, the poll schedule,
+progress, cancellation and the typed provider errors flow steps report.
+Polling is a plain idle await: flow execution runs on its own dedicated ARQ
+worker, so a waiting job holds nothing but its job slot. A job eneo stops
+waiting for (run cancelled, worker interrupted, poll deadline) is cancelled
+service-side so it does not keep burning GPU time for a result nobody will
+read.
 """
 
 from __future__ import annotations
@@ -21,16 +22,11 @@ from __future__ import annotations
 import asyncio
 import hashlib
 import json
-import math
 import random
-from dataclasses import dataclass
-from datetime import datetime, timezone
-from email.utils import parsedate_to_datetime
+from dataclasses import replace
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, BinaryIO, Literal, NoReturn, cast
+from typing import TYPE_CHECKING, Literal, NoReturn
 from uuid import UUID, uuid4
-
-import httpx
 
 from eneo.files.audio import AudioMimeTypes
 from eneo.files.transcriber import TranscribedAudio
@@ -40,10 +36,7 @@ from eneo.flows.domain.provider_call_evidence_gap import (
 )
 from eneo.flows.domain.speaker_labels import render_segments
 from eneo.flows.enums import FlowStepPhase
-from eneo.flows.flow_run_error import (
-    TRANSCRIPTION_SERVICE_REASON_MAX_LENGTH,
-    TranscriptionFailureKind,
-)
+from eneo.flows.flow_run_error import TranscriptionFailureKind
 from eneo.flows.infrastructure.flow_provider_call_recorder import (
     ProviderCallEvidencePersistenceError,
 )
@@ -70,7 +63,6 @@ from eneo.flows.runtime.transcription import (
 )
 from eneo.main.exceptions import (
     APIKeyNotConfiguredException,
-    OpenAIException,
     ProviderRejectedRequestException,
     TypedIOValidationException,
 )
@@ -81,14 +73,31 @@ from eneo.model_providers.domain.provider_call_observer import (
     build_transcription_call_request_facts,
 )
 from eneo.model_providers.infrastructure import litellm_transport
-from eneo.transcription_models.infrastructure.adapters.litellm_transcription import (
-    TranscriptSegment,
-    TranscriptWord,
+from eneo.transcription_services.client import (
+    JOB_CANCELLED,
+    JOB_COMPLETED,
+    JOB_FAILED,
+    CredentialsRejected,
+    JobFailureKind,
+    RequestFailed,
+    SubmissionOutcomeUnknown,
+    SubmissionRefused,
+    SubmissionRejected,
+    TranscriptionJobRequest,
+    TranscriptionJobResult,
+    TranscriptionServiceClient,
+    TranscriptionServiceError,
+    UnexpectedStatus,
 )
+from eneo.transcription_services.models import TranscriptionOperation
 
 if TYPE_CHECKING:
     from collections.abc import Sequence
 
+    from eneo.files.transcript import (
+        TranscriptSegment,
+        TranscriptWord,
+    )
     from eneo.flows.runtime.recording_parts import RecordingAudio
     from eneo.main.config import Settings
     from eneo.model_providers.domain.provider_call_observer import (
@@ -109,571 +118,17 @@ REMOTE_TRANSCRIPTION_PROVIDER = "external"
 # complete.
 _MAX_CONSECUTIVE_POLL_FAILURES = 5
 
-_TERMINAL_COMPLETED = "completed"
-_TERMINAL_FAILED = "failed"
-_TERMINAL_CANCELLED = "cancelled"
-
 # Cancelling a job is best effort and must not hold up the caller's own
 # cancellation for long.
 _CANCEL_TIMEOUT_SECONDS = 10.0
-
-# Job kinds the service accepts: transcribe end to end, or label speakers on a
-# transcript the caller produced (words with absolute timestamps).
-JobTask = Literal["transcribe", "diarize"]
 
 
 class RemoteTranscriptionCancelledException(TranscriptionProviderError):
     """The service reported the job cancelled before it produced a result."""
 
 
-class RemoteSubmissionRefused(TranscriptionProviderError):
-    def __init__(
-        self, retry_after: float | None, service_reason: str | None = None
-    ) -> None:
-        super().__init__(
-            litellm_transport.RATE_LIMIT_MESSAGE,
-            code="provider_rate_limited",
-            details={"reason": "provider_rate_limited", "retryable": True},
-            failure_kind=TranscriptionFailureKind.CAPACITY,
-            service_reason=service_reason,
-        )
-        self.retry_after = retry_after
-
-
-class RemoteSubmissionUnknown(TranscriptionProviderError):
-    """A submission lost its response and may already have been accepted."""
-
-
-@dataclass(frozen=True, slots=True)
-class RemoteJobStatus:
-    """One poll of ``GET /v1/jobs/{id}``."""
-
-    status: str
-    stage: str | None = None
-    queue_position: int | None = None
-    failure_kind: TranscriptionFailureKind | None = None
-    service_reason: str | None = None
-
-    def describe(self) -> str:
-        if self.queue_position is not None:
-            return f"{self.status} (position {self.queue_position})"
-        if self.stage is not None and self.stage != self.status:
-            return f"{self.status}/{self.stage}"
-        return self.status
-
-
-@dataclass(frozen=True, slots=True)
-class RemoteServiceReadiness:
-    """Authenticated ``GET /v1/health/ready`` outcome for this client."""
-
-    ready: bool
-    accepting_jobs: bool
-    detail: str
-
-
-@dataclass(frozen=True, slots=True)
-class RemoteTranscriptionResult:
-    """The service's structured result for one completed job."""
-
-    text: str
-    duration_seconds: float | None
-    model: str | None
-    language: str | None
-    # How the service placed words in time for speaker labelling, when it
-    # reports it. A diarize job is expected to report "forced"; segment_split
-    # and segment_only mean it fell back to labelling whole segments.
-    alignment: str | None = None
-    # The service's segments behind ``text``, one per rendered line, with the
-    # same speaker labels. None when the service sent none.
-    segments: tuple[TranscriptSegment, ...] | None = None
-    speaker_review: dict[str, Any] | None = None
-
-
-class RemoteTranscriptionClient:
-    """Async job API client: submit multipart, poll status, fetch result.
-
-    Maps every service failure into the canonical typed provider-error
-    disposition; callers never see raw HTTP errors.
-    """
-
-    def __init__(
-        self,
-        *,
-        base_url: str,
-        api_key: str,
-        submit_timeout_seconds: float,
-        poll_interval_seconds: float,
-        result_timeout_seconds: float,
-        transport: httpx.AsyncBaseTransport | None = None,
-        include_speaker_review: bool = False,
-    ) -> None:
-        self.base_url = base_url.rstrip("/")
-        self._api_key = api_key
-        self.submit_timeout_seconds = submit_timeout_seconds
-        self.poll_interval_seconds = poll_interval_seconds
-        self.result_timeout_seconds = result_timeout_seconds
-        self._transport = transport
-        self.include_speaker_review = include_speaker_review
-
-    def _http_client(self, *, timeout: float) -> httpx.AsyncClient:
-        return httpx.AsyncClient(timeout=timeout, transport=self._transport)
-
-    @property
-    def _headers(self) -> dict[str, str]:
-        return {"Authorization": f"Bearer {self._api_key}"}
-
-    async def submit(
-        self,
-        *,
-        filename: str,
-        mimetype: str,
-        payload: BinaryIO,
-        language: str | None,
-        diarize: bool = True,
-        task: JobTask = "transcribe",
-        words: "Sequence[TranscriptWord] | None" = None,
-        segments: "Sequence[TranscriptSegment] | None" = None,
-        model: str | None = None,
-        max_speakers: int | None = None,
-        idempotency_key: str | None = None,
-    ) -> str:
-        """Submit one audio file as a job and return its job id.
-
-        ``task="diarize"`` sends the caller's word-timestamped transcript as a
-        JSON part; the service then only adds speaker labels. ``model`` is
-        echoed back by the service in its result and names what transcribed.
-
-        Admission is known only when the service returns an HTTP response.
-        """
-        data: dict[str, str] = {
-            "language": language or "auto",
-            "diarize": "true" if diarize else "false",
-        }
-        if self.include_speaker_review and diarize:
-            data["include_speaker_review"] = "true"
-        if task == "diarize":
-            if segments and any(
-                segment.speaker_attribution or segment.overlap_ids
-                for segment in segments
-            ):
-                raise ValueError(
-                    "Reviewed transcripts require explicit re-diarization and decision invalidation."
-                )
-            if not words and not segments:
-                raise ValueError("A diarize job needs a timestamped transcript.")
-            data["task"] = task
-            if words:
-                data["words"] = json.dumps(
-                    [
-                        {"word": word.word, "start": word.start, "end": word.end}
-                        for word in words
-                    ],
-                    separators=(",", ":"),
-                )
-            if segments:
-                data["segments"] = json.dumps(
-                    [
-                        {"text": seg.text, "start": seg.start, "end": seg.end}
-                        for seg in segments
-                    ],
-                    separators=(",", ":"),
-                )
-        if model:
-            data["model"] = model
-        if max_speakers is not None:
-            max_speakers = _positive_speaker_bound(max_speakers)
-        if diarize and max_speakers is not None:
-            data["max_speakers"] = str(max_speakers)
-        logger.info(
-            "remote_transcription.speaker_prior mode=%s",
-            "maximum" if diarize and max_speakers is not None else "automatic",
-        )
-        try:
-            async with self._http_client(timeout=self.submit_timeout_seconds) as client:
-                mark_provider_request_in_flight(True)
-                response = await client.post(
-                    f"{self.base_url}/v1/jobs",
-                    headers={
-                        **self._headers,
-                        "Idempotency-Key": idempotency_key or str(uuid4()),
-                    },
-                    files={"file": (filename, payload, mimetype)},
-                    data=data,
-                )
-        except (
-            httpx.WriteError,
-            httpx.ReadError,
-            httpx.WriteTimeout,
-            httpx.ReadTimeout,
-            httpx.RemoteProtocolError,
-        ) as exc:
-            raise RemoteSubmissionUnknown(
-                litellm_transport.PROVIDER_ERROR_MESSAGE,
-                code="provider_error",
-                details={"reason": "provider_error", "retryable": True},
-            ) from exc
-        except Exception as exc:
-            self._raise_transport_error(exc)
-
-        if response.status_code == 202:
-            job_id = self._parse_job_id(response)
-            logger.info(
-                "remote_transcription.submitted job_id=%s filename=%s",
-                job_id,
-                filename,
-            )
-            return job_id
-        self._raise_for_submit_status(response)
-
-    async def wait_for_result(
-        self,
-        job_id: str,
-        *,
-        run_cancelled: RunCancelProbe | None = None,
-    ) -> RemoteTranscriptionResult:
-        """Poll the job until terminal, then fetch its structured result.
-
-        ``run_cancelled`` is asked once per poll tick; when it answers true the
-        job is cancelled service-side and ``FlowStepCancelledError`` is raised
-        so the executor records the step as cancelled rather than failed.
-        """
-        record_step_phase(FlowStepPhase.TRANSCRIPTION)
-        scope = current_step_deadline_scope()
-        remaining = scope.deadline.remaining() if scope is not None else None
-        timeout = asyncio.timeout(remaining)
-        try:
-            async with timeout:
-                return await self._poll_until_result(
-                    job_id, run_cancelled=run_cancelled
-                )
-        except TypedIOValidationException:
-            await self.cancel(job_id)
-            raise
-        except TimeoutError:
-            if not timeout.expired() or scope is None:
-                raise
-            await self.cancel(job_id)
-            raise scope.deadline.timeout_error(
-                step_order=scope.step_order,
-                phase="transcription",
-                provider_request_in_flight=True,
-            ) from None
-
-    async def _poll_until_result(
-        self, job_id: str, *, run_cancelled: RunCancelProbe | None
-    ) -> RemoteTranscriptionResult:
-        scope = current_step_deadline_scope()
-        consecutive_failures = 0
-        last_seen: RemoteJobStatus | None = None
-
-        async with self._http_client(timeout=self.result_timeout_seconds) as client:
-            while True:
-                if scope is not None and scope.deadline.expired():
-                    raise scope.deadline.timeout_error(
-                        step_order=scope.step_order,
-                        phase="transcription",
-                        provider_request_in_flight=True,
-                    )
-                if run_cancelled is not None and await _probe_quietly(
-                    run_cancelled, job_id=job_id
-                ):
-                    await self.cancel(job_id, client=client)
-                    raise FlowStepCancelledError(
-                        "Run was cancelled while waiting for transcription."
-                    )
-                try:
-                    seen = await self._poll_once(client, job_id)
-                except (
-                    APIKeyNotConfiguredException,
-                    ProviderRejectedRequestException,
-                    OpenAIException,
-                ):
-                    raise
-                except Exception as exc:
-                    consecutive_failures += 1
-                    logger.warning(
-                        "remote_transcription.poll_failed consecutive_failures=%s error_type=%s",
-                        consecutive_failures,
-                        type(exc).__name__,
-                    )
-                    # Transport messages can contain credentials; retain type and frames only.
-                    poll_failure = TranscriptionProviderError(
-                        f"External transcription poll failed: {type(exc).__name__}.",
-                        code="provider_error",
-                    ).with_traceback(exc.__traceback__)
-                else:
-                    consecutive_failures = 0
-                    record_step_progress(
-                        seen.describe(),
-                        transcription_stage=seen.stage,
-                        transcription_queue_position=seen.queue_position,
-                    )
-                    if seen != last_seen:
-                        logger.info(
-                            "remote_transcription.progress job_id=%s state=%s",
-                            job_id,
-                            seen.describe(),
-                        )
-                        last_seen = seen
-                    if seen.status == _TERMINAL_COMPLETED:
-                        result = await self._fetch_result(client, job_id)
-                        if result is not None:
-                            require_step_budget(phase="transcription result")
-                            return result
-                        # A raced 409: the status flapped; keep polling.
-                    elif seen.status == _TERMINAL_FAILED:
-                        raise TranscriptionProviderRejectedError(
-                            litellm_transport.INVALID_REQUEST_MESSAGE,
-                            failure_kind=seen.failure_kind
-                            or TranscriptionFailureKind.PROVIDER,
-                            service_reason=seen.service_reason,
-                            code="provider_rejected_request",
-                            details={
-                                "reason": "provider_rejected_request",
-                                "retryable": False,
-                            },
-                        )
-                    elif seen.status == _TERMINAL_CANCELLED:
-                        # Cancelled service-side (operator, retention, or a cancel
-                        # eneo sent that raced this poll). No result will come; the
-                        # audio was not transcribed, so a re-run is reasonable.
-                        raise RemoteTranscriptionCancelledException(
-                            litellm_transport.PROVIDER_ERROR_MESSAGE,
-                            failure_kind=seen.failure_kind
-                            or TranscriptionFailureKind.CANCELLED,
-                            service_reason=seen.service_reason,
-                            code="provider_error",
-                            details={"reason": "provider_cancelled", "retryable": True},
-                        )
-                    await asyncio.sleep(self.poll_interval_seconds)
-                    continue
-
-                if consecutive_failures >= _MAX_CONSECUTIVE_POLL_FAILURES:
-                    raise TranscriptionProviderError(
-                        litellm_transport.PROVIDER_ERROR_MESSAGE,
-                        code="provider_error",
-                        details={"reason": "provider_error", "retryable": True},
-                    ) from poll_failure
-                await asyncio.sleep(self.poll_interval_seconds)
-
-    async def cancel(
-        self, job_id: str, *, client: httpx.AsyncClient | None = None
-    ) -> None:
-        """Ask the service to stop a job eneo will not wait for.
-
-        Best effort and idempotent on the service side (202 for an active job,
-        200 for one already terminal, 404 for one it no longer knows). Nothing
-        here raises: the caller is already on its way out and the worst case
-        is the job running to completion unread, which is what happened before
-        cancellation existed.
-        """
-
-        async def _send(http: httpx.AsyncClient) -> None:
-            response = await http.delete(
-                f"{self.base_url}/v1/jobs/{job_id}", headers=self._headers
-            )
-            logger.info(
-                "remote_transcription.cancel job_id=%s status_code=%s",
-                job_id,
-                response.status_code,
-            )
-
-        try:
-            async with asyncio.timeout(_CANCEL_TIMEOUT_SECONDS):
-                if client is not None:
-                    await _send(client)
-                else:
-                    async with self._http_client(
-                        timeout=_CANCEL_TIMEOUT_SECONDS
-                    ) as own:
-                        await _send(own)
-        except asyncio.CancelledError:
-            raise
-        except Exception:
-            logger.warning(
-                "remote_transcription.cancel_failed job_id=%s", job_id, exc_info=True
-            )
-
-    async def check_readiness(self) -> RemoteServiceReadiness:
-        """Authenticated pre-flight: is the service up, and would it admit a job?
-
-        503 means the service is down. 200 with ``queue_accepting_jobs`` false
-        means a submit would be refused with 429 (the check is scoped to this
-        client's token, so it also reflects this client's active-job limit).
-        Transport failures are reported as not ready rather than raised; only
-        bad credentials raise, since that is a configuration error.
-        """
-        try:
-            async with self._http_client(timeout=self.result_timeout_seconds) as client:
-                response = await client.get(
-                    f"{self.base_url}/v1/health/ready", headers=self._headers
-                )
-        except Exception as exc:
-            return RemoteServiceReadiness(
-                ready=False,
-                accepting_jobs=False,
-                detail=f"unreachable: {type(exc).__name__}",
-            )
-        if response.status_code == 401:
-            self._raise_bad_credentials()
-        if response.status_code != 200:
-            return RemoteServiceReadiness(
-                ready=False,
-                accepting_jobs=False,
-                detail=f"http {response.status_code}",
-            )
-        body = _json_object(response)
-        accepting = body.get("queue_accepting_jobs")
-        accepting_jobs = accepting if isinstance(accepting, bool) else True
-        return RemoteServiceReadiness(
-            ready=True,
-            accepting_jobs=accepting_jobs,
-            detail="accepting jobs" if accepting_jobs else "queue not accepting jobs",
-        )
-
-    async def _poll_once(
-        self, client: httpx.AsyncClient, job_id: str
-    ) -> RemoteJobStatus:
-        response = await client.get(
-            f"{self.base_url}/v1/jobs/{job_id}", headers=self._headers
-        )
-        if response.status_code == 200:
-            body = _json_object(response)
-            status = body.get("status")
-            if not isinstance(status, str):
-                raise TranscriptionProviderError(
-                    litellm_transport.PROVIDER_ERROR_MESSAGE,
-                    code="provider_error",
-                    details={"reason": "provider_error", "retryable": True},
-                )
-            stage = body.get("stage")
-            queue_position = body.get("queue_position")
-            return RemoteJobStatus(
-                status=status,
-                stage=stage[:128] if isinstance(stage, str) else None,
-                failure_kind=_vemsa_failure_kind(body),
-                service_reason=_service_reason(body),
-                queue_position=(
-                    queue_position
-                    if isinstance(queue_position, int)
-                    and not isinstance(queue_position, bool)
-                    and queue_position >= 0
-                    else None
-                ),
-            )
-        if response.status_code == 401:
-            self._raise_bad_credentials()
-        if response.status_code == 404:
-            # The job vanished (purged, or the service lost it). The audio may
-            # already have been transcribed and billed.
-            raise TranscriptionProviderError(
-                litellm_transport.PROVIDER_ERROR_MESSAGE,
-                code="provider_error",
-                details={"reason": "provider_error", "retryable": True},
-            )
-        response.raise_for_status()
-        raise AssertionError("unreachable: non-error status not handled")
-
-    async def _fetch_result(
-        self, client: httpx.AsyncClient, job_id: str
-    ) -> RemoteTranscriptionResult | None:
-        try:
-            response = await client.get(
-                f"{self.base_url}/v1/jobs/{job_id}/result", headers=self._headers
-            )
-        except httpx.TransportError as exc:
-            self._raise_transport_error(exc)
-        if response.status_code == 409:
-            return None
-        if response.status_code == 401:
-            self._raise_bad_credentials()
-        if response.status_code != 200:
-            raise TranscriptionProviderError(
-                litellm_transport.PROVIDER_ERROR_MESSAGE,
-                code="provider_error",
-                details={"reason": "provider_error", "retryable": True},
-            )
-        body = _json_object(response)
-        text = body.get("text")
-        if not isinstance(text, str):
-            raise TranscriptionProviderError(
-                litellm_transport.PROVIDER_ERROR_MESSAGE,
-                code="provider_error",
-                details={"reason": "provider_error", "retryable": True},
-            )
-        duration = body.get("duration_seconds")
-        model = body.get("model")
-        language = body.get("language")
-        alignment = body.get("alignment")
-        review = body.get("speaker_review")
-        return RemoteTranscriptionResult(
-            text=text,
-            duration_seconds=float(duration)
-            if isinstance(duration, (int, float))
-            else None,
-            model=model if isinstance(model, str) else None,
-            language=language if isinstance(language, str) else None,
-            alignment=alignment if isinstance(alignment, str) else None,
-            segments=_parse_result_segments(body.get("segments"), text),
-            speaker_review=cast(dict[str, Any], review)
-            if isinstance(review, dict)
-            else None,
-        )
-
-    def _parse_job_id(self, response: httpx.Response) -> str:
-        job_id = _json_object(response).get("job_id")
-        if not isinstance(job_id, str) or not job_id:
-            raise TranscriptionProviderError(
-                litellm_transport.PROVIDER_ERROR_MESSAGE,
-                code="provider_error",
-                details={"reason": "provider_error", "retryable": True},
-            )
-        return job_id
-
-    def _raise_for_submit_status(self, response: httpx.Response) -> NoReturn:
-        if response.status_code == 401:
-            self._raise_bad_credentials()
-        if response.status_code == 429 or (
-            response.status_code == 503 and "Retry-After" in response.headers
-        ):
-            raise RemoteSubmissionRefused(
-                _retry_after_seconds(response), _response_service_reason(response)
-            )
-        if response.status_code in (413, 422):
-            raise TranscriptionProviderRejectedError(
-                litellm_transport.INVALID_REQUEST_MESSAGE,
-                failure_kind=TranscriptionFailureKind.INPUT,
-                service_reason=_response_service_reason(response),
-                code="provider_rejected_request",
-                details={
-                    "reason": "provider_rejected_request",
-                    "retryable": False,
-                },
-            )
-        raise TranscriptionProviderError(
-            litellm_transport.PROVIDER_ERROR_MESSAGE,
-            code="provider_error",
-            details={"reason": "provider_error", "retryable": True},
-        )
-
-    def _raise_bad_credentials(self) -> NoReturn:
-        raise APIKeyNotConfiguredException(
-            "Invalid API credentials for the external transcription service. "
-            "Please verify FLOW_TRANSCRIPTION_SERVICE_API_KEY."
-        )
-
-    def _raise_transport_error(self, exc: Exception) -> NoReturn:
-        if litellm_transport.is_provider_unavailable_error(exc):
-            litellm_transport.raise_provider_unavailable(exc)
-        raise TranscriptionProviderError(
-            litellm_transport.PROVIDER_ERROR_MESSAGE,
-            code="provider_error",
-            details={"reason": "provider_error", "retryable": True},
-        ) from exc
-
-
 class RemoteFlowTranscriber:
-    """Flow-step transcriber backed by the external transcription service.
+    """Flow-step transcriber backed by a native transcription service.
 
     Implements the same call surface ``Transcriber.transcribe`` exposes to the
     flow audio step (``FlowStepTranscriber``), so the runtime swaps engines at
@@ -681,32 +136,34 @@ class RemoteFlowTranscriber:
     model stays the governance anchor; it is not what transcribes.
     """
 
-    def __init__(self, client: RemoteTranscriptionClient) -> None:
+    def __init__(
+        self, client: TranscriptionServiceClient, *, poll_interval_seconds: float
+    ) -> None:
         self.client = client
+        self.poll_interval_seconds = poll_interval_seconds
 
     async def transcribe(
         self,
         file: SpooledAudio,
-        transcription_model: "TranscriptionModel",
+        transcription_model: TranscriptionModel,
         *,
         file_id: UUID,
         language: str | None = None,
         diarize: bool = True,
         persist_cache_to_file: bool = True,
-        observer: "ProviderCallObserver | None" = None,
+        observer: ProviderCallObserver | None = None,
         max_speakers: int | None = None,
     ) -> TranscribedAudio:
         result, audio_seconds = await self._run_job(
             file,
             file_id=file_id,
-            language=language,
-            diarize=diarize,
-            task="transcribe",
-            words=None,
-            segments=None,
-            model=None,
+            request=TranscriptionJobRequest(
+                operation=TranscriptionOperation.TRANSCRIBE,
+                language=language,
+                diarize=diarize,
+                max_speakers=max_speakers,
+            ),
             observer=observer,
-            max_speakers=max_speakers,
         )
         return TranscribedAudio(
             text=result.text,
@@ -765,13 +222,13 @@ class RemoteFlowTranscriber:
         file: SpooledAudio,
         *,
         file_id: UUID,
-        words: "Sequence[TranscriptWord] | None",
+        words: Sequence[TranscriptWord] | None,
         model_name: str,
-        segments: "Sequence[TranscriptSegment] | None" = None,
+        segments: Sequence[TranscriptSegment] | None = None,
         language: str | None = None,
-        observer: "ProviderCallObserver | None" = None,
+        observer: ProviderCallObserver | None = None,
         max_speakers: int | None = None,
-    ) -> RemoteTranscriptionResult:
+    ) -> TranscriptionJobResult:
         """Have the service add speaker labels to a transcript produced elsewhere.
 
         The audio is uploaded again for diarization; the transcript comes back
@@ -780,14 +237,16 @@ class RemoteFlowTranscriber:
         result, _ = await self._run_job(
             file,
             file_id=file_id,
-            language=language,
-            diarize=True,
-            task="diarize",
-            words=words,
-            segments=segments,
-            model=model_name,
+            request=TranscriptionJobRequest(
+                operation=TranscriptionOperation.DIARIZE,
+                language=language,
+                diarize=True,
+                words=words,
+                segments=segments,
+                model=model_name,
+                max_speakers=max_speakers,
+            ),
             observer=observer,
-            max_speakers=max_speakers,
         )
         # A service that predates diarize jobs ignores the unknown fields and
         # transcribes the audio itself with its own model. The echoed model is
@@ -805,20 +264,177 @@ class RemoteFlowTranscriber:
             )
         return result
 
+    async def wait_for_result(
+        self,
+        job_id: str,
+        *,
+        run_cancelled: RunCancelProbe | None = None,
+    ) -> TranscriptionJobResult:
+        """Poll the job until terminal, then fetch its structured result.
+
+        ``run_cancelled`` is asked once per poll tick; when it answers true the
+        job is cancelled service-side and ``FlowStepCancelledError`` is raised
+        so the executor records the step as cancelled rather than failed.
+        """
+        record_step_phase(FlowStepPhase.TRANSCRIPTION)
+        scope = current_step_deadline_scope()
+        remaining = scope.deadline.remaining() if scope is not None else None
+        timeout = asyncio.timeout(remaining)
+        try:
+            async with timeout:
+                return await self._poll_until_result(
+                    job_id, run_cancelled=run_cancelled
+                )
+        except TypedIOValidationException:
+            await self._stop_job(job_id)
+            raise
+        except TimeoutError:
+            if not timeout.expired() or scope is None:
+                raise
+            await self._stop_job(job_id)
+            raise scope.deadline.timeout_error(
+                step_order=scope.step_order,
+                phase="transcription",
+                provider_request_in_flight=True,
+            ) from None
+
+    async def _poll_until_result(
+        self, job_id: str, *, run_cancelled: RunCancelProbe | None
+    ) -> TranscriptionJobResult:
+        scope = current_step_deadline_scope()
+        consecutive_failures = 0
+        last_seen = None
+        poll_failure: TranscriptionProviderError | None = None
+
+        while True:
+            if scope is not None and scope.deadline.expired():
+                raise scope.deadline.timeout_error(
+                    step_order=scope.step_order,
+                    phase="transcription",
+                    provider_request_in_flight=True,
+                )
+            if run_cancelled is not None and await _probe_quietly(
+                run_cancelled, job_id=job_id
+            ):
+                await self._stop_job(job_id)
+                raise FlowStepCancelledError(
+                    "Run was cancelled while waiting for transcription."
+                )
+            try:
+                seen = await self.client.get_job_status(job_id)
+            except (RequestFailed, UnexpectedStatus) as error:
+                consecutive_failures += 1
+                logger.warning(
+                    "remote_transcription.poll_failed consecutive_failures=%s failure=%s",
+                    consecutive_failures,
+                    error,
+                )
+                # The client's message is safe; the transport error behind it
+                # can quote credentials, so it is not chained.
+                poll_failure = TranscriptionProviderError(
+                    f"External transcription poll failed: {error}.",
+                    code="provider_error",
+                ).with_traceback(error.__traceback__)
+            except TranscriptionServiceError as error:
+                _raise_provider_error(error)
+            else:
+                consecutive_failures = 0
+                record_step_progress(
+                    seen.describe(),
+                    transcription_stage=seen.stage,
+                    transcription_queue_position=seen.queue_position,
+                )
+                if seen != last_seen:
+                    logger.info(
+                        "remote_transcription.progress job_id=%s state=%s",
+                        job_id,
+                        seen.describe(),
+                    )
+                    last_seen = seen
+                if seen.status == JOB_COMPLETED:
+                    try:
+                        result = await self.client.get_job_result(job_id)
+                    except TranscriptionServiceError as error:
+                        _raise_provider_error(error)
+                    if result is not None:
+                        result = _with_canonical_segments(result)
+                        require_step_budget(phase="transcription result")
+                        return result
+                    # A raced 409: the status flapped; keep polling.
+                elif seen.status == JOB_FAILED:
+                    raise TranscriptionProviderRejectedError(
+                        litellm_transport.INVALID_REQUEST_MESSAGE,
+                        failure_kind=_flow_failure_kind(
+                            seen.failure_kind,
+                            default=TranscriptionFailureKind.PROVIDER,
+                        ),
+                        service_reason=seen.service_reason,
+                        code="provider_rejected_request",
+                        details={
+                            "reason": "provider_rejected_request",
+                            "retryable": False,
+                        },
+                    )
+                elif seen.status == JOB_CANCELLED:
+                    # Cancelled service-side (operator, retention, or a cancel
+                    # eneo sent that raced this poll). No result will come; the
+                    # audio was not transcribed, so a re-run is reasonable.
+                    raise RemoteTranscriptionCancelledException(
+                        litellm_transport.PROVIDER_ERROR_MESSAGE,
+                        failure_kind=_flow_failure_kind(
+                            seen.failure_kind,
+                            default=TranscriptionFailureKind.CANCELLED,
+                        ),
+                        service_reason=seen.service_reason,
+                        code="provider_error",
+                        details={"reason": "provider_cancelled", "retryable": True},
+                    )
+                await asyncio.sleep(self.poll_interval_seconds)
+                continue
+
+            if consecutive_failures >= _MAX_CONSECUTIVE_POLL_FAILURES:
+                raise TranscriptionProviderError(
+                    litellm_transport.PROVIDER_ERROR_MESSAGE,
+                    code="provider_error",
+                    details={"reason": "provider_error", "retryable": True},
+                ) from poll_failure
+            await asyncio.sleep(self.poll_interval_seconds)
+
+    async def _stop_job(self, job_id: str) -> None:
+        """Ask the service to stop a job eneo will not wait for.
+
+        Nothing here raises: the caller is already on its way out and the
+        worst case is the job running to completion unread, which is what
+        happened before cancellation existed.
+        """
+        try:
+            async with asyncio.timeout(_CANCEL_TIMEOUT_SECONDS):
+                await self.client.cancel_job(
+                    job_id, timeout_seconds=_CANCEL_TIMEOUT_SECONDS
+                )
+        except asyncio.CancelledError:
+            raise
+        except (TranscriptionServiceError, TimeoutError) as error:
+            # The chained transport error can quote credentials; log the
+            # client's safe text only.
+            logger.warning(
+                "remote_transcription.cancel_failed job_id=%s failure=%s",
+                job_id,
+                str(error) or type(error).__name__,
+            )
+        except Exception:
+            logger.warning(
+                "remote_transcription.cancel_failed job_id=%s", job_id, exc_info=True
+            )
+
     async def _run_job(
         self,
         file: SpooledAudio,
         *,
         file_id: UUID,
-        language: str | None,
-        diarize: bool,
-        task: JobTask,
-        words: "Sequence[TranscriptWord] | None",
-        segments: "Sequence[TranscriptSegment] | None",
-        model: str | None,
-        observer: "ProviderCallObserver | None",
-        max_speakers: int | None = None,
-    ) -> tuple[RemoteTranscriptionResult, float]:
+        request: TranscriptionJobRequest,
+        observer: ProviderCallObserver | None,
+    ) -> tuple[TranscriptionJobResult, float]:
         record_step_phase(FlowStepPhase.TRANSCRIPTION)
         if not AudioMimeTypes.has_value(file.mimetype):
             raise ValueError("File needs to be an audio file")
@@ -828,13 +444,7 @@ class RemoteFlowTranscriber:
             file_path=file.path,
             filename=file.filename,
             mimetype=file.mimetype,
-            language=language,
-            diarize=diarize,
-            task=task,
-            words=words,
-            segments=segments,
-            model=model,
-            max_speakers=max_speakers,
+            request=request,
             audio_seconds=audio_seconds,
             audio_digest=file.digest,
             observer=observer,
@@ -857,7 +467,7 @@ class RemoteFlowTranscriber:
                 )
             await file.aclose()
             waiting_for_result = True
-            result = await self.client.wait_for_result(
+            result = await self.wait_for_result(
                 job_id, run_cancelled=current_run_cancel_probe()
             )
         except asyncio.CancelledError:
@@ -866,7 +476,7 @@ class RemoteFlowTranscriber:
             # already delivered to this task cannot interrupt the request. The
             # stop is best effort, so the provider outcome remains unresolved.
             settle_provider_request(known=False)
-            await asyncio.shield(self.client.cancel(job_id))
+            await asyncio.shield(self._stop_job(job_id))
             if observer is not None and call_id is not None:
                 cleanup_deadline = (
                     asyncio.get_running_loop().time()
@@ -893,7 +503,7 @@ class RemoteFlowTranscriber:
         except ProviderCallObserverError as persistence_error:
             settle_provider_request(known=False)
             try:
-                await self.client.cancel(job_id)
+                await self._stop_job(job_id)
             except (asyncio.CancelledError, TimeoutError) as interruption:
                 # The best-effort cancel was interrupted (task cancellation or
                 # the outer deadline); the persistence-gap facts carry the known
@@ -913,7 +523,7 @@ class RemoteFlowTranscriber:
         except Exception:
             settle_provider_request(known=False)
             if not waiting_for_result:
-                await self.client.cancel(job_id)
+                await self._stop_job(job_id)
             if observer is not None and call_id is not None:
                 await observer.outcome_unknown(call_id, "provider_error")
             raise
@@ -968,16 +578,10 @@ class RemoteFlowTranscriber:
         file_path: Path,
         filename: str,
         mimetype: str,
-        language: str | None,
-        diarize: bool,
-        task: JobTask,
-        words: "Sequence[TranscriptWord] | None",
-        segments: "Sequence[TranscriptSegment] | None",
-        model: str | None,
-        max_speakers: int | None,
+        request: TranscriptionJobRequest,
         audio_seconds: float,
         audio_digest: str,
-        observer: "ProviderCallObserver | None",
+        observer: ProviderCallObserver | None,
     ) -> tuple[str, UUID | None]:
         """Own admission retries for one logical job and one provider receipt."""
         record_step_phase(FlowStepPhase.TRANSCRIPTION)
@@ -989,25 +593,22 @@ class RemoteFlowTranscriber:
             )
         call_id: UUID | None = None
         if observer is not None:
-            try:
-                host = (
-                    httpx.URL(self.client.base_url).netloc.decode("ascii")
-                    or "transcription-service"
-                )
-            except httpx.InvalidURL:
-                # Submission owns typed URL rejection and receipt settlement.
-                host = "transcription-service"
-            provider_model = f"{REMOTE_TRANSCRIPTION_PROVIDER}/{host}"
+            provider_model = (
+                f"{REMOTE_TRANSCRIPTION_PROVIDER}/"
+                f"{self.client.destination_host or 'transcription-service'}"
+            )
             # A diarize job is its own provider call on the same audio; the
             # suffix keeps it distinguishable from a full transcription of it.
             requested_model = (
-                f"{provider_model}#diarize" if task == "diarize" else provider_model
+                f"{provider_model}#diarize"
+                if request.operation is TranscriptionOperation.DIARIZE
+                else provider_model
             )
             call_id = await observer.started(
                 build_transcription_call_request_facts(
                     requested_model=requested_model,
                     provider=REMOTE_TRANSCRIPTION_PROVIDER,
-                    language=language,
+                    language=request.language,
                     audio_digest=audio_digest,
                     audio_seconds=audio_seconds,
                 )
@@ -1032,13 +633,13 @@ class RemoteFlowTranscriber:
         )
         idempotency_key = hashlib.sha256(
             json.dumps(
-                [operation_scope, str(file_id), audio_digest, task],
+                [operation_scope, str(file_id), audio_digest, request.operation],
                 separators=(",", ":"),
             ).encode()
         ).hexdigest()
         uncertain = False
         submission_outcome: Literal["unsent", "refused", "uncertain"] = "unsent"
-        last_refusal: RemoteSubmissionRefused | None = None
+        last_refusal: SubmissionRefused | None = None
         try:
             while True:
                 if deadline.expired():
@@ -1050,7 +651,7 @@ class RemoteFlowTranscriber:
                     if last_refusal is not None:
                         error.context = {
                             **(error.context or {}),
-                            "transcription_failure_kind": last_refusal.failure_kind,
+                            "transcription_failure_kind": TranscriptionFailureKind.CAPACITY,
                             "transcription_service_reason": last_refusal.service_reason,
                         }
                     raise error
@@ -1067,31 +668,25 @@ class RemoteFlowTranscriber:
                 try:
                     async with timeout:
                         with open(file_path, "rb") as payload:
-                            job_id = await self.client.submit(
+                            mark_provider_request_in_flight(True)
+                            job_id = await self.client.submit_job(
+                                request,
                                 filename=filename,
                                 mimetype=mimetype,
                                 payload=payload,
-                                language=language,
-                                diarize=diarize,
-                                task=task,
-                                words=words,
-                                segments=segments,
-                                model=model,
-                                max_speakers=max_speakers,
                                 idempotency_key=idempotency_key,
                             )
                     return job_id, call_id
-                except RemoteSubmissionRefused as exc:
+                except SubmissionRefused as exc:
                     last_refusal = exc
                     submission_outcome = "uncertain" if uncertain else "refused"
                     if submission_outcome == "refused":
                         settle_provider_request(known=True)
                     delay = exc.retry_after
-                    if delay is None or delay < self.client.poll_interval_seconds:
+                    if delay is None or delay < self.poll_interval_seconds:
                         delay = max(
                             delay or 0,
-                            self.client.poll_interval_seconds
-                            * random.uniform(0.8, 1.2),
+                            self.poll_interval_seconds * random.uniform(0.8, 1.2),
                         )
                     while delay > 0 and not deadline.expired():
                         if probe is not None and await probe():
@@ -1099,19 +694,19 @@ class RemoteFlowTranscriber:
                                 "Run was cancelled during transcription admission."
                             )
                         interval = min(
-                            delay,
-                            self.client.poll_interval_seconds,
-                            deadline.remaining(),
+                            delay, self.poll_interval_seconds, deadline.remaining()
                         )
                         await asyncio.sleep(interval)
                         delay -= interval
-                except RemoteSubmissionUnknown:
+                except SubmissionOutcomeUnknown as exc:
                     if uncertain:
-                        raise
+                        _raise_provider_error(exc)
                     uncertain = True
-                except ProviderRejectedRequestException:
+                except SubmissionRejected as exc:
                     submission_outcome = "uncertain" if uncertain else "refused"
-                    raise
+                    _raise_provider_error(exc)
+                except TranscriptionServiceError as exc:
+                    _raise_provider_error(exc)
                 except TimeoutError:
                     if not timeout.expired():
                         raise
@@ -1140,62 +735,60 @@ class RemoteFlowTranscriber:
             raise
 
 
-def _vemsa_failure_kind(body: dict[str, Any]) -> TranscriptionFailureKind | None:
-    """Prefer Vemsa's failure_kind when the service supports typed failures."""
-    raw = body.get("failure_kind")
-    try:
-        return TranscriptionFailureKind(raw)
-    except (ValueError, TypeError):
-        return None
+def _raise_provider_error(error: TranscriptionServiceError) -> NoReturn:
+    """Report a failed service request as the flow's typed provider error."""
+    if isinstance(error, CredentialsRejected):
+        raise APIKeyNotConfiguredException(
+            "Invalid API credentials for the external transcription service. "
+            "Please verify FLOW_TRANSCRIPTION_SERVICE_API_KEY."
+        ) from error
+    if isinstance(error, SubmissionRejected):
+        raise TranscriptionProviderRejectedError(
+            litellm_transport.INVALID_REQUEST_MESSAGE,
+            failure_kind=TranscriptionFailureKind.INPUT,
+            service_reason=error.service_reason,
+            code="provider_rejected_request",
+            details={"reason": "provider_rejected_request", "retryable": False},
+        ) from error
+    # A lost answer after the upload began is an unknown outcome, never an
+    # unavailable service, even when a timeout lost it.
+    if not isinstance(
+        error, SubmissionOutcomeUnknown
+    ) and litellm_transport.is_provider_unavailable_error(error):
+        litellm_transport.raise_provider_unavailable(error)
+    raise TranscriptionProviderError(
+        litellm_transport.PROVIDER_ERROR_MESSAGE,
+        code="provider_error",
+        details={"reason": "provider_error", "retryable": True},
+    ) from error
 
 
-def _service_reason(body: dict[str, Any]) -> str | None:
-    reason = body.get("error")
-    return (
-        reason[:TRANSCRIPTION_SERVICE_REASON_MAX_LENGTH]
-        if isinstance(reason, str)
-        else None
-    )
+def _flow_failure_kind(
+    kind: JobFailureKind | None, *, default: TranscriptionFailureKind
+) -> TranscriptionFailureKind:
+    return TranscriptionFailureKind(kind.value) if kind is not None else default
 
 
-def _response_service_reason(response: httpx.Response) -> str | None:
-    try:
-        body = response.json()
-    except ValueError:
-        return None
-    if not isinstance(body, dict):
-        return None
-    reason = cast(dict[str, Any], body).get("detail")
-    if isinstance(reason, list):
-        reason = (
-            cast(dict[str, Any], reason[0]).get("msg")
-            if reason and isinstance(reason[0], dict)
-            else None
-        )
-    return (
-        reason[:TRANSCRIPTION_SERVICE_REASON_MAX_LENGTH]
-        if isinstance(reason, str)
-        else None
-    )
+def _with_canonical_segments(
+    result: TranscriptionJobResult,
+) -> TranscriptionJobResult:
+    """Keep the segment sidecar only when it renders to the canonical text.
+
+    The rendered text is the contract; segments are the structured view of the
+    same lines that a reader UI uses to seek audio.
+    """
+    if result.segments is None or render_segments(result.segments) == result.text:
+        return result
+    return replace(result, segments=None)
 
 
-def _retry_after_seconds(response: httpx.Response) -> float | None:
-    value = response.headers.get("Retry-After")
-    if value is None:
-        return None
-    delay: float
-    try:
-        delay = float(value)
-    except ValueError:
-        try:
-            retry_at = parsedate_to_datetime(value)
-            delay = (retry_at - datetime.now(timezone.utc)).total_seconds()
-        except (TypeError, ValueError, OverflowError):
-            return None
-    return max(0.0, delay) if math.isfinite(delay) else None
+def build_remote_flow_transcriber(settings: Settings) -> RemoteFlowTranscriber:
+    """The deployment-wide service configured by ``FLOW_TRANSCRIPTION_SERVICE_*``.
 
-
-def build_remote_flow_transcriber(settings: "Settings") -> RemoteFlowTranscriber:
+    Organisation-owned service connections replace this source. It stays for
+    flows without an explicit connection until eneo-vldb.8 has moved its
+    consumers.
+    """
     url = settings.flow_transcription_service_url
     api_key = settings.flow_transcription_service_api_key
     if not url or not api_key:
@@ -1203,24 +796,22 @@ def build_remote_flow_transcriber(settings: "Settings") -> RemoteFlowTranscriber
             "The external transcription service is not configured."
         )
     return RemoteFlowTranscriber(
-        RemoteTranscriptionClient(
+        TranscriptionServiceClient(
             base_url=url,
             include_speaker_review=settings.flow_transcription_include_speaker_review,
             api_key=api_key,
             submit_timeout_seconds=(
                 settings.flow_transcription_service_submit_timeout_seconds
             ),
-            poll_interval_seconds=(
-                settings.flow_transcription_service_poll_interval_seconds
-            ),
             result_timeout_seconds=(
                 settings.flow_transcription_service_result_timeout_seconds
             ),
-        )
+        ),
+        poll_interval_seconds=settings.flow_transcription_service_poll_interval_seconds,
     )
 
 
-async def log_remote_transcription_readiness(settings: "Settings") -> None:
+async def log_remote_transcription_readiness(settings: Settings) -> None:
     """Startup diagnostic: can this deployment's token submit jobs right now?
 
     Logs only; a service that is down at worker start may be up by the time a
@@ -1231,7 +822,7 @@ async def log_remote_transcription_readiness(settings: "Settings") -> None:
     transcriber = build_remote_flow_transcriber(settings)
     try:
         readiness = await transcriber.client.check_readiness()
-    except APIKeyNotConfiguredException:
+    except CredentialsRejected:
         logger.error(
             "remote_transcription.readiness credentials rejected",
         )
@@ -1258,111 +849,3 @@ async def _probe_quietly(probe: RunCancelProbe, *, job_id: str) -> bool:
             exc_info=True,
         )
         return False
-
-
-def _parse_result_segments(
-    raw: object, canonical_text: str
-) -> tuple[TranscriptSegment, ...] | None:
-    """Admit only a complete sidecar that renders to the canonical text.
-
-    The rendered text is the contract; segments are the structured view of the
-    same lines that a reader UI uses to seek audio. A service that sends none
-    (or garbage) still produced a usable transcript.
-    """
-    if not isinstance(raw, list):
-        return None
-    segments: list[TranscriptSegment] = []
-    for entry in cast(list[object], raw):
-        if not isinstance(entry, dict):
-            return None
-        item = cast(dict[str, object], entry)
-        text = item.get("text")
-        start = item.get("start")
-        end = item.get("end")
-        if (
-            not isinstance(text, str)
-            or isinstance(start, bool)
-            or isinstance(end, bool)
-            or not isinstance(start, (int, float))
-            or not isinstance(end, (int, float))
-            or not math.isfinite(start)
-            or not math.isfinite(end)
-        ):
-            return None
-        speaker = item.get("speaker")
-        attribution = item.get("speaker_attribution")
-        overlap_ids = item.get("overlap_ids")
-        segments.append(
-            TranscriptSegment(
-                text=text,
-                start=float(start),
-                end=float(end),
-                speaker=speaker if isinstance(speaker, str) and speaker else None,
-                words=_parse_result_words(item.get("words")),
-                speaker_attribution=attribution
-                if isinstance(attribution, str)
-                else None,
-                overlap_ids=tuple(
-                    value
-                    for value in cast(list[object], overlap_ids)
-                    if isinstance(value, str)
-                )
-                if isinstance(overlap_ids, list)
-                else (),
-            )
-        )
-    segments.sort(key=lambda segment: (segment.start, segment.end))
-    if render_segments(segments) != canonical_text:
-        return None
-    return tuple(segments)
-
-
-def _finite_number(value: object) -> float | None:
-    if isinstance(value, bool) or not isinstance(value, (int, float)):
-        return None
-    return float(value)
-
-
-def _parse_result_words(raw: object) -> tuple[TranscriptWord, ...] | None:
-    """Word timings from a result segment; malformed words are dropped.
-
-    A segment without a usable word list keeps ``words=None`` so a reader
-    falls back to the segment window rather than trusting partial timings.
-    """
-    if not isinstance(raw, list):
-        return None
-    words: list[TranscriptWord] = []
-    for entry in cast(list[object], raw):
-        if not isinstance(entry, dict):
-            continue
-        item = cast(dict[str, object], entry)
-        word = item.get("word")
-        start = _finite_number(item.get("start"))
-        end = _finite_number(item.get("end"))
-        if not isinstance(word, str) or start is None or end is None:
-            continue
-        words.append(
-            TranscriptWord(
-                word=word,
-                start=start,
-                end=end,
-                probability=_finite_number(item.get("probability")),
-            )
-        )
-    return tuple(words)
-
-
-def _json_object(response: httpx.Response) -> dict[str, object]:
-    try:
-        body = response.json()
-    except ValueError:
-        return {}
-    if isinstance(body, dict):
-        return cast(dict[str, object], body)
-    return {}
-
-
-def _positive_speaker_bound(value: object) -> int:
-    if isinstance(value, bool) or not isinstance(value, int) or value < 1:
-        raise ValueError("max_speakers must be a positive integer")
-    return value

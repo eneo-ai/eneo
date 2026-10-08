@@ -11,6 +11,7 @@ from uuid import UUID, uuid4
 
 import pytest
 
+from eneo.files.transcript import TranscriptSegment
 from eneo.flows.runtime import step_deadline as step_deadline_module
 from eneo.flows.runtime.step_deadline import StepDeadline, step_deadline_scope
 from eneo.main.exceptions import TypedIOValidationException
@@ -18,7 +19,6 @@ from eneo.transcription_models.infrastructure.adapters import litellm_transcript
 from eneo.transcription_models.infrastructure.adapters.litellm_transcription import (
     EmptyTranscriptionInterval,
     LiteLLMTranscriptionAdapter,
-    TranscriptSegment,
 )
 
 TRANSPORT = (

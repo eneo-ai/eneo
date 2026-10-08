@@ -84,6 +84,7 @@ async def _accepted_transcriber(
     recorder, row, monkeypatch, spool_contract, *, result_timeout=10
 ):
     from eneo.flows.runtime import remote_transcription
+    from eneo.transcription_services.client import TranscriptionServiceClient
 
     monkeypatch.setattr(recorder, "started", AsyncMock(return_value=row.id))
     requests = []
@@ -94,14 +95,14 @@ async def _accepted_transcriber(
         return httpx.Response(202, json={"job_id": "job-1"})
 
     transcriber = remote_transcription.RemoteFlowTranscriber(
-        remote_transcription.RemoteTranscriptionClient(
+        TranscriptionServiceClient(
             base_url="http://transcription.test",
             api_key="test",
             submit_timeout_seconds=10,
-            poll_interval_seconds=0.001,
             result_timeout_seconds=result_timeout,
             transport=httpx.MockTransport(handle),
-        )
+        ),
+        poll_interval_seconds=0.001,
     )
     file = SimpleNamespace(
         id=uuid4(), name="audio.mp3", mimetype="audio/mpeg", blob=b"audio"
@@ -178,11 +179,11 @@ async def test_interrupted_cancel_after_stalled_acceptance_keeps_gap_identity(
     session.flush.side_effect = flush
     deleting = asyncio.Event()
 
-    async def hanging_cancel(job_id, *, client=None):
+    async def hanging_cancel(job_id, *, timeout_seconds):
         deleting.set()
         await asyncio.Event().wait()
 
-    monkeypatch.setattr(transcriber.client, "cancel", hanging_cancel)
+    monkeypatch.setattr(transcriber.client, "cancel_job", hanging_cancel)
 
     async def run():
         async with asyncio.timeout(0.3):
@@ -218,7 +219,7 @@ async def test_remote_releases_spool_after_acceptance_before_polling(
         assert not file.path.exists()
         raise OpenAIException("provider failure")
 
-    transcriber.client.wait_for_result = wait_for_result
+    transcriber.wait_for_result = wait_for_result
     with pytest.raises(OpenAIException):
         await transcriber.transcribe(
             file, SimpleNamespace(), file_id=row.id, observer=recorder
@@ -368,7 +369,7 @@ async def test_release_failure_after_acceptance_preserves_receipt_and_cancels_jo
         recorder, row, monkeypatch, spool_contract
     )
     wait_for_result = AsyncMock()
-    transcriber.client.wait_for_result = wait_for_result
+    transcriber.wait_for_result = wait_for_result
 
     def fail_unlink(*args, **kwargs):
         raise OSError("cannot remove original")

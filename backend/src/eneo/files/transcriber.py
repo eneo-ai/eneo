@@ -9,6 +9,7 @@ from typing import TYPE_CHECKING, Any, Optional
 from eneo.files import audio
 from eneo.files.audio import AudioMimeTypes
 from eneo.files.file_models import File
+from eneo.files.transcript import TranscriptSegment
 from eneo.main.config import SETTINGS, Settings
 from eneo.main.logging import get_logger
 from eneo.model_providers.infrastructure.litellm_provider import (
@@ -17,7 +18,6 @@ from eneo.model_providers.infrastructure.litellm_provider import (
 from eneo.transcription_models.infrastructure.adapters.litellm_transcription import (
     EmptyTranscriptionInterval,
     LiteLLMTranscriptionAdapter,
-    TranscriptSegment,
 )
 
 if TYPE_CHECKING:

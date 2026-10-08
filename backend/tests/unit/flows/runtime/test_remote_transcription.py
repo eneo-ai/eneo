@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import asyncio
-import io
 import logging
 import traceback
 from collections.abc import Iterator
@@ -13,12 +12,15 @@ from uuid import UUID, uuid4
 import httpx
 import pytest
 
+from eneo.files.transcript import (
+    TranscriptSegment,
+    TranscriptWord,
+)
 from eneo.flows.runtime import remote_transcription
 from eneo.flows.runtime import step_deadline as step_deadline_module
 from eneo.flows.runtime.remote_transcription import (
     RemoteFlowTranscriber,
     RemoteTranscriptionCancelledException,
-    RemoteTranscriptionClient,
     build_remote_flow_transcriber,
 )
 from eneo.flows.runtime.run_cancellation import (
@@ -30,6 +32,7 @@ from eneo.flows.runtime.step_deadline import (
     require_step_budget,
     step_deadline_scope,
 )
+from eneo.flows.runtime.transcription import TranscriptionProviderError
 from eneo.main.config import Settings
 from eneo.main.exceptions import (
     APIKeyNotConfiguredException,
@@ -40,16 +43,19 @@ from eneo.main.exceptions import (
 from eneo.model_providers.domain.provider_call_observer import (
     TranscriptionCallRequestFacts,
 )
-from eneo.transcription_models.infrastructure.adapters.litellm_transcription import (
-    TranscriptSegment,
-    TranscriptWord,
-)
+from eneo.transcription_services import client as client_module
 from tests.unit.main.test_config_flow_transcription_service import make_settings
+from tests.unit.transcription_services.scripted_service import (
+    JOB_ID,
+    RESULT_BODY,
+    ScriptedService,
+    accepted,
+    make_client,
+    status,
+)
 from tests.unittests.flows import audio_spool_test_support
 
 spool_contract = audio_spool_test_support.spool_contract
-
-JOB_ID = "abc123"
 
 PROVIDER_TARGETS = [
     pytest.param("http://tolka.test", "external/tolka.test", id="standard"),
@@ -60,23 +66,6 @@ PROVIDER_TARGETS = [
     ),
     pytest.param("http://[::1]:8100", "external/[::1]:8100", id="ipv6-port"),
 ]
-
-RESULT_BODY = {
-    "language": "sv",
-    "duration_seconds": 123.5,
-    "model": "KBLab/kb-whisper-large",
-    "text": "[00:00:00 - 00:00:05] SPEAKER_00: Hej och välkomna.",
-    "segments": [
-        {
-            "start": 0.0,
-            "end": 5.2,
-            "speaker": "SPEAKER_00",
-            "text": "Hej och välkomna.",
-            "words": [{"word": "Hej", "start": 0.0, "end": 0.4}],
-        }
-    ],
-    "alignment": "segment_split",
-}
 
 
 @pytest.fixture
@@ -92,95 +81,18 @@ def remote_logs(caplog: pytest.LogCaptureFixture) -> Iterator[pytest.LogCaptureF
         logger.setLevel(previous_level)
 
 
-class ScriptedService:
-    """Plays back a scripted sequence of responses per endpoint."""
-
-    def __init__(
-        self,
-        *,
-        submit_responses: list[httpx.Response] | None = None,
-        status_responses: list[httpx.Response | Exception] | None = None,
-        result_responses: list[httpx.Response] | None = None,
-        cancel_responses: list[httpx.Response] | None = None,
-        ready_responses: list[httpx.Response | Exception] | None = None,
-    ) -> None:
-        self.submit_responses = submit_responses or []
-        self.status_responses = status_responses or []
-        self.result_responses = result_responses or []
-        self.cancel_responses = cancel_responses or []
-        self.ready_responses = ready_responses or []
-        self.requests: list[httpx.Request] = []
-
-    def handler(self, request: httpx.Request) -> httpx.Response:
-        self.requests.append(request)
-        path = request.url.path
-        if request.method == "POST" and path == "/v1/jobs":
-            return self.submit_responses.pop(0)
-        if request.method == "GET" and path == f"/v1/jobs/{JOB_ID}":
-            response = self.status_responses.pop(0)
-            if isinstance(response, Exception):
-                raise response
-            return response
-        if request.method == "GET" and path == f"/v1/jobs/{JOB_ID}/result":
-            return self.result_responses.pop(0)
-        if request.method == "DELETE" and path == f"/v1/jobs/{JOB_ID}":
-            if self.cancel_responses:
-                return self.cancel_responses.pop(0)
-            return httpx.Response(
-                202, json={"job_id": JOB_ID, "cancellation_requested": True}
-            )
-        if request.method == "GET" and path == "/v1/health/ready":
-            response = self.ready_responses.pop(0)
-            if isinstance(response, Exception):
-                raise response
-            return response
-        raise AssertionError(f"unexpected request: {request.method} {path}")
-
-    @property
-    def submit_count(self) -> int:
-        return sum(
-            1
-            for request in self.requests
-            if request.method == "POST" and request.url.path == "/v1/jobs"
-        )
-
-    @property
-    def cancel_count(self) -> int:
-        return sum(1 for request in self.requests if request.method == "DELETE")
-
-
-def accepted() -> httpx.Response:
-    return httpx.Response(202, json={"job_id": JOB_ID, "status": "queued"})
-
-
-def status(value: str, *, queue_position: int | None = None) -> httpx.Response:
-    # Mirrors the service contract: stage and queue_position are always
-    # present, the latter only set while queued.
-    stage = "transcribing" if value == "running" else value
-    return httpx.Response(
-        200,
-        json={
-            "job_id": JOB_ID,
-            "status": value,
-            "stage": stage,
-            "queue_position": queue_position,
-        },
-    )
-
-
-def make_client(
+def make_transcriber(
     service: ScriptedService,
     *,
     base_url: str = "http://tolka.test",
-    **overrides: float,
-) -> RemoteTranscriptionClient:
-    return RemoteTranscriptionClient(
-        base_url=base_url,
-        api_key="devtoken",
-        submit_timeout_seconds=overrides.get("submit_timeout_seconds", 5.0),
-        poll_interval_seconds=overrides.get("poll_interval_seconds", 0.001),
-        result_timeout_seconds=overrides.get("result_timeout_seconds", 5.0),
-        transport=httpx.MockTransport(service.handler),
+    poll_interval_seconds: float = 0.001,
+    result_timeout_seconds: float = 5.0,
+) -> RemoteFlowTranscriber:
+    return RemoteFlowTranscriber(
+        make_client(
+            service, base_url=base_url, result_timeout_seconds=result_timeout_seconds
+        ),
+        poll_interval_seconds=poll_interval_seconds,
     )
 
 
@@ -219,27 +131,6 @@ async def audio_file(spool_contract, blob: bytes = b"fake-mp3-bytes"):
     )
 
 
-async def test_submit_sends_multipart_job_contract() -> None:
-    service = ScriptedService(submit_responses=[accepted()])
-    client = make_client(service)
-
-    job_id = await client.submit(
-        filename="meeting.mp3",
-        mimetype="audio/mpeg",
-        payload=io.BytesIO(b"fake"),
-        language="sv",
-    )
-
-    assert job_id == JOB_ID
-    request = service.requests[0]
-    assert request.headers["authorization"] == "Bearer devtoken"
-    body = request.read()
-    assert b'name="file"' in body
-    assert b"fake" in body
-    assert b'name="language"' in body and b"sv" in body
-    assert b'name="diarize"' in body and b"true" in body
-
-
 @pytest.mark.parametrize("base_url,expected_model", PROVIDER_TARGETS)
 async def test_accepted_job_is_recorded_before_the_first_poll(
     spool_contract, base_url: str, expected_model: str
@@ -259,7 +150,7 @@ async def test_accepted_job_is_recorded_before_the_first_poll(
         status_responses=[status("completed")],
         result_responses=[httpx.Response(200, json=RESULT_BODY)],
     )
-    await RemoteFlowTranscriber(make_client(service, base_url=base_url)).transcribe(
+    await make_transcriber(service, base_url=base_url).transcribe(
         await audio_file(spool_contract),
         SimpleNamespace(),
         observer=observer,
@@ -289,7 +180,7 @@ async def test_lost_submission_response_resubmits_once_with_same_key(
         result_responses=[httpx.Response(200, json=RESULT_BODY)],
     )
     observer = RecordingObserver()
-    await RemoteFlowTranscriber(make_client(service)).transcribe(
+    await make_transcriber(service).transcribe(
         await audio_file(spool_contract),
         SimpleNamespace(),
         observer=observer,
@@ -334,7 +225,7 @@ async def test_admission_wait_honours_retry_after(
         def now(cls, tz=None):
             return datetime(2026, 9, 20, 10, 0, 0, tzinfo=timezone.utc)
 
-    monkeypatch.setattr(remote_transcription, "datetime", Clock)
+    monkeypatch.setattr(client_module, "datetime", Clock)
     monkeypatch.setattr(remote_transcription.random, "uniform", lambda *_: 1.0)
     service = ScriptedService(
         submit_responses=[
@@ -346,9 +237,7 @@ async def test_admission_wait_honours_retry_after(
     )
     observer = RecordingObserver()
     with step_deadline_scope(StepDeadline.start(10), step_order=1):
-        await RemoteFlowTranscriber(
-            make_client(service, poll_interval_seconds=1)
-        ).transcribe(
+        await make_transcriber(service, poll_interval_seconds=1).transcribe(
             await audio_file(spool_contract),
             SimpleNamespace(),
             observer=observer,
@@ -378,9 +267,7 @@ async def test_admission_deadline_records_known_refusal(spool_contract, monkeypa
     observer = RecordingObserver()
     with step_deadline_scope(StepDeadline.start(2), step_order=1):
         with pytest.raises(TypedIOValidationException) as exc_info:
-            await RemoteFlowTranscriber(
-                make_client(service, poll_interval_seconds=1)
-            ).transcribe(
+            await make_transcriber(service, poll_interval_seconds=1).transcribe(
                 await audio_file(spool_contract),
                 SimpleNamespace(),
                 observer=observer,
@@ -420,7 +307,7 @@ async def test_submission_validation_reason_uses_vemsa_detail(
     )
     observer = RecordingObserver()
     with pytest.raises(ProviderRejectedRequestException) as exc_info:
-        await RemoteFlowTranscriber(make_client(service)).transcribe(
+        await make_transcriber(service).transcribe(
             await audio_file(spool_contract),
             SimpleNamespace(),
             observer=observer,
@@ -442,7 +329,7 @@ async def test_cancellation_before_dispatch_keeps_audio_usage_complete(spool_con
         step_deadline_scope(StepDeadline.start(20), step_order=1) as scope,
     ):
         with pytest.raises(FlowStepCancelledError):
-            await RemoteFlowTranscriber(make_client(service)).transcribe(
+            await make_transcriber(service).transcribe(
                 await audio_file(spool_contract),
                 SimpleNamespace(),
                 observer=observer,
@@ -477,7 +364,7 @@ async def test_poll_ticks_publish_transcription_progress():
         result_responses=[httpx.Response(200, json=RESULT_BODY)],
     )
     with step_deadline_scope(StepDeadline.start(10), step_order=1) as scope:
-        await make_client(service).wait_for_result(JOB_ID)
+        await make_transcriber(service).wait_for_result(JOB_ID)
     assert observed == [("queued", 3), ("transcribing", None), ("completed", None)]
 
 
@@ -494,7 +381,9 @@ async def test_poll_timeout_retains_last_progress_in_error_details(monkeypatch):
     service = ScriptedService(status_responses=[status("queued", queue_position=3)])
     with step_deadline_scope(StepDeadline.start(1), step_order=1):
         with pytest.raises(TypedIOValidationException) as exc_info:
-            await make_client(service, poll_interval_seconds=1).wait_for_result(JOB_ID)
+            await make_transcriber(service, poll_interval_seconds=1).wait_for_result(
+                JOB_ID
+            )
     details = FlowRunErrorDetails.from_budget_context(exc_info.value.context)
     assert details.transcription_stage == "queued"
     assert details.transcription_queue_position == 3
@@ -506,18 +395,8 @@ async def test_poll_timeout_retains_last_progress_in_error_details(monkeypatch):
     "base_url,observed,expected_requests,expected_error",
     [
         ("http://tolka.test", True, 2, OpenAIException),
-        (
-            "http://tolka.test:invalid-port",
-            True,
-            0,
-            remote_transcription.TranscriptionProviderError,
-        ),
-        (
-            "http://tolka.test:invalid-port",
-            False,
-            0,
-            remote_transcription.TranscriptionProviderError,
-        ),
+        ("http://tolka.test:invalid-port", True, 0, TranscriptionProviderError),
+        ("http://tolka.test:invalid-port", False, 0, TranscriptionProviderError),
     ],
 )
 async def test_failed_submission_preserves_typed_errors_and_receipts(
@@ -534,11 +413,11 @@ async def test_failed_submission_preserves_typed_errors_and_receipts(
         requests.append(request)
         raise httpx.ReadTimeout("response lost", request=request)
 
-    client = make_client(ScriptedService(), base_url=base_url)
-    client._transport = httpx.MockTransport(handle)
+    transcriber = make_transcriber(ScriptedService(), base_url=base_url)
+    transcriber.client._transport = httpx.MockTransport(handle)
     observer = RecordingObserver()
     with pytest.raises(expected_error):
-        await RemoteFlowTranscriber(client).transcribe(
+        await transcriber.transcribe(
             await audio_file(spool_contract),
             SimpleNamespace(),
             observer=observer if observed else None,
@@ -570,7 +449,7 @@ async def test_submission_key_is_stable_and_scoped_to_operation(spool_contract, 
         result_responses=[httpx.Response(200, json=RESULT_BODY) for _ in range(3)],
     )
     observer = RecordingObserver()
-    transcriber = RemoteFlowTranscriber(make_client(service))
+    transcriber = make_transcriber(service)
     file_id = UUID(int=1)
     await transcriber.transcribe(
         await audio_file(spool_contract),
@@ -632,7 +511,7 @@ async def test_run_cancellation_interrupts_admission_wait(spool_contract, monkey
         step_deadline_scope(StepDeadline.start(20), step_order=1),
     ):
         with pytest.raises(FlowStepCancelledError):
-            await RemoteFlowTranscriber(make_client(service)).transcribe(
+            await make_transcriber(service).transcribe(
                 await audio_file(spool_contract),
                 SimpleNamespace(),
                 observer=observer,
@@ -668,9 +547,18 @@ async def test_terminal_failure_kind_never_parses_reason(kind, expected):
         ]
     )
     with pytest.raises(ProviderRejectedRequestException) as exc_info:
-        await make_client(service).wait_for_result(JOB_ID)
+        await make_transcriber(service).wait_for_result(JOB_ID)
     assert exc_info.value.failure_kind.value == expected
     assert exc_info.value.service_reason == "capacity input cancelled"
+
+
+def test_every_service_failure_kind_has_a_flow_failure_kind():
+    from eneo.flows.flow_run_error import TranscriptionFailureKind
+    from eneo.transcription_services.client import JobFailureKind
+
+    assert {kind.value for kind in JobFailureKind} <= {
+        kind.value for kind in TranscriptionFailureKind
+    }
 
 
 async def test_acceptance_persistence_failure_cancels_without_polling(spool_contract):
@@ -682,7 +570,7 @@ async def test_acceptance_persistence_failure_cancels_without_polling(spool_cont
     observer.accepted = AsyncMock(side_effect=ProviderCallObserverError("write failed"))
     service = ScriptedService(submit_responses=[accepted()])
     with pytest.raises(ProviderCallObserverError):
-        await RemoteFlowTranscriber(make_client(service)).transcribe(
+        await make_transcriber(service).transcribe(
             await audio_file(spool_contract),
             SimpleNamespace(),
             observer=observer,
@@ -691,103 +579,6 @@ async def test_acceptance_persistence_failure_cancels_without_polling(spool_cont
     assert service.submit_count == 1
     assert service.cancel_count == 1
     assert not any(request.method == "GET" for request in service.requests)
-
-
-async def test_submit_sends_diarize_false_when_speaker_identification_is_off() -> None:
-    service = ScriptedService(submit_responses=[accepted()])
-    client = make_client(service)
-
-    await client.submit(
-        filename="meeting.mp3",
-        mimetype="audio/mpeg",
-        payload=io.BytesIO(b"fake"),
-        language="sv",
-        diarize=False,
-    )
-
-    body = service.requests[0].read()
-    assert b'name="diarize"' in body and b"false" in body
-    assert b"true" not in body
-
-
-async def test_submit_diarize_job_sends_transcript_and_model() -> None:
-    service = ScriptedService(submit_responses=[accepted()])
-    client = make_client(service)
-
-    await client.submit(
-        filename="meeting.mp3",
-        mimetype="audio/mpeg",
-        payload=io.BytesIO(b"fake"),
-        language="sv",
-        task="diarize",
-        words=[TranscriptWord("hej", 0.0, 0.4), TranscriptWord("du", 0.5, 0.7)],
-        model="whisper-1",
-    )
-
-    body = service.requests[0].read()
-    assert b'name="task"' in body and b"diarize" in body
-    assert b'name="model"' in body and b"whisper-1" in body
-    assert b'name="words"' in body
-    assert (
-        b'[{"word":"hej","start":0.0,"end":0.4},{"word":"du","start":0.5,"end":0.7}]'
-        in body
-    )
-
-
-async def test_submit_diarize_job_accepts_segments_without_words() -> None:
-    service = ScriptedService(submit_responses=[accepted()])
-    client = make_client(service)
-
-    await client.submit(
-        filename="meeting.mp3",
-        mimetype="audio/mpeg",
-        payload=io.BytesIO(b"fake"),
-        language="sv",
-        task="diarize",
-        segments=[TranscriptSegment("hej du", 0.0, 0.7)],
-    )
-
-    body = service.requests[0].read()
-    assert b'name="segments"' in body
-    assert b'[{"text":"hej du","start":0.0,"end":0.7}]' in body
-    assert b'name="words"' not in body
-
-
-async def test_submit_sends_max_speakers_bound_only_when_diarizing() -> None:
-    service = ScriptedService(submit_responses=[accepted(), accepted()])
-    client = make_client(service)
-
-    await client.submit(
-        filename="a.mp3",
-        mimetype="audio/mpeg",
-        payload=io.BytesIO(b"x"),
-        language="sv",
-        max_speakers=3,
-    )
-    await client.submit(
-        filename="a.mp3",
-        mimetype="audio/mpeg",
-        payload=io.BytesIO(b"x"),
-        language="sv",
-        diarize=False,
-        max_speakers=3,
-    )
-
-    assert b'name="max_speakers"' in service.requests[0].read()
-    assert b'name="max_speakers"' not in service.requests[1].read()
-
-
-async def test_submit_diarize_job_requires_words() -> None:
-    client = make_client(ScriptedService())
-    with pytest.raises(ValueError):
-        await client.submit(
-            filename="meeting.mp3",
-            mimetype="audio/mpeg",
-            payload=io.BytesIO(b"fake"),
-            language="sv",
-            task="diarize",
-            words=[],
-        )
 
 
 @pytest.mark.parametrize("base_url,expected_model", PROVIDER_TARGETS)
@@ -800,7 +591,7 @@ async def test_label_speakers_returns_service_text_and_records_its_own_call(
         result_responses=[httpx.Response(200, json=RESULT_BODY)],
     )
     # Mutant: the diarization suffix leaves URL credentials in provider-call facts.
-    transcriber = RemoteFlowTranscriber(make_client(service, base_url=base_url))
+    transcriber = make_transcriber(service, base_url=base_url)
     observer = RecordingObserver()
 
     result = await transcriber.label_speakers(
@@ -817,6 +608,8 @@ async def test_label_speakers_returns_service_text_and_records_its_own_call(
     assert isinstance(facts, TranscriptionCallRequestFacts)
     assert facts.requested_model == f"{expected_model}#diarize"
     assert len(observer.completed_calls) == 1
+    body = service.requests[0].read()
+    assert b'name="task"' in body and b'name="model"' in body
 
 
 async def test_label_speakers_rejects_a_service_that_ignored_the_task(
@@ -828,7 +621,7 @@ async def test_label_speakers_rejects_a_service_that_ignored_the_task(
         status_responses=[status("completed")],
         result_responses=[httpx.Response(200, json=RESULT_BODY)],
     )
-    transcriber = RemoteFlowTranscriber(make_client(service))
+    transcriber = make_transcriber(service)
 
     with pytest.raises(OpenAIException) as excinfo:
         await transcriber.label_speakers(
@@ -849,7 +642,7 @@ async def test_transcribe_returns_service_text_verbatim_with_duration(
         status_responses=[status("queued"), status("running"), status("completed")],
         result_responses=[httpx.Response(200, json=RESULT_BODY)],
     )
-    transcriber = RemoteFlowTranscriber(make_client(service))
+    transcriber = make_transcriber(service)
     observer = RecordingObserver()
 
     result = await transcriber.transcribe(
@@ -889,33 +682,49 @@ async def test_transcribe_returns_service_text_verbatim_with_duration(
     assert observer.unknown_calls == []
 
 
+async def test_segments_that_do_not_render_the_text_are_dropped(spool_contract):
+    mismatch = {**RESULT_BODY, "text": "[00:00:00 - 00:00:05] SPEAKER_01: Annat."}
+    service = ScriptedService(
+        submit_responses=[accepted()],
+        status_responses=[status("completed")],
+        result_responses=[httpx.Response(200, json=mismatch)],
+    )
+
+    result = await make_transcriber(service).transcribe(
+        await audio_file(spool_contract), SimpleNamespace(), file_id=UUID(int=1)
+    )
+
+    assert result.text == mismatch["text"]
+    assert result.transcript_segments is None
+
+
 @pytest.mark.parametrize(
-    ("status_code", "expected"),
+    ("status_code", "expected", "observed_reason"),
     [
-        (401, APIKeyNotConfiguredException),
-        (429, OpenAIException),
-        (413, ProviderRejectedRequestException),
-        (422, ProviderRejectedRequestException),
-        (500, OpenAIException),
+        (401, APIKeyNotConfiguredException, "provider_error"),
+        (413, ProviderRejectedRequestException, "provider_rejected"),
+        (422, ProviderRejectedRequestException, "provider_rejected"),
+        (500, OpenAIException, "provider_error"),
     ],
 )
-async def test_submit_status_maps_to_typed_provider_errors(
-    status_code: int, expected: type[Exception]
+async def test_submit_answers_become_typed_provider_errors(
+    spool_contract, status_code: int, expected: type[Exception], observed_reason: str
 ) -> None:
     service = ScriptedService(submit_responses=[httpx.Response(status_code)])
-    client = make_client(service)
+    observer = RecordingObserver()
 
     with pytest.raises(expected) as excinfo:
-        await client.submit(
-            filename="a.mp3",
-            mimetype="audio/mpeg",
-            payload=io.BytesIO(b"x"),
-            language=None,
+        await make_transcriber(service).transcribe(
+            await audio_file(spool_contract),
+            SimpleNamespace(),
+            observer=observer,
+            file_id=UUID(int=1),
         )
 
-    if status_code == 429:
-        assert excinfo.value.details["reason"] == "provider_rate_limited"
-        assert excinfo.value.details["retryable"] is True
+    if status_code == 500:
+        assert excinfo.value.details == {"reason": "provider_error", "retryable": True}
+    settled = [reason for _, reason in observer.rejected_calls + observer.unknown_calls]
+    assert settled == [observed_reason]
 
 
 async def test_failed_job_is_rejected_and_recorded(spool_contract) -> None:
@@ -923,7 +732,7 @@ async def test_failed_job_is_rejected_and_recorded(spool_contract) -> None:
         submit_responses=[accepted()],
         status_responses=[status("failed")],
     )
-    transcriber = RemoteFlowTranscriber(make_client(service))
+    transcriber = make_transcriber(service)
     observer = RecordingObserver()
 
     with pytest.raises(ProviderRejectedRequestException):
@@ -949,7 +758,7 @@ async def test_successful_job_does_not_resolve_an_unknown_submission(
         status_responses=[status("completed")],
         result_responses=[httpx.Response(200, json=RESULT_BODY)],
     )
-    transcriber = RemoteFlowTranscriber(make_client(service))
+    transcriber = make_transcriber(service)
     observer = RecordingObserver()
     with step_deadline_scope(StepDeadline.start(30), step_order=1):
         with pytest.raises(OpenAIException):
@@ -979,7 +788,7 @@ async def test_cancelled_submission_is_not_resubmitted(spool_contract) -> None:
     """The step's budget ran out while the job was being submitted: the
     cancellation propagates without the retry policy sending the job again."""
     service = ScriptedService()
-    transcriber = RemoteFlowTranscriber(make_client(service))
+    transcriber = make_transcriber(service)
 
     async def cancelled_request(request):
         service.requests.append(request)
@@ -1015,7 +824,7 @@ async def test_no_job_is_submitted_after_the_step_budget_expires(
     clock = {"now": 0.0}
     monkeypatch.setattr(step_deadline_module, "_now", lambda: clock["now"])
     service = ScriptedService(submit_responses=[accepted()])
-    transcriber = RemoteFlowTranscriber(make_client(service))
+    transcriber = make_transcriber(service)
     observer = RecordingObserver()
 
     with step_deadline_scope(StepDeadline.start(10.0), step_order=3):
@@ -1041,7 +850,7 @@ async def test_receipt_written_as_the_budget_runs_out_is_settled_not_submitted(
     clock = {"now": 0.0}
     monkeypatch.setattr(step_deadline_module, "_now", lambda: clock["now"])
     service = ScriptedService(submit_responses=[accepted()])
-    transcriber = RemoteFlowTranscriber(make_client(service))
+    transcriber = make_transcriber(service)
 
     class _SlowReceipt(RecordingObserver):
         async def started(self, request: object) -> UUID:
@@ -1074,9 +883,7 @@ async def test_cancelled_poll_keeps_the_in_flight_fact_and_stops_the_job(
         submit_responses=[accepted()],
         status_responses=[status("running") for _ in range(500)],
     )
-    transcriber = RemoteFlowTranscriber(
-        make_client(service, poll_interval_seconds=0.01)
-    )
+    transcriber = make_transcriber(service, poll_interval_seconds=0.01)
     observer = RecordingObserver()
 
     with step_deadline_scope(StepDeadline.start(30.0), step_order=2) as scope:
@@ -1107,7 +914,7 @@ async def test_poll_deadline_cancels_job_and_is_unknown_outcome(spool_contract) 
         submit_responses=[accepted()],
         status_responses=[status("queued", queue_position=3) for _ in range(50)],
     )
-    transcriber = RemoteFlowTranscriber(make_client(service))
+    transcriber = make_transcriber(service)
     observer = RecordingObserver()
 
     with step_deadline_scope(StepDeadline.start(0.01), step_order=1):
@@ -1132,7 +939,7 @@ async def test_cancelled_job_is_terminal_and_recorded_as_cancelled(
         submit_responses=[accepted()],
         status_responses=[status("running"), status("cancelled")],
     )
-    transcriber = RemoteFlowTranscriber(make_client(service))
+    transcriber = make_transcriber(service)
     observer = RecordingObserver()
 
     with pytest.raises(RemoteTranscriptionCancelledException) as excinfo:
@@ -1144,6 +951,7 @@ async def test_cancelled_job_is_terminal_and_recorded_as_cancelled(
         )
 
     assert excinfo.value.details == {"reason": "provider_cancelled", "retryable": True}
+    assert excinfo.value.failure_kind.value == "cancelled"
     assert [reason for _, reason in observer.unknown_calls] == ["request_cancelled"]
     assert observer.rejected_calls == []
     # Already terminal: nothing to cancel, and the status endpoint was left alone
@@ -1152,12 +960,17 @@ async def test_cancelled_job_is_terminal_and_recorded_as_cancelled(
     assert service.status_responses == []
 
 
-async def test_run_cancellation_stops_polling_and_cancels_job(spool_contract) -> None:
+@pytest.mark.parametrize("stop_answer", [202, 500], ids=["stopped", "stop-refused"])
+async def test_run_cancellation_stops_polling_and_cancels_job(
+    spool_contract, stop_answer
+) -> None:
+    # A refused stop is logged, never raised over the cancellation itself.
     service = ScriptedService(
         submit_responses=[accepted()],
         status_responses=[status("queued", queue_position=1) for _ in range(50)],
+        cancel_responses=[httpx.Response(stop_answer)],
     )
-    transcriber = RemoteFlowTranscriber(make_client(service))
+    transcriber = make_transcriber(service, result_timeout_seconds=1.0)
     observer = RecordingObserver()
     answers = iter([False, False, True])
 
@@ -1174,8 +987,69 @@ async def test_run_cancellation_stops_polling_and_cancels_job(spool_contract) ->
             )
 
     assert service.cancel_count == 1
+    [stop] = [request for request in service.requests if request.method == "DELETE"]
+    # The stop keeps its own budget when result downloads time out sooner.
+    assert stop.extensions["timeout"]["connect"] == 10.0
     assert [reason for _, reason in observer.unknown_calls] == ["request_cancelled"]
     assert len(service.status_responses) > 40
+
+
+async def test_a_failed_stop_is_logged_without_transport_detail(
+    spool_contract, remote_logs
+) -> None:
+    class Service(ScriptedService):
+        def handler(self, request):
+            if request.method == "DELETE":
+                self.requests.append(request)
+                raise httpx.ConnectError("dummy-cancel-secret", request=request)
+            return super().handler(request)
+
+    service = Service(
+        submit_responses=[accepted()],
+        status_responses=[status("queued") for _ in range(5)],
+    )
+    answers = iter([False, True])
+
+    async def run_cancelled() -> bool:
+        return next(answers)
+
+    with run_cancel_probe_scope(run_cancelled):
+        with pytest.raises(FlowStepCancelledError):
+            await make_transcriber(service).transcribe(
+                await audio_file(spool_contract),
+                SimpleNamespace(),
+                file_id=UUID(int=1),
+            )
+
+    [failure] = [r for r in remote_logs.records if "cancel_failed" in r.getMessage()]
+    assert "request failed: ConnectError" in failure.getMessage()
+    assert failure.exc_info is None
+    assert "dummy-cancel-secret" not in remote_logs.text
+
+
+async def test_rendering_that_spends_the_budget_is_a_timeout(monkeypatch) -> None:
+    # The canonical-text check runs inside the attempt's budget: a check that
+    # exhausts it fails the step and stops the job like any late result.
+    clock = {"now": 0.0}
+    monkeypatch.setattr(step_deadline_module, "_now", lambda: clock["now"])
+    render = remote_transcription.render_segments
+
+    def slow_render(segments):
+        clock["now"] = 11.0
+        return render(segments)
+
+    monkeypatch.setattr(remote_transcription, "render_segments", slow_render)
+    service = ScriptedService(
+        status_responses=[status("completed")],
+        result_responses=[httpx.Response(200, json=RESULT_BODY)],
+    )
+
+    with step_deadline_scope(StepDeadline.start(10), step_order=1):
+        with pytest.raises(TypedIOValidationException) as exc_info:
+            await make_transcriber(service).wait_for_result(JOB_ID)
+
+    assert exc_info.value.code == "flow_step_timeout"
+    assert service.cancel_count == 1
 
 
 async def test_failing_cancellation_probe_keeps_waiting() -> None:
@@ -1184,12 +1058,13 @@ async def test_failing_cancellation_probe_keeps_waiting() -> None:
         status_responses=[status("queued"), status("completed")],
         result_responses=[httpx.Response(200, json=RESULT_BODY)],
     )
-    client = make_client(service)
 
     async def broken_probe() -> bool:
         raise RuntimeError("db pool exhausted")
 
-    result = await client.wait_for_result(JOB_ID, run_cancelled=broken_probe)
+    result = await make_transcriber(service).wait_for_result(
+        JOB_ID, run_cancelled=broken_probe
+    )
 
     assert result.text == RESULT_BODY["text"]
     assert service.cancel_count == 0
@@ -1200,9 +1075,7 @@ async def test_worker_cancellation_cancels_job_service_side(spool_contract) -> N
         submit_responses=[accepted()],
         status_responses=[status("running") for _ in range(50)],
     )
-    transcriber = RemoteFlowTranscriber(
-        make_client(service, poll_interval_seconds=0.05)
-    )
+    transcriber = make_transcriber(service, poll_interval_seconds=0.05)
     observer = RecordingObserver()
 
     task = asyncio.create_task(
@@ -1223,15 +1096,6 @@ async def test_worker_cancellation_cancels_job_service_side(spool_contract) -> N
     assert [reason for _, reason in observer.unknown_calls] == ["request_cancelled"]
 
 
-async def test_cancel_is_best_effort() -> None:
-    service = ScriptedService(cancel_responses=[httpx.Response(500)])
-    client = make_client(service)
-
-    await client.cancel(JOB_ID)
-
-    assert service.cancel_count == 1
-
-
 @pytest.mark.parametrize(
     ("response", "ready", "accepting", "base_url"),
     [
@@ -1247,13 +1111,6 @@ async def test_cancel_is_best_effort() -> None:
             False,
             "http://tolka.test",
         ),
-        (httpx.Response(503), False, False, "http://tolka.test"),
-        (
-            httpx.Response(200, json={"queue_accepting_jobs": True}),
-            True,
-            True,
-            "http://dummy-user:dummy-url-secret@tolka.test",
-        ),
         (
             httpx.Response(503),
             False,
@@ -1266,19 +1123,10 @@ async def test_cancel_is_best_effort() -> None:
             False,
             "http://tolka.test",
         ),
-        (httpx.Response(503), False, False, "http://tolka.test:invalid-port"),
     ],
-    ids=[
-        "ready",
-        "admission-refused",
-        "unavailable",
-        "private-ready-url",
-        "private-unavailable-url",
-        "private-transport-detail",
-        "invalid-target-is-not-ready",
-    ],
+    ids=["ready", "admission-refused", "private-unavailable-url", "private-detail"],
 )
-async def test_readiness_reports_service_and_admission_state(
+async def test_startup_readiness_is_logged_without_private_detail(
     response: httpx.Response | Exception,
     ready: bool,
     accepting: bool,
@@ -1287,26 +1135,20 @@ async def test_readiness_reports_service_and_admission_state(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     # Mutants: raw transport detail or configured URL escapes into startup diagnostics.
-    service = ScriptedService(ready_responses=[response, response])
-    client = make_client(service, base_url=base_url)
-
-    readiness = await client.check_readiness()
-
-    assert (readiness.ready, readiness.accepting_jobs) == (ready, accepting)
-    assert "dummy-readiness-secret" not in readiness.detail
-    if base_url == "http://tolka.test":
-        assert service.requests[0].headers["authorization"] == "Bearer devtoken"
-    monkeypatch.setattr(
-        remote_transcription,
-        "build_remote_flow_transcriber",
-        lambda _: RemoteFlowTranscriber(client),
+    transcriber = make_transcriber(
+        ScriptedService(ready_responses=[response]), base_url=base_url
     )
+    monkeypatch.setattr(
+        remote_transcription, "build_remote_flow_transcriber", lambda _: transcriber
+    )
+
     await remote_transcription.log_remote_transcription_readiness(
         make_settings(
             flow_transcription_service_url=base_url,
             flow_transcription_service_api_key="devtoken",
         )
     )
+
     records = [
         r for r in remote_logs.records if r.name == remote_transcription.__name__
     ]
@@ -1320,30 +1162,26 @@ async def test_readiness_reports_service_and_admission_state(
 @pytest.mark.parametrize(
     "base_url", ["http://tolka.test", "http://dummy-user:dummy-url-secret@tolka.test"]
 )
-async def test_readiness_rejected_credentials_are_a_configuration_error(
+async def test_rejected_startup_credentials_are_logged_without_the_url(
     base_url: str,
     remote_logs: pytest.LogCaptureFixture,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     # Mutant: the credential-rejection diagnostic prints URL credentials.
-    service = ScriptedService(
-        ready_responses=[httpx.Response(401), httpx.Response(401)]
+    transcriber = make_transcriber(
+        ScriptedService(ready_responses=[httpx.Response(401)]), base_url=base_url
     )
-    client = make_client(service, base_url=base_url)
-
-    with pytest.raises(APIKeyNotConfiguredException):
-        await client.check_readiness()
     monkeypatch.setattr(
-        remote_transcription,
-        "build_remote_flow_transcriber",
-        lambda _: RemoteFlowTranscriber(client),
+        remote_transcription, "build_remote_flow_transcriber", lambda _: transcriber
     )
+
     await remote_transcription.log_remote_transcription_readiness(
         make_settings(
             flow_transcription_service_url=base_url,
             flow_transcription_service_api_key="devtoken",
         )
     )
+
     records = [
         r for r in remote_logs.records if r.name == remote_transcription.__name__
     ]
@@ -1354,9 +1192,14 @@ async def test_readiness_rejected_credentials_are_a_configuration_error(
 
 
 @pytest.mark.parametrize(
-    "polls,recovers,expected_failure_counts",
+    "polls,recovers,expected_failure_counts,final_failure",
     [
-        ([httpx.Response(500), httpx.Response(503), status("completed")], True, [1, 2]),
+        (
+            [httpx.Response(500), httpx.Response(503), status("completed")],
+            True,
+            [1, 2],
+            None,
+        ),
         (
             [httpx.Response(503)] * 4
             + [status("running")]
@@ -1364,10 +1207,16 @@ async def test_readiness_rejected_credentials_are_a_configuration_error(
             + [status("completed")],
             True,
             [1, 2, 3, 4, 1, 2, 3, 4],
+            None,
         ),
-        ([httpx.Response(403)] * 5, False, [1, 2, 3, 4, 5]),
-        ([httpx.Response(503)] * 5, False, [1, 2, 3, 4, 5]),
-        ([httpx.ReadTimeout("dummy-poll-secret")] * 5, False, [1, 2, 3, 4, 5]),
+        ([httpx.Response(403)] * 5, False, [1, 2, 3, 4, 5], "http 403"),
+        ([httpx.Response(503)] * 5, False, [1, 2, 3, 4, 5], "http 503"),
+        (
+            [httpx.ReadTimeout("dummy-poll-secret")] * 5,
+            False,
+            [1, 2, 3, 4, 5],
+            "request failed: ReadTimeout",
+        ),
     ],
     ids=[
         "recover",
@@ -1378,32 +1227,28 @@ async def test_readiness_rejected_credentials_are_a_configuration_error(
     ],
 )
 async def test_poll_tolerates_transient_failures(
-    polls, recovers, expected_failure_counts, remote_logs
+    polls, recovers, expected_failure_counts, final_failure, remote_logs
 ) -> None:
     # Mutants: silent retry, missing/sensitive final cause, no counter reset or early exhaustion.
     service = ScriptedService(
         status_responses=polls.copy(),
         result_responses=[httpx.Response(200, json=RESULT_BODY)],
     )
-    client = make_client(service)
+    transcriber = make_transcriber(service)
     if recovers:
-        result = await client.wait_for_result(JOB_ID)
+        result = await transcriber.wait_for_result(JOB_ID)
         assert result.text == RESULT_BODY["text"]
     else:
-        with pytest.raises(remote_transcription.TranscriptionProviderError) as raised:
-            await client.wait_for_result(JOB_ID)
+        with pytest.raises(TranscriptionProviderError) as raised:
+            await transcriber.wait_for_result(JOB_ID)
         error = raised.value
         assert error.details == {"reason": "provider_error", "retryable": True}
         cause = error.__cause__
-        assert isinstance(cause, remote_transcription.TranscriptionProviderError)
+        assert isinstance(cause, TranscriptionProviderError)
         assert cause.__traceback__ is not None
         assert cause.__context__ is None and error.__context__ is None
         diagnostic = "".join(traceback.format_exception(error))
-        assert (
-            "ReadTimeout" in diagnostic
-            if isinstance(polls[-1], httpx.ReadTimeout)
-            else "HTTPStatusError" in diagnostic
-        )
+        assert final_failure in diagnostic
         assert "dummy-poll-secret" not in diagnostic
     failures = [
         r
@@ -1416,33 +1261,53 @@ async def test_poll_tolerates_transient_failures(
     assert not service.status_responses
 
 
-async def test_poll_404_means_job_vanished() -> None:
-    service = ScriptedService(
-        submit_responses=[accepted()],
-        status_responses=[httpx.Response(404)],
-    )
-    client = make_client(service)
+@pytest.mark.parametrize(
+    "poll, expected",
+    [
+        (httpx.Response(404), OpenAIException),
+        (httpx.Response(401), APIKeyNotConfiguredException),
+        (httpx.Response(200, json={"stage": "running"}), OpenAIException),
+    ],
+    ids=["job-vanished", "credentials-rejected", "malformed-status"],
+)
+async def test_a_definite_poll_answer_fails_without_retry(poll, expected) -> None:
+    service = ScriptedService(status_responses=[poll])
 
-    with pytest.raises(OpenAIException) as excinfo:
-        await client.wait_for_result(JOB_ID)
+    with pytest.raises(expected) as excinfo:
+        await make_transcriber(service).wait_for_result(JOB_ID)
 
-    assert excinfo.value.details["reason"] == "provider_error"
+    if expected is OpenAIException:
+        assert excinfo.value.details["reason"] == "provider_error"
+    assert [request.method for request in service.requests] == ["GET"]
 
 
 async def test_raced_409_result_reenters_poll_loop() -> None:
     service = ScriptedService(
-        submit_responses=[accepted()],
         status_responses=[status("completed"), status("completed")],
         result_responses=[
             httpx.Response(409, json={"detail": {"status": "running"}}),
             httpx.Response(200, json=RESULT_BODY),
         ],
     )
-    client = make_client(service)
 
-    result = await client.wait_for_result(JOB_ID)
+    result = await make_transcriber(service).wait_for_result(JOB_ID)
 
     assert result.duration_seconds == 123.5
+
+
+async def test_unreachable_result_download_is_a_provider_outage() -> None:
+    class Service(ScriptedService):
+        def handler(self, request):
+            if request.url.path.endswith("/result"):
+                raise httpx.ConnectError("refused", request=request)
+            return super().handler(request)
+
+    service = Service(status_responses=[status("completed")])
+
+    with pytest.raises(OpenAIException) as excinfo:
+        await make_transcriber(service).wait_for_result(JOB_ID)
+
+    assert excinfo.value.code == "provider_unavailable"
 
 
 async def test_submit_retries_rate_limit_then_succeeds(
@@ -1458,7 +1323,7 @@ async def test_submit_retries_rate_limit_then_succeeds(
         status_responses=[status("completed")],
         result_responses=[httpx.Response(200, json=RESULT_BODY)],
     )
-    transcriber = RemoteFlowTranscriber(make_client(service))
+    transcriber = make_transcriber(service)
     observer = RecordingObserver()
 
     result = await transcriber.transcribe(
@@ -1477,7 +1342,7 @@ async def test_submit_retries_rate_limit_then_succeeds(
 
 async def test_transcribe_rejects_non_audio_file() -> None:
     service = ScriptedService()
-    transcriber = RemoteFlowTranscriber(make_client(service))
+    transcriber = make_transcriber(service)
 
     with pytest.raises(ValueError):
         await transcriber.transcribe(
@@ -1489,6 +1354,24 @@ async def test_transcribe_rejects_non_audio_file() -> None:
     assert service.requests == []
 
 
+@pytest.mark.parametrize("bound", [0, -1, True])
+async def test_invalid_speaker_bound_records_no_provider_call(spool_contract, bound):
+    service = ScriptedService()
+    observer = RecordingObserver()
+
+    with pytest.raises(ValueError):
+        await make_transcriber(service).transcribe(
+            await audio_file(spool_contract),
+            SimpleNamespace(),
+            observer=observer,
+            file_id=UUID(int=1),
+            max_speakers=bound,
+        )
+
+    assert service.requests == []
+    assert observer.started_facts == []
+
+
 def test_build_remote_flow_transcriber_requires_configuration() -> None:
     unset = SimpleNamespace(
         flow_transcription_service_url=None,
@@ -1498,7 +1381,7 @@ def test_build_remote_flow_transcriber_requires_configuration() -> None:
         build_remote_flow_transcriber(unset)
 
     configured = SimpleNamespace(
-        flow_transcription_include_speaker_review=False,
+        flow_transcription_include_speaker_review=True,
         flow_transcription_service_url="http://tolka.test",
         flow_transcription_service_api_key="devtoken",
         flow_transcription_service_submit_timeout_seconds=600,
@@ -1507,91 +1390,10 @@ def test_build_remote_flow_transcriber_requires_configuration() -> None:
     )
     transcriber = build_remote_flow_transcriber(configured)
     assert transcriber.client.base_url == "http://tolka.test"
-
-
-@pytest.mark.parametrize(
-    ("raw", "canonical_text", "expected"),
-    [
-        (None, "", None),
-        ("not a list", "", None),
-        ([], "", ()),
-        (
-            [
-                {"start": 1, "end": 2, "text": "ok", "speaker": ""},
-                {"start": "1", "end": 2, "text": "bad start"},
-                {"start": 1, "end": True, "text": "bad end"},
-                {"start": 1, "end": 2},
-                "garbage",
-            ],
-            "[00:00:01 - 00:00:02] ok",
-            None,
-        ),
-    ],
-)
-def test_result_segments_reject_malformed_sidecar(
-    raw: object, canonical_text: str, expected: object
-) -> None:
-    assert remote_transcription._parse_result_segments(raw, canonical_text) == expected
-
-
-@pytest.mark.parametrize(
-    "invalid",
-    [
-        "garbage",
-        {"start": "1", "end": 2, "text": "bad"},
-        {"start": float("nan"), "end": 2, "text": "bad"},
-        {"start": 1, "end": float("inf"), "text": "bad"},
-    ],
-    ids=["non_object", "invalid_fields", "nan_start", "infinite_end"],
-)
-def test_malformed_extra_segment_rejects_even_matching_survivors(invalid):
-    raw = [{"start": 1, "end": 2, "text": "ok"}, invalid]
-    assert (
-        remote_transcription._parse_result_segments(raw, "[00:00:01 - 00:00:02] ok")
-        is None
-    )
-
-
-def test_result_segments_carry_word_timings_with_probability() -> None:
-    """Words ride along per segment; a malformed word is dropped, not fatal."""
-    parsed = remote_transcription._parse_result_segments(
-        [
-            {
-                "start": 0,
-                "end": 2,
-                "text": "hej du",
-                "speaker": "SPEAKER_00",
-                "words": [
-                    {"word": "hej", "start": 0.1, "end": 0.4, "probability": 0.93},
-                    {"word": "du", "start": 0.5, "end": 0.8, "probability": 0.0},
-                    {"word": "trasig", "start": "x", "end": 1.0},
-                    "garbage",
-                ],
-            },
-            {"start": 2, "end": 3, "text": "utan ord"},
-            {"start": 3, "end": 4, "text": "fel typ", "words": "nej"},
-        ],
-        "[00:00:00 - 00:00:02] SPEAKER_00: hej du\n"
-        "[00:00:02 - 00:00:03] utan ord\n"
-        "[00:00:03 - 00:00:04] fel typ",
-    )
-
-    assert parsed is not None
-    assert parsed[0].words == (
-        TranscriptWord("hej", 0.1, 0.4, probability=0.93),
-        TranscriptWord("du", 0.5, 0.8, probability=0.0),
-    )
-    assert parsed[1].words is None
-    assert parsed[2].words is None
-
-
-def test_result_parsing_defends_against_malformed_payloads() -> None:
-    service = ScriptedService()
-    client = make_client(service)
-
-    response = httpx.Response(202, json={"status": "queued"})
-    with pytest.raises(OpenAIException):
-        client._parse_job_id(response)
+    assert transcriber.client.include_speaker_review is True
+    assert transcriber.client.submit_timeout_seconds == 600
+    assert transcriber.client.result_timeout_seconds == 120
+    assert transcriber.poll_interval_seconds == 5.0
 
 
 async def test_flow_audio_step_runs_through_remote_transcriber(spool_contract) -> None:
@@ -1614,7 +1416,7 @@ async def test_flow_audio_step_runs_through_remote_transcriber(spool_contract) -
     )
     result = await transcribe_audio_input(
         files=[file_info],
-        transcriber=RemoteFlowTranscriber(make_client(service)),
+        transcriber=make_transcriber(service),
         transcription_model=SimpleNamespace(id=new_id(), name="anchor-model"),
         language="auto",
         step_order=1,
@@ -1639,7 +1441,7 @@ async def test_flow_audio_step_runs_through_remote_transcriber(spool_contract) -
         with pytest.raises(FlowStepCancelledError):
             await transcribe_audio_input(
                 files=[file_info],
-                transcriber=RemoteFlowTranscriber(make_client(cancelled)),
+                transcriber=make_transcriber(cancelled),
                 transcription_model=SimpleNamespace(id=new_id(), name="anchor-model"),
                 language="auto",
                 step_order=1,
@@ -1652,7 +1454,7 @@ async def test_flow_audio_step_runs_through_remote_transcriber(spool_contract) -
     with pytest.raises(TypedIOValidationException) as excinfo:
         await transcribe_audio_input(
             files=[file_info],
-            transcriber=RemoteFlowTranscriber(make_client(failing)),
+            transcriber=make_transcriber(failing),
             transcription_model=SimpleNamespace(id=new_id(), name="anchor-model"),
             language="auto",
             step_order=1,
@@ -1661,38 +1463,6 @@ async def test_flow_audio_step_runs_through_remote_transcriber(spool_contract) -
             open_audio_download=open_audio_download,
         )
     assert excinfo.value.code == FlowApiErrorCode.TYPED_IO_TRANSCRIPTION_FAILED.value
-
-
-@pytest.mark.parametrize(
-    "enabled,diarize,expected",
-    [(False, True, False), (True, True, True), (True, False, False)],
-)
-async def test_review_request_is_explicitly_opt_in(enabled, diarize, expected):
-    service = ScriptedService(submit_responses=[accepted()])
-    client = make_client(service)
-    client.include_speaker_review = enabled
-    await client.submit(
-        filename="a.wav",
-        mimetype="audio/wav",
-        payload=io.BytesIO(b"audio"),
-        language="sv",
-        diarize=diarize,
-    )
-    assert (b'name="include_speaker_review"' in service.requests[0].read()) == expected
-
-
-@pytest.mark.parametrize("bound", [0, -1, True, 1.5])
-async def test_invalid_speaker_count_does_not_submit(bound):
-    service = ScriptedService()
-    with pytest.raises(ValueError):
-        await make_client(service).submit(
-            filename="a.wav",
-            mimetype="audio/wav",
-            payload=io.BytesIO(b"audio"),
-            language="sv",
-            max_speakers=bound,
-        )
-    assert service.requests == []
 
 
 @pytest.mark.parametrize(
@@ -1729,22 +1499,22 @@ async def test_remote_poll_spends_the_attempt_budget(
             httpx.Response(200, json=RESULT_BODY),
         ],
     )
-    client = build_remote_flow_transcriber(
+    transcriber = build_remote_flow_transcriber(
         Settings.model_construct(
             flow_transcription_service_url="http://tolka.test",
             flow_transcription_service_api_key="devtoken",
         )
-    ).client
-    client._transport = httpx.MockTransport(service.handler)
+    )
+    transcriber.client._transport = httpx.MockTransport(service.handler)
     for _ in range(2 if succeeds else 1):
         timeout_index = len(timeouts)
         with step_deadline_scope(StepDeadline.start(budget), step_order=1):
             if succeeds:
-                result = await client.wait_for_result(JOB_ID)
+                result = await transcriber.wait_for_result(JOB_ID)
                 assert result.text == RESULT_BODY["text"]
             else:
                 with pytest.raises(TypedIOValidationException) as exc_info:
-                    await client.wait_for_result(JOB_ID)
+                    await transcriber.wait_for_result(JOB_ID)
                 assert exc_info.value.code == "flow_step_timeout"
                 assert exc_info.value.step_phase.value == "transcription"
         assert timeouts[timeout_index] == budget
@@ -1752,16 +1522,16 @@ async def test_remote_poll_spends_the_attempt_budget(
 
 async def test_remote_poll_bounds_a_stalled_request_by_the_attempt_budget(monkeypatch):
     service = ScriptedService()
-    client = make_client(service)
+    transcriber = make_transcriber(service)
 
     async def stalled(*args):
         await asyncio.Event().wait()
 
-    monkeypatch.setattr(client, "_poll_once", stalled)
+    monkeypatch.setattr(transcriber.client, "get_job_status", stalled)
     with step_deadline_scope(StepDeadline.start(0.02), step_order=1):
         async with asyncio.timeout(0.3):
             with pytest.raises(TypedIOValidationException):
-                await client.wait_for_result(JOB_ID)
+                await transcriber.wait_for_result(JOB_ID)
     assert service.cancel_count == 1
 
 
@@ -1778,6 +1548,6 @@ async def test_remote_poll_without_attempt_has_no_duration_limit(monkeypatch):
         status_responses=[status("running"), status("completed")],
         result_responses=[httpx.Response(200, json=RESULT_BODY)],
     )
-    result = await make_client(service).wait_for_result(JOB_ID)
+    result = await make_transcriber(service).wait_for_result(JOB_ID)
     assert result.text == RESULT_BODY["text"]
     assert timeouts == [None]

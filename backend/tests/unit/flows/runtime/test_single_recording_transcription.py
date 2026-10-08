@@ -10,14 +10,14 @@ import pytest
 
 from eneo.files import audio
 from eneo.files.transcriber import TranscribedAudio
+from eneo.files.transcript import (
+    TranscriptSegment,
+    TranscriptWord,
+)
 from eneo.flows.flow_api_error_code import FlowApiErrorCode
 from eneo.flows.runtime.transcription import transcribe_audio_input
 from eneo.main.config import get_settings
 from eneo.main.exceptions import TypedIOValidationException
-from eneo.transcription_models.infrastructure.adapters.litellm_transcription import (
-    TranscriptSegment,
-    TranscriptWord,
-)
 from tests.unit.files import test_audio
 from tests.unittests.flows import audio_spool_test_support
 

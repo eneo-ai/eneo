@@ -7,12 +7,12 @@ import pytest
 
 from eneo.database.tables.flow_tables import FlowLiveTranscripts
 from eneo.files.transcriber import TranscribedAudio
+from eneo.files.transcript import TranscriptSegment
 from eneo.flows.flow_run_error import TranscriptionFailureKind
 from eneo.flows.runtime.audio_spool import SpooledAudio
 from eneo.flows.runtime.diarizing_transcription import DiarizingFlowTranscriber
 from eneo.flows.runtime.flow_run_actor import FlowRunActor
 from eneo.flows.runtime.live_transcription.repository import LiveTranscriptRepository
-from eneo.flows.runtime.remote_transcription import RemoteTranscriptionResult
 from eneo.flows.runtime.transcription import (
     TranscriptionFailure,
     TranscriptionProviderRejectedError,
@@ -22,9 +22,7 @@ from eneo.flows.runtime.transcription_runtime import (
     AudioRuntimeRequest,
     resolve_transcribe_and_attach_audio_input,
 )
-from eneo.transcription_models.infrastructure.adapters.litellm_transcription import (
-    TranscriptSegment,
-)
+from eneo.transcription_services.client import TranscriptionJobResult
 from tests.unittests.flows import audio_spool_test_support
 from tests.unittests.flows.test_flow_transcription import (
     _audio_file,
@@ -79,7 +77,7 @@ def live_audio(user, monkeypatch, spool_contract):
     )
     remote = SimpleNamespace(
         label_speakers=AsyncMock(
-            return_value=RemoteTranscriptionResult(
+            return_value=TranscriptionJobResult(
                 text="Live text.",
                 duration_seconds=42.0,
                 model="whisper-1",

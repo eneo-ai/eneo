@@ -26,8 +26,8 @@ as litellm or redis connects on its own, and weasyprint's URL fetcher is denied 
 the renderer, not here. Reviewing what a new allowlist entry can reach is part of
 adding it.
 
-Two modules connect to endpoints a flow author cannot choose and are named
-below with their reason; the destination policy does not apply to them.
+One module connects to an endpoint a flow author cannot choose and is named
+below with its reason; the destination policy does not apply to it.
 """
 
 from __future__ import annotations
@@ -44,10 +44,6 @@ SCANNED_ROOTS = ("flows", "flow_packages")
 EGRESS_PACKAGE = "flows/runtime/egress"
 
 NAMED_EXCEPTIONS = {
-    "flows/runtime/remote_transcription.py": (
-        "the external transcription service URL is a deployment setting "
-        "(FLOW_TRANSCRIPTION_SERVICE_URL), not something a flow author supplies"
-    ),
     "flows/runtime/live_transcription/relay.py": (
         "the live transcription upstream is the api_base of a transcription "
         "model's provider, set by a tenant administrator "

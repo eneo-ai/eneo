@@ -71,12 +71,10 @@ async def test_per_source_audio_publishes_one_combined_attempt_source(
     spool_contract, user, monkeypatch
 ):
     from eneo.files.text import TEXT_EXTRACTION_WARNINGS
+    from eneo.files.transcript import TranscriptSegment
     from eneo.flows.domain.transcript_corrections import segments_content_hash
     from eneo.flows.infrastructure.flow_transcript_source_repo import (
         FlowTranscriptSourceRepository,
-    )
-    from eneo.transcription_models.infrastructure.adapters.litellm_transcription import (
-        TranscriptSegment,
     )
 
     executor, repo, run, files, assistant = _case(user, "Transcript.", spool_contract)

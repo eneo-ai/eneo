@@ -1069,12 +1069,12 @@ async def test_large_producer_source_survives_publication(
 ):
     from eneo.database.database import sessionmanager
     from eneo.files.transcriber import TranscribedAudio
-    from eneo.flows.infrastructure.flow_transcript_words_repo import (
-        FlowTranscriptWordsRepository,
-    )
-    from eneo.transcription_models.infrastructure.adapters.litellm_transcription import (
+    from eneo.files.transcript import (
         TranscriptSegment,
         TranscriptWord,
+    )
+    from eneo.flows.infrastructure.flow_transcript_words_repo import (
+        FlowTranscriptWordsRepository,
     )
     from tests.unit.flows.runtime.test_transcription_speaker_inventory import (
         _file,

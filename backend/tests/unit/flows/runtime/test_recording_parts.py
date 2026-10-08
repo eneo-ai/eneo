@@ -3,6 +3,10 @@ from __future__ import annotations
 import pytest
 
 from eneo.files.transcriber import TranscribedAudio
+from eneo.files.transcript import (
+    TranscriptSegment,
+    TranscriptWord,
+)
 from eneo.flows.runtime.recording_parts import (
     PartBounds,
     RecordingSplitError,
@@ -11,8 +15,6 @@ from eneo.flows.runtime.recording_parts import (
 )
 from eneo.transcription_models.infrastructure.adapters.litellm_transcription import (
     EmptyTranscriptionInterval,
-    TranscriptSegment,
-    TranscriptWord,
 )
 
 # Two parts of one recording: 0-10 s and 10-25 s on the recording's timeline.

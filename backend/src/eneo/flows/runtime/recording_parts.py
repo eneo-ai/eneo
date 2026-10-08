@@ -18,12 +18,14 @@ from typing import TYPE_CHECKING, Any, Protocol, runtime_checkable
 from uuid import UUID
 
 from eneo.files.transcriber import TranscribedAudio
+from eneo.files.transcript import (
+    TranscriptSegment,
+    TranscriptWord,
+)
 from eneo.flows.domain.speaker_labels import render_segments
 from eneo.flows.runtime.audio_spool import SpooledAudio
 from eneo.transcription_models.infrastructure.adapters.litellm_transcription import (
     EmptyTranscriptionInterval,
-    TranscriptSegment,
-    TranscriptWord,
 )
 
 if TYPE_CHECKING:
