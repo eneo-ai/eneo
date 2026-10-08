@@ -25,6 +25,13 @@ Page paths are relative to `frontend/apps/docs-site/src/content/`. Code paths ar
 | `backend/alembic/versions/**` (breaking migrations, data migrations)                                                              | `guides/upgrade-*.mdx`, `docs/architecture.mdx` (data model)               |
 | `docs/deployment/docker-compose.modules.yml`, `docs/deployment/env_module*.template`, `docs/deployment/MODULES.md`                | `docs/module-authentication.mdx`, `guides/deployment.mdx`                  |
 
+Application runtime images (`backend/Dockerfile`, `frontend/Dockerfile`,
+`backend/src/eneo/files/audio.py`, `backend/scripts/check_runtime.py`,
+`scripts/check-application-image.sh`, `.github/actions/scan-application-image/**`,
+`.github/workflows/image-security.yml`) are documented in
+`guides/deployment.mdx` and `contributing/security.mdx`; scanner/update policy
+lives in `docs/SECURITY.md`.
+
 ## Authentication and identity
 
 | Code                                                                                                                                                                                                                                    | Pages                                                                              |

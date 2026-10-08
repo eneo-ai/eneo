@@ -1250,3 +1250,59 @@ across all workers through leader election.
 - [System Architecture](/docs/architecture) - Complete architecture overview
 - [Object Content Storage](/guides/object-content-storage) - Configure SeaweedFS, MinIO, backups, and readiness
 - [Release SBOMs and attestations](/docs/release-sboms) - Verify shipped image digests and provenance
+
+
+## Application runtime images
+
+The backend runtime uses a digest-pinned Chainguard Wolfi base with Python 3.11.
+The Svelte runtime uses the builder's official Node 22 binary in a digest-pinned
+Chainguard `glibc-dynamic` image. This is an independent runtime/security change;
+it does not require a different frontend or change the database schema.
+
+### Why change the base images?
+
+Eneo processes untrusted uploaded audio, images and documents through native
+libraries. Updating Python or JavaScript dependencies alone does not update all
+the system libraries or copies bundled inside wheels. The change puts backend
+FFmpeg, libxml2 and libxslt under the system package inventory, builds lxml against
+those libraries, and removes the second codec stack supplied by soundfile and
+audioread. FFmpeg/FFprobe now own audio decoding and MP3 segmentation, including
+process cleanup on cancellation and timeout.
+
+Wolfi was selected as a source of maintained glibc packages while retaining
+Python 3.11. Svelte uses Node 22 in both build and runtime, with maintained C/C++
+libraries and no runtime shell or package manager. This consolidates patching
+and makes the libraries used at runtime visible to the image scanners.
+
+This selection is not evidence that Debian cannot be operated securely. The
+earlier work tried updated Debian Trixie images before selecting Wolfi; it did
+not retain a complete comparison proving a distribution change was the only
+solution. The previously combined branch passed image scans and runtime checks
+in [CI](https://github.com/eneo-ai/eneo/actions/runs/37310384063), but that result
+is historical evidence, not validation of every later rebuild. The independent
+runtime PR must pass its own checks before release. Retaining Debian with patched
+system libraries and controlled wheel contents remains a viable alternative to
+evaluate if the operational cost of changing distribution is unacceptable.
+
+### Upgrade and rollback
+
+Build and validate the backend and Svelte images through CI, then rehearse the
+upgrade in staging with representative audio/document uploads, transcription,
+API and worker startup, health checks and TLS connections. CI also runs native
+library, audio-format and cancellation checks inside the actual backend image.
+Two scanners check distribution and upstream vulnerability data; neither a clean
+scan nor a startup check proves every production workload behaves correctly.
+
+Standard image names, ports, environment variables, volume mounts and backend
+UID 1000 remain the same. The backend's OS package manager changes from apt to
+apk; custom images or operational scripts using Debian packages need adaptation.
+The Svelte runtime has no shell, apt or npm: use an external debug container for
+interactive diagnostics and execute Node directly for probes. This PR contains
+no database migration. Keep the prior backend and Svelte image digests and roll
+back both images if validation fails; if another release also changes the schema,
+follow that release's database recovery procedure separately.
+
+Runtime maintainers review grouped Docker dependency updates and retained scan
+reports. The base digest is pinned, but apk repositories remain live: rebuilds
+can resolve newer system packages. The recorded final image digest, SBOM and
+scan reports identify the artifact that was actually tested and deployed.

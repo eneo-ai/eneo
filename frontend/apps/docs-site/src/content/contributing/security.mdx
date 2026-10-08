@@ -28,6 +28,21 @@ Ruff currently checks `backend/src/eneo`. Tests and Alembic are not part of the 
 
 When this check fails, update the dependency to a safe version, remove it, or document why the vulnerable code is not reachable. Do not dismiss the warning just to make the PR green.
 
+### Application image security
+
+Backend and Svelte Docker candidates run the same Trivy/Grype gate and runtime
+checks in CI and before publication. HIGH/CRITICAL findings, including unfixed
+ones, block publication; raw reports remain available as workflow artifacts.
+The Application image security workflow also rechecks published develop images
+weekly and on manual dispatch. A failure there is a maintenance signal; it does
+not prevent a remediation PR from building and checking its own candidate.
+
+Runtime checks exercise audio formats and cancellation cleanup, native libraries,
+startup dispatch, SBOM tooling and Svelte health. See
+[the runtime migration rationale](../guides/deployment#application-runtime-images)
+for the distribution choice, operational changes and rollback procedure.
+`docs/SECURITY.md` owns scanner and update policy.
+
 ### Code scanning
 
 CodeQL advanced setup is paused while maintainers evaluate a code-scanning setup that gives developers useful feedback without high false-positive noise. Re-enable code scanning only with a tuned query set and a triage process that keeps alerts actionable.

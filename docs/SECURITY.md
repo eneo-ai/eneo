@@ -53,6 +53,27 @@ The repository uses GitHub security features and CI to prevent regressions:
   frontend, GitHub Actions, Dockerfiles, and devcontainer configuration.
 - Dependency Review runs on pull requests into `develop` and blocks newly
   introduced vulnerable dependencies at `high` severity or above.
+- Each application image (backend and Svelte) is scanned with Trivy and Grype
+  before publication. HIGH/CRITICAL findings, including unfixed findings, block
+  the image. The shared `.github/actions/scan-application-image` gate keeps both
+  raw reports. Grype also checks upstream NVD/CPE records for APK packages;
+  Trivy's Wolfi feed alone does not detect unfixed vulnerabilities. CI scans its
+  locally built candidates; the weekly Application image security workflow
+  rechecks published develop images.
+- The Svelte runtime copies the builder's official Node 22 binary and license into
+  a digest-pinned Chainguard `glibc-dynamic` image with maintained C/C++ libraries.
+  It has no shell or package manager; probes execute `node` directly. Backend
+  builder/runtime share a digest-pinned Wolfi base with Python 3.11 and maintained
+  FFmpeg 9.0 packages. FFmpeg owns audio decoding and MP3 segmentation; there is
+  no wheel-bundled libsndfile. lxml is built against the scanned system
+  libxml2/libxslt. Package metadata stays in every image for inventory and scans.
+- Runtime maintainers review the weekly grouped Docker Dependabot updates
+  (one open PR per area, backend and Svelte). Base-digest updates rebuild
+  the package layer; scanners and runtime smoke tests must pass before merge.
+  A new advisory may require an immediate refresh outside that schedule.
+  `scripts/check-application-image.sh` is shared by CI and publication. It checks
+  real audio formats and failure cleanup, native parser loading, worker/API
+  launch dispatch, SBOM venv bootstrap and Svelte frontend health.
 - CodeQL advanced setup is paused while maintainers evaluate a code-scanning
   setup that gives developers useful feedback without high false-positive noise.
   Re-enable code scanning only after the query set and triage process are tuned

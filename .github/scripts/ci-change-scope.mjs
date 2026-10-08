@@ -75,6 +75,8 @@ function classify(rawFiles) {
 
 function isFullCiFile(file) {
   return file.startsWith(".github/workflows/")
+    || file.startsWith(".github/actions/scan-application-image/")
+    || file === "scripts/check-application-image.sh"
     || file === ".github/scripts/ci-change-scope.mjs"
     || file === ".pre-commit-config.yaml"
     || file === "Taskfile.yml"
@@ -190,6 +192,12 @@ function runSelfTest() {
   const docsWorkflowScope = classify([".github/workflows/deploy_docs.yml"]);
   for (const name of outputNames) {
     assert.equal(docsWorkflowScope[name], true, `workflow changes should enable ${name}`);
+  }
+
+  for (const file of [".github/actions/scan-application-image/action.yml", "scripts/check-application-image.sh"]) {
+    const imageScope = classify([file]);
+    assert.equal(imageScope.docker_backend, true);
+    assert.equal(imageScope.docker_frontend, true);
   }
 
   const emptyScope = classify([]);
