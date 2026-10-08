@@ -18,6 +18,7 @@ any of which can contain the other two.
 
 from __future__ import annotations
 
+import asyncio
 import json
 import math
 from collections.abc import Sequence
@@ -45,6 +46,7 @@ JOB_CANCELLED = "cancelled"
 
 SERVICE_REASON_MAX_CHARS = 512
 _STAGE_MAX_CHARS = 128
+_SERVICE_VERSION_MAX_CHARS = 64
 
 # Failures after the upload started: the service may have admitted the job
 # even though its answer never arrived.
@@ -188,11 +190,19 @@ class TranscriptionJobResult:
 
 @dataclass(frozen=True, slots=True)
 class ServiceReadiness:
-    """Authenticated ``GET /v1/health/ready`` outcome for this client's token."""
+    """Authenticated ``GET /v1/health/ready`` outcome for this client's token.
+
+    ``reported_operations`` are the operations Eneo uses that the service
+    says it accepts; None when the service does not report them (an older
+    deployment). Whether the service is up or has room says nothing about
+    which operations it supports.
+    """
 
     ready: bool
     accepting_jobs: bool
     detail: str
+    reported_operations: frozenset[TranscriptionOperation] | None = None
+    service_version: str | None = None
 
 
 class TranscriptionServiceClient:
@@ -324,25 +334,40 @@ class TranscriptionServiceClient:
         503 means the service is down. 200 with ``queue_accepting_jobs`` false
         means a submit would be refused (the answer is scoped to this token, so
         it also reflects this client's active-job limit). Only rejected
-        credentials raise: they are a configuration error, not a state.
+        credentials raise: they are a configuration error, not a state. The
+        whole answer must arrive within ``result_timeout_seconds``; httpx
+        bounds each read, not a response that trickles in.
         """
         try:
-            response = await self._get("/v1/health/ready")
+            async with asyncio.timeout(self.result_timeout_seconds):
+                response = await self._get("/v1/health/ready")
         except RequestFailed as exc:
             return ServiceReadiness(
                 ready=False,
                 accepting_jobs=False,
                 detail=f"unreachable: {exc.error_type}",
             )
+        except TimeoutError:
+            return ServiceReadiness(
+                ready=False, accepting_jobs=False, detail="unreachable: no answer"
+            )
         if response.status_code == 401:
             raise CredentialsRejected()
+        body = _json_object(response)
+        reported = _reported_operations(body.get("supported_tasks"))
+        version = body.get("service_version")
+        service_version = (
+            version[:_SERVICE_VERSION_MAX_CHARS] if isinstance(version, str) else None
+        )
         if response.status_code != 200:
             return ServiceReadiness(
                 ready=False,
                 accepting_jobs=False,
                 detail=f"http {response.status_code}",
+                reported_operations=reported,
+                service_version=service_version,
             )
-        accepting_jobs = _json_object(response).get("queue_accepting_jobs")
+        accepting_jobs = body.get("queue_accepting_jobs")
         if not isinstance(accepting_jobs, bool):
             # The protocol's readiness answer always carries the admission
             # flag; an answer without it is not a service Eneo can rely on.
@@ -350,11 +375,15 @@ class TranscriptionServiceClient:
                 ready=False,
                 accepting_jobs=False,
                 detail="malformed readiness response",
+                reported_operations=reported,
+                service_version=service_version,
             )
         return ServiceReadiness(
             ready=True,
             accepting_jobs=accepting_jobs,
             detail="accepting jobs" if accepting_jobs else "queue not accepting jobs",
+            reported_operations=reported,
+            service_version=service_version,
         )
 
     @property
@@ -513,6 +542,18 @@ def _job_result(body: dict[str, object]) -> TranscriptionJobResult:
         speaker_review=cast(dict[str, Any], review)
         if isinstance(review, dict)
         else None,
+    )
+
+
+def _reported_operations(raw: object) -> frozenset[TranscriptionOperation] | None:
+    """The reported tasks Eneo sends; others (such as ``align``) are ignored."""
+    if not isinstance(raw, list):
+        return None
+    known = {operation.value: operation for operation in TranscriptionOperation}
+    return frozenset(
+        known[task]
+        for task in cast(list[object], raw)
+        if isinstance(task, str) and task in known
     )
 
 

@@ -191,6 +191,10 @@ CATEGORY_MAPPINGS = {
     # Model Provider Outbound Header Actions (3 actions)
     ActionType.MODEL_PROVIDER_HEADERS_UPDATED.value: "admin_actions",
     ActionType.MODEL_PROVIDER_DESTINATION_CHANGED.value: "admin_actions",
+    ActionType.TRANSCRIPTION_SERVICE_CREATED.value: "admin_actions",
+    ActionType.TRANSCRIPTION_SERVICE_UPDATED.value: "admin_actions",
+    ActionType.TRANSCRIPTION_SERVICE_DELETED.value: "admin_actions",
+    ActionType.TRANSCRIPTION_SERVICE_CHECKED.value: "admin_actions",
     ActionType.MODEL_PROVIDER_HEADERS_PREVIEWED.value: "admin_actions",
     # Help Assistant Actions (6 actions)
     ActionType.HELP_ASSISTANT_ROLE_ASSIGNED.value: "admin_actions",

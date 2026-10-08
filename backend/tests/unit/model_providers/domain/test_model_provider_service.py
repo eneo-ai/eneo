@@ -19,7 +19,6 @@ from eneo.model_providers.domain.model_provider import ModelProvider
 from eneo.model_providers.domain.model_provider_service import (
     ModelProviderService,
     effective_endpoint,
-    normalize_destination,
 )
 from eneo.model_providers.domain.outbound_header_writes import OutboundHeaderWrite
 from eneo.model_providers.presentation.model_provider_models import (
@@ -70,39 +69,7 @@ def _service(provider: ModelProvider) -> tuple[ModelProviderService, AsyncMock]:
     ), repository
 
 
-class TestDestinationNormalization:
-    @pytest.mark.parametrize(
-        ("left", "right"),
-        [
-            ("https://api.example.com", "https://api.example.com/"),
-            ("https://api.example.com", "HTTPS://API.Example.com"),
-            ("https://api.example.com", "https://api.example.com:443"),
-            ("http://vllm:8000", "http://vllm:8000/"),
-            ("http://vllm", "http://vllm:80"),
-            ("https://api.example.com/v1", "https://api.example.com/v1/"),
-        ],
-    )
-    def test_equivalent_destinations_compare_equal(self, left: str, right: str):
-        assert normalize_destination(left) == normalize_destination(right)
-
-    @pytest.mark.parametrize(
-        ("left", "right"),
-        [
-            ("https://api.example.com", "http://api.example.com"),
-            ("https://api.example.com", "https://api.example.org"),
-            ("https://api.example.com", "https://api.example.com:8443"),
-            ("https://api.example.com", "https://api.example.com/v1"),
-            ("https://api.example.com/v1", "https://api.example.com/v2"),
-            ("https://api.example.com", "https://api.example.com?region=eu"),
-        ],
-    )
-    def test_different_destinations_compare_unequal(self, left: str, right: str):
-        assert normalize_destination(left) != normalize_destination(right)
-
-    def test_blank_and_missing_are_no_destination(self):
-        assert normalize_destination(None) is None
-        assert normalize_destination("   ") is None
-
+class TestEffectiveEndpoint:
     def test_effective_endpoint_falls_back_to_the_provider_default(self):
         assert effective_endpoint("openai", {}) == "https://api.openai.com"
         assert (

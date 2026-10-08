@@ -168,6 +168,9 @@ from eneo.transcription_models.presentation.tenant_transcription_models_router i
 from eneo.transcription_models.presentation.transcription_models_router import (
     router as transcription_models_router,
 )
+from eneo.transcription_services.router import (
+    router as transcription_services_router,
+)
 from eneo.user_groups.user_groups_router import router as user_groups_router
 from eneo.users.user_router import router as users_router
 from eneo.users.user_router import users_admin_router
@@ -440,6 +443,12 @@ router.include_router(
     tenant_transcription_models_router,
     prefix="/admin/tenant-models/transcription",
     tags=["admin", "tenant-models"],
+    dependencies=TENANT_ADMIN_API_KEY_GUARDS,
+)
+router.include_router(
+    transcription_services_router,
+    prefix="/admin/transcription-services",
+    tags=["admin", "transcription-services"],
     dependencies=TENANT_ADMIN_API_KEY_GUARDS,
 )
 router.include_router(

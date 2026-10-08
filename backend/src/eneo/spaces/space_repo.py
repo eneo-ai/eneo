@@ -73,6 +73,9 @@ from eneo.database.tables.spaces_table import (
     SpacesUserGroups,
     SpacesUsers,
 )
+from eneo.database.tables.transcription_services_table import (
+    SpacesTranscriptionServiceConnections,
+)
 from eneo.database.tables.user_groups_table import UserGroups
 from eneo.database.tables.users_table import Users, usergroups_users_table
 from eneo.database.tables.websites_spaces_table import WebsitesSpaces
@@ -98,7 +101,7 @@ from eneo.security_classifications.domain.entities.security_classification impor
     SecurityClassification,
 )
 from eneo.spaces.api.space_models import SpaceGroupMember, SpaceMember
-from eneo.spaces.space import ModelKind, Space
+from eneo.spaces.space import LinkKind, Space
 from eneo.spaces.space_applications_projection import SpaceApplicationsProjection
 from eneo.spaces.space_factory import SpaceFactory
 from eneo.spaces.space_flow_delete_blockers import (
@@ -106,6 +109,9 @@ from eneo.spaces.space_flow_delete_blockers import (
     space_has_flow_delete_blockers,
 )
 from eneo.spaces.utils.space_utils import effective_space_ids_for
+from eneo.transcription_services.repository import (
+    TranscriptionServiceConnectionRepository,
+)
 from eneo.user_groups.user_group import UserGroupState
 from eneo.users.user import UserSparse
 from eneo.websites.domain.website import Website
@@ -340,6 +346,7 @@ class SpaceRepository:
             selectinload(Spaces.completion_models_mapping),
             selectinload(Spaces.embedding_models_mapping),
             selectinload(Spaces.transcription_models_mapping),
+            selectinload(Spaces.transcription_service_connections_mapping),
             selectinload(Spaces.mcp_servers_mapping),
             selectinload(Spaces.security_classification),
             selectinload(Spaces.security_classification).selectinload(
@@ -514,7 +521,7 @@ class SpaceRepository:
 
     async def _apply_link_changes(self, space_id: UUID, space: Space) -> None:
         """Insert the links the space added and delete the ones it removed."""
-        links: tuple[tuple[ModelKind, Any, Any], ...] = (
+        links: tuple[tuple[LinkKind, Any, Any], ...] = (
             (
                 "completion",
                 SpacesCompletionModels,
@@ -529,6 +536,11 @@ class SpaceRepository:
                 "transcription",
                 SpacesTranscriptionModels,
                 SpacesTranscriptionModels.transcription_model_id,
+            ),
+            (
+                "transcription_service",
+                SpacesTranscriptionServiceConnections,
+                SpacesTranscriptionServiceConnections.connection_id,
             ),
         )
         for kind, table, column in links:
@@ -1660,6 +1672,16 @@ class SpaceRepository:
         transcription_models = await self.transcription_model_repo.all(
             with_deprecated=True
         )
+        # A personal space may use every connection, like every model; any
+        # other space only what is granted to it.
+        connections = TranscriptionServiceConnectionRepository(
+            self.session, self.tenant_id
+        )
+        transcription_services = (
+            await connections.list()
+            if entry_in_db.user_id is not None
+            else await connections.list_granted(entry_in_db.id)
+        )
 
         # Get tenant-enabled MCP servers directly
         from sqlalchemy.orm import selectinload as _selectinload
@@ -1762,6 +1784,7 @@ class SpaceRepository:
             completion_models=completion_models,
             embedding_models=embedding_models,
             transcription_models=transcription_models,
+            transcription_services=transcription_services,
             mcp_servers=mcp_servers,
             assistants_in_db=assistants,
             assistant_attachments=assistant_attachments,

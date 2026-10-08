@@ -112,7 +112,7 @@ def eligible_planner_models(
         for model in space.completion_models
         if model.can_access
         and model.provider_id in active_provider_ids
-        and space.allows_model_security_classification(model)
+        and space.allows_security_classification(model)
         and _model_level(model) >= minimum_level
     ]
 

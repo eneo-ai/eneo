@@ -457,6 +457,22 @@ const ACTION_MESSAGES = {
     name: m.audit_action_transcription_model_migrated,
     description: m.audit_action_transcription_model_migrated_description
   },
+  transcription_service_created: {
+    name: m.audit_action_transcription_service_created,
+    description: m.audit_action_transcription_service_created_description
+  },
+  transcription_service_updated: {
+    name: m.audit_action_transcription_service_updated,
+    description: m.audit_action_transcription_service_updated_description
+  },
+  transcription_service_deleted: {
+    name: m.audit_action_transcription_service_deleted,
+    description: m.audit_action_transcription_service_deleted_description
+  },
+  transcription_service_checked: {
+    name: m.audit_action_transcription_service_checked,
+    description: m.audit_action_transcription_service_checked_description
+  },
   image_model_created: {
     name: m.audit_action_image_model_created,
     description: m.audit_action_image_model_created_description

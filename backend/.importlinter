@@ -174,12 +174,25 @@ forbidden_modules =
     eneo.flows
 
 [importlinter:contract:transcription-services-no-flows]
-# Admin connection checks and Flow execution share the native service client;
-# Flow orchestration depends on it, never the reverse.
+# Flow orchestration depends on transcription services, never the reverse.
+# Direct imports only: the admin adapters use platform modules (users, the
+# table registry) that themselves reach small Flow modules.
 name = Transcription services must not import flows
 type = forbidden
+allow_indirect_imports = true
 source_modules =
     eneo.transcription_services
+forbidden_modules =
+    eneo.flows
+
+[importlinter:contract:transcription-service-client-no-flows]
+# Admin connection checks and Flow execution share the native service client
+# and its vocabulary; neither may reach Flow code, even indirectly.
+name = Transcription service client must not reach flows
+type = forbidden
+source_modules =
+    eneo.transcription_services.client
+    eneo.transcription_services.models
 forbidden_modules =
     eneo.flows
 

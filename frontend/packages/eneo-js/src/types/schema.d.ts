@@ -2073,6 +2073,78 @@ export interface paths {
     patch?: never;
     trace?: never;
   };
+  "/api/v1/admin/transcription-services/": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /**
+     * List Transcription Services
+     * @description List the organisation's transcription services by name.
+     */
+    get: operations["list_transcription_services_api_v1_admin_transcription_services__get"];
+    put?: never;
+    /**
+     * Create Transcription Service
+     * @description Connect a native transcription service.
+     */
+    post: operations["create_transcription_service_api_v1_admin_transcription_services__post"];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/v1/admin/transcription-services/{connection_id}/": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /**
+     * Get Transcription Service
+     * @description One transcription service.
+     */
+    get: operations["get_transcription_service_api_v1_admin_transcription_services__connection_id___get"];
+    put?: never;
+    post?: never;
+    /**
+     * Delete Transcription Service
+     * @description Remove a transcription service and its space grants.
+     */
+    delete: operations["delete_transcription_service_api_v1_admin_transcription_services__connection_id___delete"];
+    options?: never;
+    head?: never;
+    /**
+     * Update Transcription Service
+     * @description Change a transcription service. Changing its endpoint requires a new API key.
+     */
+    patch: operations["update_transcription_service_api_v1_admin_transcription_services__connection_id___patch"];
+    trace?: never;
+  };
+  "/api/v1/admin/transcription-services/{connection_id}/check/": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    /**
+     * Check Transcription Service
+     * @description Ask the service whether it would accept a job with this connection's key. Sends no audio and starts no job.
+     */
+    post: operations["check_transcription_service_api_v1_admin_transcription_services__connection_id__check__post"];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
   "/api/v1/admin/users/": {
     parameters: {
       query?: never;
@@ -3310,7 +3382,7 @@ export interface paths {
     };
     /**
      * Get per-action audit configuration
-     * @description Retrieve all 191 actions with their enabled status for the modal UI.
+     * @description Retrieve all 195 actions with their enabled status for the modal UI.
      */
     get: operations["get_action_config_api_v1_audit_config_actions_get"];
     put?: never;
@@ -12093,6 +12165,10 @@ export interface components {
       | "transcription_model_updated"
       | "transcription_model_deleted"
       | "transcription_model_migrated"
+      | "transcription_service_created"
+      | "transcription_service_updated"
+      | "transcription_service_deleted"
+      | "transcription_service_checked"
       | "image_model_created"
       | "image_model_updated"
       | "image_model_deleted"
@@ -14355,7 +14431,7 @@ export interface components {
      * @example {
      *       "categories": [
      *         {
-     *           "action_count": 56,
+     *           "action_count": 60,
      *           "category": "admin_actions",
      *           "enabled": true,
      *           "example_actions": [
@@ -14739,7 +14815,7 @@ export interface components {
      *     Display text is intentionally omitted: the frontend translates ``category``
      *     by key (``audit_category_{category}`` / ``_description``).
      * @example {
-     *       "action_count": 56,
+     *       "action_count": 60,
      *       "category": "admin_actions",
      *       "enabled": true,
      *       "example_actions": [
@@ -15360,6 +15436,11 @@ export interface components {
       /** Security Classification */
       security_classification?: components["schemas"]["ModelId"] | null;
     };
+    /**
+     * ConnectionCheckOutcome
+     * @enum {string}
+     */
+    ConnectionCheckOutcome: "ready" | "not_accepting_jobs" | "unavailable" | "credentials_rejected";
     /**
      * ConstrainingSource
      * @enum {string}
@@ -16956,6 +17037,7 @@ export interface components {
       | "completion_model"
       | "embedding_model"
       | "transcription_model"
+      | "transcription_service"
       | "image_model"
       | "audit_log"
       | "session"
@@ -30296,6 +30378,24 @@ export interface components {
        */
       items: components["schemas"]["FlowSparsePublic"][];
     };
+    /** OffsetPaginatedResponse[TranscriptionServicePublic] */
+    OffsetPaginatedResponse_TranscriptionServicePublic_: {
+      /**
+       * Count
+       * @description Number of items returned in the response
+       */
+      readonly count: number;
+      /**
+       * Has More
+       * @description Whether another page exists after the returned offset window
+       */
+      has_more: boolean;
+      /**
+       * Items
+       * @description List of items returned in the response
+       */
+      items: components["schemas"]["TranscriptionServicePublic"][];
+    };
     /** OmittedTranscriptSourcePage */
     OmittedTranscriptSourcePage: {
       /** Attempt No */
@@ -31696,6 +31796,11 @@ export interface components {
       security_classification?: components["schemas"]["ModelId"] | null;
       /** Transcription Models */
       transcription_models?: components["schemas"]["ModelId"][] | null;
+      /**
+       * Transcription Services
+       * @description The transcription services granted to the space. The list replaces the grants: a service it leaves out is no longer granted. A new grant must be enabled and meet the space's classification.
+       */
+      transcription_services?: components["schemas"]["ModelId"][] | null;
     };
     /** PasswordChangeRequest */
     PasswordChangeRequest: {
@@ -35815,6 +35920,11 @@ export interface components {
       skill_permissions: components["schemas"]["ResourcePermission"][];
       /** Transcription Models */
       transcription_models: components["schemas"]["TranscriptionModelPublic"][];
+      /**
+       * Transcription Services
+       * @description Every transcription service granted to this space, each marked with whether it meets the space's classification and is enabled. Build an update's service list from these IDs.
+       */
+      transcription_services?: components["schemas"]["SpaceTranscriptionServiceLink"][];
       /** Updated At */
       updated_at?: string | null;
     };
@@ -35865,6 +35975,33 @@ export interface components {
       personal: boolean;
       /** Updated At */
       updated_at?: string | null;
+    };
+    /**
+     * SpaceTranscriptionServiceLink
+     * @description A transcription service granted to a space, with the state of the grant.
+     *
+     *     New work in the space may use the service only when both flags are true.
+     */
+    SpaceTranscriptionServiceLink: {
+      /**
+       * Available
+       * @description False when the organisation disabled it.
+       */
+      available: boolean;
+      /**
+       * Id
+       * Format: uuid
+       */
+      id: string;
+      /**
+       * Meets Security Classification
+       * @description False when the service's security classification is below the space's.
+       */
+      meets_security_classification: boolean;
+      /** Name */
+      name: string;
+      /** Operations */
+      operations: components["schemas"]["TranscriptionOperation"][];
     };
     /**
      * StartRunRequest
@@ -37873,6 +38010,128 @@ export interface components {
       total_count?: number;
     };
     /**
+     * TranscriptionOperation
+     * @description Work Eneo asks a native transcription service to do.
+     *
+     *     A service may advertise more tasks (Vemsa also realigns corrected
+     *     transcripts); Eneo neither sends those nor offers them as supported.
+     * @enum {string}
+     */
+    TranscriptionOperation: "transcribe" | "diarize";
+    /** TranscriptionServiceCheckPublic */
+    TranscriptionServiceCheckPublic: {
+      /**
+       * Detail
+       * @description What the service answered, without secrets
+       */
+      detail: string;
+      /**
+       * Missing Operations
+       * @description Declared operations the service reports it does not accept. Empty when every declared operation is confirmed or none are reported.
+       */
+      missing_operations: components["schemas"]["TranscriptionOperation"][];
+      outcome: components["schemas"]["ConnectionCheckOutcome"];
+      /**
+       * Reported Operations
+       * @description Operations the service reports it accepts. Null: the service does not report them, so the declared operations are unverified.
+       */
+      reported_operations: components["schemas"]["TranscriptionOperation"][] | null;
+      /**
+       * Service Version
+       * @description Version the service reports, when it reports one
+       */
+      service_version: string | null;
+    };
+    /** TranscriptionServiceCreate */
+    TranscriptionServiceCreate: {
+      /**
+       * Api Key
+       * @description Bearer key the service issued to this organisation. Write-only.
+       */
+      api_key: string;
+      /**
+       * Endpoint Url
+       * @description Base URL of the service's native jobs API, http or https, without credentials, query or fragment. A trailing /v1 is removed.
+       */
+      endpoint_url: string;
+      /**
+       * Is Enabled
+       * @description Disabled: no new work
+       * @default true
+       */
+      is_enabled?: boolean;
+      /**
+       * Name
+       * @description Unique within the organisation
+       */
+      name: string;
+      /**
+       * Operations
+       * @description What the administrator declares the service does. A connection check reports whether the service itself confirms it.
+       */
+      operations: components["schemas"]["TranscriptionOperation"][];
+      /** @description Security classification of the service */
+      security_classification?: components["schemas"]["ModelId"] | null;
+    };
+    /** TranscriptionServicePublic */
+    TranscriptionServicePublic: {
+      /**
+       * Created At
+       * Format: date-time
+       */
+      created_at: string;
+      /** Endpoint Url */
+      endpoint_url: string;
+      /**
+       * Id
+       * Format: uuid
+       */
+      id: string;
+      /** Is Enabled */
+      is_enabled: boolean;
+      /** Name */
+      name: string;
+      /** Operations */
+      operations: components["schemas"]["TranscriptionOperation"][];
+      security_classification: components["schemas"]["SecurityClassificationPublic"] | null;
+      /**
+       * Updated At
+       * Format: date-time
+       */
+      updated_at: string;
+    };
+    /**
+     * TranscriptionServiceUpdate
+     * @description Only the fields sent change. Changing the endpoint requires a new
+     *     ``api_key``: the stored key is never sent to another destination.
+     */
+    TranscriptionServiceUpdate: {
+      /**
+       * Api Key
+       * @description Bearer key the service issued to this organisation. Write-only.
+       */
+      api_key?: string;
+      /**
+       * Endpoint Url
+       * @description Base URL of the service's native jobs API, http or https, without credentials, query or fragment. A trailing /v1 is removed.
+       */
+      endpoint_url?: string;
+      /** Is Enabled */
+      is_enabled?: boolean;
+      /** Name */
+      name?: string;
+      /**
+       * Operations
+       * @description What the administrator declares the service does. A connection check reports whether the service itself confirms it.
+       */
+      operations?: components["schemas"]["TranscriptionOperation"][];
+      /**
+       * Security Classification
+       * @description Null clears the classification; omit to keep it
+       */
+      security_classification?: components["schemas"]["ModelId"] | null;
+    };
+    /**
      * TranscriptionUsageEntity
      * @description One entity using a transcription model. Shape matches completion's
      *     ModelUsageDetail so the migrate dialog can render both with one component.
@@ -37990,6 +38249,11 @@ export interface components {
       services: components["schemas"]["ServiceSparse"][];
       /** Transcription Models */
       transcription_models: components["schemas"]["TranscriptionModelPublic"][];
+      /**
+       * Transcription Services
+       * @description Granted services the classification change would remove
+       */
+      transcription_services?: components["schemas"]["SpaceTranscriptionServiceLink"][];
     };
     /** UpdateSpaceGroupMemberRequest */
     UpdateSpaceGroupMemberRequest: {
@@ -46053,6 +46317,359 @@ export interface operations {
       };
       /** @description Validation Error */
       422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+    };
+  };
+  list_transcription_services_api_v1_admin_transcription_services__get: {
+    parameters: {
+      query?: {
+        limit?: number;
+        offset?: number;
+      };
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["OffsetPaginatedResponse_TranscriptionServicePublic_"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+    };
+  };
+  create_transcription_service_api_v1_admin_transcription_services__post: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["TranscriptionServiceCreate"];
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      201: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["TranscriptionServicePublic"];
+        };
+      };
+      /** @description Bad Request */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Not Found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Conflict */
+      409: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Service Unavailable */
+      503: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+    };
+  };
+  get_transcription_service_api_v1_admin_transcription_services__connection_id___get: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        connection_id: string;
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["TranscriptionServicePublic"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Not Found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+    };
+  };
+  delete_transcription_service_api_v1_admin_transcription_services__connection_id___delete: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        connection_id: string;
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Successful Response */
+      204: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content?: never;
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Not Found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+    };
+  };
+  update_transcription_service_api_v1_admin_transcription_services__connection_id___patch: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        connection_id: string;
+      };
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["TranscriptionServiceUpdate"];
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["TranscriptionServicePublic"];
+        };
+      };
+      /** @description Bad Request */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Not Found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Conflict */
+      409: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Service Unavailable */
+      503: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+    };
+  };
+  check_transcription_service_api_v1_admin_transcription_services__connection_id__check__post: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        connection_id: string;
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["TranscriptionServiceCheckPublic"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Not Found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Service Unavailable */
+      503: {
         headers: {
           [name: string]: unknown;
         };

@@ -74,6 +74,7 @@ from eneo.skills.domain.skill import (
     SkillRuntimePolicyChangedError,
     SkillSlugConflictError,
 )
+from eneo.transcription_services.models import SERVICE_ENDPOINT_MESSAGES
 from eneo.users.password import (
     CurrentPasswordIncorrectError,
     LocalPasswordChangeUnavailableError,
@@ -209,6 +210,7 @@ def _validation_error_entry(error: Mapping[str, object]) -> dict[str, object]:
 
 
 _PUBLIC_VALIDATION_MESSAGES: dict[str, str] = {
+    **SERVICE_ENDPOINT_MESSAGES,
     "missing": "Field required",
     "string_type": "Input should be a valid string",
     "json_invalid": "Invalid JSON",

@@ -1,7 +1,6 @@
 from collections.abc import Sequence
 from datetime import datetime
 from typing import TYPE_CHECKING, Any, Optional
-from urllib.parse import urlsplit
 from uuid import UUID, uuid4
 
 from eneo.embedding_models.domain.embedding_model_repo import (
@@ -13,7 +12,11 @@ from eneo.main.exceptions import (
     EncryptionNotConfiguredException,
     NameCollisionException,
 )
-from eneo.model_providers.domain.endpoints import normalize_endpoint_base
+from eneo.model_providers.domain.endpoints import (
+    normalize_destination,
+    normalize_endpoint_base,
+    require_key_for_destination,
+)
 from eneo.model_providers.domain.model_defaults_lookup import resolve_model_defaults
 from eneo.model_providers.domain.model_provider import ModelProvider
 from eneo.model_providers.domain.outbound_header_destinations import (
@@ -103,43 +106,9 @@ def effective_endpoint(
     return _DEFAULT_ENDPOINTS.get(provider_type)
 
 
-def normalize_destination(endpoint: str | None) -> str | None:
-    """Canonical ``scheme://host[:port]/path`` for comparing destinations.
-
-    Scheme and host are case-insensitive, a default port is the same as no
-    port, and trailing slashes do not change where a request goes. A
-    different scheme, host, port, base path or query does.
-    """
-    if endpoint is None:
-        return None
-    value = endpoint.strip()
-    if not value:
-        return None
-    parts = urlsplit(value if "://" in value else f"//{value}")
-    scheme = parts.scheme.lower()
-    host = (parts.hostname or "").lower()
-    try:
-        port: int | None = parts.port
-    except ValueError:
-        port = None
-        host = parts.netloc.lower()
-    if (scheme, port) in (("http", 80), ("https", 443)):
-        port = None
-    netloc = f"{host}:{port}" if port is not None else host
-    path = parts.path.rstrip("/")
-    query = f"?{parts.query}" if parts.query else ""
-    return f"{scheme}://{netloc}{path}{query}"
-
-
 def _has_stored_api_key(credentials: dict[str, Any]) -> bool:
     value = credentials.get("api_key")
     return isinstance(value, str) and bool(value.strip())
-
-
-def _is_masked_api_key(value: str) -> bool:
-    """A value that is only the display form of a key, never a key."""
-    stripped = value.strip()
-    return stripped.startswith("...") or set(stripped) <= set("*•·")
 
 
 def _coerce_to_epoch(value: Any) -> float:
@@ -660,42 +629,19 @@ class ModelProviderService:
         merged_config: dict[str, Any],
         credentials: Optional[dict[str, Any]],
     ) -> None:
-        """A stored key is never sent to a destination it was not entered for.
-
-        When the effective endpoint changes and the provider holds a key, the
-        update must carry an explicitly typed replacement. An omitted, blank
-        or masked display value is rejected before anything is written. Keys
-        entered for an unchanged destination are validated only for shape.
-        """
-        if credentials is not None:
-            raw = credentials.get("api_key")
-            if isinstance(raw, str) and raw.strip() and _is_masked_api_key(raw):
-                raise BadRequestException(
-                    "The API key looks like the masked display value; "
-                    "enter the actual key."
-                )
-
-        current = normalize_destination(
-            effective_endpoint(
+        replacement = credentials.get("api_key") if credentials is not None else None
+        require_key_for_destination(
+            stored_destination=effective_endpoint(
                 provider.provider_type, provider.config, provider.credentials
-            )
-        )
-        proposed = normalize_destination(
-            effective_endpoint(
+            ),
+            proposed_destination=effective_endpoint(
                 provider.provider_type,
                 merged_config,
                 credentials if credentials is not None else provider.credentials,
-            )
+            ),
+            key_stored=_has_stored_api_key(provider.credentials),
+            replacement_key=replacement if isinstance(replacement, str) else None,
         )
-        if current == proposed or not _has_stored_api_key(provider.credentials):
-            return
-
-        replacement = credentials.get("api_key") if credentials is not None else None
-        if not isinstance(replacement, str) or not replacement.strip():
-            raise BadRequestException(
-                "Changing the provider endpoint requires entering a new API key; "
-                "the stored key is not reused for a different destination."
-            )
 
     def _require_reentered_secrets_for_new_destination(
         self,

@@ -63,6 +63,7 @@ async def test_classification_dry_run_reports_unavailable_capability_without_rem
         linked_completion_models=[],
         linked_embedding_models=[],
         linked_transcription_models=[],
+        linked_transcription_services=[],
         mcp_servers=[],
         assistants=[assistant],
         group_chats=[],

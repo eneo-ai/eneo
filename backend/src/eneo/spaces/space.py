@@ -1,7 +1,7 @@
 from collections.abc import Iterable, Sequence
 from datetime import datetime
 from enum import Enum
-from typing import TYPE_CHECKING, Any, Literal, Optional, TypeVar, Union
+from typing import TYPE_CHECKING, Any, Literal, Optional, Protocol, TypeVar, Union
 from uuid import UUID
 
 from eneo.main.datetime_utils import datetime_or_utc_min
@@ -39,11 +39,32 @@ if TYPE_CHECKING:
     )
     from eneo.mcp_servers.domain.entities.mcp_server import MCPServer
     from eneo.services.service import Service
+    from eneo.transcription_services.models import TranscriptionServiceConnection
     from eneo.websites.domain.website import Website
 
-_M = TypeVar("_M", bound="AIModel")
-ModelKind = Literal["completion", "embedding", "transcription"]
-MODEL_KINDS: tuple[ModelKind, ...] = ("completion", "embedding", "transcription")
+
+class ClassifiedLink(Protocol):
+    """A resource a space links to and grants use of under its classification:
+    a model, or a transcription-service connection."""
+
+    @property
+    def id(self) -> UUID: ...
+
+    @property
+    def can_access(self) -> bool: ...
+
+    @property
+    def security_classification(self) -> Optional[SecurityClassification]: ...
+
+
+_M = TypeVar("_M", bound=ClassifiedLink)
+LinkKind = Literal["completion", "embedding", "transcription", "transcription_service"]
+LINK_KINDS: tuple[LinkKind, ...] = (
+    "completion",
+    "embedding",
+    "transcription",
+    "transcription_service",
+)
 
 
 def _security_level(
@@ -100,6 +121,7 @@ class Space:
         group_members: dict[UUID, SpaceGroupMember] | None = None,
         default_assistant_load_failed: bool = False,
         unloaded_hidden_assistant_ids: frozenset[UUID] = frozenset(),
+        transcription_services: Optional[list["TranscriptionServiceConnection"]] = None,
     ):
         super().__init__()
         self.id = id
@@ -111,6 +133,7 @@ class Space:
         self._embedding_models = embedding_models
         self._completion_models = completion_models
         self._transcription_models = transcription_models
+        self._transcription_services = list(transcription_services or [])
         self._mcp_servers = mcp_servers
         self.default_assistant = default_assistant
         # True when a default-assistant row existed in the DB but failed to
@@ -145,13 +168,16 @@ class Space:
         self._completion_models_below_classification: list["CompletionModel"] = []
         self._embedding_models_below_classification: list["EmbeddingModel"] = []
         self._transcription_models_below_classification: list[TranscriptionModel] = []
+        self._transcription_services_below_classification: list[
+            "TranscriptionServiceConnection"
+        ] = []
         self._split_models_by_classification()
         # The links as loaded. A save writes only the difference (see
         # link_changes), so a stored link this space never loaded, such as
         # one to a deprecated model, is left exactly as it is.
-        self._loaded_link_ids: dict[ModelKind, frozenset[UUID]] = {
-            kind: frozenset(model.id for model in self._linked(kind))
-            for kind in MODEL_KINDS
+        self._loaded_link_ids: dict[LinkKind, frozenset[UUID]] = {
+            kind: frozenset(link.id for link in self._linked(kind))
+            for kind in LINK_KINDS
         }
         self.data_retention_days = data_retention_days
         self.enabled_capabilities: list[CapabilityPurpose] = list(
@@ -188,6 +214,14 @@ class Space:
         return transcription_model_id in [
             model.id for model in self.transcription_models
         ]
+
+    def is_transcription_service_available(self, connection_id: UUID) -> bool:
+        """Whether new work in this space may use the connection: granted,
+        allowed by the classification, and enabled by the organisation."""
+        return any(
+            connection.id == connection_id and connection.can_access
+            for connection in self._transcription_services
+        )
 
     def is_mcp_server_in_space(self, mcp_server_id: UUID | None) -> bool:
         return mcp_server_id in [server.id for server in self.mcp_servers]
@@ -378,6 +412,37 @@ class Space:
         ) = self._assign_models(transcription_models, self.linked_transcription_models)
 
     @property
+    def transcription_services(self) -> list["TranscriptionServiceConnection"]:
+        """The transcription services granted to this space and usable here."""
+        return self._transcription_services
+
+    @transcription_services.setter
+    def transcription_services(
+        self, transcription_services: list["TranscriptionServiceConnection"]
+    ):
+        (
+            self._transcription_services,
+            self._transcription_services_below_classification,
+        ) = self._assign_models(
+            transcription_services, self.linked_transcription_services
+        )
+
+    @property
+    def transcription_services_below_classification(
+        self,
+    ) -> list["TranscriptionServiceConnection"]:
+        return list(self._transcription_services_below_classification)
+
+    @property
+    def linked_transcription_services(
+        self,
+    ) -> list["TranscriptionServiceConnection"]:
+        return [
+            *self._transcription_services,
+            *self._transcription_services_below_classification,
+        ]
+
+    @property
     def completion_models_below_classification(self) -> list["CompletionModel"]:
         """Linked completion models below this space's classification.
 
@@ -414,25 +479,26 @@ class Space:
             *self._transcription_models_below_classification,
         ]
 
-    def _linked(self, kind: "ModelKind") -> Sequence["AIModel"]:
+    def _linked(self, kind: LinkKind) -> Sequence[ClassifiedLink]:
         return {
             "completion": self.linked_completion_models,
             "embedding": self.linked_embedding_models,
             "transcription": self.linked_transcription_models,
+            "transcription_service": self.linked_transcription_services,
         }[kind]
 
-    def link_changes(self, kind: "ModelKind") -> tuple[set[UUID], set[UUID]]:
-        """The links of one model kind this space added and removed.
+    def link_changes(self, kind: LinkKind) -> tuple[set[UUID], set[UUID]]:
+        """The links of one kind this space added and removed.
 
         Only an explicit model-list edit, adding a model, or a change of the
         space's classification level changes links. A write persists exactly
         these changes and never touches a stored link it did not load."""
         loaded = self._loaded_link_ids[kind]
-        current = {model.id for model in self._linked(kind)}
+        current = {link.id for link in self._linked(kind)}
         return current - loaded, set(loaded - current)
 
     def _split_models_by_classification(self) -> None:
-        """Sort every linked model into usable and below-classification."""
+        """Sort every linked model and service into usable and below-classification."""
         self._completion_models, self._completion_models_below_classification = (
             self._split_by_classification(self.linked_completion_models)
         )
@@ -443,12 +509,16 @@ class Space:
             self._transcription_models,
             self._transcription_models_below_classification,
         ) = self._split_by_classification(self.linked_transcription_models)
+        (
+            self._transcription_services,
+            self._transcription_services_below_classification,
+        ) = self._split_by_classification(self.linked_transcription_services)
 
     def _split_by_classification(
         self, models: Sequence[_M]
     ) -> tuple[list[_M], list[_M]]:
-        usable = [m for m in models if self.allows_model_security_classification(m)]
-        below = [m for m in models if not self.allows_model_security_classification(m)]
+        usable = [m for m in models if self.allows_security_classification(m)]
+        below = [m for m in models if not self.allows_security_classification(m)]
         return usable, below
 
     def _assign_models(
@@ -466,7 +536,7 @@ class Space:
         usable: list[_M] = []
         below: list[_M] = []
         for model in models:
-            allowed = self.allows_model_security_classification(model)
+            allowed = self.allows_security_classification(model)
             if model.id not in linked_ids:
                 if not model.can_access:
                     raise UnauthorizedException(UNAUTHORIZED_EXCEPTION_MESSAGE)
@@ -492,6 +562,7 @@ class Space:
         embedding_models: list["EmbeddingModel"] | None = None,
         completion_models: list["CompletionModel"] | None = None,
         transcription_models: list[TranscriptionModel] | None = None,
+        transcription_services: list["TranscriptionServiceConnection"] | None = None,
         mcp_servers: list["MCPServer"] | None = None,
         security_classification: Union[
             SecurityClassification, NotProvided, None
@@ -534,6 +605,7 @@ class Space:
                 self._completion_models_below_classification = []
                 self._embedding_models_below_classification = []
                 self._transcription_models_below_classification = []
+                self._transcription_services_below_classification = []
                 # Capability markers stay: the provider resolved at ask time
                 # is what gets checked, not the marker's own classification.
                 self._mcp_servers = [
@@ -568,6 +640,14 @@ class Space:
                 )
 
             self.transcription_models = transcription_models
+
+        if transcription_services is not None:
+            if self.is_personal():
+                raise BadRequestException(
+                    "Can not add transcription services to personal space"
+                )
+
+            self.transcription_services = transcription_services
 
         if mcp_servers is not None:
             if self.is_personal():
@@ -839,8 +919,8 @@ class Space:
     def get_website(self, website_id: UUID) -> "Website":
         return self._get_entity(website_id, self.websites)
 
-    def allows_model_security_classification(self, model: "AIModel") -> bool:
-        """Whether this space's classification permits the model.
+    def allows_security_classification(self, link: ClassifiedLink) -> bool:
+        """Whether this space's classification permits the model or service.
 
         The predicate form exists for callers that must *choose* a model rather
         than accept one: the stored model list is only validated when it is
@@ -850,11 +930,11 @@ class Space:
         if not self.security_classification:
             return True
         return not self.security_classification.is_greater_than(
-            model.security_classification
+            link.security_classification
         )
 
     def validate_model_security_compatibility(self, model: "AIModel") -> None:
-        if not self.allows_model_security_classification(model):
+        if not self.allows_security_classification(model):
             raise BadRequestException(SECURITY_CLASSIFICATION_EXCEPTION_MESSAGE)
 
     def validate_mcp_server_security_compatibility(

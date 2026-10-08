@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import io
 import subprocess
 import sys
@@ -681,3 +682,77 @@ def test_the_client_loads_without_flow_code() -> None:
         check=True,
     )
     assert loaded.stdout.strip() == "[]"
+
+
+@pytest.mark.parametrize(
+    "body, reported, version",
+    [
+        ({"queue_accepting_jobs": True}, None, None),
+        (
+            {
+                "queue_accepting_jobs": True,
+                "supported_tasks": ["diarize", "align", 7],
+                "service_version": "1.4.0",
+            },
+            frozenset({TranscriptionOperation.DIARIZE}),
+            "1.4.0",
+        ),
+        ({"queue_accepting_jobs": True, "supported_tasks": []}, frozenset(), None),
+        ({"queue_accepting_jobs": True, "supported_tasks": "diarize"}, None, None),
+        (
+            {"queue_accepting_jobs": True, "service_version": "v" * 100},
+            None,
+            "v" * 64,
+        ),
+    ],
+    ids=[
+        "older-service",
+        "reports-tasks",
+        "reports-none",
+        "not-a-list",
+        "long-version",
+    ],
+)
+async def test_readiness_reports_operations_separately_from_capacity(
+    body, reported, version
+) -> None:
+    service = ScriptedService(ready_responses=[httpx.Response(200, json=body)])
+
+    readiness = await make_client(service).check_readiness()
+
+    assert readiness.ready is True
+    assert (readiness.reported_operations, readiness.service_version) == (
+        reported,
+        version,
+    )
+
+
+async def test_an_unready_service_still_reports_what_it_supports() -> None:
+    service = ScriptedService(
+        ready_responses=[
+            httpx.Response(
+                503, json={"status": "not_ready", "supported_tasks": ["transcribe"]}
+            )
+        ]
+    )
+
+    readiness = await make_client(service).check_readiness()
+
+    assert (readiness.ready, readiness.reported_operations) == (
+        False,
+        frozenset({TranscriptionOperation.TRANSCRIBE}),
+    )
+
+
+async def test_a_readiness_answer_that_never_arrives_is_bounded_in_total() -> None:
+    async def slow(request: httpx.Request) -> httpx.Response:
+        await asyncio.sleep(5)
+        return httpx.Response(200, json={"queue_accepting_jobs": True})
+
+    client = make_client(ScriptedService(), result_timeout_seconds=0.05)
+    client._transport = httpx.MockTransport(slow)
+
+    async with asyncio.timeout(1):
+        readiness = await client.check_readiness()
+
+    assert (readiness.ready, readiness.detail) == (False, "unreachable: no answer")

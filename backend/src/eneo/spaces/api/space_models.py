@@ -45,6 +45,7 @@ from eneo.services.service import ServiceSparse
 from eneo.transcription_models.presentation.transcription_model_models import (
     TranscriptionModelPublic,
 )
+from eneo.transcription_services.models import TranscriptionOperation
 from eneo.users.user import UserSparse
 from eneo.websites.domain.crawl_run import CrawlType
 from eneo.websites.domain.website import UpdateInterval
@@ -120,6 +121,13 @@ class UpdateSpaceRequest(BaseModel):
     embedding_models: list[ModelId]
     completion_models: list[ModelId]
     transcription_models: list[ModelId]
+    transcription_services: list[ModelId] = Field(
+        description=(
+            "The transcription services granted to the space. The list replaces "
+            "the grants: a service it leaves out is no longer granted. A new "
+            "grant must be enabled and meet the space's classification."
+        )
+    )
     mcp_servers: list[ModelId]
     mcp_tools: list[MCPToolSetting]
 
@@ -152,6 +160,22 @@ class UpdateSpaceRequest(BaseModel):
     )
 
 
+class SpaceTranscriptionServiceLink(BaseModel):
+    """A transcription service granted to a space, with the state of the grant.
+
+    New work in the space may use the service only when both flags are true."""
+
+    id: UUID
+    name: str
+    operations: list[TranscriptionOperation]
+    meets_security_classification: bool = Field(
+        description=(
+            "False when the service's security classification is below the space's."
+        )
+    )
+    available: bool = Field(description="False when the organisation disabled it.")
+
+
 class UpdateSpaceDryRunResponse(BaseModel):
     capabilities: list[CapabilityPurpose] = Field(
         default_factory=list[CapabilityPurpose]
@@ -163,6 +187,10 @@ class UpdateSpaceDryRunResponse(BaseModel):
     completion_models: list[CompletionModelPublic]
     embedding_models: list[EmbeddingModelPublic]
     transcription_models: list[TranscriptionModelPublic]
+    transcription_services: list[SpaceTranscriptionServiceLink] = Field(
+        default_factory=list[SpaceTranscriptionServiceLink],
+        description="Granted services the classification change would remove",
+    )
     mcp_servers: list[MCPServerPublicDict] = Field(
         default_factory=_empty_mcp_server_public_dict_list
     )
@@ -267,6 +295,14 @@ class SpacePublic(SpaceDashboard):
             "model list sent to update the space adds the models it names and "
             "removes the listed links it leaves out, so build it from these IDs. "
             "Links to retired models are not listed and are never changed."
+        ),
+    )
+    transcription_services: list[SpaceTranscriptionServiceLink] = Field(
+        default_factory=list[SpaceTranscriptionServiceLink],
+        description=(
+            "Every transcription service granted to this space, each marked with "
+            "whether it meets the space's classification and is enabled. Build "
+            "an update's service list from these IDs."
         ),
     )
     mcp_servers: list[MCPServerPublicDict] = Field(

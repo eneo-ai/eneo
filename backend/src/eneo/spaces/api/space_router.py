@@ -244,6 +244,9 @@ async def update_space(
         transcription_model_ids=_get_model_ids_or_none(
             update_space_req.transcription_models
         ),
+        transcription_service_ids=_get_model_ids_or_none(
+            update_space_req.transcription_services
+        ),
         mcp_server_ids=_get_model_ids_or_none(update_space_req.mcp_servers),
         enabled_capabilities=update_space_req.enabled_capabilities,
         mcp_tools=update_space_req.mcp_tools,
@@ -291,6 +294,11 @@ async def update_space(
             "transcription_models",
             old_space.linked_transcription_models,
             space.linked_transcription_models,
+        ),
+        (
+            "transcription_services",
+            old_space.linked_transcription_services,
+            space.linked_transcription_services,
         ),
     ):
         old_entries = [{"id": str(m.id), "name": m.name} for m in old_links]

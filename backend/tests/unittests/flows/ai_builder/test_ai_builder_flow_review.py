@@ -987,7 +987,7 @@ async def test_a_retained_floor_refuses_a_lower_named_model_before_any_provider_
     model.security_classification = SimpleNamespace(security_level=1)
     space = MagicMock()
     space.completion_models = [model]
-    space.allows_model_security_classification.return_value = True
+    space.allows_security_classification.return_value = True
     session = _edit_session(user, review_metadata=None)
     session.conversation.append(
         ConversationMessage(

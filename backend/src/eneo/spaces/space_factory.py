@@ -105,6 +105,7 @@ if TYPE_CHECKING:
     from eneo.transcription_models.domain.transcription_model import (
         TranscriptionModel,
     )
+    from eneo.transcription_services.models import TranscriptionServiceConnection
     from eneo.users.user import UserInDB
 
 
@@ -291,6 +292,8 @@ class SpaceFactory:
         completion_models: Sequence["CompletionModel"] | None = None,
         embedding_models: Sequence["EmbeddingModel"] | None = None,
         transcription_models: Sequence["TranscriptionModel"] | None = None,
+        transcription_services: Sequence["TranscriptionServiceConnection"]
+        | None = None,
         mcp_servers: Sequence["MCPServer"] | None = None,
         assistants_in_db: Sequence["Assistants"] | None = None,
         assistant_attachments: Mapping[UUID, Sequence[File]] | None = None,
@@ -308,6 +311,7 @@ class SpaceFactory:
         completion_models = list(completion_models or [])
         embedding_models = list(embedding_models or [])
         transcription_models = list(transcription_models or [])
+        transcription_services = list(transcription_services or [])
         mcp_servers = list(mcp_servers or [])
         assistants_in_db = list(assistants_in_db or [])
         assistant_attachments = assistant_attachments or {}
@@ -343,6 +347,7 @@ class SpaceFactory:
             space_completion_models = non_deprecated_completion_models
             space_transcription_models = non_deprecated_transcription_models
             space_embedding_models = non_deprecated_embedding_models
+            space_transcription_services = transcription_services
             space_mcp_servers = mcp_servers
         else:
             space_completion_models = [
@@ -371,6 +376,15 @@ class SpaceFactory:
                     mapping.embedding_model_id
                     for mapping in space_in_db.embedding_models_mapping
                 ]
+            ]
+            granted_services = {
+                mapping.connection_id
+                for mapping in space_in_db.transcription_service_connections_mapping
+            }
+            space_transcription_services = [
+                connection
+                for connection in transcription_services
+                if connection.id in granted_services
             ]
             space_mcp_servers = [
                 mcp_server
@@ -609,6 +623,7 @@ class SpaceFactory:
             description=space_in_db.description,
             embedding_models=space_embedding_models,
             transcription_models=space_transcription_models,
+            transcription_services=space_transcription_services,
             completion_models=space_completion_models,
             mcp_servers=[s for s in space_mcp_servers if s.purpose == "general"],
             enabled_capabilities=[c.purpose for c in space_in_db.capabilities],

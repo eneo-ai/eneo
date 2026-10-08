@@ -26,6 +26,9 @@ if TYPE_CHECKING:
     from eneo.database.tables.integration_table import IntegrationKnowledge
     from eneo.database.tables.mcp_server_table import SpacesMCPServers
     from eneo.database.tables.service_table import Services
+    from eneo.database.tables.transcription_services_table import (
+        SpacesTranscriptionServiceConnections,
+    )
     from eneo.database.tables.websites_table import Websites
 
 
@@ -122,6 +125,9 @@ class Spaces(BasePublic):
     transcription_models_mapping: Mapped[list["SpacesTranscriptionModels"]] = (
         relationship(viewonly=True)
     )
+    transcription_service_connections_mapping: Mapped[
+        list["SpacesTranscriptionServiceConnections"]
+    ] = relationship(viewonly=True)
     mcp_servers_mapping: Mapped[list["SpacesMCPServers"]] = relationship(viewonly=True)
 
     __table_args__ = (

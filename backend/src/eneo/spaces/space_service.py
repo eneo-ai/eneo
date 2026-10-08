@@ -48,6 +48,9 @@ from eneo.transcription_models.application.transcription_model_crud_service impo
 from eneo.transcription_models.domain.transcription_model_service import (
     TranscriptionModelService,
 )
+from eneo.transcription_services.repository import (
+    TranscriptionServiceConnectionRepository,
+)
 from eneo.user_groups.user_groups_repo import UserGroupsRepository
 from eneo.users.user import UserInDB
 from eneo.users.user_repo import UsersRepository
@@ -72,9 +75,14 @@ if TYPE_CHECKING:
     from eneo.transcription_models.domain.transcription_model import (
         TranscriptionModel,
     )
+    from eneo.transcription_services.models import TranscriptionServiceConnection
 
 
 def _empty_mcp_server_list() -> list["MCPServer"]:
+    return []
+
+
+def _empty_connection_list() -> list["TranscriptionServiceConnection"]:
     return []
 
 
@@ -89,6 +97,9 @@ class SpaceSecurityClassificationImpactAnalysis:
     )
     affected_mcp_servers: list[MCPServer] = field(
         default_factory=_empty_mcp_server_list
+    )
+    affected_transcription_services: list["TranscriptionServiceConnection"] = field(
+        default_factory=_empty_connection_list
     )
 
 
@@ -350,6 +361,7 @@ class SpaceService:
         embedding_model_ids: list[UUID] | None = None,
         completion_model_ids: list[UUID] | None = None,
         transcription_model_ids: list[UUID] | None = None,
+        transcription_service_ids: list[UUID] | None = None,
         mcp_server_ids: list[UUID] | None = None,
         enabled_capabilities: list[CapabilityPurpose] | None = None,
         mcp_tools: list["MCPToolSetting"] | None = None,
@@ -412,6 +424,25 @@ class SpaceService:
                     model_id=model_id
                 )
                 for model_id in transcription_model_ids
+            ]
+
+        transcription_services: list["TranscriptionServiceConnection"] | None = None
+        if transcription_service_ids is not None:
+            linked_services = {c.id: c for c in space.linked_transcription_services}
+            new_service_ids = [
+                connection_id
+                for connection_id in transcription_service_ids
+                if connection_id not in linked_services
+            ]
+            found = {
+                connection.id: connection
+                for connection in await TranscriptionServiceConnectionRepository(
+                    self.repo.session, self.user.tenant_id
+                ).get_many(new_service_ids)
+            }
+            transcription_services = [
+                linked_services.get(connection_id) or found[connection_id]
+                for connection_id in transcription_service_ids
             ]
 
         mcp_servers: list["MCPServer"] | None = None
@@ -521,6 +552,7 @@ class SpaceService:
             completion_models=completion_models,
             embedding_models=embedding_models,
             transcription_models=transcription_models,
+            transcription_services=transcription_services,
             mcp_servers=mcp_servers,
             security_classification=(
                 space_security_classification
@@ -557,6 +589,7 @@ class SpaceService:
         current_completion_models = space.linked_completion_models
         current_embedding_models = space.linked_embedding_models
         current_transcription_models = space.linked_transcription_models
+        current_transcription_services = space.linked_transcription_services
         current_mcp_servers = space.mcp_servers
 
         space.update(
@@ -571,6 +604,7 @@ class SpaceService:
             tm.id for tm in space.linked_transcription_models
         ]
         remaining_mcp_server_ids = [s.id for s in space.mcp_servers]
+        remaining_service_ids = {c.id for c in space.linked_transcription_services}
 
         affected_completion_models: list["CompletionModel"] = [
             cm
@@ -589,6 +623,11 @@ class SpaceService:
         ]
         affected_mcp_servers: list["MCPServer"] = [
             s for s in current_mcp_servers if s.id not in remaining_mcp_server_ids
+        ]
+        affected_transcription_services = [
+            c
+            for c in current_transcription_services
+            if c.id not in remaining_service_ids
         ]
 
         affected_capabilities: list[CapabilityPurpose] = []
@@ -681,6 +720,7 @@ class SpaceService:
             affected_transcription_models=affected_transcription_models,
             affected_mcp_servers=affected_mcp_servers,
             affected_capabilities=affected_capabilities,
+            affected_transcription_services=affected_transcription_services,
         )
 
     async def delete_space(self, id: UUID):

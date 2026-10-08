@@ -41,6 +41,7 @@ from eneo.spaces.api.space_models import (
     SpaceRole,
     SpaceRoleValue,
     SpaceSparse,
+    SpaceTranscriptionServiceLink,
     UpdateSpaceDryRunResponse,
 )
 from eneo.spaces.space import Space
@@ -68,6 +69,7 @@ if TYPE_CHECKING:
     from eneo.transcription_models.domain.transcription_model import (
         TranscriptionModel,
     )
+    from eneo.transcription_services.models import TranscriptionServiceConnection
 
 _M = TypeVar("_M", bound="AIModel")
 
@@ -700,11 +702,28 @@ class SpaceAssembler:
                 name=model.name,
                 nickname=model.nickname,
                 meets_security_classification=(
-                    space.allows_model_security_classification(model)
+                    space.allows_security_classification(model)
                 ),
                 available=available(model),
             )
             for model in models
+        ]
+
+    @staticmethod
+    def _service_links(
+        space: Space, connections: Sequence["TranscriptionServiceConnection"]
+    ) -> list[SpaceTranscriptionServiceLink]:
+        return [
+            SpaceTranscriptionServiceLink(
+                id=connection.id,
+                name=connection.name,
+                operations=sorted(connection.operations),
+                meets_security_classification=space.allows_security_classification(
+                    connection
+                ),
+                available=connection.can_access,
+            )
+            for connection in connections
         ]
 
     def _transcription_models_public(
@@ -814,6 +833,9 @@ class SpaceAssembler:
             completion_models=completion_models,
             transcription_models=transcription_models,
             linked_models=linked_models,
+            transcription_services=self._service_links(
+                space, space.linked_transcription_services
+            ),
             mcp_servers=mcp_servers,
             enabled_capabilities=space.enabled_capabilities,
             available_capabilities=space.available_capabilities,
@@ -953,6 +975,9 @@ class SpaceAssembler:
                 TranscriptionModelPublic.from_domain(tm)
                 for tm in result.affected_transcription_models
             ],
+            transcription_services=self._service_links(
+                result.space, result.affected_transcription_services
+            ),
             mcp_servers=[
                 cast(MCPServerPublicDict, MCPServerAssembler.to_dict_with_tools(s))
                 for s in result.affected_mcp_servers
