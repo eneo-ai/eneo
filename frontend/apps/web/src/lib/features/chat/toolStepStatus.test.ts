@@ -71,6 +71,14 @@ it.each([undefined, "pending", "approved", "deferred", "denied", "timeout_denied
   }
 );
 
+it("holds every failure as an attempt while the reply is still being written", () => {
+  const calls = [chartCall("failed"), chartCall("pending")];
+  expect(previousToolAttemptIndexes(calls, true)).toEqual(new Set([0]));
+  expect(previousToolAttemptIndexes([chartCall("failed")], true)).toEqual(new Set([0]));
+  expect(previousToolAttemptIndexes([chartCall("failed")], false).size).toBe(0);
+  expect(previousToolAttemptIndexes([chartCall("failed", { approved: false })], true).size).toBe(0);
+});
+
 it("does not soften locally rejected calls", () => {
   expect(
     previousToolAttemptIndexes([chartCall("failed", { approved: false }), chartCall("succeeded")])

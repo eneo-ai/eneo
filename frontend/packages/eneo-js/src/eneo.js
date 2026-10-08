@@ -28,6 +28,7 @@ import { initIntegrations } from "./endpoints/integrations.js";
 import { initConversations } from "./endpoints/conversations.js";
 import { initSecurityClassifications } from "./endpoints/security-classifications.js";
 import { initMCPServers } from "./endpoints/mcp-servers.js";
+import { initMcpApps } from "./endpoints/mcp-apps.js";
 import { initPromptLibrary } from "./endpoints/prompt-library.js";
 import { initGovernancePolicy } from "./endpoints/governance-policy.js";
 import { initSettings } from "./endpoints/settings.js";
@@ -85,6 +86,7 @@ export function createEneo(args) {
     conversations: initConversations(client),
     securityClassifications: initSecurityClassifications(client),
     mcpServers: initMCPServers(client),
+    mcpApps: initMcpApps(client),
     promptLibrary: initPromptLibrary(client),
     governancePolicy: initGovernancePolicy(client),
     settings: initSettings(client),

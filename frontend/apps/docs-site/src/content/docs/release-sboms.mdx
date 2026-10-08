@@ -46,9 +46,9 @@ the release SBOM workflow automatically:
 9. It attests the release SBOM assets with GitHub artifact attestations.
 
 Each release keeps its own SBOM files. Older release pages keep their original
-assets, so you can compare one version with the next. The backend and frontend
-container images also get provenance attestations when they are built and pushed
-to GitHub Container Registry.
+assets, so you can compare one version with the next. The backend, frontend
+and tool runtime container images also get provenance attestations when they
+are built and pushed to GitHub Container Registry.
 
 The SeaweedFS image is built and attested by Eneo from a pinned upstream source
 commit by its own workflow, which runs only when the image inputs change and
@@ -180,6 +180,9 @@ Each release publishes these files:
 | `eneo-frontend-<release-tag>-linux-amd64.spdx.json` | Frontend image SBOM in SPDX JSON |
 | `eneo-frontend-<release-tag>-linux-amd64.table.txt` | Frontend image package list for human review |
 | `eneo-frontend-source-<release-tag>.cyclonedx.json` | Frontend source dependency SBOM in CycloneDX JSON |
+| `eneo-tool-runtime-<release-tag>-linux-amd64.{cyclonedx,spdx}.json` | Tool runtime amd64 image SBOMs |
+| `eneo-tool-runtime-<release-tag>-linux-arm64.{cyclonedx,spdx}.json` | Tool runtime arm64 image SBOMs |
+| `eneo-tool-runtime-<release-tag>-linux-{amd64,arm64}.table.txt` | Tool runtime package lists for human review |
 | `eneo-seaweedfs-<release-tag>-linux-amd64.{cyclonedx,spdx}.json` | Eneo SeaweedFS amd64 image SBOMs |
 | `eneo-seaweedfs-<release-tag>-linux-arm64.{cyclonedx,spdx}.json` | Eneo SeaweedFS arm64 image SBOMs |
 | `eneo-seaweedfs-<release-tag>-linux-{amd64,arm64}.table.txt` | SeaweedFS package lists for human review |
@@ -229,7 +232,7 @@ one `seaweedfs manifest` row for the deployable multi-platform image.
 
 ## Which file should you use?
 
-Use the backend, frontend, or SeaweedFS CycloneDX JSON files when your tooling expects
+Use the backend, frontend, tool runtime, or SeaweedFS CycloneDX JSON files when your tooling expects
 CycloneDX and you want the full container image inventory.
 
 Use the SPDX JSON files when your process or supplier tooling expects SPDX.
@@ -306,9 +309,10 @@ The attestations prove where the release SBOM assets and container images came
 from. They do not decide whether a dependency is vulnerable or whether a
 vulnerability is reachable in Eneo.
 
-The application images currently publish `linux/amd64` release SBOMs. The
-bundled SeaweedFS image publishes separate `linux/amd64` and `linux/arm64`
-SBOMs because package contents can differ by architecture.
+The backend and frontend images publish `linux/amd64` release SBOMs. The tool
+runtime and the bundled SeaweedFS image are multi-platform and publish separate
+`linux/amd64` and `linux/arm64` SBOMs because package contents can differ by
+architecture.
 
 ## Standards and tools
 
@@ -319,7 +323,7 @@ These references explain the formats and tools used by Eneo:
 - [OWASP SCVS SBOM requirements](https://scvs.owasp.org/scvs/v2-software-bill-of-materials/)
   describe maturity expectations such as automated SBOM creation,
   machine-readable formats, metadata, and component inventory.
-- [Syft](https://github.com/anchore/syft) is used for the backend, frontend, and SeaweedFS
+- [Syft](https://github.com/anchore/syft) is used for the backend, frontend, tool runtime, and SeaweedFS
   image SBOMs.
 - [CycloneDX Python](https://github.com/CycloneDX/cyclonedx-python) is used for
   the backend Python runtime SBOM.
@@ -339,7 +343,7 @@ These references explain the formats and tools used by Eneo:
 
 1. Open the [Eneo GitHub Releases page](https://github.com/eneo-ai/eneo/releases)
    and choose the version you use.
-2. Download the backend, frontend, and platform-matching SeaweedFS `.table.txt`
+2. Download the backend, frontend, and platform-matching tool runtime and SeaweedFS `.table.txt`
    files for a quick review.
 3. Download CycloneDX or SPDX image SBOMs for your security tooling.
 4. Download the backend Python runtime SBOM if you only need the Python
@@ -355,7 +359,7 @@ additions, removals, and version changes show what changed between the images.
 
 ## Application bundle
 
-The application image workflow publishes `release.json` and `release.env` only
+The image publication workflow (`build_and_push_images.yml`) publishes `release.json` and `release.env` only
 after all three application images pass their checks and a combined smoke test.
 They record a shared version, source revision and immutable digests. The runtime
 no longer has an independent version file. SeaweedFS keeps its existing separate

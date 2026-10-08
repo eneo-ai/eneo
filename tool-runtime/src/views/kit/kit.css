@@ -13,9 +13,21 @@ body {
   background: var(--color-background-surface);
   color: var(--color-text-primary);
 }
+/* The offer to quote a selection hangs on it, over the view's content. */
+.eneo-quote {
+  position: fixed;
+  z-index: 10;
+  border-radius: var(--radius-element);
+  box-shadow: var(--shadow-med);
+  user-select: none;
+}
 .eneo-rows {
   max-height: 21rem;
   overflow: auto;
+}
+/* While a selection is dragged the kit scrolls the rows itself; see useSteadySelection. */
+.eneo-rows[data-selecting] {
+  overflow: hidden;
 }
 .eneo-rows:focus-visible {
   outline: var(--focus-outline-width) var(--focus-outline-style) var(--focus-outline-color);

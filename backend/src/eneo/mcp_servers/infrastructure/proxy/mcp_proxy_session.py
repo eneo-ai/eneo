@@ -35,6 +35,12 @@ from eneo.internal_mcp.constants import (
 from eneo.libs.json_text import contains_null_character
 from eneo.main.config import get_settings
 from eneo.main.logging import get_logger
+from eneo.mcp_apps.domain.mcp_app_view import (
+    McpAppViewInfo,
+    get_ui_resource_uri,
+    is_app_visible,
+    is_model_visible,
+)
 from eneo.mcp_servers.domain.entities.mcp_server import (
     GENERATED_FILE_TYPES_BY_PURPOSE,
     MCPServer,
@@ -50,6 +56,9 @@ from eneo.mcp_servers.infrastructure.client.mcp_client import (
 )
 
 if TYPE_CHECKING:
+    from eneo.mcp_apps.infrastructure.repo_impl.mcp_app_view_repo_impl import (
+        McpAppViewRepo,
+    )
     from eneo.mcp_servers.domain.repositories.mcp_server_tool_repo import (
         MCPServerToolRepository,
     )
@@ -144,6 +153,8 @@ class MCPProxySession:
         auth_credentials_map: dict[UUID, dict[str, str]] | None = None,
         identity_headers: dict[str, str] | None = None,
         mcp_server_tool_repo: "MCPServerToolRepository | None" = None,
+        app_view_repo: "McpAppViewRepo | None" = None,
+        for_view: bool = False,
     ):
         """
         Initialize proxy session.
@@ -161,6 +172,15 @@ class MCPProxySession:
         self.auth_credentials_map = auth_credentials_map or {}
         self.identity_headers = identity_headers or {}
         self._mcp_server_tool_repo = mcp_server_tool_repo
+        # Who calls through this session: the model, or one of a server's
+        # views. Each is offered only the tools its server makes visible to it.
+        self._for_view = for_view
+        # Stored MCP App views. A proxy built without the repo (the
+        # prepare-only path) resolves no views.
+        self._app_view_repo = app_view_repo
+        # Per-proxy memo: (server_id, uri) -> the approved view (or None when
+        # the lookup failed, so one missing view is looked up once per turn).
+        self._app_view_cache: dict[tuple[UUID, str], McpAppViewInfo | None] = {}
 
         # Lazy connection cache: server_id -> MCPClient (connected)
         self._clients: dict[UUID, MCPClient] = {}
@@ -303,6 +323,17 @@ class MCPProxySession:
             return False
         return True
 
+    def _is_offered(self, tool: Any) -> bool:
+        """Whether an enabled tool is offered to this session's caller.
+
+        A server may keep a tool for its views only, or for the model only
+        (MCP Apps ``_meta.ui.visibility``); the other caller never gets it.
+        """
+        if not self._is_db_tool_enabled(tool):
+            return False
+        meta = getattr(tool, "meta", None)
+        return is_app_visible(meta) if self._for_view else is_model_visible(meta)
+
     def _build_tool_registry(self):
         """Build tool registry from DB-stored tool definitions."""
         for server in self.mcp_servers:
@@ -312,7 +343,7 @@ class MCPProxySession:
             server_prefix = self._sanitize_name(server.name.lower())
 
             for tool in server.tools:
-                if not self._is_db_tool_enabled(tool):
+                if not self._is_offered(tool):
                     continue
 
                 self._register_tool(
@@ -361,9 +392,7 @@ class MCPProxySession:
         ]
 
         approved_tools = {
-            tool.name: tool
-            for tool in (server.tools or [])
-            if self._is_db_tool_enabled(tool)
+            tool.name: tool for tool in (server.tools or []) if self._is_offered(tool)
         }
 
         server_prefix = self._sanitize_name(server.name.lower())
@@ -449,6 +478,7 @@ class MCPProxySession:
                 and approved.has_definition_drift(
                     description=live_tool.get("description"),
                     input_schema=live_tool.get("input_schema"),
+                    meta=live_tool.get("meta"),
                 )
             ):
                 staging_candidates.append(live_tool)
@@ -462,6 +492,7 @@ class MCPProxySession:
                 title=live_tool.get("title"),
                 description=live_tool.get("description"),
                 input_schema=live_tool.get("input_schema"),
+                meta=live_tool.get("meta"),
             )
             for live_tool in staging_candidates
         ]
@@ -1113,6 +1144,24 @@ class MCPProxySession:
         }
 
     @staticmethod
+    def _is_invalid_arguments_result(result: dict[str, Any]) -> bool:
+        """The SDK rejected tool arguments before attempting to read any file."""
+        if not result.get("is_error"):
+            return False
+        content: object = result.get("content")
+        if not isinstance(content, list):
+            return False
+        for block in cast("list[object]", content[:3]):
+            if not isinstance(block, dict):
+                continue
+            raw_text = cast("dict[str, object]", block).get("text")
+            if isinstance(raw_text, str) and raw_text.lstrip().startswith(
+                ("MCP error -32602:", "Input validation error:")
+            ):
+                return True
+        return False
+
+    @staticmethod
     def _is_auth_denied_result(result: dict[str, Any]) -> bool:
         if not result.get("is_error"):
             return False
@@ -1266,15 +1315,20 @@ class MCPProxySession:
             # failures count toward the server-wide circuit breaker.
             await self._record_success(server.id)
             auth_denied = self._is_auth_denied_result(result)
+            invalid_arguments = self._is_invalid_arguments_result(result)
             result = self._truncate_tool_result(result, server.purpose)
             if is_error:
                 blocks: list[Any] = list(result.get("content") or [])
                 if auth_denied:
                     blocks.append({"type": "text", "text": AUTH_DENIED_NOTICE})
-                # A tool that failed on a reference URL should not be retried
-                # into a loop; appended after truncation so the pointer to the
-                # built-in reader survives it.
-                hint = self._reference_fallback_hint(tool_name, arguments)
+                # Invalid arguments need a corrected call, not a different file
+                # reader. Keep recovery guidance after truncation in either case.
+                hint = (
+                    "Correct the invalid arguments using the tool requirements and "
+                    "retry the same tool. This error does not indicate a file-reading failure."
+                    if invalid_arguments
+                    else self._reference_fallback_hint(tool_name, arguments)
+                )
                 if hint:
                     blocks.append({"type": "text", "text": hint})
                 if auth_denied or hint:
@@ -1366,6 +1420,57 @@ class MCPProxySession:
         )
 
         return list(results)
+
+    async def approved_app_view(self, prefixed_tool_name: str) -> McpAppViewInfo | None:
+        """The MCP App view an administrator approved for this tool.
+
+        The view is the snapshot stored when the server was synced, found by
+        the hash approved with the tool definition. The server is not asked:
+        what a browser runs is never something it could have changed since
+        the review. A tool without an approved view, and every failure, gives
+        None; a view never fails the tool result.
+        """
+        if not get_settings().mcp_apps_enabled or self._app_view_repo is None:
+            return None
+
+        entry = self._tool_registry.get(prefixed_tool_name)
+        if entry is None:
+            return None
+        server, original_name, _ = entry
+
+        db_tool = next(
+            (tool for tool in server.tools if tool.name == original_name), None
+        )
+        if db_tool is None or db_tool.ui_resource_sha256 is None:
+            return None
+        uri = get_ui_resource_uri(db_tool.meta)
+        if uri is None:
+            return None
+
+        cache_key = (server.id, uri)
+        if cache_key in self._app_view_cache:
+            return self._app_view_cache[cache_key]
+        # Look each view up once per turn, even when the lookup fails.
+        self._app_view_cache[cache_key] = None
+
+        try:
+            info = await self._app_view_repo.find_view(
+                tenant_id=server.tenant_id,
+                mcp_server_id=server.id,
+                uri=uri,
+                content_hash=db_tool.ui_resource_sha256,
+            )
+        except Exception as exc:
+            logger.warning(
+                "[MCPProxy] Failed to look up app view %s of '%s': %s",
+                uri,
+                server.name,
+                exc,
+            )
+            return None
+
+        self._app_view_cache[cache_key] = info
+        return info
 
     async def close(self):
         """Close all connections.

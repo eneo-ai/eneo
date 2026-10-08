@@ -8,7 +8,7 @@ inside Eneo as a loopback tool and what belongs outside the backend**.
 
 Outside the backend there are two kinds of MCP provider:
 
-- an **Eneo-bundled isolated MCP provider**: the optional tool runtime
+- an **Eneo-bundled isolated MCP provider**: the bundled tool runtime
   (`tool-runtime/` in the repository), released with Eneo and run as its own
   container. It serves compute, charts, file analysis and file creation.
 - an **independently operated MCP provider**: any MCP server an operator
@@ -22,6 +22,8 @@ import { Callout } from "nextra/components";
 <Callout type="info">
   For how loopback routing, scoped tokens and the shared proxy work, see
   [Knowledge Retrieval and MCP Interoperability](/docs/knowledge-retrieval-and-mcp).
+  For how Skills, Functions, execution and presentation relate, see
+  [Architecture](/docs/architecture#skills-functions-tools-and-views).
   For the administrator view of the functions, see
   [Functions](/guides/capabilities).
 </Callout>
@@ -35,7 +37,7 @@ server plus shared scaffolding:
 | --- | --- |
 | `foundation.py` | Hosting and auth. Each server is a stateless FastMCP app mounted at `/internal-mcp/<name>/mcp`; the ask path connects back over HTTP through `INTERNAL_MCP_BASE_URL`. Scope never travels in tool arguments: a 15-minute JWT minted per completion carries `assistant_id` and, for built-in providers, `mcp_server_id`. `internal_tool_context` opens a DB transaction, authenticates the token as the user, and hands the tool a user-bound DI container so every load passes normal permission checks. |
 | `registry.py` | The only hosting wiring. One tuple entry per server drives both the FastAPI mounts and the lifespan that runs each session manager. |
-| `constants.py` | Server names and the `INTERNAL_MCP_SERVER_NAMES` set that bypasses per-call user approval. |
+| `constants.py` | Server names. Per-call user approval is decided by `MCPServer.is_internal`, never by name. |
 | `file_references.py` | The single resolver for signed attachment URLs. A URL is a capability handle: the token is verified locally and bytes come from the content store, never from an HTTP fetch. |
 | `builtin_tools.py` | Swaps a persisted tool snapshot for the running server's live catalog so the model always sees the deployed definitions. |
 | `availability.py` | The runtime gates for the ephemeral servers, in one place. |
@@ -63,7 +65,8 @@ permission.
   `build_<x>_mcp_server` with a fresh token, and passes the entity into
   `Assistant.ask`, which prepends it so its tools lead the tool array and win
   name collisions.
-- Tool calls are auto-approved by name.
+- Tool calls skip per-call user approval: the entity is built with
+  `is_internal=True`.
 - The tool description gets a per-completion suffix (source labels, attachment
   presence), but the docstring always leads.
 
@@ -81,8 +84,8 @@ foreign key.
   backing-model health, and per-user resolution at ask time.
 - The tool reads its configuration from the row named in the token, so the
   caller cannot choose it.
-- Calls are **not** in the auto-approve set, so they honour the conversation's
-  tool-approval setting.
+- Calls skip per-call user approval like the ephemeral servers: a built-in
+  provider row is `is_internal`. Access is governed by the checks above.
 - It has its own tool-call timeout in the proxy.
 
 This is the shape for anything an admin must choose a provider or model for,
@@ -155,9 +158,9 @@ Why the line sits there:
 Tabular querying belongs **outside** the backend. It needs an engine (DuckDB),
 memory proportional to the file, and execution sandboxing, because the model
 writes the SQL. Eneo ships it as a bundled isolated provider: the tool runtime
-receives the signed reference URL, downloads the bytes through the signed
-download endpoint on every call, and runs each query in a separate sandbox
-process with a locked-down DuckDB. An independently operated tabular server
+receives the signed reference URL, revalidates it against the signed download
+endpoint on every call (downloading the bytes only when they are new or
+changed), and runs each query in a separate sandbox process with a locked-down DuckDB. An independently operated tabular server
 plugs into the same `file_analysis` function the same way: `read_file`
 already tells the model to prefer "tabular or spreadsheet analysis tools" and
 to pass them the same URL. See [How attachment references interoperate with
@@ -177,15 +180,15 @@ request.
 ## Bundled isolated providers
 
 The tool runtime is a separate Bun service in `tool-runtime/`, released as its
-own image (`ghcr.io/eneo-ai/eneo-tool-runtime`) and enabled with an optional
-Compose overlay. Operators configure it in `docs/deployment/TOOL_RUNTIME.md`.
+own image (`ghcr.io/eneo-ai/eneo-tool-runtime`) included in the standard
+Compose stack, sharing the frontend/backend release version and source revision. Operators configure it in `docs/deployment/TOOL_RUNTIME.md`.
 
 | Endpoint | Tools | Registered as |
 |---|---|---|
 | `/mcp/compute` | `run_javascript` | general server (**Compute**, built into Eneo) |
-| `/mcp/charts` | `create_chart` | general server (**Charts**, built into Eneo) |
-| `/mcp/file-analysis` | `inspect_table`, `query_table`, `assert_table` | `file_analysis` source |
-| `/mcp/file-creation` | `create_document`, `create_spreadsheet` | `file_creation` source |
+| `/mcp/charts` | `create_chart` | `charts` source (**Charts** function, built into Eneo) |
+| `/mcp/file-analysis` | `inspect_table`, `query_table`, `assert_table` | `file_analysis` source (**Ask a file** function, built into Eneo) |
+| `/mcp/file-creation` | `create_document`, `edit_document`, `fill_template`, `create_spreadsheet` | `file_creation` source (**Create a file** function, built into Eneo) |
 
 How it differs from a loopback server, and from an independently operated one:
 
@@ -200,20 +203,31 @@ How it differs from a loopback server, and from an independently operated one:
   `POST /api/v1/mcp-servers/bundled/{tool}/` preset. Its URL comes from
   `TOOL_RUNTIME_URL` and its bearer from `TOOL_RUNTIME_TOKEN` at connect time,
   so no credential is stored; the connection fields cannot be edited. Each
-  runtime endpoint fixes the row's purpose and whether identity is forwarded.
-  Tools go through normal discovery and approval.
+  runtime endpoint fixes the row's purpose. Bundled calls forward opaque user and tenant IDs; external providers retain their identity opt-in.
+  Tool definitions and views follow the deployed runtime automatically, preserving
+  stored per-tool enablement and display names and auditing catalog updates.
+  Per-call user approval remains a separate conversation control.
 - **Files.** Inputs arrive as signed reference URLs in tool arguments. Eneo
   sends its file origin in `X-Eneo-File-Origin` (bundled rows only), and the
-  runtime fetches only original-download links at that origin, on every call.
+  runtime revalidates only original-download links at that origin on every call.
+  Unchanged authorized content can use cached bytes after HTTP 304; failed
+  checks never serve stale content.
   Outputs return as standard embedded resources (documents, CSV exports) or
-  image blocks (charts); the runtime keeps no copies.
+  image blocks (chart exports); interactive charts return validated chart data
+  in `structuredContent` for a self-contained MCP App. The app uses the official
+  `App` SDK and ECharts, with no network access. The runtime keeps no output copies.
 - **No private state.** No database, no console, no registration sync. A
-  disposable cache of parsed sheets is keyed by tenant, user and content hash
+  disposable shared-budget cache of original bytes and parsed sheets is keyed by tenant, user and content hash
   and never stands in for the access check.
 
 The runtime is not a plugin host. New endpoints belong there only when they
 need platform-owned isolation and Eneo maintains them; domain integrations
 (statistics APIs, open-data portals) stay independently operated servers.
+
+Admin **Tools** reports runtime connectivity, version, confinement and file-origin
+diagnostics. Version mismatches warn without blocking calls. Runtime failure
+does not change backend readiness or ordinary chat. See the deployment guide
+for the complete pinned release bundle and migration instructions.
 
 ## Adding a new built-in server
 
@@ -223,7 +237,7 @@ pattern:
 | Step | Pattern A | Pattern B |
 | --- | --- | --- |
 | Module in `internal_mcp/` with a FastMCP app and `@mcp.tool` functions | Yes | Yes |
-| Name in `constants.py` | Yes, and in `INTERNAL_MCP_SERVER_NAMES` if calls should be auto-approved | Yes; do not add to the auto-approve set |
+| Name in `constants.py` | Yes; the entity is built with `is_internal=True`, which auto-approves its calls | Yes; a row with internal auth is `is_internal`, so its calls are auto-approved too |
 | Availability gate | Extend `availability.py` and `build_<x>_mcp_server` | Capability purpose in `CAPABILITY_PURPOSES`, role permission, frontend descriptor (see the *Extending the capability set* section of `docs/CAPABILITIES.md` in the repo) |
 | Token claims | `assistant_id` | `assistant_id` and `mcp_server_id` |
 | Tests | `tests/unit/internal_mcp/` | `tests/unit/internal_mcp/` |
@@ -234,20 +248,41 @@ Things a new built-in server would hit that are not yet generic:
   and the service validation is image-specific. A built-in provider without an
   image model needs that relaxed into a general backing-model concept; the
   `MCPServerBackingModel` projection is the generalisable half.
-- Auto-approval is a name set in `constants.py` rather than a per-server
-  attribute in the registry, and the per-server timeout in the proxy is keyed
-  on the image generation purpose.
+- The per-server timeout in the proxy is keyed on the image generation
+  purpose.
 - Test placement is inconsistent: the newest server tests sit in
   `tests/unit/internal_mcp/`, the knowledge and files tests sit at
   `tests/unit/test_*_mcp_server.py`. New servers should use the former.
 
-## Runtime releases and diagnostics
+## Native document export contract
 
-The isolated provider ships in the same verified release bundle as the backend
-and frontend. Admin > Tools reports its availability, version, confinement and
-file-origin diagnostics. Calls use bounded scheduling, cancellation and a
-revalidated disposable file cache. See the [deployment guide](/guides/deployment)
-and repository `docs/deployment/TOOL_RUNTIME.md` for installation and limits.
+A file-creation provider can participate in ordinary tool calls without supporting
+the document workspace's Export menu. Native export currently requires an enabled,
+approved, model-visible tool named `create_document` whose input schema is an
+object declaring string properties `title`, `content`, `filename` and `format`.
+The `format` property must declare an explicit enum containing `docx`, `pdf`,
+or both. Other optional properties are allowed, but no additional required inputs
+may be demanded.
 
-The provider also ships self-contained table and chart resources for MCP Apps
-compatible hosts. Eneo's runtime integration uses text, images and files.
+The native profile does not resolve schema references and does not accept
+top-level conditional/composed schemas. The exact saved document and arguments
+must validate against the declared schema. Eneo evaluates each output format
+separately against the acting user's effective catalogue, including identity-scoped
+discovery. Compatibility does not prove live rendering will succeed.
+
+The renderer returns a standard MCP embedded file resource in the requested
+format. Existing generated-file type and content validation still applies.
+Export does not ask the model to rewrite the text and does not create another
+saved conversation revision.
+
+`GET /api/v1/conversations/{session_id}/documents/{file_id}/export/` returns
+`docx` and `pdf` objects with `available` and an optional `reason`:
+`provider_unavailable`, `tool_unavailable`, `incompatible_tool`,
+`format_unsupported`, or `document_unsupported`. The response is private to
+the acting user and is not cached. The POST operation rechecks the same contract.
+
+Document revision navigation retains its existing convention: a producing tool
+takes `revises: {url, filename}` referring to an earlier generated file, and Eneo
+associates files recorded on that call with the earlier version when their formats
+match. A provider using unrelated argument names does not automatically participate
+in native version navigation. This is distinct from the native export contract.

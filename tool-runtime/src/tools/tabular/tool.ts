@@ -214,6 +214,13 @@ export function tabularTools(deps: TabularDeps): ToolDefinition[] {
       file: fileRef.extend({ sheet: sheetName, source_rows: sourceRows }).strict(),
       files: extraFiles,
       sql: selectSql,
+      title: z
+        .string()
+        .max(120)
+        .optional()
+        .describe(
+          "Short caption saying what the result shows, in the user's language, such as 'Deviation by account group'. Give one whenever display=table: the host lists the conversation's tables and charts by it.",
+        ),
       display: z
         .enum(["table", "none"])
         .default("table")
@@ -307,7 +314,7 @@ export function tabularTools(deps: TabularDeps): ToolDefinition[] {
       title: "Query table",
       ...(deps.resultView ? { view: deps.resultView } : {}),
       description:
-        'Use for ordinary requests such as "show me this file", "show the rows for this region", "sort by amount" or "summarise sales by region", as well as totals, counts, averages, rankings and comparisons over the full CSV/Excel dataset. Call inspect_table first for the actual sheet and column names. Choose display=none for intermediate queries used to calculate an answer or prepare a chart or another tool; do not show a table merely because you queried data. Choose display=table when the table itself is part of the requested answer. For viewing or browsing, leave export=false: hosts supporting tool views show multi-row results as an interactive table when display=table. The user does not need to ask for a table, name a tool or choose a display mode. Do not add LIMIT merely to keep the answer short; the host pages the result. Export only for a requested downloadable file or a source file needed by create_spreadsheet or create_chart. For a native row selection, pass its source_rows filter unchanged in file; t contains only those source records before your SQL runs. Runs one read-only DuckDB SELECT over table t; pass sheet for multi-sheet workbooks. To combine attachments, list them under files with an alias and JOIN them. Pass signed urls and filenames unchanged. Results report truncation, parsed/rejected coverage and formula limitations for all source files. Disclose missing saved formula results and qualify conclusions based on them; formulas are not recalculated. When the result includes shown, follow that presentation guidance and do not repeat the rows in your answer. Otherwise answer from the returned data, acknowledge truncation and do not claim an interactive table is visible.',
+        'Use for ordinary requests such as "show me this file", "show the rows for this region", "sort by amount" or "summarise sales by region", as well as totals, counts, averages, rankings and comparisons over the full CSV/Excel dataset. Call inspect_table first for the actual sheet and column names. Choose display=none for intermediate queries used to calculate an answer or prepare a chart or another tool; do not show a table merely because you queried data. Choose display=table when the table itself is part of the requested answer, and give it a title that tells it apart from the other tables in the conversation. For viewing or browsing, leave export=false: hosts supporting tool views show multi-row results as an interactive table when display=table. The user does not need to ask for a table, name a tool or choose a display mode. Do not add LIMIT merely to keep the answer short; the host pages the result. Export only for a requested downloadable file or a source file needed by create_spreadsheet or create_chart. For a native row selection, pass its source_rows filter unchanged in file; t contains only those source records before your SQL runs. Runs one read-only DuckDB SELECT over table t; pass sheet for multi-sheet workbooks. To combine attachments, list them under files with an alias and JOIN them. Pass signed urls and filenames unchanged. Results report truncation, parsed/rejected coverage and formula limitations for all source files. Disclose missing saved formula results and qualify conclusions based on them; formulas are not recalculated. When the result includes shown, follow that presentation guidance and do not repeat the rows in your answer. Otherwise answer from the returned data, acknowledge truncation and do not claim an interactive table is visible.',
       inputSchema: queryInput.shape,
       readOnly: true,
       async execute(raw, ctx) {

@@ -271,7 +271,10 @@ async def generate_with_litellm(
             f"Image edited from {count} reference image{plural} and shown to the user."
         )
     else:
-        text = "Image generated and shown to the user."
+        text = (
+            "Image generated and shown to the user. Its file reference can be "
+            "passed to a document tool to place the image in a document."
+        )
     if revised:
         text += f" The model interpreted the prompt as: {revised}"
     return CallToolResult(
@@ -337,7 +340,10 @@ async def generate_image(
     composition in the prompt. ``size`` is one of "1024x1024", "1536x1024"
     (landscape) or "1024x1536" (portrait); ``quality`` is "low", "medium" or
     "high". Leave both out to use the organisation's defaults. For diagrams
-    or vector graphics, write code instead of calling this tool.
+    or vector graphics, write code instead of calling this tool. The result
+    carries a file reference for the image; pass it to a document tool's
+    image input to place the image in a document instead of generating it
+    again.
 
     To edit an image or make a variation of it, pass ``reference_images``:
     the exact "url" values of image entries in the conversation's file

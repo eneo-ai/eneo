@@ -24,7 +24,8 @@
     Pause,
     Pencil,
     Trash2,
-    ChevronRight
+    ChevronRight,
+    Sparkles
   } from "@lucide/svelte";
   import { m } from "$lib/paraglide/messages";
   import { CAPABILITIES } from "$lib/features/mcp/capabilities";
@@ -78,6 +79,15 @@
         (showFunctionServers || (s.purpose ?? "general") === "general")
     )
   );
+
+  // The three kinds of source, named the same way as on the MCP servers tab: Eneo itself
+  // (an image model called directly), Eneo's separately deployed tool service, or an
+  // external MCP server.
+  function sourceKind(source: Provider) {
+    if (source.http_auth_type === "internal") return { icon: Sparkles, label: m.mcp_auth_internal };
+    if (source.http_auth_type === "bundled") return { icon: Package, label: m.mcp_auth_bundled };
+    return { icon: Server, label: m.tools_source_external };
+  }
 
   function configure(selectedPurpose: string, provider: Provider | null = null) {
     purpose = selectedPurpose;
@@ -335,6 +345,7 @@
               {/if}
               {#each sources as source (source.mcp_server_id)}
                 {@const expanded = reviewing === source.mcp_server_id}
+                {@const kind = sourceKind(source)}
                 <div class="border-dimmer border-b p-5 last:border-b-0">
                   <div
                     class="grid grid-cols-[auto_minmax(0,1fr)] items-start gap-x-3 gap-y-4 sm:grid-cols-[auto_minmax(0,1fr)_auto]"
@@ -359,11 +370,12 @@
                         <h3 class="text-default text-sm font-medium">
                           {bundledIdentity(source)?.name ?? source.name}
                         </h3>
-                        {#if source.http_auth_type === "bundled"}
-                          <span class="text-secondary bg-secondary rounded px-2 py-0.5 text-xs">
-                            {m.mcp_auth_bundled()}
-                          </span>
-                        {/if}
+                        <!-- Every source carries its kind: Eneo itself, Eneo's tool service, or an external server. -->
+                        <span
+                          class="text-secondary bg-secondary inline-flex items-center gap-1 rounded px-2 py-0.5 text-xs"
+                        >
+                          <kind.icon class="size-3" aria-hidden="true" />{kind.label()}
+                        </span>
                         {#if source.audience === "groups"}
                           <span class="text-secondary bg-secondary rounded px-2 py-0.5 text-xs">
                             {m.tools_group_override()}
@@ -381,7 +393,7 @@
                           <!-- The runtime address is deployment plumbing; say what the provider does. -->
                           {bundledIdentity(source)?.description ||
                             m.tools_builtin_menu_description()}
-                        {:else}{m.tools_source_external()} · {source.http_url}{/if}
+                        {:else}{source.http_url}{/if}
                       </p>
                       {#if source.audience === "groups"}
                         <p class="text-secondary mt-1 text-xs">

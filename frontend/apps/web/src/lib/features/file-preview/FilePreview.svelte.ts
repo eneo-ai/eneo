@@ -5,9 +5,13 @@ import { previewKindOf, type PreviewFile } from "./previewKind";
 
 type AttachmentUrls = ReturnType<typeof getAttachmentUrlService>;
 
-/** An excerpt of a file the user selected to ask about. */
+/** An excerpt the user selected to ask about, in a file or in an interactive view. */
 export type PreviewQuote = {
-  fileId: string;
+  /** The file the text was selected in; a quote from a view has none. */
+  fileId?: string;
+  /** The interactive view the text was selected in, by its tool call. */
+  viewCallId?: string;
+  /** Names where the text is from: the file, or what the view shows. */
   fileName: string;
   text: string;
   /** Which of several identical passages is meant; see `locatePassage`. */
@@ -257,6 +261,21 @@ export class FilePreview {
       this.quote = { fileId: this.file.id, fileName: this.file.name, text, locator };
       // On narrow screens the preview covers the composer; return to the chat.
       if (!this.besideConversation) this.close();
+    }
+  }
+
+  /**
+   * Makes text an interactive view says the reader selected in it the quote
+   * of the next question. No text withdraws that view's quote, and only its own.
+   */
+  quoteView(callId: string, name: string, selected: string) {
+    const text = tidyQuoteText(selected);
+    if (text) {
+      // The name closes the quote on a line of its own.
+      const fileName = name.replace(/\s+/g, " ").trim();
+      this.quote = { viewCallId: callId, fileName, text, locator: null };
+    } else if (this.quote?.viewCallId === callId) {
+      this.quote = null;
     }
   }
 

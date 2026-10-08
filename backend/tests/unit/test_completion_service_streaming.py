@@ -13,8 +13,12 @@ from eneo.ai_models.completion_models.completion_model import (
     Context,
     GeneratedFile,
     ResponseType,
+    ToolCallMetadata,
 )
-from eneo.completion_models.infrastructure.completion_service import CompletionService
+from eneo.completion_models.infrastructure.completion_service import (
+    CompletionService,
+    _name_app_views,
+)
 from eneo.completion_models.infrastructure.context_builder import ContextBuilder
 
 
@@ -208,3 +212,67 @@ async def test_generated_image_chunks_pass_through_tool_call_handling():
         ResponseType.TEXT,
     ]
     assert chunks[0].image is image
+
+
+class _ViewProxy:
+    """Proxy whose ``weather__get_weather`` tool has an approved view."""
+
+    def __init__(self, *, fails: bool = False):
+        self.fails = fails
+        self.view = SimpleNamespace(
+            view_id=uuid4(), mcp_server_id=uuid4(), ui_meta={"prefersBorder": True}
+        )
+
+    async def approved_app_view(self, prefixed_tool_name: str):
+        if self.fails:
+            raise RuntimeError("database unavailable")
+        return self.view if prefixed_tool_name == "weather__get_weather" else None
+
+
+def _tool_call_chunk(**call) -> Completion:
+    return Completion(
+        response_type=ResponseType.TOOL_CALL,
+        tool_calls_metadata=[
+            ToolCallMetadata(server_name="weather", tool_name="get_weather", **call)
+        ],
+    )
+
+
+async def test_view_is_named_on_a_call_from_the_moment_it_is_announced():
+    proxy = _ViewProxy()
+    pending = _tool_call_chunk(
+        mcp_tool_name="weather__get_weather", result_status="pending"
+    )
+
+    await _name_app_views(pending, proxy)
+
+    assert pending.tool_calls_metadata[0].app_view == {
+        "view_id": str(proxy.view.view_id),
+        "mcp_server_id": str(proxy.view.mcp_server_id),
+        "ui": {"prefersBorder": True},
+    }
+
+
+async def test_call_of_a_tool_without_a_view_is_left_as_it_is():
+    chunk = _tool_call_chunk(mcp_tool_name="weather__get_forecast")
+
+    await _name_app_views(chunk, _ViewProxy())
+
+    assert chunk.tool_calls_metadata[0].app_view is None
+
+
+async def test_failed_view_lookup_never_breaks_the_answer():
+    chunk = _tool_call_chunk(mcp_tool_name="weather__get_weather")
+
+    await _name_app_views(chunk, _ViewProxy(fails=True))
+
+    assert chunk.tool_calls_metadata[0].app_view is None
+
+
+async def test_proxy_that_knows_no_views_is_harmless():
+    chunk = _tool_call_chunk(mcp_tool_name="weather__get_weather")
+
+    await _name_app_views(chunk, object())
+    await _name_app_views(chunk, None)
+
+    assert chunk.tool_calls_metadata[0].app_view is None

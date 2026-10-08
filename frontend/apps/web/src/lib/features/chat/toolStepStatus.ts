@@ -23,6 +23,10 @@ export function toolStepStatus(
  * change on retry (e.g. splitting an oversized chart into two charts).
  * This does not claim the original call succeeded or that every requested
  * operation was fulfilled. Keep its actual status and result for diagnostics.
+ *
+ * While the reply is still being written (`replying`) no failure is final: the
+ * model reads the error and may correct the call, so every failed call is an
+ * attempt until the reply ends and the rule above decides.
  */
 export function previousToolAttemptIndexes(
   calls: readonly {
@@ -30,7 +34,8 @@ export function previousToolAttemptIndexes(
     tool_name: string;
     result_status?: string | null;
     approved?: boolean;
-  }[]
+  }[],
+  replying = false
 ): Set<number> {
   const successfulTools = new Set<string>();
   const previousAttempts = new Set<number>();
@@ -40,7 +45,7 @@ export function previousToolAttemptIndexes(
     const key = JSON.stringify([call.server_name, call.tool_name]);
     if (call.result_status === "succeeded" || call.result_status === "completed") {
       successfulTools.add(key);
-    } else if (call.result_status === "failed" && successfulTools.has(key)) {
+    } else if (call.result_status === "failed" && (replying || successfulTools.has(key))) {
       previousAttempts.add(i);
     }
   }

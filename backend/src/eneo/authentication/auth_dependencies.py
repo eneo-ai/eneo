@@ -246,6 +246,9 @@ FILES_READ_OVERRIDES: frozenset[str] = frozenset(
     }
 )
 
+# A link to a tool's view is read access to what a conversation shows.
+MCP_APPS_READ_OVERRIDES: frozenset[str] = frozenset({"mint_app_view_token"})
+
 
 def require_resource_permission_for_method(
     resource_type: str, read_override_endpoints: frozenset[str] | None = None

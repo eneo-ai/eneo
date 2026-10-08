@@ -247,6 +247,21 @@ it("keeps a quote tied to its original file when the preview changes", async () 
   expect(preview.quote?.fileId).toBe(file.id);
   expect(preview.quote?.text).toBe("Budget: 10");
 });
+it("quotes what a view says is selected until that view withdraws it", () => {
+  const preview = panel();
+  preview.quoteView("call-1", "Deviation\nby month", " January\t1965 ");
+  expect(preview.quote).toEqual({
+    viewCallId: "call-1",
+    fileName: "Deviation by month",
+    text: "January\t1965",
+    locator: null
+  });
+  // Another view has no say over a quote that is not its own.
+  preview.quoteView("call-2", "Other view", "");
+  expect(preview.quote?.viewCallId).toBe("call-1");
+  preview.quoteView("call-1", "Deviation by month", "");
+  expect(preview.quote).toBeNull();
+});
 it("returns to the composer after quoting on a narrow screen", async () => {
   const preview = panel();
   preview.besideConversation = false;

@@ -13,6 +13,8 @@ import json
 import os
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
+from workflow_model import response as workflow_response
+
 REPLY = os.environ.get("MOCK_REPLY", "E2E mock completion: pong")
 ERROR_MARKER = os.environ.get("MOCK_ERROR_MARKER", "E2E_FORCE_MODEL_ERROR")
 PORT = int(os.environ.get("MOCK_PORT", "8200"))
@@ -49,7 +51,9 @@ class Handler(BaseHTTPRequestHandler):
 
     def do_GET(self):
         # Health + a stub /models so any litellm preflight is happy.
-        self._json(200, {"status": "ok"} if self.path.endswith("/health") else {"data": []})
+        self._json(
+            200, {"status": "ok"} if self.path.endswith("/health") else {"data": []}
+        )
 
     def do_POST(self):
         length = int(self.headers.get("Content-Length", 0))
@@ -76,8 +80,9 @@ class Handler(BaseHTTPRequestHandler):
             )
             return
 
+        message = workflow_response(req) or {"role": "assistant", "content": REPLY}
         if req.get("stream"):
-            self._stream()
+            self._stream(message)
         else:
             self._json(
                 200,
@@ -88,22 +93,33 @@ class Handler(BaseHTTPRequestHandler):
                     "choices": [
                         {
                             "index": 0,
-                            "message": {"role": "assistant", "content": REPLY},
-                            "finish_reason": "stop",
+                            "message": message,
+                            "finish_reason": "tool_calls"
+                            if message.get("tool_calls")
+                            else "stop",
                         }
                     ],
-                    "usage": {"prompt_tokens": 1, "completion_tokens": 1, "total_tokens": 2},
+                    "usage": {
+                        "prompt_tokens": 1,
+                        "completion_tokens": 1,
+                        "total_tokens": 2,
+                    },
                 },
             )
 
-    def _stream(self):
+    def _stream(self, message):
         self.send_response(200)
         self.send_header("Content-Type", "text/event-stream")
         self.send_header("Cache-Control", "no-cache")
         self.end_headers()
         self.wfile.write(_chunk({"role": "assistant"}))
-        self.wfile.write(_chunk({"content": REPLY}))
-        self.wfile.write(_chunk({}, finish_reason="stop"))
+        if message.get("tool_calls"):
+            for index, call in enumerate(message["tool_calls"]):
+                self.wfile.write(_chunk({"tool_calls": [{"index": index, **call}]}))
+            self.wfile.write(_chunk({}, finish_reason="tool_calls"))
+        else:
+            self.wfile.write(_chunk({"content": message.get("content") or ""}))
+            self.wfile.write(_chunk({}, finish_reason="stop"))
         self.wfile.write(b"data: [DONE]\n\n")
         self.wfile.flush()
 

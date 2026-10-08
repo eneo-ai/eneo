@@ -23,9 +23,18 @@
   import { getChatService } from "../../ChatService.svelte";
   import { editedPassage } from "../../documentVersions";
   import { chatCapabilityAvailable } from "../../chatCapabilities";
+  import { initMcpAppPane } from "../../mcp-apps/McpAppPane.svelte";
+  import McpAppPanel from "../../mcp-apps/McpAppPanel.svelte";
+  import {
+    appViewCalls,
+    appViewSubject,
+    appViewTitle,
+    findAppCall,
+    toolCallsOf
+  } from "../../mcp-apps/mcpApps";
   import type { PanelContents } from "$lib/features/file-preview/panelContents";
   import { getAppContext } from "$lib/core/AppContext";
-  import { untrack, type Snippet } from "svelte";
+  import { onDestroy, untrack, type Snippet } from "svelte";
   import { followConversationScroll } from "../../followConversationScroll";
   import { m } from "$lib/paraglide/messages";
 
@@ -186,8 +195,45 @@
   // An interactive tool view that asks for more room shares the panel with
   // the file preview. The view covers the file, which is shown again when the
   // view closes; a file that is opened sends the view back to its answer.
+  const appPane = initMcpAppPane(filePreview);
+  // The preview can outlive this conversation view; a cover must not.
+  onDestroy(() => appPane.close());
+  // Like a previewed file, a view follows the conversation it belongs to: one
+  // whose call is gone (another conversation was opened), or was stopped, closes.
+  $effect(() => {
+    const shownId = appPane.callId;
+    if (!shownId) return;
+    if (!findAppCall(chat.currentConversation.messages, shownId)) {
+      untrack(() => appPane.close());
+    }
+  });
+  // So does text quoted from a view.
+  $effect(() => {
+    const quotedCall = filePreview.quote?.viewCallId;
+    if (quotedCall && !findAppCall(chat.currentConversation.messages, quotedCall)) {
+      filePreview.quote = null;
+    }
+  });
+  // A view of a new answer may take the panel again, even if the reader
+  // closed it during the previous one.
+  $effect(() => {
+    if (chat.askQuestion.isLoading) untrack(() => appPane.beginAnswer());
+  });
+
+  // What the panel's title lists to switch between: the views that can be
+  // shown there, newest first, and the conversation's documents and uploads.
   const panelContents = $derived<PanelContents>({
-    views: [],
+    views: (chat.currentConversation.messages ?? [])
+      .flatMap((message) => appViewCalls(toolCallsOf(message)))
+      .filter((call) => appPane.offered.has(call.tool_call_id))
+      .reverse()
+      .map((call) => ({
+        id: call.tool_call_id,
+        title: appViewTitle(call),
+        subject: appViewSubject(call),
+        shown: appPane.callId === call.tool_call_id,
+        open: () => appPane.open(call.tool_call_id)
+      })),
     documents: chat.documents.documents,
     uploads
   });
@@ -195,11 +241,21 @@
   let isDragging = $state(false);
 </script>
 
+{#snippet appPanel(onoverview: (() => void) | undefined)}
+  <McpAppPanel pane={appPane} preview={filePreview} contents={panelContents} {onoverview} />
+{/snippet}
+
 <FilePreviewLayout
   preview={filePreview}
   versionsOf={(file) => chat.documents.versionsOf(file.id)}
   exportOf={documentExport}
   contents={panelContents}
+  occupant={{
+    shown: appPane.shown,
+    label: m.mcp_app_view_title(),
+    close: () => appPane.close(),
+    panel: appPanel
+  }}
 >
   <div class="flex h-full min-h-0 min-w-0 flex-col">
     <!-- svelte-ignore a11y_no_static_element_interactions -->

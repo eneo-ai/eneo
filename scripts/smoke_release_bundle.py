@@ -53,11 +53,19 @@ def main():
         )
     )
     config["name"] = "eneo-release-smoke"
-    config["networks"] = {"e2e": {}, "tools": {"internal": True}}
+    # The runtime network is not internal here: the calls below reach the
+    # runtime through a published port, which Docker does not map for an
+    # internal network. The deployment contract test covers that isolation.
+    config["networks"] = {"e2e": {}, "tools": {}}
     backend = config["services"]["e2e-backend"]
     backend.pop("build", None)
     backend["image"] = bundle["images"]["backend"]
     backend["networks"] = ["e2e", "tools"]
+    # The e2e stack builds a runtime of its own; this test runs the bundle's.
+    del config["services"]["e2e-tool-runtime"]
+    backend["depends_on"]["tool-runtime"] = backend["depends_on"].pop(
+        "e2e-tool-runtime"
+    )
     backend["environment"].update(
         {
             "TOOL_RUNTIME_URL": "http://tool-runtime:3010",

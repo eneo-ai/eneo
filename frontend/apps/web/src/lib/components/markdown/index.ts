@@ -3,6 +3,7 @@ import type { EneoFileToken, EneoInrefToken, EneoMentionToken } from "./CustomCo
 
 export { default as Markdown } from "./Markdown.svelte";
 export { sanitizeImageSrc, sanitizeLinkHref } from "./sanitizeUrl.js";
+export { fileHandleId, setFileImageUrls } from "./FileImageContext.js";
 export {
   type CustomRenderers as MarkdownCustomRenderingOptions,
   type EneoFileCustomComponentProps,

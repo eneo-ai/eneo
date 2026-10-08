@@ -283,13 +283,13 @@ class SessionService:
         self,
         session: SessionInDB,
         tool_call_id: str,
-    ) -> tuple[str | None, str | None]:
-        """Return (result, mcp_tool_name) for one visible tool call."""
+    ) -> ToolCallInfo | None:
+        """The stored record of one visible tool call, with its result."""
         for question in session.questions or []:
             for tc in question.tool_calls or []:
                 if tc.tool_call_id and tc.tool_call_id == tool_call_id:
-                    return tc.result, tc.mcp_tool_name
-        return None, None
+                    return tc
+        return None
 
     async def get_sessions_by_assistant(
         self,

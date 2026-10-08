@@ -4,8 +4,8 @@
 # Complete production stack with Traefik reverse proxy and Let's Encrypt SSL
 #
 # BEFORE DEPLOYING:
-#   1. Replace "your-email@domain.com" (line 55) with your email
-#   2. Replace "your-domain.com" (lines 88, 91, 116, 119) with your domain
+#   1. Replace "your-email@domain.com" with your email (1 line, marked CHANGE THIS)
+#   2. Replace "your-domain.com" with your domain (4 lines, marked CHANGE THIS)
 #   3. Configure environment files (env_backend.env, env_frontend.env, env_db.env)
 #   4. Create external network: docker network create proxy_tier
 #
@@ -36,6 +36,9 @@
 #                           their calls go to backend:8000, and user login is
 #                           handed off from the Eneo session (SSO) rather than
 #                           the module talking to an IdP itself.
+#   tool_runtime_net (internal) - tool-runtime, backend and worker. The
+#                           bundled tools runtime has no internet, database
+#                           or Redis route (see TOOL_RUNTIME.md).
 #   object_content_net (internal) - added by docker-compose.object-content.yml
 #                           only for the optional bundled endpoint.
 #   Backend is the single gateway between the outside world, the data layers,

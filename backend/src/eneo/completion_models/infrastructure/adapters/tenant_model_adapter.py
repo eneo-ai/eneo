@@ -381,6 +381,22 @@ class _ArgumentDeltas:
         return redacted[len(sent) :] or None
 
 
+async def _has_app_view(mcp_proxy: Any, prefixed_tool_name: str) -> bool:
+    """Whether the tool has an approved MCP App view.
+
+    Stub proxies without ``approved_app_view`` and every lookup failure read
+    as no view.
+    """
+    lookup = getattr(mcp_proxy, "approved_app_view", None)
+    if lookup is None:
+        return False
+    try:
+        return await lookup(prefixed_tool_name) is not None
+    except Exception:
+        logger.warning("Failed to resolve MCP app view for %s", prefixed_tool_name)
+        return False
+
+
 class _LiteLLMUsageDetails(Protocol):
     reasoning_tokens: int | None
 
@@ -1543,6 +1559,9 @@ class TenantModelAdapter(CompletionModelAdapter):
                             mcp_tool_name=call.name,
                             existing_prefixes=seen_prefixes,
                         )
+                        has_app_view = not result.get(
+                            "is_error"
+                        ) and await _has_app_view(mcp_proxy, call.name)
                         captured_refs.extend(refs_for_call)
                         captured_images.extend(images_for_call)
                         result_status = "succeeded"
@@ -1585,6 +1604,11 @@ class TenantModelAdapter(CompletionModelAdapter):
                                 is_internal=mcp_proxy.is_internal_tool(call.name),
                                 is_bundled=mcp_proxy.is_bundled_tool(call.name),
                                 meta=result.get("meta") or None,
+                                structured_content=(
+                                    result.get("structured_content")
+                                    if has_app_view
+                                    else None
+                                ),
                             )
                         )
                     if not await _follow_up_completion():
@@ -2456,6 +2480,9 @@ class TenantModelAdapter(CompletionModelAdapter):
                                 mcp_tool_name=tc["function"]["name"],
                                 existing_prefixes=seen_prefixes,
                             )
+                            has_app_view = not result_data.get(
+                                "is_error"
+                            ) and await _has_app_view(mcp_proxy, tc["function"]["name"])
                             captured_refs.extend(refs_for_call)
                             # Generated files ride their own chunks so the
                             # ask path can persist each as a file before the
@@ -2519,6 +2546,11 @@ class TenantModelAdapter(CompletionModelAdapter):
                                         tc["function"]["name"]
                                     ),
                                     meta=result_data.get("meta") or None,
+                                    structured_content=(
+                                        result_data.get("structured_content")
+                                        if has_app_view
+                                        else None
+                                    ),
                                 )
                             )
 

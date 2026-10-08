@@ -31,6 +31,10 @@ TOKEN_VERSION = 2
 FILE_PROCESSING_DOWNLOAD_AUDIENCE = "file_processing_download"
 FILE_ORIGINAL_DOWNLOAD_AUDIENCE = "file_original_download"
 INFO_BLOB_ORIGINAL_DOWNLOAD_AUDIENCE = "info_blob_original_download"
+MCP_APP_VIEW_AUDIENCE = "mcp_app_view"
+
+# Longest life of the link that serves one MCP App view's HTML.
+MCP_APP_VIEW_TOKEN_MAXIMUM_EXPIRY_SECONDS = 60 * 60
 
 # How far in the future ``issued_at`` may lie before the token is rejected;
 # covers clock skew between replicas without admitting pre-dated tokens.
@@ -44,6 +48,7 @@ def _derive_key(purpose: bytes) -> bytes:
 _FILE_PROCESSING_DOWNLOAD_KEY = _derive_key(b"eneo:file-processing-download:v2")
 _FILE_ORIGINAL_DOWNLOAD_KEY = _derive_key(b"eneo:file-original-download:v2")
 _INFO_BLOB_ORIGINAL_DOWNLOAD_KEY = _derive_key(b"eneo:info-blob-original-download:v2")
+_MCP_APP_VIEW_KEY = _derive_key(b"eneo:mcp-app-view:v2")
 
 
 def _generate_token(
@@ -277,6 +282,42 @@ def verify_info_blob_original_download_token(token: str) -> dict[str, Any] | Non
         audience=INFO_BLOB_ORIGINAL_DOWNLOAD_AUDIENCE,
         resource_claim="info_blob_id",
         maximum_lifetime_seconds=FILE_ORIGINAL_SIGNED_URL_MAXIMUM_EXPIRY_SECONDS,
+    )
+
+
+def generate_mcp_app_view_token(
+    view_id: UUID,
+    tenant_id: UUID,
+    expires_at: int,
+    *,
+    issued_at: int | None = None,
+) -> str:
+    """Generate the sole authorizer for serving one MCP App view's HTML.
+
+    The tenant is bound into the token so the content endpoint can refuse a
+    leaked token replayed against another tenant's rows.
+    """
+    return _generate_token(
+        view_id,
+        expires_at,
+        ContentDisposition.INLINE,
+        signing_key=_MCP_APP_VIEW_KEY,
+        audience=MCP_APP_VIEW_AUDIENCE,
+        tenant_id=tenant_id,
+        resource_claim="view_id",
+        maximum_lifetime_seconds=MCP_APP_VIEW_TOKEN_MAXIMUM_EXPIRY_SECONDS,
+        issued_at=issued_at,
+    )
+
+
+def verify_mcp_app_view_token(token: str) -> dict[str, Any] | None:
+    """Verify an MCP App view token using its purpose-separated key."""
+    return _verify_token(
+        token,
+        signing_key=_MCP_APP_VIEW_KEY,
+        audience=MCP_APP_VIEW_AUDIENCE,
+        resource_claim="view_id",
+        maximum_lifetime_seconds=MCP_APP_VIEW_TOKEN_MAXIMUM_EXPIRY_SECONDS,
     )
 
 

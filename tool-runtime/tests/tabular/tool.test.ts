@@ -587,7 +587,7 @@ describe("result view", () => {
     expect(intermediate).not.toHaveProperty("shown");
     expect(showsTable({ ...intermediate, plan: false, exported: false })).toBe(false);
     const explicitTable = await query.execute(
-      { file, sql: "SELECT * FROM t", display: "table" },
+      { file, sql: "SELECT * FROM t", display: "table", title: "All sales" },
       shown,
     );
     expect(explicitTable).toEqual(rows);

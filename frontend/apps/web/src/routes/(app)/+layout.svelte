@@ -18,6 +18,7 @@
   import EneoWordMark from "$lib/assets/EneoWordMark.svelte";
   import { IconEneo } from "@eneo/icons/eneo";
   import { initAttachmentUrlService } from "$lib/features/attachments/AttachmentUrlService.svelte.js";
+  import { initMcpAppUrlService } from "$lib/features/chat/mcp-apps/McpAppUrlService.svelte.js";
   import { initFaviconUrlService } from "$lib/features/knowledge/FaviconUrlService.svelte.js";
   import { m } from "$lib/paraglide/messages";
   import { localizeHref } from "$lib/paraglide/runtime";
@@ -34,6 +35,7 @@
   $: if (!data.whatsNewEnabled) whatsNewTour.stop();
   beforeNavigate(({ to }) => whatsNewTour.beforeNavigation(to?.url ?? null));
   initAttachmentUrlService(data);
+  initMcpAppUrlService(data);
   initFaviconUrlService();
   const socket = initEneoSocket(data);
 

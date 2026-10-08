@@ -1,7 +1,7 @@
 // Markdown to a small block tree. Only the lexer of `marked` is used; no HTML is ever rendered,
-// links keep http, https and mailto only. Declared image:ID blocks embed local assets;
-// other images become alt text and nothing here
-// touches the network. The engines render this tree, never the markdown.
+// links keep http, https and mailto only. Declared image:ID blocks, and the eneo-file: lines
+// a Markdown document keeps its images as, embed local assets; other images become alt text
+// and nothing here touches the network. The engines render this tree, never the markdown.
 import { marked, type Token, type Tokens } from "marked";
 
 export type Inline = {
@@ -27,7 +27,7 @@ export type Block =
   | { type: "code"; text: string; language?: string }
   | { type: "hr" }
   | { type: "pagebreak" }
-  | { type: "image"; id: string; alt: string };
+  | { type: "image"; id: string; alt: string; caption?: string };
 
 export const MAX_LIST_DEPTH = 4;
 export const MAX_TABLE_COLUMNS = 16;
@@ -108,8 +108,15 @@ function blocks(tokens: Token[], depth: number): Block[] {
           children.length === 1 && children[0]?.type === "image"
             ? (children[0] as Tokens.Image)
             : undefined;
-        const id = image && /^image:([A-Za-z][A-Za-z0-9_-]{0,63})$/.exec(image.href)?.[1];
-        if (id) out.push({ type: "image", id, alt: image!.text });
+        const placed =
+          image && /^(?:image:([A-Za-z][A-Za-z0-9_-]{0,63})|(eneo-file:[0-9a-f]{32}))$/.exec(image.href);
+        if (placed)
+          out.push({
+            type: "image",
+            id: (placed[1] ?? placed[2])!,
+            alt: image!.text,
+            ...(image!.title ? { caption: image!.title } : {}),
+          });
         else out.push({ type: "paragraph", runs: inline(children) });
         break;
       }

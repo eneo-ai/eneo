@@ -49,7 +49,7 @@
     toolCallId?: string;
     onLoadResult?: () => Promise<string | null>;
     status: Status;
-    /** An earlier failed call followed by a success from this tool. */
+    /** A failed call the reply may still correct, or one a later success from this tool followed. */
     previousAttempt?: boolean;
     /**
      * The document the call created. `label` is the step's text around the

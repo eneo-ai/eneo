@@ -1,6 +1,7 @@
 <script lang="ts">
   import { Button } from "$lib/components/ui/button/index.js";
   import * as DropdownMenu from "$lib/components/ui/dropdown-menu/index.js";
+  import { setFileImageUrls } from "$lib/components/markdown/index.js";
   import { formatBytes } from "$lib/core/formatting/formatBytes";
   import { pickFileIcon } from "$lib/core/formatting/pickFileIcon";
   import { getAttachmentUrlService } from "$lib/features/attachments/AttachmentUrlService.svelte";
@@ -38,6 +39,8 @@
   let { preview, versionsOf, exportOf, contents, onoverview, sheet = false }: Props = $props();
 
   const attachmentUrls = getAttachmentUrlService();
+  // A document shows the images it names by file, to a reader who may open them.
+  setFileImageUrls((fileId) => attachmentUrls.getUrl({ id: fileId }));
 
   // Keep the existing renderer mounted while its replacement is prepared.
   const keepingFile = $derived(!!preview.file && !!preview.content && preview.status === "ready");
@@ -158,6 +161,11 @@
   }
 
   const content = $derived(preview.content);
+  // A Markdown file names its images by their Eneo file; saved as it is, it
+  // leaves Eneo without them.
+  const namesImages = $derived(
+    content?.kind === "markdown" && /!\[[^\]\n]*\]\(eneo-file:[0-9a-f]{32}/.test(content.text)
+  );
   const views = $derived(
     file && content && preview.status === "ready"
       ? [
@@ -236,7 +244,14 @@
       </DropdownMenu.Trigger>
       <DropdownMenu.Content align="end" class="w-64">
         <DropdownMenu.Item onSelect={saveOriginal}>
-          <span class="flex-1">{FORMATS.md.name}</span>
+          <span class="min-w-0 flex-1">
+            {FORMATS.md.name}
+            {#if namesImages}
+              <span class="text-muted-foreground block text-xs whitespace-normal"
+                >{m.file_preview_export_markdown_without_images()}</span
+              >
+            {/if}
+          </span>
           <span class="text-muted-foreground text-xs">{FORMATS.md.ending}</span>
         </DropdownMenu.Item>
         {#each ["docx", "pdf"] as const as format (format)}
@@ -244,10 +259,10 @@
             disabled={!availability?.[format].available || availabilityLoading}
             onSelect={() => exportAs(format)}
           >
-            <span class="flex-1">
+            <span class="min-w-0 flex-1">
               {FORMATS[format].name}
               {#if availability && !availability[format].available}
-                <span class="text-muted-foreground block text-xs"
+                <span class="text-muted-foreground block text-xs whitespace-normal"
                   >{unavailableReason(availability[format].reason)}</span
                 >
               {/if}
