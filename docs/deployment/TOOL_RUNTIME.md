@@ -56,7 +56,7 @@ not advertise app-view support.
 
 ### Enabling the Charts function after upgrading
 
-Apply migration `202610011200`, then add **Built into Eneo** under
+Apply migration `202610081100`, then add **Built into Eneo** under
 **Admin → Tools → Functions → Charts** and activate it. Enable **Charts** on the
 space and assistant, and grant its role permission. Existing roles receive no
 automatic permission grant; new predefined roles include it. The migration

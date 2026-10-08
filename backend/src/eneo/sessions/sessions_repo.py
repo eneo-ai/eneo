@@ -20,11 +20,8 @@ from eneo.database.tables.questions_table import (
 from eneo.database.tables.sessions_table import Sessions
 from eneo.database.tables.users_table import Users
 from eneo.files.file_content_loader import FileContentLoader
+from eneo.files.unused_file_cleanup import delete_unused_root_files
 from eneo.info_blobs.info_blob_repo import InfoBlobRepository
-from eneo.questions.generated_files import (
-    delete_unreferenced_files,
-    generated_file_ids,
-)
 from eneo.questions.question_file_projection import attach_question_files
 from eneo.sessions.session import (
     SessionAdd,
@@ -592,15 +589,21 @@ class SessionRepository:
         return sessions
 
     async def delete(self, id: UUID) -> SessionInDB | None:
-        """Delete a session and the generated files only its answers owned.
+        """Delete a session and the Files nothing else uses anymore.
 
         Questions and their file links cascade with the session, but the
-        ``files`` rows do not: a tool-generated image (linked with type
-        ``assistant``) has no other owner surface, so it is removed here once
-        nothing else references it. Uploads are left alone; the user manages
-        those.
+        ``files`` rows do not. Uploads and tool-generated images that only
+        this conversation used are deleted with it; a File still used by
+        another conversation, Assistant, App or App run is kept.
         """
-        generated = await generated_file_ids(self.session, Questions.session_id == id)
+        file_ids = list(
+            await self.session.scalars(
+                sa.select(QuestionsFiles.file_id)
+                .join(Questions, Questions.id == QuestionsFiles.question_id)
+                .where(Questions.session_id == id)
+                .distinct()
+            )
+        )
         deleted = await self.delegate.delete(id)
-        await delete_unreferenced_files(self.session, generated)
+        await delete_unused_root_files(self.session, file_ids)
         return await self._hydrate_optional(deleted)

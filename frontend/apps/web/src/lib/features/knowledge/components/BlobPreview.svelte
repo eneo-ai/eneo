@@ -13,11 +13,14 @@
   import { downloadTextFile } from "$lib/core/helpers/download";
   import * as m from "$lib/paraglide/messages";
   import { toast } from "$lib/components/toast";
+  import SourceMetadataList from "./SourceMetadataList.svelte";
+  import { hasSourceMetadata, type SourceMetadataEntry } from "../sourceMetadata";
   type BlobPreviewReference = {
     id: InfoBlob["id"];
     metadata: { title?: string | null };
     text?: InfoBlob["text"];
     original_available?: InfoBlob["original_available"];
+    source_metadata?: SourceMetadataEntry[] | null;
   };
 
   export let blob: BlobPreviewReference;
@@ -121,6 +124,21 @@
     </Dialog.Header>
 
     <div class={dialogLayout.body}>
+      {#if hasSourceMetadata(blob)}
+        <!-- The source system's own properties (SharePoint columns), kept apart
+             from the extracted text so a reader can tell metadata from content. -->
+        <section class={dialogLayout.section} aria-labelledby="blob-source-metadata-heading">
+          <div class="p-4">
+            <h3
+              id="blob-source-metadata-heading"
+              class="text-muted-foreground mb-2 text-xs font-medium uppercase"
+            >
+              {m.source_metadata_label()}
+            </h3>
+            <SourceMetadataList entries={blob.source_metadata} />
+          </div>
+        </section>
+      {/if}
       <div class={dialogLayout.section}>
         <div class="p-4">
           {#if loadingBlob}

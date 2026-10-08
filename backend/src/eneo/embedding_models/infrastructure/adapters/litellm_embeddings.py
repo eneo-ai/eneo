@@ -10,16 +10,23 @@ from tenacity import (
 )
 from typing_extensions import override
 
+from eneo.embedding_models.domain.chunking import E5_PASSAGE_PREFIX
 from eneo.embedding_models.infrastructure.adapters.base import (
     EmbeddingModelAdapter,
     PartialEmbeddingBatchError,
 )
 from eneo.files.chunk_embedding_list import ChunkEmbeddingList
 from eneo.main.config import get_settings
+from eneo.main.exceptions import ProviderRejectedRequestException
 from eneo.main.logging import get_logger
 from eneo.model_providers.infrastructure import litellm_transport
 from eneo.model_providers.infrastructure.litellm_provider import (
     build_litellm_provider_kwargs,
+)
+from eneo.model_providers.infrastructure.outbound_headers_runtime import (
+    ProviderOutboundHeaders,
+    apply_outbound_headers,
+    mask_outbound_headers,
 )
 from eneo.model_providers.infrastructure.tenant_model_credential_resolver import (
     TenantModelCredentialResolver,
@@ -45,11 +52,13 @@ class LiteLLMEmbeddingAdapter(EmbeddingModelAdapter):
         model: "EmbeddingModelLike",
         credential_resolver: Optional[TenantModelCredentialResolver] = None,
         litellm_model_name: Optional[str] = None,
+        outbound_headers: Optional[ProviderOutboundHeaders] = None,
         request_semaphore: asyncio.Semaphore | None = None,
         request_timeout_seconds: float | None = None,
     ) -> None:
         super().__init__(model)
         self.credential_resolver = credential_resolver
+        self.outbound_headers = outbound_headers
         self.request_semaphore = request_semaphore
         self.request_timeout_seconds = request_timeout_seconds
         self._provider_kwargs: dict[str, object] | None = None
@@ -63,6 +72,17 @@ class LiteLLMEmbeddingAdapter(EmbeddingModelAdapter):
             f"[LiteLLM] Initializing embedding adapter for model: {model.name} -> {self.litellm_model}"
         )
 
+    @staticmethod
+    def _mask_sensitive_params(params: dict[str, object]) -> dict[str, object]:
+        """Params fit for a debug log: no API key or input, header names only."""
+        return mask_outbound_headers(
+            {
+                key: value
+                for key, value in params.items()
+                if key not in {"api_key", "input"}
+            }
+        )
+
     @override
     async def get_embeddings(self, chunks: list["InfoBlobChunk"]) -> ChunkEmbeddingList:
         chunk_embedding_list = ChunkEmbeddingList()
@@ -72,7 +92,7 @@ class LiteLLMEmbeddingAdapter(EmbeddingModelAdapter):
             # Add "passage:" prefix for E5 models, use text directly for others
             if self.model.family == "e5":
                 texts_for_chunks = [
-                    f"passage: {chunk.text}" for chunk in chunked_chunks
+                    f"{E5_PASSAGE_PREFIX}{chunk.text}" for chunk in chunked_chunks
                 ]
                 logger.debug(
                     "[LiteLLM] %s: Using 'passage:' prefix (family=%s)",
@@ -183,11 +203,10 @@ class LiteLLMEmbeddingAdapter(EmbeddingModelAdapter):
 
                 params.update(self._provider_kwargs)
 
-            safe_params = {
-                key: value
-                for key, value in params.items()
-                if key not in {"api_key", "input"}
-            }
+            # After the endpoint is final, so the destination check sees it.
+            apply_outbound_headers(params, self.outbound_headers)
+
+            safe_params = self._mask_sensitive_params(params)
             logger.debug(
                 f"[LiteLLM] {self.litellm_model}: Making embedding request with {len(texts)} texts and params: "
                 f"{safe_params}"
@@ -214,7 +233,9 @@ class LiteLLMEmbeddingAdapter(EmbeddingModelAdapter):
                 f"[LiteLLM] {self.litellm_model}: Embedding request successful"
             )
 
-        except _EmbeddingRequestDeadlineExceeded:
+        except (ProviderRejectedRequestException, _EmbeddingRequestDeadlineExceeded):
+            # A blocked outbound header is raised before any network call and
+            # already logged; neither is a LiteLLM failure.
             raise
         except Exception as e:
             logger.exception(

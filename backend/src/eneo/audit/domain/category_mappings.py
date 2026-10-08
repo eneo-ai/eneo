@@ -142,6 +142,10 @@ CATEGORY_MAPPINGS = {
     ActionType.MCP_SERVER_DISABLED.value: "integration_events",
     ActionType.MCP_SERVER_TOOL_ENABLED.value: "integration_events",
     ActionType.MCP_SERVER_TOOL_DISABLED.value: "integration_events",
+    # Model Provider Outbound Header Actions (3 actions)
+    ActionType.MODEL_PROVIDER_HEADERS_UPDATED.value: "admin_actions",
+    ActionType.MODEL_PROVIDER_DESTINATION_CHANGED.value: "admin_actions",
+    ActionType.MODEL_PROVIDER_HEADERS_PREVIEWED.value: "admin_actions",
     # Help Assistant Actions (6 actions)
     ActionType.HELP_ASSISTANT_ROLE_ASSIGNED.value: "admin_actions",
     ActionType.HELP_ASSISTANT_ROLE_UNASSIGNED.value: "admin_actions",

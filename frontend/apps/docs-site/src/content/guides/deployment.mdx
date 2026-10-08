@@ -437,6 +437,12 @@ value and a comment.
       When `TENANT_CREDENTIALS_ENABLED=true`, you can add, update, or rotate AI provider API keys per tenant via the [Credentials API](#credentials-api) without restarting the backend. Credentials are encrypted with Fernet (AES-128-CBC + HMAC). Requires `ENCRYPTION_KEY` to be set; the endpoints answer 404 while the flag is `false`.
     </Callout>
 
+    **Outbound Provider Headers:**
+
+    | Variable | Default | Description |
+    |----------|---------|-------------|
+    | `OUTBOUND_HEADERS_ALLOWED_DESTINATIONS` | `[]` | JSON list of endpoint URLs that configured outbound headers may be sent to, e.g. `["https://gateway.internal/v1"]`. Empty allows any explicitly configured provider endpoint. Set it on both the backend and the worker, which sends headers for uploads and crawls (the shipped compose file gives both the same env file). An invalid entry stops either at startup. Recommended for multi-tenant deployments. See [Outbound headers](/guides/ai-providers#outbound-headers). |
+
     **Integrations:**
 
     <Callout type="info">

@@ -275,6 +275,28 @@ Eneo can process the following file types from SharePoint:
 
 Files that cannot be processed (images, videos, executables) are skipped during import.
 
+### Document Properties (Library Columns)
+
+Document libraries often carry metadata columns beside each file, for example _Dokumenttyp_, _Verksamhet_ or _Giltig till_. Eneo reads those columns together with the file and stores them as **document properties** on the imported document. They are part of what the assistant searches, so a question about home care routines can find a document whose body never uses those words but whose columns do, and the model sees the properties beside the source title when it answers. In the chat, the properties appear in the tooltip of an inline citation and in the document preview opened from the sources list. The import dialog's folder tree shows each file's properties under its name, so you can see what will become searchable before importing.
+
+#### Finding files to import
+
+Above the folder tree, the import dialog has a search that covers the document library, including folders you have not opened. Free text matches file names, file contents and document properties. Beside it, one drop-down per filterable column lets you pick a value instead of typing it: yes/no columns and choice columns with a fixed list of values, for example _Dokumenttyp: Policy_ or _Extern publicering: Ja_. Text and filters combine.
+
+Hits are listed with the folder they live in and their properties, and matching visible text is highlighted. **Select all matches** ticks the available hits in one press; a hit that already sits under a selected folder is shown as covered. Bulk deselection removes directly selected files and preserves selected folders. Clearing the search returns to the folder tree. A search shows at most 200 files and has a scan budget of 2,000 SharePoint results. If either limit leaves the search incomplete, a notice asks you to narrow it, even when no matching files were found.
+
+Free text uses Graph's drive search, which also looks inside documents. When combined with column filters, Eneo checks the column values on those search hits. Without free text, Eneo uses one indexed, single-value column to narrow the Microsoft Graph query when available, then checks all selected filters on the returned files. Non-indexed and multi-value columns are checked locally. This follows [Graph's limit of one indexed filter field per request](https://learn.microsoft.com/en-us/graph/api/listitem-list?view=graph-rest-1.0).
+
+Which columns are included follows the library's own column settings:
+
+- Columns a site owner has added to the library (text, choice, managed metadata, date, number, yes/no and hyperlink columns), together with the built-in _Title_ column.
+- Hidden and read-only columns, and SharePoint's own file-record columns (created, modified, author, file name, version, compliance and media columns), are left out.
+- Person and lookup columns are left out, because Microsoft Graph only exposes their numeric identifiers for a file.
+
+Values are stored as text in the library's column order, with each value capped at 500 characters and at most 40 columns per document. Multi-value columns keep each value. A change to a column value alone is picked up by the next synchronization or webhook notification, like a change to the file's contents, and re-indexes the document. Renaming a document with properties also updates its indexed source title.
+
+Documents imported before this feature gain their properties the next time they change in SharePoint or when a full synchronization runs for the imported item. SharePoint pages and OneDrive files without a backing list carry no properties. Reading the columns needs no Microsoft Entra permission beyond `Sites.Read.All` / `Files.Read.All`. If the columns or a file's property values cannot be read, synchronization preserves previously imported properties; a new document is still imported without them. A successful read with no remaining properties clears the previously stored values.
+
 ### Import Limits and Quotas
 
 Large SharePoint folders may take time to fully import. Eneo processes files in batches and shows progress in the **Jobs** panel. If you have quotas configured for your organization, imports count toward your storage usage.
@@ -300,11 +322,13 @@ SHAREPOINT_FIXTURE_MODE_ENABLED=true
 
 Then append one of these query parameters to the Eneo page URL before opening the SharePoint import dialog:
 
-| Query parameter                      | Purpose                                                                                                  |
-| ------------------------------------ | -------------------------------------------------------------------------------------------------------- |
-| `?sharepoint_fixture=representative` | 12 sites with duplicate and long names, Unicode, OneDrive, varied files, empty folders, and deep nesting |
-| `?sharepoint_fixture=large_tenant`   | 152 deterministic results for search, grouping, and rendering validation                                 |
-| `?sharepoint_fixture=empty`          | Empty-result behavior                                                                                    |
+| Query parameter                      | Purpose                                                                                                                                              |
+| ------------------------------------ | ---------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `?sharepoint_fixture=representative` | 13 sites with duplicate and long names, Unicode, OneDrive, varied files, empty folders, deep nesting, and a records library with 24 metadata columns |
+| `?sharepoint_fixture=large_tenant`   | 153 deterministic results for search, grouping, and rendering validation                                                                             |
+| `?sharepoint_fixture=empty`          | Empty-result behavior                                                                                                                                |
+
+Files in the `representative` scenario carry fixture document properties (_Dokumenttyp_, _Verksamhet_, _Giltig till_, _Extern publicering_, _Ansvarig enhet_) so the folder tree, the search and the column filters behave exactly as they would against a tenant. The site _Dokumentcenter – metadatatungt bibliotek_ carries 24 columns of mixed kinds on every file, to check how the filter menu and the property lists hold up against a wide library. The OneDrive fixture has none, matching personal drives without a backing list.
 
 Fixture mode is deliberately separate from the real integration:
 

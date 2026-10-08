@@ -164,7 +164,7 @@ Whether a capability should be served by a built-in loopback server at all, and 
 
 ## 6. Deployment and client changes
 
-Ship migrations **202609041000** and **202610011000** (`file_analysis`,
+Ship migrations **202609041000** and **202610081000** (`file_analysis`,
 `file_creation`), backend,
 frontend and the bundled JavaScript client together. The migration backfills active and inactive capability
 attachments, collapses duplicate purposes, preserves a policy default as on

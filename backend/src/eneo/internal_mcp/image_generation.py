@@ -368,6 +368,14 @@ async def generate_image(
             provider_id=model.provider_id,
             tenant_id=tool_ctx.user.tenant_id,
         )
+        # LiteLLM's image routes are not verified to forward `extra_headers`,
+        # so a provider with configured headers is refused rather than sent a
+        # request without them.
+        outbound_headers = provider.create_outbound_headers(
+            container.encryption_service(), tool_ctx.user
+        )
+        if outbound_headers is not None and outbound_headers.headers:
+            outbound_headers.reject(None, "image_generation_unsupported")
         resolver = provider.create_credential_resolver(container.encryption_service())
         provider_kwargs = build_litellm_provider_kwargs(resolver)
         route = resolve_model_route(

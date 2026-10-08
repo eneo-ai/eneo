@@ -40,7 +40,7 @@ from eneo.files.file_reference import (
     inlined_attachments,
     url_only_file_ids,
 )
-from eneo.files.file_service import FileService
+from eneo.files.file_service import FileService, require_requested_files
 from eneo.files.generated_documents import GeneratedDocumentRejected
 from eneo.governance_policy.domain.policy_resolver import (
     select_effective_completion_model,
@@ -2993,6 +2993,7 @@ class AssistantService:
 
         cleaned_question = clean_eneo_tag(question)
         files = await self.file_service.get_files_by_ids(file_ids=file_ids or [])
+        require_requested_files(file_ids or [], files)
 
         # Personal assistant governance runtime enforcement.
         # Resolve before creating a session/question placeholder so invalid

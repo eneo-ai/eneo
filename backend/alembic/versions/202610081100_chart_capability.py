@@ -3,14 +3,14 @@
 Additive only: leave existing servers, associations and role grants unchanged.
 Administrators opt existing roles into Charts and add/activate its provider.
 
-Revision ID: 202610011200
-Revises: 202610011000
+Revision ID: 202610081100
+Revises: 202610081000
 """
 
 from alembic import op
 
-revision = "202610011200"
-down_revision = "202610011000"
+revision = "202610081100"
+down_revision = "202610081000"
 branch_labels = None
 depends_on = None
 

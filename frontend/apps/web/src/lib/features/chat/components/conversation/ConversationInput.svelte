@@ -494,18 +494,19 @@
   onStop={() => abortController?.abort("User cancelled")}
   class="max-w-[74ch] md:w-full"
 >
-  {#if !chat.hasCompletionModel}
-    <div
-      class="bg-card/80 absolute inset-0 z-10 flex items-center justify-center rounded-2xl backdrop-blur-[1px]"
-    >
-      <div class="text-muted-foreground flex items-center gap-2 px-4 text-sm">
-        <TriangleAlert class="h-4 w-4 flex-shrink-0" />
-        <p>{m.no_completion_model_description()}</p>
-      </div>
-    </div>
-  {/if}
-
   <PromptInput.Body>
+    {#if !chat.hasCompletionModel}
+      <!-- Cover only the text field: the footer stays usable so the user can
+           pick a model themselves whenever the selector has one to offer. -->
+      <div
+        class="bg-card/80 absolute inset-0 z-10 flex items-center justify-center rounded-t-2xl backdrop-blur-[1px]"
+      >
+        <div class="text-muted-foreground flex items-center gap-2 px-4 text-sm">
+          <TriangleAlert class="h-4 w-4 flex-shrink-0" />
+          <p>{m.no_completion_model_description()}</p>
+        </div>
+      </div>
+    {/if}
     <MentionInput onpaste={queueUploadsFromClipboard}></MentionInput>
   </PromptInput.Body>
 
