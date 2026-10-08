@@ -101,19 +101,29 @@ curl -w "%{http_code}" -s -o /dev/null http://localhost:8123/api/healthz
 
 ## 🚀 Installation & Setup Issues
 
-### SSR login immediately returns HTTP 401 after deployment
+### Browser calls from another origin are refused with `disallowed_cors_origin`
 
-This usually means the backend could not seed the `allowed_origins` table with
-your public URL.
+The backend accepts a request that carries an `Origin` header only when that
+origin is registered in the `allowed_origins` table (or is `localhost`, the
+API's own origin, or the request authenticates with an active secret API
+key). Anything else is answered with `400` and the code
+`disallowed_cors_origin` before routing, so the backend log shows no attempt
+for the endpoint and the response has no trace id.
 
-1. **Check backend logs** – look for messages such as
-   `Allowed-origins seeding skipped` or
-   `Allowed origin '<url>' already registered`.
-   These indicate whether `PUBLIC_ORIGIN` was read from the environment.
+Up to Eneo 2.2 the web app's own server-side calls carried the browser
+`Origin` as well, so an unregistered public URL also broke username/password
+login with a generic "invalid credentials" error. From 2.3.0 those calls send
+no `Origin` and do not depend on the allowlist; the web app log then names the
+backend code (`Code: disallowed_cors_origin`) if a call is still refused.
 
-2. **Verify environment configuration** – ensure `PUBLIC_ORIGIN` (or its
-   fallback `ORIGIN` / `ENEO_BACKEND_URL`) is set in the backend `.env` file
-   to the externally reachable URL (the one your users see in their browser).
+1. **Check the init log** – `init_db.py` registers `PUBLIC_ORIGIN` for the
+   default tenant and prints
+   `Note! PUBLIC_ORIGIN not set or invalid. Skipping allowed_origins seed.`
+   or `No tenants found; skipping allowed_origins seed.` when it could not.
+
+2. **Verify environment configuration** – `PUBLIC_ORIGIN` in the backend
+   `.env` must be the externally reachable `https://` URL without a path, the
+   same value as the frontend's `ORIGIN`.
 
 3. **Inspect the allowlist manually**:
 
@@ -123,13 +133,13 @@ your public URL.
      -c 'SELECT url, tenant_id FROM allowed_origins;'
    ```
 
-4. **Backfill manually (optional)** – if the table is empty, insert the URL
-   explicitly (idempotent):
+4. **Backfill manually (optional)** – re-run `python init_db.py` with the
+   variable set (idempotent), or insert the URL explicitly:
 
    ```sql
    INSERT INTO allowed_origins (url, tenant_id)
    VALUES ('https://your-domain.com', '<tenant-uuid>')
-   ON CONFLICT (url) DO NOTHING;
+   ON CONFLICT (tenant_id, url) DO NOTHING;
    ```
 
    Replace `<tenant-uuid>` with the ID from `SELECT id FROM tenants;`.

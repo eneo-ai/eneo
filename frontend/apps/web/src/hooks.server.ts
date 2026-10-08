@@ -121,13 +121,57 @@ export const handleError: HandleServerError = async ({ error, event, status, mes
   return appError;
 };
 
-export const handleFetch: HandleFetch = async ({ request, fetch }) => {
-  const serverUrl = getBackendServerUrl();
-  const backendUrl = getBackendUrl();
+/**
+ * The URL the server calls for a request aimed at the backend, or `null` when
+ * the request goes elsewhere (identity provider, external service).
+ *
+ * Origins are compared through `URL`, so `https://Eneo.Example.com` or
+ * `https://eneo.example.com:443` in ENEO_BACKEND_URL still match the
+ * normalised request URL. Without ENEO_BACKEND_SERVER_URL the public URL is
+ * called as is.
+ */
+export function resolveBackendServerUrl(
+  requestUrl: string,
+  backendUrl: string | undefined = getBackendUrl(),
+  serverUrl: string | undefined = getBackendServerUrl()
+): string | null {
+  if (!backendUrl) return null;
+  let target: URL;
+  let base: URL;
+  try {
+    target = new URL(requestUrl);
+    base = new URL(backendUrl);
+  } catch {
+    return null;
+  }
+  const basePath = base.pathname.replace(/\/+$/, "");
+  if (target.origin !== base.origin) return null;
+  if (basePath && target.pathname !== basePath && !target.pathname.startsWith(`${basePath}/`)) {
+    return null;
+  }
+  if (!serverUrl) return target.href;
+  let server: URL;
+  try {
+    server = new URL(serverUrl);
+  } catch {
+    return target.href;
+  }
+  const serverPath = server.pathname.replace(/\/+$/, "");
+  return `${server.origin}${serverPath}${target.pathname.slice(basePath.length)}${target.search}`;
+}
 
-  if (serverUrl && backendUrl && request.url.startsWith(backendUrl)) {
-    request = new Request(request.url.replace(backendUrl, serverUrl), request);
+export const handleFetch: HandleFetch = async ({ request, fetch }) => {
+  const serverUrl = resolveBackendServerUrl(request.url);
+  if (serverUrl === null) {
+    return fetchWithTransientRetry(request, fetch);
   }
 
-  return fetchWithTransientRetry(request, fetch);
+  // Backend calls are server-to-server and deliberately skip SvelteKit's fetch
+  // wrapper. The wrapper adds `Origin: <app origin>` to every request, which
+  // the backend's CORS allowlist then has to contain (400
+  // `disallowed_cors_origin` when PUBLIC_ORIGIN was never registered), and
+  // when the backend shares the app's public origin it hands the request to
+  // this app instead of the network, so it never reaches the backend.
+  const serverRequest = serverUrl === request.url ? request : new Request(serverUrl, request);
+  return fetchWithTransientRetry(serverRequest, globalThis.fetch);
 };

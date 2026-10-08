@@ -20,21 +20,37 @@ function readNonNegativeInteger(value: unknown): number | null {
   return typeof value === "number" && Number.isInteger(value) && value >= 0 ? value : null;
 }
 
-async function readAttemptLimit(
-  response: Response
-): Promise<Pick<EneoLoginResult, "attemptsRemaining" | "retryAfterSeconds">> {
+type LoginFailure = Pick<EneoLoginResult, "attemptsRemaining" | "retryAfterSeconds"> & {
+  /** The backend's error code, when the body carried one. */
+  code: string | null;
+};
+
+function readCode(fields: Record<string, unknown>): string | null {
+  if (typeof fields.code === "string") return fields.code;
+  // FastAPI's own HTTPException shape: `{ "detail": { "code": ... } }`.
+  const detail = fields.detail;
+  if (typeof detail === "object" && detail !== null) {
+    const code = (detail as Record<string, unknown>).code;
+    if (typeof code === "string") return code;
+  }
+  return null;
+}
+
+async function readFailure(response: Response): Promise<LoginFailure> {
+  const empty: LoginFailure = { attemptsRemaining: null, retryAfterSeconds: null, code: null };
   try {
     const body: unknown = await response.json();
     if (typeof body !== "object" || body === null) {
-      return { attemptsRemaining: null, retryAfterSeconds: null };
+      return empty;
     }
     const fields = body as Record<string, unknown>;
     return {
       attemptsRemaining: readNonNegativeInteger(fields.attempts_remaining),
-      retryAfterSeconds: readNonNegativeInteger(fields.retry_after_seconds)
+      retryAfterSeconds: readNonNegativeInteger(fields.retry_after_seconds),
+      code: readCode(fields)
     };
   } catch {
-    return { attemptsRemaining: null, retryAfterSeconds: null };
+    return empty;
   }
 }
 
@@ -54,31 +70,44 @@ export async function loginWithEneo(username: string, password: string): Promise
   body.append("username", username);
   body.append("password", password);
 
+  // `event.fetch` goes through `handleFetch`, which turns this into a
+  // server-to-server call against ENEO_BACKEND_SERVER_URL.
   const { fetch } = getRequestEvent();
 
-  const response = await fetch(`${getBackendUrl()}/api/v1/users/login/token/`, {
-    body: body,
-    method: "POST",
-    headers: {
-      "Content-Type": "application/x-www-form-urlencoded;charset=UTF-8"
-    }
-  });
+  let response: Response;
+  try {
+    response = await fetch(`${getBackendUrl()}/api/v1/users/login/token/`, {
+      body,
+      method: "POST",
+      headers: {
+        "Content-Type": "application/x-www-form-urlencoded;charset=UTF-8"
+      }
+    });
+  } catch (error) {
+    // The backend never answered (wrong internal URL, DNS, closed socket), so
+    // there is no trace id. The form shows the generic failure instead of a
+    // 500 page; the reason is in the server log.
+    console.error(
+      "Username/password login failed before reaching the backend: %s",
+      error instanceof Error ? error.message : String(error)
+    );
+    return { success: false, traceId: null, correlationId: null };
+  }
 
   // Available on both success and failure.
   const traceId = readTraceId(response.headers) ?? null;
 
   if (!response.ok) {
+    const { code, ...attemptLimit } = await readFailure(response);
+    // The code tells a misconfiguration (`disallowed_cors_origin`) apart from
+    // wrong credentials (`invalid_credentials`) without logging the body.
     console.error(
-      "Username/password login failed. Status: %s, Trace ID: %s",
+      "Username/password login failed. Status: %s, Code: %s, Trace ID: %s",
       response.status,
+      code ?? "none",
       traceId || "none"
     );
-    return {
-      success: false,
-      traceId,
-      correlationId: traceId,
-      ...(await readAttemptLimit(response))
-    };
+    return { success: false, traceId, correlationId: traceId, ...attemptLimit };
   }
 
   try {
