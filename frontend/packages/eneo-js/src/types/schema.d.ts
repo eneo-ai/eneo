@@ -3955,6 +3955,26 @@ export interface paths {
     patch?: never;
     trace?: never;
   };
+  "/api/v1/admin/model-providers/outbound-headers/options/": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /**
+     * Get Outbound Header Options
+     * @description Metadata for the outbound header editor: the dynamic values a header value may use, and the provider types that support outbound headers.
+     */
+    get: operations["get_outbound_header_options_api_v1_admin_model_providers_outbound_headers_options__get"];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
   "/api/v1/admin/model-providers/{provider_id}/": {
     parameters: {
       query?: never;
@@ -3978,6 +3998,26 @@ export interface paths {
      * @description Delete a model provider.
      */
     delete: operations["delete_provider_api_v1_admin_model_providers__provider_id___delete"];
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/v1/admin/model-providers/{provider_id}/outbound-headers/preview/": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    /**
+     * Preview Outbound Headers
+     * @description Resolve the provider's outbound headers for a user in this tenant, without sending anything. A secret header returns its state only.
+     */
+    post: operations["preview_outbound_headers_api_v1_admin_model_providers__provider_id__outbound_headers_preview__post"];
+    delete?: never;
     options?: never;
     head?: never;
     patch?: never;
@@ -9010,6 +9050,9 @@ export interface components {
       | "mcp_server_disabled"
       | "mcp_server_tool_enabled"
       | "mcp_server_tool_disabled"
+      | "model_provider_headers_updated"
+      | "model_provider_destination_changed"
+      | "model_provider_headers_previewed"
       | "help_assistant_role_assigned"
       | "help_assistant_role_unassigned"
       | "help_assistant_role_toggled_enabled"
@@ -12932,6 +12975,29 @@ export interface components {
       /** Transcription Audio Limit Bytes */
       transcription_audio_limit_bytes: number;
     };
+    /** DynamicValuePublic */
+    DynamicValuePublic: {
+      /**
+       * Token
+       * @description Used in a header value as {{token}}
+       */
+      token: string;
+      /**
+       * Source
+       * @enum {string}
+       */
+      source: "scim_enterprise" | "external_id";
+      /**
+       * Attribute
+       * @description The provisioned attribute the token reads
+       */
+      attribute: string;
+      /**
+       * Classification
+       * @enum {string}
+       */
+      classification: "identifying" | "organisational";
+    };
     /** EffectiveConfigPublic */
     EffectiveConfigPublic: {
       /** Available Capabilities */
@@ -13346,6 +13412,7 @@ export interface components {
       | "audit_log"
       | "session"
       | "mcp_server"
+      | "model_provider"
       | "mcp_server_tool"
       | "user_group";
     /**
@@ -15722,6 +15789,11 @@ export interface components {
        * @default true
        */
       is_active?: boolean;
+      /**
+       * Outbound Headers
+       * @description Outbound HTTP headers to configure
+       */
+      outbound_headers?: components["schemas"]["OutboundHeaderInput"][];
     };
     /**
      * ModelProviderPublic
@@ -15750,6 +15822,11 @@ export interface components {
       is_active: boolean;
       /** Masked Api Key */
       masked_api_key?: string | null;
+      /**
+       * Outbound Headers
+       * @default []
+       */
+      outbound_headers?: components["schemas"]["OutboundHeaderPublic"][];
       /**
        * Created At
        * Format: date-time
@@ -15790,6 +15867,11 @@ export interface components {
        * @description Whether the provider is active
        */
       is_active?: boolean | null;
+      /**
+       * Outbound Headers
+       * @description Replaces the configured outbound headers; omit to leave them unchanged
+       */
+      outbound_headers?: components["schemas"]["OutboundHeaderInput"][] | null;
     };
     /** ModelUsage */
     ModelUsage: {
@@ -16443,6 +16525,167 @@ export interface components {
       expires_in?: number;
       /** @default attachment */
       content_disposition?: components["schemas"]["ContentDisposition"];
+    };
+    /**
+     * OutboundHeaderInput
+     * @description One outbound header in a create or update.
+     *
+     *     Write convention (the list replaces the stored one):
+     *     an entry with an `id` and no `value` keeps the stored value; with a `value`,
+     *     replaces it; an entry without an `id` is new and must supply `value`; a
+     *     stored header whose `id` is absent is deleted. `fallback` follows the same
+     *     rule, and `null` clears it.
+     */
+    OutboundHeaderInput: {
+      /**
+       * Id
+       * @description Server-assigned id; omit for a new header
+       */
+      id?: string | null;
+      /**
+       * Name
+       * @description HTTP header name (RFC 9110 token)
+       */
+      name: string;
+      /**
+       * Value
+       * @description Literal text and {{token}} dynamic values. Omit to keep the stored value.
+       */
+      value?: string | null;
+      /**
+       * Encoding
+       * @description percent: percent-encode the resolved value (receiver unquotes); none: send byte-exact (printable ASCII only)
+       * @default percent
+       * @enum {string}
+       */
+      encoding?: "percent" | "none";
+      /**
+       * Secret
+       * @description Encrypt at rest and never return the value
+       * @default false
+       */
+      secret?: boolean;
+      /**
+       * On Missing
+       * @description What to do when a dynamic value has no value for the user
+       * @default omit
+       * @enum {string}
+       */
+      on_missing?: "omit" | "fallback" | "fail";
+      /**
+       * Fallback
+       * @description Literal sent when on_missing is 'fallback'. Omit to keep the stored one.
+       */
+      fallback?: string | null;
+    };
+    /**
+     * OutboundHeaderOptions
+     * @description Server-owned metadata for the outbound header editor.
+     */
+    OutboundHeaderOptions: {
+      /** Dynamic Values */
+      dynamic_values: components["schemas"]["DynamicValuePublic"][];
+      /** Supported Provider Types */
+      supported_provider_types: string[];
+      /** Max Headers */
+      max_headers: number;
+    };
+    /** OutboundHeaderPreview */
+    OutboundHeaderPreview: {
+      /**
+       * User Id
+       * Format: uuid
+       */
+      user_id: string;
+      /** Headers */
+      headers: components["schemas"]["OutboundHeaderPreviewItem"][];
+      /**
+       * Destination Problem
+       * @description Why requests to this provider's endpoint would be blocked
+       */
+      destination_problem?: string | null;
+      /**
+       * Blocked
+       * @description Whether this user's requests would be blocked
+       */
+      blocked: boolean;
+      /**
+       * Blocked Reason
+       * @description Why the headers block this user's requests, e.g. 'missing_required_value', 'total_size_exceeded' or 'decryption_failed' (a stored secret cannot be read)
+       */
+      blocked_reason?: string | null;
+    };
+    /** OutboundHeaderPreviewItem */
+    OutboundHeaderPreviewItem: {
+      /** Name */
+      name: string;
+      /** Secret */
+      secret: boolean;
+      /**
+       * State
+       * @enum {string}
+       */
+      state: "resolved" | "missing" | "invalid";
+      /**
+       * Value
+       * @description The value as it would be sent. Never returned for a secret header.
+       */
+      value?: string | null;
+      /**
+       * Policy
+       * @description The missing-value policy applied, when state is 'missing'
+       */
+      policy?: ("omit" | "fallback" | "fail") | null;
+      /**
+       * Reason
+       * @description Why the value is invalid
+       */
+      reason?: string | null;
+      /**
+       * Missing Dynamic Values
+       * @default []
+       */
+      missing_dynamic_values?: string[];
+    };
+    /** OutboundHeaderPreviewRequest */
+    OutboundHeaderPreviewRequest: {
+      /**
+       * User Id
+       * Format: uuid
+       * @description The tenant user to resolve the headers for
+       */
+      user_id: string;
+    };
+    /**
+     * OutboundHeaderPublic
+     * @description A configured header. A secret header's value and fallback are masked.
+     */
+    OutboundHeaderPublic: {
+      /** Id */
+      id: string;
+      /** Name */
+      name: string;
+      /** Value */
+      value: string;
+      /**
+       * Encoding
+       * @enum {string}
+       */
+      encoding: "percent" | "none";
+      /** Secret */
+      secret: boolean;
+      /**
+       * On Missing
+       * @enum {string}
+       */
+      on_missing: "omit" | "fallback" | "fail";
+      /** Fallback */
+      fallback?: string | null;
+      /**
+       * Classification
+       * @description The most sensitive kind of dynamic value the header sends; known for a secret header although its value is masked
+       */
+      classification?: ("identifying" | "organisational") | null;
     };
     /**
      * Outcome
@@ -36952,6 +37195,35 @@ export interface operations {
       };
     };
   };
+  get_outbound_header_options_api_v1_admin_model_providers_outbound_headers_options__get: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["OutboundHeaderOptions"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+    };
+  };
   get_provider_api_v1_admin_model_providers__provider_id___get: {
     parameters: {
       query?: never;
@@ -37119,6 +37391,68 @@ export interface operations {
         };
         content: {
           "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Not Found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+      /** @description Service Unavailable */
+      503: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+    };
+  };
+  preview_outbound_headers_api_v1_admin_model_providers__provider_id__outbound_headers_preview__post: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        provider_id: string;
+      };
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["OutboundHeaderPreviewRequest"];
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["OutboundHeaderPreview"];
         };
       };
       /** @description Forbidden */

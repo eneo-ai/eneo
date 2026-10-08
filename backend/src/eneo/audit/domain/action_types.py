@@ -137,6 +137,11 @@ class ActionType(str, Enum):
     MCP_SERVER_TOOL_ENABLED = "mcp_server_tool_enabled"
     MCP_SERVER_TOOL_DISABLED = "mcp_server_tool_disabled"
 
+    # Model Provider Outbound Header Actions
+    MODEL_PROVIDER_HEADERS_UPDATED = "model_provider_headers_updated"
+    MODEL_PROVIDER_DESTINATION_CHANGED = "model_provider_destination_changed"
+    MODEL_PROVIDER_HEADERS_PREVIEWED = "model_provider_headers_previewed"
+
     # Help Assistant Actions
     HELP_ASSISTANT_ROLE_ASSIGNED = "help_assistant_role_assigned"
     HELP_ASSISTANT_ROLE_UNASSIGNED = "help_assistant_role_unassigned"
