@@ -1,7 +1,7 @@
 from dataclasses import dataclass
 from datetime import datetime
 from enum import Enum
-from typing import TYPE_CHECKING, Annotated, Generic, Literal, Optional, TypeVar
+from typing import TYPE_CHECKING, Annotated, Any, Generic, Literal, Optional, TypeVar
 from uuid import UUID
 
 from pydantic import (
@@ -297,6 +297,11 @@ class UserInDB(UserInDBBase):
         default=None,
         description="Timestamp when user was soft-deleted (null for active users)",
     )
+    # IdP provisioning data, readable in-process only. `exclude=True` keeps both
+    # out of every response built from this model (e.g. sysadmin endpoints that
+    # return UserInDB), so no tenant- or admin-facing API starts exposing them.
+    external_id: Optional[str] = Field(default=None, exclude=True)
+    scim_extensions: Optional[dict[str, Any]] = Field(default=None, exclude=True)
 
     @computed_field
     @property
