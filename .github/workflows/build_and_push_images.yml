@@ -244,6 +244,7 @@ jobs:
             type=sha,format=short,enable=${{ github.ref_type == 'tag' }}
 
       - name: Synchronize frontend with backend
+        timeout-minutes: 15
         env:
           BACKEND_TAG: ${{ needs['build-and-push-backend'].outputs.backend_tag }}
         run: ./scripts/sync-frontend-with-backend.sh "${{ env.REGISTRY }}/${{ env.BACKEND_IMAGE_NAME }}:$BACKEND_TAG"

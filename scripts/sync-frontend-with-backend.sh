@@ -9,19 +9,16 @@ BACKEND_IMAGE=""
 BUILD_VERSION=""
 REGISTRY="${REGISTRY:-ghcr.io}"
 BACKEND_IMAGE_NAME="${BACKEND_IMAGE_NAME:-eneo-ai/eneo-backend}"
+CONTAINER_NAME_FOR_LOGS=""
 
-# Cleanup function
 cleanup() {
-    # Stop any temp backend containers
-    local containers
-    containers=$(docker ps -q --filter "name=temp-backend-" 2>/dev/null || true)
-
-    if [[ -n "$containers" ]]; then
-        echo "Stopping backend container..." >&2
-        docker stop $containers 2>/dev/null || true
+    if [[ -n "$CONTAINER_NAME_FOR_LOGS" ]]; then
+        docker rm -f "$CONTAINER_NAME_FOR_LOGS" >/dev/null 2>&1 || true
     fi
 }
-trap cleanup EXIT SIGINT SIGTERM
+trap cleanup EXIT
+trap 'exit 130' SIGINT
+trap 'exit 143' SIGTERM
 
 # Determine backend image to use
 determine_backend_image() {
@@ -159,7 +156,8 @@ main() {
     export CONTAINER_NAME_FOR_LOGS="$container_name"
     echo "Starting backend on port $backend_port..." >&2
 
-    docker run -d --rm \
+    # Retain a failed container until cleanup so its startup logs remain available.
+    docker run -d \
         --platform linux/amd64 \
         --name "$container_name" \
         -p "$backend_port:8000" \
@@ -179,11 +177,11 @@ main() {
         -e API_KEY_HEADER_NAME=dummy \
         -e JWT_AUDIENCE=dummy \
         -e JWT_ISSUER=dummy \
-        -e JWT_EXPIRY_TIME=86000 \
+        -e JWT_EXPIRY_TIME=1440 \
         -e JWT_ALGORITHM=HS256 \
         -e JWT_SECRET=dummy \
         -e JWT_TOKEN_PREFIX=dummy \
-        -e URL_SIGNING_KEY=dummy \
+        -e URL_SIGNING_KEY=openapi-build-only-signing-key-not-for-production \
         -e ENCRYPTION_KEY=yPIAaWTENh5knUuz75NYHblR3672X-7lH-W6AD4F1hs= \
         -e NUM_WORKERS=1 \
         "$BACKEND_IMAGE" > /dev/null
@@ -193,8 +191,15 @@ main() {
     local attempt=0
     while [ $attempt -lt 30 ]; do
         echo "Attempt $((attempt + 1)): Testing http://localhost:$backend_port/openapi.json" >&2
-        if curl -s "http://localhost:$backend_port/openapi.json" | jq -e '.info.version' >/dev/null 2>&1; then
+        if BUILD_VERSION=$(curl --fail --silent --show-error --connect-timeout 2 --max-time 10 \
+            "http://localhost:$backend_port/openapi.json" | \
+            jq -er '.info.version | select(type == "string" and length > 0)'); then
             echo "Backend OpenAPI endpoint ready" >&2
+            break
+        fi
+        BUILD_VERSION=""
+        if [[ "$(docker inspect --format '{{.State.Running}}' "$container_name")" != "true" ]]; then
+            echo "Backend container exited before OpenAPI was ready" >&2
             break
         fi
         echo "Backend OpenAPI not ready yet, waiting..." >&2
@@ -202,7 +207,7 @@ main() {
         attempt=$((attempt + 1))
     done
 
-    if [ $attempt -eq 30 ]; then
+    if [[ -z "$BUILD_VERSION" ]]; then
         echo "Backend failed to start" >&2
         echo "Container status:" >&2
         docker ps -a --filter "name=$container_name" >&2
@@ -211,16 +216,7 @@ main() {
         exit 1
     fi
 
-    # Get version from running backend (we already tested this works)
-    echo "Extracting version from backend..."
-    BUILD_VERSION=$(curl -s "http://localhost:$backend_port/openapi.json" | jq -r '.info.version')
     echo "Backend version: $BUILD_VERSION"
-
-    # Verify version was extracted successfully
-    if [[ -z "$BUILD_VERSION" || "$BUILD_VERSION" == "null" ]]; then
-        echo "ERROR: Failed to extract version from backend API" >&2
-        exit 1
-    fi
 
     update_eneo_js "$backend_port"
     update_web_app_version
