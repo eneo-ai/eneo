@@ -48,7 +48,7 @@ expandable technical details.
 Persisted business limits accept whole-byte values from 1 through
 9,007,199,254,740,991 so PostgreSQL and browser clients can round-trip the same
 integer exactly. This representation bound is not a business default or a
-capacity recommendation; the applicable operator ceiling can still make the
+capacity recommendation; the selected storage capacity can still make the
 effective limit lower.
 
 The default deployment uses PostgreSQL-inline storage and does not start
@@ -271,8 +271,7 @@ When readiness reports `ready`, an administrator can select **Object store** in
 external endpoints; there is no provider or vendor product branch.
 
 Remote-only settings are all-or-nothing. Do not model “off” with blank values:
-leave every remote-only variable absent. Core settings such as
-`OBJECT_CONTENT_INLINE_MAXIMUM_BYTES` and reconciliation bounds are valid
+leave every remote-only variable absent. Core reconciliation settings are valid
 without an endpoint. Any remote endpoint, credential, transport, multipart, or
 object-inventory value activates strict object-store validation.
 
@@ -300,52 +299,40 @@ external private CA read-only into both backend and worker, then set
 `OBJECT_CONTENT_CA_BUNDLE` in `env_backend.env`. Do not put credentials in the
 endpoint URL, command line, image, repository, logs, or backup manifest.
 
-Inline capacity and common reconciliation tuning live in `env_backend.env`.
-`OBJECT_CONTENT_INLINE_MAXIMUM_BYTES` is an operator admission ceiling that
-bounds PostgreSQL row, WAL, backup, and process memory exposure; it is not a
-business limit. It defaults to 384 MiB, admitting a five-hour recording at
-128 kbit/s (about 275 MiB) while leaving room for `bytea` hex output and Bind
-message framing. The datatype maximum is a hard bound, not a safe operating
-default: hex conversion allocates twice the payload plus three bytes, including
-on the `pg_dump -Fc` backup path. Recordings above the inline default require the
-existing object-store path and a matching upload policy in **Admin > File storage**.
-See the [Flow limits table](../../frontend/apps/docs-site/src/content/guides/flows/integrating-flows.mdx#execution-pdf-extraction-and-builder)
-for the current upload and processing defaults.
-Lowering it affects new inline writes, not reads of existing rows. For
-PostgreSQL-inline session uploads, the effective limit is the smaller of the
-admin policy and this ceiling. **Admin > File storage** shows the configured
-limit, effective limit, and constraining source. Object-store session uploads
-use the same rule with the portable multipart envelope derived from configured
-transport settings. FastAPI/Starlette multipart parsing happens before route
-admission and may use temporary disk. Eneo rejects an oversized File or Icon
-before its own capture/spool or any storage mutation. Operators must use
-ingress/request-body limits and configure and monitor temporary-disk capacity
-to protect that earlier parsing boundary.
+### Upload limits and storage capacity
 
-### Changing the ceiling on an existing deployment
+**Admin > File storage** owns upload policy. Changes apply to new admissions
+without restarting backend or workers. The limits apply to every Flow. **Flow settings > Uploads and runtimes** shows
+the effective sizes; file counts and recording duration remain editable there.
 
-`env_backend.env` is a copy of the shipped template, so an installation keeps
-whatever value it was created with. Changing the template does not change a
-running deployment, and each backend and worker process reads this setting once
-at startup — editing the file alone has no effect.
+`OBJECT_CONTENT_INLINE_MAXIMUM_BYTES` is retired and ignored, with an actionable
+startup log. Old `UPLOAD_*` and `TRANSCRIPTION_MAX_FILE_SIZE` values were only
+migration seeds; removing them does not rewrite stored policy. After upgrading,
+check saved values in File storage. The migration removes retired per-tenant
+file/audio size overrides and logs their previous values; all other settings
+and existing files remain unchanged.
 
-```bash
-# 1. See what the running processes actually read.
-docker compose exec backend printenv OBJECT_CONTENT_INLINE_MAXIMUM_BYTES
-docker compose exec task-execution-worker printenv OBJECT_CONTENT_INLINE_MAXIMUM_BYTES
+PostgreSQL inline capacity is derived from its 1 GiB allocation envelope, the
+2× bytea hex expansion used by COPY/pg_dump, and room for row metadata. It is
+just below 512 MiB per payload. The API rejects policy values above the selected
+storage capacity and reports the affected field. Existing oversized policies
+remain stored; the page shows their lower effective value until corrected.
+For larger files, configure and select object storage in the same page. Its
+capacity follows the S3 multipart protocol and configured part size. There is
+no separate 2 GiB Flow file-size ceiling.
 
-# 2. Edit env_backend.env, then recreate every process that reads it.
-docker compose up -d --force-recreate backend worker crawler-worker \
-  task-execution-worker task-maintenance-worker
-```
+Policy does not reserve resources. Inline uploads materialize bytes in memory;
+budget for payload copies in the API/driver and larger allocations in pg_dump.
+Verify memory, WAL and backup capacity at the selected sizes and concurrency.
+Object storage streams originals, but multipart parsing and processing need
+temporary disk. Text and Office extraction can still materialize whole files;
+a 10 GiB upload policy does not guarantee every format can be processed with
+bounded memory. Audio duration/decoded-size and PDF extraction protections are
+separate processing controls. Ingress limits must admit the chosen policy.
 
-Then confirm the new ceiling reached the product: **Admin > Storage** must show
-it as the operator ceiling, and **Admin > Flow settings → Uploads and runtimes**
-must offer it as the writable maximum for file and audio size.
-
-Business limits apply to the user's original upload. Generated text, model
-input, and page variants may be larger and are bounded by the selected
-backend's operator ceiling instead of a second business limit.
+Generated text and variants use storage capacity, not a second upload policy.
+Lower limits affect new admissions, not existing file access or deletion.
+Rollback does not restore the retired per-tenant size overrides.
 
 Object-store transport, bounded-memory spool, multipart, deletion, and orphan
 tuning is optional and should remain commented out until the endpoint is
@@ -481,7 +468,7 @@ removing configuration.
 ### Change the S3-compatible destination
 
 Changing hosting provider does not require staging content in PostgreSQL — and
-cannot, once any object exceeds the inline admission ceiling. Eneo does not
+cannot, once any object exceeds PostgreSQL inline capacity. Eneo does not
 copy buckets; the operator copies with their own tooling and Eneo performs the
 guarded switch. Object keys carry no endpoint or bucket, so a faithful copy is
 readable immediately.
@@ -494,7 +481,7 @@ readable immediately.
 2. Select `postgres_inline` for new writes in **Admin > File storage**, let queued
    moves and in-flight uploads finish, then select **Pause moves**. Both are
    required: an empty queue does not by itself stop a new move from starting
-   mid-copy. New uploads above `OBJECT_CONTENT_INLINE_MAXIMUM_BYTES` fail
+   mid-copy. New uploads above PostgreSQL inline capacity fail
    during this window.
 3. Copy only `v1/<deployment-id-hex>/` with `rclone copy --checksum` (never
    `sync`, which deletes at the destination) and preserve object metadata;
@@ -988,11 +975,14 @@ the deployment:
 docker compose up -d --force-recreate --no-deps worker
 ```
 
-Keep every item within `OBJECT_CONTENT_INLINE_MAXIMUM_BYTES`; the batch byte
+Keep every item within PostgreSQL inline capacity; the batch byte
 bound does not override that per-content ceiling. An `inline_payload_too_large`
-failure halts the campaign. After confirming capacity, raise the inline ceiling
-and `FILE_ICON_BACKFILL_RESUME_REVISION` together in `env_backend.env`, then
-recreate every backend and worker replica so both use the same safety ceiling.
+failure halts the campaign. A deployment halted by the retired env ceiling can
+retry after upgrading and increasing `FILE_ICON_BACKFILL_RESUME_REVISION` in
+`env_backend.env`. If an item exceeds the actual inline capacity, leave the
+campaign halted and resolve its migration path before retrying. Direct legacy
+adoption into object storage is not supported; changing an env value cannot
+raise PostgreSQL's capacity.
 
 ```bash
 docker compose up -d --force-recreate --no-deps backend worker

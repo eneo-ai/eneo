@@ -33,6 +33,24 @@ class DeploymentPolicyUpdate(BaseModel):
         le=MAXIMUM_UPLOAD_POLICY_BYTES,
     )
 
+    def validate_storage_capacity(self, maximum_bytes: int | None) -> None:
+        if maximum_bytes is None:
+            return
+        for field in (
+            "session_file_limit_bytes",
+            "session_image_limit_bytes",
+            "knowledge_file_limit_bytes",
+            "transcription_audio_limit_bytes",
+        ):
+            requested = getattr(self, field)
+            if requested > maximum_bytes:
+                raise DeploymentPolicyCapacityExceeded(
+                    field=field,
+                    target=self.new_write_storage_target,
+                    requested_bytes=requested,
+                    maximum_bytes=maximum_bytes,
+                )
+
 
 class DeploymentPolicyPauseUpdate(BaseModel):
     model_config = ConfigDict(extra="forbid")
@@ -64,6 +82,29 @@ class ObjectStoreTargetNotSelectable(Exception):
     code = "object_store_target_not_selectable"
 
 
+class DeploymentPolicyCapacityExceeded(Exception):
+    code = "object_content_policy_capacity_exceeded"
+
+    def __init__(
+        self,
+        *,
+        field: str,
+        target: StorageKind,
+        requested_bytes: int,
+        maximum_bytes: int,
+    ) -> None:
+        super().__init__(
+            f"{field} exceeds the selected storage capacity of {maximum_bytes} bytes. "
+            "Lower the upload limit or choose storage with sufficient capacity."
+        )
+        self.context: dict[str, str | int] = {
+            "field": field,
+            "target": target.value,
+            "requested_bytes": requested_bytes,
+            "maximum_bytes": maximum_bytes,
+        }
+
+
 class UploadLimitUseCase(StrEnum):
     SESSION_FILE = "session_file"
     SESSION_IMAGE = "session_image"
@@ -74,7 +115,7 @@ class UploadLimitUseCase(StrEnum):
 
 class ConstrainingSource(StrEnum):
     ADMIN_POLICY = "admin_policy"
-    OPERATOR_CEILING = "operator_ceiling"
+    STORAGE_CAPACITY = "storage_capacity"
 
 
 @dataclass(frozen=True, slots=True)
@@ -83,7 +124,7 @@ class UploadLimitProjection:
     configured_bytes: int
     effective_bytes: int
     storage_target: StorageKind
-    operator_ceiling_bytes: int | None
+    storage_capacity_bytes: int | None
     constraining_source: ConstrainingSource
 
 
@@ -105,7 +146,7 @@ def project_upload_limits(
     inline_maximum_bytes: int,
     object_store_maximum_bytes: int | None,
 ) -> tuple[UploadLimitProjection, ...]:
-    operator_ceiling = {
+    storage_capacity = {
         StorageKind.POSTGRES_INLINE: inline_maximum_bytes,
         StorageKind.OBJECT_STORE: object_store_maximum_bytes,
     }[policy.new_write_storage_target]
@@ -114,8 +155,8 @@ def project_upload_limits(
         use_case: UploadLimitUseCase, configured_bytes: int
     ) -> UploadLimitProjection:
         effective_bytes = (
-            min(configured_bytes, operator_ceiling)
-            if operator_ceiling is not None
+            min(configured_bytes, storage_capacity)
+            if storage_capacity is not None
             else configured_bytes
         )
         return UploadLimitProjection(
@@ -123,9 +164,9 @@ def project_upload_limits(
             configured_bytes=configured_bytes,
             effective_bytes=effective_bytes,
             storage_target=policy.new_write_storage_target,
-            operator_ceiling_bytes=operator_ceiling,
+            storage_capacity_bytes=storage_capacity,
             constraining_source=(
-                ConstrainingSource.OPERATOR_CEILING
+                ConstrainingSource.STORAGE_CAPACITY
                 if effective_bytes < configured_bytes
                 else ConstrainingSource.ADMIN_POLICY
             ),

@@ -256,14 +256,16 @@ state first. Target changes, upload limits, and existing-content moves remain
 separate actions, while detailed limits and PostgreSQL allocation are available
 under technical details.
 
-`OBJECT_CONTENT_INLINE_MAXIMUM_BYTES` remains an operator-owned ceiling for
-safe PostgreSQL rows, WAL, backups, and process memory. It is not a business
-upload limit. For PostgreSQL-inline session uploads and knowledge originals,
-Eneo uses the smaller of the admin policy and this ceiling. **Admin > File storage**
-shows the configured limit, effective limit, and constraining source for
-knowledge files and transcription audio as well as File and Icon. Object-store
-uploads use the same rule with the portable multipart envelope derived from
-deployment transport settings.
+Upload limits are managed in **Admin > File storage** and take effect without a
+restart. The limits apply to every Flow.
+`OBJECT_CONTENT_INLINE_MAXIMUM_BYTES` is retired and ignored. Removing old upload
+environment variables does not reset policy already saved in the database.
+
+The selected storage must support the requested size. PostgreSQL inline capacity
+is just below 512 MiB to preserve COPY/pg_dump round trips within PostgreSQL's
+allocation limit. Choose object storage for larger files, including 10 GiB.
+The API rejects a policy above storage capacity. Legacy oversized values stay
+stored, with the lower effective value shown in the page.
 
 FastAPI/Starlette multipart parsing happens before route admission and may use
 temporary disk. Eneo then stages an accepted knowledge file or audio upload
@@ -275,9 +277,9 @@ parsing and this bounded staging lifecycle.
 
 The API stores the selected target and effective limit with each accepted
 knowledge job. A later admin change therefore affects new jobs only. The worker
-still applies its own live safety ceiling and fails the job clearly when its
+still applies its live storage capacity and fails the job clearly when its
 configuration is lower than the API replica that accepted the upload. Keep
-backend and worker safety settings aligned during normal operation.
+backend and worker storage configuration aligned during normal operation.
 
 Knowledge quota is checked when a complete version is ready to replace the
 active version, not when the request is accepted. This lets an exact
@@ -287,13 +289,13 @@ the previous active version remains available and no original is retained.
 
 Business limits apply to the user's original upload. Generated text, model
 input, and page variants can be larger; Eneo bounds those internal variants by
-the selected backend's operator ceiling instead of rejecting an otherwise valid
+the selected backend's storage capacity instead of rejecting an otherwise valid
 upload against a second business limit.
 
 Persisted business limits accept whole-byte values from 1 through
 9,007,199,254,740,991 so PostgreSQL and browser clients can round-trip the same
 integer exactly. This representation bound is not a business default or a
-capacity recommendation; the applicable operator ceiling can still make the
+capacity recommendation; the selected storage capacity can still make the
 effective limit lower.
 
 ## Set up your choice
@@ -312,11 +314,6 @@ curl -fsS https://eneo.example.eu/api/readyz \
 `object_store_not_configured` is healthy in this mode. PostgreSQL contains both
 the control records and bounded payload bytes, so the normal PostgreSQL backup
 is the complete content backup.
-
-Set `OBJECT_CONTENT_INLINE_MAXIMUM_BYTES` in `env_backend.env` to a measured
-deployment ceiling. Admin policy may exceed this value, but inline session
-writes use the lower effective limit and report the ceiling as the constraining
-source.
 
 In **Admin > File storage**, keep the target for new files set to **PostgreSQL**
 and set the four business limits. The update applies to backend and worker
@@ -533,7 +530,7 @@ name, so a faithful copy is readable the moment you switch.
 
 <Callout type="info">
   Plan a short maintenance window. New files go to PostgreSQL while you work, so
-  uploads larger than the operator's inline ceiling fail until you select object
+  uploads larger than PostgreSQL inline capacity fail until you select object
   storage again.
 </Callout>
 
@@ -949,7 +946,7 @@ bucket back first and use **Change storage location**.
 Yes, in both directions, from **Admin > File storage** — see [Move existing
 content](#move-existing-content). This is a per-file verified move, not a
 destination change. Note that moving a file into PostgreSQL is refused when it
-is larger than the operator's inline ceiling, so a deployment with large files
+is larger than PostgreSQL inline capacity, so a deployment with large files
 cannot use PostgreSQL as a staging area between two S3-compatible services.
 Copy the bucket and switch destination instead.
 

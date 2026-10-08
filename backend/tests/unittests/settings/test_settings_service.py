@@ -170,7 +170,7 @@ def _assert_extra_forbidden(model: type[BaseModel], payload: dict[str, object]) 
 
 def test_flow_settings_update_models_reject_unknown_fields() -> None:
     cases: tuple[tuple[type[BaseModel], dict[str, object]], ...] = (
-        (FlowInputLimitsUpdate, {"file_max_size_bytes": 10_000_000}),
+        (FlowInputLimitsUpdate, {"max_files_per_run": 10}),
         (FlowDocumentRenderLimitsUpdate, {"max_source_chars": 500_000}),
         (FlowRuntimePolicyUpdate, {"default_step_timeout_seconds": 900}),
         (FlowEvidencePolicyUpdate, {"allow_sensitive_flow_exports": True}),
@@ -322,7 +322,7 @@ async def test_update_settings_creates_row_when_missing():
     }
 
 
-async def test_get_flow_input_limits_reads_tenant_override():
+async def test_get_flow_input_limits_ignores_retired_tenant_sizes():
     repo = MockRepo()
     tenant_repo = MockTenantRepo()
     tenant = await tenant_repo.get(TEST_USER.tenant_id)
@@ -351,8 +351,10 @@ async def test_get_flow_input_limits_reads_tenant_override():
 
     limits = await service.get_flow_input_limits()
 
-    assert limits.file_max_size_bytes == 12_000_000
-    assert limits.audio_max_size_bytes == 28_000_000
+    assert limits.file_max_size_bytes == _upload_admission().session_file_maximum_bytes
+    assert (
+        limits.audio_max_size_bytes == _upload_admission().session_audio_maximum_bytes
+    )
 
 
 async def test_get_flow_input_limits_resolves_stored_null_counts_to_defaults():
@@ -421,8 +423,10 @@ async def test_get_flow_input_limits_resolved_returns_domain_limits():
 
     limits = await service.get_flow_input_limits_resolved()
 
-    assert limits.file_max_size_bytes == 13_000_000
-    assert limits.audio_max_size_bytes == 29_000_000
+    assert limits.file_max_size_bytes == _upload_admission().session_file_maximum_bytes
+    assert (
+        limits.audio_max_size_bytes == _upload_admission().session_audio_maximum_bytes
+    )
     assert limits.max_files_per_run == 7
     assert limits.audio_max_files_per_run == 3
 
@@ -571,9 +575,7 @@ async def test_mapped_policy_get_reports_source_for_each_state():
     assert disabled.max_provider_calls_per_mapped_step is None
 
 
-async def test_upload_ceiling_is_clamped_to_the_flow_input_hard_cap():
-    """An object-storage deployment may admit >2 GiB, but flow input limits
-    are hard-capped: the exposed writable ceiling must combine both."""
+async def test_flows_respect_large_admin_storage_policy():
     service = SettingService(
         repo=MockRepo(),
         user=TEST_USER,
@@ -584,15 +586,15 @@ async def test_upload_ceiling_is_clamped_to_the_flow_input_hard_cap():
         data_retention_service=MockDataRetentionService(),
         skill_repo=MagicMock(),
         upload_admission=_upload_admission(
-            file_maximum_bytes=3 * 1024**3,
-            audio_maximum_bytes=4 * 1024**3,
+            file_maximum_bytes=10 * 1024**3,
+            audio_maximum_bytes=10 * 1024**3,
         ),
     )
 
     limits = await service.get_flow_input_limits()
 
-    assert limits.file_max_size_ceiling_bytes == 2 * 1024**3
-    assert limits.audio_max_size_ceiling_bytes == 2 * 1024**3
+    assert limits.file_max_size_bytes == 10 * 1024**3
+    assert limits.audio_max_size_bytes == 10 * 1024**3
 
 
 async def test_restore_audits_the_actual_policy_transition():
@@ -685,18 +687,18 @@ async def test_update_flow_input_limits_persists_and_audits():
     )
 
     updated = await service.update_flow_input_limits(
-        FlowInputLimitsUpdate(audio_max_size_bytes=35_000_000)
+        FlowInputLimitsUpdate(audio_max_files_per_run=3)
     )
 
-    assert updated.audio_max_size_bytes == 35_000_000
+    assert updated.audio_max_files_per_run == 3
     assert updated.file_max_size_bytes == 10_000_000
 
     tenant = await tenant_repo.get(TEST_USER.tenant_id)
-    assert tenant.flow_settings["input_limits"]["audio_max_size_bytes"] == 35_000_000
+    assert tenant.flow_settings["input_limits"]["audio_max_files_per_run"] == 3
     assert len(calls) == 1
     assert calls[0]["metadata"]["setting"] == "flow_input_limits"
     assert calls[0]["metadata"]["changes"] == {
-        "audio_max_size_bytes": {"old": 40_000_000, "new": 35_000_000}
+        "audio_max_files_per_run": {"old": 10, "new": 3}
     }
 
 
@@ -769,35 +771,6 @@ async def test_update_flow_input_limits_null_clears_nullable_overrides():
     tenant = await tenant_repo.get(TEST_USER.tenant_id)
     assert "max_files_per_run" not in tenant.flow_settings["input_limits"]
     assert "audio_max_files_per_run" not in tenant.flow_settings["input_limits"]
-
-
-async def test_update_flow_input_limits_rejects_upload_admission_overflow():
-    tenant_repo = MockTenantRepo()
-    service = SettingService(
-        repo=MockRepo(),
-        user=TEST_USER,
-        ai_models_service=MockRepo(),
-        feature_flag_service=MockFeatureFlagService(),
-        tenant_repo=tenant_repo,
-        audit_service=MockAuditService(),
-        data_retention_service=MockDataRetentionService(),
-        skill_repo=MagicMock(),
-        upload_admission=_upload_admission(file_maximum_bytes=10_000_000),
-    )
-
-    with pytest.raises(BadRequestException) as exc_info:
-        await service.update_flow_input_limits(
-            FlowInputLimitsUpdate(file_max_size_bytes=10_000_001)
-        )
-
-    assert exc_info.value.code == "flow_settings_invalid_payload"
-    assert exc_info.value.context == {
-        "field": "file_max_size_bytes",
-        "requested_bytes": 10_000_001,
-        "maximum_bytes": 10_000_000,
-    }
-    tenant = await tenant_repo.get(TEST_USER.tenant_id)
-    assert tenant.flow_settings == {}
 
 
 async def test_update_flow_input_limits_rejects_empty_patch():

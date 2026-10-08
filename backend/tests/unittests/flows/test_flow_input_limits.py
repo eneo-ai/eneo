@@ -34,92 +34,38 @@ def test_resolve_defaults_when_tenant_settings_missing() -> None:
     assert limits.audio_max_size_bytes == 25_000_000
 
 
-def test_resolve_uses_tenant_overrides() -> None:
+@pytest.mark.parametrize("legacy_size", [1, 10 * 1024**2, 10 * 1024**3, "obsolete"])
+def test_all_flows_use_file_storage_policy_despite_retired_overrides(
+    legacy_size,
+) -> None:
     limits = resolve_flow_input_limits(
         {
             "input_limits": {
-                "file_max_size_bytes": 12_000_000,
-                "audio_max_size_bytes": 32_000_000,
+                "file_max_size_bytes": legacy_size,
+                "audio_max_size_bytes": legacy_size,
             }
         },
-        defaults=_app_settings(upload=20_000_000, transcription=40_000_000),
+        defaults=_app_settings(upload=400 * 1024**2, transcription=10 * 1024**3),
     )
-
-    assert limits.file_max_size_bytes == 12_000_000
-    assert limits.audio_max_size_bytes == 32_000_000
-
-
-def test_resolve_caps_tenant_overrides_at_upload_admission() -> None:
-    limits = resolve_flow_input_limits(
-        {
-            "input_limits": {
-                "file_max_size_bytes": 30_000_000,
-                "audio_max_size_bytes": 40_000_000,
-            }
-        },
-        defaults=_app_settings(upload=20_000_000, transcription=25_000_000),
-    )
-
-    assert limits.file_max_size_bytes == 20_000_000
-    assert limits.audio_max_size_bytes == 25_000_000
+    assert limits.file_max_size_bytes == 400 * 1024**2
+    assert limits.audio_max_size_bytes == 10 * 1024**3
 
 
-def test_resolve_rejects_malformed_settings() -> None:
-    with pytest.raises(BadRequestException, match="file_max_size_bytes"):
-        resolve_flow_input_limits(
-            {
-                "input_limits": {
-                    "file_max_size_bytes": "oops",
-                    "audio_max_size_bytes": -123,
-                }
-            },
-            defaults=_app_settings(upload=10_000_000, transcription=25_000_000),
-        )
-
-
-def test_resolve_rejects_boolean_limit_values() -> None:
-    with pytest.raises(BadRequestException, match="file_max_size_bytes"):
-        resolve_flow_input_limits(
-            {
-                "input_limits": {
-                    "file_max_size_bytes": True,
-                    "audio_max_size_bytes": False,
-                }
-            },
-            defaults=_app_settings(upload=10_000_000, transcription=25_000_000),
-        )
-
-
-def test_apply_patch_updates_only_requested_fields() -> None:
+def test_apply_patch_preserves_unrelated_settings() -> None:
     current = {
-        "input_limits": {
-            "file_max_size_bytes": 10_000_000,
-            "audio_max_size_bytes": 25_000_000,
-        },
+        "input_limits": {"max_files_per_run": 12},
         "other": {"preserve": True},
     }
-
-    updated = apply_flow_input_limits_patch(current, audio_max_size_bytes=33_000_000)
-
-    assert updated["input_limits"]["file_max_size_bytes"] == 10_000_000
-    assert updated["input_limits"]["audio_max_size_bytes"] == 33_000_000
-    assert updated["other"] == {"preserve": True}
-
-
-def test_apply_patch_rejects_out_of_range() -> None:
-    with pytest.raises(BadRequestException, match="audio_max_size_bytes"):
-        apply_flow_input_limits_patch({}, audio_max_size_bytes=0)
-
-
-def test_apply_patch_rejects_boolean_values() -> None:
-    with pytest.raises(BadRequestException, match="file_max_size_bytes"):
-        apply_flow_input_limits_patch({}, file_max_size_bytes=True)
+    updated = apply_flow_input_limits_patch(current, audio_max_files_per_run=3)
+    assert updated == {
+        "input_limits": {"max_files_per_run": 12, "audio_max_files_per_run": 3},
+        "other": {"preserve": True},
+    }
+    assert current["input_limits"] == {"max_files_per_run": 12}
 
 
 def test_validate_accepts_all_known_input_limit_fields() -> None:
     payload = {
-        "file_max_size_bytes": 10_000_000,
-        "audio_max_size_bytes": 25_000_000,
         "max_files_per_run": 50,
         "audio_max_files_per_run": 10,
     }
@@ -137,13 +83,11 @@ def test_validate_rejects_unknown_input_limit_field() -> None:
 
 def test_validate_rejects_unknown_input_limit_field_mixed_with_valid_field() -> None:
     with pytest.raises(BadRequestException) as exc_info:
-        validate_flow_input_limits_object(
-            {"file_max_size_bytes": 10_000_000, "typo": 1}
-        )
+        validate_flow_input_limits_object({"max_files_per_run": 10, "typo": 1})
 
     message = str(exc_info.value)
     assert "typo" in message
-    assert "file_max_size_bytes" not in message
+    assert "max_files_per_run" not in message
 
 
 def test_effective_limit_prefers_audio_for_audio_type() -> None:
@@ -220,14 +164,14 @@ def test_resolve_rejects_malformed_file_count() -> None:
 def test_apply_patch_updates_file_count_fields() -> None:
     current = {
         "input_limits": {
-            "file_max_size_bytes": 10_000_000,
+            "max_files_per_run": 12,
         },
     }
 
     updated = apply_flow_input_limits_patch(current, max_files_per_run=50)
 
     assert updated["input_limits"]["max_files_per_run"] == 50
-    assert updated["input_limits"]["file_max_size_bytes"] == 10_000_000
+    assert current["input_limits"]["max_files_per_run"] == 12
 
 
 def test_apply_patch_removes_keys_for_explicit_null() -> None:

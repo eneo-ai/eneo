@@ -73,6 +73,7 @@ class CapabilityPublic(BaseModel):
     configured: bool
     selectable: bool
     readiness_code: ObjectContentReadinessCode
+    maximum_bytes: int | None
 
 
 class InventoryPublic(BaseModel):
@@ -160,6 +161,7 @@ async def _read_projection(
             configured=fact.configured,
             selectable=fact.selectable,
             readiness_code=fact.readiness_code,
+            maximum_bytes=fact.maximum_bytes,
         )
         for fact in await object_content_runtime.storage_capabilities()
     )
@@ -470,16 +472,17 @@ async def replace_deployment_policy(
     replacement: DeploymentPolicyUpdate,
     container: _PolicyAdminContainer,
 ) -> DeploymentPolicyPublic:
+    capability = next(
+        fact
+        for fact in await object_content_runtime.storage_capabilities()
+        if fact.target is replacement.new_write_storage_target
+    )
     if replacement.new_write_storage_target is StorageKind.OBJECT_STORE:
-        capability = next(
-            fact
-            for fact in await object_content_runtime.storage_capabilities()
-            if fact.target is StorageKind.OBJECT_STORE
-        )
         if not capability.selectable:
             raise ObjectStoreTargetNotSelectable(
                 "Object-store target is not selectable."
             )
+    replacement.validate_storage_capacity(capability.maximum_bytes)
 
     user = container.user()
     session = cast(AsyncSession, container.session())

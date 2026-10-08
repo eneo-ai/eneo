@@ -652,43 +652,19 @@ describe("flow settings page — mapped restore lifecycle", () => {
     await expect.element(page.getByRole("tab", { name: "Sparat källunderlag" })).toBeVisible();
   });
 
-  test("upload ceilings state their value, and say where they are raised", async () => {
+  test("shows shared upload sizes with a link to their only editor", async () => {
     render(FlowSettingsPage, pageProps());
     await page.getByRole("tab", { name: "Uppladdningar och körtider" }).click();
-
-    // The value belongs under the input, where a limit is read. The provenance
-    // is what an admin needs only once — that it is owned by the
-    // deployment-wide storage policy — so it lives in the row's tooltip rather
-    // than in the line under every field.
-    await expect.element(page.getByText("Högsta tillåtna värde: 200 MiB.")).toBeVisible();
-    await expect.element(page.getByText("Högsta tillåtna värde: 10 MiB.")).toBeVisible();
-
-    for (const field of ["Största filstorlek", "Största ljudfil"]) {
-      await expect
-        .element(
-          page.getByRole("button", {
-            name: new RegExp(
-              `${field}.*Taket gäller hela driftmiljön och ändras av en lagringsadministratör under Admin > Fillagring`
-            )
-          })
-        )
-        .toBeVisible();
+    await expect.element(page.getByText("10 MiB", { exact: true })).toBeVisible();
+    await expect.element(page.getByText("200 MiB", { exact: true })).toBeVisible();
+    await expect
+      .element(page.getByRole("link", { name: "Hantera i Fillagring" }).first())
+      .toHaveAttribute("href", "/admin/storage");
+    for (const name of ["Största filstorlek", "Största ljudfil"]) {
+      expect(page.getByRole("textbox", { name }).query()).toBeNull();
     }
-  });
-
-  test("states the recording time an audio limit buys, and follows the value", async () => {
-    render(FlowSettingsPage, pageProps());
-    await page.getByRole("tab", { name: "Uppladdningar och körtider" }).click();
-
-    // 200 MiB of 128 kbit/s MP3 is roughly 3 h 38 min of speech.
     await expect
       .element(page.getByText("Räcker till ungefär 3 h 38 min tal i MP3.", { exact: false }))
-      .toBeVisible();
-
-    await page.getByRole("textbox", { name: "Största ljudfil" }).fill("60");
-
-    await expect
-      .element(page.getByText("Räcker till ungefär 1 h 6 min tal i MP3.", { exact: false }))
       .toBeVisible();
   });
 
@@ -734,36 +710,6 @@ describe("flow settings page — mapped restore lifecycle", () => {
     await field.fill("");
     await page.getByRole("button", { name: "Spara ändringar" }).click();
     expect(updateFlowInputLimits).toHaveBeenLastCalledWith({ audio_max_duration_seconds: null });
-  });
-
-  test("hides the running time while the audio size is invalid", async () => {
-    render(FlowSettingsPage, pageProps());
-    await page.getByRole("tab", { name: "Uppladdningar och körtider" }).click();
-
-    // Above the ceiling: an estimate here would read as the entered value's.
-    await page.getByRole("textbox", { name: "Största ljudfil" }).fill("300");
-
-    expect(page.getByText("Räcker till ungefär", { exact: false }).query()).toBeNull();
-    await expect
-      .element(page.getByText("Högsta tillåtna värde: 200 MiB.", { exact: false }))
-      .toBeVisible();
-  });
-
-  test("dirty upload rows expose row-specific undo actions without repeated default links", async () => {
-    render(FlowSettingsPage, pageProps());
-    await page.getByRole("tab", { name: "Uppladdningar och körtider" }).click();
-
-    expect(page.getByRole("button", { name: /Återställ till standard:/ }).query()).toBeNull();
-
-    // dirty two rows and expect two distinct undo names
-    await page.getByRole("textbox", { name: "Största filstorlek" }).fill("5");
-    await page.getByRole("textbox", { name: "Största ljudfil" }).fill("50");
-    await expect
-      .element(page.getByRole("button", { name: "Ignorera ändringar: Största filstorlek" }))
-      .toBeVisible();
-    await expect
-      .element(page.getByRole("button", { name: "Ignorera ändringar: Största ljudfil" }))
-      .toBeVisible();
   });
 
   test("max concurrent flow runs states the server capacity and refuses more", async () => {

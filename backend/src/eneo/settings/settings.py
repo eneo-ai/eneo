@@ -35,12 +35,12 @@ from eneo.flows.flow_input_limits import (
     FLOW_AUDIO_MIN_DURATION_SECONDS,
     FLOW_INPUT_MAX_AUDIO_FILES_COUNT,
     FLOW_INPUT_MAX_FILES_COUNT,
-    FLOW_INPUT_MAX_LIMIT_BYTES,
     FLOW_INPUT_MIN_LIMIT_BYTES,
 )
 from eneo.flows.runtime.document_rendering.limits import DocumentRenderLimits
 from eneo.main.config import FLOW_AUDIO_MAX_DURATION_BOUND_SECONDS
 from eneo.main.models import InDB
+from eneo.object_content.content import MAXIMUM_UPLOAD_POLICY_BYTES
 from eneo.skills.domain.skill import (
     MAX_SKILL_ACTIVATIONS_PER_TURN,
     MAX_SKILL_ATTACHMENT_LIMIT,
@@ -128,15 +128,11 @@ FLOW_INPUT_LIMITS_PUBLIC_EXAMPLE: JsonDict = {
     "audio_max_size_bytes": 104857600,
     "max_files_per_run": 20,
     "audio_max_files_per_run": 5,
-    "file_max_size_ceiling_bytes": 52428800,
-    "audio_max_size_ceiling_bytes": 209715200,
     "audio_max_duration_seconds": 18000,
     "audio_max_duration_ceiling_seconds": 28800,
 }
 
 FLOW_INPUT_LIMITS_UPDATE_EXAMPLE: JsonDict = {
-    "file_max_size_bytes": 52428800,
-    "audio_max_size_bytes": None,
     "max_files_per_run": 20,
     "audio_max_files_per_run": None,
     "audio_max_duration_seconds": 18000,
@@ -229,11 +225,11 @@ class FlowInputLimitsPublic(BaseModel):
 
     file_max_size_bytes: int = Field(
         ge=FLOW_INPUT_MIN_LIMIT_BYTES,
-        le=FLOW_INPUT_MAX_LIMIT_BYTES,
+        le=MAXIMUM_UPLOAD_POLICY_BYTES,
     )
     audio_max_size_bytes: int = Field(
         ge=FLOW_INPUT_MIN_LIMIT_BYTES,
-        le=FLOW_INPUT_MAX_LIMIT_BYTES,
+        le=MAXIMUM_UPLOAD_POLICY_BYTES,
     )
     max_files_per_run: int | None = Field(
         ...,
@@ -248,22 +244,6 @@ class FlowInputLimitsPublic(BaseModel):
             "Effective tenant-level audio file count ceiling for each Flow run. "
             "Resetting the stored override to null restores the default; this "
             "response always returns the resolved positive integer."
-        ),
-    )
-    file_max_size_ceiling_bytes: int = Field(
-        ge=FLOW_INPUT_MIN_LIMIT_BYTES,
-        description=(
-            "Effective writable ceiling for file uploads: the deployment "
-            "upload-admission limit capped by the flow-input hard maximum. "
-            "Tenant values above it are rejected on write and clamped on read."
-        ),
-    )
-    audio_max_size_ceiling_bytes: int = Field(
-        ge=FLOW_INPUT_MIN_LIMIT_BYTES,
-        description=(
-            "Effective writable ceiling for audio uploads: the deployment "
-            "upload-admission limit capped by the flow-input hard maximum. "
-            "Tenant values above it are rejected on write and clamped on read."
         ),
     )
     # Any positive value reads back: a deployment may set less than the minute
@@ -292,18 +272,6 @@ class FlowInputLimitsUpdate(BaseModel):
         json_schema_extra={"example": FLOW_INPUT_LIMITS_UPDATE_EXAMPLE},
     )
 
-    file_max_size_bytes: int | None = Field(
-        default=None,
-        ge=FLOW_INPUT_MIN_LIMIT_BYTES,
-        le=FLOW_INPUT_MAX_LIMIT_BYTES,
-        description="Set the tenant override, or send null to use the deployment default.",
-    )
-    audio_max_size_bytes: int | None = Field(
-        default=None,
-        ge=FLOW_INPUT_MIN_LIMIT_BYTES,
-        le=FLOW_INPUT_MAX_LIMIT_BYTES,
-        description="Set the tenant override, or send null to use the deployment default.",
-    )
     max_files_per_run: int | None = Field(
         default=None,
         ge=1,

@@ -251,18 +251,10 @@ TRANSCRIPTION_MAX_FILE_SIZE=402653184
 # Durable Object Content (PostgreSQL-inline defaults)
 # ----------------------------------------------------------------------------
 # These settings are active whether or not an external object store is enabled.
-# The inline ceiling is a deployment safety/admission bound, not a user-facing
-# upload policy. Reads of existing inline content remain possible if it is
-# lowered. Product upload limits remain admin-configurable in Eneo, under
-# Admin > Storage (deployment-wide) and Admin > Flow settings (per tenant);
-# neither can be raised above this ceiling.
-#
-# The 384 MiB default leaves room for bytea hex output and protocol framing.
-# A five-hour 128 kbit/s recording uses about 275 MiB; larger recordings use
-# the object-store path. Inline payloads are TOAST'd
-# bytea rows that are written to WAL and carried in every base backup, and each
-# audio file being transcribed is held in worker memory while it is prepared.
-OBJECT_CONTENT_INLINE_MAXIMUM_BYTES=402653184
+# Upload sizes for every Flow are managed in Admin > File storage, without
+# restart. Choose object storage for files above PostgreSQL inline capacity.
+# Inline payloads are bytea rows carried in WAL and backups; provision memory,
+# disk and backup capacity for the chosen upload sizes and concurrency.
 OBJECT_CONTENT_INLINE_IO_CHUNK_BYTES=262144
 
 # Bounded lifecycle and reference reconciliation. Increase only after measuring

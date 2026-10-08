@@ -265,7 +265,7 @@ These are admin surfaces, not end-user runtime endpoints:
 
 | Setting area                | Endpoint                                                                       | Purpose                                                                                                                  |
 | --------------------------- | ------------------------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------ |
-| Flow input limits           | `GET/PATCH /api/v1/settings/flow-input-limits`                                 | Control maximum file/audio sizes and file-count limits                                                                   |
+| Flow input limits           | `GET/PATCH /api/v1/settings/flow-input-limits`                                 | Read shared file/audio sizes and control file counts and recording duration                                                                   |
 | Flow document render limits | `GET/PATCH /api/v1/settings/flow-document-render-limits`                       | Control generated PDF/DOCX rendering limits                                                                              |
 | Flow runtime policy         | `GET/PATCH /api/v1/settings/flow-runtime-policy`                               | Control step timeouts and the run limit                                                                                  |
 | Mapped execution policy     | `GET/PATCH /api/v1/settings/flow-mapped-execution-policy`                      | Control provider-call fan-out and aggregate estimated-input-token ceilings for each mapped step attempt                  |
@@ -273,6 +273,11 @@ These are admin surfaces, not end-user runtime endpoints:
 | Knowledge evidence policy   | `GET/PATCH /api/v1/settings/flow-rag-evidence-policy`                          | Control how much retrieval evidence a run records and exposes                                                            |
 | Flow data eligibility       | `GET/PATCH /api/v1/settings/flow-retention-policy`                             | Inspect and change never-attached-upload and debug-evidence eligibility                                                  |
 | Flow run-history retention  | `GET/PUT /api/v1/settings/flow-run-retention-policy` and its Space/Flow routes | Inspect, replace, or inherit complete run-history policies and read the review queue                                     |
+
+File and audio sizes are managed deployment-wide in **Admin > File storage**.
+The Flow settings PATCH no longer accepts `file_max_size_bytes` or
+`audio_max_size_bytes` (422 for old clients). GET still returns the effective
+sizes used by uploads. The former duplicate size-ceiling fields are removed.
 
 Audio transcription reuses the verified digest and one original on disk—the verified download file for object-store audio, or a single write of inline audio hydrated within the deployment’s inline ceiling—with duration reused from the bounded local decode or measured lazily when only the remote engine runs; remote acceptance releases the original.
 

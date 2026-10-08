@@ -33,6 +33,7 @@ from eneo.object_content.content import (
     ObjectContentUnavailableError,
 )
 from eneo.object_content.deployment_policy import (
+    DeploymentPolicyCapacityExceeded,
     DeploymentPolicyConflict,
     ObjectStoreTargetNotSelectable,
 )
@@ -327,6 +328,7 @@ DOMAIN_EXCEPTION_MAP: dict[type[Exception], tuple[int, str | None, ErrorCodes]] 
     ContentTooLargeError: (413, None, ErrorCodes.FILE_TOO_LARGE),
     InvalidContentRangeError: (416, None, ErrorCodes.BAD_REQUEST),
     DeploymentPolicyConflict: (409, None, ErrorCodes.DEPLOYMENT_POLICY_CONFLICT),
+    DeploymentPolicyCapacityExceeded: (422, None, ErrorCodes.VALIDATION_ERROR),
     ObjectStoreTargetNotSelectable: (
         409,
         None,

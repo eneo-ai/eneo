@@ -21,7 +21,6 @@ from eneo.database.tables.flow_tables import (
 )
 from eneo.object_content.configuration import (
     DEFAULT_FILE_UPLOAD_LIMIT_BYTES,
-    ObjectContentCoreSettings,
 )
 
 _ALEMBIC_VERSION_NUM_LIMIT = 32
@@ -464,7 +463,7 @@ def test_upload_default_migration_literals_match_runtime_defaults() -> None:
         "knowledge_file_limit_bytes": (10485760, DEFAULT_FILE_UPLOAD_LIMIT_BYTES),
         "transcription_audio_limit_bytes": (
             209715200,
-            ObjectContentCoreSettings.model_fields["inline_maximum_bytes"].default,
+            402653184,
         ),
     }
     for filename in ("202607251700_add_object_content_deployment_policy.py", path.name):

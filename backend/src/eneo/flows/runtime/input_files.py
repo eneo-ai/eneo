@@ -13,7 +13,6 @@ from eneo.flows.domain.canonical_json_hash import canonical_json_bytes
 from eneo.flows.domain.runtime import InputFileSize
 from eneo.flows.flow_api_error_code import FlowApiErrorCode
 from eneo.flows.flow_api_exceptions import FlowBadRequestException
-from eneo.flows.flow_input_limits import effective_upload_ceiling_bytes
 
 if TYPE_CHECKING:
     from eneo.files.file_models import File
@@ -82,8 +81,8 @@ def ensure_input_file_budget(
             binary_bytes += size.binary_bytes
     for kind, measured, ceiling in (
         ("inline_text", inline_bytes, max_inline_text_bytes),
-        ("binary", binary_bytes, effective_upload_ceiling_bytes(file_max_size_bytes)),
-        ("binary", audio_bytes, effective_upload_ceiling_bytes(audio_max_size_bytes)),
+        ("binary", binary_bytes, file_max_size_bytes),
+        ("binary", audio_bytes, audio_max_size_bytes),
     ):
         if measured > ceiling:
             raise FlowBadRequestException(

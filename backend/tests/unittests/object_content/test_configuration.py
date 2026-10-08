@@ -5,7 +5,7 @@ import pytest
 from pydantic import ValidationError
 
 from eneo.object_content.configuration import (
-    MAXIMUM_INLINE_BYTES,
+    INLINE_PAYLOAD_CAPACITY_BYTES,
     ObjectContentCoreSettings,
     ObjectContentSettings,
     load_object_content_core_settings,
@@ -31,35 +31,40 @@ def test_absent_object_store_environment_keeps_inline_defaults(
     _clear_object_content_environment(monkeypatch)
 
     assert load_object_content_settings() is None
-    assert load_object_content_core_settings().inline_maximum_bytes == 384 * 1024**2
+    assert (
+        load_object_content_core_settings().inline_maximum_bytes
+        == INLINE_PAYLOAD_CAPACITY_BYTES
+    )
 
 
-def test_inline_tuning_does_not_require_object_store_configuration(
+@pytest.mark.parametrize("legacy_limit", ["10485760", "invalid"])
+def test_legacy_inline_environment_cannot_cap_admin_upload_policy(
     monkeypatch: pytest.MonkeyPatch,
+    legacy_limit: str,
 ) -> None:
     _clear_object_content_environment(monkeypatch)
-    monkeypatch.setenv("OBJECT_CONTENT_INLINE_MAXIMUM_BYTES", "2097152")
+    monkeypatch.setenv("OBJECT_CONTENT_INLINE_MAXIMUM_BYTES", legacy_limit)
     monkeypatch.setenv("OBJECT_CONTENT_INLINE_IO_CHUNK_BYTES", "65536")
 
     assert load_object_content_settings() is None
-    assert load_object_content_core_settings() == ObjectContentCoreSettings(
-        _env_file=None,
-        inline_maximum_bytes=2 * 1024**2,
-        inline_io_chunk_bytes=64 * 1024,
-    )
+    settings = load_object_content_core_settings()
+    assert settings.inline_maximum_bytes >= 400 * 1024**2
+    assert 2 * settings.inline_maximum_bytes + 3 < 1024**3
+    assert settings.inline_io_chunk_bytes == 64 * 1024
 
 
 def test_inline_maximum_above_the_postgres_field_limit_is_rejected() -> None:
     """A ceiling PostgreSQL cannot store would admit uploads that then fail."""
 
-    # 1 GB datum limit minus the four-byte varlena header.
-    assert MAXIMUM_INLINE_BYTES == 1024**3 - 5
-    ObjectContentCoreSettings(_env_file=None, inline_maximum_bytes=MAXIMUM_INLINE_BYTES)
+    assert 2 * INLINE_PAYLOAD_CAPACITY_BYTES + 1024 < 1024**3
+    ObjectContentCoreSettings(
+        _env_file=None, inline_maximum_bytes=INLINE_PAYLOAD_CAPACITY_BYTES
+    )
 
     with pytest.raises(ValidationError):
         ObjectContentCoreSettings(
             _env_file=None,
-            inline_maximum_bytes=MAXIMUM_INLINE_BYTES + 1,
+            inline_maximum_bytes=INLINE_PAYLOAD_CAPACITY_BYTES + 1,
         )
 
 
@@ -263,3 +268,15 @@ def test_multipart_threshold_cannot_bypass_the_single_put_limit() -> None:
             allow_insecure_http=True,
             multipart_threshold_bytes=5 * gibibyte + 1,
         )
+
+
+def test_inline_copy_capacity_accounts_for_every_persisted_column() -> None:
+    from eneo.database.tables.object_content_table import InlineContentPayloads
+
+    assert set(InlineContentPayloads.__table__.columns.keys()) == {
+        "content_id",
+        "storage_kind",
+        "payload",
+        "created_at",
+        "updated_at",
+    }

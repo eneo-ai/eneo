@@ -13,6 +13,7 @@
     bytes: number;
     storedBytes: number;
     disabled: boolean;
+    maximumBytes: number | null;
   };
 
   const unitBytes: Record<ByteUnit, number> = {
@@ -23,10 +24,19 @@
   };
   const units: ByteUnit[] = ["B", "KB", "MB", "GB"];
 
-  let { id, label, description, bytes = $bindable(), storedBytes, disabled }: Props = $props();
+  let {
+    id,
+    label,
+    description,
+    bytes = $bindable(),
+    storedBytes,
+    disabled,
+    maximumBytes
+  }: Props = $props();
   let unit = $derived<ByteUnit>(unitFor(storedBytes));
   const value = $derived(bytes / unitBytes[unit]);
-  const valid = $derived(Number.isSafeInteger(bytes) && bytes > 0);
+  const capacityExceeded = $derived(maximumBytes !== null && bytes > maximumBytes);
+  const valid = $derived(Number.isSafeInteger(bytes) && bytes > 0 && !capacityExceeded);
 
   function unitFor(value: number): ByteUnit {
     for (const candidate of ["GB", "MB", "KB"] as const) {
@@ -62,16 +72,17 @@
       type="number"
       min="0"
       step="any"
+      max={maximumBytes === null ? undefined : maximumBytes / unitBytes[unit]}
       required
       {disabled}
       aria-invalid={!valid}
-      aria-describedby={`${id}-description`}
+      aria-describedby={`${id}-description${capacityExceeded ? ` ${id}-error` : ""}`}
       bind:value={() => value, updateValue}
     />
     <Select.Root type="single" bind:value={() => unit, updateUnit} {disabled}>
       <Select.Trigger
         aria-label={m.storage_limit_unit({ limit: label })}
-        aria-describedby={`${id}-description`}
+        aria-describedby={`${id}-description${capacityExceeded ? ` ${id}-error` : ""}`}
         aria-invalid={!valid}
         class="w-full"
       >
@@ -89,4 +100,11 @@
     </Select.Root>
   </div>
   <Field.Description id={`${id}-description`}>{description}</Field.Description>
+  {#if capacityExceeded && maximumBytes !== null}
+    <Field.Error id={`${id}-error`}
+      >{m.storage_capacity_exceeded({
+        maximum: `${maximumBytes / unitBytes[unit]} ${unitLabel(unit)}`
+      })}</Field.Error
+    >
+  {/if}
 </Field.Field>

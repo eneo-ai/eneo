@@ -542,7 +542,7 @@ async def get_flow_input_limits(
     operation_id="update_flow_input_limits",
     summary="Update flow input limits",
     description=(
-        "Update tenant-level upload limits used by flow runtime input endpoints. "
+        "Update tenant-level file counts and recording duration. File sizes are managed in Admin > File storage for all flows. "
         "Omit a field to leave it unchanged. Send null to remove that tenant "
         "override and fall back to the default policy. Send a positive integer to set "
         "a tenant override. The returned payload is the resolved effective policy after "

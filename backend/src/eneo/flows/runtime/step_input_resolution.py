@@ -54,7 +54,6 @@ from eneo.flows.flow_api_exceptions import FlowBadRequestException
 from eneo.flows.flow_input_limits import (
     FLOW_INPUT_MAX_FILES_COUNT,
     FlowInputLimits,
-    effective_upload_ceiling_bytes,
     flow_audio_decode_limits,
 )
 from eneo.flows.flow_run_input_envelope import (
@@ -240,7 +239,7 @@ async def resolve_step_input(
         merged_materials.update({item.identity: item for item in materials})
         state.resolved_materials = tuple(merged_materials.values())
     processing_ceiling_bytes = (
-        effective_upload_ceiling_bytes(deps.input_limits.file_max_size_bytes)
+        deps.input_limits.file_max_size_bytes
         if materials and deps.input_limits is not None
         else None
     )
@@ -348,9 +347,7 @@ async def resolve_step_input(
                     raise RuntimeError(
                         "Resolved Flow input limits are required before loading material"
                     )
-                processing_ceiling_bytes = effective_upload_ceiling_bytes(
-                    deps.input_limits.file_max_size_bytes
-                )
+                processing_ceiling_bytes = deps.input_limits.file_max_size_bytes
                 if state is not None:
                     state.resolved_materials = (
                         *state.resolved_materials,
@@ -1693,10 +1690,7 @@ async def _resolve_step_materials(
             file_ids=[text.file_id for _, text in artifacts] + list(runtime_file_ids),
             sizes=processing_sizes,
             max_inline_text_bytes=deps.max_inline_text_bytes - inline_bytes,
-            file_max_size_bytes=effective_upload_ceiling_bytes(
-                deps.input_limits.file_max_size_bytes
-            )
-            - inline_bytes,
+            file_max_size_bytes=deps.input_limits.file_max_size_bytes - inline_bytes,
             audio_max_size_bytes=deps.input_limits.audio_max_size_bytes,
         )
     except FlowBadRequestException as exc:

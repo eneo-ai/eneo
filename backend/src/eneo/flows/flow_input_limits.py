@@ -12,7 +12,6 @@ from eneo.main.config import (
 from eneo.main.exceptions import BadRequestException
 
 FLOW_INPUT_MIN_LIMIT_BYTES = 1
-FLOW_INPUT_MAX_LIMIT_BYTES = 2 * 1024**3
 FLOW_INPUT_MAX_FILES_COUNT = 1000
 FLOW_INPUT_MAX_AUDIO_FILES_COUNT = 100
 
@@ -32,7 +31,14 @@ class FlowInputLimits:
     audio_max_duration_seconds: int | None = None
 
 
-FLOW_INPUT_LIMIT_KEYS = frozenset(FlowInputLimits.__dataclass_fields__)
+FLOW_INPUT_LIMIT_KEYS = frozenset(
+    {
+        "max_files_per_run",
+        "audio_max_files_per_run",
+        "audio_max_duration_seconds",
+    }
+)
+RETIRED_FLOW_SIZE_KEYS = frozenset({"file_max_size_bytes", "audio_max_size_bytes"})
 
 
 @dataclass(frozen=True)
@@ -91,13 +97,6 @@ class FlowInputLimitDefaults(Protocol):
     def session_audio_maximum_bytes(self) -> int: ...
 
 
-def effective_upload_ceiling_bytes(admission_ceiling_bytes: int) -> int:
-    """The actual writable bound for a tenant upload limit: the deployment
-    admission ceiling capped by the flow-input hard maximum, so the exposed
-    ceiling can never advertise values the update path rejects."""
-    return min(admission_ceiling_bytes, FLOW_INPUT_MAX_LIMIT_BYTES)
-
-
 async def resolve_flow_input_limits_from_source(
     source: FlowInputLimitsSource | None,
 ) -> FlowInputLimits:
@@ -109,15 +108,9 @@ async def resolve_flow_input_limits_from_source(
 def _default_limits(defaults: FlowInputLimitDefaults | None) -> FlowInputLimits:
     if defaults is None:
         raise RuntimeError("Flow input limit defaults are required")
-    # Admission may admit more than the flow-input hard cap; the resolved
-    # defaults must stay within the writable bound.
     return FlowInputLimits(
-        file_max_size_bytes=effective_upload_ceiling_bytes(
-            defaults.session_file_maximum_bytes
-        ),
-        audio_max_size_bytes=effective_upload_ceiling_bytes(
-            defaults.session_audio_maximum_bytes
-        ),
+        file_max_size_bytes=defaults.session_file_maximum_bytes,
+        audio_max_size_bytes=defaults.session_audio_maximum_bytes,
         max_files_per_run=FLOW_INPUT_MAX_FILES_COUNT,
         audio_max_files_per_run=DEFAULT_MAX_AUDIO_FILES_PER_RUN,
         audio_max_duration_seconds=_default_audio_duration_seconds(),
@@ -135,19 +128,6 @@ def _parse_duration(value: Any, field_name: str) -> int:
             f"{field_name} must be between {FLOW_AUDIO_MIN_DURATION_SECONDS} and "
             f"{FLOW_AUDIO_MAX_DURATION_BOUND_SECONDS} seconds."
         )
-    return value
-
-
-def _parse_limit(value: Any, field_name: str) -> int:
-    if not isinstance(value, int) or isinstance(value, bool):
-        raise BadRequestException(f"{field_name} must be an integer.")
-
-    if value < FLOW_INPUT_MIN_LIMIT_BYTES or value > FLOW_INPUT_MAX_LIMIT_BYTES:
-        raise BadRequestException(
-            f"{field_name} must be between "
-            f"{FLOW_INPUT_MIN_LIMIT_BYTES} and {FLOW_INPUT_MAX_LIMIT_BYTES} bytes."
-        )
-
     return value
 
 
@@ -184,10 +164,6 @@ def validate_flow_input_limits_object(input_limits: Any) -> dict[str, Any]:
             f"flow_settings.input_limits contains unknown fields: {unknown}"
         )
 
-    for key in ("file_max_size_bytes", "audio_max_size_bytes"):
-        if key not in input_limits_dict:
-            continue
-        _parse_limit(input_limits_dict[key], key)
     if "audio_max_duration_seconds" in input_limits_dict:
         _parse_duration(
             input_limits_dict["audio_max_duration_seconds"],
@@ -214,24 +190,9 @@ def resolve_flow_input_limits(
     *,
     defaults: FlowInputLimitDefaults | None = None,
 ) -> FlowInputLimits:
-    """Resolve tenant policy beneath the current upload-admission ceiling."""
+    """Use File storage sizes and tenant-specific counts and processing limits."""
     resolved_defaults = _default_limits(defaults)
     input_limits = _extract_input_limits(tenant_flow_settings)
-
-    file_limit = resolved_defaults.file_max_size_bytes
-    audio_limit = resolved_defaults.audio_max_size_bytes
-
-    if "file_max_size_bytes" in input_limits:
-        file_limit = min(
-            _parse_limit(input_limits["file_max_size_bytes"], "file_max_size_bytes"),
-            resolved_defaults.file_max_size_bytes,
-        )
-
-    if "audio_max_size_bytes" in input_limits:
-        audio_limit = min(
-            _parse_limit(input_limits["audio_max_size_bytes"], "audio_max_size_bytes"),
-            resolved_defaults.audio_max_size_bytes,
-        )
 
     max_files = resolved_defaults.max_files_per_run
     audio_max_files = resolved_defaults.audio_max_files_per_run
@@ -262,8 +223,8 @@ def resolve_flow_input_limits(
         )
 
     return FlowInputLimits(
-        file_max_size_bytes=file_limit,
-        audio_max_size_bytes=audio_limit,
+        file_max_size_bytes=resolved_defaults.file_max_size_bytes,
+        audio_max_size_bytes=resolved_defaults.audio_max_size_bytes,
         max_files_per_run=max_files,
         audio_max_files_per_run=audio_max_files,
         audio_max_duration_seconds=audio_duration,
@@ -273,8 +234,6 @@ def resolve_flow_input_limits(
 def apply_flow_input_limits_patch(
     current_flow_settings: dict[str, Any] | None,
     *,
-    file_max_size_bytes: int | None = None,
-    audio_max_size_bytes: int | None = None,
     max_files_per_run: int | None = None,
     audio_max_files_per_run: int | None = None,
     audio_max_duration_seconds: int | None = None,
@@ -283,23 +242,15 @@ def apply_flow_input_limits_patch(
     """Apply validated partial updates while preserving unrelated flow settings keys.
 
     When a field is in ``remove_keys``, it is deleted from the JSONB dict
-    (reverting to the env-var default on next resolve).
+    (restoring the default on next resolve).
     """
     result = (
         dict(current_flow_settings) if isinstance(current_flow_settings, dict) else {}
     )
     existing_input_limits = _extract_input_limits(result)
 
-    next_input_limits: dict[str, Any] = dict(existing_input_limits)
+    next_input_limits = dict(existing_input_limits)
 
-    if file_max_size_bytes is not None:
-        next_input_limits["file_max_size_bytes"] = _parse_limit(
-            file_max_size_bytes, "file_max_size_bytes"
-        )
-    if audio_max_size_bytes is not None:
-        next_input_limits["audio_max_size_bytes"] = _parse_limit(
-            audio_max_size_bytes, "audio_max_size_bytes"
-        )
     if max_files_per_run is not None:
         next_input_limits["max_files_per_run"] = _parse_optional_file_count(
             max_files_per_run, "max_files_per_run", FLOW_INPUT_MAX_FILES_COUNT

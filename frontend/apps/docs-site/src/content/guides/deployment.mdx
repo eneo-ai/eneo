@@ -409,11 +409,10 @@ value and a comment.
     template seed that policy once and are otherwise ignored.
 
     <Callout type="info">
-      Operators keep `OBJECT_CONTENT_INLINE_MAXIMUM_BYTES` (template:
-      `10485760`) as a PostgreSQL, WAL, backup, and process safety ceiling. For
-      an inline session upload, the effective limit is the smaller value; the
-      admin page shows the configured value, effective value, and constraining
-      source.
+      File storage is the upload-policy owner. PostgreSQL inline capacity is just
+      below 512 MiB per payload to support COPY/pg_dump backups. Choose object
+      storage for larger files. The retired `OBJECT_CONTENT_INLINE_MAXIMUM_BYTES`
+      environment setting no longer lowers saved policy.
     </Callout>
 
     **Crawler Settings:**
@@ -621,7 +620,7 @@ not match.
 | Owner                                 | Responsibility                                                                                                                                          |
 | ------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | Administrator with Storage permission | Choose one deployment-wide target for eligible new File, Icon, and knowledge-original writes and set business upload limits in **Admin > File storage** |
-| Operator                              | Run PostgreSQL and any optional compatible endpoint; own credentials, TLS, capacity, backups, and `OBJECT_CONTENT_INLINE_MAXIMUM_BYTES`                 |
+| Operator                              | Run PostgreSQL and any optional compatible endpoint; own credentials, TLS, capacity and backups                 |
 
 Policy changes take effect without a backend or worker restart. They affect
 eligible new writes only; existing content stays in its recorded backend until
@@ -931,7 +930,7 @@ key or a tenant ID. The container side is covered in
 | Can't see Users page in Admin         | `USING_ACCESS_MANAGEMENT=false` (default is `true`)     | Set to `true`, restart backend                                                                 |
 | Frontend shows wrong API URL          | `PUBLIC_ENEO_BACKEND_URL` incorrect                     | Set to the external origin (not localhost in prod)                                             |
 | Browser requests hit `/api/api/v1/…`  | `PUBLIC_ENEO_BACKEND_URL` ends with `/api`              | Use the bare origin, e.g. `https://eneo.example.com`                                           |
-| Large file uploads fail               | Admin policy or applicable operator ceiling is lower    | Review configured, effective, and source values in Admin > File storage                        |
+| Large file uploads fail               | Admin policy or selected storage capacity is lower    | Review configured, effective, and source values in Admin > File storage                        |
 | "Failed to decrypt credential"        | `ENCRYPTION_KEY` missing or changed                     | Set correct key or re-enter credentials                                                        |
 | Credentials API returns 404           | `TENANT_CREDENTIALS_ENABLED=false`                      | Set to `true`, requires `ENCRYPTION_KEY`                                                       |
 | OIDC redirect fails                   | `PUBLIC_ORIGIN` mismatch                                | Must match in backend, frontend, AND the IdP redirect URI (`{PUBLIC_ORIGIN}/login/callback`)   |

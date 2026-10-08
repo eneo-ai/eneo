@@ -266,3 +266,11 @@ def test_settings_accepts_retired_crawler_values_at_their_old_defaults(
 
     assert "TENANT_WORKER_CONCURRENCY_LIMIT is no longer read" in caplog.text
     assert "USING_CRAWL is no longer read" in caplog.text
+
+
+def test_legacy_inline_limit_does_not_block_admin_policy_rollout(caplog):
+    check_removed_variables({"OBJECT_CONTENT_INLINE_MAXIMUM_BYTES": "10485760"}, {})
+    assert "Admin > File storage" in caplog.text
+    assert "stored policy takes precedence" in caplog.text
+    assert "removed in Eneo 2.3" in caplog.text
+    assert UPGRADE_GUIDE_URL not in caplog.text

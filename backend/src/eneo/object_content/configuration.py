@@ -42,14 +42,15 @@ _MAXIMUM_MULTIPART_PART_BYTES = 5 * 1024 * _MEBIBYTE
 _MAXIMUM_MULTIPART_PARTS = 10_000
 _MAXIMUM_S3_OBJECT_BYTES = 5 * 1024 * 1024 * _MEBIBYTE
 _MAXIMUM_S3_PAGE_SIZE = 1_000
-# A PostgreSQL variable-length datum is capped at 1 GB *including* its
-# four-byte length header, so the largest storable ``bytea`` payload is
-# 2**30 - 5 bytes. An inline admission ceiling above that would admit uploads
-# that then fail at materialization; reject it at startup instead.
-_VARLENA_HEADER_BYTES = 4
-MAXIMUM_INLINE_BYTES = 1024 * _MEBIBYTE - 1 - _VARLENA_HEADER_BYTES
-# Leave room for bytea hex output and protocol framing during reads and dumps.
-DEFAULT_INLINE_MAXIMUM_BYTES = 384 * _MEBIBYTE
+# PostgreSQL byteaout doubles payload bytes; COPY (including pg_dump) must fit
+# that text plus the row in MaxAllocSize (see varlena.c, stringinfo.c, copyto.c).
+# The allowance covers UUID, storage kind, timestamps and COPY framing. Keep
+# its column-set test in sync when inline_content_payloads gains columns.
+_POSTGRES_MAX_ALLOC_SIZE = 2**30 - 1
+_INLINE_ROW_TEXT_ALLOWANCE = 1024
+INLINE_PAYLOAD_CAPACITY_BYTES = (
+    _POSTGRES_MAX_ALLOC_SIZE - 1 - _INLINE_ROW_TEXT_ALLOWANCE
+) // 2
 DEFAULT_FILE_UPLOAD_LIMIT_BYTES = 256 * _MEBIBYTE
 
 
@@ -61,15 +62,12 @@ class ObjectContentCoreSettings(BaseSettings):
         hide_input_in_errors=True,
     )
 
-    # The deployment-wide capacity bound on one PostgreSQL-inline payload, and
-    # the ceiling every administrator-configurable upload limit is capped by.
-    # Raising it grows the largest bytea row, its WAL record, and the transient
-    # memory of whichever process reads it; operators move it in either
-    # direction after measuring their own PostgreSQL capacity.
+    # Runtime loaders supply the format capacity explicitly; administrator
+    # upload policy is persisted in the database, never loaded from this env key.
     inline_maximum_bytes: int = Field(
-        default=DEFAULT_INLINE_MAXIMUM_BYTES,
+        default=INLINE_PAYLOAD_CAPACITY_BYTES,
         ge=1,
-        le=MAXIMUM_INLINE_BYTES,
+        le=INLINE_PAYLOAD_CAPACITY_BYTES,
     )
     inline_io_chunk_bytes: int = Field(default=256 * 1024, ge=1)
     reconciliation_batch_size: int = Field(
@@ -268,16 +266,12 @@ def load_object_content_settings() -> ObjectContentSettings | None:
     }
     if not any(name.upper() in remote_environment_names for name in os.environ):
         return None
-    settings_factory = cast(Callable[[], ObjectContentSettings], ObjectContentSettings)
-    return settings_factory()
+    settings_factory = cast(Callable[..., ObjectContentSettings], ObjectContentSettings)
+    return settings_factory(inline_maximum_bytes=INLINE_PAYLOAD_CAPACITY_BYTES)
 
 
 def load_object_content_core_settings() -> ObjectContentCoreSettings:
-    settings_factory = cast(
-        Callable[[], ObjectContentCoreSettings],
-        ObjectContentCoreSettings,
-    )
-    return settings_factory()
+    return ObjectContentCoreSettings(inline_maximum_bytes=INLINE_PAYLOAD_CAPACITY_BYTES)
 
 
 def load_object_store_operator_settings() -> ObjectStoreOperatorSettings:

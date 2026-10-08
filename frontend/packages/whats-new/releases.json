@@ -16,6 +16,20 @@
             "en": "Columns from a SharePoint document library, such as document type or business area, now follow each document into Eneo. Assistants find documents on those properties as well as on their contents, and the properties are shown on the sources in an answer and in the document preview. When importing, you can search the whole site and filter on column values, for example every document marked for external publication, and select all hits at once.",
             "sv": "Kolumner från ett dokumentbibliotek i SharePoint, till exempel dokumenttyp eller verksamhet, följer nu med varje dokument in i Eneo. Assistenter hittar dokument på egenskaperna lika väl som på innehållet, och egenskaperna visas på källorna i svaret och i förhandsvisningen av dokumentet. När du importerar kan du söka i hela webbplatsen och filtrera på kolumnvärden, till exempel alla dokument märkta för extern publicering, och välja alla träffar på en gång."
           }
+        },
+        {
+          "id": "shared-flow-upload-limits",
+          "type": "fixed",
+          "area": "admin",
+          "audience": "admin",
+          "title": {
+            "en": "Manage upload sizes for all flows in File storage",
+            "sv": "Styr filstorleken för alla flöden i Fillagring"
+          },
+          "body": {
+            "en": "Set file and audio sizes once in Admin > File storage. Flow settings shows the same limits, and old environment settings and separate Flow size limits no longer lower them. Larger files require storage that supports their size.",
+            "sv": "Bestäm fil- och ljudstorlek på ett ställe under Admin > Fillagring. Flödesinställningarna visar samma gränser, och gamla miljöinställningar och separata flödesgränser sänker dem inte längre. Större filer kräver lagring som stöder storleken."
+          }
         }
       ]
     },

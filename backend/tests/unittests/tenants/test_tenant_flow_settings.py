@@ -550,3 +550,23 @@ def test_tenant_in_db_rejects_unsupported_flow_runtime_policy_version():
             },
             state=TenantState.ACTIVE,
         )
+
+
+def test_legacy_size_policy_is_dropped_on_read_before_migration():
+    tenant = _tenant_with_flow_settings(
+        {
+            "input_limits": {
+                "file_max_size_bytes": 10,
+                "audio_max_size_bytes": "obsolete",
+                "max_files_per_run": 7,
+            }
+        }
+    )
+    assert tenant.flow_settings == {"input_limits": {"max_files_per_run": 7}}
+
+
+@pytest.mark.parametrize("field", ["file_max_size_bytes", "audio_max_size_bytes"])
+def test_retired_size_policy_is_rejected_on_tenant_write(field):
+    with pytest.raises(BadRequestException, match="Admin > File storage") as captured:
+        TenantUpdate(id=uuid4(), flow_settings={"input_limits": {field: 10}})
+    assert captured.value.code == "flow_settings_invalid_payload"

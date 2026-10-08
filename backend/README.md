@@ -134,7 +134,6 @@ for view semantics, query bounds and rollback behavior.
 | MOBILITYGUARD_DISCOVERY_ENDPOINT |          |                                                          |
 | MOBILITYGUARD_CLIENT_ID          |          |                                                          |
 | MOBILITYGUARD_CLIENT_SECRET      |          |                                                          |
-| OBJECT_CONTENT_INLINE_MAXIMUM_BYTES |          | Operator safety ceiling for one PostgreSQL-inline payload |
 | MAX_IN_QUESTION                  | x        | Max files in a question                                  |
 | SKILL_MAX_BINDINGS               |          | One-time seed for the Skill runtime-policy migration; the stored tenant policy owns the limit afterwards |
 | USING_ACCESS_MANAGEMENT          | x        | Feature flag if using access management (example: False) |

@@ -328,8 +328,9 @@ def test_preflight_timeout_is_incomplete_and_leaves_no_waiter(migration_database
 def test_preflight_cli_json_exit_codes_and_credentials(
     migration_database, test_settings
 ):
-    database_url, _ = migration_database
+    database_url, config = migration_database
     _seed_legacy_owners(database_url)
+    command.upgrade(config, "202607251700")
     with _connect(database_url) as connection:
         parameters = connection.get_dsn_parameters()
     environment = os.environ.copy()
@@ -379,8 +380,18 @@ def test_preflight_cli_json_exit_codes_and_credentials(
     environment["OBJECT_CONTENT_INLINE_MAXIMUM_BYTES"] = "1"
     environment["OBJECT_CONTENT_INLINE_IO_CHUNK_BYTES"] = "1"
     exit_code, output = run()
+    assert exit_code == 0
+    assert output["outcome"] == "ready"
+    with _connect(database_url) as connection, connection.cursor() as cursor:
+        cursor.execute(
+            "UPDATE object_content_deployment_policy SET new_write_storage_target = 'object_store' WHERE id = 1"
+        )
+    exit_code, output = run()
     assert exit_code == 2
     assert output["outcome"] == "blocked"
+    assert "unsupported_legacy_target" in [
+        issue["code"] for issue in output["blockers"]
+    ]
     environment["POSTGRES_PASSWORD"] = "deliberately-wrong-preflight-password"
     exit_code, output = run()
     assert exit_code == 3

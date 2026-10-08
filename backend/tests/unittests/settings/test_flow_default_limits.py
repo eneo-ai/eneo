@@ -8,7 +8,6 @@ from pydantic import ValidationError
 
 from eneo.flows.domain.step_output import build_rejected_output_payload
 from eneo.flows.flow_input_limits import (
-    FLOW_INPUT_MAX_LIMIT_BYTES,
     resolve_flow_input_limits,
 )
 from eneo.flows.flow_runtime_policy import default_flow_runtime_policy
@@ -53,7 +52,7 @@ def test_flow_defaults(defaults, name, expected):
 def test_inline_storage_default(monkeypatch):
     monkeypatch.delenv("OBJECT_CONTENT_INLINE_MAXIMUM_BYTES", raising=False)
     maximum = ObjectContentCoreSettings().inline_maximum_bytes
-    assert maximum == 402653184
+    assert maximum >= 400 * 1024**2
     assert 2 * maximum + 3 < 1024**3
 
 
@@ -138,7 +137,6 @@ def test_migrated_upload_defaults_admit_large_workloads(monkeypatch):
     assert limits.audio_max_size_bytes == 402653184
     assert limits.max_files_per_run == 1000
     assert limits.audio_max_files_per_run == 10
-    assert FLOW_INPUT_MAX_LIMIT_BYTES == 2147483648
 
 
 def test_derived_output_bounds(defaults):

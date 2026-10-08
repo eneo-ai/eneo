@@ -53,7 +53,6 @@ from eneo.flows.flow_input_limits import (
     FlowInputLimits,
     apply_flow_input_limits_patch,
     audio_duration_ceiling_seconds,
-    effective_upload_ceiling_bytes,
     flow_audio_decode_limits,
     resolve_flow_input_limits,
 )
@@ -693,14 +692,6 @@ class SettingService:
                 limits
             ).longest_audio_seconds,
             audio_max_duration_ceiling_seconds=audio_duration_ceiling_seconds(),
-            # The admission ceiling is the writable bound; exposing it lets the
-            # admin UI validate inline instead of surfacing a save-time error.
-            file_max_size_ceiling_bytes=effective_upload_ceiling_bytes(
-                admission.session_file_maximum_bytes
-            ),
-            audio_max_size_ceiling_bytes=effective_upload_ceiling_bytes(
-                admission.session_audio_maximum_bytes
-            ),
         )
 
     @validate_permissions(Permission.ADMIN)
@@ -714,27 +705,6 @@ class SettingService:
                 "At least one flow input limit field must be provided.",
                 code=FLOW_SETTINGS_INVALID_PAYLOAD_CODE,
             )
-        admission = self._require_upload_admission()
-        admission_ceilings = {
-            "file_max_size_bytes": effective_upload_ceiling_bytes(
-                admission.session_file_maximum_bytes
-            ),
-            "audio_max_size_bytes": effective_upload_ceiling_bytes(
-                admission.session_audio_maximum_bytes
-            ),
-        }
-        for field_name, ceiling in admission_ceilings.items():
-            requested = patch.get(field_name)
-            if requested is not None and requested > ceiling:
-                raise BadRequestException(
-                    f"{field_name} cannot exceed the current upload admission ceiling of {ceiling} bytes.",
-                    code=FLOW_SETTINGS_INVALID_PAYLOAD_CODE,
-                    context={
-                        "field": field_name,
-                        "requested_bytes": requested,
-                        "maximum_bytes": ceiling,
-                    },
-                )
         requested_seconds = patch.get("audio_max_duration_seconds")
         ceiling_seconds = audio_duration_ceiling_seconds()
         if requested_seconds is not None and requested_seconds > ceiling_seconds:

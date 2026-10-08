@@ -55,8 +55,6 @@ export function pageData(
       audio_max_size_bytes: 200 * 1024 * 1024,
       max_files_per_run: null,
       audio_max_files_per_run: 10,
-      file_max_size_ceiling_bytes: 10 * 1024 * 1024,
-      audio_max_size_ceiling_bytes: 200 * 1024 * 1024,
       audio_max_duration_seconds: 5 * 60 * 60,
       audio_max_duration_ceiling_seconds: 8 * 60 * 60
     },

@@ -32,6 +32,8 @@ class RemovedVariable:
     # settings that now govern what it controlled, if there are any.
     old_default: str | None = None
     replaced_by: tuple[str, ...] = ()
+    removed_in: str = "2.2"
+    upgrade_guide_url: str | None = UPGRADE_GUIDE_URL
 
 
 _MODULES_PERMISSION_NOTE = (
@@ -39,6 +41,14 @@ _MODULES_PERMISSION_NOTE = (
 )
 
 REMOVED_VARIABLES: tuple[RemovedVariable, ...] = (
+    # Stored admin policy deliberately takes precedence even during a rollout
+    # that retains this old setting, so this entry must not block startup.
+    RemovedVariable(
+        "OBJECT_CONTENT_INLINE_MAXIMUM_BYTES",
+        note="Upload limits are managed in Admin > File storage. The stored policy takes precedence.",
+        removed_in="2.3",
+        upgrade_guide_url=None,
+    ),
     RemovedVariable("INTRIC_SUPER_API_KEY", replacement="ENEO_SUPER_API_KEY"),
     RemovedVariable("INTRIC_SUPER_DUPER_API_KEY", note=_MODULES_PERMISSION_NOTE),
     RemovedVariable("ENEO_SUPER_DUPER_API_KEY", note=_MODULES_PERMISSION_NOTE),
@@ -139,11 +149,12 @@ def _check_retired_setting(
     assert variable.old_default is not None
     if _is_old_default(value, variable.old_default):
         logging.warning(
-            "%s is no longer read (removed in Eneo 2.2). It is at its old default "
-            "(%s), so dropping it changes nothing. Remove the variable. See %s",
+            "%s is no longer read (removed in Eneo %s). It is at its old default "
+            "(%s), so dropping it changes nothing. Remove the variable.%s",
             variable.name,
+            variable.removed_in,
             variable.old_default,
-            UPGRADE_GUIDE_URL,
+            f" See {variable.upgrade_guide_url}" if variable.upgrade_guide_url else "",
         )
         return
     if variable.replaced_by:
@@ -151,7 +162,7 @@ def _check_retired_setting(
     else:
         action = "It is no longer configurable; remove it."
     lost = (
-        f"{variable.name}={value} is no longer read (removed in Eneo 2.2); its old "
+        f"{variable.name}={value} is no longer read (removed in Eneo {variable.removed_in}); its old "
         f"default was {variable.old_default}, so this value would be lost."
     )
     blocking.append(" ".join(part for part in (lost, variable.note, action) if part))
@@ -176,10 +187,13 @@ def check_removed_variables(
             _check_retired_setting(variable, value, blocking)
         elif variable.replacement is None:
             logging.error(
-                "%s is no longer read (removed in Eneo 2.2). %s Remove the variable. See %s",
+                "%s is no longer read (removed in Eneo %s). %s Remove the variable.%s",
                 variable.name,
+                variable.removed_in,
                 variable.note,
-                UPGRADE_GUIDE_URL,
+                f" See {variable.upgrade_guide_url}"
+                if variable.upgrade_guide_url
+                else "",
             )
         elif _is_set(variable.replacement, environ, values):
             logging.warning(
@@ -190,7 +204,7 @@ def check_removed_variables(
             )
         else:
             blocking.append(
-                f"{variable.name} is no longer read (removed in Eneo 2.2). "
+                f"{variable.name} is no longer read (removed in Eneo {variable.removed_in}). "
                 f"Rename it to {variable.replacement}."
             )
 

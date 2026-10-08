@@ -104,6 +104,7 @@ class StorageCapability:
     configured: bool
     selectable: bool
     readiness_code: ObjectContentReadinessCode
+    maximum_bytes: int | None = None
 
 
 class ObjectContentRuntimeState(StrEnum):
@@ -493,6 +494,7 @@ class ObjectContentRuntime:
         return (
             StorageCapability(
                 target=StorageKind.POSTGRES_INLINE,
+                maximum_bytes=self.inline_maximum_bytes if self.enabled else None,
                 configured=True,
                 selectable=self.enabled,
                 readiness_code=(
@@ -503,6 +505,7 @@ class ObjectContentRuntime:
             ),
             StorageCapability(
                 target=StorageKind.OBJECT_STORE,
+                maximum_bytes=self.object_store_maximum_bytes,
                 configured=self.object_store_configured,
                 selectable=(
                     self.object_store_configured

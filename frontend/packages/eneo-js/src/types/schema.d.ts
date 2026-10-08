@@ -7821,7 +7821,7 @@ export interface paths {
     head?: never;
     /**
      * Update flow input limits
-     * @description Update tenant-level upload limits used by flow runtime input endpoints. Omit a field to leave it unchanged. Send null to remove that tenant override and fall back to the default policy. Send a positive integer to set a tenant override. The returned payload is the resolved effective policy after the update, so API consumers can immediately refresh upload forms and progress timeout calculations.
+     * @description Update tenant-level file counts and recording duration. File sizes are managed in Admin > File storage for all flows. Omit a field to leave it unchanged. Send null to remove that tenant override and fall back to the default policy. Send a positive integer to set a tenant override. The returned payload is the resolved effective policy after the update, so API consumers can immediately refresh upload forms and progress timeout calculations.
      */
     patch: operations["update_flow_input_limits"];
     trace?: never;
@@ -14725,6 +14725,8 @@ export interface components {
     CapabilityPublic: {
       /** Configured */
       configured: boolean;
+      /** Maximum Bytes */
+      maximum_bytes: number | null;
       readiness_code: components["schemas"]["ObjectContentReadinessCode"];
       /** Selectable */
       selectable: boolean;
@@ -15362,7 +15364,7 @@ export interface components {
      * ConstrainingSource
      * @enum {string}
      */
-    ConstrainingSource: "admin_policy" | "operator_ceiling";
+    ConstrainingSource: "admin_policy" | "storage_capacity";
     /**
      * ContentDisposition
      * @enum {string}
@@ -18796,9 +18798,7 @@ export interface components {
      *       "audio_max_duration_seconds": 18000,
      *       "audio_max_files_per_run": 5,
      *       "audio_max_size_bytes": 104857600,
-     *       "audio_max_size_ceiling_bytes": 209715200,
      *       "file_max_size_bytes": 52428800,
-     *       "file_max_size_ceiling_bytes": 52428800,
      *       "max_files_per_run": 20
      *     }
      */
@@ -18820,18 +18820,8 @@ export interface components {
       audio_max_files_per_run: number;
       /** Audio Max Size Bytes */
       audio_max_size_bytes: number;
-      /**
-       * Audio Max Size Ceiling Bytes
-       * @description Effective writable ceiling for audio uploads: the deployment upload-admission limit capped by the flow-input hard maximum. Tenant values above it are rejected on write and clamped on read.
-       */
-      audio_max_size_ceiling_bytes: number;
       /** File Max Size Bytes */
       file_max_size_bytes: number;
-      /**
-       * File Max Size Ceiling Bytes
-       * @description Effective writable ceiling for file uploads: the deployment upload-admission limit capped by the flow-input hard maximum. Tenant values above it are rejected on write and clamped on read.
-       */
-      file_max_size_ceiling_bytes: number;
       /**
        * Max Files Per Run
        * @description Null means the deployment default (1000 files).
@@ -18842,7 +18832,6 @@ export interface components {
      * FlowInputLimitsUpdate
      * @example {
      *       "audio_max_duration_seconds": 18000,
-     *       "file_max_size_bytes": 52428800,
      *       "max_files_per_run": 20
      *     }
      */
@@ -18857,16 +18846,6 @@ export interface components {
        * @description Set the tenant ceiling, or send null to use the default audio ceiling.
        */
       audio_max_files_per_run?: number | null;
-      /**
-       * Audio Max Size Bytes
-       * @description Set the tenant override, or send null to use the deployment default.
-       */
-      audio_max_size_bytes?: number | null;
-      /**
-       * File Max Size Bytes
-       * @description Set the tenant override, or send null to use the deployment default.
-       */
-      file_max_size_bytes?: number | null;
       /**
        * Max Files Per Run
        * @description Set the tenant ceiling, or send null to use the deployment default (1000 files).
@@ -38038,8 +38017,8 @@ export interface components {
       constraining_source: components["schemas"]["ConstrainingSource"];
       /** Effective Bytes */
       effective_bytes: number;
-      /** Operator Ceiling Bytes */
-      operator_ceiling_bytes: number | null;
+      /** Storage Capacity Bytes */
+      storage_capacity_bytes: number | null;
       storage_target: components["schemas"]["StorageKind"];
       use_case: components["schemas"]["UploadLimitUseCase"];
     };

@@ -537,7 +537,7 @@ If you see `middleware "redirect-to-https@docker" does not exist` in Traefik log
   restarting backend or worker.
 - For PostgreSQL-inline session uploads, the effective limit is the smaller of
   the admin policy and the operator-owned
-  `OBJECT_CONTENT_INLINE_MAXIMUM_BYTES` safety ceiling.
+  PostgreSQL inline storage capacity.
 - For object-store session uploads, the effective limit is the smaller of the
   admin policy and the portable multipart envelope derived from deployment
   transport settings.

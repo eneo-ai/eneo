@@ -101,6 +101,13 @@
   const objectStoreCapability = $derived(
     deploymentPolicy?.capabilities.find((capability) => capability.target === "object_store")
   );
+  const selectedStorageCapacity = $derived(
+    deploymentPolicy?.capabilities.find((capability) => capability.target === storageTarget)
+      ?.maximum_bytes ?? null
+  );
+  const clampedLimits = $derived(
+    deploymentPolicy?.limits.filter((limit) => limit.effective_bytes < limit.configured_bytes) ?? []
+  );
   const objectStoreUnavailable = $derived(objectStoreCapability?.selectable !== true);
   const validMoveLimit = $derived(
     Number.isSafeInteger(moveLimit) && moveLimit >= 1 && moveLimit <= 100
@@ -144,7 +151,11 @@
   const pauseUnavailable = $derived(moveStatus !== "idle" || policyInteractionUnavailable);
 
   function isValidByteLimit(value: number): boolean {
-    return Number.isSafeInteger(value) && value > 0;
+    return (
+      Number.isSafeInteger(value) &&
+      value > 0 &&
+      (selectedStorageCapacity === null || value <= selectedStorageCapacity)
+    );
   }
 
   $effect(() => policyAlertRef?.focus());
@@ -825,7 +836,7 @@
 
                     <Field.Label
                       for="storage-target-object-store"
-                      class="border-default has-data-[state=checked]:border-accent-default has-data-[state=checked]:bg-accent-dimmer data-[disabled=true]:opacity-60 w-auto cursor-pointer items-start rounded-lg border p-4"
+                      class="border-default has-data-[state=checked]:border-accent-default has-data-[state=checked]:bg-accent-dimmer w-auto cursor-pointer items-start rounded-lg border p-4 data-[disabled=true]:opacity-60"
                       data-disabled={objectStoreUnavailable}
                     >
                       <RadioGroup.Item
@@ -938,6 +949,7 @@
               {#if canEdit}
                 <Field.Group class="grid gap-5 sm:grid-cols-2">
                   <ByteLimitField
+                    maximumBytes={selectedStorageCapacity}
                     id="session-file-limit"
                     label={m.storage_limit_session_file()}
                     description={m.storage_limit_bytes_help()}
@@ -946,6 +958,7 @@
                     disabled={policyInteractionUnavailable}
                   />
                   <ByteLimitField
+                    maximumBytes={selectedStorageCapacity}
                     id="session-image-limit"
                     label={m.storage_limit_session_image()}
                     description={m.storage_limit_bytes_help()}
@@ -954,6 +967,7 @@
                     disabled={policyInteractionUnavailable}
                   />
                   <ByteLimitField
+                    maximumBytes={selectedStorageCapacity}
                     id="knowledge-file-limit"
                     label={m.storage_limit_knowledge_file()}
                     description={m.storage_limit_bytes_help()}
@@ -962,6 +976,7 @@
                     disabled={policyInteractionUnavailable}
                   />
                   <ByteLimitField
+                    maximumBytes={selectedStorageCapacity}
                     id="transcription-audio-limit"
                     label={m.storage_limit_transcription_audio()}
                     description={m.storage_limit_audio_help()}
@@ -999,6 +1014,16 @@
                 </dl>
               {/if}
 
+              {#if clampedLimits.length}
+                <Alert.Root variant="destructive">
+                  <Alert.Description>{m.storage_limits_clamped_warning()}</Alert.Description>
+                </Alert.Root>
+              {/if}
+              {#if selectedStorageCapacity !== null}
+                <p class="text-secondary text-sm">
+                  {m.storage_capacity_hint({ maximum: policyBytes(selectedStorageCapacity) })}
+                </p>
+              {/if}
               <Collapsible.Root bind:open={limitsDetailsOpen}>
                 <Collapsible.Trigger
                   class="hover:bg-hover-dimmer focus-visible:ring-ring flex w-full items-center gap-2 rounded-md px-3 py-2 text-left focus-visible:ring-2 focus-visible:outline-none [&[data-state=open]>svg]:rotate-180"
@@ -1040,13 +1065,13 @@
                             <Table.Cell>{policyBytes(limit.effective_bytes)}</Table.Cell>
                             <Table.Cell>{storageTargetLabel(limit.storage_target)}</Table.Cell>
                             <Table.Cell>
-                              {limit.operator_ceiling_bytes === null
+                              {limit.storage_capacity_bytes === null
                                 ? m.storage_effective_limits_no_ceiling()
-                                : policyBytes(limit.operator_ceiling_bytes)}
+                                : policyBytes(limit.storage_capacity_bytes)}
                             </Table.Cell>
                             <Table.Cell>
-                              {limit.constraining_source === "operator_ceiling"
-                                ? m.storage_constraint_operator_ceiling()
+                              {limit.constraining_source === "storage_capacity"
+                                ? m.storage_constraint_storage_capacity()
                                 : m.storage_constraint_admin_policy()}
                             </Table.Cell>
                           </Table.Row>

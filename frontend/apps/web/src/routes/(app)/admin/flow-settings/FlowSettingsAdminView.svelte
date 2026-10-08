@@ -63,23 +63,11 @@
   });
 
   // --- Uppladdningar & körning ---
-  const fileMaxSize = new NumberField({
-    initial: initial.flowInputLimits.file_max_size_bytes,
-    scale: MB,
-    min: MB,
-    max: initial.flowInputLimits.file_max_size_ceiling_bytes
-  });
   // Bounds mirror backend admission caps in flow_input_limits.py.
   const maxFilesPerRun = new NumberField({
     initial: initial.flowInputLimits.max_files_per_run,
     min: 1,
     max: 1000
-  });
-  const audioMaxSize = new NumberField({
-    initial: initial.flowInputLimits.audio_max_size_bytes,
-    scale: MB,
-    min: MB,
-    max: initial.flowInputLimits.audio_max_size_ceiling_bytes
   });
   const audioMaxFiles = new NumberField({
     initial: initial.flowInputLimits.audio_max_files_per_run,
@@ -181,9 +169,7 @@
 
   const form = new SettingsForm([
     uploadCleanup,
-    fileMaxSize,
     maxFilesPerRun,
-    audioMaxSize,
     audioMaxFiles,
     audioMaxDuration,
     defaultStepTimeout,
@@ -247,14 +233,15 @@
 
   function formatStorage(value: number | null | undefined): string {
     if (value == null) return m.flow_knowledge_evidence_default_hint();
+    if (value >= 1024 * MB) return `${Number((value / (1024 * MB)).toFixed(1))} GiB`;
     if (value >= MB) return `${Number((value / MB).toFixed(1))} MiB`;
-    return `${Number((value / KB).toFixed(1))} KiB`;
+    if (value >= KB) return `${Number((value / KB).toFixed(1))} KiB`;
+    return `${value} B`;
   }
 
   /** Say what an audio size limit buys, in running time an admin recognises. */
-  function audioRunningTime(bytes: number | null): string {
-    const effective = bytes ?? initial.flowInputLimits.audio_max_size_ceiling_bytes;
-    const minutes = Math.round(effective / MP3_BYTES_PER_SECOND / 60);
+  function audioRunningTime(bytes: number): string {
+    const minutes = Math.round(bytes / MP3_BYTES_PER_SECOND / 60);
     if (minutes < 60) {
       return m.flow_input_limits_audio_equivalent_minutes({ minutes });
     }
@@ -274,16 +261,6 @@
     if (seconds == null || seconds < 3600) return ceiling;
     const duration = formatRecordingLength(seconds * 1000);
     return [m.flow_input_limits_audio_duration_equivalent({ duration }), ceiling];
-  });
-
-  const audioCeilingHint = $derived.by(() => {
-    const ceiling = m.flow_input_limits_ceiling_hint({
-      ceiling: `${Math.floor(initial.flowInputLimits.audio_max_size_ceiling_bytes / MB)} MiB`
-    });
-    // While the entry is invalid there is no size to describe; showing the
-    // ceiling's running time next to an error would read as if it applied.
-    if (audioMaxSize.value === undefined) return ceiling;
-    return [audioRunningTime(audioMaxSize.value), ceiling];
   });
 
   // `value` is undefined while an entry is invalid, and `?? 0` turned that into
@@ -323,8 +300,6 @@
     if (form.invalid) return null;
 
     const inputLimits: FlowAdminSettingsUpdates["inputLimits"] = {};
-    if (fileMaxSize.dirty) inputLimits.file_max_size_bytes = fileMaxSize.value;
-    if (audioMaxSize.dirty) inputLimits.audio_max_size_bytes = audioMaxSize.value;
     if (maxFilesPerRun.dirty) inputLimits.max_files_per_run = maxFilesPerRun.value;
     if (audioMaxFiles.dirty) inputLimits.audio_max_files_per_run = audioMaxFiles.value;
     if (audioMaxDuration.dirty) inputLimits.audio_max_duration_seconds = audioMaxDuration.value;
@@ -392,8 +367,6 @@
 
     const updated = await saveFlowAdminSettings(eneo.settings, patches.rest);
     if (updated.inputLimits) {
-      fileMaxSize.commit(updated.inputLimits.file_max_size_bytes);
-      audioMaxSize.commit(updated.inputLimits.audio_max_size_bytes);
       maxFilesPerRun.commit(updated.inputLimits.max_files_per_run);
       audioMaxFiles.commit(updated.inputLimits.audio_max_files_per_run);
       audioMaxDuration.commit(updated.inputLimits.audio_max_duration_seconds);
@@ -569,17 +542,15 @@
           description={m.flow_input_limits_file_group_description()}
           density="compact"
         >
-          <Settings.NumberRow
+          <Settings.Row
             title={m.flow_input_limits_file_title()}
-            description={m.flow_input_limits_file_description()}
-            placeholder={m.flow_input_limits_deployment_default_hint()}
-            unit="MiB"
-            info={m.flow_input_limits_file_info()}
-            hint={m.flow_input_limits_ceiling_hint({
-              ceiling: `${Math.floor(initial.flowInputLimits.file_max_size_ceiling_bytes / MB)} MiB`
-            })}
-            field={fileMaxSize}
-          />
+            description={m.flow_upload_limit_shared()}
+          >
+            <p class="text-sm">{formatStorage(data.flowInputLimits.file_max_size_bytes)}</p>
+            <Button variant="link" href="/admin/storage" class="h-auto w-fit px-0 text-sm"
+              >{m.flow_upload_limit_manage()}</Button
+            >
+          </Settings.Row>
           <Settings.NumberRow
             title={m.flow_input_limits_max_files_title()}
             description={m.flow_input_limits_max_files_description()}
@@ -593,15 +564,18 @@
           description={m.flow_input_limits_audio_group_description()}
           density="compact"
         >
-          <Settings.NumberRow
+          <Settings.Row
             title={m.flow_input_limits_audio_title()}
-            description={m.flow_input_limits_audio_description()}
-            placeholder={m.flow_input_limits_deployment_default_hint()}
-            unit="MiB"
-            info={m.flow_input_limits_audio_info()}
-            hint={audioCeilingHint}
-            field={audioMaxSize}
-          />
+            description={m.flow_upload_limit_shared()}
+          >
+            <p class="text-sm">{formatStorage(data.flowInputLimits.audio_max_size_bytes)}</p>
+            <p class="text-secondary text-xs">
+              {audioRunningTime(data.flowInputLimits.audio_max_size_bytes)}
+            </p>
+            <Button variant="link" href="/admin/storage" class="h-auto w-fit px-0 text-sm"
+              >{m.flow_upload_limit_manage()}</Button
+            >
+          </Settings.Row>
           <Settings.NumberRow
             title={m.flow_input_limits_audio_max_files_title()}
             description={m.flow_input_limits_audio_max_files_description()}
