@@ -47,6 +47,25 @@ files. The same-turn reference needs a streaming chat; over the
 non-streaming API, the reference arrives on the next turn. Charts normally
 use an interactive view in Eneo.
 
+## Exporting a document
+
+A Markdown document opens in the panel beside the conversation, whose Export
+menu offers it as Markdown, Word or PDF. For Word and PDF Eneo calls
+`create_document` on the provider of the assistant's **Create a file**
+capability with the document's own text, checks the returned file like any
+generated document, and hands it to the user as a download. Nothing is stored
+in the conversation, and the export is written to the audit log. An assistant
+without the capability can still download the Markdown; an external provider
+serves native export only if its accessible, approved `create_document` tool
+accepts Eneo's request: string `title`, `content`, `filename` and `format`,
+with supported formats declared in `format.enum`. Word and PDF availability
+are checked separately against that schema and the selected document.
+Extra required inputs or unsupported schemas make native export unavailable;
+the Function may still supply other file-creation tools. Compatibility is
+checked again when exporting, and a compatible schema does not guarantee
+that a remote provider will render successfully. The returned resource must
+have the requested MIME type and pass Eneo's generated-file validation.
+
 ## Provider view resources
 
 The runtime ships self-contained MCP Apps table and chart resources for
@@ -238,9 +257,27 @@ and its edited variation.
 
 ## Created documents and spreadsheets
 
-Created files are saved with the answer and can be downloaded as their original
-bytes. The file tools support Markdown, Word, PDF and Excel output, revisions
-and template filling.
+The renderers run in a sandbox child and return the file inside the tool result
+as a standard MCP embedded resource. The runtime keeps no copy and serves no
+download links. Eneo then does the following:
+
+1. It admits the file only because the server provides `file_creation`
+   (DOCX, PDF, XLSX, plain text and Markdown). The
+   same resource from any other server stays an ordinary result.
+2. It checks the bytes: OOXML packages must be well-formed, bounded and free of
+   macros, embedded objects and externally loaded content. PDFs must be
+   complete and free of script, launch actions and embedded files. Text must
+   be UTF-8.
+3. It saves the document as a File in the conversation, with extracted text and
+   its exact original. The user opens it in the native preview or downloads it. It
+   survives reloads, follows the conversation's access rules and is deleted with
+   the conversation.
+
+Spreadsheets store text as text: a value starting with `=` is never written as a
+formula. A workbook revision creates a new workbook from supplied tables or
+source sheets; it does not preserve an arbitrary workbook's formulas, formatting
+or embedded objects. Formula writing and spreadsheet templates are unsupported.
+`DOCUMENT_ORGANISATION_NAME` sets the name shown in document footers.
 
 ## Deploy, upgrade and roll back
 

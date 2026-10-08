@@ -463,3 +463,134 @@ describe("ChatService citation withholding", () => {
     expect(answer()).toBe('Se <inref id="aaaaaaaa"/> och <inref id="bbbbbbbb"/> för mer.');
   });
 });
+
+describe("file creation streaming", () => {
+  it.each(["docx", "pdf", "xlsx"])(
+    "exposes the %s draft from call start through streamed arguments",
+    async (format) => {
+      let callbacks: Record<string, (event: unknown) => void>;
+      let finish!: () => void;
+      const ask = vi.fn().mockImplementation((request) => {
+        callbacks = request.callbacks;
+        callbacks.onFirstChunk({
+          id: "message-1",
+          session_id: "session-1",
+          answer: "",
+          files: [],
+          generated_files: [],
+          references: [],
+          tools: { assistants: [] }
+        });
+        callbacks.onToolCall({
+          session_id: "session-1",
+          tools: [
+            {
+              tool_call_id: "create",
+              server_name: "Documents",
+              tool_name: "create",
+              purpose: "file_creation",
+              result_status: "pending"
+            }
+          ]
+        });
+        return new Promise<void>((resolve) => {
+          finish = resolve;
+        });
+      });
+      const chat = chatService(vi.fn(), { ask });
+      const pending = chat.askQuestion("Create report");
+      await vi.waitFor(() => expect(chat.writingDocument?.callId).toBe("create"));
+      callbacks!.onToolCallDelta({
+        session_id: "session-1",
+        tool_call_id: "create",
+        arguments_delta: `{"format":"${format}","title":"Report",`
+      });
+      callbacks!.onToolCallDelta({
+        session_id: "session-1",
+        tool_call_id: "create",
+        arguments_delta:
+          format === "xlsx"
+            ? '"sheets":[{"name":"Costs","columns":["Budget"],"rows":[[123]]}]}'
+            : '"content":"Actual report text"}'
+      });
+      expect(chat.writingDocument?.title).toBe("Report");
+      if (format === "xlsx") expect(chat.writingDocument?.sheets?.[0].rows).toEqual([["123"]]);
+      else expect(chat.writingDocument?.text).toContain("Actual report text");
+      finish();
+      await pending;
+      expect(chat.writingDocument).toBeNull();
+    }
+  );
+});
+
+it("uses the available title and body when complete call metadata overtakes partial arguments", async () => {
+  let callbacks!: Record<string, (event: unknown) => void>;
+  let finish!: () => void;
+  const call = {
+    tool_call_id: "report",
+    server_name: "Documents",
+    tool_name: "create_document",
+    purpose: "file_creation",
+    result_status: "pending"
+  };
+  const ask = vi.fn().mockImplementation((request) => {
+    callbacks = request.callbacks;
+    callbacks.onFirstChunk({
+      id: "message-1",
+      session_id: "session-1",
+      answer: "",
+      files: [],
+      generated_files: [],
+      references: [],
+      tools: { assistants: [] }
+    });
+    callbacks.onToolCall({ session_id: "session-1", tools: [call] });
+    return new Promise<void>((resolve) => {
+      finish = resolve;
+    });
+  });
+  const chat = chatService(vi.fn(), { ask });
+  const request = chat.askQuestion("Create a report");
+  await vi.waitFor(() => expect(chat.writingDocument?.callId).toBe("report"));
+  callbacks.onToolCallDelta({
+    session_id: "session-1",
+    tool_call_id: "report",
+    arguments_delta: '{"format":"docx",'
+  });
+  expect(chat.writingDocument?.title).toBe("");
+  const title = "Budgetuppföljning jan–aug 2025";
+  callbacks.onToolCall({
+    session_id: "session-1",
+    tools: [
+      {
+        ...call,
+        result_status: "approved",
+        arguments: { format: "docx", title, content: "Rapportens innehåll" }
+      }
+    ]
+  });
+  expect(chat.writingDocument?.title).toBe(title);
+  expect(chat.writingDocument?.text).toContain("Rapportens innehåll");
+  // The file event can precede final metadata; an empty recorded list must
+  // not bring the draft back over the saved document.
+  callbacks.onToolCall({
+    session_id: "session-1",
+    tools: [{ ...call, result_status: "approved", generated_file_ids: [] }]
+  });
+  callbacks.onImage({
+    session_id: "session-1",
+    tool_call_id: "report",
+    generated_files: [
+      {
+        id: "saved-report",
+        name: "report.docx",
+        mimetype: "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+        size: 100
+      }
+    ]
+  });
+  expect(chat.generatedFileIdsOf({ ...call, generated_file_ids: [] })).toEqual(["saved-report"]);
+  expect(chat.writingDocument).toBeNull();
+  finish();
+  await request;
+});

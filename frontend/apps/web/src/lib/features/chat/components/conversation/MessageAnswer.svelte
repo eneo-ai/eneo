@@ -1,7 +1,13 @@
 <script lang="ts">
+  import { analysisStep } from "../../analysisStep";
+  import { analysisStepLabels } from "../../analysisStepLabels";
+  import { toolFileInputs, type ToolInputFile } from "../../toolFileInputs";
+  import { previousToolAttemptIndexes, toolStepStatus } from "../../toolStepStatus";
   import { Markdown } from "$lib/components/markdown/index.js";
   import MessageEneoInfoBlob from "./MessageEneoInfoBlob.svelte";
+  import MessageDocumentLink from "./MessageDocumentLink.svelte";
   import McpImageAttachments from "./McpImageAttachments.svelte";
+  import { isChartDocumentAsset } from "../../toolFileInputs";
   import ReasoningTrace from "./ReasoningTrace.svelte";
   import InternalToolStep from "./InternalToolStep.svelte";
   import SkillActivationStep from "./SkillActivationStep.svelte";
@@ -10,7 +16,6 @@
   import { formatEmojiTitle } from "$lib/core/formatting/formatEmojiTitle";
   import { getChatService } from "../../ChatService.svelte";
   import {
-    internalReadFileId,
     capabilityProviderDetail,
     internalToolDoneLabel,
     isBuiltinToolCall,
@@ -22,12 +27,15 @@
   import { getMessageContext } from "../../MessageContext.svelte";
   import AsyncImage from "$lib/components/AsyncImage.svelte";
   import GeneratedFileChip from "./GeneratedFileChip.svelte";
+  import { getFilePreview } from "$lib/features/file-preview/FilePreview.svelte";
+  import { isDocument, revisedDocumentName, revisedFileId } from "../../documentVersions";
   import { m } from "$lib/paraglide/messages";
   import { ChevronRight, Check, X, Wrench } from "@lucide/svelte";
   import { SvelteMap, SvelteSet } from "svelte/reactivity";
 
   const chat = getChatService();
   const attachmentUrls = getAttachmentUrlService();
+  const preview = getFilePreview();
 
   const { current, isLast } = getMessageContext();
   const message = $derived(current());
@@ -56,8 +64,17 @@
           purpose?: string | null;
           is_internal?: boolean | null;
           is_bundled?: boolean | null;
+          generated_file_ids?: string[] | null;
         }>
       | undefined
+  );
+
+  const documentAssetIds = $derived(
+    new Set(
+      (mcpToolCalls ?? [])
+        .filter(isChartDocumentAsset)
+        .flatMap((call) => chat.generatedFileIdsOf(call))
+    )
   );
 
   // Reasoning/thinking text for this message: accumulated by ChatService while
@@ -89,25 +106,32 @@
   const pendingToolCalls = $derived((mcpToolCalls ?? []).filter(isPending));
   const tracedToolCalls = $derived((mcpToolCalls ?? []).filter((tc) => !isPending(tc)));
 
-  // Attachment names across the whole conversation, so a read_file call on the
-  // internal files server can be labelled with the file it is reading (its url
-  // argument only carries the file id).
-  const attachmentNamesById = $derived.by(() => {
-    const names = new SvelteMap<string, string>();
+  const conversationFiles = $derived.by(() => {
+    const files = new SvelteMap<string, ToolInputFile>();
     for (const msg of chat.currentConversation?.messages ?? []) {
-      for (const file of msg.files ?? []) names.set(file.id, file.name);
+      for (const file of msg.files ?? [])
+        files.set(file.id, { ...file, generated: files.get(file.id)?.generated ?? false });
+      for (const file of msg.generated_files ?? [])
+        files.set(file.id, { ...file, generated: true });
     }
-    return names;
+    return files;
   });
-  const readFileDetail = (tc: {
-    server_name: string;
-    tool_name: string;
-    arguments?: Record<string, unknown>;
-    is_internal?: boolean | null;
-  }) => {
-    const fileId = internalReadFileId(tc.server_name, tc.tool_name, tc.arguments, tc.is_internal);
-    return fileId ? (attachmentNamesById.get(fileId) ?? null) : null;
+  const readFileDetail = (tc: { arguments?: Record<string, unknown>; tool_call_id?: string }) => {
+    const files = toolFileInputs(
+      tc.arguments ?? chat.partialInputOf(tc.tool_call_id ?? ""),
+      conversationFiles
+    );
+    return files.length
+      ? files
+          .map((file) =>
+            file.generated
+              ? m.tool_input_generated({ name: file.name })
+              : m.tool_input_attached({ name: file.name })
+          )
+          .join(" · ")
+      : null;
   };
+  const previousAttempts = $derived(previousToolAttemptIndexes(tracedToolCalls));
   const tracedSteps = $derived(
     tracedToolCalls.map((tc, i) => {
       const denied =
@@ -116,49 +140,76 @@
         tc.result_status === "denied" ||
         tc.result_status === "timeout_denied";
       const isLastTraced = i === tracedToolCalls.length - 1;
-      // "pending" = the model is still writing the call's arguments;
-      // "approved" = approved/auto-approved but the result hasn't landed yet.
-      // A pending call on a turn that is no longer streaming never executed
-      // (the stream died), so it is shown as failed rather than spinning forever.
-      const status: "preparing" | "running" | "complete" | "failed" | "denied" = denied
-        ? "denied"
-        : tc.result_status === "failed"
-          ? "failed"
-          : tc.result_status === "pending"
-            ? isStreamingTurn
-              ? "preparing"
-              : "failed"
-            : tc.result_status === "approved" && isStreamingTurn
-              ? "running"
-              : toolsStillExecuting && isLastTraced
-                ? "running"
-                : "complete";
-      const toolName = toolDisplayName(
-        tc.tool_name,
-        tc.server_name,
-        tc.title,
-        tc.arguments,
-        tc.purpose,
-        tc.is_internal
+      const status = toolStepStatus(
+        tc.result_status,
+        denied,
+        isStreamingTurn,
+        toolsStillExecuting && isLastTraced
       );
+      // The document the call created, if any: the step names it and opens it.
+      const fileIds = chat.generatedFileIdsOf(tc);
+      const file = message.generated_files.find(
+        (candidate) => isDocument(candidate) && fileIds.includes(candidate.id)
+      );
+      const createsFile = tc.purpose === "file_creation";
+      // A document being written is named as soon as its title has arrived.
+      const writingTitle = createsFile
+        ? ((tc.arguments?.title as string | undefined) ??
+          chat.partialArgumentsOf(tc.tool_call_id)?.title)
+        : undefined;
+      // A change to an earlier document names that document while it is made.
+      const updatingName = createsFile && !writingTitle ? revisedDocumentName(tc.arguments) : null;
+      const activity = analysisStepLabels(
+        analysisStep(tc, {
+          ...chat.partialArgumentsOf(tc.tool_call_id),
+          ...tc.arguments
+        })
+      );
+      const toolName =
+        activity?.running ??
+        (writingTitle
+          ? m.tool_document_writing({ name: writingTitle })
+          : updatingName
+            ? m.tool_document_updating({ name: updatingName })
+            : toolDisplayName(
+                tc.tool_name,
+                tc.server_name,
+                tc.title,
+                tc.arguments,
+                tc.purpose,
+                tc.is_internal
+              ));
       return {
+        document: file
+          ? {
+              file,
+              label: createsFile
+                ? revisedFileId(tc.arguments)
+                  ? (name: string) => m.tool_document_updated({ name })
+                  : (name: string) => m.tool_document_created({ name })
+                : (name: string) => m.tool_result_exported({ name })
+            }
+          : null,
         // Eneo's own tools and capability calls get localized labels; otherwise
         // prefer the server-provided title, falling back to the raw tool name.
         toolName,
         doneLabel:
+          activity?.done ??
           internalToolDoneLabel(
             tc.tool_name,
             tc.server_name,
             tc.arguments,
             tc.purpose,
             tc.is_internal
-          ) ?? toolName,
+          ) ??
+          toolName,
         serverName: serverDisplayName(tc.server_name, tc.purpose, tc.is_internal),
         detail: readFileDetail(tc) ?? capabilityProviderDetail(tc),
         skillName: isSkillActivation(tc) ? (tc.title ?? tc.tool_name) : null,
         args: tc.arguments,
         toolCallId: tc.tool_call_id,
         status,
+        previousAttempt: status === "failed" && !isSkillActivation(tc) && previousAttempts.has(i),
         // Capability calls render as built-in steps whichever provider served
         // them; general external servers keep their cards.
         internal: isBuiltinToolCall(tc)
@@ -191,11 +242,29 @@
     (toolsStillExecuting && runIndex === stepRuns.length - 1) ||
     run.steps.some((step) => step.status === "preparing" || step.status === "running");
   const runFailed = (run: (typeof stepRuns)[number]) =>
-    run.steps.some((step) => step.status === "failed" || step.status === "denied");
-  const runSummary = (run: (typeof stepRuns)[number]) => {
-    const servers = [...new Set(run.steps.map((step) => step.serverName))].join(" · ");
-    return `${servers} · ${m.internal_tool_steps_count({ count: run.steps.length })}`;
+    run.steps.some(
+      (step) => (step.status === "failed" && !step.previousAttempt) || step.status === "denied"
+    );
+  const runSummary = (steps: typeof tracedSteps) => {
+    const servers = [...new Set(steps.map((step) => step.serverName))].join(" · ");
+    return `${servers} · ${m.internal_tool_steps_count({ count: steps.length })}`;
   };
+  // A step that created a document is that document's place in the chat, so
+  // it never folds away with the others.
+  const createdDocument = (step: (typeof tracedSteps)[number]) =>
+    step.document !== null && step.status === "complete";
+  // Documents no step of this answer accounts for (an answer saved before
+  // calls recorded their files) keep a card, so each stays reachable.
+  const unclaimedDocumentIds = $derived.by(() => {
+    const claimed = new Set(
+      tracedSteps.flatMap((step) => (step.internal && step.document ? [step.document.file.id] : []))
+    );
+    return new Set(
+      message.generated_files
+        .filter((file) => isDocument(file) && !claimed.has(file.id))
+        .map((file) => file.id)
+    );
+  });
 
   function toggleToolCallExpanded(index: number) {
     if (expandedToolCalls.has(index)) {
@@ -254,6 +323,15 @@
     }
   }
 
+  // The names an answer can mention a document by: each is a link to it.
+  const documentNames = $derived([
+    ...new Set(
+      chat.documents.documents.flatMap((document) =>
+        document.versions.map((version) => version.name)
+      )
+    )
+  ]);
+
   const showAnswerLabel = $derived.by(() => {
     let hasInfo = message.tools && message.tools.assistants.length > 0;
     let isSameAssistant = message.tools.assistants.some(({ id }) => id === chat.partner.id);
@@ -304,7 +382,8 @@
            (latest step only) or done (every step), so a step opened mid-run
            keeps its panel open when the result lands. -->
       {@const working = runWorking(run, runIndex)}
-      {@const folded = !working && run.steps.length > 1}
+      {@const foldable = run.steps.filter((step) => !createdDocument(step))}
+      {@const folded = !working && foldable.length > 1}
       {@const visibleSteps = working ? run.steps.slice(-1) : run.steps}
       <div class="mb-4 flex flex-col gap-0.5">
         {#if folded}
@@ -325,7 +404,7 @@
             {#if runFailed(run)}
               <X class="text-negative-default h-3.5 w-3.5 shrink-0" />
             {/if}
-            <span class="truncate font-medium">{runSummary(run)}</span>
+            <span class="truncate font-medium">{runSummary(run.steps)}</span>
           </button>
         {/if}
         {#if !folded || openInternalRuns.has(runIndex)}
@@ -347,6 +426,8 @@
                   args={step.args}
                   toolCallId={step.toolCallId}
                   status={step.status}
+                  previousAttempt={step.previousAttempt}
+                  document={step.document}
                   onLoadResult={step.toolCallId
                     ? () => chat.getToolCallResult(step.toolCallId!)
                     : undefined}
@@ -354,6 +435,18 @@
               {/if}
             {/each}
           </div>
+        {/if}
+        {#if folded && !openInternalRuns.has(runIndex)}
+          {#each run.steps.filter(createdDocument) as step, i (step.toolCallId ?? i)}
+            <InternalToolStep
+              runningLabel={step.toolName}
+              doneLabel={step.doneLabel}
+              serverName={step.serverName}
+              status={step.status}
+              document={step.document}
+              detail={step.detail}
+            />
+          {/each}
         {/if}
       </div>
     {/if}
@@ -529,20 +622,24 @@
 
   <Markdown
     source={message.answer}
+    fileNames={documentNames}
     customRenderers={{
-      inref: MessageEneoInfoBlob
+      inref: MessageEneoInfoBlob,
+      file: MessageDocumentLink
     }}
   />
 </div>
 
 <McpImageAttachments />
 
-{#each message.generated_files as file (file.id)}
+{#each message.generated_files.filter((file) => !documentAssetIds.has(file.id)) as file (file.id)}
   <!-- An empty mimetype is the placeholder of an image still being generated. -->
   {#if !file.mimetype || file.mimetype.startsWith("image/")}
     <AsyncImage url={attachmentUrls.getUrl(file) ?? null}></AsyncImage>
-  {:else}
-    <!-- Documents download their exact bytes, never the extracted text. -->
+  {:else if !preview || unclaimedDocumentIds.has(file.id)}
+    <!-- A document is opened from the step that created it. It gets a card
+         only where no step shows it, or where there is no panel to open it in.
+         Documents download their exact bytes, never the extracted text. -->
     <GeneratedFileChip {file} url={attachmentUrls.getOriginalUrl(file) ?? null} />
   {/if}
 {/each}

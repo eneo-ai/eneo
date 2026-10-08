@@ -1178,6 +1178,7 @@ class TestReadOverrideSnapshot:
         ],
         "CONVERSATIONS_READ_OVERRIDES": [
             "chat",
+            "export_conversation_document",
             "leave_feedback",
         ],
         "APPS_READ_OVERRIDES": [

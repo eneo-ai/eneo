@@ -80,6 +80,7 @@ class ActionType(str, Enum):
     FILE_ORIGINAL_DOWNLOAD_LINK_CREATED = "file_original_download_link_created"
     FILE_ORIGINAL_DOWNLOADED = "file_original_downloaded"
     FILE_SIGNED_URL_MINTED = "file_signed_url_minted"
+    DOCUMENT_EXPORTED = "document_exported"
     INFO_BLOB_ORIGINAL_DOWNLOAD_LINK_CREATED = (
         "info_blob_original_download_link_created"
     )

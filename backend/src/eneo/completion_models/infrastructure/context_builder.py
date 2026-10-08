@@ -30,6 +30,7 @@ from eneo.completion_models.infrastructure.static_prompts import (
     TOOL_NAMING_INSTRUCTION,
     TRANSCRIPTION_PROMPT,
 )
+from eneo.completion_models.infrastructure.table_selection import parse_table_selection
 from eneo.files.file_models import File, FileType
 from eneo.files.model_file_references import file_handle, model_file_references
 from eneo.info_blobs.info_blob import SourceMetadataEntry
@@ -636,7 +637,20 @@ class ContextBuilder:
         # reachable via a signed URL are represented by that URL only (skips the
         # extracted text — e.g. a large CSV that would blow the context window).
         # Files without a URL are always inlined so the model still sees them.
+        selection = parse_table_selection(input_str)
         text_files = self._get_files_by_type(files, FileType.TEXT)
+        if (
+            selection
+            and file_reference_urls
+            and selection.file_id in file_reference_urls
+        ):
+            # A coordinate selection must be queried, not answered from the preview
+            # or an inlined dump of the original file.
+            text_files = [file for file in text_files if file.id != selection.file_id]
+            input_str += (
+                "\n\nSelected table rows (file reference for table tools):\n"
+                + json.dumps(selection.reference(), ensure_ascii=False)
+            )
         if not inline_file_text and file_reference_urls:
             text_files = [f for f in text_files if f.id not in file_reference_urls]
         if text_files:
