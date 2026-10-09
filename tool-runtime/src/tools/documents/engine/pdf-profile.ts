@@ -6,7 +6,7 @@
 // the runtime image ships, so a Calibri template lays out as in Word.
 import { writeFile } from "node:fs/promises";
 import { join } from "node:path";
-import type { Band, BandSegment } from "./html";
+import { bandRows, type Band, type BandSegment } from "./html";
 import {
   headerFooterParts,
   openWordTemplate,
@@ -23,14 +23,21 @@ export type Face = {
   color?: string;
   bold?: boolean;
   italic?: boolean;
+  /** Paragraph spacing, for paragraph styles. */
+  beforePt?: number;
+  afterPt?: number;
 };
 export type PdfProfile = {
   page: {
     widthMm: number;
     heightMm: number;
     marginMm: { top: number; right: number; bottom: number; left: number };
+    /** Distance from the page edge to the header and to the footer. */
+    headerMm: number;
+    footerMm: number;
   };
-  body: Face & { lineHeight?: number };
+  /** The line height is a CSS value: a factor of the font size, or a length. */
+  body: Face & { lineHeight?: string };
   title: Face;
   /** Index 1..3. */
   headings: Face[];
@@ -129,6 +136,32 @@ function faceOf(properties: Element | undefined, theme: Theme): Face {
   return face;
 }
 
+/** Paragraph spacing before and after, from a paragraph-properties element. */
+function spacingOf(properties: Element | undefined): Pick<Face, "beforePt" | "afterPt"> {
+  const spacing = find(properties, "w:spacing");
+  const points = (name: string) => {
+    const raw = attr(spacing, name);
+    return raw && /^\d+$/.test(raw) ? Number(raw) / 20 : undefined;
+  };
+  const before = points("w:before");
+  const after = points("w:after");
+  return {
+    ...(before !== undefined ? { beforePt: before } : {}),
+    ...(after !== undefined ? { afterPt: after } : {}),
+  };
+}
+
+/** Word's line spacing as a CSS line height. Single spacing in Word is about 1.15 times the font size. */
+function lineHeightOf(properties: Element | undefined): string | undefined {
+  const spacing = find(properties, "w:spacing");
+  const raw = attr(spacing, "w:line");
+  if (!raw || !/^\d+$/.test(raw) || Number(raw) <= 0) return undefined;
+  const rule = attr(spacing, "w:lineRule") ?? "auto";
+  return rule === "auto"
+    ? ((Number(raw) / 240) * 1.15).toFixed(2)
+    : `${(Number(raw) / 20).toFixed(1)}pt`;
+}
+
 /** The face of a paragraph style, following `basedOn` so inherited settings count. */
 function styleFace(styles: Element | undefined, id: string | undefined, theme: Theme): Face {
   if (!id) return {};
@@ -145,9 +178,30 @@ function styleFace(styles: Element | undefined, id: string | undefined, theme: T
     current = byId.get(attr(find(current, "w:basedOn"), "w:val"));
   }
   return chain.reduce<Face>(
-    (face, style) => ({ ...face, ...faceOf(find(style, "w:rPr"), theme) }),
+    (face, style) => ({
+      ...face,
+      ...faceOf(find(style, "w:rPr"), theme),
+      ...spacingOf(find(style, "w:pPr")),
+    }),
     {},
   );
+}
+
+/** The face a header or footer is set in: its first paragraph's style under the first run's own formatting. */
+function bandFace(part: Element, styles: Element | undefined, theme: Theme): Face {
+  let paragraph: Element | undefined;
+  let run: Element | undefined;
+  walk(rootElement(part), (node) => {
+    if (node.name === "w:p" && !paragraph) paragraph = node;
+    if (node.name === "w:r" && !run && find(node, "w:t")) run = node;
+    return !run;
+  });
+  const styleId = attr(at(paragraph, "w:pPr", "w:pStyle"), "w:val");
+  const { beforePt: _before, afterPt: _after, ...face } = {
+    ...styleFace(styles, styleId, theme),
+    ...faceOf(find(run, "w:rPr"), theme),
+  };
+  return face;
 }
 
 function relationTargets(rels: Element | undefined): Map<string, string> {
@@ -332,13 +386,20 @@ export async function pdfProfile(docx: Buffer, assetsDir: string): Promise<PdfPr
     findAll(stylesRoot, "w:style").find(
       (style) => attr(style, "w:type") === "paragraph" && attr(style, "w:default") === "1",
     ) ?? undefined;
-  const normal = faceOf(find(normalId, "w:rPr"), theme);
-  const body: PdfProfile["body"] = { font: theme.fonts.minor, sizePt: 11, ...defaults, ...normal };
-  const line = attr(
-    at(stylesRoot, "w:docDefaults", "w:pPrDefault", "w:pPr", "w:spacing"),
-    "w:line",
-  );
-  if (line && /^\d+$/.test(line) && Number(line) > 0) body.lineHeight = Number(line) / 240;
+  const defaultParagraph = at(stylesRoot, "w:docDefaults", "w:pPrDefault", "w:pPr");
+  const normal = {
+    ...faceOf(find(normalId, "w:rPr"), theme),
+    ...spacingOf(find(normalId, "w:pPr")),
+  };
+  const body: PdfProfile["body"] = {
+    font: theme.fonts.minor,
+    sizePt: 11,
+    ...defaults,
+    ...spacingOf(defaultParagraph),
+    ...normal,
+  };
+  const lineHeight = lineHeightOf(find(normalId, "w:pPr")) ?? lineHeightOf(defaultParagraph);
+  if (lineHeight) body.lineHeight = lineHeight;
 
   const page = (() => {
     let section: Element | undefined;
@@ -361,6 +422,8 @@ export async function pdfProfile(docx: Buffer, assetsDir: string): Promise<PdfPr
         bottom: mm(margin, "w:bottom", 1440),
         left: mm(margin, "w:left", 1440),
       },
+      headerMm: mm(margin, "w:header", 708),
+      footerMm: mm(margin, "w:footer", 708),
     };
   })();
 
@@ -378,11 +441,23 @@ export async function pdfProfile(docx: Buffer, assetsDir: string): Promise<PdfPr
     if (!part) continue;
     const segments = bandOf(part);
     const logo = kind === "header" ? await logoOf(zip, partName, part, assetsDir) : undefined;
-    if (segments.length || logo) bands[kind] = { segments, ...(logo ? { logo } : {}) };
+    const face = bandFace(part, styles, theme);
+    if (segments.length || logo)
+      bands[kind] = {
+        segments,
+        ...(Object.keys(face).length ? { face } : {}),
+        ...(logo ? { logo } : {}),
+      };
   }
 
   return {
-    page: { widthMm: page.widthMm, heightMm: page.heightMm, marginMm: page.marginMm },
+    page: {
+      widthMm: page.widthMm,
+      heightMm: page.heightMm,
+      marginMm: page.marginMm,
+      headerMm: page.headerMm,
+      footerMm: page.footerMm,
+    },
     body,
     title: styleFace(styles, map.title, theme),
     headings: [{}, ...[1, 2, 3].map((level) => styleFace(styles, map.heading[level], theme))],
@@ -390,60 +465,77 @@ export async function pdfProfile(docx: Buffer, assetsDir: string): Promise<PdfPr
   };
 }
 
-function faceCss(face: Face, fallbackSize?: number): string {
+function faceCss(face: Face, fallbackSize: number): string {
   const rules: string[] = [];
   if (face.font) rules.push(`font-family: ${fontStack(face.font)}`);
-  const size = face.sizePt ?? fallbackSize;
-  if (size) rules.push(`font-size: ${size}pt`);
+  rules.push(`font-size: ${face.sizePt ?? fallbackSize}pt`);
   if (face.color) rules.push(`color: ${face.color}`);
   if (face.bold !== undefined) rules.push(`font-weight: ${face.bold ? 700 : 400}`);
   if (face.italic !== undefined) rules.push(`font-style: ${face.italic ? "italic" : "normal"}`);
   return rules.join("; ");
 }
 
+const PT_PER_MM = 72 / 25.4;
+
+/** The height a band takes on the page, in points, for sizing the margin it sits in. */
+function bandHeightPt(band: Band | undefined, fontSizePt: number): number {
+  if (!band) return 0;
+  const rows = bandRows(band.segments).length;
+  return (band.logo ? band.logo.heightPt + 4 : 0) + rows * fontSizePt * 1.3;
+}
+
 /** The stylesheet for the document: the profile on top of Eneo's base layout. */
 export function profileCss(profile: PdfProfile): string {
   const { page, body } = profile;
   const bodySize = body.sizePt ?? 11;
-  const band = (box: string, element: string, present: boolean) =>
-    present ? `  @${box} { content: element(${element}); }\n` : "";
+  const bandSize = (band: Band | undefined) => band?.face?.sizePt ?? Math.max(8, bodySize - 1);
+  // Word places the header at its distance from the page edge and pushes the body down when
+  // the header is taller than the margin leaves; the footer grows upward the same way.
+  const headerPt = bandHeightPt(profile.header, bandSize(profile.header));
+  const footerPt = bandHeightPt(profile.footer, bandSize(profile.footer));
+  const topMm = Math.max(page.marginMm.top, page.headerMm + (headerPt + 6) / PT_PER_MM);
+  const bottomMm = Math.max(page.marginMm.bottom, page.footerMm + (footerPt + 6) / PT_PER_MM);
+  const contentWidthMm = page.widthMm - page.marginMm.left - page.marginMm.right;
+  const header = profile.header
+    ? `  @top-left { content: element(page-header); width: ${contentWidthMm.toFixed(2)}mm; vertical-align: top; padding-top: ${page.headerMm.toFixed(2)}mm; }\n`
+    : "";
+  const footer = profile.footer
+    ? `  @bottom-left { content: element(page-footer); width: ${contentWidthMm.toFixed(2)}mm; vertical-align: bottom; padding-bottom: ${page.footerMm.toFixed(2)}mm; }\n`
+    : "";
+  const bandCss = (id: string, band: Band | undefined) =>
+    `#${id} { position: running(${id}); ${faceCss(band?.face ?? {}, bandSize(band))}; }\n`;
+  const heading = (level: number, fallbackSize: number) => {
+    const face = profile.headings[level] ?? {};
+    return `h${level} { ${faceCss(face, bodySize * fallbackSize)}; margin: ${face.beforePt ?? 14}pt 0 ${face.afterPt ?? 6}pt; }`;
+  };
   return `@page {
   size: ${page.widthMm.toFixed(2)}mm ${page.heightMm.toFixed(2)}mm;
-  margin: ${page.marginMm.top.toFixed(2)}mm ${page.marginMm.right.toFixed(2)}mm ${page.marginMm.bottom.toFixed(2)}mm ${page.marginMm.left.toFixed(2)}mm;
-${band("top-center", "page-header", !!profile.header)}${band("bottom-center", "page-footer", !!profile.footer)}}
+  margin: ${topMm.toFixed(2)}mm ${page.marginMm.right.toFixed(2)}mm ${bottomMm.toFixed(2)}mm ${page.marginMm.left.toFixed(2)}mm;
+${header}${footer}}
 html {
   font-family: ${fontStack(body.font)};
   font-size: ${bodySize}pt;
-  line-height: ${body.lineHeight ?? 1.3};
+  line-height: ${body.lineHeight ?? "1.3"};
   color: ${body.color ?? "#111111"};
 }
 body { margin: 0; }
 .document { overflow-wrap: anywhere; }
-#page-header { position: running(page-header); }
-#page-footer { position: running(page-footer); }
-.band {
-  display: grid;
-  grid-template-columns: 1fr auto 1fr;
-  align-items: end;
-  width: 100%;
-  font-size: ${Math.max(8, bodySize - 1)}pt;
-  color: ${body.color ?? "#111111"};
-}
-#page-header { padding-bottom: 6pt; }
-#page-footer { padding-top: 6pt; }
-.band-logo { grid-column: 1 / -1; justify-self: start; margin-bottom: 4pt; }
-.band-left { grid-column: 1; text-align: left; }
-.band-center { grid-column: 2; text-align: center; }
-.band-right { grid-column: 3; text-align: right; }
+${bandCss("page-header", profile.header)}${bandCss("page-footer", profile.footer)}.band { color: ${body.color ?? "#111111"}; }
+.band-logo { display: block; margin-bottom: 4pt; }
+.band-row { display: table; width: 100%; table-layout: fixed; border-collapse: collapse; }
+.band-row > span { display: table-cell; vertical-align: bottom; }
+.band-left { text-align: left; }
+.band-center { text-align: center; }
+.band-right { text-align: right; }
 .counter-page::before { content: counter(page); }
 .counter-pages::before { content: counter(pages); }
-h1, h2, h3, h4, h5, h6 { line-height: 1.2; margin: 14pt 0 6pt; break-after: avoid; }
-h1 { ${faceCss(profile.headings[1] ?? {}, bodySize * 1.6) || `font-size: ${bodySize * 1.6}pt`}; }
-h2 { ${faceCss(profile.headings[2] ?? {}, bodySize * 1.3) || `font-size: ${bodySize * 1.3}pt`}; }
-h3 { ${faceCss(profile.headings[3] ?? {}, bodySize * 1.1) || `font-size: ${bodySize * 1.1}pt`}; }
-h4, h5, h6 { font-size: ${bodySize}pt; }
-h1.title { ${faceCss(profile.title, bodySize * 2.2) || `font-size: ${bodySize * 2.2}pt`}; margin: 0 0 14pt; }
-p, ul, ol, pre, table, figure, blockquote { margin: 0 0 8pt; }
+h1, h2, h3, h4, h5, h6 { line-height: 1.2; break-after: avoid; }
+${heading(1, 1.6)}
+${heading(2, 1.3)}
+${heading(3, 1.1)}
+h4, h5, h6 { font-size: ${bodySize}pt; margin: ${profile.headings[3]?.beforePt ?? 14}pt 0 ${profile.headings[3]?.afterPt ?? 6}pt; }
+h1.title { ${faceCss(profile.title, bodySize * 2.2)}; margin: ${profile.title.beforePt ?? 0}pt 0 ${profile.title.afterPt ?? 14}pt; }
+p, ul, ol, pre, table, figure, blockquote { margin: ${body.beforePt ?? 0}pt 0 ${body.afterPt ?? 8}pt; }
 ul, ol { padding-left: 18pt; }
 li { margin: 0 0 2pt; }
 li > p { margin: 0; }

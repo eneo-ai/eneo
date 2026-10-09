@@ -24,13 +24,19 @@ async function letterhead(): Promise<Buffer> {
     await Packer.toBuffer(
       new Document({
         styles: {
-          default: { document: { run: { font: "Arial", size: 20 } } },
+          default: {
+            document: {
+              run: { font: "Arial", size: 20 },
+              paragraph: { spacing: { after: 120, line: 276 } },
+            },
+          },
           paragraphStyles: [
             {
               id: "Heading1",
               name: "heading 1",
               basedOn: "Normal",
               run: { font: "Cambria", size: 32, bold: true, color: "1F4E79" },
+              paragraph: { spacing: { before: 360, after: 120 } },
             },
           ],
         },
@@ -39,7 +45,7 @@ async function letterhead(): Promise<Buffer> {
             properties: {
               page: {
                 size: { width: 11906, height: 16838 },
-                margin: { top: 2268, right: 1134, bottom: 1701, left: 1701 },
+                margin: { top: 2268, right: 1134, bottom: 1701, left: 1701, header: 567, footer: 567 },
               },
             },
             headers: {
@@ -64,11 +70,11 @@ async function letterhead(): Promise<Buffer> {
                 children: [
                   new Paragraph({
                     children: [
-                      new TextRun("{{organisation}}"),
-                      new TextRun("\tSida "),
-                      new TextRun({ children: [PageNumber.CURRENT] }),
-                      new TextRun(" av "),
-                      new TextRun({ children: [PageNumber.TOTAL_PAGES] }),
+                      new TextRun({ text: "{{organisation}}", size: 16 }),
+                      new TextRun({ text: "\tSida ", size: 16 }),
+                      new TextRun({ children: [PageNumber.CURRENT], size: 16 }),
+                      new TextRun({ text: " av ", size: 16 }),
+                      new TextRun({ children: [PageNumber.TOTAL_PAGES], size: 16 }),
                     ],
                   }),
                 ],
@@ -114,7 +120,7 @@ describe("the HTML the PDF is laid out from", () => {
     expect(html).toContain('<th scope="col">A</th><th scope="col" style="text-align:right">B</th>');
     expect(html).toContain('<div class="page-break" aria-hidden="true"></div>');
     expect(html).toContain(
-      '<div id="page-footer" class="band"><span class="band-left">Kommunen</span><span class="band-right">Sida <span class="counter-page"></span> av <span class="counter-pages"></span></span></div>',
+      '<div id="page-footer" class="band"><span class="band-row"><span class="band-left">Kommunen</span><span class="band-right">Sida <span class="counter-page"></span> av <span class="counter-pages"></span></span></span></div>',
     );
     expect(html).not.toContain("page-header");
     const own = renderHtml(parseMarkdown("# Egen\n\n## Under"), {
@@ -147,12 +153,16 @@ describe("the profile read from the Word rendering", () => {
     expect(profile.page.widthMm).toBeCloseTo(210, 0);
     expect(profile.page.marginMm.top).toBeCloseTo(40, 0);
     expect(profile.page.marginMm.left).toBeCloseTo(30, 0);
-    expect(profile.body).toMatchObject({ font: "Arial", sizePt: 10 });
+    expect(profile.page.headerMm).toBeCloseTo(10, 2);
+    expect(profile.page.footerMm).toBeCloseTo(10, 2);
+    expect(profile.body).toMatchObject({ font: "Arial", sizePt: 10, afterPt: 6, lineHeight: "1.32" });
     expect(profile.headings[1]).toMatchObject({
       font: "Cambria",
       sizePt: 16,
       bold: true,
       color: "#1f4e79",
+      beforePt: 18,
+      afterPt: 6,
     });
     expect(profile.header?.logo).toMatchObject({ file: "logo.png", widthPt: 90, heightPt: 30 });
     expect(await Bun.file(join(directory, "logo.png")).exists()).toBe(true);
@@ -161,17 +171,43 @@ describe("the profile read from the Word rendering", () => {
       { align: "left", parts: ["Sundsvalls kommun"] },
       { align: "right", parts: ["Sida ", { counter: "page" }, " av ", { counter: "pages" }] },
     ]);
+    expect(profile.footer?.face).toEqual({ sizePt: 8 });
     const css = profileCss(profile);
     expect(css).toMatch(/size: 210\.0\dmm 297\.0\dmm/);
     expect(css).toContain("margin: 40.00mm 20.00mm 30.00mm 30.00mm");
     expect(css).toContain(
-      'font-family: "Arial", "Liberation Sans", sans-serif;\n  font-size: 10pt',
+      'font-family: "Arial", "Liberation Sans", sans-serif;\n  font-size: 10pt;\n  line-height: 1.32',
     );
     expect(css).toMatch(
-      /h1 \{ font-family: "Cambria", "Caladea", serif; font-size: 16pt; color: #1f4e79; font-weight: 700; \}/,
+      /h1 \{ font-family: "Cambria", "Caladea", serif; font-size: 16pt; color: #1f4e79; font-weight: 700; margin: 18pt 0 6pt; \}/,
     );
-    expect(css).toContain("@top-center { content: element(page-header); }");
-    expect(css).toContain("@bottom-center { content: element(page-footer); }");
+    expect(css).toContain("p, ul, ol, pre, table, figure, blockquote { margin: 0pt 0 6pt; }");
+    // The bands span the text width, start at Word's header and footer distances, and
+    // keep their own type size.
+    expect(css).toContain(
+      "@top-left { content: element(page-header); width: 160.00mm; vertical-align: top; padding-top: 10.00mm; }",
+    );
+    expect(css).toContain(
+      "@bottom-left { content: element(page-footer); width: 160.00mm; vertical-align: bottom; padding-bottom: 10.00mm; }",
+    );
+    expect(css).toContain("#page-footer { position: running(page-footer); font-size: 8pt; }");
+  });
+  test("a header taller than the top margin pushes the page content down, as in Word", () => {
+    const css = profileCss({
+      page: {
+        widthMm: 210,
+        heightMm: 297,
+        marginMm: { top: 20, right: 20, bottom: 20, left: 20 },
+        headerMm: 10,
+        footerMm: 10,
+      },
+      body: { sizePt: 11 },
+      title: {},
+      headings: [],
+      header: { segments: [], logo: { file: "logo.png", widthPt: 120, heightPt: 60 } },
+    });
+    // 10 mm distance + 60 pt logo + gaps, so the text starts under the logo.
+    expect(css).toMatch(/margin: 34\.\d\dmm 20\.00mm 20\.00mm 20\.00mm/);
   });
   test("the built-in template gives a profile with a footer and no logo", async () => {
     const docx = await renderIntoTemplate(await builtinTemplate("en"), document, {

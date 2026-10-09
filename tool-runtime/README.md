@@ -43,8 +43,9 @@ documentation lives in `docs/deployment/TOOL_RUNTIME.md`.
   the rest, and an empty value removes a control. `src/tools/documents/engine/word/`
   holds the inspection, numbering and control handling around the docx patcher.
 - A PDF follows the same template. The document is rendered into the Word template
-  first; its page size and margins, body and heading faces, header, footer (with page
-  numbers) and logo are read from that file (`engine/pdf-profile.ts`) and become the
+  first; its page size and margins, header and footer distances, body and heading
+  faces with their paragraph spacing, header, footer (with page numbers) and logo are
+  read from that file (`engine/pdf-profile.ts`) and become the
   stylesheet of a semantic HTML rendering (`engine/html.ts`) that WeasyPrint lays out
   as a tagged PDF/UA-1 document. WeasyPrint runs in a Python venv the image installs
   at `/opt/pdf` (`scripts/render_pdf.py`, pinned with hashes in

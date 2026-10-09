@@ -4,17 +4,33 @@
 // file. Everything is escaped; the only URLs are the document's own image files and the
 // http(s)/mailto links the parser admitted.
 import type { Block, Inline } from "../markdown/parse";
+import type { Face } from "./pdf-profile";
 
 /** One line of a page header or footer: text with page counters, aligned in its margin box. */
 export type BandSegment = {
   align: "left" | "center" | "right";
   parts: (string | { counter: "page" | "pages" })[];
 };
-/** A page header or footer: its text segments and, for a header, the first picture it shows. */
+/** A page header or footer: its text segments, the face they are set in and, for a header, the first picture it shows. */
 export type Band = {
   segments: BandSegment[];
+  face?: Face;
   logo?: { file: string; widthPt: number; heightPt: number };
 };
+
+const ALIGN_ORDER = { left: 0, center: 1, right: 2 } as const;
+
+/** The segments grouped into lines: a line runs left to right, so a segment no further right than the last starts a new one. */
+export function bandRows(segments: BandSegment[]): BandSegment[][] {
+  const rows: BandSegment[][] = [];
+  for (const segment of segments) {
+    const row = rows[rows.length - 1];
+    const last = row?.[row.length - 1];
+    if (row && last && ALIGN_ORDER[segment.align] > ALIGN_ORDER[last.align]) row.push(segment);
+    else rows.push([segment]);
+  }
+  return rows;
+}
 /** An image file in the render directory, at the size it prints (points). */
 export type HtmlImage = { file: string; caption?: string; widthPt: number; heightPt: number };
 
@@ -120,22 +136,21 @@ function one(block: Block, options: HtmlOptions, shift: number): string {
 
 function band(id: string, band: Band | undefined): string {
   if (!band || (!band.segments.length && !band.logo)) return "";
-  const segments = band.segments
-    .map(
-      (segment) =>
-        `<span class="band-${segment.align}">${segment.parts
-          .map((part) =>
-            typeof part === "string"
-              ? escapeHtml(part)
-              : `<span class="counter-${part.counter}"></span>`,
-          )
-          .join("")}</span>`,
-    )
+  const cell = (segment: BandSegment) =>
+    `<span class="band-${segment.align}">${segment.parts
+      .map((part) =>
+        typeof part === "string"
+          ? escapeHtml(part)
+          : `<span class="counter-${part.counter}"></span>`,
+      )
+      .join("")}</span>`;
+  const rows = bandRows(band.segments)
+    .map((row) => `<span class="band-row">${row.map(cell).join("")}</span>`)
     .join("");
   const logo = band.logo
     ? `<img class="band-logo" src="${escapeHtml(band.logo.file)}" alt="" style="width:${band.logo.widthPt}pt;height:${band.logo.heightPt}pt">`
     : "";
-  return `<div id="${id}" class="band">${logo}${segments}</div>`;
+  return `<div id="${id}" class="band">${logo}${rows}</div>`;
 }
 
 /** The smallest heading level the blocks use, at any depth. */
