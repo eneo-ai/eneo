@@ -27,6 +27,6 @@ export async function readEvents(response, { onOpen, onMessage, onClose }) {
     onClose?.();
     return true;
   } else {
-    throw new PartialError("RESPONSE", response.status, await response.json());
+    throw new PartialError("RESPONSE", response.status, await response.json(), response.headers);
   }
 }

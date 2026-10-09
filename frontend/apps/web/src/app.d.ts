@@ -17,6 +17,12 @@ declare global {
       environment: ReturnType<typeof getEnvironmentConfig>;
       id_token: string | null;
       access_token: string | null;
+      /** CSP frame-ancestors for this response; set only by the widget embed page. */
+      frameAncestors?: string;
+      /** Colour scheme the embed page renders with; it never follows the app's saved theme. */
+      embedScheme?: "light" | "dark" | "system";
+      /** Origins the embed page may load images from and connect to, beyond itself. */
+      embedSources?: { img: string[]; connect: string[] };
     }
     // interface PageData {}
     interface PageState {

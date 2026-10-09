@@ -37,3 +37,5 @@ class EntityType(str, Enum):
     MODEL_PROVIDER = "model_provider"
     MCP_SERVER_TOOL = "mcp_server_tool"
     USER_GROUP = "user_group"
+    WIDGET = "widget"
+    WIDGET_TEMPLATE = "widget_template"

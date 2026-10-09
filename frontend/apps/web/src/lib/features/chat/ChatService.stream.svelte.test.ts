@@ -1,11 +1,17 @@
 import { describe, expect, it, vi } from "vitest";
+import { EneoError } from "@eneo/eneo-js";
+import { m } from "$lib/paraglide/messages";
 import { ChatService, type ChatPartner } from "./ChatService.svelte";
 
 // Runs in the browser project on purpose: the frame-aligned answer buffer only
 // exists where requestAnimationFrame does, and that is where the ordering
 // between buffered text and a withheld "<inref" prefix matters.
-function chatService(ask: ReturnType<typeof vi.fn>) {
+function chatService(
+  ask: ReturnType<typeof vi.fn>,
+  options: { inlineStreamErrors?: boolean } = {}
+) {
   return new ChatService({
+    ...options,
     eneo: {
       conversations: {
         preflight: vi.fn(),
@@ -48,5 +54,43 @@ describe("ChatService stream finalization", () => {
     await chat.askQuestion("Hi");
 
     expect(chat.currentConversation.messages.at(-1)?.answer).toBe("Hello <inref");
+  });
+});
+
+describe("ChatService answers that break off mid-stream", () => {
+  // Some text arrives and is rendered, then the stream fails.
+  const brokenOff = () =>
+    vi.fn().mockImplementation(async ({ callbacks }) => {
+      callbacks.onFirstChunk({
+        id: "message-1",
+        session_id: "session-1",
+        answer: "",
+        references: []
+      });
+      callbacks.onText({
+        session_id: "session-1",
+        answer: "Biblioteket har öppet ",
+        references: []
+      });
+      await new Promise((resolve) => setTimeout(resolve, 100));
+      throw new EneoError("The AI response stream ended unexpectedly.", "SERVER", 200, 0);
+    });
+
+  it("writes the failure into the answer in the signed-in chat", async () => {
+    const chat = chatService(brokenOff());
+
+    await chat.askQuestion("När har biblioteket öppet?");
+
+    const answer = chat.currentConversation.messages.at(-1)?.answer ?? "";
+    expect(answer.startsWith(m.chat_stream_error_inline())).toBe(true);
+  });
+
+  it("keeps the partial answer and hands the failure to a caller that reports it itself", async () => {
+    const chat = chatService(brokenOff(), { inlineStreamErrors: false });
+
+    await expect(chat.askQuestion("När har biblioteket öppet?")).rejects.toBeInstanceOf(EneoError);
+
+    expect(chat.currentConversation.messages).toHaveLength(1);
+    expect(chat.currentConversation.messages.at(-1)?.answer).toBe("Biblioteket har öppet ");
   });
 });

@@ -40,6 +40,9 @@ class Tenants(BasePublic):
     crawler_settings: Mapped[dict[str, Any]] = mapped_column(
         JSONB, nullable=False, server_default="{}"
     )
+    widget_policy: Mapped[dict[str, Any]] = mapped_column(
+        JSONB, nullable=False, server_default=sa.text("'{}'::jsonb")
+    )
     api_key_policy: Mapped[dict[str, Any]] = mapped_column(
         JSONB,
         nullable=False,

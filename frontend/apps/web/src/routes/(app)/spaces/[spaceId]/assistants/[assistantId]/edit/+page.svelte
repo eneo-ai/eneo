@@ -38,6 +38,9 @@
   import { createIconEditor } from "$lib/features/icons/createIconEditor.svelte";
   import ApiKeysSettingsSection from "$lib/features/api-keys/ApiKeysSettingsSection.svelte";
   import SkillBindingsEditor from "$lib/features/skills/SkillBindingsEditor.svelte";
+  import WidgetPublishedNotice from "$lib/features/widget/admin/WidgetPublishedNotice.svelte";
+  import { hasPermission } from "$lib/core/hasPermission.js";
+  import { localizeHref } from "$lib/paraglide/runtime";
   import {
     loadSkillBindingCatalogPage,
     loadSkillBindingPreview
@@ -493,6 +496,17 @@
       </Settings.Group>
 
       <Settings.Group title={m.tools()}>
+        {#if data.servesActiveWidget}
+          <WidgetPublishedNotice
+            href={hasPermission(data.user)("widgets")
+              ? localizeHref(
+                  `/spaces/${$currentSpace.routeId}/assistants/${data.assistant.id}/widget`
+                )
+              : hasPermission(data.user)("admin")
+                ? localizeHref("/admin/widgets")
+                : undefined}
+          />
+        {/if}
         <Settings.Row
           title={m.tools()}
           description={m.select_mcp_servers_description()}
@@ -610,6 +624,27 @@
                 resource={data.assistant}
                 hasUnsavedChanges={$currentChanges.hasUnsavedChanges}
               />
+            </Settings.Row>
+          {/if}
+
+          {#if hasPermission(data.user)("widgets") && data.assistant.permissions?.includes("edit")}
+            <Settings.Row
+              title={m.widget_admin_title()}
+              description={data.currentSpace.organization
+                ? m.widget_admin_blocker_organization_space_unsupported()
+                : data.currentSpace.personal
+                  ? m.widget_admin_blocker_personal_space_unsupported()
+                  : m.widget_admin_link_description()}
+            >
+              <div class="flex h-14 items-center">
+                <!-- eslint-disable-next-line svelte/no-navigation-without-resolve -- localized href built from typed route segments -->
+                <Button
+                  variant="outline"
+                  href={localizeHref(
+                    `/spaces/${$currentSpace.routeId}/assistants/${data.assistant.id}/widget`
+                  )}>{m.widget_admin_open()}</Button
+                >
+              </div>
             </Settings.Row>
           {/if}
 

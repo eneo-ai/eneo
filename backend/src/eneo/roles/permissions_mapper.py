@@ -19,6 +19,7 @@ PERMISSIONS_WITH_DESCRIPTION = {
     Permission.API_KEYS: "Create API keys. Required for minting tenant, space, assistant, and app-scoped keys via the dashboard.",
     Permission.STORAGE: "Administer file storage. Required for connecting an S3-compatible destination, changing it, rotating its keys, and setting upload limits.",
     Permission.MODULES: "Install and configure modules for the current Eneo organization.",
+    Permission.WIDGETS: "Configure embeddable widgets for assistants in spaces you can edit. Activating a widget for the public additionally requires the admin permission.",
     Permission.ASSISTANT_DEBUG: "Inspect body-free chat diagnostics, including Skill activation decisions, for conversations you can access.",
     Permission.WEB_SEARCH: "Use web search in chats where an assistant offers it. Without this permission web search tools are never attached for the user.",
     Permission.IMAGE_GENERATION: "Use image generation in chats where an assistant offers it. Without this permission image generation tools are never attached for the user.",

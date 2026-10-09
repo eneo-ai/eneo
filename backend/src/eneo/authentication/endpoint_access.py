@@ -32,6 +32,7 @@ class Authentication(str, Enum):
     MODULE = "module_user_token_and_service_key"
     SIGNED_URL = "signed_file_token"
     WEBSOCKET = "websocket_user_token"
+    WIDGET_VISITOR = "widget_visitor_token"
     PUBLIC = "public"
 
 
@@ -43,6 +44,9 @@ class Authorization(str, Enum):
     SCIM = "token_tenant_provisioning"
     MODULE = "assigned_module_user"
     SIGNED_URL = "token_file_and_tenant"
+    # A pseudonymous widget visitor: the token binds one widget, and the
+    # widget service checks session ownership and the widget's live state.
+    WIDGET_VISITOR = "token_widget_visitor"
     PUBLIC = "public"
 
 
@@ -60,6 +64,7 @@ _SPECIAL_AUTHORIZATION = {
     Authentication.SCIM: Authorization.SCIM,
     Authentication.MODULE: Authorization.MODULE,
     Authentication.SIGNED_URL: Authorization.SIGNED_URL,
+    Authentication.WIDGET_VISITOR: Authorization.WIDGET_VISITOR,
     Authentication.PUBLIC: Authorization.PUBLIC,
 }
 

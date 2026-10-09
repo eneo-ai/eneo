@@ -2,7 +2,7 @@
   "version": "1.23.1",
   "private": true,
   "scripts": {
-    "build": "NODE_ENV=production FORCE_COLOR=1 bun run --filter @eneo/ui build && NODE_ENV=production FORCE_COLOR=1 bun run --filter @eneo/web build",
+    "build": "NODE_ENV=production FORCE_COLOR=1 bun run --filter @eneo/ui build && NODE_ENV=production FORCE_COLOR=1 bun run --filter @eneo/widget-loader build && NODE_ENV=production FORCE_COLOR=1 bun run --filter @eneo/web build",
     "dev": "bun scripts/frontend-dev.mjs start",
     "dev:status": "bun scripts/frontend-dev.mjs status",
     "dev:stop": "bun scripts/frontend-dev.mjs stop",

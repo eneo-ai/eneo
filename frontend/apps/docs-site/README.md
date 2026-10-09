@@ -4,13 +4,14 @@ Source of [docs.eneo.ai](https://docs.eneo.ai): a [Nextra 4](https://nextra.site
 
 ## Layout
 
-| Path                                                         | Purpose                                                                                                                                       |
-| ------------------------------------------------------------ | --------------------------------------------------------------------------------------------------------------------------------------------- |
-| `src/content/**/*.mdx`                                       | The pages. Folders map to URL paths; `_meta.ts` in each folder sets sidebar order and titles.                                                 |
-| `public/`                                                    | Images, diagrams and `CNAME`. Reference them with absolute paths (`/diagrams/x.svg`); `src/mdx-components.js` prefixes the version base path. |
-| `src/app/layout.tsx`                                         | Site chrome: navbar, version switcher, banner, footer.                                                                                        |
-| `src/lib/versions.ts`, `src/components/VersionSwitcher.tsx`  | Version metadata injected at build time (see below).                                                                                          |
-| `scripts/resolve-versions.mjs`, `scripts/build-versions.mjs` | Multi-version build used by CI.                                                                                                               |
+| Path                                                                   | Purpose                                                                                                                                                                                                                                                                |
+| ---------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `src/content/**/*.mdx`                                                 | The pages. Folders map to URL paths; `_meta.ts` in each folder sets sidebar order and titles.                                                                                                                                                                          |
+| `public/`                                                              | Images, diagrams and `CNAME`. Reference them with absolute paths (`/diagrams/x.svg`); `src/mdx-components.js` prefixes the version base path.                                                                                                                          |
+| `src/components/DocsShell.tsx`, `src/app/[[...mdxPath]]/layout.tsx`    | The document and site chrome: `<html lang>`, navbar, language and version switchers, banner, search, footer. The language comes from the URL, so there is no root layout.                                                                                              |
+| `src/app/global-not-found.tsx`, `src/app/[[...mdxPath]]/not-found.tsx` | The site-wide `404.html`, rendered through the shell via Next's `global-not-found` convention (`experimental.globalNotFound` in `next.config.ts`; still experimental, keep it when upgrading Next). The page switches to Swedish for `/sv/` addresses after hydration. |
+| `src/lib/versions.ts`, `src/components/VersionSwitcher.tsx`            | Version metadata injected at build time (see below).                                                                                                                                                                                                                   |
+| `scripts/resolve-versions.mjs`, `scripts/build-versions.mjs`           | Multi-version build used by CI.                                                                                                                                                                                                                                        |
 
 ## Local development
 
@@ -76,6 +77,61 @@ Full builds/previews require explicit authorization on the shared Mac:
 ```bash
 bun run build:versions          # complete artifact in site/
 bun run preview                 # serve the completed artifact
+```
+
+## Languages
+
+English keeps its existing URLs (`/vX.Y/guides/deployment`, `/dev/guides/deployment`).
+Swedish lives **inside the same version build**, at `/vX.Y/sv/guides/deployment`
+and `/dev/sv/guides/deployment`. Root aliases include `/sv/` and continue to
+follow stable. The workflow still builds once per version, not once per language.
+
+`DocsShell`, rendered by the catch-all layout, owns the HTML language and localized site chrome.
+`src/lib/languages.ts` owns route, source and fallback selection;
+`src/lib/navigation.ts` translates the selected ref's navigation without adding
+pages or changing its order. `src/lib/content.ts` reads Nextra's source inventory.
+The English inventory defines which pages exist in a version. Swedish source
+pages under `src/content/sv/` replace their English equivalents incrementally.
+A translation without an English counterpart is not published. Each Swedish
+page records the English revision it matches (`translationSource` in its
+frontmatter, see AUTHORING.md); `scripts/languages.test.ts` fails the docs
+workflow when the English page has changed since, so stale translations stop
+the build instead of being published.
+
+An untranslated page displays the selected ref's English text inside a Swedish
+shell, with a visible notice, `lang="en"` on its body, and `noindex` for search
+engines. Older refs with no translations get this same honest fallback; current
+translations are never copied onto an older release. The normal snapshot
+extraction in `build-versions.mjs` already isolates the entire content tree.
+
+[Pagefind separates indexes using the HTML language](https://pagefind.app/docs/multilingual/).
+The fallback wrapper uses `data-pagefind-ignore="all"`, including its nested
+Nextra `data-pagefind-body`, so English fallback text cannot enter Swedish search
+or duplicate the original in English search. This is tested against Pagefind's
+actual indexer. Versions with **no** Swedish pages show an English-search link
+instead: Pagefind could otherwise fall back to another language's index.
+Language changes use document navigation to reset Pagefind's cached index.
+
+MDX links use `DocsLink`; the small remark plugin routes explicit JSX anchors
+and `Cards.Card` through the same language adapters. Nextra/Next adds the version
+base path once. Images remain version assets, without a language prefix.
+Version switching probes the corresponding localized page, then its English
+original, then the localized root and version root. Query strings are retained;
+fragments are retained only when staying on the corresponding page.
+
+The web app's `src/lib/core/docs.ts` owns external docs URLs. Storage links and the widget installation card pass
+Paraglide's reader locale, independently of the widget visitor language. English URLs and fragment identifiers stay intact.
+
+Target branch: `develop`, next release (currently 2.2); site routing applies to
+all published lines, while translated prose ships only with the ref containing
+it. No release-specific instructions are backported. Roll back by reverting the
+change and rerunning the existing atomic publication workflow. CI performs the
+full static exports; local checks intentionally cover contracts and MDX only.
+
+Focused language checks (through the resource supervisor on the shared Mac):
+
+```bash
+bun test scripts/languages.test.ts
 ```
 
 ## Writing pages

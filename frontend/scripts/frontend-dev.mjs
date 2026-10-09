@@ -32,6 +32,7 @@ const frontendUrl = `http://localhost:${frontendPort}`;
 const shutdownTimeoutMs = 5_000;
 const processGroupArguments = {
   build: "run --cwd packages/ui build:dev",
+  loader: "run --cwd packages/widget-loader build:dev",
   ui: "run --cwd packages/ui dev",
   web: "run --cwd apps/web dev",
 };
@@ -579,20 +580,36 @@ async function runDevelopmentStack() {
   process.on("SIGTERM", handleTermination);
   process.on("SIGHUP", handleTermination);
 
+  const runOnce = async (kind) => {
+    const child = spawnBun(processGroupArguments[kind].split(" "));
+    children.add(child);
+    const group = await recordProcessGroup(kind, child);
+    const exit = await waitForChild(child);
+    children.delete(child);
+    await removeRecordedProcessGroup(group);
+    return exit;
+  };
+
   try {
     console.log("[eneo] Building the UI package for development...");
-    const build = spawnBun(["run", "--cwd", "packages/ui", "build:dev"]);
-    children.add(build);
-    const buildGroup = await recordProcessGroup("build", build);
-    const buildExit = await waitForChild(build);
-    children.delete(build);
-    await removeRecordedProcessGroup(buildGroup);
+    const buildExit = await runOnce("build");
     if (requestedSignal) return requestedSignal === "SIGINT" ? 130 : 143;
     if (buildExit.error || buildExit.code !== 0) {
       console.error(
         `[eneo] UI development build exited with code ${buildExit.code ?? 1}.`,
       );
       return buildExit.code ?? 1;
+    }
+
+    console.log("[eneo] Building the widget loader for development...");
+    const loaderExit = await runOnce("loader");
+    if (requestedSignal) return requestedSignal === "SIGINT" ? 130 : 143;
+    // The rest of the app works without it; /widget/<channel>/eneo.js keeps
+    // the previous build, or answers 503 until one succeeds.
+    if (loaderExit.error || loaderExit.code !== 0) {
+      console.warn(
+        `[eneo] Widget loader build exited with code ${loaderExit.code ?? 1}; starting without a fresh loader.`,
+      );
     }
 
     const postBuildStatus = await snapshotFrontendStatus();

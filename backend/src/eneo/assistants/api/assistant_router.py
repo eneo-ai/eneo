@@ -12,6 +12,7 @@ from eneo.assistants.api.assistant_models import (
     AssistantCreatePublic,
     AssistantPublic,
     AssistantUpdatePublic,
+    AssistantWidgetStatus,
 )
 
 # Audit logging - module level imports for consistency
@@ -274,6 +275,36 @@ async def get_assistant(
     container: Annotated[Container, Depends(get_container(with_user=True))],
 ):
     return await _assistant_response(container, id)
+
+
+@router.get(
+    "/{id}/widget-status/",
+    response_model=AssistantWidgetStatus,
+    description=(
+        "Whether an active web widget publishes the assistant, for anyone who "
+        "can read it. Says nothing else about the widget. Requires a session token."
+    ),
+    responses=responses.get_responses([403, 404]),
+)
+@endpoint_access(
+    authentication=Authentication.SESSION,
+    authorization=Authorization.AUTHENTICATED,
+    reason=(
+        "Assistant readers learn whether a widget publishes the assistant;"
+        " AssistantService enforces read access, and the session-only policy"
+        " keeps widgets invisible to API keys."
+    ),
+)
+async def get_assistant_widget_status(
+    id: UUID,
+    container: Annotated[Container, Depends(get_container(with_user=True))],
+):
+    assistant, _ = await container.assistant_service().get_assistant(id)
+    return AssistantWidgetStatus(
+        serves_active_widget=await container.widget_repo().serves_target(
+            tenant_id=container.user().tenant_id, target_id=assistant.id
+        )
+    )
 
 
 def _build_assistant_update_changes(
@@ -1195,8 +1226,11 @@ async def leave_feedback(
 @router.post(
     "/{id}/transfer/",
     status_code=204,
-    description="Transfer an assistant to another space.",
-    responses=responses.get_responses([403, 404]),
+    description=(
+        "Transfer an assistant to another space. Refused with 400 while the "
+        "assistant has Skill bindings or a web widget that is not archived."
+    ),
+    responses=responses.get_responses([400, 403, 404]),
 )
 @endpoint_access(
     authentication=Authentication.USER,

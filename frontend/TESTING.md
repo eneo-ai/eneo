@@ -214,6 +214,40 @@ Prefer stable, language-agnostic locators (`input[name="email"]`,
 `button[type="submit"]`, `getByRole`) over text — the UI is localized via
 Paraglide `m.*`.
 
+## Accessibility (WCAG)
+
+The embeddable widget runs on other organisations' websites, which are bound by
+the accessibility law (EN 301 549 / WCAG), so its accessibility is tested in
+layers that each fail CI. Automated checks find roughly half of WCAG problems;
+the rest needs a person with a screen reader.
+
+| Layer | What it catches | Where |
+| --- | --- | --- |
+| Svelte a11y warnings | Missing `alt`, click handlers without keyboard support, invalid ARIA; `svelte-check --fail-on-warnings` turns every warning into an error | `bun run check` (`apps/web`, `packages/ui`) |
+| axe in component tests | Every WCAG 2.0–2.2 A/AA rule, contrast included, in light and dark: the chat, its error and single-turn states, the paused notice | `WidgetChat.svelte.test.ts`, `WidgetUnavailable.svelte.test.ts` |
+| Virtual screen reader | What a screen reader user hears: reading order of landmarks, headings and labels, and what live regions announce (each answer once, never the stream, the vote acknowledgement, the paused notice) | The same files, with `@guidepup/virtual-screen-reader` |
+| Layout | Reflow at 320 px (1.4.10), WCAG text spacing (1.4.12) and a short, zoomed panel, without clipped content or sideways scrolling | `WidgetChat.svelte.test.ts` |
+| Loader | Dialog semantics, modal full screen with the host page inert, Escape on the host page, focus return | `packages/widget-loader/src/element.test.ts` |
+| E2E | axe on the host page and the frame together (closed, open, full-screen notice), ARIA snapshots of the launcher, dialog and chat, the keyboard flow | `tests/widget-embed.spec.ts` |
+
+When writing these tests:
+
+- Run axe with the WCAG tags (`wcag2a` … `wcag22aa`) and fail on any violation;
+  axe's impact rating says nothing about conformance.
+- Assert announcements through the virtual screen reader, not a live region's
+  text: `virtual.start({ container: document.body })`, act, then read the
+  `polite:`/`assertive:` entries of `virtual.spokenPhraseLog()`. Stop it in a
+  `finally`.
+- A live region must exist before its text changes; one rendered together with
+  its text is not announced (real screen readers make an exception for
+  `role="alert"`). The same text twice is only announced when the region is
+  emptied in between, see `lib/features/widget/announcer.svelte.ts`.
+- Prove the negative: break the markup a test guards and watch it fail.
+
+Not automated yet: real screen readers (NVDA, JAWS, VoiceOver, TalkBack).
+Guidepup can drive NVDA and VoiceOver in CI; until that is set up, test the
+widget with them by hand before a release.
+
 ## AI-assisted workflow
 
 This setup is chosen partly because it has the strongest AI tooling story.

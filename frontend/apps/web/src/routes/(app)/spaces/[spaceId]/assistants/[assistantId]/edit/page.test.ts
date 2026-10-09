@@ -42,7 +42,8 @@ describe("Assistant edit loader", () => {
         eneo: {
           assistants: {
             get: vi.fn().mockResolvedValue({ id: "assistant-1" }),
-            listMCPServers: vi.fn().mockResolvedValue({ items: [] })
+            listMCPServers: vi.fn().mockResolvedValue({ items: [] }),
+            getWidgetStatus: vi.fn().mockResolvedValue({ serves_active_widget: false })
           },
           helpAssistants: {
             runs: { availability: vi.fn().mockResolvedValue(null) }
@@ -89,7 +90,8 @@ describe("Assistant edit loader", () => {
         eneo: {
           assistants: {
             get: vi.fn().mockResolvedValue({ id: "default-assistant" }),
-            listMCPServers: vi.fn().mockResolvedValue({ items: [] })
+            listMCPServers: vi.fn().mockResolvedValue({ items: [] }),
+            getWidgetStatus: vi.fn().mockResolvedValue({ serves_active_widget: false })
           },
           helpAssistants: {
             runs: { availability: vi.fn().mockResolvedValue(null) }
@@ -146,7 +148,8 @@ describe("Assistant edit loader", () => {
         eneo: {
           assistants: {
             get: vi.fn().mockResolvedValue({ id: "default-assistant" }),
-            listMCPServers: vi.fn().mockResolvedValue({ items: [] })
+            listMCPServers: vi.fn().mockResolvedValue({ items: [] }),
+            getWidgetStatus: vi.fn().mockResolvedValue({ serves_active_widget: false })
           },
           helpAssistants: {
             runs: { availability: vi.fn().mockResolvedValue(null) }
@@ -176,5 +179,54 @@ describe("Assistant edit loader", () => {
       spaceId: "shared-space",
       assistantId: "default-assistant"
     });
+  });
+});
+
+describe("Assistant edit loader and web widgets", () => {
+  function widgetEvent(getWidgetStatus: ReturnType<typeof vi.fn>) {
+    const list = vi.fn();
+    const event = {
+      depends: vi.fn(),
+      params: { assistantId: "assistant-1" },
+      parent: vi.fn().mockResolvedValue({
+        // An assistant editor without the widgets or admin permission.
+        user: { roles: [{ permissions: ["assistants"] }], predefined_roles: [] },
+        currentSpace: {
+          id: "space-1",
+          organization: false,
+          default_assistant: { id: "default-assistant" },
+          skill_permissions: []
+        },
+        eneo: {
+          assistants: {
+            get: vi.fn().mockResolvedValue({ id: "assistant-1" }),
+            listMCPServers: vi.fn().mockResolvedValue({ items: [] }),
+            getWidgetStatus
+          },
+          helpAssistants: { runs: { availability: vi.fn().mockResolvedValue(null) } },
+          widgets: { list }
+        }
+      })
+    };
+    return { event, list };
+  }
+
+  test("an editor without widget access learns that an active widget publishes the assistant", async () => {
+    const getWidgetStatus = vi.fn().mockResolvedValue({ serves_active_widget: true });
+    const { event, list } = widgetEvent(getWidgetStatus);
+    const result = await load(event as never);
+    expect(getWidgetStatus).toHaveBeenCalledWith({ id: "assistant-1" });
+    expect(result.servesActiveWidget).toBe(true);
+    expect(list).not.toHaveBeenCalled();
+  });
+
+  test("no active widget, no notice", async () => {
+    const { event } = widgetEvent(vi.fn().mockResolvedValue({ serves_active_widget: false }));
+    expect((await load(event as never)).servesActiveWidget).toBe(false);
+  });
+
+  test("a failed status check claims nothing and keeps the page loading", async () => {
+    const { event } = widgetEvent(vi.fn().mockRejectedValue(new Error("offline")));
+    expect((await load(event as never)).servesActiveWidget).toBe(false);
   });
 });
