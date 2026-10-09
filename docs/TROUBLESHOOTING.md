@@ -116,8 +116,9 @@ login with a generic "invalid credentials" error. From 2.3.0 those calls send
 no `Origin` and do not depend on the allowlist; the web app log then names the
 backend code (`Code: disallowed_cors_origin`) if a call is still refused.
 
-1. **Check the init log** – `init_db.py` registers `PUBLIC_ORIGIN` for the
-   default tenant and prints
+1. **Check the backend log** – every refused request is logged as
+   `CORS origin refused: <method> <path> from origin <origin>`. On startup,
+   `init_db.py` registers `PUBLIC_ORIGIN` for the default tenant and prints
    `Note! PUBLIC_ORIGIN not set or invalid. Skipping allowed_origins seed.`
    or `No tenants found; skipping allowed_origins seed.` when it could not.
 

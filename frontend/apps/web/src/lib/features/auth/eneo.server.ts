@@ -8,12 +8,23 @@ import { setFrontendAuthCookie } from "./auth.server";
 import { getRequestEvent } from "$app/server";
 import { getBackendUrl } from "$lib/core/environment.server";
 
+/**
+ * Why a login did not succeed, at the level the login page can act on:
+ * `credentials` is the user's to fix, `rate_limited` is temporary, and
+ * `unavailable` means the backend did not give a usable answer at all
+ * (unreachable, misconfigured, or failing) so the user should not be told to
+ * check their password.
+ */
+export type EneoLoginFailureReason = "credentials" | "rate_limited" | "unavailable";
+
 export type EneoLoginResult = {
   success: boolean;
   traceId: string | null;
   correlationId: string | null;
   attemptsRemaining?: number | null;
   retryAfterSeconds?: number | null;
+  /** Set when `success` is false. */
+  reason?: EneoLoginFailureReason;
 };
 
 function readNonNegativeInteger(value: unknown): number | null {
@@ -34,6 +45,28 @@ function readCode(fields: Record<string, unknown>): string | null {
     if (typeof code === "string") return code;
   }
   return null;
+}
+
+/** The login endpoint answers 401 for wrong credentials, 422 for a malformed
+ * email, 429 at the attempt limit; anything else did not evaluate them. */
+function failureReason(status: number): EneoLoginFailureReason {
+  if (status === 401 || status === 422) return "credentials";
+  if (status === 429) return "rate_limited";
+  return "unavailable";
+}
+
+/**
+ * `fetch failed: connect ECONNREFUSED 10.0.0.5:8000` rather than only `fetch
+ * failed`: Node keeps the transport error in `cause`. Server log only.
+ */
+function describeFailure(error: unknown): string {
+  const parts: string[] = [];
+  let current: unknown = error;
+  for (let depth = 0; current instanceof Error && depth < 4; depth++) {
+    parts.push(current.message);
+    current = current instanceof AggregateError ? current.errors[0] : current.cause;
+  }
+  return parts.length > 0 ? parts.join(": ") : String(error);
 }
 
 async function readFailure(response: Response): Promise<LoginFailure> {
@@ -61,7 +94,8 @@ async function readFailure(response: Response): Promise<LoginFailure> {
  *   ``correlationId`` is a same-value alias for ``traceId`` retained during
  *   the migration period — prefer ``traceId`` in new code. After a failure,
  *   ``attemptsRemaining`` and ``retryAfterSeconds`` carry the attempt limit's
- *   standing when the backend reported it.
+ *   standing when the backend reported it, and ``reason`` says whether the
+ *   credentials were actually rejected.
  */
 export async function loginWithEneo(username: string, password: string): Promise<EneoLoginResult> {
   // Endpoint wants urlencoded data
@@ -89,9 +123,9 @@ export async function loginWithEneo(username: string, password: string): Promise
     // 500 page; the reason is in the server log.
     console.error(
       "Username/password login failed before reaching the backend: %s",
-      error instanceof Error ? error.message : String(error)
+      describeFailure(error)
     );
-    return { success: false, traceId: null, correlationId: null };
+    return { success: false, traceId: null, correlationId: null, reason: "unavailable" };
   }
 
   // Available on both success and failure.
@@ -107,7 +141,13 @@ export async function loginWithEneo(username: string, password: string): Promise
       code ?? "none",
       traceId || "none"
     );
-    return { success: false, traceId, correlationId: traceId, ...attemptLimit };
+    return {
+      success: false,
+      traceId,
+      correlationId: traceId,
+      reason: failureReason(response.status),
+      ...attemptLimit
+    };
   }
 
   try {
@@ -117,6 +157,6 @@ export async function loginWithEneo(username: string, password: string): Promise
     return { success: true, traceId, correlationId: traceId };
   } catch (e) {
     console.error("Failed to decode login response. Trace ID: %s", traceId || "none");
-    return { success: false, traceId, correlationId: traceId };
+    return { success: false, traceId, correlationId: traceId, reason: "unavailable" };
   }
 }

@@ -1,4 +1,5 @@
 import json
+import logging
 from datetime import datetime, timezone
 from types import SimpleNamespace
 
@@ -9,6 +10,7 @@ from starlette.datastructures import Headers
 from eneo.allowed_origins import get_origin_callback as callback_module
 from eneo.authentication.auth_models import ApiKeyPolicyResponse
 from eneo.main.exceptions import ErrorCodes
+from eneo.server.middleware import cors as cors_module
 from eneo.server.middleware.cors import CORSMiddleware
 
 
@@ -691,3 +693,40 @@ async def test_inactive_secret_key_still_needs_a_registered_origin(monkeypatch):
 
     headers = Headers({"X-API-Key": "sk_example"})
     assert not await callback_module.get_origin("https://integration.example", headers)
+
+
+@pytest.mark.asyncio
+async def test_refused_origin_is_logged_without_headers_or_body(monkeypatch, caplog):
+    """An operator can tie a caller's 400 to its unregistered origin."""
+    _install_common_fakes(monkeypatch)
+    monkeypatch.setattr(callback_module, "get_settings", _settings)
+    # The module logger does not propagate to the root logger that caplog
+    # listens on, so hand it a plain stdlib logger for this test.
+    monkeypatch.setattr(cors_module, "logger", logging.getLogger("test.cors"))
+    caplog.set_level(logging.WARNING, logger="test.cors")
+
+    async def app(scope, receive, send):  # noqa: ARG001
+        raise AssertionError("application must not run for a refused origin")
+
+    cors = CORSMiddleware(app, callback=callback_module.get_origin)
+    async with AsyncClient(
+        transport=ASGITransport(app=cors), base_url="https://api.example.com"
+    ) as client:
+        response = await client.post(
+            "/api/v1/users/login/token/",
+            headers={
+                "Origin": "https://other.example",
+                "Authorization": "Bearer s3cret",
+            },
+            data={"username": "test@example.com", "password": "test-only"},
+        )
+
+    assert response.status_code == 400
+    assert len(caplog.records) == 1
+    record = caplog.records[0]
+    assert record.levelno == logging.WARNING
+    assert record.getMessage() == (
+        "CORS origin refused: POST /api/v1/users/login/token/ from origin https://other.example"
+    )
+    assert "s3cret" not in caplog.text
+    assert "test-only" not in caplog.text

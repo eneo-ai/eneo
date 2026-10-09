@@ -861,6 +861,7 @@
   "invalid_login_request": "The login request was invalid. Please clear your browser cache and try again.",
   "login_process_interrupted": "Login Process Interrupted",
   "login_too_many_attempts": "Too many failed login attempts. Try again in {minutes} min.",
+  "login_unavailable": "Sign-in could not be completed right now. Try again in a moment, and contact your administrator if it keeps happening.",
   "authentication_incomplete": "The authentication process was incomplete. Please ensure cookies are enabled and try again.",
   "login_failed_general": "Login Failed",
   "authentication_error_occurred": "An error occurred during authentication. Please try again or contact support.",

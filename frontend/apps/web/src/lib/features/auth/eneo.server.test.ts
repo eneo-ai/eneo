@@ -66,6 +66,7 @@ describe("loginWithEneo", () => {
       success: false,
       traceId: "trace-2",
       correlationId: "trace-2",
+      reason: "credentials",
       attemptsRemaining: 2,
       retryAfterSeconds: null
     });
@@ -85,13 +86,27 @@ describe("loginWithEneo", () => {
 
     const result = await loginWithEneo("user@example.com", "secret");
 
-    expect(result.success).toBe(false);
+    expect(result).toMatchObject({ success: false, reason: "unavailable" });
     expect(consoleError).toHaveBeenCalledWith(
       expect.stringContaining("Code: %s"),
       400,
       "disallowed_cors_origin",
       "none"
     );
+  });
+
+  test("tells the attempt limit and a failing backend apart from rejected credentials", async () => {
+    const cases: Array<[number, string]> = [
+      [401, "credentials"],
+      [422, "credentials"],
+      [429, "rate_limited"],
+      [500, "unavailable"],
+      [502, "unavailable"]
+    ];
+    for (const [status, reason] of cases) {
+      mocks.fetch.mockResolvedValue(jsonResponse(status, {}));
+      expect((await loginWithEneo("user@example.com", "x")).reason).toBe(reason);
+    }
   });
 
   test("reads the code from FastAPI's detail envelope as well", async () => {
@@ -107,16 +122,33 @@ describe("loginWithEneo", () => {
     );
   });
 
-  test("fails without throwing when the backend cannot be reached", async () => {
-    mocks.fetch.mockRejectedValue(new TypeError("fetch failed"));
+  test("fails without throwing when the backend cannot be reached and logs the transport cause", async () => {
+    const cause = Object.assign(new Error("connect ECONNREFUSED 10.0.0.5:8000"), {
+      code: "ECONNREFUSED"
+    });
+    mocks.fetch.mockRejectedValue(new TypeError("fetch failed", { cause }));
 
     const result = await loginWithEneo("user@example.com", "secret");
 
-    expect(result).toEqual({ success: false, traceId: null, correlationId: null });
+    expect(result).toEqual({
+      success: false,
+      traceId: null,
+      correlationId: null,
+      reason: "unavailable"
+    });
     expect(mocks.setFrontendAuthCookie).not.toHaveBeenCalled();
     expect(consoleError).toHaveBeenCalledWith(
       expect.stringContaining("before reaching the backend"),
-      "fetch failed"
+      "fetch failed: connect ECONNREFUSED 10.0.0.5:8000"
     );
+  });
+
+  test("reports an undecodable success response as unavailable", async () => {
+    mocks.fetch.mockResolvedValue(new Response("<html>", { status: 200 }));
+
+    const result = await loginWithEneo("user@example.com", "secret");
+
+    expect(result).toMatchObject({ success: false, reason: "unavailable" });
+    expect(mocks.setFrontendAuthCookie).not.toHaveBeenCalled();
   });
 });
