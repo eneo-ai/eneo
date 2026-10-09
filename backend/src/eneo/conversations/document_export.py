@@ -15,7 +15,7 @@ that leaves Eneo.
 import base64
 import binascii
 import re
-from collections.abc import AsyncGenerator
+from collections.abc import AsyncGenerator, Awaitable, Callable
 from contextlib import asynccontextmanager
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any, Literal, cast
@@ -26,6 +26,7 @@ from jsonschema.exceptions import SchemaError
 from pydantic import BaseModel
 
 from eneo.authentication.signed_urls import build_signed_original_download_url
+from eneo.document_templates.models import DocumentTemplateReferencePublic
 from eneo.files.file_reference import (
     file_reference_base_url,
     image_reference_file_ids,
@@ -48,6 +49,7 @@ if TYPE_CHECKING:
     from jsonschema.protocols import Validator
 
     from eneo.assistants.assistant_service import AssistantService
+    from eneo.document_templates.domain import DocumentTemplateReference
     from eneo.files.file_models import File
     from eneo.files.file_service import FileService
     from eneo.mcp_servers.domain.entities.mcp_server import MCPServer
@@ -60,6 +62,8 @@ if TYPE_CHECKING:
 logger = get_logger(__name__)
 
 ExportFormat = Literal["docx", "pdf"]
+# Gives the template an assistant's documents render with (document_templates.service).
+TemplateResolver = Callable[[UUID], Awaitable["DocumentTemplateReference"]]
 EXPORT_MIME_TYPES: dict[str, str] = {"docx": DOCX_MIME_TYPE, "pdf": PDF_MIME_TYPE}
 # The capability whose provider renders documents, and the tool it does so with.
 EXPORT_PURPOSE = "file_creation"
@@ -92,6 +96,7 @@ class DocumentExportFormatAvailability(BaseModel):
 class DocumentExportAvailability(BaseModel):
     docx: DocumentExportFormatAvailability
     pdf: DocumentExportFormatAvailability
+    template: DocumentTemplateReferencePublic | None = None
 
 
 def export_compatibility(
@@ -257,6 +262,7 @@ async def _export_context(
     file_service: "FileService",
     proxy_factory: "MCPProxySessionFactory",
     identity_headers: dict[str, str],
+    template_resolver: "TemplateResolver | None" = None,
 ) -> AsyncGenerator[
     tuple[
         "MCPServer | None",
@@ -304,6 +310,17 @@ async def _export_context(
             proxy.allow_file_references(
                 {file_id: image["url"] for file_id, image in images.items()}
             )
+        # The export renders with the same template as the assistant's own calls.
+        template = None
+        if template_resolver is not None:
+            reference = await template_resolver(assistant_id)
+            if reference.argument is not None:
+                proxy.set_document_template(reference)
+            template = DocumentTemplateReferencePublic(
+                name=reference.name,
+                source=reference.source,
+                template_id=reference.template_id,
+            )
         await proxy.prepare_tools_for_context()
         tool = proxy.prefixed_tool_name(server.id, EXPORT_TOOL)
         approved = next(
@@ -320,7 +337,13 @@ async def _export_context(
                     available=False, reason="tool_unavailable"
                 )
             )
-        yield server, proxy, tool, arguments, DocumentExportAvailability(**states)
+        yield (
+            server,
+            proxy,
+            tool,
+            arguments,
+            DocumentExportAvailability(**states, template=template),
+        )
     finally:
         await proxy.close()
 
@@ -333,6 +356,7 @@ async def document_export_availability(
     file_service: "FileService",
     proxy_factory: "MCPProxySessionFactory",
     identity_headers: dict[str, str],
+    template_resolver: "TemplateResolver | None" = None,
 ) -> DocumentExportAvailability:
     """Read the current contract without rendering or storing a document."""
     async with _export_context(
@@ -342,6 +366,7 @@ async def document_export_availability(
         file_service=file_service,
         proxy_factory=proxy_factory,
         identity_headers=identity_headers,
+        template_resolver=template_resolver,
     ) as (_, _, _, _, availability):
         return availability
 
@@ -355,6 +380,7 @@ async def export_document(
     file_service: "FileService",
     proxy_factory: "MCPProxySessionFactory",
     identity_headers: dict[str, str],
+    template_resolver: "TemplateResolver | None" = None,
 ) -> ExportedDocument:
     """Re-resolve permissions and the contract for every rendering attempt."""
     mime_type = EXPORT_MIME_TYPES[format]
@@ -365,6 +391,7 @@ async def export_document(
         file_service=file_service,
         proxy_factory=proxy_factory,
         identity_headers=identity_headers,
+        template_resolver=template_resolver,
     ) as (server, proxy, tool, arguments, availability):
         if (
             not getattr(availability, format).available

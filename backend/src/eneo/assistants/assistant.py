@@ -8,6 +8,7 @@ from eneo.assistants.api.assistant_models import AssistantType, KnowledgeMode
 from eneo.base.base_entity import Entity
 from eneo.completion_models.domain.completion_model import CompletionModel
 from eneo.completion_models.infrastructure.completion_service import CompletionService
+from eneo.document_templates.domain import DocumentTemplateChoice
 from eneo.files.file_models import File, FileType
 from eneo.files.file_reference import url_only_attachment_ids
 from eneo.files.text import TextMimeTypes
@@ -38,6 +39,7 @@ if TYPE_CHECKING:
     from eneo.assistants.references import ReferencesService
     from eneo.collections.domain.collection import Collection
     from eneo.completion_models.domain.skill_activation import SkillActivationRuntime
+    from eneo.document_templates.domain import DocumentTemplateReference
     from eneo.integration.domain.entities.integration_knowledge import (
         IntegrationKnowledge,
     )
@@ -83,6 +85,7 @@ class Assistant(Entity):
         icon_id: Optional[UUID] = None,
         enabled_capabilities: list[CapabilityPurpose] | None = None,
         attachment_inline_text: Mapping[UUID, bool] | None = None,
+        document_template: DocumentTemplateChoice | None = None,
     ):
         super().__init__(id=id, created_at=created_at, updated_at=updated_at)
 
@@ -121,6 +124,10 @@ class Assistant(Entity):
             enabled_capabilities or []
         )
         self.available_capabilities: list[CapabilityAvailability] = []
+        # Which document template the file-creation capability renders with.
+        self.document_template: DocumentTemplateChoice = (
+            document_template or DocumentTemplateChoice()
+        )
         self.icon_id = icon_id
 
         # Temporary attributes for update flow - not persisted directly
@@ -516,6 +523,7 @@ class Assistant(Entity):
         knowledge_mcp_server: Optional["MCPServer"] = None,
         internal_mcp_servers: Sequence["MCPServer"] = (),
         skill_runtime: "SkillActivationRuntime | None" = None,
+        document_template: "DocumentTemplateReference | None" = None,
     ) -> tuple["CompletionModelResponse", DatastoreResult]:
         # Overrides come from the orchestrating service (personal assistant
         # governance). When set, they take precedence over the values stored on
@@ -619,6 +627,7 @@ class Assistant(Entity):
             inline_file_text=self.inline_file_text,
             knowledge_catalog=knowledge_catalog,
             url_only_prompt_file_ids=url_only_prompt_file_ids,
+            document_template=document_template,
         )
 
         return response, datastore_result

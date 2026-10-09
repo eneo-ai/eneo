@@ -25,10 +25,10 @@ export class McpAppPane {
    * has something to show and can use the room.
    */
   readonly offered = new SvelteSet<string>();
-  #preview: Pick<FilePreview, "cover">;
+  #preview: Pick<FilePreview, "cover" | "maximised" | "shown">;
   #cover: PreviewCover = { leave: () => this.close() };
 
-  constructor(preview: Pick<FilePreview, "cover">) {
+  constructor(preview: Pick<FilePreview, "cover" | "maximised" | "shown">) {
     this.#preview = preview;
   }
 
@@ -45,6 +45,8 @@ export class McpAppPane {
   close() {
     this.callId = null;
     if (this.#preview.cover === this.#cover) this.#preview.cover = null;
+    // A maximised panel stays so for the file beneath; an empty one lets go.
+    if (!this.#preview.shown) this.#preview.maximised = false;
   }
 
   /** The user closes the panel. */
@@ -60,7 +62,7 @@ export class McpAppPane {
 
 const contextKey = Symbol("MCP App pane");
 
-export function initMcpAppPane(preview: Pick<FilePreview, "cover">) {
+export function initMcpAppPane(preview: Pick<FilePreview, "cover" | "maximised" | "shown">) {
   return setContext(contextKey, new McpAppPane(preview));
 }
 

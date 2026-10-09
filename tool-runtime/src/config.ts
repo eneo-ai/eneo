@@ -52,6 +52,10 @@ const environmentSchema = z.object({
     .transform((value) => value === "true"),
   // Shown in the footer of generated documents.
   DOCUMENT_ORGANISATION_NAME: z.string().max(120).optional(),
+  // Markdown characters a document may hold; the request body cap follows it.
+  DOCUMENT_MAX_CONTENT_CHARS: z.coerce.number().int().min(5000).max(1_000_000).optional(),
+  // PDF renders run a Python sidecar each, a few hundred MB apiece: run few at a time.
+  DOCUMENT_PDF_CONCURRENCY: z.coerce.number().int().min(1).max(8).default(2),
 });
 
 export type RuntimeConfig = {
@@ -64,6 +68,9 @@ export type RuntimeConfig = {
   compute: ComputeConfig;
   tabular: { config: TabularConfig; allowedFileOrigins: string[]; concurrency: number };
   documents: DocumentConfig;
+  pdfConcurrency: number;
+  /** Request bodies up to this size; room for the largest document, JSON-escaped. */
+  maxBodyBytes: number;
 };
 
 export function loadConfig(environment: Record<string, string | undefined>): RuntimeConfig {
@@ -79,10 +86,19 @@ export function loadConfig(environment: Record<string, string | undefined>): Run
       ...(parsed.COMPUTE_TIMEOUT_MS !== undefined ? { timeout_ms: parsed.COMPUTE_TIMEOUT_MS } : {}),
       ...(parsed.COMPUTE_MEMORY_MB !== undefined ? { memory_mb: parsed.COMPUTE_MEMORY_MB } : {}),
     }),
-    documents: documentConfigSchema.parse(
-      parsed.DOCUMENT_ORGANISATION_NAME
+    documents: documentConfigSchema.parse({
+      ...(parsed.DOCUMENT_ORGANISATION_NAME
         ? { organisation_name: parsed.DOCUMENT_ORGANISATION_NAME }
-        : {},
+        : {}),
+      ...(parsed.DOCUMENT_MAX_CONTENT_CHARS !== undefined
+        ? { max_content_chars: parsed.DOCUMENT_MAX_CONTENT_CHARS }
+        : {}),
+    }),
+    pdfConcurrency: parsed.DOCUMENT_PDF_CONCURRENCY,
+    // Swedish text escapes to at most a few bytes per character; images travel by reference.
+    maxBodyBytes: Math.max(
+      256 * 1024,
+      (parsed.DOCUMENT_MAX_CONTENT_CHARS ?? 50_000) * 4 + 64 * 1024,
     ),
     tabular: {
       allowedFileOrigins: parsed.TOOL_RUNTIME_FILE_ORIGINS,

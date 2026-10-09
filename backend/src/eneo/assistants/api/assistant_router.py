@@ -36,8 +36,10 @@ from eneo.authentication.endpoint_access import (
     endpoint_access,
 )
 from eneo.database.database import AsyncSession
+from eneo.document_templates.domain import DocumentTemplateChoice
 from eneo.main.config import get_settings
 from eneo.main.container.container import Container
+from eneo.main.exceptions import BadRequestException
 from eneo.main.models import (
     NOT_PROVIDED,
     CursorPaginatedResponse,
@@ -295,6 +297,11 @@ def _build_assistant_update_changes(
         changes["enabled_capabilities"] = {
             "old": old_assistant.enabled_capabilities,
             "new": updated_assistant.enabled_capabilities,
+        }
+    if old_assistant.document_template != updated_assistant.document_template:
+        changes["document_template"] = {
+            "old": old_assistant.document_template.as_dict(),
+            "new": updated_assistant.document_template.as_dict(),
         }
 
     # Name change
@@ -698,6 +705,16 @@ async def update_assistant(
             (tool.tool_id, tool.is_enabled) for tool in assistant.mcp_tools
         ]
 
+    document_template = None
+    if assistant.document_template is not None:
+        try:
+            document_template = DocumentTemplateChoice(
+                mode=assistant.document_template.mode,
+                template_id=assistant.document_template.template_id,
+            )
+        except ValueError as exc:
+            raise BadRequestException(str(exc)) from exc
+
     completion_model_id = None
     if assistant.completion_model is not None:
         completion_model_id = assistant.completion_model.id
@@ -756,6 +773,7 @@ async def update_assistant(
         metadata_json=metadata_json,
         icon_id=icon_id,
         skill_binding_intents=skill_binding_intents,
+        document_template=document_template,
     )
 
     changes, change_summary = _build_assistant_update_changes(

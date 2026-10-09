@@ -12,8 +12,14 @@ import { defaultCacheRoot, SheetCache } from "./tools/tabular/cache";
 import type { QueryJobResult, SheetMetadata } from "./tools/tabular/ports";
 import { tabularTools } from "./tools/tabular/tool";
 import { queryResultView } from "./tools/tabular/view";
-import type { RenderResult } from "./tools/documents/ports";
-import { documentTools, fileRenderer, spreadsheetTools } from "./tools/documents/tool";
+import type { InspectResult, RenderResult } from "./tools/documents/ports";
+import {
+  builtinTemplateProvider,
+  documentTools,
+  fileInspector,
+  fileRenderer,
+  spreadsheetTools,
+} from "./tools/documents/tool";
 import { chartConfigSchema } from "./tools/charts/config";
 import type { ChartResult } from "./tools/charts/ports";
 import { chartTools } from "./tools/charts/tool";
@@ -109,7 +115,22 @@ const fileAccess = {
   maxBytes: tabular.max_upload_bytes,
   timeoutMs: tabular.download_timeout_ms,
 };
+// PDFs run a Python sidecar each, so they queue separately from the native-job slots.
+const pdfScheduler = new Scheduler(
+  config.pdfConcurrency,
+  config.maxConcurrency,
+  config.maxConcurrency,
+);
 const render = fileRenderer((job) =>
+  (job.format === "pdf" ? pdfScheduler.run.bind(pdfScheduler) : slot)(
+    async () => (await isolate({ job }, renderTimeoutMs)) as RenderResult,
+  ),
+);
+const inspector = fileInspector((job) =>
+  slot(async () => (await isolate({ job }, renderTimeoutMs)) as InspectResult),
+);
+// Eneo's own document template, built in a child like every other Word file.
+const builtinTemplate = builtinTemplateProvider((job) =>
   slot(async () => (await isolate({ job }, renderTimeoutMs)) as RenderResult),
 );
 // One endpoint creates every kind of file, so one Eneo provider serves the capability.
@@ -118,7 +139,7 @@ endpoints.push(
     slug: "file-creation",
     toolTimeoutMs: renderTimeoutMs + 5_000,
     tools: [
-      ...documentTools(config.documents, render, fileAccess),
+      ...documentTools(config.documents, render, fileAccess, inspector),
       ...spreadsheetTools(config.documents, render, fileAccess),
     ],
   },
@@ -147,6 +168,9 @@ const fetch = createHandler({
   nativeStatus: () => nativeScheduler.status,
   allowedFileOrigins: config.tabular.allowedFileOrigins,
   endpoints,
+  builtinTemplate,
+  inspectTemplate: inspector,
+  maxBodyBytes: config.maxBodyBytes,
 });
 
 // The token stays in this process only; sandbox children are spawned without it.

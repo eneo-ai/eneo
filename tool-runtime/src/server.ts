@@ -38,7 +38,14 @@ export type ServerOptions = {
   allowedFileOrigins?: string[];
   revision?: string;
   version?: string;
+  /** Eneo's built-in document template, served at GET /templates/builtin.docx?language=sv|en. */
+  builtinTemplate?: (language: "sv" | "en") => Promise<Buffer>;
+  /** Largest request body accepted; defaults to 256 KiB. */
+  maxBodyBytes?: number;
+  /** Reads a Word template's fields and checks, at POST /templates/inspect (a .docx body). */
+  inspectTemplate?: (template: Buffer) => Promise<unknown>;
 };
+const MAX_TEMPLATE_BYTES = 5 * 1024 * 1024;
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
@@ -103,7 +110,10 @@ export function createHandler(options: ServerOptions) {
     const match = /^\/mcp\/([a-z][a-z0-9-]*)$/.exec(url.pathname);
     const endpoint = match ? endpoints.get(match[1]!) : undefined;
     const diagnostics = url.pathname === "/diagnostics";
-    if (!endpoint && !diagnostics) return new Response("Not found", { status: 404 });
+    const template = url.pathname === "/templates/builtin.docx" && !!options.builtinTemplate;
+    const inspect = url.pathname === "/templates/inspect" && !!options.inspectTemplate;
+    if (!endpoint && !diagnostics && !template && !inspect)
+      return new Response("Not found", { status: 404 });
     if (request.headers.has("origin")) return new Response("Forbidden origin", { status: 403 });
     const header = request.headers.get("authorization") ?? "";
     if (!header.startsWith("Bearer ") || !equalSecret(header.slice(7), options.token))
@@ -111,6 +121,45 @@ export function createHandler(options: ServerOptions) {
         status: 401,
         headers: { "www-authenticate": "Bearer" },
       });
+    if (inspect) {
+      if (request.method !== "POST") return new Response("Method not allowed", { status: 405 });
+      if (controlActive >= 4) return new Response("Busy", { status: 429 });
+      controlActive++;
+      try {
+        const bytes = Buffer.from(await request.arrayBuffer());
+        if (bytes.length > MAX_TEMPLATE_BYTES)
+          return new Response("Template too large", { status: 413 });
+        return Response.json(await options.inspectTemplate!(bytes));
+      } catch (error) {
+        const failure = publicError(error);
+        return Response.json(failure, { status: failure.code === "INTERNAL_ERROR" ? 500 : 422 });
+      } finally {
+        controlActive--;
+      }
+    }
+    if (template) {
+      if (request.method !== "GET") return new Response("Method not allowed", { status: 405 });
+      const language = url.searchParams.get("language") ?? "sv";
+      if (language !== "sv" && language !== "en")
+        return new Response("Unknown language", { status: 400 });
+      if (controlActive >= 4) return new Response("Busy", { status: 429 });
+      controlActive++;
+      try {
+        const bytes = await options.builtinTemplate!(language);
+        return new Response(new Uint8Array(bytes), {
+          headers: {
+            "content-type":
+              "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+            "content-disposition": `attachment; filename="eneo-template-${language}.docx"`,
+            "cache-control": "no-store",
+          },
+        });
+      } catch (error) {
+        return Response.json(publicError(error), { status: 500 });
+      } finally {
+        controlActive--;
+      }
+    }
     if (diagnostics) {
       if (request.method !== "GET") return new Response("Method not allowed", { status: 405 });
       if (controlActive >= 4) return new Response("Busy", { status: 429 });
@@ -160,7 +209,7 @@ export function createHandler(options: ServerOptions) {
     active++;
     let control = false;
     try {
-      const body = await boundedJson(request);
+      const body = await boundedJson(request, options.maxBodyBytes);
       if (
         !body ||
         typeof body !== "object" ||
@@ -340,7 +389,7 @@ class BodyError extends Error {
   }
 }
 
-async function boundedJson(request: Request): Promise<unknown> {
+async function boundedJson(request: Request, maxBytes = MAX_BODY_BYTES): Promise<unknown> {
   if (!request.body) throw new BodyError("Missing body", 400);
   const reader = request.body.getReader();
   const chunks: Uint8Array[] = [];
@@ -356,7 +405,7 @@ async function boundedJson(request: Request): Promise<unknown> {
       if (timedOut) throw new BodyError("Request body timed out", 408);
       if (done) break;
       bytes += value.length;
-      if (bytes > MAX_BODY_BYTES) {
+      if (bytes > maxBytes) {
         await reader.cancel();
         throw new BodyError("Request too large", 413);
       }

@@ -4,12 +4,27 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { z } from "zod";
 import { ToolError } from "../../errors";
-import { RichResult, type CallContext, type ToolDefinition, type ToolView } from "../types";
+import {
+  RichResult,
+  type CallContext,
+  type ToolDefinition,
+  type ToolView,
+} from "../types";
 import { SheetCache } from "./cache";
-import { fetchReference, fileReference, type FileReference } from "../files/reference";
+import {
+  fetchReference,
+  fileReference,
+  type FileReference,
+} from "../files/reference";
 import type { TabularConfig } from "./config";
 import type { downloadFile } from "./download";
-import type { IngestJob, QueryJob, QueryJobResult, QueryOutcome, SheetMetadata } from "./ports";
+import type {
+  IngestJob,
+  QueryJob,
+  QueryJobResult,
+  QueryOutcome,
+  SheetMetadata,
+} from "./ports";
 import { sourceRows } from "./selection";
 import { showsTable } from "./view/paging";
 
@@ -37,6 +52,9 @@ export type TabularDeps = {
 const ROWS_SHOWN =
   "The user sees these rows as a table directly under your answer, which they can sort, filter, copy, expand and page through. Do not write the rows out again or list the columns. For a browsing request, briefly introduce the table; no extra analysis or export is needed. For an analytical question, explain the relevant findings. If truncated, these rows are only the first page: never infer full-dataset totals or rankings from it; run an aggregate or ordered query when needed.";
 
+const NO_ROWS_MATCHED =
+  "No rows matched. Compare the filter values with the value lists and examples from inspect_table: string comparison is exact and case-sensitive, so use the listed spelling or ILIKE. Say which filter found nothing instead of reporting that the data is missing.";
+
 // An exported result travels as a file; Eneo admits generated files up to 20 MiB by default.
 const MAX_EXPORT_BYTES = 20 * 1024 * 1024;
 
@@ -59,7 +77,9 @@ const sheetName = z
   .string()
   .max(200)
   .optional()
-  .describe("Exact sheet name from inspect_table. Required when the workbook has several sheets.");
+  .describe(
+    "Exact sheet name from inspect_table. Required when the workbook has several sheets.",
+  );
 const extraFiles = z
   .array(
     fileRef
@@ -70,7 +90,9 @@ const extraFiles = z
           .string()
           .regex(/^[a-z][a-z0-9_]{0,30}$/)
           .refine((a) => a !== "t", "t is the main table")
-          .describe("SQL table name for this file, for example budget or last_year."),
+          .describe(
+            "SQL table name for this file, for example budget or last_year.",
+          ),
       })
       .strict(),
   )
@@ -84,7 +106,7 @@ const selectSql = z
   .min(1)
   .max(10_000)
   .describe(
-    "One read-only DuckDB SELECT over table t (and any aliases), using column names from inspect_table. Example: SELECT region, SUM(amount) AS total FROM t GROUP BY region. For browsing, select the requested rows without adding LIMIT: the host pages the result. Use LIMIT only for an explicitly requested sample or top-N result, with ORDER BY for rankings. No file paths, URLs, extensions or multiple statements.",
+    'One read-only DuckDB SELECT over table t (and any aliases), using column names from inspect_table. Example: SELECT region, SUM(amount) AS total FROM t GROUP BY region. For browsing, select the requested rows without adding LIMIT: the host pages the result. Use LIMIT only for an explicitly requested sample or top-N result, with ORDER BY for rankings. No file paths, URLs, extensions or multiple statements. Dialect: double-quote column names that contain spaces or letters outside a-z ("Belopp 2024", "Län"); single-quote strings. Comparison is exact and case-sensitive: filter with the values listed in the column profile, or use ILIKE. Follow a column\'s hint to cast text that holds numbers or dates; TRY_CAST turns other text into NULL. / divides as a decimal. Excel dates with a time of day are TIMESTAMP; cast to DATE or use date_trunc before grouping. GROUP BY ALL and QUALIFY are available.',
   );
 
 export function tabularTools(deps: TabularDeps): ToolDefinition[] {
@@ -134,13 +156,19 @@ export function tabularTools(deps: TabularDeps): ToolDefinition[] {
     });
   }
 
-  function pickSheet(sheets: SheetMetadata[], requested: string | undefined, label: string) {
+  function pickSheet(
+    sheets: SheetMetadata[],
+    requested: string | undefined,
+    label: string,
+  ) {
     if (!requested && sheets.length > 1)
       throw new ToolError(
         "SHEET_REQUIRED",
         `${label} has several sheets. Pass sheet with a name from inspect_table.`,
       );
-    const sheet = requested ? sheets.find((s) => s.name === requested) : sheets[0];
+    const sheet = requested
+      ? sheets.find((s) => s.name === requested)
+      : sheets[0];
     if (!sheet)
       throw new ToolError(
         "UNKNOWN_SHEET",
@@ -162,7 +190,10 @@ export function tabularTools(deps: TabularDeps): ToolDefinition[] {
     const aliases = new Set<string>();
     for (const extra of extras ?? []) {
       if (aliases.has(extra.alias))
-        throw new ToolError("INVALID_ALIAS", `Duplicate table alias: ${extra.alias}`);
+        throw new ToolError(
+          "INVALID_ALIAS",
+          `Duplicate table alias: ${extra.alias}`,
+        );
       aliases.add(extra.alias);
     }
     const loaded = await load(main, ctx);
@@ -184,12 +215,14 @@ export function tabularTools(deps: TabularDeps): ToolDefinition[] {
         alias: extra.alias,
         csvPath: join(other.directory, otherSheet.csv),
         explicitHeader: otherSheet.explicitHeader,
+        skipRows: otherSheet.skipRows,
       });
     }
     return {
       csvPath: join(loaded.directory, sheet.csv),
       sheet,
       explicitHeader: sheet.explicitHeader,
+      skipRows: sheet.skipRows,
       tables: joined,
       calculation: calculationWarnings.length
         ? {
@@ -204,14 +237,20 @@ export function tabularTools(deps: TabularDeps): ToolDefinition[] {
   const inspectInput = z
     .object({
       files: z
-        .array(fileRef.extend({ sheet: sheetName, source_rows: sourceRows }).strict())
+        .array(
+          fileRef
+            .extend({ sheet: sheetName, source_rows: sourceRows })
+            .strict(),
+        )
         .min(1)
         .max(5),
     })
     .strict();
   const queryInput = z
     .object({
-      file: fileRef.extend({ sheet: sheetName, source_rows: sourceRows }).strict(),
+      file: fileRef
+        .extend({ sheet: sheetName, source_rows: sourceRows })
+        .strict(),
       files: extraFiles,
       sql: selectSql,
       title: z
@@ -248,13 +287,19 @@ export function tabularTools(deps: TabularDeps): ToolDefinition[] {
     .strict();
   const assertInput = z
     .object({
-      file: fileRef.extend({ sheet: sheetName, source_rows: sourceRows }).strict(),
+      file: fileRef
+        .extend({ sheet: sheetName, source_rows: sourceRows })
+        .strict(),
       files: extraFiles,
       checks: z
         .array(
           z
             .object({
-              name: z.string().min(1).max(200).describe("Readable name for the data-quality rule."),
+              name: z
+                .string()
+                .min(1)
+                .max(200)
+                .describe("Readable name for the data-quality rule."),
               sql: selectSql.describe(
                 "One SELECT whose first cell is boolean true when the rule passes. Example: SELECT COUNT(*) = 0 FROM t WHERE id IS NULL.",
               ),
@@ -290,6 +335,7 @@ export function tabularTools(deps: TabularDeps): ToolDefinition[] {
               name: s.name,
               columns: s.columns,
               parsed_rows: s.rowCount,
+              ...(s.skipRows ? { header_row: s.skipRows + 1 } : {}),
               ...(s.sourceRows ? { source_rows: s.sourceRows } : {}),
               rejected_rows: s.rejectedRows,
               sample_rows: s.sampleRows,
@@ -300,7 +346,9 @@ export function tabularTools(deps: TabularDeps): ToolDefinition[] {
         }
         return {
           files,
-          ...(files.some((file) => file.sheets.some((sheet) => sheet.calculation))
+          ...(files.some((file) =>
+            file.sheets.some((sheet) => sheet.calculation),
+          )
             ? {
                 calculation_notice:
                   "Formulas were not recalculated. Values are saved Excel results and freshness is unknown. Disclose missing saved results and qualify conclusions; recalculate and save in Excel to obtain missing results.",
@@ -326,11 +374,14 @@ export function tabularTools(deps: TabularDeps): ToolDefinition[] {
           ? await mkdtemp(join(tmpdir(), "eneo-tool-runtime-export-"))
           : undefined;
         try {
-          const outputPath = directory ? join(directory, "result.csv") : undefined;
+          const outputPath = directory
+            ? join(directory, "result.csv")
+            : undefined;
           const { results } = await deps.executor.query({
             kind: "tabular_query",
             csvPath: input.csvPath,
             explicitHeader: input.explicitHeader,
+            skipRows: input.skipRows,
             tables: input.tables,
             statements: [args.sql],
             explain: args.explain,
@@ -361,7 +412,9 @@ export function tabularTools(deps: TabularDeps): ToolDefinition[] {
           const structured = {
             display: args.display,
             sheet: input.sheet.name,
-            ...(input.sheet.sourceRows ? { source_rows: input.sheet.sourceRows } : {}),
+            ...(input.sheet.sourceRows
+              ? { source_rows: input.sheet.sourceRows }
+              : {}),
             columns: outcome.columns,
             rows: outcome.rows,
             returned_rows: outcome.returnedRows,
@@ -369,6 +422,11 @@ export function tabularTools(deps: TabularDeps): ToolDefinition[] {
             ...coverage(outcome),
             ...input.calculation,
             ...(shown ? { shown: ROWS_SHOWN } : {}),
+            ...(outcome.returnedRows === 0 &&
+            !args.explain &&
+            /\bwhere\b/i.test(args.sql)
+              ? { hint: NO_ROWS_MATCHED }
+              : {}),
           };
           if (!outputPath) return structured;
           const csv = await readFile(outputPath);
@@ -416,6 +474,7 @@ export function tabularTools(deps: TabularDeps): ToolDefinition[] {
           kind: "tabular_query",
           csvPath: input.csvPath,
           explicitHeader: input.explicitHeader,
+          skipRows: input.skipRows,
           tables: input.tables,
           statements: args.checks.map((c) => c.sql),
           explain: false,

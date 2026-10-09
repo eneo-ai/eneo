@@ -154,3 +154,32 @@ describe("file origin header", () => {
       expect(parseOrigin(bad)).toBeUndefined();
   });
 });
+
+describe("the built-in template download", () => {
+  const withTemplate = createHandler({
+    token: TOKEN,
+    maxConcurrency: 2,
+    endpoints: [],
+    builtinTemplate: async (language) => Buffer.from(`PK-${language}`),
+  });
+  const get = (path: string, headers: Record<string, string> = {}) =>
+    withTemplate(new Request(`http://tool-runtime:3010${path}`, { method: "GET", headers }));
+  test("serves the template to the bearer only, in a known language", async () => {
+    expect((await get("/templates/builtin.docx")).status).toBe(401);
+    const response = await get("/templates/builtin.docx?language=en", {
+      authorization: `Bearer ${TOKEN}`,
+    });
+    expect(response.status).toBe(200);
+    expect(response.headers.get("content-type")).toContain("wordprocessingml.document");
+    expect(response.headers.get("content-disposition")).toContain("eneo-template-en.docx");
+    expect(await response.text()).toBe("PK-en");
+    expect(
+      (await get("/templates/builtin.docx?language=xx", { authorization: `Bearer ${TOKEN}` }))
+        .status,
+    ).toBe(400);
+    // A handler without a template provider does not know the route.
+    expect(
+      (await handler(new Request("http://tool-runtime:3010/templates/builtin.docx"))).status,
+    ).toBe(404);
+  });
+});

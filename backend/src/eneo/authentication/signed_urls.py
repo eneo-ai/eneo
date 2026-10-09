@@ -31,6 +31,7 @@ TOKEN_VERSION = 2
 FILE_PROCESSING_DOWNLOAD_AUDIENCE = "file_processing_download"
 FILE_ORIGINAL_DOWNLOAD_AUDIENCE = "file_original_download"
 INFO_BLOB_ORIGINAL_DOWNLOAD_AUDIENCE = "info_blob_original_download"
+DOCUMENT_TEMPLATE_DOWNLOAD_AUDIENCE = "document_template_download"
 MCP_APP_VIEW_AUDIENCE = "mcp_app_view"
 
 # Longest life of the link that serves one MCP App view's HTML.
@@ -48,6 +49,7 @@ def _derive_key(purpose: bytes) -> bytes:
 _FILE_PROCESSING_DOWNLOAD_KEY = _derive_key(b"eneo:file-processing-download:v2")
 _FILE_ORIGINAL_DOWNLOAD_KEY = _derive_key(b"eneo:file-original-download:v2")
 _INFO_BLOB_ORIGINAL_DOWNLOAD_KEY = _derive_key(b"eneo:info-blob-original-download:v2")
+_DOCUMENT_TEMPLATE_DOWNLOAD_KEY = _derive_key(b"eneo:document-template-download:v2")
 _MCP_APP_VIEW_KEY = _derive_key(b"eneo:mcp-app-view:v2")
 
 
@@ -531,6 +533,62 @@ def build_signed_original_download_url(
     return (
         f"{base_url.rstrip('/')}/api/v1/files/{file_id}/original/download/"
         f"?token={token}"
+    )
+
+
+def generate_document_template_download_token(
+    template_id: UUID,
+    expires_at: int,
+    tenant_id: UUID,
+    *,
+    issued_at: int | None = None,
+) -> str:
+    """A token valid only for one document template of one tenant."""
+    return _generate_token(
+        template_id,
+        expires_at,
+        ContentDisposition.ATTACHMENT,
+        signing_key=_DOCUMENT_TEMPLATE_DOWNLOAD_KEY,
+        audience=DOCUMENT_TEMPLATE_DOWNLOAD_AUDIENCE,
+        tenant_id=tenant_id,
+        resource_claim="template_id",
+        maximum_lifetime_seconds=FILE_ORIGINAL_SIGNED_URL_MAXIMUM_EXPIRY_SECONDS,
+        issued_at=issued_at,
+    )
+
+
+def verify_document_template_download_token(token: str) -> dict[str, Any] | None:
+    return _verify_token(
+        token,
+        signing_key=_DOCUMENT_TEMPLATE_DOWNLOAD_KEY,
+        audience=DOCUMENT_TEMPLATE_DOWNLOAD_AUDIENCE,
+        resource_claim="template_id",
+        maximum_lifetime_seconds=FILE_ORIGINAL_SIGNED_URL_MAXIMUM_EXPIRY_SECONDS,
+    )
+
+
+def build_signed_document_template_url(
+    template_id: UUID, base_url: str, expires_in: int, tenant_id: UUID
+) -> str:
+    """The signed link the tool runtime fetches a document template through.
+
+    It ends in ``/original/download/`` like a file reference, so the token
+    redaction that keeps signed links out of stored tool calls covers it, while
+    the file-id patterns never mistake it for a conversation file.
+    """
+    expires_in = max(
+        1, min(expires_in, FILE_ORIGINAL_SIGNED_URL_MAXIMUM_EXPIRY_SECONDS)
+    )
+    issued_at = int(time.time())
+    token = generate_document_template_download_token(
+        template_id,
+        expires_at=issued_at + expires_in,
+        tenant_id=tenant_id,
+        issued_at=issued_at,
+    )
+    return (
+        f"{base_url.rstrip('/')}/api/v1/document-templates/{template_id}"
+        f"/original/download/?token={token}"
     )
 
 

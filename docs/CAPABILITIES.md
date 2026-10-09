@@ -171,6 +171,14 @@ Every other blob is stripped by the proxy, so the resource stays an ordinary res
 
 Generated files that were saved before an answer failed or was aborted are still linked to the question, so they stay visible and are deleted with the conversation.
 
+### Document templates
+
+Word and PDF files from the `file_creation` capability are rendered into a Word template. Administrators keep a library of templates under Admin > Tools > File creation (`document_templates`, one `is_default` per tenant, soft deleted); an assistant inherits the default, selects another template or uses Eneo's built-in one (`assistant_document_templates`, a row only when it departs from the default). The runtime reads two conventions: content controls as Word's Developer tab makes them (a rich control tagged `content` or `dokument` takes the document, text controls take one value each) and `{{name}}` placeholders. Title, date, year and organisation are filled from the call; other fields come from `create_document.fields`. Content is written in the template's own styles, resolved by style name (a Swedish template's `Rubrik1` is "heading 1"), with the template's list styles and numbering where it has them.
+
+Eneo hands the template to the provider itself: `MCPProxySession._with_document_template` adds a signed link (`/api/v1/document-templates/{id}/original/download/?token=…`, minted per turn by `document_templates.service.resolve_document_template`) to `create_document` calls whose approved schema takes a `template`, that render docx or pdf, and that name no template of their own and revise nothing. The document export resolves the same template and reports it in its availability. The link ends in `/original/download/` so the reference-token redaction keeps it out of stored tool calls, while the file-id patterns never take it for a conversation file.
+
+A PDF follows the same template: the runtime renders the Word file, reads its page, fonts, heading faces, header, footer and logo into a stylesheet, and lays the document out with WeasyPrint as a tagged PDF/UA-1 file (validated with veraPDF on the runtime's fixtures). Uploads are checked for macros and bounds in the backend (`document_templates/validation.py`), then inspected by the runtime (`POST /templates/inspect`), whose fields and style checks the admin view shows; a template is `unchecked` when the runtime cannot be reached. Every library change is audited (`DOCUMENT_TEMPLATE_*`).
+
 ## 5. Extending the capability set
 
 Adding a capability requires:

@@ -56,7 +56,9 @@ export async function convertXlsxToCsvSheets(
   // ExcelJS ships an older un-parameterized `Buffer` type that TS can't
   // reconcile with modern `Buffer<ArrayBufferLike>` — same runtime value,
   // type cast is purely to satisfy the outdated upstream signature.
-  await workbook.xlsx.load(bytes as unknown as Parameters<typeof workbook.xlsx.load>[0]);
+  await workbook.xlsx.load(
+    bytes as unknown as Parameters<typeof workbook.xlsx.load>[0],
+  );
 
   const emptyResults = await emptyFormulaResults(bytes);
   const out: SheetCsv[] = [];
@@ -64,16 +66,23 @@ export async function convertXlsxToCsvSheets(
     ? workbook.worksheets.filter(
         (sheet) =>
           !selection.sheet ||
-          (originalNames.get(sheet.name.toLowerCase()) ?? sheet.name) === selection.sheet,
+          (originalNames.get(sheet.name.toLowerCase()) ?? sheet.name) ===
+            selection.sheet,
       )
     : workbook.worksheets;
   if (selection && requested.length !== 1)
-    throw new ToolError("UNKNOWN_SHEET", "Select one exact worksheet from the original file.");
+    throw new ToolError(
+      "UNKNOWN_SHEET",
+      "Select one exact worksheet from the original file.",
+    );
   for (const worksheet of requested) {
     // ExcelJS counts rows even when they contain only stylings; `rowCount`
     // includes the trailing empty rows that operators sometimes leave. We
     // skip a sheet only when its actual row range is empty.
-    if (selection && selection.source_rows.some((row) => row > worksheet.rowCount))
+    if (
+      selection &&
+      selection.source_rows.some((row) => row > worksheet.rowCount)
+    )
       throw new ToolError(
         "INVALID_SELECTION",
         "A selected source row is outside the worksheet. Reopen the file and select again.",
@@ -107,7 +116,9 @@ export async function convertXlsxToCsvSheets(
     out.push({
       name: originalNames.get(worksheet.name.toLowerCase()) ?? worksheet.name,
       csv: csv ?? Buffer.alloc(0),
-      ...(selection ? { sourceRows: selection.source_rows, explicitHeader: true } : {}),
+      ...(selection
+        ? { sourceRows: selection.source_rows, explicitHeader: true }
+        : {}),
       ...(calculation.formula_cells ? { calculation } : {}),
     });
   }
@@ -130,7 +141,10 @@ function worksheetToCsv(
     // Read immutable source coordinates before dropping blanks or inferring a header.
     const width = worksheet.columnCount;
     if (width > 200)
-      throw new ToolError("INVALID_SELECTION", "The selection has too many columns (maximum 200).");
+      throw new ToolError(
+        "INVALID_SELECTION",
+        "The selection has too many columns (maximum 200).",
+      );
     return Buffer.from(
       [1, ...sourceRows]
         .map((number) => {
@@ -176,7 +190,11 @@ function worksheetToCsv(
  */
 function cellValue(cell: ExcelJS.Cell, empty: Set<string>): ExcelJS.CellValue {
   const value = cell.value;
-  if (value && typeof value === "object" && ("formula" in value || "sharedFormula" in value)) {
+  if (
+    value &&
+    typeof value === "object" &&
+    ("formula" in value || "sharedFormula" in value)
+  ) {
     const result = empty.has(cell.address)
       ? ""
       : (cell.model as { result?: ExcelJS.CellValue }).result;
@@ -186,7 +204,9 @@ function cellValue(cell: ExcelJS.Cell, empty: Set<string>): ExcelJS.CellValue {
 }
 
 /** Read only cache presence, never execute formulas or load external resources. */
-async function emptyFormulaResults(bytes: Buffer): Promise<Map<string, Set<string>>> {
+async function emptyFormulaResults(
+  bytes: Buffer,
+): Promise<Map<string, Set<string>>> {
   const zip = await JSZip.loadAsync(bytes);
   const relations = new Map<string, string>();
   const sheets = new Map<string, string>();
@@ -197,19 +217,24 @@ async function emptyFormulaResults(bytes: Buffer): Promise<Map<string, Set<strin
     text: (value: string) => void = () => {},
   ) {
     const parser = new SaxesParser();
-    parser.on("opentag", (tag) => open(tag.name.split(":").at(-1)!, tag.attributes));
+    parser.on("opentag", (tag) =>
+      open(tag.name.split(":").at(-1)!, tag.attributes),
+    );
     parser.on("closetag", (tag) => close(tag.name.split(":").at(-1)!));
     parser.on("text", text);
     parser.write(xml).close();
   }
-  parse(await zip.file("xl/_rels/workbook.xml.rels")!.async("string"), (name, attrs) => {
-    if (name === "Relationship" && attrs.TargetMode !== "External") {
-      const target = attrs.Target?.startsWith("/")
-        ? attrs.Target.slice(1)
-        : posix.join("xl", attrs.Target ?? "");
-      if (target.startsWith("xl/")) relations.set(attrs.Id!, target);
-    }
-  });
+  parse(
+    await zip.file("xl/_rels/workbook.xml.rels")!.async("string"),
+    (name, attrs) => {
+      if (name === "Relationship" && attrs.TargetMode !== "External") {
+        const target = attrs.Target?.startsWith("/")
+          ? attrs.Target.slice(1)
+          : posix.join("xl", attrs.Target ?? "");
+        if (target.startsWith("xl/")) relations.set(attrs.Id!, target);
+      }
+    },
+  );
   parse(await zip.file("xl/workbook.xml")!.async("string"), (name, attrs) => {
     if (name === "sheet") sheets.set(attrs.name!, attrs["r:id"]!);
   });
@@ -242,7 +267,8 @@ async function emptyFormulaResults(bytes: Buffer): Promise<Map<string, Set<strin
       },
       (tag) => {
         if (tag === "v") inValue = false;
-        if (tag === "c" && formula && stringCell && hasValue && value === "") empty.add(address);
+        if (tag === "c" && formula && stringCell && hasValue && value === "")
+          empty.add(address);
       },
       (text) => {
         if (inValue) value += text;
@@ -255,12 +281,20 @@ async function emptyFormulaResults(bytes: Buffer): Promise<Map<string, Set<strin
 
 function cellToText(value: ExcelJS.CellValue): string {
   if (value === null || value === undefined) return "";
-  if (value instanceof Date) return value.toISOString();
+  if (value instanceof Date) {
+    // A cell holding only a date (no time of day) is written as one, so the column types
+    // as DATE rather than TIMESTAMP; a column mixing both still types as TIMESTAMP.
+    const iso = value.toISOString();
+    return iso.endsWith("T00:00:00.000Z") ? iso.slice(0, 10) : iso;
+  }
   if (typeof value === "object") {
-    if ("richText" in value) return value.richText.map((run) => run.text).join("");
+    if ("richText" in value)
+      return value.richText.map((run) => run.text).join("");
     if ("hyperlink" in value) return value.hyperlink || value.text || "";
     if ("formula" in value || "sharedFormula" in value) {
-      return value.result === undefined || value.result === null ? "" : cellToText(value.result);
+      return value.result === undefined || value.result === null
+        ? ""
+        : cellToText(value.result);
     }
     if ("error" in value) return value.error;
     return JSON.stringify(value);
@@ -310,7 +344,10 @@ async function normalizeSheetNames(
   if (!changed) return { bytes: xlsxBytes, originalNames };
 
   zip.file("xl/workbook.xml", rewritten);
-  const bytes = await zip.generateAsync({ type: "nodebuffer", compression: "DEFLATE" });
+  const bytes = await zip.generateAsync({
+    type: "nodebuffer",
+    compression: "DEFLATE",
+  });
   return { bytes, originalNames };
 }
 
@@ -320,15 +357,20 @@ function uniqueSheetName(name: string, taken: ReadonlySet<string>): string {
   if (!taken.has(base.toLowerCase())) return base;
   for (let n = 2; ; n++) {
     const suffix = ` (${n})`;
-    const candidate = base.slice(0, MAX_SHEET_NAME_LENGTH - suffix.length) + suffix;
+    const candidate =
+      base.slice(0, MAX_SHEET_NAME_LENGTH - suffix.length) + suffix;
     if (!taken.has(candidate.toLowerCase())) return candidate;
   }
 }
 
 function decodeXmlAttribute(value: string): string {
   return value
-    .replace(/&#x([0-9a-fA-F]+);/g, (_, hex: string) => String.fromCodePoint(parseInt(hex, 16)))
-    .replace(/&#(\d+);/g, (_, dec: string) => String.fromCodePoint(parseInt(dec, 10)))
+    .replace(/&#x([0-9a-fA-F]+);/g, (_, hex: string) =>
+      String.fromCodePoint(parseInt(hex, 16)),
+    )
+    .replace(/&#(\d+);/g, (_, dec: string) =>
+      String.fromCodePoint(parseInt(dec, 10)),
+    )
     .replace(/&quot;/g, '"')
     .replace(/&apos;/g, "'")
     .replace(/&lt;/g, "<")

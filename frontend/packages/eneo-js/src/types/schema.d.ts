@@ -6560,6 +6560,133 @@ export interface paths {
     patch?: never;
     trace?: never;
   };
+  "/api/v1/document-templates/": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /** List Document Templates */
+    get: operations["list_document_templates_api_v1_document_templates__get"];
+    put?: never;
+    /**
+     * Upload Document Template
+     * @description Upload a Word (.docx) template. The tool runtime reads its fields and styles; the result is stored with the template.
+     */
+    post: operations["upload_document_template_api_v1_document_templates__post"];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/v1/document-templates/available/": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /**
+     * List Available Document Templates
+     * @description The organisation's templates by name, for choosing one on an assistant.
+     */
+    get: operations["list_available_document_templates_api_v1_document_templates_available__get"];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/v1/document-templates/builtin/": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /**
+     * Download Builtin Document Template
+     * @description Eneo's built-in document template, to adapt in Word.
+     */
+    get: operations["download_builtin_document_template_api_v1_document_templates_builtin__get"];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/v1/document-templates/{id}/": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /** Get Document Template */
+    get: operations["get_document_template_api_v1_document_templates__id___get"];
+    put?: never;
+    post?: never;
+    /**
+     * Delete Document Template
+     * @description Remove a template. Assistants that selected it fall back to the organisation's default.
+     */
+    delete: operations["delete_document_template_api_v1_document_templates__id___delete"];
+    options?: never;
+    head?: never;
+    /**
+     * Update Document Template
+     * @description Rename a template or make it the organisation's default.
+     */
+    patch: operations["update_document_template_api_v1_document_templates__id___patch"];
+    trace?: never;
+  };
+  "/api/v1/document-templates/{id}/content/": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /**
+     * Download Document Template
+     * @description Download the template's Word file.
+     */
+    get: operations["download_document_template_api_v1_document_templates__id__content__get"];
+    /**
+     * Replace Document Template Content
+     * @description Replace the template's Word file; the template keeps its id.
+     */
+    put: operations["replace_document_template_content_api_v1_document_templates__id__content__put"];
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/v1/document-templates/{id}/original/download/": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /** Download a document template through a signed link */
+    get: operations["download_document_template_signed_api_v1_document_templates__id__original_download__get"];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
   "/api/v1/mcp-apps/views/{view_id}/token/": {
     parameters: {
       query?: never;
@@ -9198,6 +9325,10 @@ export interface components {
       | "mcp_server_tool_enabled"
       | "mcp_server_tool_disabled"
       | "mcp_app_view_link_created"
+      | "document_template_created"
+      | "document_template_updated"
+      | "document_template_deleted"
+      | "document_template_default_set"
       | "mcp_app_tool_called"
       | "model_provider_headers_updated"
       | "model_provider_destination_changed"
@@ -10795,6 +10926,7 @@ export interface components {
       enabled_capabilities?: (
         "web_search" | "image_generation" | "file_analysis" | "file_creation" | "charts"
       )[];
+      document_template?: components["schemas"]["DocumentTemplateChoicePublic"];
       /** Available Capabilities */
       available_capabilities?: components["schemas"]["CapabilityAvailability"][];
       /** Name */
@@ -11412,6 +11544,23 @@ export interface components {
     Body_create_icon_api_v1_icons__post: {
       /** File */
       file: string;
+    };
+    /** Body_replace_document_template_content_api_v1_document_templates__id__content__put */
+    Body_replace_document_template_content_api_v1_document_templates__id__content__put: {
+      /** File */
+      file: string;
+    };
+    /** Body_upload_document_template_api_v1_document_templates__post */
+    Body_upload_document_template_api_v1_document_templates__post: {
+      /** File */
+      file: string;
+      /** Name */
+      name: string;
+      /**
+       * Is Default
+       * @default false
+       */
+      is_default?: boolean;
     };
     /** Body_upload_file_api_v1_files__post */
     Body_upload_file_api_v1_files__post: {
@@ -12961,6 +13110,7 @@ export interface components {
       enabled_capabilities?: (
         "web_search" | "image_generation" | "file_analysis" | "file_creation" | "charts"
       )[];
+      document_template?: components["schemas"]["DocumentTemplateChoicePublic"];
       /** Available Capabilities */
       available_capabilities?: components["schemas"]["CapabilityAvailability"][];
       /** Name */
@@ -13170,6 +13320,7 @@ export interface components {
     DocumentExportAvailability: {
       docx: components["schemas"]["DocumentExportFormatAvailability"];
       pdf: components["schemas"]["DocumentExportFormatAvailability"];
+      template?: components["schemas"]["DocumentTemplateReferencePublic"] | null;
     };
     /** DocumentExportFormatAvailability */
     DocumentExportFormatAvailability: {
@@ -13197,6 +13348,125 @@ export interface components {
        * @enum {string}
        */
       format: "docx" | "pdf";
+    };
+    /**
+     * DocumentTemplateChoicePublic
+     * @description An assistant's choice for its file-creation capability.
+     */
+    DocumentTemplateChoicePublic: {
+      /**
+       * Mode
+       * @default default
+       * @enum {string}
+       */
+      mode?: "default" | "selected" | "builtin";
+      /** Template Id */
+      template_id?: string | null;
+    };
+    /** DocumentTemplateList */
+    DocumentTemplateList: {
+      /** Items */
+      items: components["schemas"]["DocumentTemplatePublic"][];
+      /**
+       * Runtime Configured
+       * @description Whether uploads are inspected by the tool runtime.
+       */
+      runtime_configured: boolean;
+    };
+    /**
+     * DocumentTemplateOptionPublic
+     * @description A template as an assistant editor picks it: name and default only.
+     */
+    DocumentTemplateOptionPublic: {
+      /**
+       * Id
+       * Format: uuid
+       */
+      id: string;
+      /** Name */
+      name: string;
+      /** Is Default */
+      is_default: boolean;
+    };
+    /** DocumentTemplateOptions */
+    DocumentTemplateOptions: {
+      /** Items */
+      items: components["schemas"]["DocumentTemplateOptionPublic"][];
+    };
+    /** DocumentTemplatePublic */
+    DocumentTemplatePublic: {
+      /**
+       * Id
+       * Format: uuid
+       */
+      id: string;
+      /** Name */
+      name: string;
+      /** Filename */
+      filename: string;
+      /** Sha256 */
+      sha256: string;
+      /** Size Bytes */
+      size_bytes: number;
+      /**
+       * Syntax
+       * @enum {string}
+       */
+      syntax: "controls" | "braces" | "mixed" | "none" | "unknown";
+      /** Placeholders */
+      placeholders: components["schemas"]["TemplatePlaceholderPublic"][];
+      /** Checks */
+      checks: {
+        [key: string]: components["schemas"]["TemplateCheckPublic"];
+      };
+      /**
+       * Status
+       * @enum {string}
+       */
+      status: "ready" | "invalid" | "unchecked";
+      /** Is Default */
+      is_default: boolean;
+      /**
+       * Selected By
+       * @description How many assistants select this template explicitly.
+       */
+      selected_by: number;
+      /** Created By */
+      created_by?: string | null;
+      /** Updated By */
+      updated_by?: string | null;
+      /**
+       * Created At
+       * Format: date-time
+       */
+      created_at: string;
+      /**
+       * Updated At
+       * Format: date-time
+       */
+      updated_at: string;
+    };
+    /**
+     * DocumentTemplateReferencePublic
+     * @description Which template applies, for display next to an export.
+     */
+    DocumentTemplateReferencePublic: {
+      /** Name */
+      name: string;
+      /**
+       * Source
+       * @enum {string}
+       */
+      source: "tenant" | "assistant" | "builtin";
+      /** Template Id */
+      template_id?: string | null;
+    };
+    /** DocumentTemplateUpdate */
+    DocumentTemplateUpdate: {
+      /** Name */
+      name?: string | null;
+      /** Is Default */
+      is_default?: boolean | null;
     };
     /** DynamicValuePublic */
     DynamicValuePublic: {
@@ -13641,6 +13911,7 @@ export interface components {
       | "mcp_server"
       | "model_provider"
       | "mcp_server_tool"
+      | "document_template"
       | "user_group";
     /**
      * ErrorCodes
@@ -17789,6 +18060,8 @@ export interface components {
        * @description This field is deprecated and will be ignored
        */
       completion_model?: components["schemas"]["ModelId"] | null;
+      /** @description Which document template the file-creation capability renders with: the organisation's default, a selected template, or Eneo's built-in. */
+      document_template?: components["schemas"]["DocumentTemplateChoicePublic"] | null;
       /** Attachments */
       attachments?: components["schemas"]["AssistantAttachmentInput"][] | null;
       /** Mcp Tools */
@@ -20891,6 +21164,13 @@ export interface components {
       | "analyze_conversation_insights"
       | "export_audit_logs"
       | "log_audit_event";
+    /** TemplateCheckPublic */
+    TemplateCheckPublic: {
+      /** Ok */
+      ok: boolean;
+      /** Detail */
+      detail: string;
+    };
     /** TemplateCreate */
     TemplateCreate: {
       /**
@@ -20910,6 +21190,34 @@ export interface components {
       )[];
       /** Count */
       readonly count: number;
+    };
+    /** TemplatePlaceholderPublic */
+    TemplatePlaceholderPublic: {
+      /** Name */
+      name: string;
+      /**
+       * Syntax
+       * @enum {string}
+       */
+      syntax: "control" | "braces";
+      /**
+       * Kind
+       * @enum {string}
+       */
+      kind: "rich" | "text";
+      /** Label */
+      label?: string | null;
+      /** Hint */
+      hint?: string | null;
+      /**
+       * Location
+       * @enum {string}
+       */
+      location: "body" | "header" | "footer";
+      /** Supported */
+      supported: boolean;
+      /** Reason */
+      reason?: string | null;
     };
     /** TemplateWizard */
     TemplateWizard: {
@@ -45833,6 +46141,524 @@ export interface operations {
         };
         content: {
           "application/json": components["schemas"]["MCPServerToolPublic"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Not Found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  list_document_templates_api_v1_document_templates__get: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["DocumentTemplateList"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+    };
+  };
+  upload_document_template_api_v1_document_templates__post: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        "multipart/form-data": components["schemas"]["Body_upload_document_template_api_v1_document_templates__post"];
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      201: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["DocumentTemplatePublic"];
+        };
+      };
+      /** @description Bad Request */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Request Entity Too Large */
+      413: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Unsupported Media Type */
+      415: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  list_available_document_templates_api_v1_document_templates_available__get: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["DocumentTemplateOptions"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+    };
+  };
+  download_builtin_document_template_api_v1_document_templates_builtin__get: {
+    parameters: {
+      query?: {
+        language?: "sv" | "en";
+      };
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content?: never;
+      };
+      /** @description Bad Request */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  get_document_template_api_v1_document_templates__id___get: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        id: string;
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["DocumentTemplatePublic"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Not Found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  delete_document_template_api_v1_document_templates__id___delete: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        id: string;
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Successful Response */
+      204: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content?: never;
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Not Found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  update_document_template_api_v1_document_templates__id___patch: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        id: string;
+      };
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["DocumentTemplateUpdate"];
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["DocumentTemplatePublic"];
+        };
+      };
+      /** @description Bad Request */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Not Found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  download_document_template_api_v1_document_templates__id__content__get: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        id: string;
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content?: never;
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Not Found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  replace_document_template_content_api_v1_document_templates__id__content__put: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        id: string;
+      };
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        "multipart/form-data": components["schemas"]["Body_replace_document_template_content_api_v1_document_templates__id__content__put"];
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["DocumentTemplatePublic"];
+        };
+      };
+      /** @description Bad Request */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Not Found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Request Entity Too Large */
+      413: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Unsupported Media Type */
+      415: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  download_document_template_signed_api_v1_document_templates__id__original_download__get: {
+    parameters: {
+      query: {
+        /** @description The signed template-download token */
+        token: string;
+      };
+      header?: never;
+      path: {
+        id: string;
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content?: never;
+      };
+      /** @description Unauthorized */
+      401: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
         };
       };
       /** @description Forbidden */
