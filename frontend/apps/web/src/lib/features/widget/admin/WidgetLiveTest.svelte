@@ -22,6 +22,13 @@
 
   let element = $state<HTMLElement | null>(null);
   let loading = $state(false);
+  // A start that is still waiting for its token and loader when the editor
+  // stops it or leaves the page must not mount anything afterwards: the
+  // launcher would land on whatever page the admin navigated to, with the
+  // removal control gone. Each start belongs to one generation; stop() and
+  // destruction move on.
+  let generation = 0;
+  let destroyed = false;
 
   const active = $derived(element !== null);
   // The loader build the widget page loaded; null when this installation has none.
@@ -41,12 +48,14 @@
 
   async function start() {
     if (!release) return;
+    const run = ++generation;
     loading = true;
     try {
       const [{ token }] = await Promise.all([
         eneo.widgets.previewToken({ id: widget.id }),
         loadLoader(release.channel)
       ]);
+      if (destroyed || run !== generation) return;
       const mounted = document.createElement("eneo-widget");
       mounted.setAttribute("widget-id", widget.public_id);
       mounted.setAttribute("preview", token);
@@ -66,18 +75,24 @@
       element = mounted;
       (mounted as HTMLElement & { openPanel?: () => void }).openPanel?.();
     } catch (error) {
+      if (destroyed || run !== generation) return;
       toastError(error, m.widget_admin_live_test_failed());
     } finally {
-      loading = false;
+      if (run === generation) loading = false;
     }
   }
 
   function stop() {
+    generation++;
+    loading = false;
     element?.remove();
     element = null;
   }
 
-  onDestroy(stop);
+  onDestroy(() => {
+    destroyed = true;
+    stop();
+  });
 </script>
 
 <section

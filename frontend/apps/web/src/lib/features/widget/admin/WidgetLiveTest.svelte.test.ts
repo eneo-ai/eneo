@@ -63,6 +63,31 @@ describe("WidgetLiveTest", () => {
     expect(page.getByText("widget_admin_snippet_not_built").elements()).toHaveLength(0);
   });
 
+  test("a start still waiting when the editor leaves mounts nothing", async () => {
+    state.page.data.release = { version: "2.0.0", channel: "v7", integrity: "sha384-abc" };
+    captureScripts();
+    for (const stale of document.querySelectorAll("eneo-widget")) stale.remove();
+    let resolveToken: (value: { token: string }) => void = () => {};
+    const deferred = {
+      widgets: {
+        previewToken: () =>
+          new Promise<{ token: string }>((resolve) => {
+            resolveToken = resolve;
+          })
+      }
+    } as unknown as Eneo;
+    const screen = render(WidgetLiveTest, { widget, eneo: deferred });
+
+    await start().click();
+    await expect.element(start()).toBeDisabled();
+    // The admin navigates away while the token request is still pending.
+    screen.unmount();
+    resolveToken({ token: "late-token" });
+    await new Promise((resolve) => setTimeout(resolve, 0));
+
+    expect(document.querySelectorAll("eneo-widget")).toHaveLength(0);
+  });
+
   test("says why it cannot start when the installation has no loader", async () => {
     state.page.data.release = null;
     const scripts = captureScripts();
