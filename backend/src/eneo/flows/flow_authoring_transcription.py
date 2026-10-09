@@ -1,13 +1,25 @@
 from __future__ import annotations
 
 from collections.abc import Sequence
-from typing import Protocol
+from typing import TYPE_CHECKING, NoReturn, Protocol
 from uuid import UUID
 
 from eneo.flows.domain.flow import FlowPersistedJsonObject, clone_json_object
+from eneo.flows.domain.flow_step_validation import FlowGraphIssueCode
 from eneo.flows.domain.runtime_input import parse_runtime_input_config
 from eneo.flows.flow_authoring_spec import InputSource, InputType
-from eneo.flows.transcription_config import DEFAULT_TRANSCRIPTION_LANGUAGE
+from eneo.flows.transcription_config import (
+    DEFAULT_TRANSCRIPTION_LANGUAGE,
+    SPEAKER_SERVICE_KEY,
+    FlowTranscriptionConfig,
+    FlowTranscriptionConfigError,
+    parse_transcription_config,
+)
+from eneo.main.exceptions import BadRequestException
+from eneo.transcription_services.models import TranscriptionOperation
+
+if TYPE_CHECKING:
+    from eneo.spaces.space import Space
 
 
 class AudioInputStep(Protocol):
@@ -58,6 +70,75 @@ def apply_audio_transcription_defaults(
     return updated_metadata
 
 
+def transcription_config_for_write(
+    metadata: FlowPersistedJsonObject | None,
+) -> FlowTranscriptionConfig:
+    """The transcription choice a write states, refused when malformed: a flow
+    without audio steps would otherwise store it unread."""
+    try:
+        return parse_transcription_config(metadata)
+    except FlowTranscriptionConfigError as exc:
+        code = FlowGraphIssueCode.FLOW_AUDIO_TRANSCRIPTION_INVALID.value
+        raise BadRequestException(
+            str(exc), code=code, context={"issue_code": code}
+        ) from exc
+
+
+def kept_speaker_service_id(metadata: FlowPersistedJsonObject | None) -> UUID | None:
+    """The speaker service a saved draft picked and uses; None when it picked
+    none or its stored choice is unreadable."""
+    try:
+        return parse_transcription_config(metadata).speaker_service_in_use
+    except FlowTranscriptionConfigError:
+        return None
+
+
+def require_one_speaker_service(*, space: Space) -> None:
+    """A flow that labels speakers without a pick needs the space to have one
+    speaker service to use, not a choice to make; none means no labels."""
+    services = [
+        connection
+        for connection in space.usable_transcription_services
+        if TranscriptionOperation.DIARIZE in connection.operations
+    ]
+    if len(services) > 1:
+        code = FlowGraphIssueCode.FLOW_SPEAKER_SERVICE_CHOICE_REQUIRED.value
+        raise BadRequestException(
+            "This space has several speaker identification services; choose "
+            "the one the flow uses.",
+            code=code,
+            context={"issue_code": code},
+        )
+
+
+def require_usable_speaker_service(service_id: UUID, *, space: Space) -> None:
+    """Refuse a picked speaker service the space may not use, or one its
+    administrator has not declared for identifying speakers."""
+    connection = space.usable_transcription_service(service_id)
+    if connection is None:
+        _refuse(
+            FlowGraphIssueCode.FLOW_SPEAKER_SERVICE_UNAVAILABLE,
+            "The chosen speaker identification service is not available in this "
+            "space: it is not granted to the space, is turned off, or is below "
+            "the space's security classification.",
+            service_id,
+        )
+    if TranscriptionOperation.DIARIZE not in connection.operations:
+        _refuse(
+            FlowGraphIssueCode.FLOW_SPEAKER_SERVICE_CANNOT_IDENTIFY_SPEAKERS,
+            "The chosen service is not set up to identify speakers.",
+            service_id,
+        )
+
+
+def _refuse(code: FlowGraphIssueCode, message: str, service_id: UUID) -> NoReturn:
+    raise BadRequestException(
+        message,
+        code=code.value,
+        context={"issue_code": code.value, "speaker_service_id": str(service_id)},
+    )
+
+
 def requires_audio_transcription(steps: Sequence[AudioInputStep]) -> bool:
     for step in steps:
         if (
@@ -76,6 +157,7 @@ _TRANSCRIPTION_WIZARD_KEYS = {
     "transcription_model",
     "transcription_language",
     "transcription_diarization",
+    SPEAKER_SERVICE_KEY,
 }
 
 

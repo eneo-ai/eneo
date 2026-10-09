@@ -215,12 +215,26 @@ class Space:
             model.id for model in self.transcription_models
         ]
 
-    def is_transcription_service_available(self, connection_id: UUID) -> bool:
-        """Whether new work in this space may use the connection: granted,
-        allowed by the classification, and enabled by the organisation."""
-        return any(
-            connection.id == connection_id and connection.can_access
+    @property
+    def usable_transcription_services(self) -> list["TranscriptionServiceConnection"]:
+        """The connections new work in this space may use: granted, allowed by
+        the classification, and enabled by the organisation."""
+        return [
+            connection
             for connection in self._transcription_services
+            if connection.can_access
+        ]
+
+    def usable_transcription_service(
+        self, connection_id: UUID
+    ) -> "TranscriptionServiceConnection | None":
+        return next(
+            (
+                connection
+                for connection in self.usable_transcription_services
+                if connection.id == connection_id
+            ),
+            None,
         )
 
     def is_mcp_server_in_space(self, mcp_server_id: UUID | None) -> bool:

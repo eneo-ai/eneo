@@ -37,6 +37,11 @@ class FlowGraphIssueCode(StrEnum):
     FLOW_AUDIO_TRANSCRIPTION_INVALID = "flow_audio_transcription_invalid"
     FLOW_AUDIO_TRANSCRIPTION_MODEL_REQUIRED = "flow_audio_transcription_model_required"
     FLOW_AUDIO_TRANSCRIPTION_REQUIRED = "flow_audio_transcription_required"
+    FLOW_SPEAKER_SERVICE_CHOICE_REQUIRED = "flow_speaker_service_choice_required"
+    FLOW_SPEAKER_SERVICE_UNAVAILABLE = "flow_speaker_service_unavailable"
+    FLOW_SPEAKER_SERVICE_CANNOT_IDENTIFY_SPEAKERS = (
+        "flow_speaker_service_cannot_identify_speakers"
+    )
     FLOW_HTTP_POST_OUTPUT_MUST_BE_TERMINAL = "flow_http_post_output_must_be_terminal"
     FLOW_INPUT_ALIAS_NOT_RECEIVED = "flow_input_alias_not_received"
     FLOW_INPUT_BINDING_FUTURE_STEP_REFERENCE = (

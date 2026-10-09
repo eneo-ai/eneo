@@ -52,6 +52,11 @@ const CODE_TO_MESSAGE: Record<string, () => string> = {
   flow_audio_transcription_required: () => m.flow_validation_msg_audio_transcription_required(),
   flow_audio_transcription_model_required: () =>
     m.flow_validation_msg_audio_transcription_model_required(),
+  flow_speaker_service_choice_required: () =>
+    m.flow_validation_msg_speaker_service_choice_required(),
+  flow_speaker_service_unavailable: () => m.flow_validation_msg_speaker_service_unavailable(),
+  flow_speaker_service_cannot_identify_speakers: () =>
+    m.flow_validation_msg_speaker_service_cannot_identify_speakers(),
   flow_step_limit_exceeded: () => m.flow_error_flow_step_limit_exceeded(),
   // The security-classification refusals a save raises. Their facts, when the
   // server sends them, turn this generic sentence into an actionable one

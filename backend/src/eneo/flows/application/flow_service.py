@@ -31,6 +31,12 @@ from eneo.flows.domain.flow_invariant_exceptions import (
 from eneo.flows.domain.flow_step_validation import FlowStepValidationError
 from eneo.flows.domain.step_config import clean_inactive_step_config
 from eneo.flows.flow_api_error_code import FlowApiErrorCode
+from eneo.flows.flow_authoring_transcription import (
+    kept_speaker_service_id,
+    require_one_speaker_service,
+    require_usable_speaker_service,
+    transcription_config_for_write,
+)
 from eneo.flows.flow_metadata import (
     normalize_flow_metadata_for_write,
     normalize_persisted_flow_metadata,
@@ -79,6 +85,7 @@ from eneo.flows.published_definition import (
 from eneo.main.exceptions import BadRequestException, NotFoundException
 from eneo.main.models import NOT_PROVIDED, NotProvided, ResourcePermission
 from eneo.settings.encryption_service import EncryptionService
+from eneo.spaces.space import Space
 from eneo.spaces.space_service import SpaceService
 from eneo.users.user import UserInDB
 
@@ -153,6 +160,9 @@ class FlowService:
             steps=steps,
             metadata_json=normalized_metadata,
         )
+        space = await self._check_speaker_service(
+            space_id=space_id, metadata_json=normalized_metadata
+        )
         await self._validate_assistant_scope_for_steps(
             space_id=space_id,
             steps=steps,
@@ -160,6 +170,7 @@ class FlowService:
         await self._validate_step_security_classification_for_steps(
             space_id=space_id,
             steps=steps,
+            space=space,
         )
 
         normalized_steps = self._normalize_steps_for_tenant(steps)
@@ -293,9 +304,20 @@ class FlowService:
             steps=next_steps,
             metadata_json=next_metadata,
         )
+        # An edit that leaves the metadata alone states no new choice.
+        space = (
+            await self._check_speaker_service(
+                space_id=existing.space_id,
+                metadata_json=next_metadata,
+                kept_metadata_json=existing.metadata_json,
+            )
+            if metadata_json is not NOT_PROVIDED
+            else None
+        )
         await self._validate_step_security_classification_for_steps(
             space_id=existing.space_id,
             steps=next_steps,
+            space=space,
         )
 
         normalized_steps = self._normalize_steps_for_tenant(next_steps)
@@ -589,10 +611,14 @@ class FlowService:
             steps=flow.steps,
             metadata_json=normalized_metadata,
         )
+        space = await self._check_speaker_service(
+            space_id=flow.space_id, metadata_json=normalized_metadata, publishing=True
+        )
         await self._validate_step_security_classification_for_steps(
             space_id=flow.space_id,
             steps=flow.steps,
             assistants_by_id=assistants_by_id,
+            space=space,
         )
         self._reject_templated_stored_secrets(flow.steps)
         self._reject_unprotected_stored_secrets(flow.steps)
@@ -730,17 +756,48 @@ class FlowService:
                 "Flow steps must reference flow-managed assistants owned by the flow."
             )
 
+    async def _check_speaker_service(
+        self,
+        *,
+        space_id: UUID,
+        metadata_json: FlowPersistedJsonObject | None,
+        kept_metadata_json: FlowPersistedJsonObject | None = None,
+        publishing: bool = False,
+    ) -> Space | None:
+        """Refuse a malformed transcription choice, a picked speaker service
+        the space may not use, and on publish a flow that labels speakers
+        without a pick in a space with several services. A saved draft keeps
+        the pick it has, as a space keeps its grants, so an administrator's
+        later change never blocks unrelated edits; publishing checks it again.
+
+        Returns the space when it was loaded, for the checks that follow."""
+        config = transcription_config_for_write(metadata_json)
+        pick = config.speaker_service_in_use
+        if pick is not None and pick == kept_speaker_service_id(kept_metadata_json):
+            pick = None
+        needs_one = publishing and config.labels_with_the_spaces_service
+        if self.space_service is None or (pick is None and not needs_one):
+            return None
+        space = await self.space_service.get_space(space_id)
+        if pick is not None:
+            require_usable_speaker_service(pick, space=space)
+        if needs_one:
+            require_one_speaker_service(space=space)
+        return space
+
     async def _validate_step_security_classification_for_steps(
         self,
         *,
         space_id: UUID,
         steps: list[FlowStep],
         assistants_by_id: dict[UUID, Assistant] | None = None,
+        space: Space | None = None,
     ) -> None:
         if self.space_service is None or not steps:
             return
 
-        space = await self.space_service.get_space(space_id)
+        if space is None:
+            space = await self.space_service.get_space(space_id)
         require_flow_security_classification(
             steps=steps,
             assistants_by_id=(

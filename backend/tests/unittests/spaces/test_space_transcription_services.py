@@ -81,8 +81,8 @@ def test_a_grant_below_the_classification_stays_but_is_not_usable():
     assert _ids(space.transcription_services) == [allowed.id]
     assert _ids(space.transcription_services_below_classification) == [below.id]
     assert _ids(space.linked_transcription_services) == [allowed.id, below.id]
-    assert space.is_transcription_service_available(allowed.id)
-    assert not space.is_transcription_service_available(below.id)
+    assert space.usable_transcription_service(allowed.id) == allowed
+    assert space.usable_transcription_service(below.id) is None
 
 
 def test_a_disabled_service_keeps_its_grant_but_takes_no_new_work():
@@ -93,7 +93,7 @@ def test_a_disabled_service_keeps_its_grant_but_takes_no_new_work():
 
     assert _ids(space.linked_transcription_services) == [disabled.id]
     assert space.link_changes("transcription_service") == (set(), set())
-    assert not space.is_transcription_service_available(disabled.id)
+    assert space.usable_transcription_service(disabled.id) is None
 
 
 @pytest.mark.parametrize(

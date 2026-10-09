@@ -112,7 +112,7 @@ async def _grants(db_container, space_id: str) -> set[UUID]:
 async def _available(db_container, space_id: str, connection_id: str) -> bool:
     async with db_container() as container:
         space = await container.space_repo().one(UUID(space_id))
-        return space.is_transcription_service_available(UUID(connection_id))
+        return space.usable_transcription_service(UUID(connection_id)) is not None
 
 
 async def test_a_granted_service_is_listed_and_usable_in_the_space(
