@@ -73,6 +73,10 @@ test("workbook tools produce a report, preserve revisions, and recheck export su
       { exact: true }
     )
   ).toBeVisible({ timeout: 90_000 });
+  // The reply text can land before the turn's last step settles, and a step
+  // run only folds (and keeps its expanded state) once nothing is running.
+  // The composer offers to send again when the turn is over.
+  await expect(page.locator('button[name="ask"][type="submit"]')).toBeVisible();
   await conversation.getByRole("button", { name: /Skills.*6/ }).click();
   await expect(conversation.getByRole("button", { name: /Workflow analysis/ })).toBeVisible();
 
