@@ -4487,6 +4487,8 @@
   "permission_assistant_debug_description": "Se innehållsfri diagnostik för chattar du har tillgång till, till exempel vilka skills som aktiverades.",
   "permission_group_chat": "Chatt & samarbete",
   "permission_group_chat_short": "Chatt",
+  "permission_group_functions": "Funktioner",
+  "permission_group_functions_short": "Funktioner",
   "permission_group_build": "Bygga assistenter & appar",
   "permission_group_build_short": "Bygga",
   "permission_group_knowledge": "Kunskap",

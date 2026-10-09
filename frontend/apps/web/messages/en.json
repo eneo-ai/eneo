@@ -4487,6 +4487,8 @@
   "permission_assistant_debug_description": "Inspect content-free chat diagnostics, such as which Skills were activated, for conversations you can access.",
   "permission_group_chat": "Chat & collaboration",
   "permission_group_chat_short": "Chat",
+  "permission_group_functions": "Functions",
+  "permission_group_functions_short": "Functions",
   "permission_group_build": "Build assistants & apps",
   "permission_group_build_short": "Build",
   "permission_group_knowledge": "Knowledge",
