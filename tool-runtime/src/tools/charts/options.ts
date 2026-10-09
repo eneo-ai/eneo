@@ -31,7 +31,10 @@ export type ChartViewState = {
   zoom: { start: number; end: number };
 };
 
-/** The image is always drawn on the light surface, in a font the image carries. */
+/**
+ * The image is always drawn light, in a font the image carries, and on white: it ends up on
+ * the page of a document as often as in the chat.
+ */
 export function imageStyle(width: number, locale: string): ChartStyle {
   const scale = Math.min(1.6, Math.max(0.8, width / 1200));
   return {
@@ -41,7 +44,7 @@ export function imageStyle(width: number, locale: string): ChartStyle {
     inkSecondary: "#52514e",
     grid: "#e6e5e1",
     axis: "#c3c2b7",
-    surface: "#fcfcfb",
+    surface: "#ffffff",
     font: "'DejaVu Sans', Helvetica, Arial, sans-serif",
     textSize: Math.round(11 * scale),
   };

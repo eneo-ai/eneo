@@ -322,3 +322,46 @@ Coverage is a local-only tool: run `scripts/coverage.sh` as above.
 - The two Vitest projects are configured in `apps/web/vite.config.ts` under
   `test.projects`. The `server` project excludes `*.svelte.test.ts`; the `client`
   project includes only those.
+
+## Skills, Functions and document workflow acceptance
+
+`tests/tool-workflow.spec.ts` uses the opt-in `E2E_WORKFLOW_*` scenarios of
+the mock model with the real bundled runtime, file store and document workspace.
+The fixture in `e2e/fixtures/workflow.xlsx` has 600 amounts (1–600), totalling
+180,300, and one formula without a saved result. The saved-value total is not a
+complete recalculated workbook total.
+
+The E2E compose stacks include the runtime. MCP App content uses the backend on
+a different origin from the frontend; `E2E_APP_CONTENT_ORIGIN` overrides its
+browser address for container-based runs. No separate remote content service is
+needed in this isolated setup. The tool runtime has no real external credentials.
+
+The MCP Apps host also has a real-browser protocol and isolation suite that
+needs no backend: `bun run test:mcp-apps` in `apps/web`
+(`scripts/mcp-apps.test.mjs`). It is not part of `test:all` or CI; run it when
+changing the host, the sandbox proxy, its CSP or a bundled view. See
+`docs/deployment/MCP_APPS.md` (Regression checks) for what it covers.
+
+Before release, repeat the following with the default deployed tool-capable model
+and one supported alternative. Use an approved test tenant and the synthetic
+fixture, and record model/provider identifiers, release revision, enabled
+Functions, Skill revision, result and any failed step. Never record credentials
+or signed file URLs.
+
+1. Attach an on-demand analysis Skill instructing inspection, full-dataset
+   aggregation and disclosure of formula limitations; enable Ask a file, Charts
+   and Create a file.
+2. Upload the fixture; request rows, a regional chart and a short report. Verify
+   the saved-value sum is 180,300, all 601 rows are accounted for, pagination is
+   usable, and the missing formula result is disclosed.
+3. Ask to revise one paragraph. Check both saved versions after reload. Export
+   the selected version to Word and PDF; verify the text matches that version.
+4. Disable Ask a file while retaining the Skill. Verify the reply explains the
+   missing capability and does not claim a successful analysis.
+5. Replace the file-creation provider with one lacking native export support.
+   Existing documents must remain readable; unsupported formats must be disabled.
+   Restore a compatible provider and verify export returns.
+
+Deterministic E2E passes establish integration behavior, not model quality.
+Record real-model results separately; do not report this checklist as completed
+unless both models have actually been exercised.

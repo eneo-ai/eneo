@@ -384,10 +384,12 @@ class _InMemoryToolRepo:
             if (
                 existing.description == observed.pending_description
                 and existing.input_schema == observed.pending_input_schema
+                and existing.meta == observed.pending_meta
             ):
                 continue
             existing.pending_description = observed.pending_description
             existing.pending_input_schema = observed.pending_input_schema
+            existing.pending_meta = observed.pending_meta
             existing.requires_approval = True
             existing.removed_from_remote = False
             staged.append(existing)
@@ -1169,6 +1171,37 @@ class TestReferenceFallbackHint:
         texts = [block["text"] for block in result["content"]]
         assert any("files__read_file" in text for text in texts)
         assert any('"Read attached file"' in text for text in texts)
+
+    @pytest.mark.parametrize(
+        "error",
+        [
+            "MCP error -32602: Input validation error: source.value_columns exceeds 8",
+            "Input validation error: Invalid arguments for tool create_chart",
+        ],
+    )
+    async def test_invalid_arguments_recover_with_same_tool_not_file_reader(
+        self, error
+    ):
+        external = _make_server(name="charts")
+        proxy = MCPProxySession([_make_files_loopback_server(), external])
+        proxy._clients[external.id] = SimpleNamespace(
+            call_tool=AsyncMock(
+                return_value={
+                    "content": [{"type": "text", "text": error}],
+                    "is_error": True,
+                }
+            )
+        )
+
+        result = await proxy.call_tool(
+            "charts__tool", {"source": {"url": _conversation_reference_url(proxy)}}
+        )
+
+        texts = [block["text"] for block in result["content"]]
+        assert any("retry the same tool" in text for text in texts)
+        assert not any("files__read_file" in text for text in texts)
+        assert not any("still readable" in text for text in texts)
+        assert external.id not in proxy._failed_server_ids
 
     async def test_no_hint_for_non_reference_arguments(self):
         external = _make_server(name="tabular")

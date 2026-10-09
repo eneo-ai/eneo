@@ -120,6 +120,8 @@ TOOL_DELIVERABLE_INSTRUCTION = (
     "include the relevant charts in the document by default, with descriptive captions "
     "and sizing that fits the page while preserving their aspect ratio. Reuse existing "
     "chart images when available; otherwise export the charts as images for embedding. "
+    "An image generated in the conversation goes into a document the same way, by its "
+    "file reference; do not generate it again for the document. "
     "Keep images created only for embedding out of chat when the provider supports it, "
     "especially when the interactive charts are already visible. Use the current "
     "attachment references and the tools' declared inputs; never invent an image input "

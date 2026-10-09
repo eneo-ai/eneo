@@ -101,6 +101,26 @@ export function initConversations(client) {
     },
 
     /**
+     * Call a tool for the interactive view (MCP App) of an earlier tool call.
+     * The tool runs on the view's own server and its result goes to the view.
+     * @param {{ sessionId: string, toolCallId: string, viewId: string, name: string, arguments?: Record<string, unknown> }} params
+     * @returns {Promise<import('../types/schema').components["schemas"]["ViewToolCallResultPublic"]>}
+     * @throws {EneoError}
+     */
+    callToolFromView: async ({ sessionId, toolCallId, viewId, name, arguments: args }) => {
+      return await client.fetch(
+        "/api/v1/conversations/{session_id}/tool-calls/{tool_call_id}/app-calls/",
+        {
+          method: "post",
+          params: { path: { session_id: sessionId, tool_call_id: toolCallId } },
+          requestBody: {
+            "application/json": { view_id: viewId, name, arguments: args ?? {} }
+          }
+        }
+      );
+    },
+
+    /**
      * Check the formats this document's current provider can export.
      * @param {{ sessionId: string, fileId: string }} params
      * @returns {Promise<import('../types/schema').components["schemas"]["DocumentExportAvailability"]>}

@@ -17,9 +17,12 @@ documentation lives in `docs/deployment/TOOL_RUNTIME.md`.
   image are drawn by ECharts from one description (`src/tools/charts/options.ts`),
   so an exported picture matches the chart the reader looked at. The image is
   rendered to SVG without a browser and rasterized by resvg in a sandbox child.
-- Word/PDF reports accept signed PNG/JPEG references through `create_document.images`.
-  Place each as `![alt](image:ID)` on its own line, with an optional caption and
-  `width_percent`. Chart exports prepared only for reports use `display: "none"`.
+- Documents accept signed PNG/JPEG references through `create_document.images`, in
+  every format. Place each as `![alt](image:ID)` on its own line, with an optional
+  caption and `width_percent`. Word and PDF embed the bytes; a Markdown document keeps
+  a line naming the file by its handle (`![alt](eneo-file:… "caption")`), which Eneo
+  shows and embeds on export. Chart exports prepared only for documents use
+  `display: "none"`.
 - `POST /mcp/file-creation` (`create_document`, Markdown, DOCX or PDF from Markdown,
   optionally into a Word template; `edit_document`, exact passages of an earlier
   Markdown document replaced in place; `fill_template`, a DOCX, TXT or MD template
@@ -33,7 +36,7 @@ documentation lives in `docs/deployment/TOOL_RUNTIME.md`.
 | ---------------------- | -------------------------------------------------------- |
 | `src/main.ts`                | Entrypoint: environment config, HTTP server              |
 | `src/server.ts`              | Bearer check, Origin refusal, body/result bounds, MCP    |
-| `src/sandbox.ts`             | One child process per job (empty env, watchdog, tmpdir)  |
+| `src/sandbox.ts`             | One child process per job (only `PATH` and `TMPDIR` in its env, watchdog, tmpdir) |
 | `src/child.ts`               | Child entrypoint                                         |
 | `src/tools/compute/`         | QuickJS engine, limits and the tool definition           |
 | `src/tools/tabular/`         | Download policy, parsed-sheet cache, DuckDB/XLSX engines |
@@ -70,7 +73,11 @@ as shipped, and they share one kit in `src/views/kit/`:
 - `ViewFrame` is the frame every view is drawn in: a header toolbar with the
   title, the view's controls and the larger-view button, notices under it, the
   content, and a footer. It follows the host's theme, language and display mode
-  and reports its height.
+  and reports its height. On a text selection it offers **Quote in chat**, which
+  hands the text to the host (`ui/update-model-context`) for the next question.
+  While a selection is dragged in scrolling rows, the frame scrolls them itself
+  (`useSteadySelection`): Chrome's own scrolling there makes the host's page
+  jump to the top of the view.
 - `useHost` is the connection to the host (the official `App` SDK): the host's
   context, and the tool's input and result as they arrive.
 - `TableRows` and `columnWidth` give an Astryx `Table` scrolling rows under
@@ -86,11 +93,13 @@ them first, and the image builds them in its own stage, so React, Astryx and
 Vite are development dependencies only. A page larger than the 2 MB a host
 reads fails the build.
 
-The runtime reads the built pages when it starts, and Eneo keeps its own copy
-of a view from the last time the server's tools were refreshed. To see a
-changed view in Eneo: run `bun run build:views`, restart the runtime, refresh
-the server's tools under **Admin > Tools > MCP servers**, and make a new tool
-call (earlier messages keep the view they were made with).
+The runtime reads the built pages when it starts. Eneo stores its own copy of
+each view and replaces it by itself when the runtime's catalog changes; the
+backend caches that catalog for up to five minutes. To see a changed view in
+Eneo: run `bun run build:views`, restart the runtime, wait for the cache to
+lapse (or refresh the server's tools under **Admin > Tools > MCP servers** to
+pick it up at once), and make a new tool call (earlier messages keep the view
+they were made with).
 
 In the devcontainer, run it in its own terminal next to the backend and
 frontend:
@@ -136,12 +145,12 @@ start-up log line reports what is enforced (`"confinement":{"files":true,"tcp":t
 | `TABULAR_CONCURRENCY` | 2       | DuckDB children running at once        |
 | `TABULAR_MAX_UPLOAD_MB` | 20    | Largest attachment downloaded          |
 | `TABULAR_CACHE_MB`                 | 256     | Original-byte and parsed-sheet cache budget on `/tmp`    |
-| `TABULAR_CACHE_TTL_SECONDS` | 1800 | How long parsed sheets stay on `/tmp` (60 to 86400) |
+| `TABULAR_CACHE_TTL_SECONDS` | 1800 | How long unused original bytes and parsed sheets stay on `/tmp` (60 to 86400) |
 | `TOOL_RUNTIME_REQUIRE_CONFINEMENT` | false | Refuse to start or run jobs unless children are confined |
 | `DOCUMENT_ORGANISATION_NAME` | none | Name in generated document footers |
 
-Releases share the frontend/backend version and source revision. The application
-image workflow calls the runtime validation/build workflow and publishes one
+Releases share the frontend/backend version and source revision. The image
+publication workflow (`.github/workflows/build_and_push_images.yml`) calls the runtime validation/build workflow and publishes one
 verified deployment bundle. There is no runtime-specific version bump.
 See `docs/deployment/TOOL_RUNTIME.md` for diagnostics, cache revalidation,
 queue limits, migration from the old overlay, and bundle-based upgrades.

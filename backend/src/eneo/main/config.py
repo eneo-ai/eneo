@@ -35,6 +35,22 @@ URL_SIGNING_KEY_MINIMUM_BYTES = 32
 JWT_EXPIRY_TIME_MAXIMUM_MINUTES = 30 * 24 * 60
 
 
+def _same_origin(first: str, second: str) -> bool:
+    """Whether two URLs share scheme, host and port (default ports included)."""
+
+    def origin(url: str) -> tuple[str, str, int | None]:
+        parts = urlparse(url.strip())
+        scheme = parts.scheme.lower()
+        default_port = {"http": 80, "https": 443}.get(scheme)
+        try:
+            port = parts.port or default_port
+        except ValueError:
+            port = default_port
+        return scheme, (parts.hostname or "").lower(), port
+
+    return origin(first) == origin(second)
+
+
 def validate_public_origin(origin: str | None) -> str | None:
     """
     Validate and normalize public origin.
@@ -315,6 +331,17 @@ class Settings(BaseSettings):
     mcp_circuit_breaker_failure_threshold: int = 5
     mcp_circuit_breaker_cooldown_seconds: int = 60
 
+    # MCP Apps (io.modelcontextprotocol/ui): interactive HTML views declared
+    # by MCP tools and rendered in sandboxed iframes in assistant chat.
+    mcp_apps_enabled: bool = False
+    # Origin the view HTML is served from. Must be a DIFFERENT origin than
+    # public_origin for real browser isolation; dev may point at the backend
+    # directly (e.g. http://localhost:8123). Views refuse to render while unset.
+    mcp_app_content_base_url: Optional[str] = None
+    # Ceiling for one decoded ui:// HTML resource.
+    mcp_app_resource_max_bytes: int = 2 * 1024 * 1024
+    mcp_app_view_token_expiry_seconds: int = 3600
+
     # Database connection pool configuration
     # Why: Controls PostgreSQL connection pooling behavior for SQLAlchemy async engine
     # See pool exhaustion analysis in plans/fuzzy-skipping-cray.md
@@ -499,10 +526,11 @@ class Settings(BaseSettings):
     # backend process/container. Dev default is the local server.
     internal_mcp_base_url: str = "http://localhost:8123"
 
-    # Optional bundled tool runtime (tool-runtime/ in this repository): an
-    # isolated container that serves Eneo-maintained MCP tools. When the URL
-    # is set, Admin > Tools offers to add its servers; the token is the shared
-    # bearer both sides are configured with and is never stored in the DB.
+    # Bundled tool runtime (tool-runtime/ in this repository): an isolated
+    # container in the standard stack that serves Eneo-maintained MCP tools.
+    # Unset where a deployment omits it. When the URL is set, Admin > Tools
+    # offers to add its servers; the token is the shared bearer both sides are
+    # configured with and is never stored in the DB.
     tool_runtime_url: Optional[str] = None
     tool_runtime_token: Optional[str] = None
 
@@ -951,6 +979,41 @@ class Settings(BaseSettings):
             logging.error(
                 "MCP_CIRCUIT_BREAKER_COOLDOWN_SECONDS must be greater than zero. Current value: %s",
                 self.mcp_circuit_breaker_cooldown_seconds,
+            )
+            sys.exit(1)
+
+        if self.mcp_app_resource_max_bytes <= 0:
+            logging.error(
+                "MCP_APP_RESOURCE_MAX_BYTES must be greater than zero. Current value: %s",
+                self.mcp_app_resource_max_bytes,
+            )
+            sys.exit(1)
+
+        # The upper bound is the token's maximum lifetime (signed_urls).
+        if not 0 < self.mcp_app_view_token_expiry_seconds <= 3600:
+            logging.error(
+                "MCP_APP_VIEW_TOKEN_EXPIRY_SECONDS must be between 1 and 3600. Current value: %s",
+                self.mcp_app_view_token_expiry_seconds,
+            )
+            sys.exit(1)
+
+        if self.mcp_apps_enabled and not self.mcp_app_content_base_url:
+            logging.warning(
+                "MCP_APPS_ENABLED is set without MCP_APP_CONTENT_BASE_URL; "
+                "app views will not render until the content origin is configured."
+            )
+
+        # Views are another party's HTML; served from Eneo's own address they
+        # would not be isolated from it.
+        if (
+            self.mcp_app_content_base_url
+            and self.public_origin
+            and _same_origin(self.mcp_app_content_base_url, self.public_origin)
+        ):
+            logging.error(
+                "MCP_APP_CONTENT_BASE_URL must be a different origin than "
+                "PUBLIC_ORIGIN. Current value: %s",
+                self.mcp_app_content_base_url,
             )
             sys.exit(1)
 

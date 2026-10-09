@@ -7,6 +7,8 @@ import { Theme } from "@astryxdesign/core/theme";
 import { Toolbar } from "@astryxdesign/core/Toolbar";
 import { neutralTheme } from "@astryxdesign/theme-neutral/built";
 import { HostContext, pick, useViewHost, type Host } from "./host";
+import { QuoteSelection } from "./Quote";
+import { useSteadySelection } from "./selection";
 
 const TEXTS = {
   sv: { expand: "Större vy", rows: "Rader" },
@@ -55,8 +57,8 @@ type FrameProps = {
 /**
  * The frame every view is drawn in: a header that says what is shown and holds the controls,
  * notices under it, the view's content, and a footer when there is more to fetch or say. It
- * follows the host's theme, language and display mode, and tells the host how tall it is. The
- * host draws the border around it.
+ * follows the host's theme, language and display mode, tells the host how tall it is, and
+ * offers to quote what the reader selects in it. The host draws the border around it.
  */
 export function ViewFrame(props: FrameProps) {
   const { host, shown } = props;
@@ -64,6 +66,7 @@ export function ViewFrame(props: FrameProps) {
   const text = pick(context, TEXTS);
   const fullscreen = context.displayMode === "fullscreen";
   const root = useRef<HTMLDivElement>(null);
+  useSteadySelection();
 
   useEffect(() => {
     document.documentElement.lang = context.locale ?? "sv";
@@ -118,6 +121,7 @@ export function ViewFrame(props: FrameProps) {
           {props.notices}
           {props.children}
           {props.footer}
+          <QuoteSelection />
         </div>
       </Theme>
     </HostContext>

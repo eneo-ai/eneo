@@ -5,14 +5,21 @@
 
 Capabilities are functions an assistant can use: **Webbsökning**
 (`web_search`), **Bildgenerering** (`image_generation`), **Fråga fil**
-(`file_analysis`) and **Skapa fil** (`file_creation`). Image generation can
+(`file_analysis`), **Skapa fil** (`file_creation`) and **Diagram** (`charts`). Image generation can
 run through a configured image model or an external MCP server; web search
-uses an external server; file analysis and file creation run in the bundled
-tool runtime or an external MCP server.
+uses an external server; file analysis, file creation and charts run in the
+bundled tool runtime or an external MCP server.
+
+For the relationship between Skills, Functions, providers, interactive MCP Apps
+and native document views, see the docs site's
+[Architecture](../frontend/apps/docs-site/src/content/docs/architecture.mdx#skills-functions-tools-and-views).
+The [Functions guide](../frontend/apps/docs-site/src/content/guides/capabilities.mdx)
+owns user workflows and UI instructions; this page records the contributor contract.
 
 ## 1. Configuration and navigation
 
-Open **Admin → Verktyg** (/admin/tools). **Funktioner** is the default tab.
+Open **Admin → Verktyg** (/admin/tools). **Funktioner** is selected by default;
+**MCP-servrar** appears first in the tab bar.
 Each function keeps its source identity, configuration status and activation
 action visible. The source's ellipsis menu contains **Ändra** and **Ta bort**;
 deletion still requires confirmation. Use the arrow beside the source to expand
@@ -43,7 +50,7 @@ activation action identifies the default that will be replaced.
 ## 2. Saved intent and provider lifecycle
 
 Spaces and assistants store enabled_capabilities, a list of purposes
-(web_search, image_generation, file_analysis, file_creation). Governance
+(web_search, image_generation, file_analysis, file_creation, charts). Governance
 policies store purposes with
 is_default_enabled. These rows reference their owner, never a provider.
 They remain intact when a provider is switched, disabled or deleted—even
@@ -81,16 +88,19 @@ The backend must be able to reach its own loopback URL (`INTERNAL_MCP_BASE_URL`,
 
 ### Bundled tool runtime providers
 
-File analysis and file creation can be served by the bundled tool runtime
+File analysis, file creation and charts can be served by the bundled tool runtime
 (`tool-runtime/`, operator guide `docs/deployment/TOOL_RUNTIME.md`). A function
 card offers it as **Inbyggd i Eneo**: **Slå på** (or the Add source menu)
 creates the source through `POST /api/v1/mcp-servers/bundled/{tool}/`,
 activating it when the function has no active default. The row has `http_auth_type = "bundled"`: its URL comes
 from `TOOL_RUNTIME_URL` and its bearer from `TOOL_RUNTIME_TOKEN` at connect
 time, and the connection fields are read-only. Everything else (audiences,
-permissions, classification, tool approval, replacement) works as for external
-providers. The runtime's compute and charts endpoints are added as ordinary
-general servers from the MCP servers tab.
+permissions, classification and replacement) works as for external providers.
+Bundled tool definitions and view snapshots follow the deployed runtime
+automatically, preserving stored enablement and display names and recording
+catalog updates in the audit log. Per-call user approval still follows the
+conversation setting. Compute is added as a general server from the MCP
+servers tab; Charts is a Function with purpose `charts`.
 
 ## 3. Ask-time resolution
 
@@ -117,22 +127,36 @@ An MCP `image` content block returned by any tool becomes a generated file shown
 | `MCP_TOOL_IMAGE_MAX_COUNT` | 4 | Images admitted per tool result; the rest are dropped with one notice. |
 | `MCP_TOOL_OUTPUT_MAX_CHARS` | 32768 | Text budget per tool result. Images do not count against it. |
 
-Only `image/png`, `image/jpeg`, `image/webp` and `image/gif` are accepted. The model sees a short placeholder instead of the bytes. Only the latest turn's generated images are replayed to the model as vision input on follow-ups; older ones are described by the placeholder in their tool result plus a reference URL (below). Generated files are deleted with their conversation.
+Only `image/png`, `image/jpeg`, `image/webp` and `image/gif` are accepted. The model sees a short placeholder instead of the bytes. Only the latest turn's generated images are replayed to the model as vision input on follow-ups; older ones are described by the placeholder in their tool result plus a file reference (below). Generated files are deleted with their conversation.
 
 ### Reference images (variations and follow-up edits)
 
-A user can attach an image and ask for a variation or edit, and a follow-up turn can pass an image the assistant generated earlier back to the image tool. Both the built-in provider and external `purpose=image_generation` servers use the same mechanism: signed file reference URLs.
+A user can attach an image and ask for a variation or edit, and a follow-up turn can pass an image the assistant generated earlier back to the image tool. Both the built-in provider and external `purpose=image_generation` servers receive the same signed file references from Eneo.
 
-- Attached images and generated images get signed reference URLs in the prompt, tagged `"kind": "image"` next to the document entries. Images are never URL-only; the entry is an extra handle beside the vision input. The system prompt directs image entries to image tools, never to `read_file`.
+- Attached and generated images get credential-free `file_ref` handles in the
+  model context, tagged `"kind": "image"` next to document entries. The handle
+  accompanies vision input when available. Eneo resolves it to an authorised
+  signed URL before calling the tool; provider schemas remain unchanged.
+  The system prompt directs image entries to image tools, never to `read_file`.
 - The built-in `generate_image` tool takes an optional `reference_images` list of those URLs. With references it calls the image edit API (`litellm.aimage_edit`) with the file bytes; the URL is verified locally like `read_file` does, never fetched. Count and size caps reuse `MCP_TOOL_IMAGE_MAX_COUNT` and `MCP_TOOL_IMAGE_MAX_BYTES`.
 - A model without edit support, or a provider that rejects the edit request, returns a tool error the model can recover from (generate from the description, or tell the user the image cannot be edited). Never a silent plain generation.
-- `ToolCallInfo.generated_file_ids` records which files a call produced. Replayed tool results get a fresh `Reference url for Image N` line per image; URLs are never persisted.
+- `ToolCallInfo.generated_file_ids` records which files a call produced.
+  Current and replayed model-facing results use stable file handles; download
+  credentials are not persisted in the tool trace.
 - External image servers fetch the bytes through the signed download endpoint, so `FILE_REFERENCE_BASE_URL` must be reachable from the external server. A failed call carrying a reference URL tells the model the URL is valid, so it reports that the tool cannot reach the file rather than asking for a re-upload.
 - Image attachments are offered in the chat whenever image generation is available, even without a vision model.
 
-In a streaming chat, a file generated earlier in the turn is saved before its tool result reaches the model, and the result carries a fresh `Reference url for Image N` or `File N` line (minted and audited by the streaming wrapper, never persisted). An image can therefore be edited, and a document or export passed to another tool, in the same turn. Non-streaming requests persist files after the model finishes; there the reference arrives on the next turn.
+In streaming chat, a generated file is saved before its result reaches the
+model, which receives a stable `file_ref` for chaining another call in the same
+turn. Non-streaming requests persist files after the model finishes; there
+the reference arrives on the next turn.
 
-Stored tool-call arguments keep reference URLs with the token redacted. Replay swaps each redacted link for a freshly minted URL of the same file, so a model copying its own earlier call sends a working link.
+The model passes handles unchanged in URL inputs. Dispatch resolves them only
+against the current authorised file map, including nested arguments; unknown
+or unavailable handles fail before execution. Stored legacy URL arguments have
+their tokens removed and are supported on replay. Providers receive fresh
+signed URLs and downloads still enforce file access. See
+`backend/src/eneo/files/model_file_references.py`.
 
 ### Documents, spreadsheets and exports
 
@@ -140,10 +164,10 @@ A binary embedded resource (`resource` with `blob`) becomes a generated file onl
 
 | Purpose | Types |
 |---------|-------|
-| `file_creation` | DOCX, PDF, XLSX |
+| `file_creation` | Markdown, plain text, DOCX, PDF, XLSX |
 | `file_analysis` | CSV |
 
-Every other blob is stripped by the proxy, so the resource stays an ordinary result and bytes never reach the model, which sees `[File N (name) ...]`. `files/generated_documents.py` then checks the bytes: OOXML packages are bounded (entries, expansion ratio) and must not contain macros, embedded objects, unsafe paths or non-hyperlink external relationships; PDFs must be complete and contain no JavaScript, launch actions, embedded files, rich media or XFA; CSV must be UTF-8 without NUL bytes. Accepted documents are prepared like uploads (exact original plus extracted text), linked to the question and the tool call, and shown as download chips. A refused document is logged and skipped. Limits: `MCP_TOOL_FILE_MAX_BYTES` (20 MiB) and `MCP_TOOL_FILE_MAX_COUNT` (4) per tool result.
+Every other blob is stripped by the proxy, so the resource stays an ordinary result and bytes never reach the model, which sees `[File N (name) ...]`. `files/generated_documents.py` then checks the bytes: OOXML packages are bounded (entries, expansion ratio) and must not contain macros, embedded objects, unsafe paths or non-hyperlink external relationships; PDFs must be complete and contain no JavaScript, launch actions, embedded files, rich media or XFA; CSV must be UTF-8 without NUL bytes. Accepted documents are prepared like uploads (exact original plus extracted text), linked to the question and the tool call, and available in the native document workspace or file preview, with an explicit download action. A refused document is logged and skipped. Limits: `MCP_TOOL_FILE_MAX_BYTES` (20 MiB) and `MCP_TOOL_FILE_MAX_COUNT` (4) per tool result.
 
 Generated files that were saved before an answer failed or was aborted are still linked to the question, so they stay visible and are deleted with the conversation.
 
@@ -152,7 +176,7 @@ Generated files that were saved before an answer failed or was aborted are still
 Adding a capability requires:
 
 - backend: the `CapabilityPurpose` type and `CAPABILITY_PURPOSES` list, `MCPServerPurpose`, the matching `Permission` and its description in `permissions_mapper.py`, the predefined roles in `predefined_roles.yml`, and the purpose CHECK constraints in `capabilities_table.py`;
-- a migration that replaces the three purpose constraints and grants the permission to the roles it should reach (the recent ones grant only the predefined User, AI Configurator and Owner roles);
+- a migration that replaces the three purpose constraints and decides which existing roles get the permission (`202610011000` grants `file_analysis` and `file_creation` to the predefined User, AI Configurator and Owner roles; `202610011200` grants `charts` to no existing role, so administrators opt roles in);
 - frontend: the `capabilities.ts` descriptor, `CAPABILITY_STEPS` in `internalToolLabels.ts`, `permission-labels.ts`, `permission-groups.ts` and the Paraglide messages; the JSDoc unions in `packages/eneo-js/src/endpoints/*.js`, and a regenerated `schema.d.ts`;
 - for a capability that delivers files, its types in `GENERATED_FILE_TYPES_BY_PURPOSE`;
 - for a bundled provider, an entry in `BUNDLED_TOOLS` naming its purpose and whether it needs forwarded identity.
@@ -165,7 +189,7 @@ Whether a capability should be served by a built-in loopback server at all, and 
 ## 6. Deployment and client changes
 
 Ship migrations **202609041000** and **202610081000** (`file_analysis`,
-`file_creation`), backend,
+`file_creation`), and **202610081100** (`charts`), backend,
 frontend and the bundled JavaScript client together. The migration backfills active and inactive capability
 attachments, collapses duplicate purposes, preserves a policy default as on
 when any duplicate was on, and removes obsolete provider attachments and

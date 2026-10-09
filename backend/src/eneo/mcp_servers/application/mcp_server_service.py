@@ -1,11 +1,12 @@
 import logging
 import re
 from dataclasses import dataclass, field
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, cast
 from uuid import UUID
 
 from sqlalchemy.exc import IntegrityError
 
+from eneo.main.config import get_settings
 from eneo.main.exceptions import (
     BadRequestException,
     NameCollisionException,
@@ -15,6 +16,9 @@ from eneo.main.exceptions import (
     UnauthorizedException,
 )
 from eneo.main.models import NOT_PROVIDED, NotProvided
+from eneo.mcp_apps.application.view_snapshots import snapshot_app_views
+from eneo.mcp_apps.domain.csp import declared_domains
+from eneo.mcp_apps.domain.mcp_app_view import get_ui_resource_uri
 from eneo.mcp_servers.application.bundled_tools import forget_catalogs
 from eneo.mcp_servers.domain.entities.mcp_server import (
     AUDIENCE_EVERYONE,
@@ -80,6 +84,9 @@ def _raise_for_integrity_error(error: IntegrityError) -> None:
 if TYPE_CHECKING:
     from eneo.image_models.domain.image_model import ImageModel
     from eneo.image_models.domain.image_model_repo import ImageModelRepository
+    from eneo.mcp_apps.infrastructure.repo_impl.mcp_app_view_repo_impl import (
+        McpAppViewRepo,
+    )
     from eneo.mcp_servers.domain.repositories.mcp_server_repo import (
         MCPServerRepository,
     )
@@ -207,8 +214,26 @@ class ToolChange:
     change_type: str  # "new", "changed", "removed", "unchanged"
     current_description: str | None = None
     current_input_schema: dict[str, Any] | None = None
+    current_meta: dict[str, Any] | None = None
+    current_ui_resource_sha256: str | None = None
     pending_description: str | None = None
     pending_input_schema: dict[str, Any] | None = None
+    pending_meta: dict[str, Any] | None = None
+    pending_ui_resource_sha256: str | None = None
+
+
+@dataclass
+class ToolViewFacts:
+    """What a tool's interactive view may do, for an administrator's review."""
+
+    uri: str
+    # The view awaits approval; otherwise it is the approved one.
+    pending: bool
+    size_bytes: int
+    # Hosts the view's declaration opens, by the declaration's list names.
+    domains: dict[str, list[str]]
+    # Browser permissions the view asks for.
+    permissions: list[str]
 
 
 @dataclass
@@ -245,10 +270,12 @@ class MCPServerService:
         encryption_service: "EncryptionService | None" = None,
         user_groups_repo: "UserGroupsRepository | None" = None,
         image_model_repo: "ImageModelRepository | None" = None,
+        app_view_repo: "McpAppViewRepo | None" = None,
     ):
         super().__init__()
         self.repo = mcp_server_repo
         self.tool_repo = mcp_server_tool_repo
+        self.app_view_repo = app_view_repo
         self.user = user
         self.encryption_service = encryption_service
         self.image_model_repo = image_model_repo
@@ -619,6 +646,10 @@ class MCPServerService:
                 title=tool_def.get("title"),
                 description=tool_def.get("description"),
                 input_schema=tool_def.get("input_schema"),
+                # Kept from the start so a tool its server offers to its view
+                # only is never offered to the model. A view itself is shown
+                # only after a sync has stored it and it has been approved.
+                meta=tool_def.get("meta"),
                 is_enabled_by_default=True,
             )
             await self.tool_repo.upsert_by_server_and_name(tool)
@@ -1078,6 +1109,12 @@ class MCPServerService:
                 identity_headers=build_identity_headers(self.user, None),
             ) as client:
                 tool_defs = await client.list_tools()
+                # A view is reviewed with the definition that declares it, so
+                # its HTML is read on this same connection and kept.
+                if get_settings().mcp_apps_enabled and self.app_view_repo is not None:
+                    await snapshot_app_views(
+                        client, mcp_server, tool_defs, self.app_view_repo
+                    )
 
             logger.info(f"Discovered {len(tool_defs)} tools from {mcp_server.name}")
 
@@ -1129,6 +1166,8 @@ class MCPServerService:
                 title=tool_def.get("title"),
                 description=tool_def.get("description"),
                 input_schema=tool_def.get("input_schema"),
+                meta=tool_def.get("meta"),
+                ui_resource_sha256=tool_def.get("ui_resource_sha256"),
             )
             for tool_def in tool_defs
             if (
@@ -1138,6 +1177,8 @@ class MCPServerService:
                     and existing_by_name[tool_def["name"]].has_definition_drift(
                         description=tool_def.get("description"),
                         input_schema=tool_def.get("input_schema"),
+                        meta=tool_def.get("meta"),
+                        ui_resource_sha256=tool_def.get("ui_resource_sha256"),
                     )
                 )
             )
@@ -1158,6 +1199,7 @@ class MCPServerService:
             remote_title = tool_def.get("title")
             remote_desc = tool_def.get("description")
             remote_schema = tool_def.get("input_schema")
+            remote_meta = tool_def.get("meta")
             previous = existing_by_name.get(name)
             current = current_by_name.get(name) or staged_by_name.get(name)
             if current is None:
@@ -1170,6 +1212,8 @@ class MCPServerService:
                         change_type="new",
                         pending_description=current.pending_description,
                         pending_input_schema=current.pending_input_schema,
+                        pending_meta=current.pending_meta,
+                        pending_ui_resource_sha256=current.pending_ui_resource_sha256,
                     )
                 )
                 continue
@@ -1186,6 +1230,8 @@ class MCPServerService:
             if previous.has_definition_drift(
                 description=remote_desc,
                 input_schema=remote_schema,
+                meta=remote_meta,
+                ui_resource_sha256=tool_def.get("ui_resource_sha256"),
             ):
                 result.changed_tools.append(
                     ToolChange(
@@ -1193,8 +1239,12 @@ class MCPServerService:
                         change_type="changed",
                         current_description=current.description,
                         current_input_schema=current.input_schema,
+                        current_meta=current.meta,
+                        current_ui_resource_sha256=current.ui_resource_sha256,
                         pending_description=current.pending_description,
                         pending_input_schema=current.pending_input_schema,
+                        pending_meta=current.pending_meta,
+                        pending_ui_resource_sha256=current.pending_ui_resource_sha256,
                     )
                 )
             else:
@@ -1250,6 +1300,49 @@ class MCPServerService:
         return result
 
     @validate_permissions(Permission.ADMIN)
+    async def describe_tool_view(
+        self, mcp_server_id: UUID, tool_id: UUID
+    ) -> ToolViewFacts | None:
+        """What the tool's view may do: the one awaiting approval, else the approved one.
+
+        None when the tool has no stored view.
+        """
+        server = await self._get_server_for_tenant(mcp_server_id)
+        tool = await self.tool_repo.one(id=tool_id)
+        if tool.mcp_server_id != server.id or self.app_view_repo is None:
+            return None
+        pending = tool.pending_ui_resource_sha256 is not None
+        content_hash = tool.pending_ui_resource_sha256 or tool.ui_resource_sha256
+        uri = get_ui_resource_uri(tool.pending_meta if pending else tool.meta)
+        if content_hash is None or uri is None:
+            return None
+        stored = await self.app_view_repo.describe_view(
+            tenant_id=server.tenant_id,
+            mcp_server_id=server.id,
+            uri=uri,
+            content_hash=content_hash,
+        )
+        if stored is None:
+            return None
+        size_bytes, ui_meta = stored
+        policy = ui_meta or {}
+        ui_csp = policy.get("csp")
+        permissions = policy.get("permissions")
+        return ToolViewFacts(
+            uri=uri,
+            pending=pending,
+            size_bytes=size_bytes,
+            domains=declared_domains(
+                cast(dict[str, Any], ui_csp) if isinstance(ui_csp, dict) else None
+            ),
+            permissions=(
+                sorted(cast(dict[str, Any], permissions))
+                if isinstance(permissions, dict)
+                else []
+            ),
+        )
+
+    @validate_permissions(Permission.ADMIN)
     async def approve_tool_changes(
         self, mcp_server_id: UUID, tool_ids: list[UUID]
     ) -> list[MCPServerTool]:
@@ -1273,16 +1366,7 @@ class MCPServerService:
                 continue
 
             if tool.requires_approval:
-                # Promote pending values to active
-                if tool.pending_description is not None:
-                    tool.description = tool.pending_description
-                if tool.pending_input_schema is not None:
-                    tool.input_schema = tool.pending_input_schema
-
-                # Clear pending state
-                tool.pending_description = None
-                tool.pending_input_schema = None
-                tool.requires_approval = False
+                tool.approve_pending()
 
                 tool = await self.tool_repo.update(tool)
                 approved_tools.append(tool)
@@ -1318,9 +1402,7 @@ class MCPServerService:
                 continue
 
             # Changed or removed tool — clear pending state
-            tool.pending_description = None
-            tool.pending_input_schema = None
-            tool.requires_approval = False
+            tool.clear_pending()
             tool.removed_from_remote = False
 
             tool = await self.tool_repo.update(tool)

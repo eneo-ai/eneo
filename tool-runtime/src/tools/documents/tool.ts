@@ -9,6 +9,7 @@ import {
   earlierMarkdownReference,
   earlierWorkbookReference,
   fetchReference,
+  fileHandle,
   fileReference,
   imageReference,
   templateReference,
@@ -101,6 +102,60 @@ const placeholderValues = z
 /** The name an earlier file was delivered under, without its extension. */
 const stem = (filename: string) => filename.replace(/\.[^.]+$/, "");
 
+/** An image a document shows, with the handle of the Eneo file it is. */
+type PlacedImage = { id?: string; caption?: string; handle: string };
+
+/**
+ * A Markdown document names its images by their file handle, on a line of their own:
+ * ![alt](eneo-file:… "caption"). Eneo shows the file there to whoever may read it, so the
+ * document carries no bytes and no credentials. Each declared image:ID line becomes such a
+ * line, set off as a paragraph of its own; the ones the content already has stay as they are.
+ */
+function placeImages(content: string, images: PlacedImage[]): string {
+  const invalid = (message: string) => new ToolError("INVALID_IMAGES", message);
+  const marker = /^([ \t]*(?:>[ \t]*)*)!\[([^\]\n]*)\]\(image:([A-Za-z][A-Za-z0-9_-]{0,63})\)[ \t]*$/gm;
+  // Every missing declaration is named at once, so one corrected call is enough.
+  const undeclared = [...new Set([...content.matchAll(marker)].map((match) => match[3]!))].filter(
+    (id) => !images.some((image) => image.id === id),
+  );
+  if (undeclared.length)
+    throw invalid(
+      `${undeclared.length > 1 ? "Images" : "Image"} ${undeclared.join(", ")} ${undeclared.length > 1 ? "are" : "is"} placed in the content but not declared in images. Call again with the same content and an images entry for each: that id, with the url and filename of the PNG or JPEG it shows.`,
+    );
+  const placed = new Set<PlacedImage>();
+  const text = content.replace(
+    marker,
+    (line: string, indent: string, alt: string, id: string, offset: number) => {
+      const image = images.find((candidate) => candidate.id === id)!;
+      placed.add(image);
+      const caption = image.caption?.replace(/\s+/g, " ").replace(/["\\]/g, "\\$&");
+      const placedLine = `${indent}![${alt}](${image.handle}${caption ? ` "${caption}"` : ""})`;
+      if (indent) return placedLine;
+      const before = content.slice(0, offset);
+      const after = content.slice(offset + line.length);
+      return (
+        (before && !/(^|\n)[ \t]*\n$/.test(before) ? "\n" : "") +
+        placedLine +
+        (after && !/^\n[ \t]*(\n|$)/.test(after) ? "\n" : "")
+      );
+    },
+  );
+  if (/!\[[^\]]*\]\(image:/.test(text))
+    throw invalid("Put each ![alt text](image:ID) on a line of its own.");
+  const missing = images.find(
+    (image) => image.id && !placed.has(image) && !text.includes(`(${image.handle}`),
+  );
+  if (missing)
+    throw invalid(
+      `Image ${missing.id} is declared but not placed: put ![alt text](image:ID) on a line of its own where it belongs.`,
+    );
+  return text;
+}
+
+const isRaster = (bytes: Buffer) =>
+  (bytes.length > 8 && bytes.readUInt32BE(0) === 0x89504e47) ||
+  (bytes.length > 3 && bytes[0] === 0xff && bytes[1] === 0xd8);
+
 /** The file travels back as an MCP embedded resource; Eneo saves it in the conversation. */
 async function produce(
   render: Renderer,
@@ -181,13 +236,19 @@ export function documentTools(
       .min(1)
       .max(config.max_content_chars)
       .describe(
-        `The complete document as Markdown (at most ${config.max_content_chars} characters): headings (#, ##, ###), paragraphs, **bold**, *italic*, bullet and numbered lists, task lists (- [ ]), tables, > quotes, code blocks, links. In docx and pdf a line with only <!-- pagebreak --> starts a new page. For docx/pdf images, put ![descriptive alt text](image:ID) on its own line where each image belongs and declare ID in images. Do not put signed URLs in the Markdown. Images are static in exported documents.`,
+        `The complete document as Markdown (at most ${config.max_content_chars} characters): headings (#, ##, ###), paragraphs, **bold**, *italic*, bullet and numbered lists, task lists (- [ ]), tables, > quotes, code blocks, links. In docx and pdf a line with only <!-- pagebreak --> starts a new page. To show an image, in any format, first declare it in images with an ID, then put ![descriptive alt text](image:ID) on its own line where it belongs; an ID that images does not declare fails the call. A Markdown document you revise already holds its images as ![alt text](eneo-file:…) lines: keep those lines exactly as they are, and when you make a Word or PDF file from it also list each in images with that eneo-file value as its url. Do not put signed URLs in the Markdown. Images are static in exported documents.`,
       ),
     images: z
       .array(
         imageReference
           .extend({
-            id: z.string().regex(/^[A-Za-z][A-Za-z0-9_-]{0,63}$/),
+            id: z
+              .string()
+              .regex(/^[A-Za-z][A-Za-z0-9_-]{0,63}$/)
+              .optional()
+              .describe(
+                "The ID its ![alt text](image:ID) line uses. Leave out only for an image the content already places with its own eneo-file line.",
+              ),
             caption: z.string().min(1).max(500).optional(),
             width_percent: z
               .number()
@@ -203,7 +264,7 @@ export function documentTools(
       .max(8)
       .optional()
       .describe(
-        "Existing PNG/JPEG attachments or generated chart images, using their current signed reference URLs. Place each at a standalone ![alt text](image:ID) in content; caption is printed below it. Only docx/pdf. Reuse existing images; if only an interactive chart exists, export it with create_chart format=png and display=none first. Do not recreate images already available.",
+        "Existing PNG/JPEG attachments, images generated in the conversation (generate_image) or chart images to show in the document, using their current signed reference URLs. Works in every format: adding an image to a Markdown document keeps it Markdown. Place each at a standalone ![alt text](image:ID) in content; caption is printed below it. Reuse existing images; if only an interactive chart exists, export it with create_chart format=png and display=none first. Do not recreate images already available.",
       ),
     filename,
     language: z
@@ -252,7 +313,7 @@ export function documentTools(
       name: "create_document",
       title: "Create document",
       description:
-        "Create a document from Markdown: a Markdown document (md) shown beside the conversation, or a Word (.docx) or PDF file to download. Use md for working material the user reads and revises in Eneo: a plan, a summary, notes, a draft, an outline. Create one without being asked when your answer would otherwise be a long standalone piece the user will keep or keep working on, and then answer with a short note; short answers and plain questions stay in the message. Use docx for a document that leaves Eneo (a report, letter, memo, tjänsteskrivelse, anything asked for 'as Word') and pdf when the user asks for one. Write the complete, well-structured content in Markdown with headings, lists and tables. For Word/PDF reports with charts, embed existing PNG/JPEG references using images and standalone image:ID Markdown markers, with captions. Interactive charts need a PNG export first; use display=none for images only needed by the document. When the user names a Word template or one is attached for that purpose, pass its signed url as template and output docx; if the template only has {{placeholders}} to fill in, use fill_template instead. To change part of a Markdown document you created earlier, use edit_document. To restructure or rewrite a document, or to change a Word or PDF file, pass it as revises with the full revised content; the result replaces it. Mention the document by name and do not paste its content back.",
+        "Create a document from Markdown: a Markdown document (md) shown beside the conversation, or a Word (.docx) or PDF file to download. Use md for working material the user reads and revises in Eneo: a plan, a summary, notes, a draft, an outline. Create one without being asked when your answer would otherwise be a long standalone piece the user will keep or keep working on, and then answer with a short note; short answers and plain questions stay in the message. Use docx for a document that leaves Eneo (a report, letter, memo, tjänsteskrivelse, anything asked for 'as Word') and pdf when the user asks for one. Write the complete, well-structured content in Markdown with headings, lists and tables. To put a chart or picture in a document, in any format, pass the existing PNG/JPEG reference in images and place it with a standalone image:ID Markdown marker, with a caption. A Markdown document stays Markdown when an image is added: never switch to Word or PDF for the image's sake, only when the user asks for that file. Interactive charts need a PNG export first; use display=none for images only needed by the document. When the user names a Word template or one is attached for that purpose, pass its signed url as template and output docx; if the template only has {{placeholders}} to fill in, use fill_template instead. To change part of a Markdown document you created earlier, use edit_document. To restructure or rewrite a document, or to change a Word or PDF file, pass it as revises with the full revised content; the result replaces it. Mention the document by name and do not paste its content back.",
       inputSchema: input.shape,
       readOnly: false,
       async execute(raw, ctx) {
@@ -264,10 +325,9 @@ export function documentTools(
         if (args.template && format !== "docx")
           throw new ToolError("TEMPLATE_FORMAT", "A template applies to Word (docx) output only.");
         const images = args.images ?? [];
-        if (new Set(images.map((image) => image.id)).size !== images.length)
+        const ids = images.flatMap((image) => image.id ?? []);
+        if (new Set(ids).size !== ids.length)
           throw new ToolError("INVALID_IMAGES", "Image IDs must be unique.");
-        if (format === "md" && (images.length || /!\[[^\]]*\]\(image:/.test(args.content)))
-          throw new ToolError("IMAGE_FORMAT", "Embedded images require format docx or pdf.");
         const sources: Buffer[] = [];
         // The layout comes from the template, else from the Word file being revised, whose
         // own layout (and the template it was made from) carries over to the new version.
@@ -283,12 +343,28 @@ export function documentTools(
           args.filename ?? (args.revises ? stem(args.revises.filename) : args.title),
           format,
         );
+        // Every declared image is downloaded, so Eneo checks access to it for this call.
+        const imageFiles = [];
+        let imageBytes = 0;
+        for (const image of images) {
+          const handle = fileHandle(image);
+          const { bytes } = await fetchReference(image, ctx, {
+            ...access,
+            maxBytes: Math.min(access.maxBytes, 10 * 1024 * 1024),
+          });
+          imageBytes += bytes.length;
+          if (imageBytes > 32 * 1024 * 1024)
+            throw new ToolError("IMAGES_TOO_LARGE", "Document images must total at most 32 MiB.");
+          imageFiles.push({ ...image, handle: handle!, bytes });
+        }
         if (format === "md") {
-          // The file is the content itself, under its title. Nothing is rendered, and the
-          // content limit keeps it well below the export limit.
-          const text = /^\s*# /.test(args.content)
-            ? args.content
-            : `# ${args.title}\n\n${args.content}`;
+          // The file is the content itself, under its title, with each image named by its
+          // file handle. Nothing is rendered, and the content limit keeps it well below
+          // the export limit.
+          if (imageFiles.some((image) => !isRaster(image.bytes)))
+            throw new ToolError("INVALID_IMAGES", "Use a valid PNG or JPEG image.");
+          const content = placeImages(args.content, imageFiles);
+          const text = /^\s*# /.test(content) ? content : `# ${args.title}\n\n${content}`;
           return deliver(
             "md",
             name,
@@ -299,22 +375,15 @@ export function documentTools(
         }
         if (layout) sources.push((await fetchReference(layout, ctx, access)).bytes);
         const imageSources = [];
-        let imageBytes = 0;
-        for (const image of images) {
-          const { bytes } = await fetchReference(image, ctx, {
-            ...access,
-            maxBytes: Math.min(access.maxBytes, 10 * 1024 * 1024),
-          });
-          imageBytes += bytes.length;
-          if (imageBytes > 32 * 1024 * 1024)
-            throw new ToolError("IMAGES_TOO_LARGE", "Document images must total at most 32 MiB.");
+        for (const image of imageFiles) {
           imageSources.push({
             id: image.id,
+            handle: image.handle,
             caption: image.caption,
             widthPercent: image.width_percent,
             index: sources.length,
           });
-          sources.push(bytes);
+          sources.push(image.bytes);
         }
         return produce(
           render,

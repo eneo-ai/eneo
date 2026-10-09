@@ -30,6 +30,7 @@ _TABLE_MODULES = (
     "eneo.database.tables.logging_table",
     "eneo.database.tables.module_table",
     "eneo.database.tables.governance_policy_table",
+    "eneo.database.tables.mcp_app_views_table",
     "eneo.database.tables.mcp_tool_references_table",
     "eneo.database.tables.org_space_assistant_roles_table",
     "eneo.database.tables.object_content_table",

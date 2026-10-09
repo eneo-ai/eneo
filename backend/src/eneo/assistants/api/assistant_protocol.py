@@ -67,6 +67,7 @@ class _SupportsToolCallMetadata(Protocol):
     purpose: str | None
     is_internal: bool | None
     is_bundled: bool | None
+    app_view: dict[str, Any] | None
 
 
 def _require_approval_id(chunk: Completion) -> str:
@@ -248,6 +249,7 @@ def to_sse_response(chunk: Completion, session_id: "UUID") -> ServerSentEvent:
                     purpose=tc.purpose,
                     is_internal=tc.is_internal,
                     is_bundled=tc.is_bundled,
+                    app_view=tc.app_view,
                     meta=tc.meta,
                 )
                 for tc in tool_calls
@@ -292,6 +294,7 @@ def to_sse_response(chunk: Completion, session_id: "UUID") -> ServerSentEvent:
                     purpose=tc.purpose,
                     is_internal=tc.is_internal,
                     is_bundled=tc.is_bundled,
+                    app_view=tc.app_view,
                 )
                 for tc in tool_calls
             ],
@@ -316,6 +319,7 @@ def to_sse_response(chunk: Completion, session_id: "UUID") -> ServerSentEvent:
                     purpose=tc.purpose,
                     is_internal=tc.is_internal,
                     is_bundled=tc.is_bundled,
+                    app_view=tc.app_view,
                 )
                 for tc in tool_calls
             ],

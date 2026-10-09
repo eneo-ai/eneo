@@ -5,10 +5,16 @@ who needs the document elsewhere exports it: the provider that serves the
 assistant's file-creation capability renders the document's own text in the
 other format. The bytes go back to the reader as a download and are not
 stored; a Word file that should live in the conversation is asked for there.
+
+A document shows an image as a line naming a file by its handle
+(``![alt](eneo-file:...)``). The export hands the provider a signed link for
+each such file the conversation holds, so the image is embedded in the file
+that leaves Eneo.
 """
 
 import base64
 import binascii
+import re
 from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
 from dataclasses import dataclass
@@ -19,10 +25,17 @@ from jsonschema import Draft202012Validator
 from jsonschema.exceptions import SchemaError
 from pydantic import BaseModel
 
+from eneo.authentication.signed_urls import build_signed_original_download_url
+from eneo.files.file_reference import (
+    file_reference_base_url,
+    image_reference_file_ids,
+)
 from eneo.files.generated_documents import (
     GeneratedDocumentRejected,
     validate_generated_document,
 )
+from eneo.files.model_file_references import HANDLE_PATTERN, HANDLE_PREFIX
+from eneo.main.config import get_settings
 from eneo.main.exceptions import NotFoundException
 from eneo.main.logging import get_logger
 from eneo.mcp_servers.domain.entities.mcp_server import (
@@ -54,6 +67,13 @@ EXPORT_TOOL = "create_document"
 
 _NOT_FOUND = "Document not found in this conversation"
 
+# An image of a Markdown document: alt text, the file's handle, perhaps a caption.
+_IMAGE = re.compile(
+    r"!\[(?P<alt>[^\]\n]*)\]\((?P<handle>" + HANDLE_PATTERN + r")(?:[ \t][^)\n]*)?\)"
+)
+# What the renderer is told the image is; it checks the bytes itself.
+_IMAGE_FILENAMES = {"image/png": "image.png", "image/jpeg": "image.jpg"}
+
 
 ExportUnavailableReason = Literal[
     "provider_unavailable",
@@ -75,7 +95,7 @@ class DocumentExportAvailability(BaseModel):
 
 
 def export_compatibility(
-    schema: dict[str, Any] | None, arguments: dict[str, str]
+    schema: dict[str, Any] | None, arguments: dict[str, Any]
 ) -> DocumentExportFormatAvailability:
     """Check our exact request against the approved native export contract.
 
@@ -107,11 +127,13 @@ def export_compatibility(
     if not isinstance(properties, dict):
         return unavailable("incompatible_tool")
     properties = cast(dict[str, Any], properties)
-    for name in arguments:
+    for name, value in arguments.items():
         field = properties.get(name)
+        # The document's images go as a list; everything else is text.
+        expected = "array" if isinstance(value, list) else "string"
         if (
             not isinstance(field, dict)
-            or cast(dict[str, Any], field).get("type") != "string"
+            or cast(dict[str, Any], field).get("type") != expected
         ):
             return unavailable("incompatible_tool")
     formats = properties["format"].get("enum")
@@ -175,6 +197,57 @@ def conversation_document(
     return None
 
 
+def _with_images(
+    content: str, conversation: "SessionInDB"
+) -> tuple[str, dict[UUID, dict[str, str]]]:
+    """The document's text and its images, by file, as the renderer takes them.
+
+    An image is signed only when the conversation itself holds the file
+    (attached to or generated in one of its turns); what the document says is
+    the model's writing and never on its own a reason to sign a link. Any other
+    image is left as its alt text, so the rest of the document still exports.
+    """
+    if HANDLE_PREFIX not in content:
+        return content, {}
+    held: "dict[UUID, File]" = {
+        file.id: file
+        for question in conversation.questions or []
+        for file in [
+            *getattr(question, "files", []),
+            *getattr(question, "generated_files", []),
+        ]
+    }
+    base_url = file_reference_base_url()
+    expires_in = get_settings().file_reference_url_expiry_seconds
+    images: dict[UUID, dict[str, str]] = {}
+
+    def place(match: re.Match[str]) -> str:
+        file_id = UUID(hex=match["handle"][len(HANDLE_PREFIX) :])
+        file = held.get(file_id)
+        filename = _IMAGE_FILENAMES.get((file.mimetype if file else None) or "")
+        if (
+            file is None
+            or filename is None
+            or not base_url
+            or file_id not in image_reference_file_ids([file])
+        ):
+            return match["alt"]
+        if file_id not in images:
+            images[file_id] = {
+                "url": build_signed_original_download_url(
+                    file_id=file_id,
+                    base_url=base_url,
+                    expires_in=expires_in,
+                    tenant_id=file.tenant_id,
+                ),
+                "filename": filename,
+            }
+        return match[0]
+
+    content = _IMAGE.sub(place, content)
+    return content, images
+
+
 @asynccontextmanager
 async def _export_context(
     *,
@@ -189,7 +262,7 @@ async def _export_context(
         "MCPServer | None",
         "MCPProxySession | None",
         str | None,
-        dict[str, str],
+        dict[str, Any],
         DocumentExportAvailability,
     ]
 ]:
@@ -205,7 +278,10 @@ async def _export_context(
     if not content:
         raise NotFoundException(_NOT_FOUND)
     name = _stem(document.name)
-    arguments = {"title": name, "content": content, "filename": name}
+    content, images = _with_images(content, conversation)
+    arguments: dict[str, Any] = {"title": name, "content": content, "filename": name}
+    if images:
+        arguments["images"] = list(images.values())
     server = await assistant_service.capability_server(
         assistant_id=assistant_id, purpose=EXPORT_PURPOSE
     )
@@ -223,6 +299,11 @@ async def _export_context(
         return
     proxy = proxy_factory.create([server], identity_headers=identity_headers)
     try:
+        if images:
+            # The proxy passes on only the signed links it was told of.
+            proxy.allow_file_references(
+                {file_id: image["url"] for file_id, image in images.items()}
+            )
         await proxy.prepare_tools_for_context()
         tool = proxy.prefixed_tool_name(server.id, EXPORT_TOOL)
         approved = next(

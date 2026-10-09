@@ -69,12 +69,13 @@ class _Assistants:
 
 
 class _Files:
-    def __init__(self):
+    def __init__(self, text: str = MARKDOWN):
         self.read: list[UUID] = []
+        self.text = text
 
     async def get_file_content(self, file_id: UUID):
         self.read.append(file_id)
-        return SimpleNamespace(text=MARKDOWN)
+        return SimpleNamespace(text=self.text)
 
 
 class _Proxy:
@@ -89,6 +90,9 @@ class _Proxy:
 
     async def prepare_tools_for_context(self):
         pass
+
+    def allow_file_references(self, file_ids):
+        self.allowed = dict(file_ids)
 
     async def call_tools_parallel(self, calls):
         self.called.extend(calls)
@@ -112,17 +116,25 @@ def _file_result(data: bytes, mime_type: str) -> dict:
     }
 
 
-async def _export(proxy: _Proxy, *, format="docx", conversation=None, server=True):
+async def _export(
+    proxy: _Proxy,
+    *,
+    format="docx",
+    conversation=None,
+    server=True,
+    schema=SCHEMA,
+    text=MARKDOWN,
+):
     assistants = _Assistants(
         SimpleNamespace(
             id=SERVER_ID,
             name="Create files",
-            tools=[SimpleNamespace(name="create_document", input_schema=SCHEMA)],
+            tools=[SimpleNamespace(name="create_document", input_schema=schema)],
         )
         if server
         else None
     )
-    files = _Files()
+    files = _Files(text)
     exported = await export_document(
         conversation=conversation or _conversation(),
         file_id=FILE_ID,
@@ -160,6 +172,53 @@ async def test_document_is_rendered_by_the_file_creation_provider():
     assert exported.mcp_server_id == SERVER_ID
     assert files.read == [FILE_ID]
     assert proxy.closed
+
+
+async def test_images_the_conversation_holds_are_handed_over_signed(monkeypatch):
+    from eneo.conversations import document_export
+    from eneo.files import file_reference
+    from eneo.files.file_models import FileType
+
+    for module in (document_export, file_reference):
+        monkeypatch.setattr(
+            module, "file_reference_base_url", lambda *_: "http://eneo.test"
+        )
+    chart = SimpleNamespace(
+        id=uuid4(),
+        name="generated_image.png",
+        mimetype="image/png",
+        file_type=FileType.IMAGE,
+        original_available=True,
+        parent_file_id=None,
+        tenant_id=uuid4(),
+    )
+    conversation = _conversation()
+    conversation.questions[0].generated_files.append(chart)
+    line = f'![Kostnader](eneo-file:{chart.id.hex} "Figur 1")'
+    foreign = f"![Annan fil](eneo-file:{uuid4().hex})"
+    proxy = _Proxy(_file_result(_docx(), DOCX_MIME_TYPE))
+    images = {"type": "array", "items": {"type": "object"}}
+
+    await _export(
+        proxy,
+        conversation=conversation,
+        schema={**SCHEMA, "properties": {**SCHEMA["properties"], "images": images}},
+        text=f"# Plan\n\n{line}\n\n{foreign}\n",
+    )
+
+    arguments = proxy.called[0][1]
+    # A file the conversation does not hold is never signed: its alt text stays.
+    assert arguments["content"] == f"# Plan\n\n{line}\n\nAnnan fil\n"
+    [image] = arguments["images"]
+    assert image["filename"] == "image.png"
+    assert image["url"].startswith(
+        f"http://eneo.test/api/v1/files/{chart.id}/original/download/?token="
+    )
+    assert proxy.allowed == {chart.id: image["url"]}
+
+    # A provider that takes no images cannot export this document.
+    with pytest.raises(DocumentExportUnavailable):
+        await _export(proxy, conversation=conversation, text=f"{line}\n")
 
 
 async def test_pdf_is_exported_the_same_way():
@@ -290,6 +349,7 @@ async def test_discovery_is_format_specific_and_never_calls_renderer():
         {"is_enabled_by_default": False},
         {"removed_from_remote": True},
         {"requires_approval": True, "description": None, "input_schema": None},
+        {"meta": {"ui": {"visibility": ["app"]}}},
     ],
 )
 async def test_real_proxy_catalogue_excludes_non_callable_export_tools(overrides):

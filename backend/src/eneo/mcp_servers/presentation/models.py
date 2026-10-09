@@ -277,9 +277,19 @@ class MCPServerToolPublic(BaseModel):
     display_name: Optional[str] = None
     description: Optional[str]
     input_schema: Optional[dict[str, Any]]
+    meta: Optional[dict[str, Any]] = None
+    ui_resource_sha256: Optional[str] = Field(
+        default=None,
+        description="Hash of the approved interactive view (MCP App), if any.",
+    )
     is_enabled_by_default: bool
     pending_description: Optional[str] = None
     pending_input_schema: Optional[dict[str, Any]] = None
+    pending_meta: Optional[dict[str, Any]] = None
+    pending_ui_resource_sha256: Optional[str] = Field(
+        default=None,
+        description="Hash of the interactive view awaiting approval, if any.",
+    )
     requires_approval: bool = False
     removed_from_remote: bool = False
 
@@ -325,8 +335,32 @@ class ToolChangePublic(BaseModel):
     change_type: str  # "new", "changed", "removed"
     current_description: Optional[str] = None
     current_input_schema: Optional[dict[str, Any]] = None
+    current_meta: Optional[dict[str, Any]] = None
+    current_ui_resource_sha256: Optional[str] = None
     pending_description: Optional[str] = None
     pending_input_schema: Optional[dict[str, Any]] = None
+    pending_meta: Optional[dict[str, Any]] = None
+    pending_ui_resource_sha256: Optional[str] = None
+
+
+class MCPToolViewPublic(BaseModel):
+    """What a tool's interactive view (MCP App) may do, for review."""
+
+    uri: str
+    pending: bool = Field(
+        description="The view awaits approval; otherwise it is the approved one."
+    )
+    size_bytes: int
+    connect_domains: list[str] = Field(
+        description="Hosts the view may send requests to."
+    )
+    resource_domains: list[str] = Field(
+        description="Hosts the view may load scripts, styles, images and fonts from."
+    )
+    frame_domains: list[str] = Field(description="Hosts the view may embed.")
+    permissions: list[str] = Field(
+        description="Browser permissions the view asks for. Only clipboardWrite is granted."
+    )
 
 
 class MCPServerToolSyncResponse(BaseModel):

@@ -47,6 +47,19 @@ export const earlierMarkdownReference = referenceTo(["md"]);
 export const earlierWorkbookReference = referenceTo(["xlsx"]);
 export type FileReference = z.infer<typeof fileReference>;
 
+/**
+ * The handle of the file a signed Eneo URL points at (eneo-file:<id>), or undefined for any
+ * other URL. It names the file without credentials: what a Markdown document keeps of an image.
+ */
+export function fileHandle(ref: FileReference): string | undefined {
+  try {
+    const id = FILE_PATH.exec(new URL(ref.url).pathname)?.[1];
+    return id && `eneo-file:${id.replaceAll("-", "").toLowerCase()}`;
+  } catch {
+    return undefined;
+  }
+}
+
 export type ReferenceAccess = {
   /** Optional operator limit (TOOL_RUNTIME_FILE_ORIGINS) on the origin Eneo sends. */
   allowedFileOrigins: string[];

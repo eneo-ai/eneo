@@ -1052,6 +1052,8 @@ class SpaceRepository:
                 title=tool_db.title,
                 description=tool_db.description,
                 input_schema=tool_db.input_schema,
+                meta=tool_db.meta,
+                ui_resource_sha256=tool_db.ui_resource_sha256,
                 is_enabled_by_default=is_enabled,  # Effective status after all overrides
                 created_at=tool_db.created_at,
                 updated_at=tool_db.updated_at,
@@ -1414,6 +1416,8 @@ class SpaceRepository:
                 title=tool_db.title,
                 description=tool_db.description,
                 input_schema=tool_db.input_schema,
+                meta=tool_db.meta,
+                ui_resource_sha256=tool_db.ui_resource_sha256,
                 is_enabled_by_default=is_enabled,  # Effective status after overrides
                 created_at=tool_db.created_at,
                 updated_at=tool_db.updated_at,

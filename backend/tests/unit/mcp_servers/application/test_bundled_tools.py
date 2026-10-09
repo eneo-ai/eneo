@@ -1,6 +1,9 @@
 """A server built into Eneo exposes the running runtime's tool definitions,
-keeping only the administrator's per-tool decisions from the persisted rows."""
+keeping only the administrator's per-tool decisions from the persisted rows.
+Rows that differ from the live catalog are stored from it, with the views its
+tools declare, once per catalog."""
 
+from types import SimpleNamespace
 from uuid import uuid4
 
 import pytest
@@ -60,6 +63,18 @@ def fresh_cache():
     forget_catalogs()
     yield
     forget_catalogs()
+
+
+@pytest.fixture(autouse=True)
+def stored(monkeypatch):
+    """What was stored as a server's rows, in place of the database."""
+    catalogs: list[tuple[object, list[dict]]] = []
+
+    async def store(mcp_server_id, tenant_id, tool_defs):
+        catalogs.append((mcp_server_id, tool_defs))
+
+    monkeypatch.setattr(bundled_tools, "store_own_catalog", store)
+    return catalogs
 
 
 def _runtime(monkeypatch, catalogs):
@@ -141,3 +156,128 @@ async def test_other_servers_pass_through(monkeypatch):
 
     assert await with_live_bundled_tools(server) is server
     assert calls == []
+
+
+async def test_rows_that_differ_are_stored_once_per_catalog(monkeypatch, stored):
+    _runtime(monkeypatch, [LIVE])
+    server = _server()
+
+    await with_live_bundled_tools(server)
+    await with_live_bundled_tools(server)
+
+    assert [(server_id, [d["name"] for d in defs]) for server_id, defs in stored] == [
+        (server.id, ["query_table", "export_table"])
+    ]
+
+
+async def test_rows_that_are_current_are_left_alone(monkeypatch, stored):
+    _runtime(monkeypatch, [LIVE])
+    server = _server()
+    server.tools = [
+        MCPServerTool(
+            id=uuid4(),
+            mcp_server_id=server.id,
+            name=tool_def["name"],
+            title=tool_def["title"],
+            description=tool_def["description"],
+            input_schema=tool_def["input_schema"],
+            display_name="Renamed by the administrator",
+            is_enabled_by_default=False,
+        )
+        for tool_def in LIVE
+    ]
+
+    await with_live_bundled_tools(server)
+
+    assert stored == []
+
+
+async def test_a_view_stored_now_is_shown_with_this_answer(monkeypatch, stored):
+    view = {"ui": {"resourceUri": "ui://file-analysis/query-result.html"}}
+    catalog = [{**LIVE[0], "meta": view}, LIVE[1]]
+    _runtime(monkeypatch, [catalog])
+    monkeypatch.setattr(
+        bundled_tools,
+        "get_settings",
+        lambda: SimpleNamespace(mcp_apps_enabled=True),
+    )
+
+    class _Session:
+        async def __aenter__(self):
+            return object()
+
+        async def __aexit__(self, *exc):
+            return False
+
+    monkeypatch.setattr(
+        bundled_tools, "sessionmanager", SimpleNamespace(session=lambda: _Session())
+    )
+
+    async def snapshot(client, server, tool_defs, repo):
+        for tool_def in tool_defs:
+            if tool_def.get("meta"):
+                tool_def["ui_resource_sha256"] = "f" * 64
+
+    monkeypatch.setattr(bundled_tools, "snapshot_app_views", snapshot)
+
+    live = await with_live_bundled_tools(_server())
+
+    assert [tool.ui_resource_sha256 for tool in live.tools] == ["f" * 64, None]
+    assert stored[0][1][0]["ui_resource_sha256"] == "f" * 64
+    # The catalog every tenant shares is not the one the hash was written on.
+    assert "ui_resource_sha256" not in catalog[0]
+
+
+async def test_a_catalog_that_cannot_be_stored_does_not_fail_the_answer(monkeypatch):
+    _runtime(monkeypatch, [LIVE])
+
+    async def fail(mcp_server_id, tenant_id, tool_defs):
+        raise RuntimeError("database unavailable")
+
+    monkeypatch.setattr(bundled_tools, "store_own_catalog", fail)
+
+    live = await with_live_bundled_tools(_server())
+
+    assert [tool.name for tool in live.tools] == ["query_table", "export_table"]
+
+
+async def test_a_stored_catalog_is_audited_as_the_systems_own_change(monkeypatch):
+    _runtime(monkeypatch, [LIVE])
+    server = _server()
+    audit = SimpleNamespace(entries=[])
+
+    async def log_async(**entry):
+        audit.entries.append(entry)
+
+    audit.log_async = log_async
+
+    await with_live_bundled_tools(server, audit)
+    # The rows are current now: nothing more is stored or recorded.
+    await with_live_bundled_tools(server, audit)
+
+    (entry,) = audit.entries
+    assert entry["tenant_id"] == server.tenant_id
+    assert entry["entity_id"] == server.id
+    assert entry["action"].value == "mcp_server_updated"
+    assert entry["actor_type"].value == "system"
+    assert entry["actor_id"] is None
+    assert entry["metadata"]["tools"] == ["query_table", "export_table"]
+    assert entry["metadata"]["approved_view_hashes"] == {}
+
+
+async def test_a_catalog_that_was_not_stored_is_not_audited(monkeypatch):
+    _runtime(monkeypatch, [LIVE])
+    audit = SimpleNamespace(entries=[])
+
+    async def log_async(**entry):
+        audit.entries.append(entry)
+
+    async def fail(mcp_server_id, tenant_id, tool_defs):
+        raise RuntimeError("database unavailable")
+
+    audit.log_async = log_async
+    monkeypatch.setattr(bundled_tools, "store_own_catalog", fail)
+
+    await with_live_bundled_tools(_server(), audit)
+
+    assert audit.entries == []

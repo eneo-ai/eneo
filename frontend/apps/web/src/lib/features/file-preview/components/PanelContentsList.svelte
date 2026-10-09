@@ -133,10 +133,11 @@
               aria-current={view.shown ? "true" : undefined}
               onclick={() => onview?.(view)}
             >
+              <!-- A view that says what it is about is listed by that, above its tool. -->
               {@render row(
                 AppWindow,
-                view.title,
-                view.subject ?? m.mcp_app_view_title(),
+                view.subject ?? view.title,
+                view.subject ? view.title : m.mcp_app_view_title(),
                 view.shown
               )}
             </Button>

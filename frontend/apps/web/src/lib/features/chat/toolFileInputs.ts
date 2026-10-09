@@ -27,16 +27,3 @@ export function toolFileInputs(
 export function opensFilePanel(call: { purpose?: string | null } | undefined): boolean {
   return call?.purpose === "file_creation";
 }
-
-/** A chart image prepared for embedding in a document stays out of the chat. */
-export function isChartDocumentAsset(call: {
-  is_bundled?: boolean | null;
-  tool_name: string;
-  arguments?: Record<string, unknown> | null;
-}): boolean {
-  return (
-    call.is_bundled === true &&
-    call.tool_name === "create_chart" &&
-    call.arguments?.display === "none"
-  );
-}

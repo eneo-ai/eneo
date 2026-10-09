@@ -58,35 +58,45 @@ export async function loadDocumentImages(
   document: Extract<DocumentSpec, { kind: "markdown" }>,
 ): Promise<DocumentImages> {
   const declared = document.images ?? [];
-  if (declared.length > 8 || new Set(declared.map((i) => i.id)).size !== declared.length)
+  // An image answers to its ID and to its handle, whichever the content places it by.
+  const keys = declared.map((image) => [image.id, image.handle].filter((key) => !!key) as string[]);
+  const all = keys.flat();
+  if (declared.length > 8 || new Set(all).size !== all.length || keys.some((own) => !own.length))
     throw new RenderError("Use at most eight images with unique IDs.");
-  const used = new Set<string>();
+  const used = new Map<string, string | undefined>();
   const visit = (blocks: Block[]) => {
     for (const block of blocks) {
-      if (block.type === "image") used.add(block.id);
+      if (block.type === "image") used.set(block.id, used.get(block.id) ?? block.caption);
       if (block.type === "quote") visit(block.blocks);
       if (block.type === "list") for (const item of block.items) visit(item.children);
     }
   };
   visit(parseMarkdown(document.content));
-  if (used.size !== declared.length || declared.some((i) => !used.has(i.id)))
+  // An image declared for a line the document already has needs no ID, and that line may
+  // since have been edited away; an ID is declared to be placed.
+  if (
+    [...used.keys()].some((id) => !all.includes(id)) ||
+    declared.some((image, index) => image.id && !keys[index]!.some((key) => used.has(key)))
+  )
     throw new RenderError(
-      "Every image must have a matching standalone ![alt text](image:ID) in the document, with no undeclared image IDs.",
+      "Every image must be declared in images and placed on a line of its own: ![alt text](image:ID) for a declared ID, or the document's existing ![alt text](eneo-file:…) line with that same eneo-file value passed as the image's url. No undeclared images.",
     );
   const images: DocumentImages = new Map();
   let total = 0;
-  for (const image of declared) {
+  for (const [index, image] of declared.entries()) {
     if (!image.path) throw new RenderError("An image was not downloaded.");
     const bytes = await readFile(image.path);
     total += bytes.length;
     if (bytes.length > 10 * 1024 * 1024 || total > 32 * 1024 * 1024)
       throw new RenderError("Document images exceed the size limit.");
-    images.set(image.id, {
+    const bitmap = {
       bytes,
       ...imageDimensions(bytes),
-      caption: image.caption,
+      // A Markdown document carries the caption in its image line.
+      caption: image.caption ?? keys[index]!.map((key) => used.get(key)).find((text) => !!text),
       widthPercent: image.widthPercent ?? 100,
-    });
+    };
+    for (const key of keys[index]!) images.set(key, bitmap);
   }
   return images;
 }

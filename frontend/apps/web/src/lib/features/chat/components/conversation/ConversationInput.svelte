@@ -35,6 +35,7 @@
   import { chatCapabilities } from "../../chatCapabilities";
   import { getContextErrorInfo, isConversationSubmitDisabled } from "./conversationInputState";
   import { getFilePreview } from "$lib/features/file-preview/FilePreview.svelte";
+  import { getMcpAppPane } from "../../mcp-apps/McpAppPane.svelte";
   import { composeQuotedQuestion } from "../../questionQuote";
 
   type McpServerSummary = {
@@ -89,10 +90,15 @@
     });
   });
 
-  // Text the user selected in a file preview; it is sent as a quote at the
-  // head of the next question.
+  // Text the user selected in a file preview or an interactive view; it is
+  // sent as a quote at the head of the next question.
   const filePreview = getFilePreview();
+  const appPane = getMcpAppPane();
   const quote = $derived(filePreview?.quote ?? null);
+  // A quoted view is shown again beside the conversation when it can be.
+  const quotedView = $derived(
+    quote?.viewCallId && appPane?.offered.has(quote.viewCallId) ? quote.viewCallId : null
+  );
   const quotedFile = $derived(
     chat.currentConversation.messages
       ?.flatMap((message) => [...(message.files ?? []), ...(message.generated_files ?? [])])
@@ -530,29 +536,37 @@
 >
   {#if quote && filePreview}
     {@const location = tableLocationLabel(quote.locator, (row) => m.table_reference_row({ row }))}
-    <div class="bg-muted mx-1.5 mt-1.5 flex items-start gap-2 rounded-xl py-2 pr-2 pl-3">
-      <TextQuote class="text-muted-foreground mt-0.5 size-4 flex-shrink-0" aria-hidden="true" />
+    <!-- A quotation, not a disabled surface: the accent tint and rule mark it as part of
+         what is about to be sent. -->
+    <div
+      class="bg-accent-dimmer border-accent-default mx-1.5 mt-1.5 flex items-start gap-2.5 rounded-lg border-l-[3px] py-2 pr-2 pl-3"
+    >
+      <TextQuote class="text-accent-stronger mt-0.5 size-4 flex-shrink-0" aria-hidden="true" />
       <button
         type="button"
         class="focus-visible:ring-ring min-w-0 flex-1 rounded text-left focus-visible:ring-2 focus-visible:outline-none"
-        disabled={!quotedFile}
+        disabled={!quotedFile && !quotedView}
         aria-label={m.file_quote_show({ name: quote.fileName })}
-        onclick={(event) =>
-          quotedFile && filePreview.showPassage(quotedFile, quote, event.currentTarget)}
+        onclick={(event) => {
+          if (quotedView) appPane?.open(quotedView);
+          else if (quotedFile) filePreview.showPassage(quotedFile, quote, event.currentTarget);
+        }}
       >
-        <span class="text-muted-foreground block truncate text-xs"
+        <span class="text-accent-stronger block truncate text-xs font-medium"
           >{m.file_quote_from({ name: quote.fileName })}</span
         >
-        {#if location}<span class="text-muted-foreground block text-xs">{location}</span>{/if}
-        <span class="line-clamp-2 text-sm break-words whitespace-pre-line">{quote.text}</span>
-        {#if !quotedFile}<span class="text-muted-foreground block text-xs"
+        {#if location}<span class="text-secondary block text-xs">{location}</span>{/if}
+        <span class="text-default line-clamp-2 text-sm break-words whitespace-pre-line"
+          >{quote.text}</span
+        >
+        {#if quote.fileId && !quotedFile}<span class="text-secondary block text-xs"
             >{m.table_reference_unavailable()}</span
           >{/if}
       </button>
       <button
         type="button"
         onclick={() => (filePreview.quote = null)}
-        class="text-muted-foreground hover:bg-background hover:text-foreground focus-visible:ring-ring rounded p-0.5 transition-colors focus-visible:ring-2 focus-visible:outline-none"
+        class="text-secondary hover:bg-background hover:text-default focus-visible:ring-ring rounded p-0.5 transition-colors focus-visible:ring-2 focus-visible:outline-none"
         aria-label={m.file_quote_remove()}
       >
         <X class="size-4" />

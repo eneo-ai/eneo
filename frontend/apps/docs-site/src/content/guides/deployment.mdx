@@ -227,13 +227,14 @@ Then add your first model provider in **Admin → Models** (see
 
 ## Network Isolation
 
-The Docker Compose stack uses four networks:
+The Docker Compose stack uses five networks:
 
 | Network                                 | Services                                        | Purpose                                                                |
 | --------------------------------------- | ----------------------------------------------- | ---------------------------------------------------------------------- |
 | `proxy_tier` (external)                 | Traefik, frontend, backend, worker              | Ingress and outbound access for APIs, OIDC, and crawls                 |
 | `data_net` (`internal: true`)           | db, redis, backend, worker, db-init             | Data layer without internet egress, isolated from Traefik and frontend |
 | `module_net` (`internal: true`)         | Traefik, backend, optional module containers    | Modules reach only `backend:8000`; no internet egress                  |
+| `tool_runtime_net` (`internal: true`)   | tool-runtime, backend, worker                   | Bundled tools runtime; no internet, database, or Redis route           |
 | `object_content_net` (`internal: true`) | optional object-content, backend, worker        | Private S3-compatible byte plane when enabled; never routed publicly   |
 
 PostgreSQL and Redis are only attached to `data_net`. They are not reachable from frontend, Traefik, or module containers, and they have no outbound internet access.
@@ -992,7 +993,10 @@ changing existing settings or printing secrets. Use both environment files:
 docker compose --env-file .env --env-file release.env up -d
 ```
 
-Use the same environment-file arguments for later Compose commands. Without a
+Use the same environment-file arguments for later Compose commands.
+Commands that do not show those arguments need them too. To avoid repeating
+them, run `export COMPOSE_ENV_FILES=.env,release.env` once in the shell
+(Docker Compose 2.24 or later). Without a
 bundle, `python3 setup.py --version X.Y.Z` selects one explicit version.
 There are no default application `latest` tags.
 
@@ -1105,11 +1109,11 @@ content needs no second backup artifact.
 For PostgreSQL-inline content or an external endpoint:
 
 ```bash
-docker compose stop backend worker
+docker compose --env-file .env --env-file release.env stop backend worker
 docker compose --env-file .env --env-file release.env pull
-docker compose run --rm db-init
+docker compose --env-file .env --env-file release.env run --rm db-init
 docker compose --env-file .env --env-file release.env up -d
-docker compose ps
+docker compose --env-file .env --env-file release.env ps
 ```
 
 For the bundled store:
