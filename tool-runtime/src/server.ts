@@ -38,6 +38,8 @@ export type ServerOptions = {
   allowedFileOrigins?: string[];
   revision?: string;
   version?: string;
+  /** Eneo's built-in document template, served at GET /templates/builtin.docx?language=sv|en. */
+  builtinTemplate?: (language: "sv" | "en") => Promise<Buffer>;
 };
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -103,7 +105,8 @@ export function createHandler(options: ServerOptions) {
     const match = /^\/mcp\/([a-z][a-z0-9-]*)$/.exec(url.pathname);
     const endpoint = match ? endpoints.get(match[1]!) : undefined;
     const diagnostics = url.pathname === "/diagnostics";
-    if (!endpoint && !diagnostics) return new Response("Not found", { status: 404 });
+    const template = url.pathname === "/templates/builtin.docx" && !!options.builtinTemplate;
+    if (!endpoint && !diagnostics && !template) return new Response("Not found", { status: 404 });
     if (request.headers.has("origin")) return new Response("Forbidden origin", { status: 403 });
     const header = request.headers.get("authorization") ?? "";
     if (!header.startsWith("Bearer ") || !equalSecret(header.slice(7), options.token))
@@ -111,6 +114,29 @@ export function createHandler(options: ServerOptions) {
         status: 401,
         headers: { "www-authenticate": "Bearer" },
       });
+    if (template) {
+      if (request.method !== "GET") return new Response("Method not allowed", { status: 405 });
+      const language = url.searchParams.get("language") ?? "sv";
+      if (language !== "sv" && language !== "en")
+        return new Response("Unknown language", { status: 400 });
+      if (controlActive >= 4) return new Response("Busy", { status: 429 });
+      controlActive++;
+      try {
+        const bytes = await options.builtinTemplate!(language);
+        return new Response(new Uint8Array(bytes), {
+          headers: {
+            "content-type":
+              "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+            "content-disposition": `attachment; filename="eneo-template-${language}.docx"`,
+            "cache-control": "no-store",
+          },
+        });
+      } catch (error) {
+        return Response.json(publicError(error), { status: 500 });
+      } finally {
+        controlActive--;
+      }
+    }
     if (diagnostics) {
       if (request.method !== "GET") return new Response("Method not allowed", { status: 405 });
       if (controlActive >= 4) return new Response("Busy", { status: 429 });

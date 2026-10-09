@@ -5,7 +5,7 @@ import { publicError, ToolError } from "./errors";
 import type { ComputeConfig } from "./tools/compute/config";
 import type { ComputeJob } from "./tools/compute/ports";
 import type { IngestJob, QueryJob } from "./tools/tabular/ports";
-import type { RenderJob } from "./tools/documents/ports";
+import type { BuiltinTemplateJob, InspectJob, RenderJob } from "./tools/documents/ports";
 import type { ChartJob } from "./tools/charts/ports";
 
 export type SandboxJob =
@@ -13,6 +13,8 @@ export type SandboxJob =
   | { job: IngestJob }
   | { job: QueryJob }
   | { job: RenderJob }
+  | { job: InspectJob }
+  | { job: BuiltinTemplateJob }
   | { job: ChartJob }
   | { job: { kind: "env" } }
   | { job: { kind: "confinement" } };
@@ -39,6 +41,14 @@ async function execute(input: SandboxJob): Promise<Record<string, unknown>> {
     case "render_document": {
       const { executeRender } = await import("./tools/documents/execute");
       return executeRender(input.job);
+    }
+    case "inspect_template": {
+      const { executeInspect } = await import("./tools/documents/execute");
+      return executeInspect(input.job);
+    }
+    case "builtin_template": {
+      const { executeBuiltinTemplate } = await import("./tools/documents/execute");
+      return executeBuiltinTemplate(input.job);
     }
     case "render_chart": {
       const { executeChart } = await import("./tools/charts/execute");

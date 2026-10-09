@@ -5,7 +5,7 @@ import { documentConfigSchema } from "../../src/tools/documents/config";
 import { executeRender } from "../../src/tools/documents/execute";
 import { documentTools, fileRenderer } from "../../src/tools/documents/tool";
 import { imageDimensions } from "../../src/tools/documents/engine/images";
-import { pageContentSize } from "../../src/tools/documents/engine/template";
+import { pageContentSize } from "../../src/tools/documents/engine/word/inspect";
 import { RichResult } from "../../src/tools/types";
 import { chartTools } from "../../src/tools/charts/tool";
 import { executeChart } from "../../src/tools/charts/execute";
@@ -108,7 +108,8 @@ describe("document chart images", () => {
     const dimensions = /<wp:extent cx="(\d+)" cy="(\d+)"/.exec(xml)!;
     const width = Number(dimensions[1]) / 12700;
     const height = Number(dimensions[2]) / 12700;
-    expect(height).toBeLessThanOrEqual(531);
+    // Eneo's built-in template is A4 with 2.54 cm margins: 698 pt of height, 120 pt kept free.
+    expect(height).toBeLessThanOrEqual(578);
     expect(height / width).toBeCloseTo(20, 2);
   });
 

@@ -265,7 +265,9 @@ describe("engines", () => {
     for (const id of ids) expect(numbering).toContain(`w:numId="${id}"`);
     const rels = await unzipText(buffer, "word/_rels/document.xml.rels");
     expect(rels).toContain("https://example.org/a");
-    expect(xml).toContain('r:id="rIdEneo1"');
+    // The link's relationship is registered in the template under an id of its own.
+    const linkId = /<w:hyperlink[^>]*r:id="([^"]+)"/.exec(xml)![1]!;
+    expect(rels).toContain(`Id="${linkId}"`);
   });
   test("a template without a placeholder has its body replaced", async () => {
     const template = Buffer.from(
@@ -383,7 +385,9 @@ describe("engines", () => {
     await expect(fill("Hej {{namn}}", {})).rejects.toMatchObject({
       code: "TEMPLATE_VALUES_MISSING",
     });
-    await expect(fill("Ingen markör", { namn: "x" })).rejects.toThrow("no {{placeholders}}");
+    await expect(fill("Ingen markör", { namn: "x" })).rejects.toThrow(
+      "no content controls or {{placeholders}}",
+    );
     await expect(fill(Buffer.from([0xff, 0xfe, 0x7b]), {})).rejects.toMatchObject({
       code: "INVALID_FILE",
     });

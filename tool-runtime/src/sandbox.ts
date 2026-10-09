@@ -64,6 +64,10 @@ export function jobPaths(job: SandboxJob["job"]): JobPaths {
     case "render_document":
       // Sources and the template sit next to the output, in a directory made for this job.
       return { write: [dirname(job.outputPath)] };
+    case "inspect_template":
+      return { read: [job.templatePath] };
+    case "builtin_template":
+      return { write: [dirname(job.outputPath)] };
     case "render_chart":
       // An XLSX source is converted to CSV next to itself.
       return { write: job.source?.path ? [dirname(job.source.path)] : [] };

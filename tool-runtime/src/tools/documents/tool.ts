@@ -18,8 +18,18 @@ import {
 import { RichResult, type ToolDefinition } from "../types";
 import type { DocumentConfig, ExportFormat } from "./config";
 import { applyEdits, documentEdit, MAX_EDITS } from "./edits";
+import { textPlaceholders } from "./engine/fill";
 import { MIME_BY_FORMAT, safeFilename } from "./filename";
-import type { DocumentRequest, RenderJob, RenderResult, SheetRequest } from "./ports";
+import type {
+  BuiltinTemplateJob,
+  DocumentRequest,
+  InspectJob,
+  InspectResult,
+  RenderJob,
+  RenderResult,
+  SheetRequest,
+  TemplateReport,
+} from "./ports";
 
 type RenderRequest = Omit<RenderJob, "kind" | "outputPath"> & {
   /** Downloaded sheet sources, referenced by `SheetSource.index`. */
@@ -85,6 +95,39 @@ export function fileRenderer(run: (job: RenderJob) => Promise<RenderResult>): Re
   };
 }
 
+/** Reads a Word template's placeholders (normally in a sandbox child). */
+export type TemplateInspector = (template: Buffer) => Promise<TemplateReport>;
+
+/** Runs an inspect job against a template file in a directory the parent owns. */
+export function fileInspector(run: (job: InspectJob) => Promise<InspectResult>): TemplateInspector {
+  return async (template) => {
+    const directory = await mkdtemp(join(tmpdir(), "eneo-tool-runtime-inspect-"));
+    try {
+      const templatePath = join(directory, "template");
+      await writeFile(templatePath, template, { mode: 0o600 });
+      return (await run({ kind: "inspect_template", templatePath })).inspection;
+    } finally {
+      await rm(directory, { recursive: true, force: true });
+    }
+  };
+}
+
+/** Builds Eneo's built-in template (in a sandbox child) and returns its bytes. */
+export function builtinTemplateProvider(
+  run: (job: BuiltinTemplateJob) => Promise<RenderResult>,
+): (language: "sv" | "en") => Promise<Buffer> {
+  return async (language) => {
+    const directory = await mkdtemp(join(tmpdir(), "eneo-tool-runtime-template-"));
+    try {
+      const outputPath = join(directory, "output");
+      await run({ kind: "builtin_template", language, outputPath });
+      return await readFile(outputPath);
+    } finally {
+      await rm(directory, { recursive: true, force: true });
+    }
+  };
+}
+
 const filename = z
   .string()
   .max(100)
@@ -93,12 +136,13 @@ const filename = z
     "File name without extension, e.g. 'Tjänsteskrivelse trygghet'. Defaults to the title.",
   );
 const cell = z.union([z.string().max(2000), z.number(), z.boolean(), z.null()]);
-/** Plain-text values for a template's {{placeholders}}, by placeholder name. */
-const placeholderValues = z
-  .record(z.string().min(1).max(200), z.string().max(5000))
-  .refine((values) => Object.keys(values).length <= 200, {
-    message: "At most 200 values",
-  });
+/** Values for a template's placeholders by name: text, or Markdown for a rich content control. */
+const placeholderValues = (maxChars: number) =>
+  z
+    .record(z.string().min(1).max(200), z.string().max(maxChars))
+    .refine((values) => Object.keys(values).length <= 200, {
+      message: "At most 200 values",
+    });
 /** The name an earlier file was delivered under, without its extension. */
 const stem = (filename: string) => filename.replace(/\.[^.]+$/, "");
 
@@ -113,7 +157,8 @@ type PlacedImage = { id?: string; caption?: string; handle: string };
  */
 function placeImages(content: string, images: PlacedImage[]): string {
   const invalid = (message: string) => new ToolError("INVALID_IMAGES", message);
-  const marker = /^([ \t]*(?:>[ \t]*)*)!\[([^\]\n]*)\]\(image:([A-Za-z][A-Za-z0-9_-]{0,63})\)[ \t]*$/gm;
+  const marker =
+    /^([ \t]*(?:>[ \t]*)*)!\[([^\]\n]*)\]\(image:([A-Za-z][A-Za-z0-9_-]{0,63})\)[ \t]*$/gm;
   // Every missing declaration is named at once, so one corrected call is enough.
   const undeclared = [...new Set([...content.matchAll(marker)].map((match) => match[3]!))].filter(
     (id) => !images.some((image) => image.id === id),
@@ -150,6 +195,22 @@ function placeImages(content: string, images: PlacedImage[]): string {
       `Image ${missing.id} is declared but not placed: put ![alt text](image:ID) on a line of its own where it belongs.`,
     );
   return text;
+}
+
+/** The fields of a text template, in the shape a Word inspection reports. */
+function textReport(template: Buffer): TemplateReport {
+  const names = textPlaceholders(template);
+  return {
+    syntax: names.length ? "braces" : "none",
+    placeholders: names.map((name) => ({
+      name,
+      syntax: "braces",
+      kind: "text",
+      location: "body",
+      supported: true,
+    })),
+    checks: {},
+  };
 }
 
 const isRaster = (bytes: Buffer) =>
@@ -214,6 +275,7 @@ export function documentTools(
   config: DocumentConfig,
   render: Renderer,
   access: ReferenceAccess,
+  inspect?: TemplateInspector,
 ): ToolDefinition[] {
   const input = z.object({
     title: z
@@ -274,12 +336,12 @@ export function documentTools(
     template: documentReference
       .optional()
       .describe(
-        "Optional Word template: the signed url and filename of a .docx attached in the conversation or by the assistant. The content is rendered into it, keeping its styles, headers, footers and page setup. A paragraph in the template reading {{content}} marks where the content goes; without one the template's body is replaced. Only with format docx.",
+        "A Word template from the conversation, when the user names one or attaches one for that purpose: the signed url and filename of the .docx. Leave it out otherwise: Eneo applies the organisation's document template on its own. The content is rendered into the template in its own styles, keeping its headers, footers and page setup. The document goes into a rich content control tagged content (or dokument), else where a paragraph reads {{content}}, else in place of the template's body. Only with format docx.",
       ),
-    fields: placeholderValues
+    fields: placeholderValues(config.max_content_chars)
       .optional()
       .describe(
-        "Only with a template that has other {{placeholders}} besides {{content}}, for example {{diarienummer}} in its header: the plain-text value for each, by name without the braces. Every placeholder needs a value; an empty string leaves one blank.",
+        "Only with a template that has other fields besides the content, for example a text control or {{diarienummer}} in its header: the plain-text value for each, by its tag or name without the braces. Title, date, year and organisation are filled by Eneo. Every other field needs a value; an empty string leaves a {{placeholder}} blank and removes a content control.",
       ),
     revises: earlierDocumentReference
       .optional()
@@ -303,9 +365,17 @@ export function documentTools(
     template: templateReference.describe(
       "The template: the signed url and filename of a .docx, .txt or .md file attached in the conversation or by the assistant.",
     ),
-    values: placeholderValues.describe(
-      'The plain-text value for each placeholder, by its name without the braces, e.g. {"namn": "Anna Berg"}. A line break in a value starts a new line. An empty string leaves a placeholder blank.',
-    ),
+    inspect: z
+      .boolean()
+      .optional()
+      .describe(
+        "true to only list the template's fields (name, label, kind, guidance text) without producing a file. Use it first when you do not know a template's fields.",
+      ),
+    values: placeholderValues(config.max_content_chars)
+      .optional()
+      .describe(
+        'The value for each field, by its tag or name without the braces, e.g. {"namn": "Anna Berg"}. A text field and a {{placeholder}} take plain text, where a line break starts a new line; a rich content control takes a document in Markdown (headings, lists, tables). An empty string leaves a {{placeholder}} blank and removes a content control. Required unless inspect is true.',
+      ),
     filename,
   });
   return [
@@ -313,7 +383,7 @@ export function documentTools(
       name: "create_document",
       title: "Create document",
       description:
-        "Create a document from Markdown: a Markdown document (md) shown beside the conversation, or a Word (.docx) or PDF file to download. Use md for working material the user reads and revises in Eneo: a plan, a summary, notes, a draft, an outline. Create one without being asked when your answer would otherwise be a long standalone piece the user will keep or keep working on, and then answer with a short note; short answers and plain questions stay in the message. Use docx for a document that leaves Eneo (a report, letter, memo, tjänsteskrivelse, anything asked for 'as Word') and pdf when the user asks for one. Write the complete, well-structured content in Markdown with headings, lists and tables. To put a chart or picture in a document, in any format, pass the existing PNG/JPEG reference in images and place it with a standalone image:ID Markdown marker, with a caption. A Markdown document stays Markdown when an image is added: never switch to Word or PDF for the image's sake, only when the user asks for that file. Interactive charts need a PNG export first; use display=none for images only needed by the document. When the user names a Word template or one is attached for that purpose, pass its signed url as template and output docx; if the template only has {{placeholders}} to fill in, use fill_template instead. To change part of a Markdown document you created earlier, use edit_document. To restructure or rewrite a document, or to change a Word or PDF file, pass it as revises with the full revised content; the result replaces it. Mention the document by name and do not paste its content back.",
+        "Create a document from Markdown: a Markdown document (md) shown beside the conversation, or a Word (.docx) or PDF file to download. Use md for working material the user reads and revises in Eneo: a plan, a summary, notes, a draft, an outline. Create one without being asked when your answer would otherwise be a long standalone piece the user will keep or keep working on, and then answer with a short note; short answers and plain questions stay in the message. Use docx for a document that leaves Eneo (a report, letter, memo, tjänsteskrivelse, anything asked for 'as Word') and pdf when the user asks for one. Write the complete, well-structured content in Markdown with headings, lists and tables. To put a chart or picture in a document, in any format, pass the existing PNG/JPEG reference in images and place it with a standalone image:ID Markdown marker, with a caption. A Markdown document stays Markdown when an image is added: never switch to Word or PDF for the image's sake, only when the user asks for that file. Interactive charts need a PNG export first; use display=none for images only needed by the document. Eneo applies the organisation's document template to Word files on its own; pass template only when the user names a Word template or attaches one for that purpose, and output docx. If the template is a form with fields to fill in (content controls or {{placeholders}}) rather than a layout for a whole document, use fill_template instead. To change part of a Markdown document you created earlier, use edit_document. To restructure or rewrite a document, or to change a Word or PDF file, pass it as revises with the full revised content; the result replaces it. Mention the document by name and do not paste its content back.",
       inputSchema: input.shape,
       readOnly: false,
       async execute(raw, ctx) {
@@ -432,7 +502,7 @@ export function documentTools(
       name: "fill_template",
       title: "Fill template",
       description:
-        "Fill in a template the user or the assistant supplied: a Word (.docx), plain text (.txt) or Markdown (.md) file with {{placeholders}} such as {{namn}} or {{datum}}. Pass the template's signed url and a plain-text value for every placeholder; the result is the same file with the values in place, in the template's own format and layout. If a value is missing the call fails and lists the template's placeholders, so you can ask the user for what you do not know. A PDF cannot be filled: ask for the Word original. To write a whole document into a Word template instead, use create_document. The file is attached to your answer for the user to download: mention it by name and do not paste its content back.",
+        "Fill in a template the user or the assistant supplied: a Word (.docx) file with content controls (fields with a tag, as Word's Developer tab makes them) or {{placeholders}} such as {{namn}} or {{datum}}, or a plain text (.txt) or Markdown (.md) file with {{placeholders}}. Call it with inspect=true first to see the fields: each has a name, a label and often guidance text saying what to write; a rich field takes a document in Markdown, a text field one value. Then pass a value for every field; the result is the same file with the values in place, in the template's own format and layout. If a value is missing the call fails and lists the fields, so you can ask the user for what you do not know. A PDF cannot be filled: ask for the Word original. To write a whole document into a Word template instead, use create_document. The file is attached to your answer for the user to download: mention it by name and do not paste its content back.",
       inputSchema: fillInput.shape,
       readOnly: false,
       async execute(raw, ctx) {
@@ -440,6 +510,32 @@ export function documentTools(
         const format = args.template.filename.split(".").pop()!.toLowerCase() as
           "docx" | "txt" | "md";
         const template = await fetchReference(args.template, ctx, access);
+        if (args.inspect) {
+          const report: TemplateReport =
+            format === "docx"
+              ? await (
+                  inspect ??
+                  (() => {
+                    throw new ToolError(
+                      "INSPECT_UNAVAILABLE",
+                      "Template inspection is not available on this runtime.",
+                    );
+                  })
+                )(template.bytes)
+              : textReport(template.bytes);
+          return {
+            template: args.template.filename,
+            ...report,
+            next: report.placeholders.some((p) => p.supported)
+              ? "Call fill_template again with a value for every supported field."
+              : "This template has no fields to fill. To write a whole document into it, use create_document with it as the template.",
+          };
+        }
+        if (!args.values)
+          throw new ToolError(
+            "VALUES_REQUIRED",
+            "Pass values for the template's fields, or inspect=true to list them.",
+          );
         return produce(
           render,
           config,

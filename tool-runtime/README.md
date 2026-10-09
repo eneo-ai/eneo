@@ -23,11 +23,25 @@ documentation lives in `docs/deployment/TOOL_RUNTIME.md`.
   a line naming the file by its handle (`![alt](eneo-file:… "caption")`), which Eneo
   shows and embeds on export. Chart exports prepared only for documents use
   `display: "none"`.
-- `POST /mcp/file-creation` (`create_document`, Markdown, DOCX or PDF from Markdown,
-  optionally into a Word template; `edit_document`, exact passages of an earlier
-  Markdown document replaced in place; `fill_template`, a DOCX, TXT or MD template
-  with its `{{placeholders}}` filled; `create_spreadsheet`, XLSX) returns the
-  file as an embedded resource that Eneo saves in the conversation.
+- `POST /mcp/file-creation` (`create_document`, Markdown, DOCX or PDF from Markdown;
+  `edit_document`, exact passages of an earlier Markdown document replaced in place;
+  `fill_template`, a DOCX, TXT or MD template filled, or inspected with
+  `inspect: true`; `create_spreadsheet`, XLSX) returns the file as an embedded
+  resource that Eneo saves in the conversation.
+- Every Word file is rendered into a template: the one passed as
+  `create_document.template` (a signed `.docx` reference, normally supplied by Eneo
+  from the organisation's template library), else Eneo's built-in template, which
+  `GET /templates/builtin.docx?language=sv|en` serves for administrators to adapt.
+  Content is written in the template's own styles, resolved by style name (a Swedish
+  template's `Rubrik1` is "heading 1"), and lists use the template's list styles when
+  it has them. A template marks where the document goes with a rich content control
+  tagged `content` (or `dokument`), else a paragraph reading `{{content}}`; otherwise
+  its body is replaced. Other fields are content controls (tag, alias and placeholder
+  text as Word's Developer tab makes them; a text control takes one value, a rich
+  control a document in Markdown) or `{{name}}` placeholders. Title, date, year and
+  organisation are filled from the call; `fields` and `fill_template.values` cover
+  the rest, and an empty value removes a control. `src/tools/documents/engine/word/`
+  holds the inspection, numbering and control handling around the docx patcher.
 - `GET /health/live` and `GET /health/ready` are the health endpoints.
 
 ## Layout
@@ -40,7 +54,7 @@ documentation lives in `docs/deployment/TOOL_RUNTIME.md`.
 | `src/child.ts`               | Child entrypoint                                         |
 | `src/tools/compute/`         | QuickJS engine, limits and the tool definition           |
 | `src/tools/tabular/`         | Download policy, parsed-sheet cache, DuckDB/XLSX engines |
-| `src/tools/documents/`       | Markdown parser, DOCX/PDF/XLSX renderers, template fill  |
+| `src/tools/documents/`       | Markdown parser, DOCX/PDF/XLSX renderers, Word templates |
 | `src/tools/charts/`    | Chart spec, ECharts app and SVG/resvg image export       |
 | `src/tools/files/`           | Signed Eneo file references shared by all file inputs    |
 

@@ -15,14 +15,16 @@ export async function renderDocument(
     if (format !== "docx" && format !== "txt" && format !== "md")
       throw new RenderError("Only Word and text templates can be filled.");
     const filled = await wordErrors(async () => {
-      const { fillDocx, fillText } = await import("./fill");
-      return format === "docx"
-        ? fillDocx(options.template!, document.values)
-        : fillText(options.template!, document.values);
+      if (format === "docx") {
+        const { fillTemplateDocx } = await import("./word/apply");
+        return fillTemplateDocx(options.template!, document.values);
+      }
+      const { fillText } = await import("./fill");
+      return fillText(options.template!, document.values);
     });
     if (!filled.placeholders.length)
       throw new RenderError(
-        "The template has no {{placeholders}} to fill. To write a whole document into it, call create_document with it as the template.",
+        "The template has no content controls or {{placeholders}} to fill. To write a whole document into it, call create_document with it as the template.",
       );
     return { buffer: filled.buffer };
   }
@@ -35,16 +37,17 @@ export async function renderDocument(
   const { loadDocumentImages } = await import("./images");
   const images = await loadDocumentImages(document);
   if (format === "docx") {
-    const { renderDocx } = await import("./docx");
-    const rendered = await renderDocx(document, { ...options, images });
-    const { template } = options;
-    if (!template) return { buffer: rendered };
+    // Every Word file is rendered into a template: the one given, else Eneo's own.
     return wordErrors(async () => {
-      const { applyTemplate } = await import("./template");
-      const applied = await applyTemplate(rendered, template);
-      if (!document.fields) return { buffer: applied };
-      const { fillDocx } = await import("./fill");
-      return { buffer: (await fillDocx(applied, document.fields)).buffer };
+      const { renderIntoTemplate } = await import("./word/apply");
+      const { builtinTemplate } = await import("./word/builtin");
+      const template = options.template ?? (await builtinTemplate(document.language));
+      return {
+        buffer: await renderIntoTemplate(template, document, {
+          images,
+          organisationName: options.organisationName,
+        }),
+      };
     });
   }
   if (options.template) throw new RenderError("A template applies to Word (docx) output only.");
@@ -55,7 +58,7 @@ export async function renderDocument(
 
 /** A template that is not a usable Word file is a render failure the caller can read. */
 async function wordErrors<T>(work: () => Promise<T>): Promise<T> {
-  const { TemplateError } = await import("./template");
+  const { TemplateError } = await import("./word/inspect");
   try {
     return await work();
   } catch (error) {
