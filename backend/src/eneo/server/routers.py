@@ -458,6 +458,7 @@ router.include_router(
     transcription_service_catalogue_router,
     prefix="/transcription-services",
     tags=["transcription-services"],
+    dependencies=TENANT_ADMIN_API_KEY_GUARDS,
 )
 router.include_router(
     tenant_image_models_router,
