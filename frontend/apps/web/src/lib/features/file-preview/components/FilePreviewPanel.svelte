@@ -265,6 +265,16 @@
                 <span class="text-muted-foreground block text-xs whitespace-normal"
                   >{unavailableReason(availability[format].reason)}</span
                 >
+              {:else if availability?.template}
+                <!-- The organisation's document template the file is rendered into. -->
+                <span class="text-muted-foreground block text-xs whitespace-normal"
+                  >{m.file_preview_export_template({
+                    name:
+                      availability.template.source === "builtin"
+                        ? m.document_template_builtin_name()
+                        : availability.template.name
+                  })}</span
+                >
               {/if}
             </span>
             <span class="text-muted-foreground text-xs">{FORMATS[format].ending}</span>

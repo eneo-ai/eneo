@@ -40,6 +40,7 @@
   import DeleteMCPDialog from "../mcp-servers/DeleteMCPDialog.svelte";
   import MCPToolsPanel from "../mcp-servers/MCPToolsPanel.svelte";
   import ProviderToolsSummary from "./ProviderToolsSummary.svelte";
+  import DocumentTemplates from "./DocumentTemplates.svelte";
 
   type Provider = components["schemas"]["MCPServerSettingsPublic"];
   let { data }: { data: PageData } = $props();
@@ -495,6 +496,15 @@
                   {/if}
                 </div>
               {/each}
+              {#if capability.purpose === "file_creation" && sources.length > 0}
+                <!-- The templates the files are rendered into live with the capability. -->
+                <DocumentTemplates
+                  templates={data.documentTemplates?.items ?? null}
+                  runtimeConfigured={data.documentTemplates?.runtime_configured ?? false}
+                  eneo={data.eneo}
+                  onchange={refresh}
+                />
+              {/if}
               {#if capability.guide && sources.length > 0}
                 <!-- Usage guidance lives here and in the docs, not in assistant settings. -->
                 <p class="border-dimmer text-secondary border-t p-5 text-sm">

@@ -536,7 +536,8 @@
           <Settings.Row
             title={m.capabilities()}
             description={m.capabilities_row_description()}
-            hasChanges={$currentChanges.diff.enabled_capabilities !== undefined}
+            hasChanges={$currentChanges.diff.enabled_capabilities !== undefined ||
+              $currentChanges.diff.document_template !== undefined}
           >
             <div class="border-default overflow-hidden rounded-xl border">
               {#each CAPABILITIES as capability (capability.purpose)}
@@ -544,6 +545,8 @@
                   {capability}
                   selectedModel={toolModel}
                   bind:enabledCapabilities={$update.enabled_capabilities}
+                  bind:documentTemplate={$update.document_template}
+                  documentTemplates={data.documentTemplates}
                 />
               {/each}
             </div>
