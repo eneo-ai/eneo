@@ -2,7 +2,7 @@ import json
 import logging
 from collections import defaultdict
 from dataclasses import dataclass
-from typing import Any, Optional, Protocol, Sequence
+from typing import Any, Optional, Protocol, Sequence, cast
 from uuid import UUID
 
 from typing_extensions import override
@@ -14,6 +14,7 @@ from eneo.ai_models.completion_models.completion_model import (
     MessageToolCall,
     function_definition_to_tool,
 )
+from eneo.authentication.signed_urls import restore_reference_tokens
 from eneo.completion_models.domain.skill_activation import (
     SKILL_ACTIVATION_TOOL_NAME,
 )
@@ -78,7 +79,13 @@ def _replayable_tool_calls(
             MessageToolCall(
                 tool_call_id=tc.tool_call_id,
                 tool_name=tc.mcp_tool_name or tc.tool_name,
-                arguments=tc.arguments,
+                # Stored arguments carry reference URLs with the token
+                # redacted; a model copying its own earlier call would send a
+                # dead link. Replay them with this request's fresh URLs.
+                arguments=cast(
+                    "dict[str, object] | None",
+                    restore_reference_tokens(tc.arguments, file_reference_urls or {}),
+                ),
                 result=_with_generated_image_references(tc, file_reference_urls),
             )
         )
@@ -90,10 +97,15 @@ def _with_generated_image_references(
 ) -> str:
     """The persisted result plus one reference line per generated image.
 
-    Numbering follows the "[Image N ...]" placeholders the result already
+    Redacted reference links in the result are replayed with this request's
+    fresh URLs. Numbering follows the "[Image N ...]" placeholders the result already
     carries, in the order the files were persisted for this call.
     """
-    result = tc.result or ""
+    # Persisted results carry reference URLs with the token redacted too, so
+    # a model copying a link out of an earlier result gets a working one.
+    result = cast(
+        str, restore_reference_tokens(tc.result or "", file_reference_urls or {})
+    )
     if not tc.generated_file_ids or not file_reference_urls:
         return result
     lines = [
