@@ -20,6 +20,8 @@ export type SheetMetadata = {
   queryable?: boolean;
   sourceRows?: number[];
   explicitHeader?: boolean;
+  /** Lines above the header (a report title) that every read of this sheet skips. */
+  skipRows?: number;
 };
 
 /** Child job: validate and convert one downloaded file, writing sheet CSVs to `outputDir`. */
@@ -38,7 +40,13 @@ export type QueryJob = {
   kind: "tabular_query";
   csvPath: string;
   explicitHeader?: boolean;
-  tables: { alias: string; csvPath: string; explicitHeader?: boolean }[];
+  skipRows?: number;
+  tables: {
+    alias: string;
+    csvPath: string;
+    explicitHeader?: boolean;
+    skipRows?: number;
+  }[];
   statements: string[];
   explain: boolean;
   config: TabularConfig;
@@ -61,6 +69,7 @@ export type QueryOutcome = {
 /** Per statement: a result, or the safe reason it was rejected. */
 export type QueryJobResult = {
   results: Array<
-    { ok: true; outcome: QueryOutcome } | { ok: false; code: string; message: string }
+    | { ok: true; outcome: QueryOutcome }
+    | { ok: false; code: string; message: string }
   >;
 };

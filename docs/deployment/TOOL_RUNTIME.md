@@ -233,7 +233,10 @@ to the runtime. The runtime then works as follows:
    Older servers without validators return the full file.
 3. It parses the file in a sandbox child. CSV must be UTF-8. XLSX goes through
    a zip-bomb guard and is converted to one CSV per sheet. At most 20 sheets
-   and 64 MiB expanded.
+   and 64 MiB expanded. Column types are read from the whole file, not a
+   sample, so a stray text value makes a column text instead of dropping its
+   row. Title lines above a header (as report exports write them) are detected
+   and skipped, and `inspect_table` reports the header row.
 4. It caches the parsed sheets on local disk for 30 minutes
    (`TOOL_RUNTIME_TABULAR_CACHE_TTL_SECONDS`), keyed by tenant, user and the
    downloaded bytes' hash. The cache never replaces the access check in step 2, so
@@ -243,7 +246,9 @@ to the runtime. The runtime then works as follows:
    Before any model SQL is prepared, DuckDB's external access, extensions and
    configuration are locked. Only a single `SELECT` is accepted, as determined
    by DuckDB's own parser. Queries are limited to 500 rows, 10 s, 256 MB and
-   1 thread.
+   1 thread. DuckDB's diagnosis of the model's SQL (an unknown column with the
+   candidates, a syntax error, a failed cast) is returned to the model so it
+   can correct the query; other engine errors are reported generically.
 
 Bundled calls forward opaque user and tenant IDs for caching and scheduling.
 External providers retain their identity opt-in.
