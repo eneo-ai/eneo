@@ -9,6 +9,8 @@ import type { CallContext } from "../types";
 
 // Eneo's signed original-download link: /api/v1/files/{id}/original/download/?token=…
 const FILE_PATH = /^\/api\/v1\/files\/([0-9a-f-]{36})\/original\/download\/?$/;
+// Eneo's signed link to a document template of the organisation's library.
+const TEMPLATE_PATH = /^\/api\/v1\/document-templates\/[0-9a-f-]{36}\/original\/download\/?$/;
 
 /** A file the model names by its signed Eneo URL and filename, both passed unchanged. */
 function referenceTo(extensions: readonly string[]) {
@@ -101,7 +103,11 @@ export async function fetchReference(
       "STALE_REFERENCE",
       "This link was copied from conversation history, where its token is removed. Use the url from the file's attachment reference in the current request, exactly as given. Do not ask the user to upload the file again.",
     );
-  if (url.origin !== origin || !FILE_PATH.test(url.pathname) || !url.searchParams.get("token"))
+  if (
+    url.origin !== origin ||
+    !(FILE_PATH.test(url.pathname) || TEMPLATE_PATH.test(url.pathname)) ||
+    !url.searchParams.get("token")
+  )
     throw new ToolError(
       "INVALID_URL",
       "Only signed Eneo attachment URLs are accepted. Pass the url from the attachment reference unchanged.",

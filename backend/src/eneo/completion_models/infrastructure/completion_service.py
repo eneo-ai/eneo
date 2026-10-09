@@ -49,6 +49,7 @@ if TYPE_CHECKING:
         CompletionModelAdapter,
     )
     from eneo.database.database import AsyncSession
+    from eneo.document_templates.domain import DocumentTemplateReference
     from eneo.main.container.container import Container
     from eneo.mcp_servers.domain.entities.mcp_server import MCPServer
     from eneo.mcp_servers.domain.repositories.mcp_server_tool_repo import (
@@ -458,6 +459,7 @@ class CompletionService:
         inline_file_text: bool = True,
         knowledge_catalog: str = "",
         url_only_prompt_file_ids: Collection[UUID] = (),
+        document_template: "DocumentTemplateReference | None" = None,
     ) -> CompletionModelResponse:
         if files is None:
             files = []
@@ -554,6 +556,8 @@ class CompletionService:
             )
             # Tools may only be handed links to the files minted above.
             mcp_proxy.allow_file_references(file_reference_urls)
+            if document_template is not None:
+                mcp_proxy.set_document_template(document_template)
             if model.supports_tool_calling:
                 await mcp_proxy.prepare_tools_for_context()
             logger.debug(

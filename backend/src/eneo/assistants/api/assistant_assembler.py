@@ -14,6 +14,7 @@ from eneo.collections.presentation.collection_models import CollectionPublic
 from eneo.completion_models.presentation.completion_model_assembler import (
     CompletionModelAssembler,
 )
+from eneo.document_templates.models import DocumentTemplateChoicePublic
 from eneo.files.file_models import (
     AcceptedFileType,
     FileRestrictions,
@@ -242,6 +243,10 @@ class AssistantAssembler:
             integration_knowledge_list=integration_knowledge_list,
             mcp_servers=mcp_servers,
             enabled_capabilities=assistant.enabled_capabilities,
+            document_template=DocumentTemplateChoicePublic(
+                mode=assistant.document_template.mode,
+                template_id=assistant.document_template.template_id,
+            ),
             available_capabilities=assistant.available_capabilities,
             mcp_tools=[],  # Initialize as empty - frontend will track changes from current state
             completion_model=completion_model,

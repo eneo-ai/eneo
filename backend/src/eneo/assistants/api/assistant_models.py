@@ -28,6 +28,7 @@ from eneo.ai_models.embedding_models.embedding_model import EmbeddingModelLegacy
 from eneo.collections.presentation.collection_models import CollectionPublic
 from eneo.completion_models.domain.completion_model import CompletionModel
 from eneo.data_retention.constants import MAX_RETENTION_DAYS, MIN_RETENTION_DAYS
+from eneo.document_templates.models import DocumentTemplateChoicePublic
 from eneo.files.file_models import File, FilePublic, FileRestrictions
 from eneo.groups_legacy.api.group_models import GroupInDBBase
 from eneo.info_blobs.info_blob import InfoBlobInDBWithScore
@@ -255,6 +256,13 @@ class AssistantCreatePublic(AssistantBase):
 @partial_model
 class AssistantUpdatePublic(AssistantCreatePublic):
     enabled_capabilities: list[CapabilityPurpose] | None = None
+    document_template: Optional[DocumentTemplateChoicePublic] = Field(
+        default=None,
+        description=(
+            "Which document template the file-creation capability renders with: "
+            "the organisation's default, a selected template, or Eneo's built-in."
+        ),
+    )
     prompt: Optional[PromptCreate] = None
     attachments: Optional[list[AssistantAttachmentInput]] = None
     groups: Optional[list[ModelId]] = None  # type: ignore[assignment]
@@ -394,6 +402,9 @@ class AssistantSparse(ResourcePermissionsMixin, AssistantBase, InDB):
 class AssistantPublic(InDB, ResourcePermissionsMixin):
     enabled_capabilities: list[CapabilityPurpose] = Field(
         default_factory=list[CapabilityPurpose]
+    )
+    document_template: DocumentTemplateChoicePublic = Field(
+        default_factory=DocumentTemplateChoicePublic
     )
     available_capabilities: list[CapabilityAvailability] = Field(
         default_factory=list[CapabilityAvailability]

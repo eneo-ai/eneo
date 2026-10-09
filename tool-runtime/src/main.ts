@@ -169,6 +169,7 @@ const fetch = createHandler({
   allowedFileOrigins: config.tabular.allowedFileOrigins,
   endpoints,
   builtinTemplate,
+  inspectTemplate: inspector,
   maxBodyBytes: config.maxBodyBytes,
 });
 

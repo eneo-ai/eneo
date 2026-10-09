@@ -1,6 +1,6 @@
 from datetime import datetime
 from types import SimpleNamespace
-from typing import Annotated, NoReturn, Optional, cast
+from typing import Annotated, Any, NoReturn, Optional, cast
 from uuid import UUID
 
 from fastapi import (
@@ -49,6 +49,7 @@ from eneo.conversations.document_export import (
     export_document,
 )
 from eneo.database.database import AsyncSession
+from eneo.document_templates.service import document_template_resolver
 from eneo.main.config import get_settings
 from eneo.main.container.container import Container
 from eneo.main.exceptions import (
@@ -928,6 +929,9 @@ async def get_document_export_availability(
         file_service=container.file_service(),
         proxy_factory=container.mcp_proxy_session_factory(),
         identity_headers=build_identity_headers(container.user(), container.tenant()),
+        template_resolver=document_template_resolver(
+            cast(Any, container.session()), container.user().tenant_id
+        ),
     )
 
 
@@ -1016,6 +1020,9 @@ async def export_conversation_document(
             file_service=container.file_service(),
             proxy_factory=container.mcp_proxy_session_factory(),
             identity_headers=build_identity_headers(current_user, container.tenant()),
+            template_resolver=document_template_resolver(
+                cast(Any, container.session()), current_user.tenant_id
+            ),
         )
     except DocumentExportUnavailable as exc:
         await audit(extra={"reason": exc.reason}, refused="unavailable")

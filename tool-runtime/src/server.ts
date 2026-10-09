@@ -42,7 +42,10 @@ export type ServerOptions = {
   builtinTemplate?: (language: "sv" | "en") => Promise<Buffer>;
   /** Largest request body accepted; defaults to 256 KiB. */
   maxBodyBytes?: number;
+  /** Reads a Word template's fields and checks, at POST /templates/inspect (a .docx body). */
+  inspectTemplate?: (template: Buffer) => Promise<unknown>;
 };
+const MAX_TEMPLATE_BYTES = 5 * 1024 * 1024;
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
@@ -108,7 +111,9 @@ export function createHandler(options: ServerOptions) {
     const endpoint = match ? endpoints.get(match[1]!) : undefined;
     const diagnostics = url.pathname === "/diagnostics";
     const template = url.pathname === "/templates/builtin.docx" && !!options.builtinTemplate;
-    if (!endpoint && !diagnostics && !template) return new Response("Not found", { status: 404 });
+    const inspect = url.pathname === "/templates/inspect" && !!options.inspectTemplate;
+    if (!endpoint && !diagnostics && !template && !inspect)
+      return new Response("Not found", { status: 404 });
     if (request.headers.has("origin")) return new Response("Forbidden origin", { status: 403 });
     const header = request.headers.get("authorization") ?? "";
     if (!header.startsWith("Bearer ") || !equalSecret(header.slice(7), options.token))
@@ -116,6 +121,22 @@ export function createHandler(options: ServerOptions) {
         status: 401,
         headers: { "www-authenticate": "Bearer" },
       });
+    if (inspect) {
+      if (request.method !== "POST") return new Response("Method not allowed", { status: 405 });
+      if (controlActive >= 4) return new Response("Busy", { status: 429 });
+      controlActive++;
+      try {
+        const bytes = Buffer.from(await request.arrayBuffer());
+        if (bytes.length > MAX_TEMPLATE_BYTES)
+          return new Response("Template too large", { status: 413 });
+        return Response.json(await options.inspectTemplate!(bytes));
+      } catch (error) {
+        const failure = publicError(error);
+        return Response.json(failure, { status: failure.code === "INTERNAL_ERROR" ? 500 : 422 });
+      } finally {
+        controlActive--;
+      }
+    }
     if (template) {
       if (request.method !== "GET") return new Response("Method not allowed", { status: 405 });
       const language = url.searchParams.get("language") ?? "sv";
