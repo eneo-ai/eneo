@@ -60,8 +60,6 @@ def sync_log_database(integration_access):
             user=integration_access.user,
             factory=MagicMock(),
             file_content_loader=MagicMock(),
-            app_repo=None,
-            assistant_repo=MagicMock(),
             completion_model_repo=MagicMock(),
             transcription_model_repo=MagicMock(),
             embedding_model_repo=MagicMock(),

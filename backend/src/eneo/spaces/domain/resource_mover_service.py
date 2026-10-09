@@ -10,12 +10,14 @@ if TYPE_CHECKING:
     from uuid import UUID
 
     from eneo.actors import ActorManager
+    from eneo.assistants.assistant_repo import AssistantRepository
     from eneo.groups_legacy.group_service import GroupService
     from eneo.skills.domain.skill_repo import SkillRepo
     from eneo.spaces.space import Space
     from eneo.spaces.space_repo import SpaceRepository
     from eneo.spaces.space_service import SpaceService
     from eneo.users.user import UserInDB
+    from eneo.websites.infrastructure.website_repo import WebsiteRepository
 
 
 class ResourceMoverService:
@@ -27,6 +29,8 @@ class ResourceMoverService:
         actor_manager: "ActorManager",
         group_service: "GroupService",
         skill_repo: "SkillRepo",
+        assistant_repo: "AssistantRepository",
+        website_repo: "WebsiteRepository",
     ):
         super().__init__()
         self.user = user
@@ -35,6 +39,8 @@ class ResourceMoverService:
         self.actor_manager = actor_manager
         self.group_service = group_service
         self.skill_repo = skill_repo
+        self.assistant_repo = assistant_repo
+        self.website_repo = website_repo
 
     def _require_same_tenant(self, *spaces: "Space") -> None:
         """Moves and links never cross a tenant boundary.
@@ -75,41 +81,7 @@ class ResourceMoverService:
         if website.id not in [w.id for w in target_space.websites]:
             target_space.add_website(website)
 
-        await self.space_repo.update(space=target_space)
-
-    async def move_website_to_space(self, website_id: "UUID", space_id: "UUID"):
-        """
-        Flyttar websiten (med unlink från källan) - ändrar INTE owner i den här versionen.
-        Rekommenderas att använda link_website_to_space istället.
-        """
-        source_space = await self.space_service.get_space_by_website(website_id)
-        source_actor = self.actor_manager.get_space_actor_from_space(source_space)
-
-        if not source_actor.can_delete_websites():
-            raise UnauthorizedException(
-                "User does not have permission to move website from space"
-            )
-
-        target_space = await self.space_service.get_space(space_id)
-        target_actor = self.actor_manager.get_space_actor_from_space(target_space)
-
-        if not target_actor.can_create_websites():
-            raise UnauthorizedException(
-                "User does not have permission to create websites in the space"
-            )
-
-        self._require_same_tenant(source_space, target_space)
-        website = source_space.get_website(website_id)
-        self._require_resources_in_tenant(website.tenant_id)
-
-        if website.id not in [w.id for w in target_space.websites]:
-            target_space.add_website(website)
-
-        if website in source_space.websites:
-            source_space.remove_website(website)
-
-        await self.space_repo.update(space=target_space)
-        await self.space_repo.update(space=source_space)
+        await self.website_repo.link(website_id, space_id)
 
     async def move_collection_to_space(self, collection_id: "UUID", space_id: "UUID"):
         source_space = await self.space_service.get_space_by_collection(collection_id)
@@ -162,12 +134,30 @@ class ResourceMoverService:
 
         self._require_same_tenant(source_space, target_space)
 
+        assert source_space.id is not None and target_space.id is not None
+        if source_space.id == target_space.id:
+            raise BadRequestException("Assistant is already in the space")
+        # Lock parents in stable order before the assistant, then re-read access
+        # facts. Membership and settings writes take the same parent lock.
+        for locked_id in sorted({source_space.id, target_space.id}, key=str):
+            await self.space_repo.lock(locked_id)
+        target_space = await self.space_service.get_space(space_id)
+        target_space_actor = self.actor_manager.get_space_actor_from_space(target_space)
+        if not target_space_actor.can_create_assistants():
+            raise UnauthorizedException(
+                "User cannot create assistants in the target space"
+            )
+
         locked_source_space_id = await self.skill_repo.lock_assistant_space_for_update(
             assistant_id=assistant_id
         )
         if locked_source_space_id is None:
             raise NotFoundException()
 
+        if locked_source_space_id != source_space.id:
+            raise BadRequestException(
+                "Assistant moved concurrently; reload before retrying"
+            )
         source_space = await self.space_service.get_space(locked_source_space_id)
         source_space_actor = self.actor_manager.get_space_actor_from_space(source_space)
         if not source_space_actor.can_delete_assistants():
@@ -189,8 +179,16 @@ class ResourceMoverService:
                 *(website.tenant_id for website in assistant.websites),
             )
 
+        if assistant.is_default:
+            raise BadRequestException(
+                "The default assistant cannot move between spaces"
+            )
+        model = assistant.completion_model
+        enable_model = (
+            model is not None
+            and not target_space.is_completion_model_in_space(model.id)
+        )
         target_space.add_assistant(assistant)
-        source_space.remove_assistant(assistant)
 
         if move_resources:
             for collection in assistant.collections:
@@ -223,6 +221,8 @@ class ResourceMoverService:
 
                 if website.id not in [w.id for w in target_space.websites]:
                     target_space.add_website(website)
+                await self.website_repo.link(website.id, space_id)
 
-        await self.space_repo.update(space=target_space)
-        await self.space_repo.update(space=source_space)
+        if enable_model and model is not None:
+            await self.space_repo.enable_completion_model(space_id, model.id)
+        await self.assistant_repo.move(assistant_id, locked_source_space_id, space_id)

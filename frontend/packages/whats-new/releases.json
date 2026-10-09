@@ -165,6 +165,19 @@
             "en": "Signing in with username and password no longer fails with a generic error when Eneo runs behind a reverse proxy and the public address was never registered for the backend. When the sign-in service cannot be reached you are told so, instead of being asked to check your password. Integrations that use a secret API key are accepted even when their requests carry a browser Origin header.",
             "sv": "Inloggning med användarnamn och lösenord misslyckas inte längre med ett allmänt fel när Eneo körs bakom en omvänd proxy och den publika adressen aldrig registrerats i backend. När inloggningstjänsten inte går att nå får du veta det, i stället för att uppmanas kontrollera lösenordet. Integrationer som använder en hemlig API-nyckel accepteras även när deras anrop skickar med en Origin-header från webbläsaren."
           }
+        },
+        {
+          "id": "space-changes-preserve-resources",
+          "type": "fixed",
+          "area": "spaces",
+          "title": {
+            "en": "Keep resources when changing a Space",
+            "sv": "Behåll resurser när du ändrar ett Space"
+          },
+          "body": {
+            "en": "Changing a Space or one of its resources preserves other assistants, group chat members and saved selections, including resources that are temporarily unavailable. Memberships also remain when a removed user is reactivated.",
+            "sv": "När du ändrar ett Space eller en av dess resurser bevaras andra assistenter, gruppchattmedlemmar och sparade val, även för resurser som tillfälligt inte är tillgängliga. Medlemskap finns också kvar när en borttagen användare återaktiveras."
+          }
         }
       ]
     },

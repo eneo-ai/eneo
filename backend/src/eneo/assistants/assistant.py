@@ -123,10 +123,6 @@ class Assistant(Entity):
         self.available_capabilities: list[CapabilityAvailability] = []
         self.icon_id = icon_id
 
-        # Temporary attributes for update flow - not persisted directly
-        self._mcp_server_ids: list[UUID] | None = None
-        self._mcp_tool_settings: list[tuple[UUID, bool]] | None = None
-
     def _validate_embedding_model(self, items: _KnowledgeItemList):
         embedding_model_id_set = set([item.embedding_model.id for item in items])
         if len(embedding_model_id_set) != 1 or (

@@ -555,7 +555,7 @@ class SpaceFactory:
             item_kind="group_chat",
             build_fn=lambda group_chat: GroupChatFactory.create_group_chat_from_db(
                 group_chat_db=group_chat,
-                assistants=space_assistants,
+                assistants=all_assistants,
             ),
         )
 

@@ -8,13 +8,14 @@ from eneo.main.exceptions import (
     NotFoundException,
     UnauthorizedException,
 )
-from eneo.main.models import NOT_PROVIDED, NotProvided
+from eneo.main.models import NOT_PROVIDED, NotProvided, is_provided
 from eneo.websites.domain.crawl_run_repo import (
     CrawlDeletionBlocker,
     WebsiteCrawlActiveError,
     WebsiteCrawlCleanupPendingError,
 )
 from eneo.websites.domain.website import UpdateInterval, Website
+from eneo.websites.infrastructure.website_repo import WebsiteRepository
 
 if TYPE_CHECKING:
     from eneo.actors.actor_manager import ActorManager
@@ -54,6 +55,7 @@ class WebsiteCRUDService:
         self,
         user: "UserInDB",
         space_service: "SpaceService",
+        website_repo: WebsiteRepository,
         space_repo: "SpaceRepository",
         crawl_run_repo: "CrawlRunRepository",
         actor_manager: "ActorManager",
@@ -62,6 +64,7 @@ class WebsiteCRUDService:
         super().__init__()
         self.user = user
         self.space_service = space_service
+        self.website_repo = website_repo
         self.space_repo = space_repo
         self.crawl_run_repo = crawl_run_repo
         self.actor_manager = actor_manager
@@ -106,8 +109,8 @@ class WebsiteCRUDService:
             http_auth_password=http_auth_password,
         )
 
-        space.add_website(website)
-        updated_space = await self.space_repo.update(space=space)
+        await self.website_repo.add(website)
+        updated_space = await self.space_service.get_space(space_id)
         new_website = updated_space.get_website(website_id=website.id)
 
         await self.crawl_service.crawl(website=new_website)
@@ -157,7 +160,20 @@ class WebsiteCRUDService:
             # input validation, not server faults.
             raise BadRequestException(str(exc)) from exc
 
-        await self.space_repo.update(space=space)
+        await self.website_repo.update(
+            id,
+            website.space_id,
+            name=name,
+            url=url,
+            download_files=download_files,
+            crawl_type=crawl_type,
+            update_interval=update_interval,
+            http_auth=(
+                website.http_auth
+                if is_provided(http_auth_username) or is_provided(http_auth_password)
+                else NOT_PROVIDED
+            ),
+        )
 
         return website
 
@@ -192,7 +208,7 @@ class WebsiteCRUDService:
             raise WebsiteCrawlActiveError()
         if blocker == CrawlDeletionBlocker.TRANSPORT_CLEANUP:
             raise WebsiteCrawlCleanupPendingError()
-        await self.space_repo.hard_delete_website(
+        await self.website_repo.delete(
             website_id=website.id,
             owner_space_id=owner_space_id,
         )

@@ -495,20 +495,6 @@ class Space:
 
         self.websites.append(website)
 
-    def remove_website(self, website: "Website"):
-        for assistant in self.assistants:
-            assistant.websites = [w for w in assistant.websites if w.id != website.id]
-
-        self.websites.remove(website)
-
-    def add_group_chat(self, group_chat: "GroupChat"):
-        assert self.group_chats is not None
-        self.group_chats.append(group_chat)
-
-    def remove_group_chat(self, group_chat: "GroupChat"):
-        assert self.group_chats is not None
-        self.group_chats.remove(group_chat)
-
     def add_assistant(self, assistant: "Assistant"):
         if assistant.id in [a.id for a in self.assistants]:
             raise BadRequestException("Assistant is already in the space")
@@ -520,32 +506,6 @@ class Space:
                 self.add_completion_model(cm)
 
         self.assistants.append(assistant)
-
-    def remove_assistant(self, assistant: "Assistant"):
-        for group_chat in self.group_chats or []:
-            group_chat.assistants = [
-                a for a in group_chat.assistants if a.assistant.id != assistant.id
-            ]
-
-        self.assistants.remove(assistant)
-
-    def add_collection_owner_move(self, collection: "Collection"):
-        """Byter ägare på en collection till detta space (uppdaterar FK i DB).
-        Använd INTE för import/delning."""
-
-        if collection.id in [_c.id for _c in self.collections]:
-            raise BadRequestException("Collection is already owned by the space")
-        if not self.is_embedding_model_in_space(collection.embedding_model.id):
-            raise BadRequestException("Embedding model is not in the space")
-        self.collections.append(collection)
-
-    def remove_collection(self, collection: "Collection"):
-        for assistant in self.assistants:
-            assistant.collections = [
-                c for c in assistant.collections if c.id != collection.id
-            ]
-
-        self.collections = [c for c in self.collections if c.id != collection.id]
 
     def can_use_knowledge(
         self, knowledge: list[Union["Website", "Collection", "IntegrationKnowledge"]]

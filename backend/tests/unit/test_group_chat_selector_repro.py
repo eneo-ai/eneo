@@ -49,6 +49,7 @@ def _make_service(selector_text: str) -> GroupChatService:
     return GroupChatService(
         user=MagicMock(),
         space_service=MagicMock(),
+        group_chat_repo=AsyncMock(),
         space_repo=MagicMock(),
         actor_manager=MagicMock(),
         assistant_service=MagicMock(),

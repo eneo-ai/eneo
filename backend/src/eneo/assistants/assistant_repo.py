@@ -2,7 +2,7 @@ from collections import defaultdict
 from collections.abc import AsyncIterator, Mapping, Sequence
 from dataclasses import dataclass
 from datetime import datetime
-from typing import TYPE_CHECKING, cast
+from typing import TYPE_CHECKING
 from uuid import UUID
 
 import sqlalchemy as sa
@@ -12,10 +12,16 @@ from sqlalchemy.orm import selectinload
 
 from eneo.assistants.assistant import Assistant
 from eneo.assistants.assistant_factory import AssistantFactory
+from eneo.assistants.assistant_update import AssistantUpdate
+from eneo.database.association_writes import (
+    replace_association_ids,
+    replace_association_values,
+)
 from eneo.database.database import AsyncSession
 from eneo.database.tables.assistant_table import (
     AssistantIntegrationKnowledge,
     AssistantMCPServers,
+    AssistantMCPServerTools,
     Assistants,
     AssistantsFiles,
     AssistantsGroups,
@@ -24,6 +30,10 @@ from eneo.database.tables.assistant_table import (
 from eneo.database.tables.assistant_template_table import AssistantTemplates
 from eneo.database.tables.capabilities_table import AssistantCapabilities
 from eneo.database.tables.collections_table import CollectionsTable
+from eneo.database.tables.group_chats_table import (
+    GroupChatsAssistantsMapping,
+    GroupChatsTable,
+)
 from eneo.database.tables.help_assistant_assignment_history_table import (
     HelpAssistantAssignmentHistory,
 )
@@ -45,23 +55,18 @@ from eneo.database.tables.websites_table import Websites
 from eneo.files.file_content_loader import FileAttachmentGroup, FileContentLoader
 from eneo.files.file_models import File, FileMetadata, FileType
 from eneo.files.file_repo import FileRepository
-from eneo.main.exceptions import BadRequestException
+from eneo.main.exceptions import BadRequestException, NotFoundException
 from eneo.mcp_servers.infrastructure.mappers.mcp_server_mapper import MCPServerMapper
 from eneo.prompts.prompt import Prompt
 from eneo.skills.domain.skill import PersonalDefaultsSnapshot
 
 if TYPE_CHECKING:
-    from eneo.collections.domain.collection import Collection
     from eneo.completion_models.domain.completion_model import CompletionModel
     from eneo.completion_models.domain.completion_model_repo import (
         CompletionModelRepository,
     )
-    from eneo.integration.domain.entities.integration_knowledge import (
-        IntegrationKnowledge as DomainIntegrationKnowledge,
-    )
     from eneo.mcp_servers.domain.entities.mcp_server import MCPServer
     from eneo.users.user import UserInDB
-    from eneo.websites.domain.website import Website
 
 
 @dataclass(frozen=True)
@@ -456,149 +461,17 @@ class AssistantRepository:
 
         return await self.session.scalar(stmt)
 
-    async def _set_attachments(
-        self,
-        assistant_in_db: Assistants,
-        attachments: list[File],
-        inline_text_by_id: Mapping[UUID, bool] | None = None,
-    ):
-        inline_text_by_id = inline_text_by_id or {}
-        # Delete all
-        stmt = sa.delete(AssistantsFiles).where(
-            AssistantsFiles.assistant_id == assistant_in_db.id
-        )
-        await self.session.execute(stmt)
-
-        # Add attachments
-        if attachments:
-            attachments_dicts = [
-                dict(
-                    assistant_id=assistant_in_db.id,
-                    file_id=file.id,
-                    inline_text=inline_text_by_id.get(file.id, True),
-                )
-                for file in attachments
-            ]
-
-            stmt = sa.insert(AssistantsFiles).values(attachments_dicts)
-            await self.session.execute(stmt)
-
-        await self.session.refresh(assistant_in_db)
-
-    async def _set_collections(
-        self, assistant_in_db: Assistants, collections: list["Collection"]
-    ):
-        # Delete all
-        stmt = sa.delete(AssistantsGroups).where(
-            AssistantsGroups.assistant_id == assistant_in_db.id
-        )
-        await self.session.execute(stmt)
-
-        if collections:
-            stmt = sa.insert(AssistantsGroups).values(
-                [
-                    dict(group_id=group.id, assistant_id=assistant_in_db.id)
-                    for group in collections
-                ]
-            )
-            await self.session.execute(stmt)
-
-        await self.session.refresh(assistant_in_db)
-
-    async def _set_websites(
-        self, assistant_in_db: Assistants, websites: list["Website"]
-    ):
-        # Delete all
-        stmt = sa.delete(AssistantsWebsites).where(
-            AssistantsWebsites.assistant_id == assistant_in_db.id
-        )
-        await self.session.execute(stmt)
-
-        if websites:
-            stmt = sa.insert(AssistantsWebsites).values(
-                [
-                    dict(website_id=website.id, assistant_id=assistant_in_db.id)
-                    for website in websites
-                ]
-            )
-            await self.session.execute(stmt)
-
-        await self.session.refresh(assistant_in_db)
-
-    async def _set_integration_knowledge(
-        self,
-        assistant_in_db: Assistants,
-        integration_knowledge: list["DomainIntegrationKnowledge"],
-    ):
-        # Delete all
-        stmt = sa.delete(AssistantIntegrationKnowledge).where(
-            AssistantIntegrationKnowledge.assistant_id == assistant_in_db.id
-        )
-        await self.session.execute(stmt)
-
-        if integration_knowledge:
-            stmt = sa.insert(AssistantIntegrationKnowledge).values(
-                [
-                    dict(
-                        integration_knowledge_id=knowledge.id,
-                        assistant_id=assistant_in_db.id,
-                    )
-                    for knowledge in integration_knowledge
-                ]
-            )
-            await self.session.execute(stmt)
-
-        await self.session.refresh(assistant_in_db)
-
-    async def set_mcp_servers(
-        self,
-        assistant_in_db: Assistants,
-        mcp_server_ids: list[UUID],
-    ):
-        """Set MCP server associations for an assistant.
-
-        Args:
-            assistant_in_db: The assistant database record
-            mcp_server_ids: List of MCP server IDs to associate
-        """
-        # Delete all existing associations
-        stmt = sa.delete(AssistantMCPServers).where(
-            AssistantMCPServers.assistant_id == assistant_in_db.id
-        )
-        await self.session.execute(stmt)
-
-        if mcp_server_ids:
-            values = [
-                {
-                    "assistant_id": assistant_in_db.id,
-                    "mcp_server_id": server_id,
-                }
-                for server_id in mcp_server_ids
-            ]
-
-            stmt = sa.insert(AssistantMCPServers).values(values)
-            await self.session.execute(stmt)
-
-        await self.session.refresh(assistant_in_db)
-
     async def _set_mcp_tools(
         self,
-        assistant_in_db: Assistants,
+        assistant_id: UUID,
         mcp_tool_settings: list[tuple[UUID, bool]],
     ):
         """Set MCP tool overrides for an assistant.
 
         Args:
-            assistant_in_db: The assistant database record
+            assistant_id: The assistant whose override list is explicitly replaced
             mcp_tool_settings: List of (tool_id, is_enabled) tuples
         """
-        from eneo.database.tables.assistant_table import AssistantMCPServerTools
-
-        # Delete all existing tool overrides
-        stmt = sa.delete(AssistantMCPServerTools).where(
-            AssistantMCPServerTools.assistant_id == assistant_in_db.id
-        )
-        await self.session.execute(stmt)
 
         if mcp_tool_settings:
             from eneo.database.tables.mcp_server_table import (
@@ -606,7 +479,7 @@ class AssistantRepository:
             )
 
             server_ids_stmt = sa.select(AssistantMCPServers.mcp_server_id).where(
-                AssistantMCPServers.assistant_id == assistant_in_db.id
+                AssistantMCPServers.assistant_id == assistant_id
             )
             server_ids_result = await self.session.execute(server_ids_stmt)
             valid_server_ids = [row[0] for row in server_ids_result.fetchall()]
@@ -631,19 +504,15 @@ class AssistantRepository:
                     + ", ".join(invalid_tool_ids)
                 )
 
-            values = [
-                {
-                    "assistant_id": assistant_in_db.id,
-                    "mcp_server_tool_id": tool_id,
-                    "is_enabled": is_enabled,
-                }
-                for tool_id, is_enabled in mcp_tool_settings
-            ]
-
-            stmt = sa.insert(AssistantMCPServerTools).values(values)
-            await self.session.execute(stmt)
-
-        await self.session.refresh(assistant_in_db)
+        await replace_association_values(
+            self.session,
+            AssistantMCPServerTools,
+            AssistantMCPServerTools.assistant_id,
+            assistant_id,
+            AssistantMCPServerTools.mcp_server_tool_id,
+            AssistantMCPServerTools.is_enabled,
+            dict(mcp_tool_settings),
+        )
 
     async def _get_groups(self, assistant_id: UUID):
         query = (
@@ -713,27 +582,35 @@ class AssistantRepository:
                 template_id=template_id,
                 type=assistant.type,
                 description=assistant.description,
+                insight_enabled=assistant.insight_enabled,
+                inline_file_text=assistant.inline_file_text,
+                knowledge_mode=assistant.knowledge_mode,
+                data_retention_days=assistant.data_retention_days,
+                metadata_json=assistant.metadata_json,
+                icon_id=assistant.icon_id,
             )
-            .returning(Assistants)
+            .returning(Assistants.id)
         )
-        entry_in_db = await self.session.scalar(query)
-        assert entry_in_db is not None
-
-        entry_in_db.capabilities = [
-            AssistantCapabilities(purpose=p)
-            for p in sorted(set(assistant.enabled_capabilities))
-        ]
-        # Assign groups and websites
-        await self._set_collections(entry_in_db, assistant.collections)
-        await self._set_websites(entry_in_db, assistant.websites)
-        await self._set_attachments(
-            entry_in_db,
-            attachments=assistant.attachments,
-            inline_text_by_id=assistant.attachment_inline_text,
+        assistant_id = await self.session.scalar(query)
+        assert assistant_id is not None
+        await self.apply_update(
+            assistant_id,
+            assistant.space_id,
+            AssistantUpdate(
+                collection_ids=[collection.id for collection in assistant.collections],
+                website_ids=[website.id for website in assistant.websites],
+                integration_knowledge_ids=[
+                    knowledge.id for knowledge in assistant.integration_knowledge_list
+                ],
+                attachments=[
+                    (file.id, assistant.attachment_inline_text.get(file.id, True))
+                    for file in assistant.attachments
+                ],
+                enabled_capabilities=assistant.enabled_capabilities,
+                mcp_server_ids=[server.id for server in assistant.mcp_servers],
+                prompt=assistant.prompt,
+            ),
         )
-
-        if assistant.prompt:
-            await self._add_prompt(assistant_id=entry_in_db.id, prompt=assistant.prompt)
 
     async def get_for_user(
         self,
@@ -993,80 +870,176 @@ class AssistantRepository:
             )
         return inputs
 
-    async def update(
-        self,
-        assistant: Assistant,
-        mcp_server_ids: list[UUID] | None = None,
-        mcp_tool_settings: list[tuple[UUID, bool]] | None = None,
-    ):
-        completion_model_id = (
-            assistant.completion_model.id
-            if assistant.completion_model is not None
-            else None
+    async def lock(self, assistant_id: UUID, space_id: UUID) -> None:
+        record = await self.session.scalar(
+            sa.select(Assistants.id)
+            .where(
+                Assistants.id == assistant_id,
+                Assistants.space_id == space_id,
+            )
+            .with_for_update()
         )
-        query = (
-            sa.update(Assistants)
+        if record is None:
+            raise NotFoundException("Assistant not found")
+
+    async def add_mcp_server(
+        self, assistant_id: UUID, space_id: UUID, server_id: UUID
+    ) -> None:
+        from sqlalchemy.dialects.postgresql import insert
+
+        await self.lock(assistant_id, space_id)
+        await self.session.execute(
+            insert(AssistantMCPServers)
             .values(
-                name=assistant.name,
-                completion_model_id=completion_model_id,
-                completion_model_kwargs=assistant.completion_model_kwargs.model_dump(),
-                logging_enabled=assistant.logging_enabled,
-                space_id=assistant.space_id,
-                published=assistant.published,
-                description=assistant.description,
-                type=assistant.type,
-                insight_enabled=assistant.insight_enabled,
-                inline_file_text=assistant.inline_file_text,
-                knowledge_mode=assistant.knowledge_mode,
-                data_retention_days=assistant.data_retention_days,
-                metadata_json=assistant.metadata_json,
-                icon_id=assistant.icon_id,
+                assistant_id=assistant_id,
+                mcp_server_id=server_id,
             )
-            .where(Assistants.id == assistant.id)
-            .returning(Assistants)
+            .on_conflict_do_nothing()
         )
-        entry_in_db = await self.session.scalar(query)
-        assert entry_in_db is not None
-
-        entry_in_db.capabilities = [
-            AssistantCapabilities(purpose=p)
-            for p in sorted(set(assistant.enabled_capabilities))
-        ]
-        # assign groups and websites
-        await self._set_collections(entry_in_db, assistant.collections)
-        await self._set_websites(entry_in_db, assistant.websites)
-        await self._set_integration_knowledge(
-            entry_in_db, assistant.integration_knowledge_list
-        )
-        await self._set_attachments(
-            entry_in_db,
-            attachments=assistant.attachments,
-            inline_text_by_id=assistant.attachment_inline_text,
+        await self.session.execute(
+            sa.update(Assistants)
+            .where(
+                Assistants.id == assistant_id,
+            )
+            .values(updated_at=sa.func.now())
         )
 
-        # Set MCP servers/tool overrides explicitly when provided by caller.
-        # Backward-compatible fallback to legacy side-channel attributes.
-        effective_mcp_server_ids = mcp_server_ids
-        if effective_mcp_server_ids is None:
-            assistant_mcp_server_ids = cast(
-                list[UUID] | None, getattr(assistant, "_mcp_server_ids", None)
+    async def remove_mcp_server(
+        self, assistant_id: UUID, space_id: UUID, server_id: UUID
+    ) -> None:
+        await self.lock(assistant_id, space_id)
+        await self.session.execute(
+            sa.delete(AssistantMCPServers).where(
+                AssistantMCPServers.assistant_id == assistant_id,
+                AssistantMCPServers.mcp_server_id == server_id,
             )
-            if assistant_mcp_server_ids is not None:
-                effective_mcp_server_ids = assistant_mcp_server_ids
-
-        effective_mcp_tool_settings = mcp_tool_settings
-        if effective_mcp_tool_settings is None:
-            assistant_mcp_tool_settings = cast(
-                list[tuple[UUID, bool]] | None,
-                getattr(assistant, "_mcp_tool_settings", None),
+        )
+        await self.session.execute(
+            sa.update(Assistants)
+            .where(
+                Assistants.id == assistant_id,
             )
-            if assistant_mcp_tool_settings is not None:
-                effective_mcp_tool_settings = assistant_mcp_tool_settings
+            .values(updated_at=sa.func.now())
+        )
 
-        if effective_mcp_server_ids is not None:
-            await self.set_mcp_servers(entry_in_db, effective_mcp_server_ids)
-        if effective_mcp_tool_settings is not None:
-            await self._set_mcp_tools(entry_in_db, effective_mcp_tool_settings)
+    async def apply_update(
+        self, assistant_id: UUID, space_id: UUID, change: AssistantUpdate
+    ) -> None:
+        await self.lock(assistant_id, space_id)
+        values = change.scalar_values()
+        if any(
+            selection is not None
+            for selection in (
+                change.collection_ids,
+                change.website_ids,
+                change.integration_knowledge_ids,
+                change.attachments,
+                change.enabled_capabilities,
+                change.mcp_server_ids,
+                change.mcp_tools,
+                change.prompt,
+            )
+        ):
+            # Governance/attachment fit snapshots use the parent row version.
+            # A relation-only write must invalidate that snapshot too.
+            values["updated_at"] = sa.func.now()
+        if values:
+            await self.session.execute(
+                sa.update(Assistants)
+                .where(
+                    Assistants.id == assistant_id,
+                    Assistants.space_id == space_id,
+                )
+                .values(**values)
+            )
+        if change.collection_ids is not None:
+            await replace_association_ids(
+                self.session,
+                AssistantsGroups,
+                AssistantsGroups.assistant_id,
+                assistant_id,
+                AssistantsGroups.group_id,
+                change.collection_ids,
+            )
+        if change.website_ids is not None:
+            await replace_association_ids(
+                self.session,
+                AssistantsWebsites,
+                AssistantsWebsites.assistant_id,
+                assistant_id,
+                AssistantsWebsites.website_id,
+                change.website_ids,
+            )
+        if change.integration_knowledge_ids is not None:
+            await replace_association_ids(
+                self.session,
+                AssistantIntegrationKnowledge,
+                AssistantIntegrationKnowledge.assistant_id,
+                assistant_id,
+                AssistantIntegrationKnowledge.integration_knowledge_id,
+                change.integration_knowledge_ids,
+            )
+        if change.attachments is not None:
+            await replace_association_values(
+                self.session,
+                AssistantsFiles,
+                AssistantsFiles.assistant_id,
+                assistant_id,
+                AssistantsFiles.file_id,
+                AssistantsFiles.inline_text,
+                dict(change.attachments),
+            )
+        if change.enabled_capabilities is not None:
+            await replace_association_ids(
+                self.session,
+                AssistantCapabilities,
+                AssistantCapabilities.assistant_id,
+                assistant_id,
+                AssistantCapabilities.purpose,
+                change.enabled_capabilities,
+            )
+        if change.mcp_server_ids is not None:
+            await replace_association_ids(
+                self.session,
+                AssistantMCPServers,
+                AssistantMCPServers.assistant_id,
+                assistant_id,
+                AssistantMCPServers.mcp_server_id,
+                change.mcp_server_ids,
+            )
+        if change.mcp_tools is not None:
+            await self._set_mcp_tools(assistant_id, change.mcp_tools)
+        if change.prompt is not None:
+            await self._add_prompt(assistant_id, change.prompt)
 
-        if assistant.prompt:
-            await self._add_prompt(assistant_id=entry_in_db.id, prompt=assistant.prompt)
+    async def delete(self, assistant_id: UUID, space_id: UUID) -> None:
+        await self.session.execute(
+            sa.delete(Assistants).where(
+                Assistants.id == assistant_id,
+                Assistants.space_id == space_id,
+            )
+        )
+
+    async def move(
+        self, assistant_id: UUID, source_space_id: UUID, target_space_id: UUID
+    ) -> None:
+        # The service locks and reauthorizes the current owner before moving.
+        # Move the FK, then remove seats in the source; never delete the assistant.
+        await self.session.execute(
+            sa.update(Assistants)
+            .where(
+                Assistants.id == assistant_id,
+                Assistants.space_id == source_space_id,
+            )
+            .values(space_id=target_space_id)
+        )
+        await self.session.execute(
+            sa.delete(GroupChatsAssistantsMapping).where(
+                GroupChatsAssistantsMapping.assistant_id == assistant_id,
+                GroupChatsAssistantsMapping.group_chat_id.in_(
+                    sa.select(GroupChatsTable.id).where(
+                        GroupChatsTable.space_id == source_space_id,
+                    )
+                ),
+            )
+        )

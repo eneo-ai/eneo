@@ -14,6 +14,7 @@ from eneo.group_chat.domain.entities.group_chat import (
     GroupChatAssistant,
     GroupChatAssistantData,
 )
+from eneo.group_chat.infrastructure.group_chat_repo import GroupChatRepository
 from eneo.main.exceptions import BadRequestException, UnauthorizedException
 from eneo.main.models import NOT_PROVIDED, NotProvided
 from eneo.questions.question import ToolAssistant, UseTools
@@ -56,6 +57,7 @@ class GroupChatService:
         user: "UserInDB",
         space_service: "SpaceService",
         space_repo: "SpaceRepository",
+        group_chat_repo: GroupChatRepository,
         actor_manager: "ActorManager",
         assistant_service: "AssistantService",
         session_service: "SessionService",
@@ -66,6 +68,7 @@ class GroupChatService:
         self.user = user
         self.space_service = space_service
         self.space_repo = space_repo
+        self.group_chat_repo = group_chat_repo
         self.actor_manager = actor_manager
         self.assistant_service = assistant_service
         self.session_service = session_service
@@ -91,8 +94,8 @@ class GroupChatService:
             name=name, space_id=space_id, user_id=self.user.id
         )
 
-        space.add_group_chat(group_chat)
-        updated_space = await self.space_repo.update(space=space)
+        await self.group_chat_repo.add(group_chat)
+        updated_space = await self.space_service.get_space(space_id)
 
         return updated_space.get_group_chat(group_chat_id=group_chat.id)
 
@@ -116,8 +119,7 @@ class GroupChatService:
         group_chat = space.get_group_chat(group_chat_id=group_chat_id)
         icon_id = group_chat.icon_id
 
-        space.remove_group_chat(group_chat)
-        await self.space_repo.update(space=space)
+        await self.group_chat_repo.delete(group_chat_id, group_chat.space_id)
 
         if icon_id:
             await self.icon_repo.delete(icon_id)
@@ -180,7 +182,23 @@ class GroupChatService:
             icon_id=icon_id,
         )
 
-        updated_space = await self.space_repo.update(space=space)
+        await self.group_chat_repo.update(
+            id,
+            group_chat.space_id,
+            name=name,
+            allow_mentions=allow_mentions,
+            show_response_label=show_response_label,
+            published=published,
+            insight_enabled=insight_enabled,
+            metadata_json=metadata_json,
+            icon_id=icon_id,
+            members=(
+                {member.id: member.user_description for member in current_assistants}
+                if current_assistants is not None
+                else None
+            ),
+        )
+        updated_space = await self.space_service.get_space(group_chat.space_id)
 
         updated_group_chat = updated_space.get_group_chat(group_chat_id=id)
         updated_group_chat.permissions = actor.get_group_chat_permissions(
@@ -592,7 +610,12 @@ class GroupChatService:
         group_chat.update(published=publish)
 
         # Pass the updated group chat to the repository
-        updated_space = await self.space_repo.update(space=space)
+        await self.group_chat_repo.update(
+            group_chat_id,
+            group_chat.space_id,
+            published=publish,
+        )
+        updated_space = await self.space_service.get_space(group_chat.space_id)
         updated_group_chat = updated_space.get_group_chat(group_chat_id=group_chat_id)
         updated_group_chat.permissions = actor.get_group_chat_permissions(
             group_chat=updated_group_chat

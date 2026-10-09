@@ -7872,6 +7872,46 @@ export interface paths {
     patch?: never;
     trace?: never;
   };
+  "/api/v1/sysadmin/tenants/{tenant_id}/model-configurations/{kind}/invalid/": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /**
+     * Inspect a page of persisted model configurations without loading applications
+     * @description Scan up to 200 stored configurations in one tenant, including resources hidden by validation failures. Return invalid field paths, error codes and source fingerprints without exposing raw configuration values. Use next_after to continue scanning; inspection never modifies data.
+     */
+    get: operations["inspect_model_configurations_api_v1_sysadmin_tenants__tenant_id__model_configurations__kind__invalid__get"];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/v1/sysadmin/tenants/{tenant_id}/model-configurations/{kind}/{resource_id}/repair/": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    /**
+     * Preview or apply an explicit repair of invalid stored model options
+     * @description Repair one invalid configuration in the specified tenant using explicit, validated replacement options. Defaults to dry-run. The source fingerprint must match the inspected value, unless the requested replacement is already stored. Reject changed or valid configurations; return 404 when the resource does not belong to the tenant.
+     */
+    post: operations["repair_model_configuration_api_v1_sysadmin_tenants__tenant_id__model_configurations__kind___resource_id__repair__post"];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
   "/api/v1/sysadmin/users/": {
     parameters: {
       query?: never;
@@ -12115,6 +12155,58 @@ export interface components {
       /** Security Classification */
       security_classification?: components["schemas"]["ModelId"] | null;
     };
+    /** ConfigurationError */
+    ConfigurationError: {
+      /** Field */
+      field: string;
+      /** Code */
+      code: string;
+    };
+    /** ConfigurationInspection */
+    ConfigurationInspection: {
+      /**
+       * Tenant Id
+       * Format: uuid
+       */
+      tenant_id: string;
+      /**
+       * Kind
+       * @enum {string}
+       */
+      kind: "assistant" | "app" | "service";
+      /** Scanned */
+      scanned: number;
+      /** Invalid */
+      invalid: components["schemas"]["InvalidConfiguration"][];
+      /** Next After */
+      next_after: string | null;
+    };
+    /** ConfigurationRepair */
+    ConfigurationRepair: {
+      /** Expected Fingerprint */
+      expected_fingerprint: string;
+      replacement: components["schemas"]["ModelKwargs"];
+      /**
+       * Dry Run
+       * @default true
+       */
+      dry_run?: boolean;
+    };
+    /** ConfigurationRepairResult */
+    ConfigurationRepairResult: {
+      /**
+       * Resource Id
+       * Format: uuid
+       */
+      resource_id: string;
+      /**
+       * Status
+       * @enum {string}
+       */
+      status: "would_repair" | "repaired" | "unchanged";
+      /** Fingerprint */
+      fingerprint: string;
+    };
     /**
      * ConstrainingSource
      * @enum {string}
@@ -14927,6 +15019,23 @@ export interface components {
      * @enum {string}
      */
     IntegrationType: "confluence" | "sharepoint";
+    /** InvalidConfiguration */
+    InvalidConfiguration: {
+      /**
+       * Resource Id
+       * Format: uuid
+       */
+      resource_id: string;
+      /**
+       * Space Id
+       * Format: uuid
+       */
+      space_id: string;
+      /** Fingerprint */
+      fingerprint: string;
+      /** Errors */
+      errors: components["schemas"]["ConfigurationError"][];
+    };
     /** InventoryPublic */
     InventoryPublic: {
       owner: components["schemas"]["ContentOwner"];
@@ -50314,6 +50423,123 @@ export interface operations {
       };
       /** @description Bad Request */
       400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Not Found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  inspect_model_configurations_api_v1_sysadmin_tenants__tenant_id__model_configurations__kind__invalid__get: {
+    parameters: {
+      query?: {
+        after?: string | null;
+        limit?: number;
+      };
+      header?: never;
+      path: {
+        tenant_id: string;
+        kind: "assistant" | "app" | "service";
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ConfigurationInspection"];
+        };
+      };
+      /** @description Bad Request */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Unauthorized */
+      401: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  repair_model_configuration_api_v1_sysadmin_tenants__tenant_id__model_configurations__kind___resource_id__repair__post: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        tenant_id: string;
+        kind: "assistant" | "app" | "service";
+        resource_id: string;
+      };
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["ConfigurationRepair"];
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ConfigurationRepairResult"];
+        };
+      };
+      /** @description Bad Request */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Unauthorized */
+      401: {
         headers: {
           [name: string]: unknown;
         };
