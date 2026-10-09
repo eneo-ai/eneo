@@ -23,10 +23,33 @@ import {
 } from "@eneo/eneo-js";
 import { SvelteMap } from "svelte/reactivity";
 import type { CapabilityPurpose } from "$lib/features/mcp/capabilities";
+import { documentDraft, type DocumentDraft } from "./documentDraft";
+import { conversationDocuments } from "./documentVersions";
+import { readPartialArguments, readPartialStringArguments } from "./partialToolArguments";
 
 export type PendingToolApproval = {
   approvalId: string;
   tools: SSE.ToolApprovalRequired["tools"];
+};
+
+/** A tool call as the document features read it, streamed or from history. */
+type DocumentToolCall = {
+  tool_call_id?: string | null;
+  purpose?: string | null;
+  approved?: boolean | null;
+  result_status?: string | null;
+  arguments?: Record<string, unknown> | null;
+  generated_file_ids?: string[] | null;
+};
+
+export type { DocumentDraft } from "./documentDraft";
+
+/** A tool call's stored result, fetched on demand. */
+export type ToolCallOutcome = {
+  result: string | null;
+  /** The result's MCP `structuredContent`; kept only for calls that have a view. */
+  structuredContent: Record<string, unknown> | null;
+  isError: boolean;
 };
 
 export type ChatPartner = GroupChat | Assistant;
@@ -42,7 +65,7 @@ export class ChatService {
     return "tools" in partner && partner.tools?.assistants?.length > 0;
   });
   #eneo: Eneo;
-  #toolCallResultCache = new SvelteMap<string, Promise<string | null>>();
+  #toolCallResultCache = new SvelteMap<string, Promise<ToolCallOutcome>>();
   currentConversation = $state<Conversation>(emptyConversation());
   totalConversations = $state<number>(0);
   loadedConversations = $state<ConversationSparse[]>([]);
@@ -99,6 +122,78 @@ export class ChatService {
     }
     return total;
   });
+  // The files each tool call of the streamed answer produced. History records
+  // them on the call itself (`generated_file_ids`); a live answer learns them
+  // from its file events.
+  #liveFileIdsByCall = new SvelteMap<string, string[]>();
+  // The arguments of the calls the model is writing right now: the raw JSON
+  // text so far, and the string values that can already be read from it.
+  #argumentText = new SvelteMap<string, string>();
+  #partialArguments = new SvelteMap<string, Record<string, string>>();
+  // Calls whose tool has an interactive view. The view is handed the whole
+  // of the arguments so far, nested values included, so those are read too.
+  // eslint-disable-next-line svelte/prefer-svelte-reactivity -- only decides what is parsed
+  #viewCallIds = new Set<string>();
+  #partialInputs = new SvelteMap<string, Record<string, unknown>>();
+
+  /** The files a tool call produced, in a streamed answer or one from history. */
+  generatedFileIdsOf(call: DocumentToolCall): string[] {
+    return [
+      // eslint-disable-next-line svelte/prefer-svelte-reactivity -- transient deduplication, not stored reactive state
+      ...new Set([
+        ...(call.generated_file_ids ?? []),
+        ...(call.tool_call_id ? (this.#liveFileIdsByCall.get(call.tool_call_id) ?? []) : [])
+      ])
+    ];
+  }
+
+  /** The arguments of a call with a view that is still being written, as far as they go. */
+  partialInputOf(toolCallId: string): Record<string, unknown> | undefined {
+    return (
+      this.#partialInputs.get(toolCallId) ??
+      readPartialArguments(this.#argumentText.get(toolCallId) ?? "")
+    );
+  }
+
+  #noteViewCalls(tools: Array<{ tool_call_id?: string | null; app_view?: unknown }>) {
+    for (const tool of tools) {
+      if (tool.tool_call_id && tool.app_view) this.#viewCallIds.add(tool.tool_call_id);
+    }
+  }
+
+  /** String arguments of a call that is still being written, as far as they go. */
+  partialArgumentsOf(toolCallId: string | null | undefined): Record<string, string> | undefined {
+    return toolCallId ? this.#partialArguments.get(toolCallId) : undefined;
+  }
+
+  /** The documents the assistant created in this conversation, each with its versions. */
+  documents = $derived.by(() =>
+    conversationDocuments(this.currentConversation?.messages ?? [], (call) =>
+      this.generatedFileIdsOf(call)
+    )
+  );
+
+  /** Actual text/sheets as they arrive, with a visible preparation state from call start. */
+  get writingDocument(): DocumentDraft | null {
+    if (!this.askQuestion.isLoading) return null;
+    const message = this.currentConversation?.messages?.at(-1) as
+      { mcp_tool_calls?: DocumentToolCall[] } | undefined;
+    for (const call of message?.mcp_tool_calls?.toReversed() ?? []) {
+      if (call.purpose !== "file_creation" || !call.tool_call_id) continue;
+      const streamed = this.#argumentText.get(call.tool_call_id);
+      // Complete call metadata may arrive after the final argument delta, or
+      // without all deltas being delivered. It is authoritative once present;
+      // an earlier partial buffer must not hide its title or document body.
+      const args = {
+        ...(streamed ? readPartialArguments(streamed) : {}),
+        ...call.arguments
+      };
+      const draft = documentDraft(call, args, this.generatedFileIdsOf(call).length > 0);
+      if (draft) return draft;
+    }
+    return null;
+  }
+
   turnCount = $derived(this.currentConversation?.messages?.length ?? 0);
   averageTokensPerTurn = $derived(
     this.turnCount > 0 ? Math.round(this.cumulativeTokens / this.turnCount) : 0
@@ -276,6 +371,11 @@ export class ChatService {
   }
 
   async getToolCallResult(toolCallId: string): Promise<string | null> {
+    return (await this.getToolCallOutcome(toolCallId)).result;
+  }
+
+  /** A tool call's stored result: its text, and what an MCP App view renders from. */
+  async getToolCallOutcome(toolCallId: string): Promise<ToolCallOutcome> {
     const sessionId = this.currentConversation.id;
     if (!sessionId) {
       throw new Error("Cannot load a tool result without an active conversation");
@@ -287,13 +387,41 @@ export class ChatService {
 
     const request = this.#eneo.conversations
       .getToolCallResult({ sessionId, toolCallId })
-      .then((response) => response.result ?? null)
+      .then((response) => ({
+        result: response.result ?? null,
+        structuredContent: response.structured_content ?? null,
+        isError: response.is_error ?? false
+      }))
       .catch((error) => {
         this.#toolCallResultCache.delete(cacheKey);
         throw error;
       });
     this.#toolCallResultCache.set(cacheKey, request);
     return request;
+  }
+
+  /**
+   * Text an interactive tool view offers as the reader's next message. It is
+   * put in the composer and nothing is sent: the reader decides.
+   */
+  composerSuggestion = $state<string | null>(null);
+
+  /**
+   * Run a tool for the interactive view of an earlier tool call. The tool
+   * runs on the view's own server; the result is for the view and does not
+   * become part of the conversation.
+   */
+  async callToolFromView(params: {
+    toolCallId: string;
+    viewId: string;
+    name: string;
+    arguments: Record<string, unknown>;
+  }) {
+    const sessionId = this.currentConversation.id;
+    if (!sessionId) {
+      throw new Error("Cannot call a tool without an active conversation");
+    }
+    return this.#eneo.conversations.callToolFromView({ sessionId, ...params });
   }
 
   #seedLockedFromHistory() {
@@ -598,6 +726,10 @@ export class ChatService {
       this.#clearPreflight(false);
       // End any previous stream loop/buffer
       this.#finalizeStream();
+      this.#argumentText.clear();
+      this.#partialArguments.clear();
+      this.#viewCallIds.clear();
+      this.#partialInputs.clear();
       const streamGen = ++this.#streamGen;
       this.#activeDiagnosticsStreamGeneration = streamGen;
       let inrefBuffer = "";
@@ -694,7 +826,25 @@ export class ChatService {
             onImage: (image) => {
               if (!ref || isStale()) return;
               if (!ensureCurrentSession(image)) return;
-              Object.assign(ref, image);
+              // Each event carries the one file that was just saved. It joins
+              // the files this answer already has (an answer may create several,
+              // such as a query's export and the workbook built from it) and
+              // takes the place of one placeholder of an image in the making.
+              const { generated_files: arrived = [], tool_call_id: toolCallId, ...rest } = image;
+              if (toolCallId) {
+                this.#liveFileIdsByCall.set(toolCallId, [
+                  ...(this.#liveFileIdsByCall.get(toolCallId) ?? []),
+                  ...arrived.map((file) => file.id)
+                ]);
+              }
+              const kept = ref.generated_files.filter(
+                (file) => file.id !== "" && !arrived.some((other) => other.id === file.id)
+              );
+              const placeholders = ref.generated_files
+                .filter((file) => file.id === "")
+                .slice(arrived.length);
+              Object.assign(ref, rest);
+              ref.generated_files = [...kept, ...arrived, ...placeholders];
             },
             onEneoEvent: (event) => {
               if (isStale()) return;
@@ -726,12 +876,24 @@ export class ChatService {
                 this.assistantSkillTokens = 0;
               }
             },
+            onToolCallDelta: (event) => {
+              if (!ref || isStale()) return;
+              if (!ensureCurrentSession(event)) return;
+              const text =
+                (this.#argumentText.get(event.tool_call_id) ?? "") + event.arguments_delta;
+              this.#argumentText.set(event.tool_call_id, text);
+              this.#partialArguments.set(event.tool_call_id, readPartialStringArguments(text));
+              if (this.#viewCallIds.has(event.tool_call_id)) {
+                this.#partialInputs.set(event.tool_call_id, readPartialArguments(text));
+              }
+            },
             onToolCall: (event) => {
               // Guard order matches the other SSE handlers: ref is only set
               // after onFirstChunk lands, so an early tool_call event would
               // otherwise crash trying to read mcp_tool_calls on undefined.
               if (!ref || isStale()) return;
               if (!ensureCurrentSession(event)) return;
+              this.#noteViewCalls(event.tools);
               // Store tool calls for rendering with translations
               // @ts-expect-error - mcp_tool_calls is a runtime property for streaming
               if (!ref.mcp_tool_calls) {
@@ -792,6 +954,7 @@ export class ChatService {
                   this.currentConversation.messages[this.currentConversation.messages.length - 1];
                 this.currentConversation.id = event.session_id;
               }
+              this.#noteViewCalls(event.tools);
               // Add tools to the message so they display in the UI
               // @ts-expect-error - mcp_tool_calls is a runtime property for streaming
               if (!ref.mcp_tool_calls) {

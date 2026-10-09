@@ -199,6 +199,8 @@ def test_tool_event_keeps_the_call_and_the_argument_the_widget_shows():
         "query": "bibliotek",
         "email": "anna@kommun.se",
     }
+    original.tool_calls_metadata[0].structured_content = {"rows": [SECRET_CONTENT]}
+    original.tool_calls_metadata[0].app_view = {"view_id": "v1", "ui": {}}
 
     [visible] = VisitorView(_widget()).events(original)
 
@@ -219,6 +221,8 @@ def test_tool_event_keeps_the_call_and_the_argument_the_widget_shows():
             "is_bundled": None,
             "meta": None,
             "generated_file_ids": None,
+            "structured_content": None,
+            "app_view": None,
         }
     ]
     assert event["mcp_tool_references"] == []

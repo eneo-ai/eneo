@@ -24,6 +24,11 @@ It has four endpoints:
   interactively through an MCP App, with PNG output on request or when app
   views are unavailable. It provides **Charts** (`charts`, "Diagram" in Swedish).
 
+For how the runtime relates to Skills, Function providers, native documents
+and interactive views, see the
+[architecture overview](../../frontend/apps/docs-site/src/content/docs/architecture.mdx#skills-functions-tools-and-views).
+[MCP_APPS.md](MCP_APPS.md) owns view deployment and host permissions.
+
 ## Chaining tools without copying data
 
 Large data moves between tools as Eneo files, never through the model:
@@ -47,12 +52,69 @@ files. The same-turn reference needs a streaming chat; over the
 non-streaming API, the reference arrives on the next turn. Charts normally
 use an interactive view in Eneo.
 
-## Provider view resources
+## Exporting a document
 
-The runtime ships self-contained MCP Apps table and chart resources for
-compatible hosts. Eneo's runtime integration displays tool results as text,
-images and downloadable files. Charts fall back to PNG when the caller does
-not advertise app-view support.
+A Markdown document opens in the panel beside the conversation, whose Export
+menu offers it as Markdown, Word or PDF. For Word and PDF Eneo calls
+`create_document` on the provider of the assistant's **Create a file**
+capability with the document's own text, checks the returned file like any
+generated document, and hands it to the user as a download. Nothing is stored
+in the conversation, and the export is written to the audit log. An assistant
+without the capability can still download the Markdown; an external provider
+serves native export only if its accessible, approved `create_document` tool
+accepts Eneo's request: string `title`, `content`, `filename` and `format`,
+with supported formats declared in `format.enum`. Word and PDF availability
+are checked separately against that schema and the selected document.
+Extra required inputs or unsupported schemas make native export unavailable;
+the Function may still supply other file-creation tools. Compatibility is
+checked again when exporting, and a compatible schema does not guarantee
+that a remote provider will render successfully. The returned resource must
+have the requested MIME type and pass Eneo's generated-file validation.
+
+## The table view
+
+`query_table` brings an interactive view (an MCP App, see
+[MCP_APPS.md](MCP_APPS.md)): where Eneo shows tool views, the rows a query
+returned appear as a table under the answer. The user can sort, filter and
+copy them, open the table beside the conversation, and read on past the first
+500 rows; reading on and sorting a longer result run the same query again
+through `query_table`, a page at a time. The view takes no room for a single
+row, a query plan, a failed query or a result exported as a file.
+
+Users can ask naturally: "Show me the rows in this file", "Show orders from
+last month", or "Summarise sales by region". The tool descriptions direct the
+assistant to inspect the file and query the requested data with export off.
+It does not need the user to mention tools or interactive tables. Browsing
+queries leave pagination to the host; an explicit sample or top-N request may
+limit the result. Download requests and files needed by chart or spreadsheet
+tools still use export. The result tells the assistant when a table is shown,
+so it can avoid duplicating rows without claiming a view exists on clients
+where apps are unavailable.
+
+The view is one self-contained HTML page served by the runtime with the tool.
+It loads nothing from the network. Eneo stores it and keeps it current on its
+own; there is nothing to sync or approve. Eneo tells the runtime when views
+are shown (`X-Eneo-Tool-Views`), and the tool then tells the model that the
+user sees the rows, so the answer describes them instead of repeating them.
+Without `MCP_APPS_ENABLED` and a content origin nothing changes: the tool
+returns its rows as before.
+
+## The chart view
+
+`create_chart` brings a self-contained MCP App built with the official `App`
+SDK and Apache ECharts. It receives a validated chart specification through
+`structuredContent`, renders SVG in the browser and offers hover values,
+series/slice controls, x-axis zoom (except pie), a data table and a larger view.
+The host uses the official `AppBridge`; there is no separate chart protocol.
+No network access, browser permissions, remote assets or raw HTML tooltips are
+requested. Only controlled options are derived from the validated data.
+
+The tool defaults to `format: auto`. When Eneo sends `X-Eneo-Tool-Views: shown`,
+it resolves data in the sandbox child and returns chart data instead of
+rasterizing an image. `format: png`, `include_svg: true` or a host without app
+support keeps the existing SVG/resvg image path. Interactive data is bounded
+at 200 KiB, below Eneo's 256 KiB structured-result limit; oversized data returns
+`CHART_DATA_TOO_LARGE` and asks the model to aggregate, filter or use PNG.
 
 ### Enabling the Charts function after upgrading
 
@@ -73,8 +135,10 @@ Their old general-tool access rules continue to apply until then.
   Eneo registers it through **Admin > Tools** like any other MCP server.
 - The only credential is a shared bearer (`TOOL_RUNTIME_TOKEN`). Eneo reads it
   from its settings at connect time, so it is never stored in the database.
-- Tools go through the normal review, per-tool enablement, space enablement and
-  per-call approval. Adding the bundled server grants nobody anything.
+- Tools keep per-tool enablement, space enablement and per-call approval. Their
+  definitions are Eneo's own code and need no review (see
+  [Upgrading the runtime](#upgrading-the-runtime)). Adding the bundled server
+  grants nobody anything.
 
 ## Isolation: what keeps one conversation's data from another
 
@@ -238,14 +302,33 @@ and its edited variation.
 
 ## Created documents and spreadsheets
 
-Created files are saved with the answer and can be downloaded as their original
-bytes. The file tools support Markdown, Word, PDF and Excel output, revisions
-and template filling.
+The renderers run in a sandbox child and return the file inside the tool result
+as a standard MCP embedded resource. The runtime keeps no copy and serves no
+download links. Eneo then does the following:
+
+1. It admits the file only because the server provides `file_creation`
+   (DOCX, PDF, XLSX, plain text and Markdown). The
+   same resource from any other server stays an ordinary result.
+2. It checks the bytes: OOXML packages must be well-formed, bounded and free of
+   macros, embedded objects and externally loaded content. PDFs must be
+   complete and free of script, launch actions and embedded files. Text must
+   be UTF-8.
+3. It saves the document as a File in the conversation, with extracted text and
+   its exact original. The user opens it in the native preview or downloads it. It
+   survives reloads, follows the conversation's access rules and is deleted with
+   the conversation.
+
+Spreadsheets store text as text: a value starting with `=` is never written as a
+formula. A workbook revision creates a new workbook from supplied tables or
+source sheets; it does not preserve an arbitrary workbook's formulas, formatting
+or embedded objects. Formula writing and spreadsheet templates are unsupported.
+`TOOL_RUNTIME_DOCUMENT_ORGANISATION_NAME` in `.env` sets the name shown in
+document footers (the runtime reads it as `DOCUMENT_ORGANISATION_NAME`).
 
 ## Deploy, upgrade and roll back
 
 Frontend, backend and runtime share one Eneo version and source revision.
-The application image workflow publishes a complete bundle only after component
+The image publication workflow (`build_and_push_images.yml`) publishes a complete bundle only after component
 checks and a combined smoke test pass. There is no separate runtime version.
 
 Download `release.env` and `release.json` from the selected GitHub release,
@@ -297,7 +380,8 @@ does not depend on runtime health.
 
 Upgrade by replacing both bundle files together and recreating application
 services. Roll back using the previous complete bundle, observing the release's
-normal database rollback constraints. This change adds no database migration.
+normal database rollback constraints. The bundle itself needs no database
+migration; the migrations of the release it carries apply as usual.
 External deployment automation must consume the bundle; floating image tags
 cannot change atomically.
 
@@ -343,8 +427,8 @@ Set a new `TOOL_RUNTIME_TOKEN` in `.env` and recreate `tool-runtime`,
 
 ## Footprint
 
-These figures were measured on the reference image (`0.1.0-eneo.1`, linux/arm64,
-Docker Desktop):
+These figures were measured on an earlier runtime image (linux/arm64, Docker
+Desktop), before the runtime shared the application version:
 
 | Condition                                      | Memory   |
 | ---------------------------------------------- | -------- |

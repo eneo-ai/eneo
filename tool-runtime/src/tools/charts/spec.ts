@@ -28,7 +28,9 @@ export const chartSpecSchema = z
       .string()
       .max(120)
       .optional()
-      .describe("Short chart title shown above the plot."),
+      .describe(
+        "Short chart title saying what the chart shows, in the user's language. It is shown above the plot, and the host lists the conversation's charts and tables by it: give one for every chart the user sees.",
+      ),
     labels: z
       .array(label)
       .max(20_000)

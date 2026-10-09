@@ -231,6 +231,7 @@ if TYPE_CHECKING:
         CompletionModelResponse,
     )
     from eneo.assistants.references import ReferencesService
+    from eneo.audit.application.audit_service import AuditService
     from eneo.completion_models.application import CompletionModelCRUDService
     from eneo.completion_models.domain.completion_model import CompletionModel
     from eneo.completion_models.domain.skill_activation import (
@@ -314,6 +315,12 @@ def get_references(
     return [blob for blob in blobs if blob is not None]
 
 
+def is_display_only_mime(mime_type: str | None) -> bool:
+    """Display-only references never carry a ``source_id`` line, so they can
+    never be cited: image thumbnails."""
+    return (mime_type or "").startswith("image/")
+
+
 def filter_mcp_tool_references(
     response_string: str,
     references: Sequence[McpToolReference],
@@ -322,19 +329,16 @@ def filter_mcp_tool_references(
     """Keep only the MCP references the answer cites inline, mirroring the
     legacy info-blob path.
 
-    Display-only image references never receive a ``source_id`` line (see
-    ``_build_tool_result_with_references``) so they cannot be cited; they are
-    always kept so thumbnail rendering survives filtering.
+    Display-only references (image thumbnails, MCP App views) never receive a
+    ``source_id`` line (see ``_build_tool_result_with_references``) so they
+    cannot be cited; they are always kept so their rendering survives
+    filtering.
     """
     if version == 1:
         return list(references)
 
-    display_only = [
-        ref for ref in references if (ref.mime_type or "").startswith("image/")
-    ]
-    citeable = [
-        ref for ref in references if not (ref.mime_type or "").startswith("image/")
-    ]
+    display_only = [ref for ref in references if is_display_only_mime(ref.mime_type)]
+    citeable = [ref for ref in references if not is_display_only_mime(ref.mime_type)]
     cited = get_references(
         response_string=response_string,
         info_blobs=citeable,
@@ -427,6 +431,112 @@ class AssistantService:
         if self.user.active_widget is not None:
             return set(VISITOR_CAPABILITY_PURPOSES)
         return allowed_capability_purposes(self.user.permissions)
+
+    @staticmethod
+    def _requested_capabilities(
+        *,
+        assistant: Assistant,
+        space: "Space",
+        effective_config: "EffectiveConfig | None",
+    ) -> set[CapabilityPurpose]:
+        """The capability purposes a turn of this assistant asks providers for.
+
+        The assistant's own selection, limited to what its space allows; a
+        governance policy that enforces tools replaces both.
+        """
+        if effective_config is not None and effective_config.mcp_enforced:
+            return set(effective_config.enabled_capabilities)
+        requested = set(assistant.enabled_capabilities)
+        if not space.is_personal():
+            requested &= set(space.enabled_capabilities)
+        return requested
+
+    @property
+    def _catalog_audit(self) -> "AuditService | None":
+        """Where a built-in server's catalog is recorded when a turn brings it up to date."""
+        return getattr(getattr(self, "completion_service", None), "audit_service", None)
+
+    async def attachment_files(self, assistant_id: UUID) -> "list[File]":
+        """The files attached to the assistant itself, as its turns are given them."""
+        space = await self.space_repo.get_space_by_assistant(assistant_id=assistant_id)
+        return list(space.get_assistant(assistant_id=assistant_id).attachments)
+
+    async def _servers_a_turn_reaches(
+        self, assistant_id: UUID
+    ) -> "tuple[Assistant, list[MCPServer]]":
+        """The assistant and the servers one of its turns would be given now.
+
+        Its own servers within the space's security classification, and the
+        provider serving this user for each capability the assistant has.
+        """
+        space = await self.space_repo.get_space_by_assistant(assistant_id=assistant_id)
+        assistant = space.get_assistant(assistant_id=assistant_id)
+        effective_config = await self._resolve_effective_config(
+            space=space, assistant=assistant
+        )
+        attached: "Sequence[MCPServer]" = (
+            effective_config.available_mcp_servers
+            if effective_config is not None and effective_config.mcp_enforced
+            else assistant.mcp_servers
+        )
+        servers = general_servers_for_space(attached, space.security_classification)
+        requested_capabilities = self._requested_capabilities(
+            assistant=assistant, space=space, effective_config=effective_config
+        )
+        if requested_capabilities:
+            resolution = await resolve_capability_servers(
+                self.repo.session,
+                self.user.tenant_id,
+                attached,
+                requested_capabilities=sorted(requested_capabilities),
+                # No model takes part in a call made outside a turn.
+                supports_tool_calling=True,
+                user_group_ids=self.user.user_groups_ids,
+                allowed_purposes=allowed_capability_purposes(self.user.permissions),
+                space_security_classification=space.security_classification,
+            )
+            servers = [*resolution.capability_servers, *resolution.general_servers]
+        return assistant, [server for server in servers if server.is_enabled]
+
+    async def mcp_server_for_view(
+        self, *, assistant_id: UUID, mcp_server_id: UUID
+    ) -> "MCPServer | None":
+        """The server as a turn of this assistant would reach it now, or None.
+
+        A tool's view may call tools on its own server, and only while the
+        user's turns could: the server must still be among the assistant's
+        servers (or be the provider serving the user for a capability the
+        assistant has), within the space's security classification, and it is
+        returned with the same tool enablement a turn would see.
+        """
+        assistant, servers = await self._servers_a_turn_reaches(assistant_id)
+        server = next(
+            (server for server in servers if server.id == mcp_server_id), None
+        )
+        if server is None:
+            return None
+        server = await self._with_builtin_provider_token(
+            server, assistant_id=assistant.id
+        )
+        return await with_live_bundled_tools(server, self._catalog_audit)
+
+    async def capability_server(
+        self, *, assistant_id: UUID, purpose: str
+    ) -> "MCPServer | None":
+        """The provider serving this user for a capability of the assistant, or None.
+
+        Resolved as for a turn, so it is the provider the assistant's own
+        calls would reach: none when the assistant lacks the capability, the
+        user may not use it, or no provider is active.
+        """
+        assistant, servers = await self._servers_a_turn_reaches(assistant_id)
+        server = next((server for server in servers if server.purpose == purpose), None)
+        if server is None:
+            return None
+        server = await self._with_builtin_provider_token(
+            server, assistant_id=assistant.id
+        )
+        return await with_live_bundled_tools(server, self._catalog_audit)
 
     async def _save_generated_image(self, image: "GeneratedFile") -> "File | None":
         """Persist a tool-produced image or document as a generated file.
@@ -1000,11 +1110,9 @@ class AssistantService:
             effective_mcp_servers = assistant.mcp_servers
         if assistant.has_knowledge():
             effective_mcp_servers = []
-        requested_capabilities = set(assistant.enabled_capabilities)
-        if not space.is_personal():
-            requested_capabilities &= set(space.enabled_capabilities)
-        if effective_config is not None and effective_config.mcp_enforced:
-            requested_capabilities = set(effective_config.enabled_capabilities)
+        requested_capabilities = self._requested_capabilities(
+            assistant=assistant, space=space, effective_config=effective_config
+        )
         if requested_capabilities:
             resolution = await resolve_capability_servers(
                 self.repo.session,
@@ -2408,6 +2516,12 @@ class AssistantService:
                                             existing.result = tc.result
                                         if tc.meta is not None:
                                             existing.meta = tc.meta
+                                        if tc.structured_content is not None:
+                                            existing.structured_content = (
+                                                tc.structured_content
+                                            )
+                                        if tc.app_view is not None:
+                                            existing.app_view = tc.app_view
                                         if tc.purpose is not None:
                                             existing.purpose = tc.purpose
                                     else:
@@ -2430,6 +2544,8 @@ class AssistantService:
                                                 is_internal=tc.is_internal,
                                                 is_bundled=tc.is_bundled,
                                                 meta=tc.meta,
+                                                structured_content=tc.structured_content,
+                                                app_view=tc.app_view,
                                             )
                                         )
                             yield chunk
@@ -2725,6 +2841,8 @@ class AssistantService:
                             is_internal=tc.is_internal,
                             is_bundled=tc.is_bundled,
                             meta=tc.meta,
+                            structured_content=tc.structured_content,
+                            app_view=tc.app_view,
                         )
                         for tc in non_streaming_tool_metadata
                     ]
@@ -3183,11 +3301,9 @@ class AssistantService:
             capability_base, space.security_classification
         )
         capability_mcp_servers: list["MCPServer"] = []
-        requested_capabilities = set(assistant_to_ask.enabled_capabilities)
-        if not space.is_personal():
-            requested_capabilities &= set(space.enabled_capabilities)
-        if effective_config is not None and effective_config.mcp_enforced:
-            requested_capabilities = set(effective_config.enabled_capabilities)
+        requested_capabilities = self._requested_capabilities(
+            assistant=assistant_to_ask, space=space, effective_config=effective_config
+        )
         requested_capabilities -= set(disabled_capabilities or [])
         if requested_capabilities:
             resolution = await resolve_capability_servers(
@@ -3413,10 +3529,12 @@ class AssistantService:
             for server in mcp_servers_override
         ):
             mcp_servers_override = [
-                await with_live_bundled_tools(server) for server in mcp_servers_override
+                await with_live_bundled_tools(server, self._catalog_audit)
+                for server in mcp_servers_override
             ]
         capability_mcp_servers = [
-            await with_live_bundled_tools(server) for server in capability_mcp_servers
+            await with_live_bundled_tools(server, self._catalog_audit)
+            for server in capability_mcp_servers
         ]
 
         try:

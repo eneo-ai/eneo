@@ -256,6 +256,7 @@ export namespace SSE {
   export type Files = Omit<components["schemas"]["SSEFiles"], "$defs">;
   export type Eneo = Omit<components["schemas"]["SSEEneoEvent"], "$defs">;
   export type ToolCall = Omit<components["schemas"]["SSEToolCall"], "$defs">;
+  export type ToolCallDelta = Omit<components["schemas"]["SSEToolCallDelta"], "$defs">;
   export type ToolApprovalRequired = {
     session_id: string;
     eneo_event_type: "tool_approval_required";

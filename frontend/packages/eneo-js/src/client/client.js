@@ -3,6 +3,7 @@
  * @property {import('../types/fetch').EneoFetchFunction} fetch Typed fetch function for the Eneo backend.
  * @property {import('../types/fetch').EneoStreamFunction} stream Fetch function specifically for streaming answers from an assistant.
  * @property {import('../types/fetch').EneoXhrFunction} xhr
+ * @property {import('../types/fetch').EneoDownloadFunction} download Typed request whose answer is a file, returned as a Blob.
  * @property {URL} baseUrl Base url this client uses
  * @property {string} version Version of the Api this client was created for
  */
@@ -114,6 +115,31 @@ export function createClient(args) {
         /** @type {any} We need to cast this through any – we just got to hope for the correctness of the schema... */
         const parsed = await parseResponse(response);
         return parsed;
+      } catch (error) {
+        EneoError.throw(error, { endpoint: `${httpMethod}@${url}` });
+      }
+    },
+
+    download: async (endpoint, { method, params, requestBody }) => {
+      const url = parseUrl(baseUrl, endpoint, params);
+      const payload = parsePayload(requestBody);
+      const httpMethod = String(method).toUpperCase();
+
+      try {
+        const response = await _fetch(url, {
+          method: httpMethod,
+          headers: {
+            ...auth,
+            ...payload.header
+          },
+          body: payload.body,
+          credentials: "include"
+        });
+        // A refusal is the usual JSON error; only a success carries the file.
+        if (!response.ok) await parseResponse(response);
+        /** @type {any} As in `fetch`: the failure path below always throws. */
+        const file = await response.blob();
+        return file;
       } catch (error) {
         EneoError.throw(error, { endpoint: `${httpMethod}@${url}` });
       }

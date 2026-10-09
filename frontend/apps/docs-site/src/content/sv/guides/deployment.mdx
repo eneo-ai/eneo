@@ -1,6 +1,6 @@
 ---
 title: Driftsätt Eneo
-translationSource: guides/deployment.mdx@dfbcde2224ff
+translationSource: guides/deployment.mdx@13ddf87a52c3
 ---
 
 import { Callout } from "nextra/components";
@@ -63,9 +63,11 @@ chmod 600 .env env_backend.env env_frontend.env env_db.env
 `python3 setup.py` skapar den körmiljöhemlighet som saknas utan att ändra
 befintliga inställningar eller skriva ut hemligheter. Klonar du i stället
 repot, checka ut revisionen i `release.json` innan du kopierar filerna. Alla
-Compose-kommandon nedan tar båda miljöfilerna:
-`docker compose --env-file .env --env-file release.env …`. Eneos image-taggar
-har inget `v`-prefix.
+Compose-kommandon tar båda miljöfilerna, även de som nedan skrivs utan dem:
+`docker compose --env-file .env --env-file release.env …`. För att slippa
+upprepa dem kan du köra `export COMPOSE_ENV_FILES=.env,release.env` en gång i
+skalet (Docker Compose 2.24 eller senare). Eneos image-taggar har inget
+`v`-prefix.
 
 ### Skapa hemligheter
 
@@ -164,8 +166,9 @@ engelska versionens avsnitt _Reverse Proxy Requirements_ för detaljer och
 konfigurationsexempel.
 
 Databas och Redis ligger på det interna nätverket `data_net`. Frontend och
-Traefik har ingen direkt åtkomst dit. Moduler använder `module_net` och
-valfri objektlagring använder `object_content_net`. Externa backupjobb som
+Traefik har ingen direkt åtkomst dit. Moduler använder `module_net`, verktygens
+körmiljö använder `tool_runtime_net` (utan väg till internet, databas eller
+Redis) och valfri objektlagring använder `object_content_net`. Externa backupjobb som
 förut anslöt till databasen via `proxy_tier` behöver köras genom `docker exec`
 eller anslutas till `eneo_data_net`.
 

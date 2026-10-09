@@ -193,12 +193,72 @@ describe("document chart images", () => {
     expect(calls).toBe(2);
   });
 
-  test("rejects unsafe formats, undeclared images, oversized rasters and duplicate IDs", async () => {
-    await expect(tool().execute({ ...input, format: "md" }, context)).rejects.toThrow(
-      "docx or pdf",
+  test("a Markdown document keeps an image as a line naming the file", async () => {
+    const handle = "eneo-file:11111111111141118111111111111111";
+    const markdown = bytesOf(
+      (await tool().execute({ ...input, format: "md" }, context)) as RichResult,
+    ).toString("utf8");
+    expect(markdown).toContain(
+      `\n![Budget och utfall](${handle} "Figur 1. Budget och utfall i miljoner kronor.")\n`,
     );
+    expect(markdown).not.toContain("token=");
+
+    // Revised as Markdown the line stays as it is; as Word it embeds once the file is declared.
+    const revised = bytesOf(
+      (await tool().execute(
+        { title: input.title, format: "md", content: markdown },
+        context,
+      )) as RichResult,
+    ).toString("utf8");
+    expect(revised).toBe(markdown);
+    const word = (await tool().execute(
+      {
+        title: input.title,
+        format: "docx",
+        content: markdown,
+        images: [{ url, filename: "generated_image.png" }],
+      },
+      context,
+    )) as RichResult;
+    const zip = await JSZip.loadAsync(bytesOf(word));
+    expect(Object.keys(zip.files).some((name) => name.startsWith("word/media/"))).toBe(true);
+    expect(await zip.file("word/document.xml")!.async("string")).toContain(
+      "Figur 1. Budget och utfall i miljoner kronor.",
+    );
+    await expect(
+      tool().execute({ title: input.title, format: "docx", content: markdown }, context),
+    ).rejects.toThrow("declared in images");
+  });
+
+  test("a Markdown document refuses images it cannot place", async () => {
+    const md = { ...input, format: "md" };
+    await expect(tool().execute({ ...md, images: [] }, context)).rejects.toThrow("not declared");
+    await expect(
+      tool().execute(
+        { ...md, content: `${md.content}\n\n![Utfall](image:utfall)\n\n![Utfall](image:utfall)` },
+        context,
+      ),
+    ).rejects.toThrow("Image utfall is placed");
+    await expect(
+      tool().execute(
+        { ...md, content: `${md.content}\n\n![Utfall](image:utfall)`, images: [] },
+        context,
+      ),
+    ).rejects.toThrow("Images budget, utfall are placed");
+    await expect(
+      tool().execute({ ...md, content: "Se ![diagram](image:budget) här." }, context),
+    ).rejects.toThrow("line of its own");
+    await expect(tool().execute({ ...md, content: "Ingen bild." }, context)).rejects.toThrow(
+      "not placed",
+    );
+    await expect(tool(Buffer.from("<svg/>")).execute(md, context)).rejects.toThrow(
+      "valid PNG or JPEG",
+    );
+  });
+
+  test("rejects undeclared images, oversized rasters and duplicate IDs", async () => {
     await expect(tool().execute({ ...input, images: [] }, context)).rejects.toThrow(
-      "matching standalone",
+      "declared in images",
     );
     await expect(
       tool().execute({ ...input, images: [input.images[0], input.images[0]] }, context),

@@ -66,3 +66,24 @@ test("conversation capability opt-outs use purpose fields independently of MCP s
   assert.deepEqual(body.disabled_capabilities, ["image_generation"]);
   assert.deepEqual(body.disabled_mcp_server_ids, ["ordinary-server"]);
 });
+
+test("document export availability is a read scoped to the saved document", async () => {
+  const calls = [];
+  const state = {
+    docx: { available: true },
+    pdf: { available: false, reason: "format_unsupported" }
+  };
+  const api = initConversations({
+    fetch: async (...args) => {
+      calls.push(args);
+      return state;
+    }
+  });
+  assert.deepEqual(await api.getDocumentExportAvailability({ sessionId: "s", fileId: "f" }), state);
+  assert.deepEqual(calls, [
+    [
+      "/api/v1/conversations/{session_id}/documents/{file_id}/export/",
+      { method: "get", params: { path: { session_id: "s", file_id: "f" } } }
+    ]
+  ]);
+});

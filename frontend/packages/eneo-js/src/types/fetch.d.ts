@@ -99,6 +99,19 @@ type EneoStreamFunction = <Endpoint extends EneoStreamingEndpoints>(
   abortController?: AbortController | undefined
 ) => Promise<void>;
 
+/** A request whose successful answer is a file, not JSON. */
+type EneoDownloadFunction = <
+  Endpoint extends keyof EneoEndpoints,
+  Method extends keyof EneoEndpoints[Endpoint]
+>(
+  endpoint: Endpoint,
+  args: {
+    method: Method;
+    params: EneoParams<Endpoint, Method>;
+    requestBody: EneoRequestBody<Endpoint, Method>;
+  }
+) => Promise<Blob>;
+
 type EneoXhrFunction = <
   Endpoint extends keyof EneoEndpoints,
   Method extends keyof EneoEndpoints[Endpoint]

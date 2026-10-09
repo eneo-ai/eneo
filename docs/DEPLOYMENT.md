@@ -208,7 +208,7 @@ docker compose --env-file .env --env-file release.env pull
 docker compose --env-file .env --env-file release.env up -d
 ```
 
-Use those environment-file arguments for all Compose commands below when deploying a bundle.
+Use those environment-file arguments for all Compose commands below when deploying a bundle, including the ones that do not show them. To avoid repeating them, run `export COMPOSE_ENV_FILES=.env,release.env` once in the shell (Docker Compose 2.24 or later).
 
 **Stop and remove all containers:**
 ```bash

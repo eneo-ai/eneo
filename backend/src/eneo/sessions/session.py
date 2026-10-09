@@ -1,6 +1,6 @@
 from datetime import datetime
 from enum import Enum
-from typing import TYPE_CHECKING, Literal, Optional
+from typing import TYPE_CHECKING, Any, Literal, Optional
 from uuid import UUID
 
 from pydantic import BaseModel, Field
@@ -178,6 +178,41 @@ class ToolCallResultPublic(BaseModel):
     tool_call_id: str
     result: Optional[str] = None
     mcp_tool_name: Optional[str] = None
+    # What an MCP App view renders: the result's `structuredContent` (kept
+    # only for calls that have a view) and whether the tool reported an error.
+    structured_content: Optional[dict[str, Any]] = None
+    is_error: bool = False
+
+
+class DocumentExportRequest(BaseModel):
+    """A Markdown document of the conversation, asked for in another format."""
+
+    format: Literal["docx", "pdf"] = Field(description="The format to export to.")
+
+
+class ViewToolCallRequest(BaseModel):
+    """A tool call made by the interactive view (MCP App) of an earlier call."""
+
+    view_id: UUID = Field(description="The view shown for the tool call.")
+    name: str = Field(
+        min_length=1,
+        max_length=256,
+        description="The tool to call, by its name on the view's own server.",
+    )
+    arguments: dict[str, Any] = Field(default_factory=dict)
+
+
+class ViewToolCallText(BaseModel):
+    type: Literal["text"] = "text"
+    text: str
+
+
+class ViewToolCallResultPublic(BaseModel):
+    """The tool's result, for the view that asked."""
+
+    content: list[ViewToolCallText] = []
+    structured_content: Optional[dict[str, Any]] = None
+    is_error: bool = False
 
 
 class SSEToolApprovalRequired(SSEBase):

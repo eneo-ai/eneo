@@ -7,6 +7,7 @@ from urllib.parse import unquote, urlsplit
 from uuid import UUID
 
 from eneo.base.base_entity import Entity
+from eneo.mcp_apps.domain.mcp_app_view import get_ui_resource_uri
 from eneo.mcp_servers.domain.capabilities import CapabilityPurpose
 from eneo.roles.permissions import Permission
 
@@ -119,7 +120,7 @@ def is_builtin_provider(http_auth_type: str | None) -> bool:
     return http_auth_type == INTERNAL_AUTH_TYPE
 
 
-# A bundled server runs in the optional tool runtime shipped with Eneo (an
+# A bundled server runs in the tool runtime shipped with Eneo (an
 # isolated container, never the backend process). It is an ordinary server
 # otherwise: its URL is derived from ``tool_runtime_url`` when an admin adds
 # it, and the bearer comes from ``tool_runtime_token`` at connect time, so no
@@ -237,9 +238,13 @@ class MCPServerTool(Entity):
         display_name: Optional[str] = None,
         description: Optional[str] = None,
         input_schema: Optional[dict[str, Any]] = None,
+        meta: Optional[dict[str, Any]] = None,
+        ui_resource_sha256: Optional[str] = None,
         is_enabled_by_default: bool = True,
         pending_description: Optional[str] = None,
         pending_input_schema: Optional[dict[str, Any]] = None,
+        pending_meta: Optional[dict[str, Any]] = None,
+        pending_ui_resource_sha256: Optional[str] = None,
         requires_approval: bool = False,
         removed_from_remote: bool = False,
         id: Optional[UUID] = None,
@@ -253,9 +258,14 @@ class MCPServerTool(Entity):
         self.display_name = display_name
         self.description = description
         self.input_schema = input_schema
+        self.meta = meta
+        # SHA-256 of the MCP App view HTML approved with this definition.
+        self.ui_resource_sha256 = ui_resource_sha256
         self.is_enabled_by_default = is_enabled_by_default
         self.pending_description = pending_description
         self.pending_input_schema = pending_input_schema
+        self.pending_meta = pending_meta
+        self.pending_ui_resource_sha256 = pending_ui_resource_sha256
         self.requires_approval = requires_approval
         self.removed_from_remote = removed_from_remote
 
@@ -268,6 +278,8 @@ class MCPServerTool(Entity):
         title: str | None,
         description: str | None,
         input_schema: dict[str, Any] | None,
+        meta: dict[str, Any] | None,
+        ui_resource_sha256: str | None = None,
     ) -> "MCPServerTool":
         """Create a discovered definition that cannot run before approval."""
         return cls(
@@ -276,9 +288,12 @@ class MCPServerTool(Entity):
             title=title,
             description=None,
             input_schema=None,
+            meta=None,
             is_enabled_by_default=True,
             pending_description=description,
             pending_input_schema=input_schema,
+            pending_meta=meta,
+            pending_ui_resource_sha256=ui_resource_sha256,
             requires_approval=True,
         )
 
@@ -287,9 +302,53 @@ class MCPServerTool(Entity):
         *,
         description: str | None,
         input_schema: dict[str, Any] | None,
+        meta: dict[str, Any] | None,
+        ui_resource_sha256: str | None = None,
     ) -> bool:
-        """Return whether a live contract differs from the approved contract."""
-        return self.description != description or self.input_schema != input_schema
+        """Return whether a live contract differs from the approved contract.
+
+        ``ui_resource_sha256`` is the hash of the view HTML read with this
+        observation. An observation made without reading the view (None) says
+        nothing about it, so it cannot drift on the view's content.
+        """
+        return (
+            self.description != description
+            or self.input_schema != input_schema
+            or self.meta != meta
+            or (
+                ui_resource_sha256 is not None
+                and self.ui_resource_sha256 != ui_resource_sha256
+            )
+        )
+
+    def approve_pending(self) -> None:
+        """Make the pending definition the approved one.
+
+        The approved view follows the definition: a pending hash replaces it,
+        and a definition approved without one keeps the approved view only
+        while it still declares the same view resource. A view is never
+        carried over to a resource nobody approved.
+        """
+        previous_view = get_ui_resource_uri(self.meta)
+        if self.pending_description is not None:
+            self.description = self.pending_description
+        if self.pending_input_schema is not None:
+            self.input_schema = self.pending_input_schema
+        # Catalog observations are complete definitions: None removes metadata.
+        self.meta = self.pending_meta
+        if self.pending_ui_resource_sha256 is not None:
+            self.ui_resource_sha256 = self.pending_ui_resource_sha256
+        elif get_ui_resource_uri(self.meta) != previous_view:
+            self.ui_resource_sha256 = None
+        self.clear_pending()
+
+    def clear_pending(self) -> None:
+        """Drop the pending definition; the approved one stays as it is."""
+        self.pending_description = None
+        self.pending_input_schema = None
+        self.pending_meta = None
+        self.pending_ui_resource_sha256 = None
+        self.requires_approval = False
 
 
 class MCPServer(Entity):

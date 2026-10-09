@@ -87,7 +87,7 @@ export function initConversations(client) {
     /**
      * Lazy-fetch the persisted upstream response of a single tool call.
      * @param  {{ sessionId: string, toolCallId: string }} params
-     * @returns {Promise<{tool_call_id: string, result?: string | null, mcp_tool_name?: string | null}>}
+     * @returns {Promise<{tool_call_id: string, result?: string | null, mcp_tool_name?: string | null, structured_content?: Record<string, unknown> | null, is_error?: boolean}>}
      * @throws {EneoError}
      */
     getToolCallResult: async ({ sessionId, toolCallId }) => {
@@ -99,6 +99,56 @@ export function initConversations(client) {
         }
       );
       return res;
+    },
+
+    /**
+     * Call a tool for the interactive view (MCP App) of an earlier tool call.
+     * The tool runs on the view's own server and its result goes to the view.
+     * @param {{ sessionId: string, toolCallId: string, viewId: string, name: string, arguments?: Record<string, unknown> }} params
+     * @returns {Promise<import('../types/schema').components["schemas"]["ViewToolCallResultPublic"]>}
+     * @throws {EneoError}
+     */
+    callToolFromView: async ({ sessionId, toolCallId, viewId, name, arguments: args }) => {
+      return await client.fetch(
+        "/api/v1/conversations/{session_id}/tool-calls/{tool_call_id}/app-calls/",
+        {
+          method: "post",
+          params: { path: { session_id: sessionId, tool_call_id: toolCallId } },
+          requestBody: {
+            "application/json": { view_id: viewId, name, arguments: args ?? {} }
+          }
+        }
+      );
+    },
+
+    /**
+     * Check the formats this document's current provider can export.
+     * @param {{ sessionId: string, fileId: string }} params
+     * @returns {Promise<import('../types/schema').components["schemas"]["DocumentExportAvailability"]>}
+     */
+    getDocumentExportAvailability: async ({ sessionId, fileId }) => {
+      return await client.fetch("/api/v1/conversations/{session_id}/documents/{file_id}/export/", {
+        method: "get",
+        params: { path: { session_id: sessionId, file_id: fileId } }
+      });
+    },
+
+    /**
+     * Export a Markdown document the assistant created in a conversation as
+     * Word or PDF. The file is rendered for this download and not stored.
+     * @param {{ sessionId: string, fileId: string, format: "docx" | "pdf" }} params
+     * @returns {Promise<Blob>}
+     * @throws {EneoError} 409 with code `document_export_unavailable` when the assistant has no tool that creates documents
+     */
+    exportDocument: async ({ sessionId, fileId, format }) => {
+      return await client.download(
+        "/api/v1/conversations/{session_id}/documents/{file_id}/export/",
+        {
+          method: "post",
+          params: { path: { session_id: sessionId, file_id: fileId } },
+          requestBody: { "application/json": { format } }
+        }
+      );
     },
 
     /**
@@ -151,6 +201,7 @@ export function initConversations(client) {
      * @param {(data: import("../types/resources").SSE.Files) => void} [params.callbacks.onImage] Callback to run when generated files of the answer is received
      * @param {(data: import("../types/resources").SSE.Eneo | import("../types/resources").SSE.TokenUsage) => void} [params.callbacks.onEneoEvent] Callback to run when an eneo or token-usage event is received
      * @param {(data: import("../types/resources").SSE.ToolCall) => void} [params.callbacks.onToolCall] Callback to run when MCP tools are being executed
+     * @param {(data: import("../types/resources").SSE.ToolCallDelta) => void} [params.callbacks.onToolCallDelta] Callback to run when the next piece of a pending tool call's arguments is received
      * @param {(data: import("../types/resources").SSE.ToolApprovalRequired) => void} [params.callbacks.onToolApprovalRequired] Callback to run when MCP tools require user approval
      * @param {(data: import("../types/resources").SSE.ToolApprovalTimeout) => void} [params.callbacks.onToolApprovalTimeout] Callback to run when a pending tool approval expires
      * @param {(response: Response) => Promise<void>} [params.callbacks.onOpen] Callback to run once the initial response of the backend is received

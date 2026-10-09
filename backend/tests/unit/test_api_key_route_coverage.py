@@ -20,6 +20,7 @@ from eneo.authentication.auth_dependencies import (
     FILES_READ_OVERRIDES,
     INFO_BLOBS_READ_OVERRIDES,
     KNOWLEDGE_READ_OVERRIDES,
+    MCP_APPS_READ_OVERRIDES,
 )
 from eneo.authentication.endpoint_access import access_for
 from eneo.main.config import get_settings
@@ -358,6 +359,7 @@ class TestReadOverrideValidity:
             | FILES_READ_OVERRIDES
             | INFO_BLOBS_READ_OVERRIDES
             | KNOWLEDGE_READ_OVERRIDES
+            | MCP_APPS_READ_OVERRIDES
         )
         stale = all_overrides - all_endpoint_names
         assert not stale, (
@@ -1169,6 +1171,12 @@ class TestScopeCheckPathParamSafety:
     PATH_PARAM_NONE_ALLOWLIST_EXACT: dict[tuple[str, str], str] = {
         (
             "POST",
+            "/mcp-apps/views/{view_id}/token/",
+        ): "A tool view is not a scoped resource: the endpoint mints a link only for a "
+        "view stored for the caller's tenant and approved for a tool, and the link "
+        "serves nothing but that view's HTML.",
+        (
+            "POST",
             "/files/",
         ): "File upload; service layer associates the new file with user.tenant_id. "
         "scope=file + basic POST→write is sufficient.",
@@ -1259,6 +1267,7 @@ class TestReadOverrideUniqueness:
             ("FILES_READ_OVERRIDES", FILES_READ_OVERRIDES),
             ("INFO_BLOBS_READ_OVERRIDES", INFO_BLOBS_READ_OVERRIDES),
             ("KNOWLEDGE_READ_OVERRIDES", KNOWLEDGE_READ_OVERRIDES),
+            ("MCP_APPS_READ_OVERRIDES", MCP_APPS_READ_OVERRIDES),
         ]
 
         collisions: list[str] = []
@@ -1304,6 +1313,7 @@ class TestReadOverrideSnapshot:
         ],
         "CONVERSATIONS_READ_OVERRIDES": [
             "chat",
+            "export_conversation_document",
             "leave_feedback",
         ],
         "APPS_READ_OVERRIDES": [
@@ -1320,6 +1330,9 @@ class TestReadOverrideSnapshot:
         "KNOWLEDGE_READ_OVERRIDES": [
             "run_semantic_search",
         ],
+        "MCP_APPS_READ_OVERRIDES": [
+            "mint_app_view_token",
+        ],
     }
 
     def test_read_override_contents_match_snapshot(self):
@@ -1330,6 +1343,7 @@ class TestReadOverrideSnapshot:
             "FILES_READ_OVERRIDES": sorted(FILES_READ_OVERRIDES),
             "INFO_BLOBS_READ_OVERRIDES": sorted(INFO_BLOBS_READ_OVERRIDES),
             "KNOWLEDGE_READ_OVERRIDES": sorted(KNOWLEDGE_READ_OVERRIDES),
+            "MCP_APPS_READ_OVERRIDES": sorted(MCP_APPS_READ_OVERRIDES),
         }
         assert actual == self.EXPECTED_READ_OVERRIDES, (
             "Read-override frozenset contents changed. Adding a name downgrades "

@@ -53,7 +53,15 @@ ATTACHED_FILE_REFERENCES_INSTRUCTION = (
     "Prefer a tool suited to the file and task. When no specific tool fits or a "
     'chosen tool fails, read_file ("Read attached file"), when available, accepts '
     'every file_ref in its url input. Entries with "kind": "image" are images; '
-    "pass their file_ref to image tools, not read_file."
+    "pass their file_ref to image tools, not read_file. "
+    "For Selected table rows, pass the provided file reference, including sheet and "
+    "source_rows, unchanged to inspect_table and query_table. These are coordinates "
+    "in the immutable original file, not values or positions in a sorted query result. "
+    "The runtime filters the source before running DuckDB SQL. Use query_table for "
+    "comparisons, totals and calculations before answering; do not calculate from "
+    "quoted text, earlier samples or a full-file text dump. Keep the filter for "
+    "follow-up queries on that selection. If the tools cannot apply source_rows, "
+    "explain the limitation instead of guessing or silently querying other rows."
 )
 
 
@@ -112,6 +120,8 @@ TOOL_DELIVERABLE_INSTRUCTION = (
     "include the relevant charts in the document by default, with descriptive captions "
     "and sizing that fits the page while preserving their aspect ratio. Reuse existing "
     "chart images when available; otherwise export the charts as images for embedding. "
+    "An image generated in the conversation goes into a document the same way, by its "
+    "file reference; do not generate it again for the document. "
     "Keep images created only for embedding out of chat when the provider supports it, "
     "especially when the interactive charts are already visible. Use the current "
     "attachment references and the tools' declared inputs; never invent an image input "

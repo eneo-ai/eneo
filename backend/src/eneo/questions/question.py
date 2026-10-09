@@ -95,7 +95,7 @@ class ToolCallInfo(BaseModel):
     # such rows fall back to text-only replay (the model won't see the tool use).
     result: Optional[str] = None
 
-    @field_validator("arguments", "result", mode="after")
+    @field_validator("arguments", "result", "structured_content", mode="after")
     @classmethod
     def _redact_reference_tokens(cls, value: Any) -> Any:
         """Strip signed download tokens from persisted and displayed tool data.
@@ -144,6 +144,15 @@ class ToolCallInfo(BaseModel):
     # model a fresh reference URL per image so it can pass the image back to
     # an image tool. Absent on rows persisted before this field existed.
     generated_file_ids: Optional[list[UUID]] = None
+    # The tool result's MCP `structuredContent`, kept only for a call whose
+    # tool has an approved MCP App view, which renders from it. Like `result`
+    # it is left out of conversation payloads and read through the tool-result
+    # endpoint; it is never replayed to the model.
+    structured_content: Optional[dict[str, Any]] = None
+    # The approved MCP App view of the tool when the call was made, as
+    # `{"view_id", "mcp_server_id", "ui"}`. Clients show that stored view for
+    # the call; a tool the view calls runs on that server.
+    app_view: Optional[dict[str, Any]] = None
 
 
 class QuestionAdd(QuestionBase):

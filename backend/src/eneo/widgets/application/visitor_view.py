@@ -124,6 +124,10 @@ class VisitorView:
                 replace(
                     call,
                     result=None,
+                    # A structured result and an MCP App view are tool output
+                    # too; the widget renders neither.
+                    structured_content=None,
+                    app_view=None,
                     meta=None,
                     arguments=self._shown_argument(call.arguments),
                 )

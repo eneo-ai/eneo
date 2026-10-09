@@ -19,6 +19,7 @@ from eneo.authentication.auth_dependencies import (
     FILES_READ_OVERRIDES,
     INFO_BLOBS_READ_OVERRIDES,
     KNOWLEDGE_READ_OVERRIDES,
+    MCP_APPS_READ_OVERRIDES,
     require_api_key_permission,
     require_api_key_scope_check,
     require_file_delete_scope_guard,
@@ -80,6 +81,7 @@ from eneo.jobs.job_router import router as jobs_router
 from eneo.limits.limit_router import router as limit_router
 from eneo.logging.logging_router import router as logging_router
 from eneo.main.config import get_settings
+from eneo.mcp_apps.presentation.mcp_apps_router import router as mcp_apps_router
 from eneo.mcp_servers.presentation.mcp_server_router import (
     router as mcp_server_router,
 )
@@ -598,6 +600,25 @@ router.include_router(
     prefix="/mcp-servers",
     tags=["mcp-servers"],
     dependencies=TENANT_ADMIN_API_KEY_GUARDS,
+)
+# A view belongs to what a conversation shows, so an API key reaches the token
+# endpoint as it reaches conversations: with read access to assistants, and
+# not when scoped to an app. The content endpoint is authorized solely by its
+# signed token (mirroring signed file downloads); the guards do not apply to it.
+router.include_router(
+    mcp_apps_router,
+    prefix="/mcp-apps",
+    tags=["mcp-apps"],
+    dependencies=[
+        Depends(
+            require_resource_permission_for_method(
+                "assistants", read_override_endpoints=MCP_APPS_READ_OVERRIDES
+            )
+        ),
+        Depends(
+            require_api_key_scope_check(resource_type="conversation", path_param=None)
+        ),
+    ],
 )
 router.include_router(
     prompt_library_router,

@@ -110,6 +110,33 @@ def test_tool_call_sse_carries_the_capability_purpose():
     assert tools[1]["purpose"] is None
 
 
+def test_tool_call_sse_names_the_view_of_a_pending_call():
+    """A client shows a tool's view from the moment the call is announced, so
+    the view must reach it on the first event, before the call has run."""
+    view = {"view_id": str(uuid4()), "ui": {"prefersBorder": True}}
+    event = to_sse_response(
+        Completion(
+            response_type=ResponseType.TOOL_CALL,
+            tool_calls_metadata=[
+                ToolCallMetadata(
+                    server_name="weather",
+                    tool_name="get_weather",
+                    tool_call_id="call-1",
+                    result_status="pending",
+                    app_view=view,
+                ),
+                ToolCallMetadata(server_name="general", tool_name="tool"),
+            ],
+        ),
+        uuid4(),
+    )
+
+    tools = json.loads(event.data)["tools"]
+
+    assert tools[0]["app_view"] == view
+    assert tools[1]["app_view"] is None
+
+
 @pytest.mark.parametrize(
     "response_type",
     [ResponseType.TOOL_CALL, ResponseType.TOOL_APPROVAL_REQUIRED],

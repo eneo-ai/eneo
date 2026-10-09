@@ -20,8 +20,10 @@ from mcp.shared.message import SessionMessage
 from mcp.types import (
     LATEST_PROTOCOL_VERSION,
     ServerNotification,
+    TextResourceContents,
     ToolListChangedNotification,
 )
+from pydantic import AnyUrl
 
 from eneo.files.file_reference import file_reference_base_url
 from eneo.main.config import get_settings
@@ -33,6 +35,9 @@ from eneo.mcp_servers.domain.entities.mcp_server import (
     is_builtin_provider,
     is_bundled_server,
 )
+from eneo.mcp_servers.infrastructure.client.mcp_ui_session import (
+    UiCapableClientSession,
+)
 
 logger = get_logger(__name__)
 
@@ -43,12 +48,20 @@ MCP_TOOL_CALL_TIMEOUT_DEFAULT = _settings.mcp_client_call_timeout_seconds
 MCP_TOOL_LIST_PROTOCOL_OVERHEAD_BYTES = 64 * 1024
 MCP_INITIALIZE_RESPONSE_MAX_BYTES = 1024 * 1024
 MCP_DELETE_RESPONSE_MAX_BYTES = 64 * 1024
+# resources/read is only issued for MCP App view HTML. The wire ceiling counts
+# JSON-escaped bytes, so allow 2x the decoded resource cap plus framing; the
+# exact decoded-size check happens after parsing in read_resource().
+MCP_RESOURCES_READ_RESPONSE_MAX_BYTES = (
+    _settings.mcp_app_resource_max_bytes * 2 + 64 * 1024
+)
 
 # Defensive caps for resource content blocks. An adversarial MCP server can
 # emit arbitrarily large `text` / `_meta` payloads. Cap the parsed resource
 # blocks before they flow into persistence or citation rendering.
 RESOURCE_TEXT_MAX_BYTES = 8 * 1024
 RESOURCE_META_MAX_BYTES = 16 * 1024
+# A tool result's `structuredContent`, which an MCP App view renders from.
+STRUCTURED_CONTENT_MAX_BYTES = 256 * 1024
 MCP_SSE_READ_TIMEOUT_SECONDS = 300.0
 
 
@@ -73,6 +86,12 @@ MCPStreams = tuple[
     MemoryObjectSendStream[SessionMessage],
     GetSessionIdCallback,
 ]
+
+
+def _session_class() -> type[ClientSession]:
+    """Runtime settings lookup so tests (and ops) can flip the MCP Apps flag
+    without rebuilding module-level state. Flag off keeps the stock session."""
+    return UiCapableClientSession if get_settings().mcp_apps_enabled else ClientSession
 
 
 def _skip_json_whitespace(data: bytes | bytearray | memoryview, offset: int) -> int:
@@ -373,6 +392,9 @@ async def _bound_mcp_response(
         max_count: int | None = tools_max_count
     elif method == "initialize":
         max_bytes = MCP_INITIALIZE_RESPONSE_MAX_BYTES
+        max_count = None
+    elif method == "resources/read":
+        max_bytes = MCP_RESOURCES_READ_RESPONSE_MAX_BYTES
         max_count = None
     else:
         return
@@ -754,6 +776,10 @@ class MCPClient:
             base_url = file_reference_base_url(settings)
             if base_url:
                 headers["X-Eneo-File-Origin"] = _origin(base_url)
+            # Whether the reader is shown tool views (MCP Apps), so a tool can
+            # tell the model what the reader already sees beside the answer.
+            if settings.mcp_apps_enabled and settings.mcp_app_content_base_url:
+                headers["X-Eneo-Tool-Views"] = "shown"
         elif self.mcp_server.http_auth_type == "api_key_header":
             # Admin-chosen header (e.g. X-Api-Key). The name is validated at
             # configuration time against HTTP token syntax and a deny-list of
@@ -858,7 +884,7 @@ class MCPClient:
         read, write, get_session_id = streams
         logger.debug(f"Streamable HTTP transport connected to {self.endpoint_url}")
 
-        session_context = ClientSession(
+        session_context = _session_class()(
             read, write, message_handler=self._handle_session_message
         )
         try:
@@ -940,12 +966,21 @@ class MCPClient:
                 title = getattr(annotations, "title", None) or getattr(
                     tool, "title", None
                 )
+                raw_meta = getattr(tool, "meta", None) or getattr(tool, "_meta", None)
                 tools.append(
                     {
                         "name": tool.name,
                         "title": title,
                         "description": tool.description,
                         "input_schema": tool.inputSchema,
+                        # Serialized into the catalog dicts below, so metadata
+                        # counts against the same per-definition and catalog
+                        # byte ceilings as the rest of the contract.
+                        "meta": (
+                            raw_meta
+                            if isinstance(raw_meta, dict) and raw_meta
+                            else None
+                        ),
                     }
                 )
 
@@ -1091,6 +1126,24 @@ class MCPClient:
             if result_meta:
                 result["meta"] = result_meta
 
+            # Kept whole or not at all: a view handed part of its data would
+            # show something the tool never returned.
+            structured: object = getattr(response, "structuredContent", None)
+            if isinstance(structured, dict) and structured:
+                structured_bytes = len(
+                    json.dumps(structured, ensure_ascii=False, default=str).encode()
+                )
+                if structured_bytes <= STRUCTURED_CONTENT_MAX_BYTES:
+                    result["structured_content"] = structured
+                else:
+                    logger.warning(
+                        "Dropped %d bytes of structured content from %s on %s (max %d)",
+                        structured_bytes,
+                        tool_name,
+                        self.mcp_server.name,
+                        STRUCTURED_CONTENT_MAX_BYTES,
+                    )
+
             logger.info(f"Called tool {tool_name} on {self.mcp_server.name}")
             return result
 
@@ -1112,6 +1165,54 @@ class MCPClient:
                 f"Failed to call tool {tool_name} on {self.mcp_server.name}: {error_msg}"
             )
             raise MCPClientError(f"Tool call failed: {error_msg}") from e
+
+    async def read_resource(self, uri: str) -> dict[str, Any]:
+        """Read one resource from the MCP server (used for MCP App view HTML).
+
+        Returns ``{"uri", "text", "mime_type", "meta"}`` for the first content
+        block. The decoded text is bounded by ``mcp_app_resource_max_bytes``
+        (the wire response is separately pre-bounded before SDK decoding); the
+        general 8 KiB embedded-resource cap deliberately does not apply here.
+        """
+        if not self.session:
+            raise MCPClientError("Not connected to MCP server")
+
+        try:
+            result = await asyncio.wait_for(
+                self.session.read_resource(AnyUrl(uri)),
+                timeout=self.tool_call_timeout,
+            )
+            if not result.contents:
+                raise MCPClientError(f"Resource {uri} returned no contents")
+            first = result.contents[0]
+            text = first.text if isinstance(first, TextResourceContents) else None
+            max_bytes = get_settings().mcp_app_resource_max_bytes
+            if text is not None and len(text.encode("utf-8")) > max_bytes:
+                raise MCPClientError(
+                    f"Resource {uri} exceeds the configured maximum of "
+                    f"{max_bytes} bytes"
+                )
+            raw_meta = first.meta
+            return {
+                "uri": str(first.uri),
+                "text": text,
+                "mime_type": first.mimeType,
+                "meta": raw_meta if isinstance(raw_meta, dict) else None,
+            }
+        except asyncio.TimeoutError as e:
+            raise MCPClientError(
+                "Failed to read resource: request timed out after "
+                f"{self.tool_call_timeout}s"
+            ) from e
+        except MCPClientError:
+            raise
+        except BaseException as e:
+            error_msg = _extract_error_message(e) or str(e)
+            logger.error(
+                f"Failed to read resource {uri} from {self.mcp_server.name}: "
+                f"{error_msg}"
+            )
+            raise MCPClientError(f"Resource read failed: {error_msg}") from e
 
     async def disconnect(self) -> None:
         """Disconnect from the MCP server.

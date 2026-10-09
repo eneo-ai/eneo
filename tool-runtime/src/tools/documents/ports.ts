@@ -12,7 +12,13 @@ export type SheetSpec = {
  * sources; the renderer fills in `path`, a file in its own directory.
  */
 export type FileSource = { index: number; path?: string };
-export type DocumentImage = FileSource & { id: string; caption?: string; widthPercent?: number };
+/** Placed in the content by `id` (an image:ID line) or by `handle` (an eneo-file: line). */
+export type DocumentImage = FileSource & {
+  id?: string;
+  handle?: string;
+  caption?: string;
+  widthPercent?: number;
+};
 export type DocumentSpec =
   | {
       kind: "markdown";

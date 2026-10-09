@@ -67,7 +67,11 @@ export async function readConversationStream(client, endpoint, args, callbacks, 
               break;
 
             case "image":
-              response.generated_files = data.generated_files;
+              // One event per saved file; an answer may create several.
+              response.generated_files = [
+                ...(response.generated_files ?? []),
+                ...data.generated_files
+              ];
               callbacks?.onImage?.(data);
               break;
 

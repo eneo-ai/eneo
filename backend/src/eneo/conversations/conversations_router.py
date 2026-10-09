@@ -3,12 +3,22 @@ from types import SimpleNamespace
 from typing import Annotated, NoReturn, Optional, cast
 from uuid import UUID
 
-from fastapi import APIRouter, Body, Depends, HTTPException, Path, Query, Request
+from fastapi import (
+    APIRouter,
+    Body,
+    Depends,
+    HTTPException,
+    Path,
+    Query,
+    Request,
+    Response,
+)
 
 from eneo.assistants.api.assistant_protocol import to_conversation_response
 from eneo.audit.application.audit_metadata import AuditMetadata
 from eneo.audit.domain.action_types import ActionType
 from eneo.audit.domain.entity_types import EntityType
+from eneo.audit.domain.outcome import Outcome
 from eneo.audit.infrastructure.rate_limiting import (
     RateLimitConfig,
     RateLimitExceededError,
@@ -30,11 +40,31 @@ from eneo.conversations.conversation_models import (
     PreflightRequest,
     PreflightResponse,
 )
+from eneo.conversations.document_export import (
+    EXPORT_MIME_TYPES,
+    DocumentExportAvailability,
+    DocumentExportFailed,
+    DocumentExportUnavailable,
+    document_export_availability,
+    export_document,
+)
 from eneo.database.database import AsyncSession
+from eneo.main.config import get_settings
 from eneo.main.container.container import Container
-from eneo.main.exceptions import NotFoundException, UnauthorizedException
+from eneo.main.exceptions import (
+    BadRequestException,
+    NotFoundException,
+    UnauthorizedException,
+)
 from eneo.main.logging import get_logger
 from eneo.main.models import CursorPaginatedResponse
+from eneo.mcp_apps.application.view_tool_calls import (
+    ViewCallNotReady,
+    call_tool_from_view,
+    view_server_id,
+)
+from eneo.mcp_apps.infrastructure.repo_impl.mcp_app_view_repo_impl import McpAppViewRepo
+from eneo.mcp_servers.infrastructure.identity_headers import build_identity_headers
 from eneo.mcp_servers.infrastructure.tool_approval import (
     ToolApprovalDecision,
     get_approval_manager,
@@ -42,7 +72,9 @@ from eneo.mcp_servers.infrastructure.tool_approval import (
 from eneo.roles.permissions import Permission
 from eneo.server.dependencies.container import get_container
 from eneo.server.protocol import responses
+from eneo.server.protocol.downloads import content_disposition_header
 from eneo.sessions.session import (
+    DocumentExportRequest,
     SessionFeedback,
     SessionInDB,
     SessionMetadataPublic,
@@ -58,6 +90,9 @@ from eneo.sessions.session import (
     SSEToolCall,
     ToolApprovalResponse,
     ToolCallResultPublic,
+    ViewToolCallRequest,
+    ViewToolCallResultPublic,
+    ViewToolCallText,
 )
 from eneo.sessions.session_protocol import (
     to_session_public,
@@ -658,15 +693,364 @@ async def get_tool_call_result(
     session_service = container.session_service()
     session = await session_service.get_session_by_uuid(session_id)
     await _authorize_session_access(container, session)
-    result, mcp_tool_name = await session_service.get_tool_call_result(
+    tool_call = await session_service.get_tool_call_result(
         session=session, tool_call_id=tool_call_id
     )
-    if result is None and mcp_tool_name is None:
+    if tool_call is None:
         raise NotFoundException("Tool call not found in this session")
     return ToolCallResultPublic(
         tool_call_id=tool_call_id,
-        result=result,
-        mcp_tool_name=mcp_tool_name,
+        result=tool_call.result,
+        mcp_tool_name=tool_call.mcp_tool_name,
+        structured_content=tool_call.structured_content,
+        is_error=tool_call.result_status == "failed",
+    )
+
+
+@router.post(
+    "/{session_id}/tool-calls/{tool_call_id}/app-calls/",
+    response_model=ViewToolCallResultPublic,
+    description="Call an approved tool on the originating server for an authorized interactive view.",
+    responses=responses.get_responses([400, 403, 404, 409, 429, 503]),
+    dependencies=[Depends(require_resource_permission_for_method("conversations"))],
+)
+@endpoint_access(
+    authentication=Authentication.USER,
+    authorization=Authorization.AUTHENTICATED,
+    reason=_CONVERSATION_SERVICE_ACCESS_REASON,
+)
+async def call_tool_from_app_view(
+    session_id: Annotated[
+        UUID, Path(description="The UUID of the conversation/session")
+    ],
+    tool_call_id: Annotated[
+        str, Path(description="The tool call whose interactive view makes the call")
+    ],
+    request: ViewToolCallRequest,
+    http_request: Request,
+    container: Annotated[Container, Depends(get_container(with_user=True))],  # pyright: ignore[reportCallInDefaultInitializer]  # FastAPI DI; evaluated at request time
+):
+    """Call a tool for the interactive view (MCP App) of an earlier tool call.
+
+    The tool runs on the view's own server, for the user, and only if the
+    assistant still reaches that server and the tool is enabled, approved and
+    visible to views. The result is returned to the view and is not added to
+    the conversation.
+    """
+    if not get_settings().mcp_apps_enabled:
+        raise NotFoundException("Tool call not found in this session")
+
+    current_user = container.user()
+    try:
+        await enforce_rate_limit(
+            redis_client=container.redis_client(),
+            user_id=current_user.id,
+            tenant_id=current_user.tenant_id,
+            config=RateLimitConfig(
+                max_requests=30,
+                window_seconds=60,
+                key_prefix="rate_limit:mcp_app_tool_call",
+            ),
+        )
+    except RateLimitExceededError as exc:
+        retry_after = exc.result.window_seconds
+        raise HTTPException(
+            status_code=429,
+            detail={
+                "code": "rate_limit_exceeded",
+                "message": "Too many tool calls from views. Please retry shortly.",
+                "retry_after_seconds": retry_after,
+            },
+            headers={"Retry-After": str(retry_after)},
+        )
+    except RateLimitServiceUnavailableError:
+        # Fail-closed: a view runs a server's code, and nothing else bounds
+        # how often it may call tools for the user.
+        raise HTTPException(
+            status_code=503,
+            detail={
+                "code": "rate_limit_unavailable",
+                "message": "Tool calls from views are temporarily unavailable.",
+            },
+        )
+
+    await _validate_conversation_scope(
+        http_request=http_request,
+        container=container,
+        assistant_id=None,
+        group_chat_id=None,
+        session_id=session_id,
+    )
+    session = await container.session_service().get_session_by_uuid(session_id)
+    await _authorize_session_access(container, session)
+
+    audit_service = container.audit_service()
+
+    async def audit(
+        *, mcp_server_id: UUID | None, is_error: bool, refused: str | None = None
+    ) -> None:
+        """Record the view's call, made or refused; never its arguments."""
+        await audit_service.log_async(
+            tenant_id=current_user.tenant_id,
+            user=current_user,
+            action=ActionType.MCP_APP_TOOL_CALLED,
+            # A call refused before its server is known is recorded on the
+            # conversation it was made from.
+            entity_type=(
+                EntityType.MCP_SERVER if mcp_server_id else EntityType.SESSION
+            ),
+            entity_id=mcp_server_id or session_id,
+            description=(
+                f"A tool view was refused a call to '{request.name}'"
+                if refused
+                else f"A tool view called '{request.name}'"
+            ),
+            metadata=AuditMetadata.standard(
+                actor=current_user,
+                target=session,
+                extra={
+                    "session_id": str(session_id),
+                    "tool_call_id": tool_call_id,
+                    "view_id": str(request.view_id),
+                    "tool_name": request.name,
+                    "is_error": is_error,
+                    **({"refused": refused} if refused else {}),
+                },
+            ),
+            outcome=Outcome.FAILURE if refused else Outcome.SUCCESS,
+            error_message=refused,
+        )
+
+    # A refused attempt is the one worth knowing about, so it is recorded too.
+    attempted_server_id = view_server_id(session, tool_call_id, request.view_id)
+    try:
+        result = await call_tool_from_view(
+            conversation=session,
+            tool_call_id=tool_call_id,
+            view_id=request.view_id,
+            app_view_repo=McpAppViewRepo(cast(AsyncSession, container.session())),
+            name=request.name,
+            arguments=request.arguments,
+            assistant_service=container.assistant_service(),
+            proxy_factory=container.mcp_proxy_session_factory(),
+            identity_headers=build_identity_headers(current_user, container.tenant()),
+            tenant_id=current_user.tenant_id,
+        )
+    except ViewCallNotReady:
+        await audit(
+            mcp_server_id=attempted_server_id, is_error=True, refused="not_finished"
+        )
+        raise HTTPException(
+            status_code=409,
+            detail={
+                "code": "tool_call_not_finished",
+                "message": "The tool call this view belongs to has not finished.",
+            },
+        )
+    except NotFoundException:
+        await audit(
+            mcp_server_id=attempted_server_id, is_error=True, refused="not_allowed"
+        )
+        raise
+    except BadRequestException:
+        await audit(mcp_server_id=attempted_server_id, is_error=True, refused="invalid")
+        raise
+    except Exception:
+        await audit(mcp_server_id=attempted_server_id, is_error=True, refused="failed")
+        raise
+
+    await audit(mcp_server_id=result.mcp_server_id, is_error=result.is_error)
+    # A link signed again for the view is an exposure of the file like any
+    # other link Eneo signs for a tool.
+    for file in result.signed_files:
+        await audit_service.log_async(
+            tenant_id=current_user.tenant_id,
+            user=current_user,
+            action=ActionType.FILE_SIGNED_URL_MINTED,
+            entity_type=EntityType.FILE,
+            entity_id=file.id,
+            description=(
+                f"Minted signed URL for file '{file.name}' for a tool view's call"
+            ),
+            metadata=AuditMetadata.standard(
+                actor=current_user,
+                target=file,
+                extra={
+                    "source": "mcp_app_view",
+                    "variant": "original",
+                    "expires_in": get_settings().file_reference_url_expiry_seconds,
+                    "session_id": str(session_id),
+                    "tool_call_id": tool_call_id,
+                },
+            ),
+        )
+    return ViewToolCallResultPublic(
+        content=[ViewToolCallText(text=result.text)] if result.text else [],
+        structured_content=result.structured_content,
+        is_error=result.is_error,
+    )
+
+
+@router.get(
+    "/{session_id}/documents/{file_id}/export/",
+    response_model=DocumentExportAvailability,
+    description="Check which formats the current provider can export for this conversation document.",
+    responses=responses.get_responses([400, 403, 404]),
+    dependencies=[Depends(require_resource_permission_for_method("conversations"))],
+)
+@endpoint_access(
+    authentication=Authentication.USER,
+    authorization=Authorization.AUTHENTICATED,
+    reason=_CONVERSATION_SERVICE_ACCESS_REASON,
+)
+async def get_document_export_availability(
+    session_id: UUID,
+    file_id: UUID,
+    http_request: Request,
+    response: Response,
+    container: Annotated[Container, Depends(get_container(with_user=True))],
+) -> DocumentExportAvailability:
+    """Check native export support for this document and acting user."""
+    await _validate_conversation_scope(
+        http_request=http_request,
+        container=container,
+        assistant_id=None,
+        group_chat_id=None,
+        session_id=session_id,
+    )
+    session = await container.session_service().get_session_by_uuid(session_id)
+    await _authorize_session_access(container, session)
+    response.headers["Cache-Control"] = "no-store"
+    return await document_export_availability(
+        conversation=session,
+        file_id=file_id,
+        assistant_service=container.assistant_service(),
+        file_service=container.file_service(),
+        proxy_factory=container.mcp_proxy_session_factory(),
+        identity_headers=build_identity_headers(container.user(), container.tenant()),
+    )
+
+
+@router.post(
+    "/{session_id}/documents/{file_id}/export/",
+    response_class=Response,
+    response_model=None,
+    description="Export an authorized conversation document as Word or PDF without another model response.",
+    responses={
+        200: {
+            "description": "The document in the format asked for, as a download.",
+            "content": {mime: {} for mime in EXPORT_MIME_TYPES.values()},
+        },
+        **responses.get_responses([400, 403, 404, 409, 502]),
+    },
+    dependencies=[Depends(require_resource_permission_for_method("conversations"))],
+)
+@endpoint_access(
+    authentication=Authentication.USER,
+    authorization=Authorization.AUTHENTICATED,
+    reason=_CONVERSATION_SERVICE_ACCESS_REASON,
+)
+async def export_conversation_document(
+    session_id: Annotated[
+        UUID, Path(description="The UUID of the conversation/session")
+    ],
+    file_id: Annotated[
+        UUID, Path(description="A Markdown document the assistant created in it")
+    ],
+    request: DocumentExportRequest,
+    http_request: Request,
+    container: Annotated[Container, Depends(get_container(with_user=True))],  # pyright: ignore[reportCallInDefaultInitializer]  # FastAPI DI; evaluated at request time
+):
+    """Export a Markdown document of the conversation as Word or PDF.
+
+    The provider of the assistant's file-creation capability renders the
+    document's text. The file is returned as a download and is not stored in
+    the conversation. 409 when the assistant has no such provider.
+    """
+    current_user = container.user()
+    await _validate_conversation_scope(
+        http_request=http_request,
+        container=container,
+        assistant_id=None,
+        group_chat_id=None,
+        session_id=session_id,
+    )
+    session = await container.session_service().get_session_by_uuid(session_id)
+    await _authorize_session_access(container, session)
+
+    audit_service = container.audit_service()
+
+    async def audit(*, extra: dict[str, object], refused: str | None = None) -> None:
+        """Record the export, made or refused."""
+        await audit_service.log_async(
+            tenant_id=current_user.tenant_id,
+            user=current_user,
+            action=ActionType.DOCUMENT_EXPORTED,
+            entity_type=EntityType.FILE,
+            entity_id=file_id,
+            description=(
+                f"A document could not be exported as {request.format}"
+                if refused
+                else f"Exported a document as {request.format}"
+            ),
+            metadata=AuditMetadata.standard(
+                actor=current_user,
+                target=session,
+                extra={
+                    "session_id": str(session_id),
+                    "file_id": str(file_id),
+                    "format": request.format,
+                    **extra,
+                },
+            ),
+            outcome=Outcome.FAILURE if refused else Outcome.SUCCESS,
+            error_message=refused,
+        )
+
+    try:
+        exported = await export_document(
+            conversation=session,
+            file_id=file_id,
+            format=request.format,
+            assistant_service=container.assistant_service(),
+            file_service=container.file_service(),
+            proxy_factory=container.mcp_proxy_session_factory(),
+            identity_headers=build_identity_headers(current_user, container.tenant()),
+        )
+    except DocumentExportUnavailable as exc:
+        await audit(extra={"reason": exc.reason}, refused="unavailable")
+        raise HTTPException(
+            status_code=409,
+            detail={
+                "code": "document_export_unavailable",
+                "message": "Native export is unavailable for this document and format.",
+            },
+        )
+    except DocumentExportFailed:
+        await audit(extra={}, refused="failed")
+        raise HTTPException(
+            status_code=502,
+            detail={
+                "code": "document_export_failed",
+                "message": "The document could not be exported.",
+            },
+        )
+
+    await audit(
+        extra={
+            "mcp_server_id": str(exported.mcp_server_id),
+            "bytes": len(exported.data),
+        }
+    )
+    return Response(
+        content=exported.data,
+        media_type=exported.mime_type,
+        headers={
+            "Content-Disposition": content_disposition_header(
+                "attachment", exported.filename
+            ),
+            "Cache-Control": "no-store",
+        },
     )
 
 

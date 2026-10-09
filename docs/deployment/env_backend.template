@@ -441,11 +441,17 @@ EXPORT_MAX_AGE_HOURS=24
 # runs on a different port or behind an internal service URL.
 # INTERNAL_MCP_BASE_URL=http://localhost:8000
 
-# Optional bundled tool runtime (docker-compose.tool-runtime.yml, see
-# TOOL_RUNTIME.md). The overlay sets TOOL_RUNTIME_URL and TOOL_RUNTIME_TOKEN
-# for the backend and worker from TOOL_RUNTIME_TOKEN in .env; do not set them
-# here. Tabular analysis also needs signed file links the runtime can reach:
-# FILE_REFERENCE_BASE_URL=http://backend:8000
+# Bundled tool runtime (part of the standard stack, see TOOL_RUNTIME.md).
+# docker-compose.yml passes TOOL_RUNTIME_URL, TOOL_RUNTIME_TOKEN and
+# FILE_REFERENCE_BASE_URL to the backend and worker from the deployment .env
+# (python3 setup.py generates the token), and those values take precedence
+# over this file; do not set them here.
+
+# Optional interactive tool views (MCP Apps, see MCP_APPS.md). Views are served
+# from a second hostname that reaches the backend; it must differ from the
+# address users open Eneo on.
+# MCP_APPS_ENABLED=true
+# MCP_APP_CONTENT_BASE_URL=https://views.your-domain.com
 
 # ============================================================================
 # FEATURE FLAGS

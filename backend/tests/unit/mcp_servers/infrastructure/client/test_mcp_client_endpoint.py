@@ -36,6 +36,8 @@ def configured_loopback(monkeypatch: pytest.MonkeyPatch) -> None:
             tool_runtime_token="runtime-secret",
             file_reference_base_url=None,
             public_origin=None,
+            mcp_apps_enabled=False,
+            mcp_app_content_base_url=None,
         ),
     )
 

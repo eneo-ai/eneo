@@ -1664,6 +1664,50 @@ export interface paths {
     patch?: never;
     trace?: never;
   };
+  "/api/v1/conversations/{session_id}/tool-calls/{tool_call_id}/app-calls/": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    /**
+     * Call Tool From App View
+     * @description Call an approved tool on the originating server for an authorized interactive view.
+     */
+    post: operations["call_tool_from_app_view_api_v1_conversations__session_id__tool_calls__tool_call_id__app_calls__post"];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/v1/conversations/{session_id}/documents/{file_id}/export/": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /**
+     * Get Document Export Availability
+     * @description Check which formats the current provider can export for this conversation document.
+     */
+    get: operations["get_document_export_availability_api_v1_conversations__session_id__documents__file_id__export__get"];
+    put?: never;
+    /**
+     * Export Conversation Document
+     * @description Export an authorized conversation document as Word or PDF without another model response.
+     */
+    post: operations["export_conversation_document_api_v1_conversations__session_id__documents__file_id__export__post"];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
   "/api/v1/conversations/{session_id}/feedback/": {
     parameters: {
       query?: never;
@@ -6834,6 +6878,28 @@ export interface paths {
     patch?: never;
     trace?: never;
   };
+  "/api/v1/mcp-servers/{id}/tools/{tool_id}/view/": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /**
+     * Get Mcp Tool View
+     * @description What a tool's interactive view may do: its size, the hosts it may reach
+     *     and the permissions it asks for. Describes the view awaiting approval when
+     *     there is one, otherwise the approved view.
+     */
+    get: operations["get_mcp_tool_view_api_v1_mcp_servers__id__tools__tool_id__view__get"];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
   "/api/v1/mcp-servers/{id}/tools/sync/": {
     parameters: {
       query?: never;
@@ -6947,6 +7013,46 @@ export interface paths {
      * @description Update global default enabled status for a tool (admin only).
      */
     put: operations["update_tool_default_enabled_api_v1_mcp_servers__id__tools__tool_id___put"];
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/v1/mcp-apps/views/{view_id}/token/": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    /**
+     * Get approved MCP App HTML and a signed sandbox URL
+     * @description Checks the view belongs to the caller's tenant, then returns approved HTML and a short-lived sandbox URL on the content origin. 424 when no content origin is configured.
+     */
+    post: operations["mint_app_view_token_api_v1_mcp_apps_views__view_id__token__post"];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/v1/mcp-apps/views/{view_id}/content": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /**
+     * Serve the trusted MCP App sandbox (signed-token authorized)
+     * @description Serve the isolated MCP App sandbox for an approved view authorized by a signed token.
+     */
+    get: operations["serve_app_view_content_api_v1_mcp_apps_views__view_id__content_get"];
+    put?: never;
     post?: never;
     delete?: never;
     options?: never;
@@ -9500,6 +9606,7 @@ export interface components {
       | "file_original_download_link_created"
       | "file_original_downloaded"
       | "file_signed_url_minted"
+      | "document_exported"
       | "info_blob_original_download_link_created"
       | "website_created"
       | "website_updated"
@@ -9550,6 +9657,8 @@ export interface components {
       | "mcp_server_disabled"
       | "mcp_server_tool_enabled"
       | "mcp_server_tool_disabled"
+      | "mcp_app_view_link_created"
+      | "mcp_app_tool_called"
       | "model_provider_headers_updated"
       | "model_provider_destination_changed"
       | "model_provider_headers_previewed"
@@ -13572,6 +13681,38 @@ export interface components {
       /** Transcription Audio Limit Bytes */
       transcription_audio_limit_bytes: number;
     };
+    /** DocumentExportAvailability */
+    DocumentExportAvailability: {
+      docx: components["schemas"]["DocumentExportFormatAvailability"];
+      pdf: components["schemas"]["DocumentExportFormatAvailability"];
+    };
+    /** DocumentExportFormatAvailability */
+    DocumentExportFormatAvailability: {
+      /** Available */
+      available: boolean;
+      /** Reason */
+      reason?:
+        | (
+            | "provider_unavailable"
+            | "tool_unavailable"
+            | "incompatible_tool"
+            | "format_unsupported"
+            | "document_unsupported"
+          )
+        | null;
+    };
+    /**
+     * DocumentExportRequest
+     * @description A Markdown document of the conversation, asked for in another format.
+     */
+    DocumentExportRequest: {
+      /**
+       * Format
+       * @description The format to export to.
+       * @enum {string}
+       */
+      format: "docx" | "pdf";
+    };
     /** DynamicValuePublic */
     DynamicValuePublic: {
       /**
@@ -15858,6 +15999,15 @@ export interface components {
       input_schema: {
         [key: string]: unknown;
       } | null;
+      /** Meta */
+      meta?: {
+        [key: string]: unknown;
+      } | null;
+      /**
+       * Ui Resource Sha256
+       * @description Hash of the approved interactive view (MCP App), if any.
+       */
+      ui_resource_sha256?: string | null;
       /** Is Enabled By Default */
       is_enabled_by_default: boolean;
       /** Pending Description */
@@ -15866,6 +16016,15 @@ export interface components {
       pending_input_schema?: {
         [key: string]: unknown;
       } | null;
+      /** Pending Meta */
+      pending_meta?: {
+        [key: string]: unknown;
+      } | null;
+      /**
+       * Pending Ui Resource Sha256
+       * @description Hash of the interactive view awaiting approval, if any.
+       */
+      pending_ui_resource_sha256?: string | null;
       /**
        * Requires Approval
        * @default false
@@ -15989,6 +16148,53 @@ export interface components {
       tool_id: string;
       /** Is Enabled */
       is_enabled: boolean;
+    };
+    /**
+     * MCPToolViewPublic
+     * @description What a tool's interactive view (MCP App) may do, for review.
+     */
+    MCPToolViewPublic: {
+      /** Uri */
+      uri: string;
+      /**
+       * Pending
+       * @description The view awaits approval; otherwise it is the approved one.
+       */
+      pending: boolean;
+      /** Size Bytes */
+      size_bytes: number;
+      /**
+       * Connect Domains
+       * @description Hosts the view may send requests to.
+       */
+      connect_domains: string[];
+      /**
+       * Resource Domains
+       * @description Hosts the view may load scripts, styles, images and fonts from.
+       */
+      resource_domains: string[];
+      /**
+       * Frame Domains
+       * @description Hosts the view may embed.
+       */
+      frame_domains: string[];
+      /**
+       * Permissions
+       * @description Browser permissions the view asks for. Only clipboardWrite is granted.
+       */
+      permissions: string[];
+    };
+    /**
+     * McpAppViewTokenResponse
+     * @description Approved HTML and a signed URL for its trusted sandbox proxy.
+     */
+    McpAppViewTokenResponse: {
+      /** Url */
+      url: string;
+      /** Expires At */
+      expires_at: number;
+      /** Html */
+      html: string;
     };
     /** McpRestrictionInput */
     McpRestrictionInput: {
@@ -22182,6 +22388,14 @@ export interface components {
       } | null;
       /** Generated File Ids */
       generated_file_ids?: string[] | null;
+      /** Structured Content */
+      structured_content?: {
+        [key: string]: unknown;
+      } | null;
+      /** App View */
+      app_view?: {
+        [key: string]: unknown;
+      } | null;
     };
     /**
      * ToolCallResultPublic
@@ -22197,6 +22411,15 @@ export interface components {
       result?: string | null;
       /** Mcp Tool Name */
       mcp_tool_name?: string | null;
+      /** Structured Content */
+      structured_content?: {
+        [key: string]: unknown;
+      } | null;
+      /**
+       * Is Error
+       * @default false
+       */
+      is_error?: boolean;
     };
     /**
      * ToolChangePublic
@@ -22212,12 +22435,24 @@ export interface components {
       current_input_schema?: {
         [key: string]: unknown;
       } | null;
+      /** Current Meta */
+      current_meta?: {
+        [key: string]: unknown;
+      } | null;
+      /** Current Ui Resource Sha256 */
+      current_ui_resource_sha256?: string | null;
       /** Pending Description */
       pending_description?: string | null;
       /** Pending Input Schema */
       pending_input_schema?: {
         [key: string]: unknown;
       } | null;
+      /** Pending Meta */
+      pending_meta?: {
+        [key: string]: unknown;
+      } | null;
+      /** Pending Ui Resource Sha256 */
+      pending_ui_resource_sha256?: string | null;
     };
     /**
      * ToolReviewRequest
@@ -23215,6 +23450,58 @@ export interface components {
        * @default false
        */
       user_confirmed?: boolean;
+    };
+    /**
+     * ViewToolCallRequest
+     * @description A tool call made by the interactive view (MCP App) of an earlier call.
+     */
+    ViewToolCallRequest: {
+      /**
+       * View Id
+       * Format: uuid
+       * @description The view shown for the tool call.
+       */
+      view_id: string;
+      /**
+       * Name
+       * @description The tool to call, by its name on the view's own server.
+       */
+      name: string;
+      /** Arguments */
+      arguments?: {
+        [key: string]: unknown;
+      };
+    };
+    /**
+     * ViewToolCallResultPublic
+     * @description The tool's result, for the view that asked.
+     */
+    ViewToolCallResultPublic: {
+      /**
+       * Content
+       * @default []
+       */
+      content?: components["schemas"]["ViewToolCallText"][];
+      /** Structured Content */
+      structured_content?: {
+        [key: string]: unknown;
+      } | null;
+      /**
+       * Is Error
+       * @default false
+       */
+      is_error?: boolean;
+    };
+    /** ViewToolCallText */
+    ViewToolCallText: {
+      /**
+       * Type
+       * @default text
+       * @constant
+       */
+      type?: "text";
+      /** Text */
+      text: string;
     };
     /** VisitorSession */
     VisitorSession: {
@@ -30954,6 +31241,14 @@ export interface operations {
                     } | null;
                     /** Generated File Ids */
                     generated_file_ids?: string[] | null;
+                    /** Structured Content */
+                    structured_content?: {
+                      [key: string]: unknown;
+                    } | null;
+                    /** App View */
+                    app_view?: {
+                      [key: string]: unknown;
+                    } | null;
                   };
                 };
               }
@@ -31017,6 +31312,14 @@ export interface operations {
                     } | null;
                     /** Generated File Ids */
                     generated_file_ids?: string[] | null;
+                    /** Structured Content */
+                    structured_content?: {
+                      [key: string]: unknown;
+                    } | null;
+                    /** App View */
+                    app_view?: {
+                      [key: string]: unknown;
+                    } | null;
                   };
                 };
               }
@@ -31080,6 +31383,14 @@ export interface operations {
                     } | null;
                     /** Generated File Ids */
                     generated_file_ids?: string[] | null;
+                    /** Structured Content */
+                    structured_content?: {
+                      [key: string]: unknown;
+                    } | null;
+                    /** App View */
+                    app_view?: {
+                      [key: string]: unknown;
+                    } | null;
                   };
                 };
               }
@@ -31790,6 +32101,241 @@ export interface operations {
         };
         content: {
           "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  call_tool_from_app_view_api_v1_conversations__session_id__tool_calls__tool_call_id__app_calls__post: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description The UUID of the conversation/session */
+        session_id: string;
+        /** @description The tool call whose interactive view makes the call */
+        tool_call_id: string;
+      };
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["ViewToolCallRequest"];
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ViewToolCallResultPublic"];
+        };
+      };
+      /** @description Bad Request */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Not Found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Conflict */
+      409: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+      /** @description Too Many Requests */
+      429: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Service Unavailable */
+      503: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+    };
+  };
+  get_document_export_availability_api_v1_conversations__session_id__documents__file_id__export__get: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        session_id: string;
+        file_id: string;
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["DocumentExportAvailability"];
+        };
+      };
+      /** @description Bad Request */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Not Found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  export_conversation_document_api_v1_conversations__session_id__documents__file_id__export__post: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description The UUID of the conversation/session */
+        session_id: string;
+        /** @description A Markdown document the assistant created in it */
+        file_id: string;
+      };
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["DocumentExportRequest"];
+      };
+    };
+    responses: {
+      /** @description The document in the format asked for, as a download. */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/vnd.openxmlformats-officedocument.wordprocessingml.document": unknown;
+          "application/pdf": unknown;
+        };
+      };
+      /** @description Bad Request */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Not Found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Conflict */
+      409: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+      /** @description Bad Gateway */
+      502: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
         };
       };
     };
@@ -48043,6 +48589,56 @@ export interface operations {
       };
     };
   };
+  get_mcp_tool_view_api_v1_mcp_servers__id__tools__tool_id__view__get: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        id: string;
+        tool_id: string;
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["MCPToolViewPublic"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Not Found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
   sync_mcp_server_tools_api_v1_mcp_servers__id__tools_sync__post: {
     parameters: {
       query?: never;
@@ -48387,6 +48983,98 @@ export interface operations {
         };
         content: {
           "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  mint_app_view_token_api_v1_mcp_apps_views__view_id__token__post: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        view_id: string;
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["McpAppViewTokenResponse"];
+        };
+      };
+      /** @description Not Found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+      /** @description Failed Dependency */
+      424: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+    };
+  };
+  serve_app_view_content_api_v1_mcp_apps_views__view_id__content_get: {
+    parameters: {
+      query: {
+        /** @description The signed app-view token */
+        token: string;
+      };
+      header?: never;
+      path: {
+        view_id: string;
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "text/html": string;
+        };
+      };
+      /** @description Not Found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "text/html": components["schemas"]["GeneralError"];
         };
       };
       /** @description Validation Error */

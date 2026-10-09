@@ -345,6 +345,10 @@ const ACTION_MESSAGES = {
     name: m.audit_action_file_signed_url_minted,
     description: m.audit_action_file_signed_url_minted_description
   },
+  document_exported: {
+    name: m.audit_action_document_exported,
+    description: m.audit_action_document_exported_description
+  },
   website_created: {
     name: m.audit_action_website_created,
     description: m.audit_action_website_created_description
@@ -540,6 +544,14 @@ const ACTION_MESSAGES = {
   mcp_server_tool_disabled: {
     name: m.audit_action_mcp_server_tool_disabled,
     description: m.audit_action_mcp_server_tool_disabled_description
+  },
+  mcp_app_view_link_created: {
+    name: m.audit_action_mcp_app_view_link_created,
+    description: m.audit_action_mcp_app_view_link_created_description
+  },
+  mcp_app_tool_called: {
+    name: m.audit_action_mcp_app_tool_called,
+    description: m.audit_action_mcp_app_tool_called_description
   },
   model_provider_headers_updated: {
     name: m.audit_action_model_provider_headers_updated,

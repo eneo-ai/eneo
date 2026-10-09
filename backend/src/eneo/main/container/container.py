@@ -258,6 +258,9 @@ from eneo.limits.limit_service import LimitService
 from eneo.main.aiohttp_client import aiohttp_client
 from eneo.main.config import get_settings
 from eneo.main.logging import get_logger
+from eneo.mcp_apps.infrastructure.repo_impl.mcp_app_view_repo_impl import (
+    McpAppViewRepo,
+)
 from eneo.mcp_servers.application.mcp_server_service import MCPServerService
 from eneo.mcp_servers.application.mcp_server_settings_service import (
     MCPServerSettingsService,
@@ -770,6 +773,7 @@ class Container(containers.DeclarativeContainer):
     mcp_server_tool_repo = providers.Factory(
         MCPServerToolRepoImpl, session=session, mapper=mcp_server_tool_mapper
     )
+    mcp_app_view_repo = providers.Factory(McpAppViewRepo, session=session)
 
     sync_log_repo = providers.Factory(
         SyncLogRepoImpl, session=session, mapper=sync_log_mapper
@@ -1474,6 +1478,7 @@ class Container(containers.DeclarativeContainer):
         encryption_service=encryption_service,
         user_groups_repo=user_groups_repo,
         image_model_repo=image_model_repo,
+        app_view_repo=mcp_app_view_repo,
     )
     tenant_integration_service = providers.Factory(
         TenantIntegrationService,

@@ -30,6 +30,9 @@ from eneo.info_blobs.info_blob import InfoBlobChunkInDBWithScore
 from eneo.main.config import SETTINGS, Settings
 from eneo.main.exceptions import ProviderInactiveException
 from eneo.main.logging import get_logger
+from eneo.mcp_apps.infrastructure.repo_impl.mcp_app_view_repo_impl import (
+    McpAppViewRepo,
+)
 from eneo.mcp_servers.infrastructure.identity_headers import build_identity_headers
 from eneo.mcp_servers.infrastructure.proxy import (
     MCPProxySession,
@@ -59,6 +62,33 @@ if TYPE_CHECKING:
     from eneo.users.user import UserInDB
 
 logger = get_logger(__name__)
+
+
+async def _name_app_views(completion: Completion, mcp_proxy: Any | None) -> None:
+    """Name the approved MCP App view on every tool call ``completion`` carries.
+
+    Done here, where every chunk passes on its way out, so a call is shown
+    with its view whichever step announced it: pending, awaiting approval,
+    denied or executed. A tool without an approved view, a stub proxy and a
+    failed lookup all leave the call as it is.
+    """
+    lookup = getattr(mcp_proxy, "approved_app_view", None)
+    if lookup is None or not completion.tool_calls_metadata:
+        return
+    for call in completion.tool_calls_metadata:
+        if call.app_view is not None or not call.mcp_tool_name:
+            continue
+        try:
+            info = await lookup(call.mcp_tool_name)
+        except Exception:
+            logger.warning("Failed to resolve MCP app view for %s", call.mcp_tool_name)
+            continue
+        if info is not None:
+            call.app_view = {
+                "view_id": str(info.view_id),
+                "mcp_server_id": str(info.mcp_server_id),
+                "ui": info.ui_meta or {},
+            }
 
 
 @dataclass(frozen=True)
@@ -518,6 +548,9 @@ class CompletionService:
                 mcp_servers,
                 identity_headers=identity_headers,
                 mcp_server_tool_repo=self.mcp_server_tool_repo,
+                app_view_repo=(
+                    McpAppViewRepo(self.session) if self.session is not None else None
+                ),
             )
             # Tools may only be handed links to the files minted above.
             mcp_proxy.allow_file_references(file_reference_urls)
@@ -579,6 +612,7 @@ class CompletionService:
                     mcp_proxy=mcp_proxy,
                     skill_runtime=skill_runtime,
                 )
+                await _name_app_views(completion, mcp_proxy)
                 adapter_input_estimate = completion.input_token_estimate
                 usage = completion.usage
             finally:
@@ -650,6 +684,7 @@ class CompletionService:
                         approval_context=approval_context,
                         pending_approval_ids=pending_approval_ids,
                     ):
+                        await _name_app_views(chunk, mcp_proxy)
                         yield chunk
                         # The ask path has saved the file by the time the
                         # consumer returns control. Mint its reference URL now,

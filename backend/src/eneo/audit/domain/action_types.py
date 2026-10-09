@@ -80,6 +80,7 @@ class ActionType(str, Enum):
     FILE_ORIGINAL_DOWNLOAD_LINK_CREATED = "file_original_download_link_created"
     FILE_ORIGINAL_DOWNLOADED = "file_original_downloaded"
     FILE_SIGNED_URL_MINTED = "file_signed_url_minted"
+    DOCUMENT_EXPORTED = "document_exported"
     INFO_BLOB_ORIGINAL_DOWNLOAD_LINK_CREATED = (
         "info_blob_original_download_link_created"
     )
@@ -136,6 +137,8 @@ class ActionType(str, Enum):
     MCP_SERVER_DISABLED = "mcp_server_disabled"
     MCP_SERVER_TOOL_ENABLED = "mcp_server_tool_enabled"
     MCP_SERVER_TOOL_DISABLED = "mcp_server_tool_disabled"
+    MCP_APP_VIEW_LINK_CREATED = "mcp_app_view_link_created"
+    MCP_APP_TOOL_CALLED = "mcp_app_tool_called"
 
     # Model Provider Outbound Header Actions
     MODEL_PROVIDER_HEADERS_UPDATED = "model_provider_headers_updated"

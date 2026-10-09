@@ -159,8 +159,8 @@ class TestCategoryMappings:
             for action, cat in CATEGORY_MAPPINGS.items()
             if cat == "integration_events"
         ]
-        assert len(integration_actions) == 22, (
-            f"Expected 22 integration events, got {len(integration_actions)}"
+        assert len(integration_actions) == 24, (
+            f"Expected 24 integration events, got {len(integration_actions)}"
         )
 
     def test_mcp_events_mapping(self):
