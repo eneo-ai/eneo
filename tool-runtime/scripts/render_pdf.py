@@ -32,7 +32,7 @@ def main() -> int:
 
     from weasyprint import CSS, HTML
     from weasyprint.text.fonts import FontConfiguration
-    from weasyprint.urls import URLFetchingError
+    from weasyprint.urls import URLFetcherResponse, URLFetchingError
 
     # Served without urllib: the default fetcher consults /etc/mime.types, which the
     # sandbox does not expose, and a failed load drops the image silently.
@@ -44,7 +44,7 @@ def main() -> int:
         ".html": "text/html",
     }
 
-    def fetch(url: str, timeout: float = 10, ssl_context: object = None) -> dict:
+    def fetch(url: str, *args: object, **kwargs: object) -> URLFetcherResponse:
         parsed = urlparse(url)
         if parsed.scheme != "file":
             raise URLFetchingError(f"Only the document's own files may be loaded: {url}")
@@ -54,11 +54,9 @@ def main() -> int:
         media_type = media_types.get(target.suffix.lower())
         if media_type is None:
             raise URLFetchingError(f"Unsupported file type: {url}")
-        return {
-            "file_obj": target.open("rb"),
-            "mime_type": media_type,
-            "redirected_url": url,
-        }
+        return URLFetcherResponse(
+            url, body=target.open("rb"), headers={"Content-Type": media_type}
+        )
 
     fonts = FontConfiguration()
     document = HTML(
