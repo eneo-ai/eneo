@@ -19,8 +19,9 @@
   import { m } from "$lib/paraglide/messages";
 
   type Props = {
-    /** The organisation's catalogue, as space editors see it. */
-    services: TranscriptionServiceSummary[];
+    /** The organisation's catalogue, as space editors see it; null when it
+     *  could not be read. */
+    services: TranscriptionServiceSummary[] | null;
     /** Without security classifications every service meets the space's. */
     securityEnabled: boolean;
   };
@@ -82,7 +83,7 @@
   title={m.speaker_identification()}
   description={m.speaker_service_space_description()}
 >
-  {#if links === null}
+  {#if links === null || services === null}
     <p role="alert" class="text-negative-default text-sm">
       {m.speaker_service_space_load_failed()}
     </p>
@@ -103,11 +104,12 @@
               <Field.Description id="{uid}-{service.id}-reason">{reason}</Field.Description>
             {/if}
           </Field.Content>
+          <!-- Bound through the grant itself, so a failed save never leaves the
+               switch showing a state the space does not have. -->
           <Switch
             id="{uid}-{service.id}"
-            checked={granted}
+            bind:checked={() => granted, () => toggle(service)}
             disabled={saving || (!granted && reason !== undefined)}
-            onCheckedChange={() => toggle(service)}
             aria-describedby={reason ? `${uid}-${service.id}-reason` : undefined}
           />
         </Field.Field>

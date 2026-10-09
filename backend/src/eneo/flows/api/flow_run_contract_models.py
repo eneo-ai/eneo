@@ -517,15 +517,19 @@ class FlowSpeakerLabelsOptionPublic(BaseModel):
     selectable: bool = Field(
         description=(
             "Whether a run may choose with `speaker_labels` on run creation. False "
-            "when no transcription service labels speakers or the flow requires "
-            "labels."
+            "when the flow's space has no speaker identification service it can "
+            "use, or the flow requires labels."
         )
     )
     required: bool = Field(
         description="Whether the flow needs speaker labels, because a step maps speakers to names."
     )
     default: bool = Field(
-        description="The flow's own speaker-label setting, which applies when a run makes no choice."
+        description=(
+            "What a run gets when it makes no choice: the flow's own speaker-label "
+            "setting, or false while the space has no speaker identification "
+            "service it can use."
+        )
     )
 
 
@@ -570,9 +574,9 @@ class FlowTranscriptionContractPublic(BaseModel):
         default=None,
         description=(
             "Whether a run may bound the speaker count with `max_speakers`: "
-            "present whenever a transcription service labels speakers, including "
-            "when a speaker-mapping step requires labels. Null when no service "
-            "labels speakers."
+            "present whenever a speaker identification service labels speakers "
+            "for the flow, including when a speaker-mapping step requires labels. "
+            "Null when the space has no service it can use."
         ),
     )
     single_recording: bool = Field(

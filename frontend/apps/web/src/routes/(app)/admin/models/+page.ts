@@ -20,8 +20,12 @@ export const load = async (event) => {
       eneo.modelProviders.list(),
       eneo.modelProviders.getFavorites(),
       // An organisation connects at most 200 services (the backend's limit,
-      // one page), so a single page holds them all.
-      eneo.transcriptionServices.list({ limit: 200 }).then((page) => page.items)
+      // one page), so a single page holds them all. A failure stays in the
+      // speaker identification section instead of taking the page down.
+      eneo.transcriptionServices
+        .list({ limit: 200 })
+        .then((page) => page.items)
+        .catch(() => null)
     ]);
 
   const credentialsResponse = tenantCredentialsEnabled ? await eneo.credentials.list() : undefined;

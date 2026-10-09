@@ -11,7 +11,10 @@ from eneo.files.transcript import TranscriptSegment
 from eneo.flows.runtime.audio_spool import SpooledAudio
 from eneo.flows.runtime.diarizing_transcription import DiarizingFlowTranscriber
 from eneo.flows.runtime.recording_parts import PartBounds, RecordingAudio
-from eneo.flows.runtime.speaker_enrichment import DIARIZATION_SKIPPED_EMPTY_TRANSCRIPT
+from eneo.flows.runtime.speaker_enrichment import (
+    DIARIZATION_SKIPPED_EMPTY_TRANSCRIPT,
+    SpeakerServiceFailed,
+)
 from eneo.main.exceptions import ProviderRejectedRequestException
 from eneo.transcription_models.infrastructure.adapters.litellm_transcription import (
     EmptyTranscriptionInterval,
@@ -144,8 +147,10 @@ async def test_service_failure_after_transcription_fails_the_call(
     )
     transcriber = DiarizingFlowTranscriber(registry, remote)  # type: ignore[arg-type]
 
-    with pytest.raises(ProviderRejectedRequestException):
+    # The speaker service's own failure, with its cause, never the model's.
+    with pytest.raises(SpeakerServiceFailed) as failed:
         await transcriber.transcribe(spool, MODEL, file_id=FILE.id, diarize=True)  # type: ignore[arg-type]
+    assert isinstance(failed.value.__cause__, ProviderRejectedRequestException)
 
 
 def _recording(tmp_path) -> RecordingAudio:

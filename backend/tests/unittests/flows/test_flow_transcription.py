@@ -281,7 +281,9 @@ async def test_remote_failure_facts_survive_executor_terminalization(
         ),
         from_attributes=True,
     )
-    assert public.error.code.value == "typed_io_transcription_failed"
+    # The model wrote the text; the speaker service failed on it, so the run
+    # names the speaker service, with the same failure facts.
+    assert public.error.code.value == "typed_io_speaker_identification_failed"
     assert public.error.retryable is False
     assert public.error.details.phase.value == "transcription"
     assert public.error.details.transcription_failure_kind.value == failure_kind

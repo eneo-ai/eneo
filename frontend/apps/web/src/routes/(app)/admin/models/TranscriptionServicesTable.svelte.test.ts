@@ -4,10 +4,15 @@ import { page } from "@vitest/browser/context";
 import { render } from "vitest-browser-svelte";
 import { beforeEach, expect, it, vi } from "vitest";
 
-const { update, check } = vi.hoisted(() => ({ update: vi.fn(), check: vi.fn() }));
+const { update, check, invalidate } = vi.hoisted(() => ({
+  update: vi.fn(),
+  check: vi.fn(),
+  invalidate: vi.fn()
+}));
 vi.mock("$lib/core/Eneo", () => ({
   getEneo: () => ({ transcriptionServices: { update, check } })
 }));
+vi.mock("$app/navigation", () => ({ invalidate }));
 
 import TranscriptionServicesTable from "./TranscriptionServicesTable.svelte";
 import { m } from "$lib/paraglide/messages";
@@ -262,4 +267,15 @@ it("drops a running check's answer once a save returns newer settings", async ()
   await settle();
   await expect.element(row).not.toHaveTextContent(m.speaker_service_status_ready());
   await expect.element(row).toHaveTextContent(m.speaker_service_not_tested());
+});
+
+it("keeps a failed list inside its section, with a way to try again", async () => {
+  render(TranscriptionServicesTable, { services: null, classifications: [] });
+
+  await expect.element(page.getByText(m.speaker_service_list_failed())).toBeVisible();
+  await expect
+    .element(page.getByRole("button", { name: m.speaker_service_connect() }))
+    .not.toBeInTheDocument();
+  await page.getByRole("button", { name: m.retry() }).click();
+  expect(invalidate).toHaveBeenCalledWith("admin:models:load");
 });

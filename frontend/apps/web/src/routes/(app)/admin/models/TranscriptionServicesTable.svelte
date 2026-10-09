@@ -16,13 +16,16 @@
     TranscriptionServiceUpdate
   } from "@eneo/eneo-js";
   import { SvelteMap, SvelteSet } from "svelte/reactivity";
+  import { invalidate } from "$app/navigation";
   import AudioLines from "@lucide/svelte/icons/audio-lines";
+  import CircleAlert from "@lucide/svelte/icons/circle-alert";
   import Ellipsis from "@lucide/svelte/icons/ellipsis";
   import Pencil from "@lucide/svelte/icons/pencil";
   import Plug from "@lucide/svelte/icons/plug";
   import Plus from "@lucide/svelte/icons/plus";
   import Trash2 from "@lucide/svelte/icons/trash-2";
   import ConfirmDialog from "$lib/components/ConfirmDialog.svelte";
+  import * as Alert from "$lib/components/ui/alert/index.js";
   import { Button } from "$lib/components/ui/button/index.js";
   import * as DropdownMenu from "$lib/components/ui/dropdown-menu/index.js";
   import * as Empty from "$lib/components/ui/empty/index.js";
@@ -37,7 +40,8 @@
   import TranscriptionServiceDialog from "./TranscriptionServiceDialog.svelte";
 
   type Props = {
-    services: TranscriptionService[];
+    /** Null when the list could not be read. */
+    services: TranscriptionService[] | null;
     classifications: SecurityClassification[];
   };
 
@@ -47,7 +51,8 @@
   const uid = $props.id();
 
   // The loaded list, then every change this page saves to it.
-  let services = $derived(loaded);
+  let services = $derived(loaded ?? []);
+  const loadFailed = $derived(loaded === null);
   const checking = new SvelteSet<string>();
   // The latest check started per service; an earlier one's answer is dropped.
   const checkRuns = new SvelteMap<string, number>();
@@ -223,13 +228,25 @@
         {m.speaker_service_intro()}
       </p>
     </div>
-    <Button onclick={() => openDialog(null)}>
-      <Plus data-icon="inline-start" />
-      {m.speaker_service_connect()}
-    </Button>
+    {#if !loadFailed}
+      <Button onclick={() => openDialog(null)}>
+        <Plus data-icon="inline-start" />
+        {m.speaker_service_connect()}
+      </Button>
+    {/if}
   </header>
 
-  {#if services.length === 0}
+  {#if loadFailed}
+    <Alert.Root variant="destructive">
+      <CircleAlert />
+      <Alert.Title>{m.speaker_service_list_failed()}</Alert.Title>
+      <Alert.Description>
+        <Button variant="outline" size="sm" onclick={() => invalidate("admin:models:load")}>
+          {m.retry()}
+        </Button>
+      </Alert.Description>
+    </Alert.Root>
+  {:else if services.length === 0}
     <Empty.Root>
       <Empty.Header>
         <Empty.Media variant="icon"><AudioLines /></Empty.Media>

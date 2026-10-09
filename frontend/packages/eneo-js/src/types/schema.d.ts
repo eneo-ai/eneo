@@ -18166,6 +18166,7 @@ export interface components {
       | "typed_io_transcription_config_invalid"
       | "typed_io_transcription_empty"
       | "typed_io_transcription_failed"
+      | "typed_io_speaker_identification_failed"
       | "typed_io_transcription_model_missing"
       | "typed_io_transcription_model_unavailable"
       | "typed_io_speaker_service_unavailable"
@@ -22015,6 +22016,7 @@ export interface components {
         | "typed_io_missing_required_files"
         | "typed_io_output_parse_failed"
         | "typed_io_render_failed"
+        | "typed_io_speaker_identification_failed"
         | "typed_io_speaker_service_unavailable"
         | "typed_io_structured_output_exceeds_limit"
         | "typed_io_template_checksum_mismatch"
@@ -24787,6 +24789,7 @@ export interface components {
             | "typed_io_missing_required_files"
             | "typed_io_output_parse_failed"
             | "typed_io_render_failed"
+            | "typed_io_speaker_identification_failed"
             | "typed_io_speaker_service_unavailable"
             | "typed_io_structured_output_exceeds_limit"
             | "typed_io_template_checksum_mismatch"
@@ -25979,7 +25982,7 @@ export interface components {
     FlowSpeakerLabelsOptionPublic: {
       /**
        * Default
-       * @description The flow's own speaker-label setting, which applies when a run makes no choice.
+       * @description What a run gets when it makes no choice: the flow's own speaker-label setting, or false while the space has no speaker identification service it can use.
        */
       default: boolean;
       /**
@@ -25989,7 +25992,7 @@ export interface components {
       required: boolean;
       /**
        * Selectable
-       * @description Whether a run may choose with `speaker_labels` on run creation. False when no transcription service labels speakers or the flow requires labels.
+       * @description Whether a run may choose with `speaker_labels` on run creation. False when the flow's space has no speaker identification service it can use, or the flow requires labels.
        */
       selectable: boolean;
     };
@@ -26173,6 +26176,7 @@ export interface components {
             | "typed_io_missing_required_files"
             | "typed_io_output_parse_failed"
             | "typed_io_render_failed"
+            | "typed_io_speaker_identification_failed"
             | "typed_io_speaker_service_unavailable"
             | "typed_io_structured_output_exceeds_limit"
             | "typed_io_template_checksum_mismatch"
@@ -27215,7 +27219,7 @@ export interface components {
     FlowTranscriptionContractPublic: {
       /** @description Whether the audio step can show a live transcript preview while recording. */
       live: components["schemas"]["FlowLiveTranscriptionAvailabilityPublic"];
-      /** @description Whether a run may bound the speaker count with `max_speakers`: present whenever a transcription service labels speakers, including when a speaker-mapping step requires labels. Null when no service labels speakers. */
+      /** @description Whether a run may bound the speaker count with `max_speakers`: present whenever a speaker identification service labels speakers for the flow, including when a speaker-mapping step requires labels. Null when the space has no service it can use. */
       max_speakers?: components["schemas"]["FlowMaxSpeakersOptionPublic"] | null;
       /**
        * Single Recording

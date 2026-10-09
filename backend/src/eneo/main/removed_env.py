@@ -42,7 +42,7 @@ _MODULES_PERMISSION_NOTE = (
 
 _SPEAKER_SERVICE_NOTE = (
     "Speaker identification services are connected in Admin > Models > "
-    "Transcription services and granted to spaces."
+    "Transcription > Speaker identification and granted to spaces."
 )
 
 REMOVED_VARIABLES: tuple[RemovedVariable, ...] = (

@@ -131,4 +131,28 @@ describe("speaker count", () => {
     expect(onMaxSpeakersChange.mock.calls).toEqual([[5]]);
     expect(screen.queryByRole("alert")).toBeNull();
   });
+
+  it("lets the author turn labels off when the picked service is gone and none is left", async () => {
+    // Publishing would refuse the lost pick; turning labels off is the way out.
+    const onLabelsChange = vi.fn();
+    render(FlowSpeakerIdentification, {
+      services: [{ ...vemsa, available: false }],
+      labels: true,
+      pickedId: vemsa.id,
+      maxSpeakers: null,
+      disabled: false,
+      onLabelsChange,
+      onPick: vi.fn(),
+      onMaxSpeakersChange: vi.fn()
+    });
+    const toggle = screen.getByRole("switch", { name: m.flow_transcription_diarization() });
+
+    expect(toggle).toBeEnabled();
+    expect(toggle).toBeChecked();
+    expect(screen.getByRole("status")).toHaveTextContent(
+      m.flow_transcription_speakers_pick_unavailable_none()
+    );
+    await fireEvent.click(toggle);
+    expect(onLabelsChange).toHaveBeenCalledWith(false);
+  });
 });

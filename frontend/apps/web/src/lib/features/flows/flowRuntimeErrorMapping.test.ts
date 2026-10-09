@@ -13,6 +13,7 @@ import {
   getReviewPolicyAffectedStepsFromRunError,
   getReviewPolicyErrorStepsFromDefinitionSnapshot,
   getFlowRuntimeErrorMessageByCode,
+  getFlowRunErrorMessage,
   isReviewPolicyInvalidRunError,
   isReviewPolicyRunErrorRelevantForStep,
   isReviewPolicyRunErrorStepExact,
@@ -362,6 +363,44 @@ describe("flowRuntimeErrorMapping", () => {
       messageKey: "flow_error_flow_published_form_schema_invalid"
     });
     expect(getFlowRuntimeErrorMessage(error, "fallback")).not.toBe("fallback");
+  });
+});
+
+describe("speaker identification run errors", () => {
+  const runError = (overrides: Partial<FlowRunError>): FlowRunError => ({
+    schema_version: 1,
+    code: FLOW_API_ERROR_CODE.TYPED_IO_SPEAKER_SERVICE_UNAVAILABLE,
+    message: "Step 1: speakers cannot be identified.",
+    source: "executor_failed",
+    step_order: 1,
+    details: {},
+    retryable: false,
+    ...overrides
+  });
+  type SpeakerServiceGap = NonNullable<NonNullable<FlowRunError["details"]>["speaker_service_gap"]>;
+  const refused = (speaker_service_gap?: SpeakerServiceGap) =>
+    runError({ details: speaker_service_gap ? { speaker_service_gap } : {} });
+
+  it("says why speakers could not be identified", () => {
+    expect(getFlowRunErrorMessage(refused("no_service"))).toBe(
+      m.flow_error_typed_io_speaker_service_unavailable()
+    );
+    expect(getFlowRunErrorMessage(refused("choice_required"))).toBe(
+      m.flow_speaker_service_gap_choice_required()
+    );
+    expect(getFlowRunErrorMessage(refused("picked_unavailable"))).toBe(
+      m.flow_speaker_service_gap_picked_unavailable()
+    );
+    expect(getFlowRunErrorMessage(refused())).toBe(
+      m.flow_error_typed_io_speaker_service_unavailable()
+    );
+  });
+
+  it("names the speaker service, not the audio, when it fails", () => {
+    const failed = runError({ code: FLOW_API_ERROR_CODE.TYPED_IO_SPEAKER_IDENTIFICATION_FAILED });
+    expect(getFlowRunErrorMessage(failed)).toBe(
+      m.flow_error_typed_io_speaker_identification_failed()
+    );
   });
 });
 

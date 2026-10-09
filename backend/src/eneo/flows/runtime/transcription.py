@@ -55,6 +55,7 @@ from eneo.flows.runtime.recording_parts import (
     split_recording,
 )
 from eneo.flows.runtime.run_cancellation import FlowStepCancelledError
+from eneo.flows.runtime.speaker_enrichment import SpeakerServiceFailed
 from eneo.flows.runtime.step_deadline import current_step_deadline_scope
 from eneo.flows.transcription_config import (
     FlowTranscriptionConfig,
@@ -104,10 +105,14 @@ class TranscriptionProviderRejectedError(
 
 
 class TranscriptionFailure(TypedIOValidationException):
-    def __init__(self, message: str, *, cause: Exception) -> None:
-        super().__init__(
-            message, code=FlowApiErrorCode.TYPED_IO_TRANSCRIPTION_FAILED.value
-        )
+    def __init__(
+        self,
+        message: str,
+        *,
+        cause: Exception,
+        code: FlowApiErrorCode = FlowApiErrorCode.TYPED_IO_TRANSCRIPTION_FAILED,
+    ) -> None:
+        super().__init__(message, code=code.value)
         service_reason = None
         if isinstance(cause, TranscriptionProviderError):
             kind = cause.failure_kind
@@ -719,6 +724,14 @@ def _transcription_failures(step_order: int, subject: str) -> Generator[None]:
             code=FlowApiErrorCode.TYPED_IO_AUDIO_EXCEEDS_LIMIT.value,
             context=exc.context,
         ) from exc
+    except SpeakerServiceFailed as exc:
+        # The model's text was written; the speaker service failed on it.
+        cause = exc.__cause__ if isinstance(exc.__cause__, Exception) else exc
+        raise TranscriptionFailure(
+            f"Step {step_order}: speaker identification failed for {subject}.",
+            cause=cause,
+            code=FlowApiErrorCode.TYPED_IO_SPEAKER_IDENTIFICATION_FAILED,
+        ) from cause
     except Exception as exc:
         raise TranscriptionFailure(
             f"Step {step_order}: transcription failed for {subject}.",

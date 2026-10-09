@@ -26,6 +26,8 @@ export type FlowApiErrorContext = {
   reason?: string;
   /** Server-provided recovery guidance for the exceeded limit. */
   hint?: string;
+  /** Why a run could not identify speakers (no_service, choice_required, picked_unavailable). */
+  speaker_service_gap?: string;
 };
 
 export type FlowApiErrorDescriptor = {
@@ -209,6 +211,7 @@ const FLOW_API_ERROR_MESSAGES = {
   typed_io_transcription_config_invalid: m.flow_error_typed_io_transcription_config_invalid,
   typed_io_transcription_empty: m.flow_error_typed_io_transcription_empty,
   typed_io_transcription_failed: m.flow_error_typed_io_transcription_failed,
+  typed_io_speaker_identification_failed: m.flow_error_typed_io_speaker_identification_failed,
   typed_io_transcription_model_missing: m.flow_error_typed_io_transcription_model_missing,
   typed_io_transcription_model_unavailable: m.flow_error_typed_io_transcription_model_unavailable,
   typed_io_speaker_service_unavailable: m.flow_error_typed_io_speaker_service_unavailable,
@@ -472,6 +475,11 @@ export function describeFlowRunError(error: unknown): FlowApiErrorDescriptor | n
     context.step_order = stepOrder;
   }
 
+  const gap = isObject(error.details)
+    ? readOptionalString(error.details.speaker_service_gap)
+    : undefined;
+  if (gap) context.speaker_service_gap = gap;
+
   return descriptorForCode(readOptionalString(error.code), context);
 }
 
@@ -483,6 +491,15 @@ function resolveFlowApiErrorMessage(descriptor: FlowApiErrorDescriptor): string 
     descriptor.context.reason === "extraction_capacity"
   ) {
     return m.flow_upload_pdf_extraction_busy();
+  }
+  // The code says speakers could not be identified; the gap says why.
+  if (descriptor.code === FLOW_API_ERROR_CODE.TYPED_IO_SPEAKER_SERVICE_UNAVAILABLE) {
+    if (descriptor.context.speaker_service_gap === "choice_required") {
+      return m.flow_speaker_service_gap_choice_required();
+    }
+    if (descriptor.context.speaker_service_gap === "picked_unavailable") {
+      return m.flow_speaker_service_gap_picked_unavailable();
+    }
   }
   return FLOW_API_ERROR_MESSAGES[descriptor.code]();
 }

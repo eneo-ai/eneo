@@ -32,7 +32,7 @@ def test_flow_run_error_from_source_requires_public_error_code() -> None:
 
 
 def test_terminal_error_retryability_covers_exact_current_catalog() -> None:
-    assert len(FLOW_RUN_TERMINAL_ERROR_RETRYABILITY) == 90
+    assert len(FLOW_RUN_TERMINAL_ERROR_RETRYABILITY) == 91
     assert FLOW_RUN_TERMINAL_ERROR_RETRYABILITY[FlowApiErrorCode.RUN_ABANDONED] is False
     assert set(FLOW_RUN_TERMINAL_ERROR_RETRYABILITY) == FLOW_RUN_TERMINAL_ERROR_CODES
     assert {
@@ -61,6 +61,11 @@ def test_terminal_error_retryability_covers_exact_current_catalog() -> None:
     ]
     assert not FLOW_RUN_TERMINAL_ERROR_RETRYABILITY[
         FlowApiErrorCode.PROVIDER_UNAVAILABLE
+    ]
+    # Like a failed transcription, a failed speaker service is not retried by
+    # starting another run automatically.
+    assert not FLOW_RUN_TERMINAL_ERROR_RETRYABILITY[
+        FlowApiErrorCode.TYPED_IO_SPEAKER_IDENTIFICATION_FAILED
     ]
     assert not FLOW_RUN_TERMINAL_ERROR_RETRYABILITY[
         FlowApiErrorCode.MODEL_CAPACITY_UNDECLARED

@@ -65,7 +65,9 @@
     picked ?? (pickedId === null && usable.length === 1 ? usable[0] : null)
   );
   const offerPicker = $derived(usable.length > 1 || (pickLost && usable.length > 0));
-  const noService = $derived(usable.length === 0);
+  // Nothing to use and nothing to fix. A flow still labelling with a lost pick
+  // keeps its switch, so the author can turn labels off and publish again.
+  const noService = $derived(usable.length === 0 && !(pickLost && labels));
 </script>
 
 <div
@@ -177,6 +179,10 @@
             </p>
           {/if}
         </div>
+      {:else if pickLost}
+        <p class="text-warning-stronger text-xs leading-relaxed" role="status">
+          {m.flow_transcription_speakers_pick_unavailable_none()}
+        </p>
       {:else if resolved}
         <p class="text-secondary text-xs leading-relaxed">
           {m.flow_transcription_speakers_by({ name: resolved.name })}

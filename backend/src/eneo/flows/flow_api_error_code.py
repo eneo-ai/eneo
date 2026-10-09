@@ -169,6 +169,7 @@ class FlowApiErrorCode(str, Enum):
     TYPED_IO_TRANSCRIPTION_CONFIG_INVALID = "typed_io_transcription_config_invalid"
     TYPED_IO_TRANSCRIPTION_EMPTY = "typed_io_transcription_empty"
     TYPED_IO_TRANSCRIPTION_FAILED = "typed_io_transcription_failed"
+    TYPED_IO_SPEAKER_IDENTIFICATION_FAILED = "typed_io_speaker_identification_failed"
     TYPED_IO_TRANSCRIPTION_MODEL_MISSING = "typed_io_transcription_model_missing"
     TYPED_IO_TRANSCRIPTION_MODEL_UNAVAILABLE = (
         "typed_io_transcription_model_unavailable"
@@ -284,6 +285,7 @@ FLOW_TYPED_IO_ERROR_CODES: frozenset[FlowApiErrorCode] = frozenset(
         FlowApiErrorCode.TYPED_IO_TRANSCRIPTION_CONFIG_INVALID,
         FlowApiErrorCode.TYPED_IO_TRANSCRIPTION_EMPTY,
         FlowApiErrorCode.TYPED_IO_TRANSCRIPTION_FAILED,
+        FlowApiErrorCode.TYPED_IO_SPEAKER_IDENTIFICATION_FAILED,
         FlowApiErrorCode.TYPED_IO_TRANSCRIPTION_MODEL_MISSING,
         FlowApiErrorCode.TYPED_IO_TRANSCRIPTION_MODEL_UNAVAILABLE,
         FlowApiErrorCode.TYPED_IO_SPEAKER_SERVICE_UNAVAILABLE,

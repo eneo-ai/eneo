@@ -9,7 +9,12 @@ from uuid import UUID
 
 from eneo.files.transcriber import TranscribedAudio
 from eneo.flows.runtime.audio_spool import SpooledAudio
+from eneo.flows.runtime.run_cancellation import FlowStepCancelledError
+from eneo.main.exceptions import TypedIOValidationException
 from eneo.main.logging import get_logger
+from eneo.model_providers.domain.provider_call_observer import (
+    ProviderCallObserverError,
+)
 
 if TYPE_CHECKING:
     from eneo.flows.runtime.remote_transcription import RemoteFlowTranscriber
@@ -18,6 +23,12 @@ if TYPE_CHECKING:
 
 logger = get_logger(__name__)
 DIARIZATION_SKIPPED_EMPTY_TRANSCRIPT = "skipped:empty_transcript"
+
+
+class SpeakerServiceFailed(Exception):
+    """The speaker identification service failed after the model wrote the
+    text; the cause is chained. The step reports it as the speaker service's
+    failure, not the transcription's."""
 
 
 async def enrich_transcript(
@@ -40,16 +51,27 @@ async def enrich_transcript(
         return replace(transcribed, diarization=DIARIZATION_SKIPPED_EMPTY_TRANSCRIPT)
 
     started = time.monotonic()
-    labelled = await remote.label_speakers(
-        file,
-        file_id=file_id,
-        words=None,
-        segments=transcribed.segments,
-        model_name=transcription_model.model_name,
-        language=language,
-        observer=observer,
-        max_speakers=max_speakers,
-    )
+    try:
+        labelled = await remote.label_speakers(
+            file,
+            file_id=file_id,
+            words=None,
+            segments=transcribed.segments,
+            model_name=transcription_model.model_name,
+            language=language,
+            observer=observer,
+            max_speakers=max_speakers,
+        )
+    except (
+        TypedIOValidationException,
+        ProviderCallObserverError,
+        FlowStepCancelledError,
+    ):
+        # Refusals, deadlines, cancellation and evidence gaps already say
+        # what happened.
+        raise
+    except Exception as exc:
+        raise SpeakerServiceFailed() from exc
     return TranscribedAudio(
         text=labelled.text,
         duration_seconds=transcribed.duration_seconds,

@@ -95,3 +95,29 @@ it("grants a usable service and refuses one below the space's classification", a
   await expect.poll(() => updateSpace.mock.calls.length).toBe(1);
   expect(sentPatch(0)).toEqual({ transcription_services: [{ id: "kept" }, { id: "new" }] });
 });
+
+it("shows the grant as it was when the save fails", async () => {
+  currentSpace.value = { security_classification: null, transcription_services: [] };
+  updateSpace.mockRejectedValueOnce(new Error("offline"));
+  render(SelectSpaceSpeakerServices, {
+    services: [service("s1", "Vemsa Sundsvall")],
+    securityEnabled: false
+  });
+
+  const toggle = page.getByRole("switch", { name: "Vemsa Sundsvall" });
+  await toggle.click();
+  await expect.poll(() => updateSpace.mock.calls.length).toBe(1);
+
+  await expect.element(toggle).toBeEnabled();
+  await expect.element(toggle).not.toBeChecked();
+});
+
+it("says so when the organisation's services could not be read", async () => {
+  currentSpace.value = { security_classification: null, transcription_services: [] };
+  render(SelectSpaceSpeakerServices, { services: null, securityEnabled: false });
+
+  await expect
+    .element(page.getByRole("alert"))
+    .toHaveTextContent(m.speaker_service_space_load_failed());
+  await expect.element(page.getByRole("switch")).not.toBeInTheDocument();
+});

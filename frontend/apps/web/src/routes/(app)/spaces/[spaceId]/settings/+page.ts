@@ -15,8 +15,12 @@ export const load = async (event) => {
     // grouped separately in the settings UI.
     eneo.mcpServers.listSettings(),
     // An organisation connects at most 200 services (the backend's limit,
-    // one page), so a single page holds them all.
-    eneo.transcriptionServices.listCatalogue({ limit: 200 }).then((page) => page.items)
+    // one page), so a single page holds them all. A failure stays in the
+    // speaker identification row instead of taking the page down.
+    eneo.transcriptionServices
+      .listCatalogue({ limit: 200 })
+      .then((page) => page.items)
+      .catch(() => null)
   ]);
 
   // Filter to only tenant-enabled servers

@@ -1275,6 +1275,16 @@ FLOW_ERROR_TAXONOMY: dict[FlowApiErrorCode, FlowErrorTaxonomyEntry] = {
         consumer_action="Use transcription_failure_kind in error details to diagnose the failure; check retryable before starting another run.",
         user_action="Check the reported transcription failure and earlier run effects before trying again.",
     ),
+    FlowApiErrorCode.TYPED_IO_SPEAKER_IDENTIFICATION_FAILED: _entry(
+        category="Typed input/output",
+        surfaced_through="Run error payload",
+        cause=(
+            "The transcription model wrote the text, then the speaker "
+            "identification service failed while labelling it."
+        ),
+        consumer_action="Use transcription_failure_kind in error details to diagnose the failure; check retryable before starting another run.",
+        user_action="Try again later, or run without speaker identification; an administrator can test the service connection.",
+    ),
     FlowApiErrorCode.TYPED_IO_TRANSCRIPTION_MODEL_MISSING: _entry(
         category="Typed input/output",
         surfaced_through="Run error payload",
