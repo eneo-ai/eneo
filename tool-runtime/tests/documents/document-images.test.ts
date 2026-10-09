@@ -303,5 +303,11 @@ describe("document chart images", () => {
     )[0]!;
     const output = (await create.execute(input, context)) as RichResult;
     expect(output.files[0]!.mimeType).toContain("wordprocessingml");
+    if (PDF) {
+      // The PDF sidecar runs inside the child's confinement too: it must still read the
+      // document's own image files from the render directory.
+      const pdf = (await create.execute({ ...input, format: "pdf" }, context)) as RichResult;
+      expect(bytesOf(pdf).toString("latin1")).toContain("/Subtype /Image");
+    }
   });
 });

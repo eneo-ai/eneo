@@ -49,6 +49,7 @@ const BASE_RULES = [
   ["--rox", PDF_PYTHON_BINARY],
   ["--ro", "/etc/fonts"],
   ["--ro", "/var/cache/fontconfig"],
+  ["--ro", "/etc/mime.types"],
   ["--ro", "/usr/share/zoneinfo"],
   ["--ro", "/etc/localtime"],
   ["--ro", "/sys/fs/cgroup"],
