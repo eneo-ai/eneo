@@ -152,10 +152,12 @@ model proposes which participant each label is; the step output is the mapping
 and the run pauses at the review checkpoint where the reviewer confirms or
 corrects the names. Editing re-derives the text from the mapping and updates
 `{{transkribering}}` on the run input.
-`output_config.speaker_mapping.speaker_count_field` may name a `number` form field; the
-participant count (or, when the participants field is empty, that number) is sent to the
-external service as `max_speakers`, an upper bound for diarization, and recorded as
-`max_speakers` in the transcription step's metadata. Transcripts from several audio files are
+`output_config.speaker_mapping.speaker_count_field` may name a `number` form field. A run's
+upper bound on speakers is its own `max_speakers`, else that field's value, else the flow's
+default (`wizard.transcription_max_speakers`, shown as `transcription.max_speakers.default` in
+the run contract), else automatic. Eneo never derives the bound from the participant names. The
+bound is sent to the speaker identification service as `max_speakers` and recorded in the
+transcription step's metadata. Transcripts from several audio files are
 renumbered so labels are unique across the whole transcript. Manual authoring
 only for now; the AI Builder does not plan this step.
 

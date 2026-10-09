@@ -26,6 +26,7 @@ from eneo.flows.flow_run_contract_service import (
     FlowRunContractService,
     build_final_output_contract,
     max_speakers_option,
+    settle_max_speakers,
 )
 from eneo.flows.published_definition import (
     FLOW_DEFINITION_SCHEMA_VERSION,
@@ -34,6 +35,7 @@ from eneo.flows.published_definition import (
 )
 from eneo.main.config import Settings, get_settings
 from eneo.main.exceptions import BadRequestException, NotFoundException
+from eneo.main.models import NOT_PROVIDED
 from eneo.security_classifications.domain.entities.security_classification import (
     SecurityClassification,
 )
@@ -1368,6 +1370,7 @@ def test_the_speaker_count_option_names_the_participants_field(
 
     option = max_speakers_option(
         steps,
+        wizard_metadata=None,
         speaker_labels=FlowSpeakerLabelsOptionPublic(
             selectable=True, required=False, default=True
         ),
@@ -1376,3 +1379,52 @@ def test_the_speaker_count_option_names_the_participants_field(
 
     assert option is not None
     assert option.participants_field == participants_field
+
+
+_AUDIO_INPUT = {"runtime_input": {"enabled": True, "input_format": "audio"}}
+
+
+@pytest.mark.parametrize(
+    ("choice", "form_count", "flow_default", "settled"),
+    [
+        (4, 6, 3, 4),
+        (None, 6, 3, None),
+        (NOT_PROVIDED, 6, 3, 6),
+        (NOT_PROVIDED, None, 3, 3),
+        (NOT_PROVIDED, None, None, None),
+    ],
+    ids=[
+        "run-choice-wins",
+        "run-asks-for-automatic",
+        "form-field",
+        "flow-default",
+        "automatic",
+    ],
+)
+def test_the_speaker_bound_comes_from_the_run_the_form_the_flow_or_automatic(
+    choice: object, form_count: int | None, flow_default: int | None, settled: object
+) -> None:
+    steps = [
+        replace(
+            _runtime_step(step_order=1, output_type="text"), input_config=_AUDIO_INPUT
+        ),
+        replace(
+            _runtime_step(step_order=2, output_type="json"),
+            output_mode="speaker_mapping",
+            output_config={"speaker_mapping": {"speaker_count_field": "antal"}},
+        ),
+    ]
+    wizard: dict[str, object] = {"transcription_enabled": True}
+    if flow_default is not None:
+        wizard["transcription_max_speakers"] = flow_default
+
+    bound = settle_max_speakers(
+        choice,  # pyright: ignore[reportArgumentType]
+        steps=steps,
+        wizard_metadata=wizard,
+        speaker_labels=True,
+        speakers_identifiable=True,
+        form_input={"antal": form_count} if form_count is not None else {},
+    )
+
+    assert bound == settled

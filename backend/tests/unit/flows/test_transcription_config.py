@@ -63,3 +63,20 @@ def test_no_pick_means_the_spaces_only_speaker_service() -> None:
 def test_a_malformed_speaker_service_reference_is_refused(raw: object) -> None:
     with pytest.raises(FlowTranscriptionConfigError):
         parse_transcription_config({"wizard": {"transcription_speaker_service": raw}})
+
+
+def test_the_flow_may_set_a_speaker_bound_or_leave_it_automatic() -> None:
+    def parse(raw: object):
+        wizard: dict[str, object] = {"transcription_enabled": True}
+        if raw is not None:
+            wizard["transcription_max_speakers"] = raw
+        return parse_transcription_config({"wizard": wizard})
+
+    assert parse(4).max_speakers == 4
+    assert parse(None).max_speakers is None
+
+
+@pytest.mark.parametrize("raw", [0, -2, True, "3", 2.5])
+def test_a_speaker_bound_must_be_a_whole_number_of_at_least_one(raw: object) -> None:
+    with pytest.raises(FlowTranscriptionConfigError):
+        parse_transcription_config({"wizard": {"transcription_max_speakers": raw}})

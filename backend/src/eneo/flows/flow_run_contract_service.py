@@ -153,6 +153,7 @@ class FlowRunContractService:
             speaker_labels=speaker_labels,
             max_speakers=max_speakers_option(
                 runtime_inputs.steps,
+                wizard_metadata=wizard_metadata,
                 speaker_labels=speaker_labels,
                 speakers_identifiable=identifiable,
             ),
@@ -315,6 +316,7 @@ def speaker_labels_option(
 def max_speakers_option(
     steps: Sequence[RuntimeStep],
     *,
+    wizard_metadata: FlowPersistedJsonObject | None,
     speaker_labels: FlowSpeakerLabelsOptionPublic | None,
     speakers_identifiable: bool,
 ) -> FlowMaxSpeakersOptionPublic | None:
@@ -327,6 +329,7 @@ def max_speakers_option(
     return FlowMaxSpeakersOptionPublic(
         form_field=speaker_mapping_speaker_count_field(mapping_config),
         participants_field=speaker_mapping_participants_field(mapping_config),
+        default=_flow_max_speakers(wizard_metadata),
     )
 
 
@@ -342,9 +345,10 @@ def settle_max_speakers(
     """The run's upper bound on speakers, settled once at admission.
 
     The run's own choice wins, null meaning automatic; else the value of the
-    form's speaker-count field; else automatic (None). NOT_PROVIDED when the
-    run labels no speakers. Never derived from the participant names: a bound
-    below the real count would merge unlisted voices into one person.
+    form's speaker-count field; else the flow's default; else automatic
+    (None). NOT_PROVIDED when the run labels no speakers. Never derived from
+    the participant names: a bound below the real count would merge unlisted
+    voices into one person.
     """
     option = speaker_labels_option(
         steps,
@@ -372,7 +376,7 @@ def settle_max_speakers(
     field = speaker_mapping_speaker_count_field(_speaker_mapping_config(steps))
     value = (form_input or {}).get(field) if field is not None else None
     if value is None:
-        return None
+        return _flow_max_speakers(wizard_metadata)
     if isinstance(value, bool) or not isinstance(value, int) or value < 1:
         raise BadRequestException(
             f"Field '{field}' must be a whole number of at least 1.",
@@ -380,6 +384,14 @@ def settle_max_speakers(
             context={"field_name": field, "field_type": "number"},
         )
     return value
+
+
+def _flow_max_speakers(wizard_metadata: FlowPersistedJsonObject | None) -> int | None:
+    """The flow's default bound; malformed metadata is the validators' concern."""
+    try:
+        return parse_transcription_config({"wizard": wizard_metadata}).max_speakers
+    except FlowTranscriptionConfigError:
+        return None
 
 
 def _speaker_mapping_config(steps: Sequence[RuntimeStep]) -> object:

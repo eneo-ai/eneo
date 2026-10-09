@@ -195,7 +195,11 @@ async def test_with_a_service_a_run_may_choose_and_the_flow_sets_the_default(
     assert contract["transcription"] == {
         "live": {"available": True, "reason": None},
         "speaker_labels": {"selectable": True, "required": False, "default": False},
-        "max_speakers": {"form_field": None, "participants_field": None},
+        "max_speakers": {
+            "form_field": None,
+            "participants_field": None,
+            "default": None,
+        },
         "single_recording": True,
     }
 
@@ -478,6 +482,7 @@ async def test_a_flow_that_asks_for_the_count_advertises_its_form_field(
     assert contract["transcription"]["max_speakers"] == {
         "form_field": "antal_talare",
         "participants_field": "deltagare",
+        "default": None,
     }
 
 
@@ -780,3 +785,31 @@ async def test_the_contract_and_the_live_route_read_no_attachment_content(
 
     assert contract["transcription"]["live"] == {"available": True, "reason": None}
     assert session.status_code == 201, session.text
+
+
+async def test_a_run_without_a_bound_takes_the_flows_default_speaker_count(
+    client, flow_process_auth_headers, db_container, dispatched
+):
+    headers = dict(flow_process_auth_headers)
+    flow = await _published_flow(
+        client,
+        headers,
+        db_container,
+        input_required=False,
+        wizard={"transcription_max_speakers": 3},
+    )
+    await _speaker_service(
+        client, flow_process_auth_headers, flow.flow_id, granted=True
+    )
+
+    contract = await _contract(client, headers, flow.flow_id)
+    defaulted = await _create_run(client, headers, flow.flow_id, {})
+    chosen = await _create_run(client, headers, flow.flow_id, {"max_speakers": 5})
+
+    assert defaulted.status_code == 201, defaulted.text
+    assert chosen.status_code == 201, chosen.text
+    stored = await _stored_inputs(db_container, flow.flow_id)
+    assert stored[defaulted.json()["id"]]["max_speakers"] == 3
+    assert stored[chosen.json()["id"]]["max_speakers"] == 5
+    # Callers learn the bound an empty run takes before they send one.
+    assert contract["transcription"]["max_speakers"]["default"] == 3

@@ -1123,6 +1123,9 @@
                           flowEditor.setWizardMetadata({ transcription_diarization: checked })}
                         onPick={(id) =>
                           flowEditor.setWizardMetadata({ transcription_speaker_service: { id } })}
+                        maxSpeakers={wizardMetadata.transcription_max_speakers ?? null}
+                        onMaxSpeakersChange={(value) =>
+                          flowEditor.setWizardMetadata({ transcription_max_speakers: value })}
                       />
                       {#if transcriptionModelMissingInSpace}
                         <div

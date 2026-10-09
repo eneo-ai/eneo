@@ -10,6 +10,7 @@ from eneo.flows.domain.runtime_input import parse_runtime_input_config
 from eneo.flows.flow_authoring_spec import InputSource, InputType
 from eneo.flows.transcription_config import (
     DEFAULT_TRANSCRIPTION_LANGUAGE,
+    MAX_SPEAKERS_KEY,
     SPEAKER_SERVICE_KEY,
     FlowTranscriptionConfig,
     FlowTranscriptionConfigError,
@@ -141,6 +142,7 @@ _TRANSCRIPTION_WIZARD_KEYS = {
     "transcription_language",
     "transcription_diarization",
     SPEAKER_SERVICE_KEY,
+    MAX_SPEAKERS_KEY,
 }
 
 

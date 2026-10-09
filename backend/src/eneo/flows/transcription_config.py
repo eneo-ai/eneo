@@ -9,6 +9,7 @@ _ALLOWED_TRANSCRIPTION_LANGUAGES = {"auto", "sv", "en"}
 # The language a run transcribes in when the flow names none.
 DEFAULT_TRANSCRIPTION_LANGUAGE = "sv"
 SPEAKER_SERVICE_KEY = "transcription_speaker_service"
+MAX_SPEAKERS_KEY = "transcription_max_speakers"
 
 if TYPE_CHECKING:
     from eneo.spaces.space import Space
@@ -28,6 +29,9 @@ class FlowTranscriptionConfig:
     # The service that labels speakers, when the author picked one; None means
     # the space's only speaker service, resolved when a run starts.
     speaker_service_id: UUID | None = None
+    # The most speakers the service may label in a run that states no bound;
+    # None lets the service count them.
+    max_speakers: int | None = None
 
     @property
     def labels_with_the_spaces_service(self) -> bool:
@@ -83,7 +87,18 @@ def parse_transcription_config(
         language=language,
         diarization=raw_diarization,
         speaker_service_id=_reference_id(wizard, SPEAKER_SERVICE_KEY),
+        max_speakers=_max_speakers(wizard.get(MAX_SPEAKERS_KEY)),
     )
+
+
+def _max_speakers(raw: object) -> int | None:
+    if raw is None:
+        return None
+    if isinstance(raw, bool) or not isinstance(raw, int) or raw < 1:
+        raise FlowTranscriptionConfigError(
+            f"wizard.{MAX_SPEAKERS_KEY} must be a whole number of at least 1."
+        )
+    return raw
 
 
 def _reference_id(wizard: dict[str, Any], key: str) -> UUID | None:

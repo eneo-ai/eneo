@@ -550,6 +550,13 @@ class FlowMaxSpeakersOptionPublic(BaseModel):
             "person."
         )
     )
+    default: int | None = Field(
+        description=(
+            "The bound a run uses when it sends no `max_speakers` and the form "
+            "field is empty: the flow's default, or null to let the service "
+            "count the speakers."
+        )
+    )
 
 
 class FlowTranscriptionContractPublic(BaseModel):

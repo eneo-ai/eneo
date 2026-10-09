@@ -19153,6 +19153,11 @@ export interface components {
     /** FlowMaxSpeakersOptionPublic */
     FlowMaxSpeakersOptionPublic: {
       /**
+       * Default
+       * @description The bound a run uses when it sends no `max_speakers` and the form field is empty: the flow's default, or null to let the service count the speakers.
+       */
+      default: number | null;
+      /**
        * Form Field
        * @description The form field that already asks for the speaker count (a speaker-mapping step's count field), or null. When set, a client should not offer a second count control; a run's `max_speakers` still overrides the field.
        */
@@ -21120,7 +21125,7 @@ export interface components {
       } | null;
       /**
        * Max Speakers
-       * @description An upper bound on how many speakers the transcription may find, for a run that labels speakers. Send it only when `transcription.max_speakers` in the run contract is present; for a run that labels no speakers the request is refused with 422 `flow_run_max_speakers_not_available`. It is an upper bound, not an exact count, because a recording part may hold fewer people. Null means automatic, even when the flow's form asks for the count; omitted uses the form's count field, else automatic. Whole numbers from 1 only.
+       * @description An upper bound on how many speakers the transcription may find, for a run that labels speakers. Send it only when `transcription.max_speakers` in the run contract is present; for a run that labels no speakers the request is refused with 422 `flow_run_max_speakers_not_available`. It is an upper bound, not an exact count, because a recording part may hold fewer people. Null means automatic, even when the form or the flow sets a count; omitted uses the form's count field, else the flow's default (`transcription.max_speakers.default` in the run contract), else automatic. Whole numbers from 1 only.
        */
       max_speakers?: number | null;
       /**
@@ -21768,7 +21773,7 @@ export interface components {
       job_id?: string | null;
       /**
        * Max Speakers
-       * @description The upper bound on speakers the run settled at creation: its own `max_speakers`, else the form's speaker-count field. Null when the bound is automatic or the run labels no speakers. Send it as `max_speakers` to start a new run with the same bound.
+       * @description The upper bound on speakers the run settled at creation: its own `max_speakers`, else the form's speaker-count field, else the flow's default. Null when the bound is automatic or the run labels no speakers. Send it as `max_speakers` to start a new run with the same bound.
        */
       max_speakers?: number | null;
       /** @description Principal kind that created the run, once resolved. Service-key callers only see runs their own key created. */
@@ -23414,7 +23419,7 @@ export interface components {
       job_id?: string | null;
       /**
        * Max Speakers
-       * @description The upper bound on speakers the run settled at creation: its own `max_speakers`, else the form's speaker-count field. Null when the bound is automatic or the run labels no speakers. Send it as `max_speakers` to start a new run with the same bound.
+       * @description The upper bound on speakers the run settled at creation: its own `max_speakers`, else the form's speaker-count field, else the flow's default. Null when the bound is automatic or the run labels no speakers. Send it as `max_speakers` to start a new run with the same bound.
        */
       max_speakers?: number | null;
       /** @description Principal kind that created the run, once resolved. Service-key callers only see runs their own key created. */

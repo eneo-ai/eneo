@@ -955,9 +955,10 @@ class FlowRunCreateRequest(BaseModel):
             "that labels no speakers the request is refused with 422 "
             "`flow_run_max_speakers_not_available`. It is an upper bound, not an "
             "exact count, because a recording part may hold fewer people. Null "
-            "means automatic, even when the flow's form asks for the count; "
-            "omitted uses the form's count field, else automatic. Whole numbers "
-            "from 1 only."
+            "means automatic, even when the form or the flow sets a count; "
+            "omitted uses the form's count field, else the flow's default "
+            "(`transcription.max_speakers.default` in the run contract), else "
+            "automatic. Whole numbers from 1 only."
         ),
     )
 
@@ -1308,8 +1309,9 @@ class FlowRunPublic(FlowRunSummaryPublic):
         ge=1,
         description=(
             "The upper bound on speakers the run settled at creation: its own "
-            "`max_speakers`, else the form's speaker-count field. Null when the "
-            "bound is automatic or the run labels no speakers. Send it as "
+            "`max_speakers`, else the form's speaker-count field, else the "
+            "flow's default. Null when the bound is automatic or the run labels "
+            "no speakers. Send it as "
             "`max_speakers` to start a new run with the same bound."
         ),
     )

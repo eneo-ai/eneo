@@ -8,6 +8,8 @@ export type FlowWizardMetadata = {
   // The speaker identification service the author picked; absent means the
   // space's only usable one.
   transcription_speaker_service?: { id: string } | null;
+  // The most speakers a run labels when it states no bound; absent = automatic.
+  transcription_max_speakers?: number | null;
 };
 
 type SpeakerServiceLink = { meets_security_classification: boolean; available: boolean };

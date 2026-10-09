@@ -1,4 +1,4 @@
-import { cleanup, render, screen } from "@testing-library/svelte";
+import { cleanup, fireEvent, render, screen } from "@testing-library/svelte";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { m } from "$lib/paraglide/messages";
 import FlowSpeakerIdentification from "./FlowSpeakerIdentification.svelte";
@@ -27,9 +27,11 @@ function renderRow(props: {
     services: props.services ?? [],
     labels: props.labels ?? true,
     pickedId: props.pickedId ?? null,
+    maxSpeakers: null,
     disabled: false,
     onLabelsChange: vi.fn(),
-    onPick: vi.fn()
+    onPick: vi.fn(),
+    onMaxSpeakersChange: vi.fn()
   });
 }
 
@@ -76,5 +78,57 @@ describe("speaker identification", () => {
     renderRow({ services: [vemsa], labels: false });
 
     expect(screen.queryByText(m.flow_transcription_speakers_by({ name: vemsa.name }))).toBeNull();
+  });
+});
+
+describe("speaker count", () => {
+  it("is automatic when empty and saves a whole number as the maximum", async () => {
+    const onMaxSpeakersChange = vi.fn();
+    render(FlowSpeakerIdentification, {
+      services: [vemsa],
+      labels: true,
+      pickedId: null,
+      maxSpeakers: null,
+      disabled: false,
+      onLabelsChange: vi.fn(),
+      onPick: vi.fn(),
+      onMaxSpeakersChange
+    });
+    const input = screen.getByLabelText(m.flow_transcription_speakers_max_label());
+
+    expect(input).toHaveAttribute("placeholder", m.flow_transcription_speakers_max_placeholder());
+    await fireEvent.change(input, { target: { value: "4" } });
+    await fireEvent.change(input, { target: { value: "0" } });
+    await fireEvent.change(input, { target: { value: "" } });
+
+    expect(onMaxSpeakersChange.mock.calls).toEqual([[4], [null]]);
+  });
+
+  it("refuses a count that is not a whole number from 1 and shows the saved one again", async () => {
+    const onMaxSpeakersChange = vi.fn();
+    render(FlowSpeakerIdentification, {
+      services: [vemsa],
+      labels: true,
+      pickedId: null,
+      maxSpeakers: 3,
+      disabled: false,
+      onLabelsChange: vi.fn(),
+      onPick: vi.fn(),
+      onMaxSpeakersChange
+    });
+    const input = screen.getByLabelText(m.flow_transcription_speakers_max_label());
+
+    for (const refused of ["0", "2.5"]) {
+      await fireEvent.change(input, { target: { value: refused } });
+      expect(input).toHaveValue(3);
+      expect(input).toHaveAttribute("aria-invalid", "true");
+      expect(screen.getByRole("alert")).toHaveTextContent(
+        m.flow_transcription_speakers_max_invalid()
+      );
+    }
+    await fireEvent.change(input, { target: { value: "5" } });
+
+    expect(onMaxSpeakersChange.mock.calls).toEqual([[5]]);
+    expect(screen.queryByRole("alert")).toBeNull();
   });
 });

@@ -1966,6 +1966,7 @@ def test_openapi_documents_transcription_options_and_the_run_speaker_choice(
     assert set(schemas["FlowMaxSpeakersOptionPublic"]["properties"]) == {
         "form_field",
         "participants_field",
+        "default",
     }
     assert {
         (option.get("type"), option.get("minimum")) for option in speaker_bound["anyOf"]
