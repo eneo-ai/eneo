@@ -187,7 +187,7 @@ If `transcription` is `null`, the flow has no audio input step or does not trans
 
 ### Connect a speaker identification service
 
-A speaker identification service (for example Vemsa) does not change live transcription. An administrator connects it under Modeller, Transkriberingstjänster in the admin interface, with its address and API key, and gives each space access to it. The flow's own transcription model always writes the text, so the live text and the final transcript come from the same model, and the service only identifies speakers. There is no deployment environment variable for it.
+A speaker identification service (for example Vemsa) does not change live transcription. An administrator connects it in the admin interface under **Modeller**, **Transkription**, in the **Talaridentifiering** section, with its address and API key. Eneo tests the connection right away, and the latest result and when it ran stay visible to every administrator. Each space gets access to the service in its own settings. The flow's own transcription model always writes the text, so the live text and the final transcript come from the same model, and the service only identifies speakers. There is no deployment environment variable for it.
 
 ### Proxy and session limits
 

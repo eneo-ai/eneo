@@ -5,8 +5,8 @@ service (such as Vemsa). The flow's transcription model always writes the text;
 the service only identifies who is speaking. The flow transcript becomes the
 text with speaker labels (`[HH:MM:SS - HH:MM:SS] SPEAKER_00: ...` lines).
 
-An administrator connects the service under Modeller, Transkriberingstjänster
-in the admin interface, with its address and API key, and gives each space
+An administrator connects the service under Modeller, Transkription (the
+Talaridentifiering section) in the admin interface, with its address and API key, and gives each space
 access to it. There is no deployment environment variable for it. Knowledge
 uploads and app runs always use the model-registry path regardless.
 
@@ -65,7 +65,8 @@ file; its bytes remain fixed for checkpoint history and evidence.
 
 ## Configuration
 
-Connect the service in the admin interface under Modeller, Transkriberingstjänster:
+Connect the service in the admin interface under Modeller, Transkription, in the
+Talaridentifiering section:
 enter its base address (without a `/v1` suffix, for example `http://tolka:8000`)
 and its API key. Then give each space that needs speaker identification access
 to the connection. The backend API and the flow execution worker
@@ -115,7 +116,7 @@ Run Tolka from its repo with the no-GPU fake engine:
 TOLKA_ENGINE=fake TOLKA_API_TOKENS=eneo=devtoken uv run uvicorn tolka.main:app --port 8000
 ```
 
-Then in the admin interface under Modeller, Transkriberingstjänster, connect it with the address
+Then in the admin interface under Modeller, Transkription (Talaridentifiering), connect it with the address
 `http://host.docker.internal:8000` (the devcontainer reaches the host this way)
 and the API key `devtoken`, and give your space access to it.
 

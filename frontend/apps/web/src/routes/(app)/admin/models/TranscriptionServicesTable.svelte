@@ -209,7 +209,11 @@
   );
 </script>
 
-<section aria-labelledby="{uid}-heading" class="flex flex-col gap-4 border-t py-4">
+<section
+  aria-labelledby="{uid}-heading"
+  class="flex flex-col gap-4 border-t py-4"
+  data-tour="admin-speaker-identification"
+>
   <header class="flex flex-wrap items-start justify-between gap-3">
     <div>
       <h2 id="{uid}-heading" class="text-primary text-sm font-semibold tracking-tight">

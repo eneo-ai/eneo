@@ -250,7 +250,7 @@ Response:
   "transcription": {
     "live": { "available": true, "reason": null },
     "speaker_labels": { "selectable": true, "required": false, "default": true },
-    "max_speakers": { "form_field": null, "participants_field": null }
+    "max_speakers": { "form_field": null, "participants_field": null, "default": null }
   },
   "security_classification": {
     "name": "Open information",
@@ -1205,13 +1205,13 @@ Use the [Flow error reference](/guides/flows/reference/errors) for the complete 
 
 A flow that transcribes recorded audio reports live text availability, speaker-label options, and an optional speaker-count limit in the run contract's `transcription` object. For any other flow, `transcription` is `null`.
 
-| Field                       | Meaning                                                                                                                                                                                                                                                                           |
-| --------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `live.available`            | The flow's audio step can show live text while someone records                                                                                                                                                                                                                    |
-| `live.reason`               | `null` when live text is available. Otherwise `transcription_disabled` (the flow does not transcribe audio), `transcription_service_mode` (an external transcription service transcribes with its own model), `model_unavailable` (the flow's transcription model is not available in its space), or `model_not_realtime` (the model does not support live transcription) |
-| `speaker_labels.selectable` | A run may choose speaker labels with `speaker_labels`. It is `false` when no transcription service labels speakers, or when the flow requires labels                                                                                                                             |
-| `speaker_labels.required`   | The flow needs speaker labels, because a step maps speakers to names                                                                                                                                                                                                              |
-| `speaker_labels.default`    | The flow's own setting, which applies when a run makes no choice                                                                                                                                                                                                                  |
+| Field                       | Meaning                                                                                                                                                                                                                                                                  |
+| --------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `live.available`            | The flow's audio step can show live text while someone records                                                                                                                                                                                                           |
+| `live.reason`               | `null` when live text is available. Otherwise `transcription_disabled` (the flow does not transcribe audio), `model_unavailable` (the flow's transcription model is not available in its space), or `model_not_realtime` (the model does not support live transcription) |
+| `speaker_labels.selectable` | A run may choose speaker labels with `speaker_labels`. It is `false` when the flow's space has no speaker identification service it can use, or when the flow requires labels                                                                                            |
+| `speaker_labels.required`   | The flow needs speaker labels, because a step maps speakers to names                                                                                                                                                                                                     |
+| `speaker_labels.default`    | The flow's own setting, which applies when a run makes no choice. It is `false` when the space has no speaker identification service it can use                                                                                                                          |
 
 ### Choose speaker labels for a run
 
@@ -1253,6 +1253,8 @@ resolved in this order:
 - An explicit `max_speakers` value overrides the form field. Explicit `null`
   selects automatic speaker detection, even if the form contains a count.
 - When `max_speakers` is omitted, Eneo uses the form's count field if supplied.
+- Otherwise Eneo uses the flow's own limit, reported as
+  `transcription.max_speakers.default` (`null` when the flow sets none).
 - Otherwise, detection is automatic.
 
 Eneo stores this decision with the run and preserves it through retry and
