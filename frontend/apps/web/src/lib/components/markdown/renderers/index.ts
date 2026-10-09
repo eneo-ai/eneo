@@ -11,6 +11,7 @@ import Emphasis from "./Emphasis.svelte";
 import Code from "./Code.svelte";
 import Inref from "./Inref.svelte";
 import Mention from "./Mention.svelte";
+import FileMention from "./FileMention.svelte";
 import CodeSpan from "./CodeSpan.svelte";
 import Blockquote from "./Blockquote.svelte";
 import Del from "./Del.svelte";
@@ -43,6 +44,7 @@ export const renderers: Renderers = {
   // Custom blocks
   eneoInref: Inref,
   eneoMention: Mention,
+  eneoFile: FileMention,
   // Basic markdown blocks
   heading: Heading,
   text: Text,

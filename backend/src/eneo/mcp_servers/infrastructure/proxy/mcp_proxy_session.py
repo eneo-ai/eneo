@@ -897,6 +897,13 @@ class MCPProxySession:
         """Get total number of available tools."""
         return len(self._tool_registry)
 
+    def prefixed_tool_name(self, mcp_server_id: UUID, tool_name: str) -> str | None:
+        """The registered name of a server's tool, or None when it is not offered."""
+        for prefixed, (server, original, _) in self._tool_registry.items():
+            if server.id == mcp_server_id and original == tool_name:
+                return prefixed
+        return None
+
     def get_tool_info(
         self, prefixed_tool_name: str
     ) -> tuple[str, str, str | None] | None:

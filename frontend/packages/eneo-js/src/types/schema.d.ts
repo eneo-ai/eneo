@@ -1644,6 +1644,30 @@ export interface paths {
     patch?: never;
     trace?: never;
   };
+  "/api/v1/conversations/{session_id}/documents/{file_id}/export/": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /**
+     * Get Document Export Availability
+     * @description Check which formats the current provider can export for this conversation document.
+     */
+    get: operations["get_document_export_availability_api_v1_conversations__session_id__documents__file_id__export__get"];
+    put?: never;
+    /**
+     * Export Conversation Document
+     * @description Export an authorized conversation document as Word or PDF without another model response.
+     */
+    post: operations["export_conversation_document_api_v1_conversations__session_id__documents__file_id__export__post"];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
   "/api/v1/conversations/{session_id}/feedback/": {
     parameters: {
       query?: never;
@@ -9040,6 +9064,7 @@ export interface components {
       | "file_original_download_link_created"
       | "file_original_downloaded"
       | "file_signed_url_minted"
+      | "document_exported"
       | "info_blob_original_download_link_created"
       | "website_created"
       | "website_updated"
@@ -13056,6 +13081,38 @@ export interface components {
       knowledge_file_limit_bytes: number;
       /** Transcription Audio Limit Bytes */
       transcription_audio_limit_bytes: number;
+    };
+    /** DocumentExportAvailability */
+    DocumentExportAvailability: {
+      docx: components["schemas"]["DocumentExportFormatAvailability"];
+      pdf: components["schemas"]["DocumentExportFormatAvailability"];
+    };
+    /** DocumentExportFormatAvailability */
+    DocumentExportFormatAvailability: {
+      /** Available */
+      available: boolean;
+      /** Reason */
+      reason?:
+        | (
+            | "provider_unavailable"
+            | "tool_unavailable"
+            | "incompatible_tool"
+            | "format_unsupported"
+            | "document_unsupported"
+          )
+        | null;
+    };
+    /**
+     * DocumentExportRequest
+     * @description A Markdown document of the conversation, asked for in another format.
+     */
+    DocumentExportRequest: {
+      /**
+       * Format
+       * @description The format to export to.
+       * @enum {string}
+       */
+      format: "docx" | "pdf";
     };
     /** DynamicValuePublic */
     DynamicValuePublic: {
@@ -30445,6 +30502,149 @@ export interface operations {
         };
         content: {
           "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  get_document_export_availability_api_v1_conversations__session_id__documents__file_id__export__get: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        session_id: string;
+        file_id: string;
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["DocumentExportAvailability"];
+        };
+      };
+      /** @description Bad Request */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Not Found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  export_conversation_document_api_v1_conversations__session_id__documents__file_id__export__post: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description The UUID of the conversation/session */
+        session_id: string;
+        /** @description A Markdown document the assistant created in it */
+        file_id: string;
+      };
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["DocumentExportRequest"];
+      };
+    };
+    responses: {
+      /** @description The document in the format asked for, as a download. */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/vnd.openxmlformats-officedocument.wordprocessingml.document": unknown;
+          "application/pdf": unknown;
+        };
+      };
+      /** @description Bad Request */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Not Found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Conflict */
+      409: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+      /** @description Bad Gateway */
+      502: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
         };
       };
     };

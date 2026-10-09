@@ -1,4 +1,6 @@
 <script lang="ts">
+  import { tableLocationLabel } from "$lib/features/file-preview/tableReference";
+  import { AUTO_ACCEPT_TOOLS_STORAGE_KEY } from "../../toolApprovalPreference";
   import { onMount, untrack } from "svelte";
   import { browser } from "$app/environment";
   import AttachmentUploadIconButton from "$lib/features/attachments/components/AttachmentUploadIconButton.svelte";
@@ -26,12 +28,14 @@
   import { getAppContext } from "$lib/core/AppContext";
   import { m } from "$lib/paraglide/messages";
   import { SvelteSet } from "svelte/reactivity";
-  import { TriangleAlert, X } from "@lucide/svelte";
+  import { TextQuote, TriangleAlert, X } from "@lucide/svelte";
   import { getErrorMessage } from "$lib/core/errors/getErrorMessage";
   import { isCapabilityPurpose } from "$lib/features/mcp/capabilities";
   import { modelSupportsToolCalling } from "$lib/features/mcp/readiness";
   import { chatCapabilities } from "../../chatCapabilities";
   import { getContextErrorInfo, isConversationSubmitDisabled } from "./conversationInputState";
+  import { getFilePreview } from "$lib/features/file-preview/FilePreview.svelte";
+  import { composeQuotedQuestion } from "../../questionQuote";
 
   type McpServerSummary = {
     id: string;
@@ -58,6 +62,7 @@
   const {
     states: { mentions, question },
     resetMentionInput,
+    setQuestionText,
     snapshotMentionInput,
     restoreMentionInput,
     isMentionInputEmpty,
@@ -72,8 +77,34 @@
 
   const { scrollToBottom, onNewConversation }: Props = $props();
 
+  // An interactive tool view may offer the reader a message. It is put after
+  // whatever is already written and is never sent by itself.
+  $effect(() => {
+    const suggestion = chat.composerSuggestion;
+    if (suggestion === null) return;
+    untrack(() => {
+      chat.composerSuggestion = null;
+      setQuestionText($question ? `${$question}\n${suggestion}` : suggestion);
+      focusMentionInput();
+    });
+  });
+
+  // Text the user selected in a file preview; it is sent as a quote at the
+  // head of the next question.
+  const filePreview = getFilePreview();
+  const quote = $derived(filePreview?.quote ?? null);
+  const quotedFile = $derived(
+    chat.currentConversation.messages
+      ?.flatMap((message) => [...(message.files ?? []), ...(message.generated_files ?? [])])
+      .find((file) => file.id === quote?.fileId)
+  );
+
+  // Quoting is followed by typing what to do with the passage.
+  $effect(() => {
+    if (quote) focusMentionInput();
+  });
+
   let abortController: AbortController | undefined;
-  const AUTO_ACCEPT_TOOLS_STORAGE_KEY = "autoAcceptToolsEnabled";
   let autoAcceptTools = $state(true);
   let hasHydratedToolApprovalPreference = $state(false);
 
@@ -183,8 +214,10 @@
     // behind a spinner until the answer finishes. The full draft (mention
     // chips included) is restored on error below.
     const draft = snapshotMentionInput();
-    const questionText = draft.question;
+    const sentQuote = quote;
+    const questionText = composeQuotedQuestion(sentQuote, draft.question);
     resetMentionInput();
+    if (filePreview) filePreview.quote = null;
     scrollToBottom();
 
     try {
@@ -205,6 +238,7 @@
       // Put the draft back unless the user has already started a new one
       // while the request was pending; that newer input wins.
       if (isMentionInputEmpty()) restoreMentionInput(draft);
+      if (filePreview && !filePreview.quote) filePreview.quote = sentQuote;
       const contextError = getContextErrorInfo(error);
       if (contextError) {
         if (contextError.used !== undefined && contextError.limit !== undefined) {
@@ -275,7 +309,7 @@
             })
           }
         : undefined;
-    chat.requestPreflight($question, fileIds, tools);
+    chat.requestPreflight(composeQuotedQuestion(quote, $question), fileIds, tools);
   });
 
   const shouldShowMentionButton = $derived.by(() => {
@@ -494,6 +528,38 @@
   onStop={() => abortController?.abort("User cancelled")}
   class="max-w-[74ch] md:w-full"
 >
+  {#if quote && filePreview}
+    {@const location = tableLocationLabel(quote.locator, (row) => m.table_reference_row({ row }))}
+    <div class="bg-muted mx-1.5 mt-1.5 flex items-start gap-2 rounded-xl py-2 pr-2 pl-3">
+      <TextQuote class="text-muted-foreground mt-0.5 size-4 flex-shrink-0" aria-hidden="true" />
+      <button
+        type="button"
+        class="focus-visible:ring-ring min-w-0 flex-1 rounded text-left focus-visible:ring-2 focus-visible:outline-none"
+        disabled={!quotedFile}
+        aria-label={m.file_quote_show({ name: quote.fileName })}
+        onclick={(event) =>
+          quotedFile && filePreview.showPassage(quotedFile, quote, event.currentTarget)}
+      >
+        <span class="text-muted-foreground block truncate text-xs"
+          >{m.file_quote_from({ name: quote.fileName })}</span
+        >
+        {#if location}<span class="text-muted-foreground block text-xs">{location}</span>{/if}
+        <span class="line-clamp-2 text-sm break-words whitespace-pre-line">{quote.text}</span>
+        {#if !quotedFile}<span class="text-muted-foreground block text-xs"
+            >{m.table_reference_unavailable()}</span
+          >{/if}
+      </button>
+      <button
+        type="button"
+        onclick={() => (filePreview.quote = null)}
+        class="text-muted-foreground hover:bg-background hover:text-foreground focus-visible:ring-ring rounded p-0.5 transition-colors focus-visible:ring-2 focus-visible:outline-none"
+        aria-label={m.file_quote_remove()}
+      >
+        <X class="size-4" />
+      </button>
+    </div>
+  {/if}
+
   <PromptInput.Body>
     {#if !chat.hasCompletionModel}
       <!-- Cover only the text field: the footer stays usable so the user can

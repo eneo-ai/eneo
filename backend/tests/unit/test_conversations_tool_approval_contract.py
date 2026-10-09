@@ -11,14 +11,17 @@ from starlette.requests import Request
 from eneo.assistants.api.assistant_models import AskAssistant
 from eneo.audit.domain.action_types import ActionType
 from eneo.audit.domain.entity_types import EntityType
+from eneo.audit.domain.outcome import Outcome
 from eneo.audit.infrastructure.rate_limiting import (
     RateLimitExceededError,
     RateLimitResult,
 )
 from eneo.conversations.conversations_router import (
     approve_tools,
+    export_conversation_document,
     get_tool_call_result,
 )
+from eneo.conversations.document_export import DocumentExportUnavailable
 from eneo.main.exceptions import UnauthorizedException
 from eneo.mcp_servers.infrastructure.tool_approval import (
     ToolApprovalContext,
@@ -26,6 +29,7 @@ from eneo.mcp_servers.infrastructure.tool_approval import (
     ToolApprovalDecision,
     ToolApprovalSubmitResult,
 )
+from eneo.sessions.session import DocumentExportRequest
 
 
 def _make_request() -> Request:
@@ -541,3 +545,88 @@ def test_legacy_assistant_ask_ignores_require_tool_approval_extra_field():
     assert ask.question == "hello"
     assert ask.stream is True
     assert not hasattr(ask, "require_tool_approval")
+
+
+async def test_document_export_is_audited_and_returned_as_a_download():
+    container, user, audit_service = _make_container()
+    session = SimpleNamespace(
+        id=uuid4(), name="Plan", group_chat_id=None, assistant=SimpleNamespace()
+    )
+    session_service = AsyncMock()
+    session_service.get_session_by_uuid.return_value = session
+    container.session_service = lambda: session_service
+    container.assistant_service = lambda: AsyncMock()
+    container.file_service = lambda: AsyncMock()
+    container.mcp_proxy_session_factory = lambda: SimpleNamespace()
+    container.session = lambda: None
+    container.tenant = lambda: None
+    file_id, server_id = uuid4(), uuid4()
+    exported = SimpleNamespace(
+        filename="Införandeplan.docx",
+        mime_type="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+        data=b"word-bytes",
+        mcp_server_id=server_id,
+    )
+    router = "eneo.conversations.conversations_router"
+    with (
+        patch(f"{router}._validate_conversation_scope", new=AsyncMock()),
+        patch(f"{router}._authorize_session_access", new=AsyncMock()),
+        patch(f"{router}.build_identity_headers", lambda user, tenant: {}),
+        patch(f"{router}.export_document", new=AsyncMock(return_value=exported)),
+    ):
+        response = await export_conversation_document(
+            session_id=session.id,
+            file_id=file_id,
+            request=DocumentExportRequest(format="docx"),
+            http_request=_make_request(),
+            container=container,
+        )
+
+    assert response.body == b"word-bytes"
+    assert response.media_type == exported.mime_type
+    assert "attachment" in response.headers["content-disposition"]
+    assert response.headers["cache-control"] == "no-store"
+    (logged,) = audit_service.log_async.await_args_list
+    assert logged.kwargs["action"] == ActionType.DOCUMENT_EXPORTED
+    assert logged.kwargs["entity_type"] == EntityType.FILE
+    assert logged.kwargs["entity_id"] == file_id
+
+
+async def test_document_export_without_a_provider_is_a_conflict_audited_as_a_failure():
+    container, user, audit_service = _make_container()
+    session = SimpleNamespace(
+        id=uuid4(), name="Plan", group_chat_id=None, assistant=SimpleNamespace()
+    )
+    session_service = AsyncMock()
+    session_service.get_session_by_uuid.return_value = session
+    container.session_service = lambda: session_service
+    container.assistant_service = lambda: AsyncMock()
+    container.file_service = lambda: AsyncMock()
+    container.mcp_proxy_session_factory = lambda: SimpleNamespace()
+    container.session = lambda: None
+    container.tenant = lambda: None
+    router = "eneo.conversations.conversations_router"
+    with (
+        patch(f"{router}._validate_conversation_scope", new=AsyncMock()),
+        patch(f"{router}._authorize_session_access", new=AsyncMock()),
+        patch(f"{router}.build_identity_headers", lambda user, tenant: {}),
+        patch(
+            f"{router}.export_document",
+            new=AsyncMock(side_effect=DocumentExportUnavailable()),
+        ),
+        pytest.raises(HTTPException) as refused,
+    ):
+        await export_conversation_document(
+            session_id=session.id,
+            file_id=uuid4(),
+            request=DocumentExportRequest(format="pdf"),
+            http_request=_make_request(),
+            container=container,
+        )
+
+    assert refused.value.status_code == 409
+    assert refused.value.detail["code"] == "document_export_unavailable"
+    (logged,) = audit_service.log_async.await_args_list
+    assert logged.kwargs["action"] == ActionType.DOCUMENT_EXPORTED
+    assert logged.kwargs["outcome"] == Outcome.FAILURE
+    assert logged.kwargs["error_message"] == "unavailable"

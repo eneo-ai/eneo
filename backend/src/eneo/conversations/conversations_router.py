@@ -3,12 +3,22 @@ from types import SimpleNamespace
 from typing import Annotated, NoReturn, Optional, cast
 from uuid import UUID
 
-from fastapi import APIRouter, Body, Depends, HTTPException, Path, Query, Request
+from fastapi import (
+    APIRouter,
+    Body,
+    Depends,
+    HTTPException,
+    Path,
+    Query,
+    Request,
+    Response,
+)
 
 from eneo.assistants.api.assistant_protocol import to_conversation_response
 from eneo.audit.application.audit_metadata import AuditMetadata
 from eneo.audit.domain.action_types import ActionType
 from eneo.audit.domain.entity_types import EntityType
+from eneo.audit.domain.outcome import Outcome
 from eneo.audit.infrastructure.rate_limiting import (
     RateLimitConfig,
     RateLimitExceededError,
@@ -30,11 +40,20 @@ from eneo.conversations.conversation_models import (
     PreflightRequest,
     PreflightResponse,
 )
+from eneo.conversations.document_export import (
+    EXPORT_MIME_TYPES,
+    DocumentExportAvailability,
+    DocumentExportFailed,
+    DocumentExportUnavailable,
+    document_export_availability,
+    export_document,
+)
 from eneo.database.database import AsyncSession
 from eneo.main.container.container import Container
 from eneo.main.exceptions import NotFoundException, UnauthorizedException
 from eneo.main.logging import get_logger
 from eneo.main.models import CursorPaginatedResponse
+from eneo.mcp_servers.infrastructure.identity_headers import build_identity_headers
 from eneo.mcp_servers.infrastructure.tool_approval import (
     ToolApprovalDecision,
     get_approval_manager,
@@ -42,7 +61,9 @@ from eneo.mcp_servers.infrastructure.tool_approval import (
 from eneo.roles.permissions import Permission
 from eneo.server.dependencies.container import get_container
 from eneo.server.protocol import responses
+from eneo.server.protocol.downloads import content_disposition_header
 from eneo.sessions.session import (
+    DocumentExportRequest,
     SessionFeedback,
     SessionInDB,
     SessionMetadataPublic,
@@ -667,6 +688,169 @@ async def get_tool_call_result(
         tool_call_id=tool_call_id,
         result=result,
         mcp_tool_name=mcp_tool_name,
+    )
+
+
+@router.get(
+    "/{session_id}/documents/{file_id}/export/",
+    response_model=DocumentExportAvailability,
+    description="Check which formats the current provider can export for this conversation document.",
+    responses=responses.get_responses([400, 403, 404]),
+    dependencies=[Depends(require_resource_permission_for_method("conversations"))],
+)
+@endpoint_access(
+    authentication=Authentication.USER,
+    authorization=Authorization.AUTHENTICATED,
+    reason=_CONVERSATION_SERVICE_ACCESS_REASON,
+)
+async def get_document_export_availability(
+    session_id: UUID,
+    file_id: UUID,
+    http_request: Request,
+    response: Response,
+    container: Annotated[Container, Depends(get_container(with_user=True))],
+) -> DocumentExportAvailability:
+    """Check native export support for this document and acting user."""
+    await _validate_conversation_scope(
+        http_request=http_request,
+        container=container,
+        assistant_id=None,
+        group_chat_id=None,
+        session_id=session_id,
+    )
+    session = await container.session_service().get_session_by_uuid(session_id)
+    await _authorize_session_access(container, session)
+    response.headers["Cache-Control"] = "no-store"
+    return await document_export_availability(
+        conversation=session,
+        file_id=file_id,
+        assistant_service=container.assistant_service(),
+        file_service=container.file_service(),
+        proxy_factory=container.mcp_proxy_session_factory(),
+        identity_headers=build_identity_headers(container.user(), container.tenant()),
+    )
+
+
+@router.post(
+    "/{session_id}/documents/{file_id}/export/",
+    response_class=Response,
+    response_model=None,
+    description="Export an authorized conversation document as Word or PDF without another model response.",
+    responses={
+        200: {
+            "description": "The document in the format asked for, as a download.",
+            "content": {mime: {} for mime in EXPORT_MIME_TYPES.values()},
+        },
+        **responses.get_responses([400, 403, 404, 409, 502]),
+    },
+    dependencies=[Depends(require_resource_permission_for_method("conversations"))],
+)
+@endpoint_access(
+    authentication=Authentication.USER,
+    authorization=Authorization.AUTHENTICATED,
+    reason=_CONVERSATION_SERVICE_ACCESS_REASON,
+)
+async def export_conversation_document(
+    session_id: Annotated[
+        UUID, Path(description="The UUID of the conversation/session")
+    ],
+    file_id: Annotated[
+        UUID, Path(description="A Markdown document the assistant created in it")
+    ],
+    request: DocumentExportRequest,
+    http_request: Request,
+    container: Annotated[Container, Depends(get_container(with_user=True))],  # pyright: ignore[reportCallInDefaultInitializer]  # FastAPI DI; evaluated at request time
+):
+    """Export a Markdown document of the conversation as Word or PDF.
+
+    The provider of the assistant's file-creation capability renders the
+    document's text. The file is returned as a download and is not stored in
+    the conversation. 409 when the assistant has no such provider.
+    """
+    current_user = container.user()
+    await _validate_conversation_scope(
+        http_request=http_request,
+        container=container,
+        assistant_id=None,
+        group_chat_id=None,
+        session_id=session_id,
+    )
+    session = await container.session_service().get_session_by_uuid(session_id)
+    await _authorize_session_access(container, session)
+
+    audit_service = container.audit_service()
+
+    async def audit(*, extra: dict[str, object], refused: str | None = None) -> None:
+        """Record the export, made or refused."""
+        await audit_service.log_async(
+            tenant_id=current_user.tenant_id,
+            user=current_user,
+            action=ActionType.DOCUMENT_EXPORTED,
+            entity_type=EntityType.FILE,
+            entity_id=file_id,
+            description=(
+                f"A document could not be exported as {request.format}"
+                if refused
+                else f"Exported a document as {request.format}"
+            ),
+            metadata=AuditMetadata.standard(
+                actor=current_user,
+                target=session,
+                extra={
+                    "session_id": str(session_id),
+                    "file_id": str(file_id),
+                    "format": request.format,
+                    **extra,
+                },
+            ),
+            outcome=Outcome.FAILURE if refused else Outcome.SUCCESS,
+            error_message=refused,
+        )
+
+    try:
+        exported = await export_document(
+            conversation=session,
+            file_id=file_id,
+            format=request.format,
+            assistant_service=container.assistant_service(),
+            file_service=container.file_service(),
+            proxy_factory=container.mcp_proxy_session_factory(),
+            identity_headers=build_identity_headers(current_user, container.tenant()),
+        )
+    except DocumentExportUnavailable as exc:
+        await audit(extra={"reason": exc.reason}, refused="unavailable")
+        raise HTTPException(
+            status_code=409,
+            detail={
+                "code": "document_export_unavailable",
+                "message": "Native export is unavailable for this document and format.",
+            },
+        )
+    except DocumentExportFailed:
+        await audit(extra={}, refused="failed")
+        raise HTTPException(
+            status_code=502,
+            detail={
+                "code": "document_export_failed",
+                "message": "The document could not be exported.",
+            },
+        )
+
+    await audit(
+        extra={
+            "mcp_server_id": str(exported.mcp_server_id),
+            "bytes": len(exported.data),
+        }
+    )
+    return Response(
+        content=exported.data,
+        media_type=exported.mime_type,
+        headers={
+            "Content-Disposition": content_disposition_header(
+                "attachment", exported.filename
+            ),
+            "Cache-Control": "no-store",
+        },
     )
 
 

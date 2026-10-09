@@ -45,8 +45,28 @@ export type EneoMentionCustomComponentProps = {
 
 export type CustomMentionComponent = Component<EneoMentionCustomComponentProps>;
 
-export type EneoToken = EneoInrefToken | EneoMentionToken;
+/**
+ * 3. EneoFile: the name of a file of the conversation, where the text mentions it
+ */
+export type EneoFileToken = {
+  type: "eneoFile";
+  level: "inline";
+  raw: string;
+  name: string;
+};
+
+export type EneoFileCustomComponentProps = {
+  /**
+   * The generated token with the file's name as written in the text
+   */
+  token: EneoFileToken;
+};
+
+export type CustomFileComponent = Component<EneoFileCustomComponentProps>;
+
+export type EneoToken = EneoInrefToken | EneoMentionToken | EneoFileToken;
 export type CustomRenderers = {
   inref?: CustomInfoBlobComponent;
   mention?: CustomMentionComponent;
+  file?: CustomFileComponent;
 };

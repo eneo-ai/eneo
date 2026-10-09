@@ -19,6 +19,97 @@
           }
         },
         {
+          "id": "charts-in-documents",
+          "type": "new",
+          "area": "chat",
+          "title": {
+            "en": "Include charts in Word and PDF reports",
+            "sv": "Ta med diagram i Word- och PDF-rapporter"
+          },
+          "body": {
+            "en": "Ask for a Word or PDF report based on your analysis and charts. The assistant is guided to include charts with captions and page-appropriate sizing, and keep images prepared only for the report out of chat.",
+            "sv": "Be om en Word- eller PDF-rapport utifrån analysen och diagrammen. Assistenten får instruktioner att ta med diagram med bildtexter och sidanpassad storlek, utan att visa bilder som bara behövs i rapporten i chatten."
+          }
+        },
+        {
+          "id": "file-creation-progress",
+          "type": "improved",
+          "area": "chat",
+          "title": {
+            "en": "Follow file creation in the side panel",
+            "sv": "Följ när filen skapas i sidopanelen"
+          },
+          "body": {
+            "en": "The side panel opens when file creation starts and updates the title, text and spreadsheet rows as they arrive. Drafts stay visible while a retry starts or the saved file downloads, then give way to the finished file. Interrupted tool calls no longer appear as successfully created files.",
+            "sv": "Sidopanelen öppnas när en fil börjar skapas och uppdaterar titel, text och kalkylbladsrader efter hand. Utkastet visas medan ett nytt försök förbereds eller den sparade filen hämtas, och ersätts sedan av den färdiga filen. Avbrutna verktygsanrop visas inte längre som färdigskapade filer."
+          }
+        },
+        {
+          "id": "file-analysis-trace",
+          "type": "fixed",
+          "area": "chat",
+          "title": {
+            "en": "See which file is being analysed",
+            "sv": "Se vilken fil som analyseras"
+          },
+          "body": {
+            "en": "Analysis steps describe the operation and identify the input separately from exported results, keeping execution order when expanded. Intermediate exports no longer open the side panel automatically. Files pass between tools through stable references so the assistant no longer needs to copy download links.",
+            "sv": "Analyssteg beskriver vad som görs och visar indatafilen separat från exporterade resultat, i körordning när du fäller ut dem. Mellanliggande exporter öppnar inte längre sidopanelen automatiskt. Filer skickas mellan verktyg med stabila referenser så att assistenten inte längre behöver kopiera nedladdningslänkar."
+          }
+        },
+        {
+          "id": "spreadsheet-selection-quotes",
+          "type": "new",
+          "area": "chat",
+          "title": {
+            "en": "Ask about a spreadsheet cell or row",
+            "sv": "Fråga om en cell eller rad i ett kalkylblad"
+          },
+          "body": {
+            "en": "Select a cell or row in the file preview and choose Ask about selection to reference it in your next message. The reference includes headings and its location, and reopens the original file even when newer versions exist.",
+            "sv": "Markera en cell eller rad i förhandsvisningen och välj Fråga om markeringen för att hänvisa till den i nästa meddelande. Referensen innehåller rubriker och plats och öppnar ursprungsfilen även när nyare versioner finns."
+          }
+        },
+        {
+          "id": "conversation-uploads",
+          "type": "improved",
+          "area": "chat",
+          "title": {
+            "en": "Find uploaded files in Documents",
+            "sv": "Hitta uppladdade filer under Dokument"
+          },
+          "body": {
+            "en": "The Documents menu now includes an Uploads section, separate from files created in chat. Open supported files in the side panel or use the download button to save a copy, even before the assistant has created any documents.",
+            "sv": "Menyn Dokument innehåller nu avsnittet Uppladdade filer, separat från filer som skapats i chatten. Öppna filer som stöds i sidopanelen eller använd nedladdningsknappen för att spara en kopia, även innan assistenten har skapat något dokument."
+          }
+        },
+        {
+          "id": "chat-widget-scroll",
+          "type": "fixed",
+          "area": "chat",
+          "title": {
+            "en": "Keep new charts and tables in view",
+            "sv": "Håll nya diagram och tabeller i bild"
+          },
+          "body": {
+            "en": "When you follow the latest reply, the chat now scrolls to the bottom as charts and tables appear or grow. If you scroll up to read earlier messages, your position is preserved.",
+            "sv": "När du följer det senaste svaret rullar chatten nu till slutet när diagram och tabeller visas eller växer. Om du bläddrar upp för att läsa tidigare meddelanden behålls din position."
+          }
+        },
+        {
+          "id": "file-download-links",
+          "type": "fixed",
+          "area": "chat",
+          "title": {
+            "en": "Preview files before downloading",
+            "sv": "Förhandsvisa filer innan du laddar ner dem"
+          },
+          "body": {
+            "en": "Filename links open the sidebar preview; use the Download button to save a copy. Find the Documents menu at the top right of the chat, even while scrolling. When a document is rewritten, the current version stays visible until the new preview is ready.",
+            "sv": "Filnamnslänkar öppnar förhandsvisningen i sidopanelen; använd knappen Ladda ner för att spara en kopia. Menyn Dokument finns uppe till höger i chatten, även när du bläddrar. När ett dokument skrivs om visas den nuvarande versionen tills den nya förhandsvisningen är klar."
+          }
+        },
+        {
           "id": "sharepoint-document-properties",
           "type": "improved",
           "area": "knowledge",
