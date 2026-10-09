@@ -1,4 +1,6 @@
+import { formatList } from "$lib/core/formatting/formatList";
 import { m } from "$lib/paraglide/messages";
+import { aiBuilderErrorCopy } from "./aiBuilderError";
 import type {
   AIBuilderError,
   AIBuilderFlowReviewSuggestion,
@@ -27,10 +29,7 @@ export function suggestionStepsLabel(stepOrders: number[]): string {
 
 /** "2 och 3", "1, 2 och 3" (or "and"): the same reading the server's message uses. */
 function formatSteps(stepOrders: number[]): string {
-  const steps = [...new Set(stepOrders)].sort((a, b) => a - b).map(String);
-  if (steps.length <= 1) return steps.join("");
-  const conjunction = m.ai_builder_review_suggestion_steps_join();
-  return `${steps.slice(0, -1).join(", ")} ${conjunction} ${steps[steps.length - 1]}`;
+  return formatList([...new Set(stepOrders)].sort((a, b) => a - b).map(String));
 }
 
 /** One entry of the generated request contract: an edit scope, kind + steps. */
@@ -153,6 +152,10 @@ export function suggestionsFailureCopy(error: AIBuilderError): {
         retry: false
       };
     default:
-      return { title: m.ai_builder_review_suggestions_failed(), body: error.message, retry: true };
+      return {
+        title: m.ai_builder_review_suggestions_failed(),
+        body: aiBuilderErrorCopy(error),
+        retry: true
+      };
   }
 }

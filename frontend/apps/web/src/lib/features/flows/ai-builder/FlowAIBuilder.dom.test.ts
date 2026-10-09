@@ -1260,7 +1260,7 @@ describe("FlowAIBuilder discovery screens", () => {
     expect(await screen.findByText(m.ai_builder_reply_understanding())).toBeTruthy();
     // Still the first phase: no build narration, and the composer's reply
     // screen is what the question will replace.
-    expect(screen.queryByText(m.ai_builder_build_narration_reading())).toBeNull();
+    expect(screen.queryByText(m.ai_builder_build_status_reading())).toBeNull();
 
     calls[0]!.emit([textEvent("Jag behöver veta formatet."), questionEvent(FORMAT_QUESTION)]);
     expect(await screen.findByRole("heading", { name: FORMAT_QUESTION.question })).toBeTruthy();
@@ -1415,7 +1415,7 @@ describe("FlowAIBuilder discovery screens", () => {
     expect(preview.textContent).toContain(m.ai_builder_run_preview_title());
     expect(preview.textContent).toContain("Dokument");
     // The per-run file limit is an assumption row, not repeated in the preview.
-    expect(preview.textContent).not.toContain(m.ai_builder_run_preview_max_files({ count: "5" }));
+    expect(preview.textContent).not.toMatch(/högst 5 filer per körning|at most 5 files per run/);
     expect(preview.textContent).toContain("Word-dokument");
     expect(preview.textContent).toContain("mall.docx");
   });
@@ -3432,7 +3432,7 @@ describe("FlowAIBuilder confirm, build and review", () => {
     calls[1]!.emit([statusEvent("architecture_committed")]);
 
     expect(await screen.findByRole("heading", { name: m.ai_builder_build_title() })).toBeTruthy();
-    expect(screen.getByText(new RegExp(escape(m.ai_builder_build_narration_steps())))).toBeTruthy();
+    expect(screen.getByText(m.ai_builder_build_status_steps())).toBeTruthy();
     const current = railButton(m.ai_builder_rail_planning());
     expect(current.getAttribute("aria-current")).toBe("step");
     calls[1]!.finish();
@@ -3557,7 +3557,7 @@ describe("FlowAIBuilder confirm, build and review", () => {
       records: "retry_with_acknowledgement_requested"
     },
     {
-      name: "any other server failure, quoted as sent",
+      name: "any other server failure, told as the turn that failed",
       error: {
         code: "planner_stream_failed",
         category: "upstream",
@@ -3566,7 +3566,9 @@ describe("FlowAIBuilder confirm, build and review", () => {
       latestTurn: "committed",
       kind: "other",
       heading: () => m.ai_builder_failure_heading_other_generation(),
-      cause: () => "Modellen svarade inte i tid.",
+      // The server's prose is diagnostics; the reader is told which
+      // operation failed.
+      cause: () => m.ai_builder_error_fallback_turn(),
       primary: () => m.ai_builder_turn_retry(),
       secondary: () => m.ai_builder_failure_action_clarify(),
       records: "resend_requested"
@@ -3675,7 +3677,9 @@ describe("FlowAIBuilder confirm, build and review", () => {
         screen.getByText(new RegExp(escape(m.ai_builder_failure_preserved_create())))
       ).toBeTruthy();
       // The way back to the transcript is the header's, not a third button.
-      expect(screen.queryByRole("button", { name: m.ai_builder_show_conversation() })).toBeNull();
+      expect(
+        screen.queryByRole("button", { name: /Visa konversationen|Show the conversation/ })
+      ).toBeNull();
 
       // Exactly the actions the driver allows, primary first.
       const card = headingEl.closest<HTMLElement>("[role='status']")!;
@@ -3875,7 +3879,7 @@ describe("FlowAIBuilder conversation screen", () => {
     await openConversation();
 
     expect(screen.getByText("Sammanfatta rapporter till en PDF")).toBeTruthy();
-    expect(screen.getByText(m.ai_builder_question_answer_in_view())).toBeTruthy();
+    expect(screen.getByText(m.ai_builder_question_answer_on_question_page())).toBeTruthy();
 
     await fireEvent.click(button(m.ai_builder_conversation_edit_answer()));
 

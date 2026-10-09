@@ -200,7 +200,7 @@ describe("flow settings page — mapped restore lifecycle", () => {
     await expect.element(page.getByText("Följer driftmiljöns standard.")).toBeVisible();
     // …the mapped field adopts the returned inherited value as a clean baseline…
     await expect
-      .element(page.getByRole("textbox", { name: "Nya mappade steg: Högst" }))
+      .element(page.getByRole("textbox", { name: "Nya steg som körs per fil: Högst" }))
       .toHaveValue("100");
     // …while the unrelated attachment edit stays the only dirty field.
     await expect.element(page.getByText("1 osparad ändring")).toBeVisible();
@@ -649,7 +649,7 @@ describe("flow settings page — mapped restore lifecycle", () => {
       .element(page.getByRole("tab", { name: "Uppladdningar och körtider" }))
       .toBeVisible();
     await expect.element(page.getByRole("tab", { name: "AI-byggaren" })).toBeVisible();
-    await expect.element(page.getByRole("tab", { name: "Sparat källunderlag" })).toBeVisible();
+    await expect.element(page.getByRole("tab", { name: "Sparad källtext" })).toBeVisible();
   });
 
   test("shows shared upload sizes with a link to their only editor", async () => {
@@ -716,9 +716,9 @@ describe("flow settings page — mapped restore lifecycle", () => {
     render(FlowSettingsPage, pageProps());
     await page.getByRole("tab", { name: "Uppladdningar och körtider" }).click();
 
-    const field = page.getByRole("textbox", { name: "Max samtidiga flödeskörningar" });
+    const field = page.getByRole("textbox", { name: "Högsta antal samtidiga flödeskörningar" });
     await expect.element(field).toHaveValue("4");
-    await expect.element(page.getByText(/Upp till 8 \(serverns kapacitet\)/)).toBeVisible();
+    await expect.element(page.getByText(/Upp till 8, vilket är vad servern klarar/)).toBeVisible();
 
     await field.fill("9");
     await expect.element(field).toHaveAttribute("aria-invalid", "true");
@@ -737,7 +737,7 @@ describe("flow settings page — mapped restore lifecycle", () => {
     render(FlowSettingsPage, pageProps());
     await page.getByRole("tab", { name: "Uppladdningar och körtider" }).click();
 
-    const field = page.getByRole("textbox", { name: "Max samtidiga flödeskörningar" });
+    const field = page.getByRole("textbox", { name: "Högsta antal samtidiga flödeskörningar" });
     await field.fill("2");
     await page.getByRole("button", { name: "Spara ändringar" }).click();
     expect(updateFlowRuntimePolicy).toHaveBeenLastCalledWith({ max_concurrent_runs: 2 });
@@ -770,10 +770,14 @@ describe("flow settings page — mapped restore lifecycle", () => {
     );
     await page.getByRole("tab", { name: "Uppladdningar och körtider" }).click();
 
-    const field = page.getByRole("textbox", { name: "Max samtidiga flödeskörningar" });
+    const field = page.getByRole("textbox", { name: "Högsta antal samtidiga flödeskörningar" });
     await expect.element(field).toHaveValue("3");
     await expect
-      .element(page.getByText("Begränsad till 3 av serverns kapacitet; sparat värde 6."))
+      .element(
+        page.getByText(
+          "Begränsas till 3 eftersom servern inte klarar fler. Det sparade värdet är 6."
+        )
+      )
       .toBeVisible();
 
     // Entering the shown number is not a change, so the explicit action is what resets it.
@@ -801,7 +805,7 @@ describe("flow settings page — mapped restore lifecycle", () => {
     await expect
       .element(page.getByText("Inga nya flödeskörningar kan starta: serverns kapacitet är 0."))
       .toBeVisible();
-    await page.getByRole("textbox", { name: "Max samtidiga flödeskörningar" }).fill("3");
+    await page.getByRole("textbox", { name: "Högsta antal samtidiga flödeskörningar" }).fill("3");
     expect(page.getByText(/Ange ett värde mellan 0 och 0/).query()).toBeNull();
     await expect.element(page.getByRole("button", { name: "Spara ändringar" })).toBeDisabled();
   });
@@ -816,11 +820,11 @@ describe("flow settings page — mapped restore lifecycle", () => {
     render(FlowSettingsPage, pageProps());
     await page.getByRole("tab", { name: "Uppladdningar och körtider" }).click();
 
-    await page.getByRole("textbox", { name: "Max samtidiga flödeskörningar" }).fill("2");
+    await page.getByRole("textbox", { name: "Högsta antal samtidiga flödeskörningar" }).fill("2");
     await page.getByRole("button", { name: "Spara ändringar" }).click();
 
     expect(toastErrorFn).toHaveBeenCalledExactlyOnceWith(
-      "Max samtidiga flödeskörningar får inte överstiga serverns kapacitet. Ladda om sidan för att se aktuell kapacitet."
+      "Högsta antal samtidiga flödeskörningar får inte överstiga serverns kapacitet. Ladda om sidan för att se aktuell kapacitet."
     );
     expect(toastErrorMock).not.toHaveBeenCalled();
   });
@@ -899,9 +903,12 @@ describe("flow settings page — mapped restore lifecycle", () => {
 
     await expect
       .element(
-        page.getByText("Den sparade inställningen är ogiltig och nya mappade steg är blockerade.", {
-          exact: false
-        })
+        page.getByText(
+          "Den sparade inställningen är ogiltig, och nya steg som körs per fil är blockerade.",
+          {
+            exact: false
+          }
+        )
       )
       .toBeVisible();
     await expect
@@ -911,7 +918,7 @@ describe("flow settings page — mapped restore lifecycle", () => {
 
   test("summarizes the effective source-text budget in human units", async () => {
     render(FlowSettingsPage, pageProps());
-    await page.getByRole("tab", { name: "Sparat källunderlag" }).click();
+    await page.getByRole("tab", { name: "Sparad källtext" }).click();
 
     await expect.element(page.getByText("Med de här värdena")).toBeVisible();
     await expect

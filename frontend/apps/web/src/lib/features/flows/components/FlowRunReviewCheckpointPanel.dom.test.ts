@@ -1069,7 +1069,7 @@ describe("FlowRunReviewCheckpointPanel speaker mapping", () => {
         runId: "run-1",
         eneo: eneo as unknown as Eneo
       });
-      const passage = await screen.findByRole("button", { name: /Markera hela passagen: Hej/ });
+      const passage = await screen.findByRole("button", { name: /Markera hela repliken: Hej/ });
       await waitFor(() =>
         expect(
           (screen.getByRole("button", { name: "Bekräfta alla förslag (1)" }) as HTMLButtonElement)
@@ -1083,7 +1083,7 @@ describe("FlowRunReviewCheckpointPanel speaker mapping", () => {
       expect(approveAndContinue).not.toHaveBeenCalled();
       release({ revision: 1, stale: fails, occurrences: [], speaker_edits: [] });
       if (fails) {
-        await screen.findByText("Hämta osparade rättningar");
+        await screen.findByText("Spara osparade rättningar som fil");
         expect(approveAndContinue).not.toHaveBeenCalled();
       } else {
         await waitFor(() => expect(approveAndContinue).toHaveBeenCalledTimes(1));

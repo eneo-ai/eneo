@@ -24,6 +24,9 @@
     /** Edit mode: "Steg 3: Skriv sammanfattning ändras" when one step changes. */
     changedStepLine?: string | null;
     phase?: ApprovePhase;
+    /** Edit mode: the flow is published, so the write is refused until the
+     *  reader confirms unpublishing in a second step. */
+    flowIsPublished?: boolean;
     onconfirm: () => void;
   }
 
@@ -35,6 +38,7 @@
     unchangedStepCount = 0,
     changedStepLine = null,
     phase = "idle",
+    flowIsPublished = false,
     onconfirm
   }: Props = $props();
 
@@ -57,7 +61,11 @@
         {isCreate ? m.ai_builder_approve_dialog_title() : m.ai_builder_approve_dialog_title_edit()}
       </AlertDialog.Title>
       <AlertDialog.Description>
-        {isCreate ? m.ai_builder_approve_dialog_body() : m.ai_builder_approve_dialog_body_edit()}
+        {isCreate
+          ? m.ai_builder_approve_dialog_body()
+          : flowIsPublished
+            ? m.ai_builder_approve_dialog_body_edit_published()
+            : m.ai_builder_approve_dialog_body_edit()}
       </AlertDialog.Description>
     </AlertDialog.Header>
     <div class="flex flex-col gap-1.5 text-[0.8125rem]">

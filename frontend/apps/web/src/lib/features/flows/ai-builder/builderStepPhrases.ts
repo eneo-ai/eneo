@@ -1,3 +1,4 @@
+import { formatList } from "$lib/core/formatting/formatList";
 import { m } from "$lib/paraglide/messages";
 import { getLocale } from "$lib/paraglide/runtime";
 import { FLOW_INPUT_ALIASES, PREVIOUS_STEP_ALIAS } from "$lib/features/flows/flowFormSchema";
@@ -70,7 +71,7 @@ function stepsLabel(orders: number[]): string {
       last: String(sorted[sorted.length - 1])
     });
   }
-  return m.ai_builder_reads_steps_listed({ steps: sorted.join(", ") });
+  return m.ai_builder_reads_steps_listed({ steps: formatList(sorted.map(String)) });
 }
 
 /**
@@ -116,7 +117,7 @@ export function readsLabel(
     ];
     if (parts.length > 0) {
       const locale = getLocale();
-      return new Intl.ListFormat(locale, { type: "conjunction" }).format(
+      return formatList(
         parts.map((part, index) => (index === 0 ? part : inSentence(part, locale)))
       );
     }

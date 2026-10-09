@@ -28,9 +28,11 @@ describe("VariablePicker", () => {
       onInsert: vi.fn()
     });
     await fireEvent.click(
-      screen.getByRole("button", { name: /^(Infoga variabel|Insert variable)$/ })
+      screen.getByRole("button", { name: /^(Infoga från flödet|Insert from the flow)$/ })
     );
-    expect(screen.getByRole("combobox", { name: /Sök variabler|Search variables/ })).toBeTruthy();
+    expect(
+      screen.getByRole("combobox", { name: /Sök fält och resultat|Search fields and results/ })
+    ).toBeTruthy();
     const option = await screen.findByRole("option", {
       name: /Det uppladdade underlaget|The uploaded material/
     });
@@ -80,9 +82,11 @@ describe("VariablePicker", () => {
         onInsert: vi.fn()
       });
       await fireEvent.click(
-        screen.getByRole("button", { name: /^(Infoga variabel|Insert variable)$/ })
+        screen.getByRole("button", { name: /^(Infoga från flödet|Insert from the flow)$/ })
       );
-      await screen.findByRole("combobox", { name: /Sök variabler|Search variables/ });
+      await screen.findByRole("combobox", {
+        name: /Sök fält och resultat|Search fields and results/
+      });
       const option = screen.queryByRole("option", { name: /Inskickad text|Submitted text/ });
       expect(option !== null).toBe(offered);
       unmount();
@@ -102,7 +106,7 @@ describe("VariablePicker", () => {
     });
 
     await fireEvent.click(
-      screen.getByRole("button", { name: /^(Infoga variabel|Insert variable)$/ })
+      screen.getByRole("button", { name: /^(Infoga från flödet|Insert from the flow)$/ })
     );
     await fireEvent.click(await screen.findByRole("option", { name: /kundnamn/ }));
 
@@ -118,7 +122,7 @@ describe("VariablePicker", () => {
       onInsert: vi.fn()
     });
     await fireEvent.click(
-      screen.getByRole("button", { name: /^(Infoga variabel|Insert variable)$/ })
+      screen.getByRole("button", { name: /^(Infoga från flödet|Insert from the flow)$/ })
     );
     expect(
       await screen.findByRole("option", { name: /Delens nummer|Section number/ })
@@ -132,7 +136,7 @@ describe("VariablePicker", () => {
       onInsert: vi.fn()
     });
     await fireEvent.click(
-      screen.getByRole("button", { name: /^(Infoga variabel|Insert variable)$/ })
+      screen.getByRole("button", { name: /^(Infoga från flödet|Insert from the flow)$/ })
     );
     await screen.findByRole("option", { name: /kundnamn/ });
     expect(screen.queryByRole("option", { name: /Delens nummer|Section number/ })).toBeNull();

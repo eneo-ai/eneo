@@ -15,6 +15,7 @@ import {
   shownInstance
 } from "./structuredQuestionAnswer";
 import {
+  AIBuilderClientRefusal,
   buildUnpublishedApplyFailureError,
   isSoftBlockAIBuilderError,
   isStaleApplyError,
@@ -877,7 +878,11 @@ export class FlowAIBuilderDriver {
    *  across turns and a republished flow simply yields a new one. */
   async fetchFlowReviewPacket(): Promise<AIBuilderFlowReviewPacket> {
     if (!this.#flowId) {
-      throw new Error("A flow review needs an edit session's flow.");
+      throw new AIBuilderClientRefusal(
+        "edit_session_flow_required",
+        {},
+        "A flow review needs an edit session's flow."
+      );
     }
     const packet = (await this.#transport.fetch(FLOW_AI_BUILDER_ROUTES.flowReviewPacket, {
       method: "get",
@@ -894,7 +899,11 @@ export class FlowAIBuilderDriver {
     target: FlowRunFailureRepairTarget
   ): Promise<AIBuilderRunFailureLaunch> {
     if (!this.#flowId) {
-      throw new Error("A failure repair needs an edit session's flow.");
+      throw new AIBuilderClientRefusal(
+        "edit_session_flow_required",
+        {},
+        "A failure repair needs an edit session's flow."
+      );
     }
     return (await this.#transport.fetch(FLOW_AI_BUILDER_ROUTES.runFailureLaunch, {
       method: "get",
@@ -921,10 +930,19 @@ export class FlowAIBuilderDriver {
    *  composer's model and effort selection applies, as it does to a turn. */
   async fetchFlowReviewSuggestions(): Promise<AIBuilderFlowReviewSuggestions> {
     if (!this.#flowId) {
-      throw new Error("A flow review needs an edit session's flow.");
+      throw new AIBuilderClientRefusal(
+        "edit_session_flow_required",
+        {},
+        "A flow review needs an edit session's flow."
+      );
     }
-    if (this.modelSendBlock !== null) {
-      throw new Error("The model the composer shows cannot run a review.");
+    const modelSendBlock = this.modelSendBlock;
+    if (modelSendBlock !== null) {
+      throw new AIBuilderClientRefusal(
+        "model_send_blocked",
+        { reason: modelSendBlock },
+        "The model the composer shows cannot run a review."
+      );
     }
     return (await this.#transport.fetch(FLOW_AI_BUILDER_ROUTES.flowReviewSuggestions, {
       method: "post",
@@ -1216,7 +1234,8 @@ export class FlowAIBuilderDriver {
               }
               case "error": {
                 receivedStreamError = true;
-                const data = toAIBuilderError(event.data);
+                // The same words a refresh restores for this turn's failure.
+                const data = toAIBuilderError(event.data, m.ai_builder_error_fallback_turn());
                 const isSoftBlock = isSoftBlockAIBuilderError(data);
                 this.#state.error = isSoftBlock ? null : data;
                 if (!isSoftBlock) {

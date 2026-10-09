@@ -35,7 +35,7 @@ describe("FlowPromptEditor", () => {
     });
 
     await fireEvent.click(
-      screen.getByRole("button", { name: /^(Infoga variabel|Insert variable)$/ })
+      screen.getByRole("button", { name: /^(Infoga från flödet|Insert from the flow)$/ })
     );
     const chip = await screen.findByRole("option", { name: /user_flow/ });
     await fireEvent.click(chip);
@@ -70,9 +70,9 @@ describe("FlowPromptEditor", () => {
     });
 
     await fireEvent.click(
-      screen.getByRole("button", { name: /^(Infoga variabel|Insert variable)$/ })
+      screen.getByRole("button", { name: /^(Infoga från flödet|Insert from the flow)$/ })
     );
-    await fireEvent.click(await screen.findByRole("option", { name: /Textutdata/ }));
+    await fireEvent.click(await screen.findByRole("option", { name: /Resultat som text/ }));
 
     expect(onChange).toHaveBeenCalledWith("{{step_4.output.text}}");
     expect(onCommit).toHaveBeenCalledWith("{{step_4.output.text}}");

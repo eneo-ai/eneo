@@ -27,6 +27,7 @@
   import FlowAIBuilderReasoningSelect from "./FlowAIBuilderReasoningSelect.svelte";
   import { getAIBuilderService } from "./FlowAIBuilderService.svelte.ts";
   import { summaryTerm } from "./aiBuilderSummaryText";
+  import { aiBuilderErrorText } from "./aiBuilderError";
   import { buildAnswerLabels } from "./aiBuilderAnswerLabel";
   import type { StructuredInputFieldAnswer } from "./structuredQuestionAnswer";
   import { reopenQuestionRequest } from "./structuredQuestionAnswer";
@@ -385,7 +386,9 @@
           ? m.ai_builder_rail_planning_edit()
           : m.ai_builder_rail_planning();
       case "review":
-        return m.ai_builder_announce_review();
+        return targetKind === "edit"
+          ? m.ai_builder_announce_review_edit()
+          : m.ai_builder_announce_review();
       case "conversation":
         return m.ai_builder_conversation_title();
       default:
@@ -911,7 +914,9 @@
           ? m.ai_builder_resume_failed_title()
           : m.ai_builder_bootstrap_failed_title()}
       </h2>
-      <p class="text-secondary mt-1 text-sm">{service.error?.message ?? ""}</p>
+      <p class="text-secondary mt-1 text-sm">
+        {service.error ? aiBuilderErrorText(service.error) : ""}
+      </p>
       <div class="mt-4 flex flex-col gap-2 sm:flex-row sm:flex-wrap sm:justify-center">
         <Button variant="outline" class="w-full sm:w-auto" href={flowsHref}>
           {m.ai_builder_resume_failed_back()}

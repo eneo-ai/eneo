@@ -92,14 +92,14 @@ describe("step editor summaries", () => {
         { usesInputTemplate: true },
         null
       )
-    ).toBe("Flödets indata");
+    ).toBe("Det som skickas in");
   });
 
   test("shows the inherited space classification when it is available", () => {
     expect(getSecurityInheritanceLabel({ security_level: 2, name: "Intern" })).toBe(
-      "Ärvs från ytan — Intern"
+      "Ärvs automatiskt — Intern"
     );
-    expect(getSecurityInheritanceLabel(null)).toBe("Ärvs från ytan");
+    expect(getSecurityInheritanceLabel(null)).toBe("Ärvs automatiskt");
   });
 
   test("uses configured organization classifications at or above the space level", () => {

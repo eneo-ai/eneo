@@ -31,10 +31,9 @@
   // What the Builder reads depends on what the run kept: a rejected answer is
   // read as text; a truncated answer was never kept, so the recorded finish
   // reason and token counts are read instead.
+  const truncated = $derived(launch?.error_code === FLOW_API_ERROR_CODE.LLM_OUTPUT_TRUNCATED);
   const hint = $derived(
-    launch?.error_code === FLOW_API_ERROR_CODE.LLM_OUTPUT_TRUNCATED
-      ? m.ai_builder_repair_hint_truncated()
-      : m.ai_builder_repair_hint()
+    truncated ? m.ai_builder_repair_hint_truncated() : m.ai_builder_repair_hint()
   );
 
   // The server writes the retained sentence from the reference (the step's
@@ -43,7 +42,10 @@
   function prepare() {
     if (!launch) return;
     onprepare({
-      message: m.ai_builder_repair_message({ step: String(launch.step_number) }),
+      // A cut-off answer is fixed by making room, not by following a format.
+      message: truncated
+        ? m.ai_builder_repair_message_truncated({ step: String(launch.step_number) })
+        : m.ai_builder_repair_message({ step: String(launch.step_number) }),
       reviewContext: launch.reference
     });
   }
@@ -98,7 +100,9 @@
             data-testid="repair-unavailable"
           >
             <p class="font-semibold">{failure.title}</p>
-            <p class="mt-0.5">{failure.body}</p>
+            {#if failure.body}
+              <p class="mt-0.5">{failure.body}</p>
+            {/if}
             {#if failure.retry}
               <Button
                 variant="outline"

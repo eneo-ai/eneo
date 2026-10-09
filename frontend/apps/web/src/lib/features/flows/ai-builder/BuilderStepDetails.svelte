@@ -128,11 +128,12 @@
 
   function inputMaterialSourceMeta(source: FlowInputBindingSourceRef): string {
     const parts: string[] = [
+      // The review screen's words, not the flow editor's technical labels.
       source.output === "structured"
-        ? m.flow_input_template_source_output_structured()
+        ? m.ai_builder_source_output_structured()
         : m.flow_input_template_source_output_text(),
       source.fieldPath
-        ? m.flow_input_material_selected_field({ field: source.fieldPath })
+        ? m.ai_builder_source_selected_field({ field: source.fieldPath })
         : m.flow_input_material_whole_result()
     ];
     if (source.label) parts.push(source.label);

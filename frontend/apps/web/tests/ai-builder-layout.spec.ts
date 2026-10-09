@@ -135,7 +135,7 @@ async function stubAiBuilderApi(page: Page, spaceId: string) {
 const RAIL_LABEL = "AI-byggarens förlopp";
 const RAIL_UNDERSTANDING = "Eneo förstår uppgiften";
 const RAIL_PLANNING = "Eneo utformar planen";
-const RAIL_REVIEWING = "Du granskar innan det skapas";
+const RAIL_REVIEWING = "Du granskar innan flödet skapas";
 const HOW_FLOW_WORKS = "Så fungerar flödet";
 const CONVERSATION_BUTTON = "Samtal";
 const CONVERSATION_TITLE = "Samtalet";

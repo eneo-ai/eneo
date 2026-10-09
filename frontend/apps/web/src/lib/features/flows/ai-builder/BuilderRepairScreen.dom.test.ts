@@ -64,10 +64,11 @@ describe("BuilderRepairScreen", () => {
     });
   });
 
-  it("says what is read for a truncated answer, which was never kept", () => {
+  it("says what is read for a truncated answer, which was never kept", async () => {
+    const onprepare = vi.fn();
     render(BuilderRepairScreen, {
       repair: { status: "ready", launch: makeLaunch({ error_code: "flow_llm_output_truncated" }) },
-      onprepare: vi.fn(),
+      onprepare,
       onclose: vi.fn(),
       onretry: vi.fn()
     });
@@ -75,7 +76,13 @@ describe("BuilderRepairScreen", () => {
     expect(text).toContain(m.flow_error_flow_llm_output_truncated());
     expect(text).toContain(m.ai_builder_repair_hint_truncated());
     expect(text).not.toContain(m.ai_builder_repair_hint());
-    expect(screen.getByTestId("repair-prepare")).toBeTruthy();
+
+    // A cut-off answer asks for room, not for the answer format.
+    await fireEvent.click(screen.getByTestId("repair-prepare"));
+    expect(onprepare).toHaveBeenCalledWith({
+      message: m.ai_builder_repair_message_truncated({ step: "2" }),
+      reviewContext: makeLaunch().reference
+    });
   });
 
   it("explains each refusal in words and retries only an unexplained failure", () => {
@@ -96,8 +103,8 @@ describe("BuilderRepairScreen", () => {
         m.ai_builder_repair_step_unknown_body(),
         false
       ],
-      [refusal("flow_not_published"), m.ai_builder_review_unpublished_body(), false],
-      [refusal("unknown"), "server text", true]
+      [refusal("flow_not_published"), m.ai_builder_repair_unpublished_body(), false],
+      [refusal("unknown"), m.ai_builder_repair_load_failed(), true]
     ];
     for (const [error, body, retry] of cases) {
       const onretry = vi.fn();
@@ -108,6 +115,8 @@ describe("BuilderRepairScreen", () => {
         onretry
       });
       expect(screen.getByTestId("repair-unavailable").textContent).toContain(body);
+      // The server's prose is diagnostics, never the reader's words.
+      expect(screen.getByTestId("repair-unavailable").textContent).not.toContain("server text");
       const retryButton = screen.queryByRole("button", { name: m.ai_builder_review_retry() });
       expect(retryButton !== null).toBe(retry);
       if (retryButton) {

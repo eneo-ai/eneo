@@ -91,6 +91,7 @@
         content={message.content}
         isLast={i === service.messages.length - 1}
         isStreaming={service.isStreaming && i === service.messages.length - 1}
+        isEdit={service.session?.target_kind === "edit"}
         interactionDisabled={service.isCreating}
         question={message.question}
         questionAnswered={message.question

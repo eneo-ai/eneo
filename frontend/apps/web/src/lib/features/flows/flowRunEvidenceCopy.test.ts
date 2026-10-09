@@ -13,7 +13,7 @@ describe("flow run evidence copy", () => {
 
     expect(messages.flow_run_evidence_redacted).toBe("Åtkomstuppgifter maskerade");
     expect(messages.flow_run_debug_tools).toBe("Tekniska verktyg");
-    expect(messages.flow_run_evidence_trace_id).toBe("Spår-ID");
+    expect(messages.flow_run_evidence_trace_id).toBe("Referens");
     expect(messages.flow_run_download_evidence_export).toBe("Ladda ner bevisunderlag");
     expect(messages.flow_run_evidence_redacted_tooltip).toContain("API-nycklar");
     expect(messages.flow_run_evidence_redacted_tooltip).toContain("bearer-tokens");
@@ -25,7 +25,7 @@ describe("flow run evidence copy", () => {
 
     expect(messages.flow_run_evidence_redacted).toBe("Credentials masked");
     expect(messages.flow_run_debug_tools).toBe("Technical tools");
-    expect(messages.flow_run_evidence_trace_id).toBe("Trace ID");
+    expect(messages.flow_run_evidence_trace_id).toBe("Reference");
     expect(messages.flow_run_download_evidence_export).toBe("Download evidence file");
     expect(messages.flow_run_evidence_redacted_tooltip).toContain("API keys");
     expect(messages.flow_run_evidence_redacted_tooltip).toContain("bearer tokens");

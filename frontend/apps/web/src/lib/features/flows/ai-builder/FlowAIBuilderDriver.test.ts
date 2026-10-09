@@ -235,7 +235,11 @@ describe("FlowAIBuilderDriver", () => {
       ]
     });
 
-    await expect(driver.fetchFlowReviewSuggestions()).rejects.toThrow();
+    // Refused with a code the error owner reads, not a developer sentence.
+    await expect(driver.fetchFlowReviewSuggestions()).rejects.toMatchObject({
+      code: "model_send_blocked",
+      details: { reason: "model_capacity_undeclared" }
+    });
     expect(fetch).not.toHaveBeenCalled();
   });
 
@@ -2894,7 +2898,12 @@ describe("FlowAIBuilderDriver", () => {
 
     await driver.resumeSession(committedSession.session_id);
 
-    expect(driver.state.error).toEqual(committedError);
+    // The server's payload as persisted, plus the words for a turn that has
+    // none of its own.
+    expect(driver.state.error).toEqual({
+      ...committedError,
+      fallback_message: m.ai_builder_error_fallback_turn()
+    });
   });
 
   it("replaces an ambiguous transport failure with the committed server error", async () => {
@@ -2932,7 +2941,10 @@ describe("FlowAIBuilderDriver", () => {
 
     await driver.sendMessage("Build a flow");
 
-    expect(driver.state.error).toEqual(committedError);
+    expect(driver.state.error).toEqual({
+      ...committedError,
+      fallback_message: m.ai_builder_error_fallback_turn()
+    });
   });
 
   it("clears an ambiguous transport failure after committed success is reloaded", async () => {
@@ -3630,13 +3642,14 @@ describe("FlowAIBuilderDriver", () => {
       request_id: "req-published",
       eneo_error_code: 9007,
       diagnostic_context: { flow_id: "flow-1" },
-      details: { published_version: 3 }
+      details: { published_version: 3 },
+      fallback_message: m.ai_builder_error_fallback_apply_plan()
     });
     expect(driver.state.currentPlan?.status).toBe("approved");
     expect(driver.state.session?.status).toBe("awaiting_approval");
   });
 
-  it("stores unknown apply failures as typed errors and keeps the message visible", async () => {
+  it("stores unknown apply failures as typed errors and keeps the message for diagnostics", async () => {
     const unexpectedError = {
       status: 400,
       response: {
@@ -3671,7 +3684,8 @@ describe("FlowAIBuilderDriver", () => {
         retryable: false,
         status: 400,
         original_code: "unexpected_backend_code"
-      }
+      },
+      fallback_message: m.ai_builder_error_fallback_apply_plan()
     });
     expect(driver.state.error?.message).toBe("Unexpected apply failure");
     expect(driver.state.isConflict).toBe(false);
@@ -3783,7 +3797,8 @@ describe("FlowAIBuilderDriver", () => {
         flow_id: "flow-1",
         original_code: "stale_revision",
         original_details_latest_revision: 9
-      }
+      },
+      fallback_message: m.ai_builder_error_fallback_apply_plan()
     });
     expect(driver.state.isConflict).toBe(true);
     expect(driver.state.applyResult).toBeNull();

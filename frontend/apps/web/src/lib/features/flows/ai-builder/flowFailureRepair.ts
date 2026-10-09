@@ -1,4 +1,5 @@
 import { m } from "$lib/paraglide/messages";
+import { aiBuilderErrorCopy } from "./aiBuilderError";
 import type { AIBuilderError } from "./protocol";
 
 /** Why a failed step cannot be handed to the Builder, in the user's words.
@@ -7,13 +8,14 @@ import type { AIBuilderError } from "./protocol";
  *  is worth retrying. */
 export function repairFailureCopy(error: AIBuilderError): {
   title: string;
-  body: string;
+  /** Null when the code has no words beyond the title. */
+  body: string | null;
   retry: boolean;
 } {
   if (error.code === "flow_not_published") {
     return {
       title: m.ai_builder_review_unpublished_title(),
-      body: m.ai_builder_review_unpublished_body(),
+      body: m.ai_builder_repair_unpublished_body(),
       retry: false
     };
   }
@@ -46,5 +48,5 @@ export function repairFailureCopy(error: AIBuilderError): {
       retry: false
     };
   }
-  return { title: m.ai_builder_repair_load_failed(), body: error.message, retry: true };
+  return { title: m.ai_builder_repair_load_failed(), body: aiBuilderErrorCopy(error), retry: true };
 }

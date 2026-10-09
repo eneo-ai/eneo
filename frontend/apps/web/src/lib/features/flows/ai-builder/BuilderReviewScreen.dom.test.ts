@@ -2,6 +2,7 @@ import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-li
 import type { Space } from "@eneo/eneo-js";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
+import { formatList } from "$lib/core/formatting/formatList";
 import { m } from "$lib/paraglide/messages";
 
 import type {
@@ -675,7 +676,7 @@ describe("BuilderReviewScreen plan document", () => {
             lint_warnings: [
               {
                 step_ref: "step_a",
-                code: "citations_disabled",
+                code: "citation_mode_unsupported",
                 message: "Källhänvisningar inaktiverades.",
                 field_name: null,
                 severity: "warning"
@@ -694,7 +695,9 @@ describe("BuilderReviewScreen plan document", () => {
     });
 
     expect(screen.getByText(m.ai_builder_quality_warnings())).toBeTruthy();
-    expect(screen.getByText("Källhänvisningar inaktiverades.")).toBeTruthy();
+    // The warning reads by its code; the server's prose stays in diagnostics.
+    expect(screen.getByText(m.flow_validation_msg_citation_mode_unsupported())).toBeTruthy();
+    expect(screen.queryByText("Källhänvisningar inaktiverades.")).toBeNull();
     expect(screen.getByText(m.ai_builder_flow_notes())).toBeTruthy();
     expect(screen.queryByText("Set output_fields.")).toBeNull();
   });
@@ -1327,7 +1330,7 @@ describe("BuilderReviewScreen plan document", () => {
       .getAllByRole("listitem")
       .map((li) => li.textContent?.replace(/\s+/g, " ").trim());
     expect(rows).toContain(
-      `${m.ai_builder_form_fields_title()} ${m.ai_builder_change_list_form_modified({ count: "2" })} ${m.ai_builder_review_suggestion_steps_join()} ${m.ai_builder_change_list_form_moved({ count: "1" })}`
+      `${m.ai_builder_form_fields_title()} ${formatList([m.ai_builder_change_list_form_modified({ count: "2" }), m.ai_builder_change_list_form_moved({ count: "1" })])}`
     );
     const movedBadges = screen.getAllByText(m.ai_builder_form_field_moved());
     expect(movedBadges).toHaveLength(1);
@@ -1405,7 +1408,10 @@ describe("BuilderReviewScreen plan document", () => {
     // "Utdata och instruktioner ändras": the field labels the details view
     // uses, read as one sentence.
     const fieldsSentence = m.ai_builder_change_list_fields_changed({
-      fields: `${m.ai_builder_step_change_field_output_type().toLowerCase()} ${m.ai_builder_review_suggestion_steps_join()} ${m.ai_builder_step_instructions().toLowerCase()}`
+      fields: formatList([
+        m.ai_builder_step_change_field_output_type().toLowerCase(),
+        m.ai_builder_step_instructions().toLowerCase()
+      ])
     });
     expect(rows).toEqual([
       `${m.ai_builder_change_list_name()} ${m.ai_builder_change_list_name_what({ name: "Mötesrapport" })}`,
@@ -1413,7 +1419,7 @@ describe("BuilderReviewScreen plan document", () => {
       `${m.ai_builder_change_request_scope({ step: 2, name: "Strukturera transkriberingen" })} ${fieldsSentence.charAt(0).toUpperCase()}${fieldsSentence.slice(1)}`,
       `${m.ai_builder_change_request_scope({ step: 3, name: "Sammanfatta" })} ${m.ai_builder_change_list_new_step()}`,
       `Skicka e-post ${m.ai_builder_change_list_removed()}`,
-      `${m.ai_builder_form_fields_title()} ${m.ai_builder_change_list_form_added({ count: "1" })} ${m.ai_builder_review_suggestion_steps_join()} ${m.ai_builder_change_list_form_removed({ count: "2" })}`
+      `${m.ai_builder_form_fields_title()} ${formatList([m.ai_builder_change_list_form_added({ count: "1" }), m.ai_builder_change_list_form_removed({ count: "2" })])}`
     ]);
     // The list is the only place a removed step is read.
     expect(screen.getAllByText("Skicka e-post")).toHaveLength(1);
@@ -1610,9 +1616,11 @@ describe("BuilderReviewScreen change requests", () => {
 });
 
 describe("BuilderReviewScreen recovery surfaces", () => {
-  it("tells the person to ask again for a plan the apply refuses, with no refresh to loop on", () => {
+  it("keeps a refused apply's English prose out of the screen, with no refresh to loop on", () => {
     // A plan persisted before diffs listed each step's changes: reloading
-    // brings the same plan back, so this is not a conflict card.
+    // brings the same plan back, so this is not a conflict card. The server
+    // sends it as a bare bad_request, so the screen can only say the apply
+    // failed; the server's sentence stays in the diagnostic report.
     const message =
       "This plan was made before an update of the AI Builder and can no longer be applied. Ask the Builder again for the change.";
     render(BuilderReviewScreenHarness, {
@@ -1624,9 +1632,12 @@ describe("BuilderReviewScreen recovery surfaces", () => {
     });
 
     expect(screen.getByText(m.ai_builder_apply_failed_title())).toBeTruthy();
-    expect(screen.getByText(message)).toBeTruthy();
+    expect(screen.queryByText(message)).toBeNull();
+    expect(screen.getByText(m.ai_builder_error_fallback_generic())).toBeTruthy();
     expect(screen.queryByText(m.ai_builder_conflict_elsewhere_title())).toBeNull();
-    expect(screen.queryByRole("button", { name: m.ai_builder_conflict_refresh() })).toBeNull();
+    expect(
+      screen.queryByRole("button", { name: m.ai_builder_failure_action_refresh() })
+    ).toBeNull();
     expect(screen.getByRole("button", { name: m.ai_builder_dismiss() })).toBeTruthy();
   });
 
@@ -1679,7 +1690,9 @@ describe("BuilderReviewScreen recovery surfaces", () => {
     expect(screen.getAllByText(m.ai_builder_conflict_elsewhere_title())).toHaveLength(1);
     expect(screen.getByText(m.ai_builder_conflict_stale_plan())).toBeTruthy();
 
-    await fireEvent.click(screen.getByRole("button", { name: m.ai_builder_conflict_refresh() }));
+    await fireEvent.click(
+      screen.getByRole("button", { name: m.ai_builder_failure_action_refresh() })
+    );
 
     await waitFor(() => {
       expect(screen.queryByText(m.ai_builder_conflict_elsewhere_title())).toBeNull();
@@ -1700,7 +1713,9 @@ describe("BuilderReviewScreen recovery surfaces", () => {
       transport
     });
 
-    await fireEvent.click(screen.getByRole("button", { name: m.ai_builder_conflict_refresh() }));
+    await fireEvent.click(
+      screen.getByRole("button", { name: m.ai_builder_failure_action_refresh() })
+    );
     await waitFor(() => expect(transport.fetch).toHaveBeenCalled());
 
     expect(screen.getAllByText(m.ai_builder_conflict_elsewhere_title())).toHaveLength(1);
@@ -1764,7 +1779,9 @@ describe("BuilderReviewScreen recovery surfaces", () => {
       screen.queryByRole("button", { name: m.ai_builder_failure_action_clarify() })
     ).toBeNull();
     // The way back to the conversation lives in the header, not in the card.
-    expect(screen.queryByRole("button", { name: m.ai_builder_show_conversation() })).toBeNull();
+    expect(
+      screen.queryByRole("button", { name: /Visa konversationen|Show the conversation/ })
+    ).toBeNull();
   });
 
   it("names a committed provider rejection, sends the request again, and opens once", async () => {
@@ -2034,3 +2051,139 @@ function makeSpace({
     mcp_servers: []
   } as unknown as Pick<Space, "completion_models" | "transcription_models"> & Partial<Space>;
 }
+
+describe("BuilderReviewScreen edit outcomes", () => {
+  it("says how many steps differ from the saved flow when an edit plan is replaced", async () => {
+    let seed: ((state: object) => void) | undefined;
+    const initial = scopedStepEditState();
+    render(BuilderReviewScreenHarness, {
+      currentSpace: makeSpace({ transcriptionModels: [{ can_access: true }] }),
+      state: initial,
+      onservice: (service) => (seed = (state) => service.seedState(state))
+    });
+
+    seed!({ currentPlan: { ...initial.currentPlan, plan_id: "plan-2" } });
+
+    // Edit badges are "Nytt"/"Ändras" against the saved flow, not "Uppdaterat".
+    expect(
+      await screen.findByText(m.ai_builder_plan_updated_detail_edit_one({ count: 1 }))
+    ).toBeTruthy();
+    expect(screen.queryByText(m.ai_builder_plan_updated_detail({ count: 1 }))).toBeNull();
+  });
+
+  it("confirms unpublishing in a dialog whose button names the action", async () => {
+    const unpublishAndApplyPlan = vi.fn().mockResolvedValue({
+      flow_id: "flow-1",
+      flow_name: "Mötesrapport",
+      steps_created: 0,
+      steps_updated: 1,
+      steps_removed: 0
+    });
+    const confirmSpy = vi.spyOn(window, "confirm");
+    render(BuilderReviewScreenHarness, {
+      currentSpace: makeSpace({ transcriptionModels: [{ can_access: true }] }),
+      state: {
+        ...scopedStepEditState(),
+        applyError: {
+          ...makeError("flow_is_published"),
+          category: "bad_request",
+          details: { published_version: 3 }
+        }
+      },
+      screenProps: { flowIsPublished: true },
+      onservice: (service) => {
+        service.unpublishAndApplyPlan = unpublishAndApplyPlan;
+      }
+    });
+
+    await fireEvent.click(
+      screen.getByRole("button", { name: m.ai_builder_published_flow_unpublish() })
+    );
+    const dialog = within(await screen.findByRole("alertdialog"));
+    expect(dialog.getByText(m.ai_builder_unpublish_confirm_title())).toBeTruthy();
+    expect(dialog.getByText(m.ai_builder_published_flow_confirm())).toBeTruthy();
+    expect(unpublishAndApplyPlan).not.toHaveBeenCalled();
+
+    await fireEvent.click(
+      dialog.getByRole("button", { name: m.ai_builder_unpublish_confirm_action() })
+    );
+    await waitFor(() => expect(unpublishAndApplyPlan).toHaveBeenCalledTimes(1));
+    expect(confirmSpy).not.toHaveBeenCalled();
+    confirmSpy.mockRestore();
+  });
+
+  it("tells the approver of a published flow that unpublishing is confirmed first", async () => {
+    render(BuilderReviewScreenHarness, {
+      currentSpace: makeSpace({ transcriptionModels: [{ can_access: true }] }),
+      state: scopedStepEditState(),
+      screenProps: { flowIsPublished: true }
+    });
+
+    await fireEvent.click(screen.getByRole("button", { name: m.ai_builder_approve() }));
+    const dialog = within(screen.getByRole("alertdialog"));
+    expect(dialog.getByText(m.ai_builder_approve_dialog_body_edit_published())).toBeTruthy();
+    expect(dialog.queryByText(m.ai_builder_approve_dialog_body_edit())).toBeNull();
+  });
+
+  it("says a step works differently when only its processing changes", () => {
+    render(BuilderReviewScreenHarness, {
+      currentSpace: makeSpace({ transcriptionModels: [{ can_access: true }] }),
+      state: scopedStepEditState({ output_mode: "pass_through" }, [
+        { field: "output_mode", previous: "llm", current: "pass_through" }
+      ])
+    });
+
+    expect(screen.getByText(m.ai_builder_change_does_processing())).toBeTruthy();
+    expect(screen.queryByText(m.ai_builder_change_does_same())).toBeNull();
+  });
+
+  it("lists only the step counts applying changed, in agreement", () => {
+    render(BuilderReviewScreenHarness, {
+      currentSpace: makeSpace({ transcriptionModels: [{ can_access: true }] }),
+      state: {
+        ...scopedStepEditState(),
+        applyResult: {
+          flow_id: "flow-1",
+          flow_name: "Mötesrapport",
+          steps_created: 1,
+          steps_updated: 2,
+          steps_removed: 0
+        }
+      }
+    });
+
+    expect(
+      screen.getByText(
+        m.ai_builder_applied_counts({
+          list: formatList([
+            m.ai_builder_applied_count_created_one({ count: 1 }),
+            m.ai_builder_applied_count_updated({ count: 2 })
+          ])
+        })
+      )
+    ).toBeTruthy();
+    expect(screen.queryByText(m.ai_builder_applied_count_removed({ count: 0 }))).toBeNull();
+  });
+
+  it("reads an advisory by its code and names the step it is about", () => {
+    const state = scopedStepEditState();
+    state.currentPlan.proposal.edit!.advisories = [
+      {
+        code: "input_source_all_previous_rewired",
+        message: "Rewired redundant all_previous_steps to previous_step.",
+        severity: "info",
+        field: "existing_step_2.input_source"
+      }
+    ];
+    render(BuilderReviewScreenHarness, {
+      currentSpace: makeSpace({ transcriptionModels: [{ can_access: true }] }),
+      state
+    });
+
+    expect(
+      screen.getByText(m.ai_builder_advisory_input_source_all_previous_rewired())
+    ).toBeTruthy();
+    expect(screen.getByText("2. Sammanfatta")).toBeTruthy();
+    expect(screen.queryByText(/Rewired redundant/)).toBeNull();
+  });
+});

@@ -3,6 +3,7 @@
   import * as Collapsible from "$lib/components/ui/collapsible/index.js";
   import * as ToggleGroup from "$lib/components/ui/toggle-group/index.js";
   import IconArrowRight from "@lucide/svelte/icons/arrow-right";
+  import { formatList } from "$lib/core/formatting/formatList";
   import { m } from "$lib/paraglide/messages";
   import { getLocale } from "$lib/paraglide/runtime";
   import { getFlowUserMode } from "$lib/features/flows/FlowUserMode";
@@ -141,7 +142,7 @@
       if (currentFields.length > MAX_NAMED_FIELDS) {
         return m.ai_builder_change_sentence_fields_count({ count });
       }
-      const fields = new Intl.ListFormat(locale, { type: "conjunction" }).format(
+      const fields = formatList(
         currentFields.map(([key, schema]) => inSentence(fieldName(key, schema), locale))
       );
       return currentFields.length === 1
@@ -187,7 +188,9 @@
         ? m.ai_builder_change_does_instruction()
         : byField.has("model_ref")
           ? m.ai_builder_change_does_model()
-          : m.ai_builder_change_does_same()
+          : byField.has("output_mode")
+            ? m.ai_builder_change_does_processing()
+            : m.ai_builder_change_does_same()
     },
     {
       key: "answers",
@@ -496,7 +499,7 @@
       </dl>
       {#if removedFields.length > 0}
         <p class="text-secondary mt-1 text-[0.8125rem]">
-          {m.ai_builder_change_fields_removed({ fields: removedFields.join(", ") })}
+          {m.ai_builder_change_fields_removed({ fields: formatList(removedFields) })}
         </p>
       {/if}
       {#if contractChange}

@@ -90,12 +90,12 @@
       case "architecture_committed":
       case "architecture_revised":
       case "drafting_flow":
-        return m.ai_builder_build_narration_steps();
+        return m.ai_builder_build_status_steps();
       case "checking_flow":
       case "repairing":
-        return m.ai_builder_build_narration_checking();
+        return m.ai_builder_build_status_checking();
       default:
-        return m.ai_builder_build_narration_reading();
+        return m.ai_builder_build_status_reading();
     }
   });
 </script>
@@ -137,7 +137,7 @@
         <p class="text-secondary mt-2.5 text-[0.8125rem]" role="status" aria-live="polite">
           <!-- Each stage fades in rather than snapping: the reader sees the
                work move on, not the text jump. -->
-          {#key narration}<span class="narration-step">{narration} …</span>{/key}
+          {#key narration}<span class="narration-step">{narration}</span>{/key}
         </p>
         {#if slow}
           <p class="text-warning-stronger mt-2 text-[0.8125rem]" role="status">
@@ -193,7 +193,12 @@
                     ? 'bg-accent-dimmer text-accent-stronger'
                     : 'bg-secondary text-secondary'}"
                 >
-                  {changing ? m.ai_builder_node_changes() : m.ai_builder_node_unchanged()}
+                  <!-- A whole-flow edit has decided nothing yet: any step may change. -->
+                  {changing
+                    ? targetStepNumber === null
+                      ? m.ai_builder_node_may_change()
+                      : m.ai_builder_node_changes()
+                    : m.ai_builder_node_unchanged()}
                 </span>
               </div>
             {/if}

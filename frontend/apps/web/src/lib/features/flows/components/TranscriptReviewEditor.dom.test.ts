@@ -70,7 +70,7 @@ function rangeIn(el: Element, start: number, end = start) {
 it("selects the complete dotted passage, confirms without advancing, and undoes once", async () => {
   const onSave = vi.fn();
   const { container } = render(Fixture, { segments: raw, onSave });
-  await fireEvent.click(screen.getByRole("button", { name: /Markera hela passagen: Hej/ }));
+  await fireEvent.click(screen.getByRole("button", { name: /Markera hela repliken: Hej/ }));
   await fireEvent.click(screen.getByRole("button", { name: "Bekräfta Anna" }));
   expect(onSave.mock.calls[0][0].speakerEdits[0]).toMatchObject({
     original: null,
@@ -117,7 +117,7 @@ it("bulk confirms mixed suggestions in one save with one undo", async () => {
 it("allows unresolved without audio while affirmative confirmation stays disabled", async () => {
   const onSave = vi.fn();
   render(Fixture, { segments: raw, onSave, audioAvailable: false });
-  await fireEvent.click(screen.getByRole("button", { name: /Markera hela passagen: Hej/ }));
+  await fireEvent.click(screen.getByRole("button", { name: /Markera hela repliken: Hej/ }));
   expect(
     (screen.getByRole("button", { name: "Bekräfta Anna" }) as HTMLButtonElement).disabled
   ).toBe(true);

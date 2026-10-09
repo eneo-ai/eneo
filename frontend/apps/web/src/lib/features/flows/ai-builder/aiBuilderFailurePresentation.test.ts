@@ -496,7 +496,10 @@ describe("describeFailure", () => {
       capabilities: committed,
       context: generation
     });
-    expect(shown.consequence).toContain("Servern kunde inte bygga flödet.");
+    // The disposition still says the reader can act; the server's prose is
+    // diagnostics only.
+    expect(shown.consequence).toContain(m.ai_builder_error_requirements_unbuildable());
+    expect(shown.consequence).not.toContain("Servern kunde inte bygga flödet.");
     expect(shown.primary?.kind).toBe("retry_new_turn");
   });
 
@@ -546,9 +549,9 @@ describe("describeFailure", () => {
     );
   });
 
-  it("shows an outdated page the server's own words to reload it, with no retry", () => {
+  it("tells an outdated page to reload it, with no retry", () => {
     // A page from before answers named their showing knows no such reason; it
-    // lands here, on the server's message, and this path must not offer to
+    // lands here, on the code's own words, and this path must not offer to
     // send the same answer again.
     const outdated = present({
       error: error({
@@ -562,7 +565,7 @@ describe("describeFailure", () => {
       context: chat
     });
 
-    expect(outdated.consequence).toBe("Sidan är inaktuell. Ladda om sidan och svara igen.");
+    expect(outdated.consequence).toBe(m.ai_builder_error_client_outdated());
     expect(outdated.primary?.kind).toBe("dismiss");
     expect(outdated.secondary).toBeNull();
   });
@@ -578,7 +581,8 @@ describe("describeFailure", () => {
       capabilities: committed,
       context: chat
     });
-    expect(refusal.heading).toBe(m.ai_builder_question_delegate());
+    // A heading, not the button the reader pressed.
+    expect(refusal.heading).toBe(m.ai_builder_failure_heading_delegate());
     expect(refusal.consequence).toBe(m.ai_builder_question_delegation_unavailable());
     expect(refusal.primary?.kind).toBe("dismiss");
 

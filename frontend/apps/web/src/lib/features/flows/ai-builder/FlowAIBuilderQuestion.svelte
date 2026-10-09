@@ -4,6 +4,7 @@
      through */
   import { untrack } from "svelte";
   import IconX from "@lucide/svelte/icons/x";
+  import { formatList } from "$lib/core/formatting/formatList";
   import { m } from "$lib/paraglide/messages";
   import {
     getFlowFormFieldNameIssue,
@@ -519,7 +520,7 @@
         {#if (question.understanding.open_topics ?? []).length > 0}
           <p class="understanding-open">
             {m.ai_builder_understanding_open({
-              topics: (question.understanding.open_topics ?? []).join(", ")
+              topics: formatList(question.understanding.open_topics ?? [])
             })}
           </p>
         {/if}

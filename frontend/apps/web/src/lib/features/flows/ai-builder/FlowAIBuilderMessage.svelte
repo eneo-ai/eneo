@@ -28,6 +28,8 @@
     onEditAnswer?: () => void;
     /** Locks question controls while a plan operation runs. */
     interactionDisabled?: boolean;
+    /** An edit session: the summary is about a change, not a new task. */
+    isEdit?: boolean;
   }
 
   let {
@@ -43,7 +45,8 @@
     requirementsActive = true,
     onQuestionAnswer = undefined,
     onEditAnswer = undefined,
-    interactionDisabled = false
+    interactionDisabled = false,
+    isEdit = false
   }: Props = $props();
 </script>
 
@@ -91,7 +94,9 @@
           <!-- The transcript never hosts a second live question: it is answered on the phase screen. -->
           <p class="pending-question-note">
             {question.question}
-            <span class="pending-question-hint">{m.ai_builder_question_answer_in_view()}</span>
+            <span class="pending-question-hint"
+              >{m.ai_builder_question_answer_on_question_page()}</span
+            >
           </p>
         {/if}
         {#if questionAnswered && onEditAnswer}
@@ -109,12 +114,12 @@
       {#if requirementsSummary}
         <!-- The summary is confirmed on the Bekräfta screen; the transcript only notes it. -->
         <p class="pending-question-note">
-          {m.ai_builder_requirements_title()}
+          {isEdit ? m.ai_builder_requirements_title_edit() : m.ai_builder_requirements_title()}
           <span class="pending-question-hint">
             {requirementsConfirmed
               ? m.ai_builder_conversation_summary_confirmed()
               : requirementsActive
-                ? m.ai_builder_question_answer_in_view()
+                ? m.ai_builder_summary_confirm_on_summary_page()
                 : m.ai_builder_requirements_superseded()}
           </span>
         </p>

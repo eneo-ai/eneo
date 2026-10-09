@@ -59,9 +59,11 @@
     size="sm"
     class="ml-auto shrink-0 gap-1.5"
     aria-pressed={service.conversationOpen}
-    aria-label={m.ai_builder_conversation_button_aria({
-      count: String(service.visibleMessageCount)
-    })}
+    aria-label={service.visibleMessageCount === 1
+      ? m.ai_builder_conversation_button_aria_one({ count: "1" })
+      : m.ai_builder_conversation_button_aria({
+          count: String(service.visibleMessageCount)
+        })}
     title={m.ai_builder_conversation_button_title()}
     onclick={() => service.toggleConversation()}
   >

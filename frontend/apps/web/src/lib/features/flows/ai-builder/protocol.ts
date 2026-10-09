@@ -259,6 +259,10 @@ export interface AIBuilderError {
   eneo_error_code?: number | null;
   diagnostic_context: AIBuilderDiagnosticContext | null;
   details: AIBuilderErrorDetails;
+  /** The translated sentence for the operation that failed, shown when the
+   *  code has no words of its own. `message` is the server's prose and is
+   *  for diagnostics only; `aiBuilderErrorText` is what the reader sees. */
+  fallback_message?: string;
 }
 
 export type ApplyError = AIBuilderError;

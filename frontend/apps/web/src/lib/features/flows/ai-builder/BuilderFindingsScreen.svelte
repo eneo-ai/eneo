@@ -33,6 +33,7 @@
     suggestionStepsLabel,
     suggestionsFailureCopy
   } from "./flowReviewSuggestions";
+  import { aiBuilderErrorCopy } from "./aiBuilderError";
 
   interface Props {
     review: AIBuilderFlowReviewState;
@@ -239,6 +240,12 @@
             <Skeleton class="h-[4.5rem] w-full rounded-lg" />
           </div>
         {:else if review.status === "failed"}
+          {@const reviewErrorBody =
+            review.error.code === "flow_not_published"
+              ? m.ai_builder_review_unpublished_body()
+              : review.error.code === "review_flow_too_large"
+                ? m.ai_builder_review_flow_too_large()
+                : aiBuilderErrorCopy(review.error)}
           <div
             class="bg-warning-dimmer border-warning-default/45 text-warning-stronger rounded-[9px] border px-3 py-2.5 text-[0.8125rem]"
             role="status"
@@ -250,13 +257,9 @@
                   ? m.ai_builder_review_flow_too_large_title()
                   : m.ai_builder_review_load_failed()}
             </p>
-            <p class="mt-0.5">
-              {review.error.code === "flow_not_published"
-                ? m.ai_builder_review_unpublished_body()
-                : review.error.code === "review_flow_too_large"
-                  ? m.ai_builder_review_flow_too_large()
-                  : review.error.message}
-            </p>
+            {#if reviewErrorBody}
+              <p class="mt-0.5">{reviewErrorBody}</p>
+            {/if}
             {#if review.error.code !== "flow_not_published" && review.error.code !== "review_flow_too_large"}
               <Button variant="outline" size="sm" class="mt-2.5" onclick={onretry}>
                 {m.ai_builder_review_retry()}

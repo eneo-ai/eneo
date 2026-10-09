@@ -147,7 +147,7 @@ describe("legal holds section", () => {
       .element(page.getByRole("button", { name: `Häv spärren: Körning ${RUN_ID}` }))
       .toBeVisible();
     await expect
-      .element(page.getByRole("button", { name: `Ompröva spärren: Körning ${RUN_ID}` }))
+      .element(page.getByRole("button", { name: `Flytta omprövningen: Körning ${RUN_ID}` }))
       .toBeVisible();
   });
 
@@ -265,7 +265,7 @@ describe("legal holds section", () => {
 
     const dialog = await openPlaceDialog();
     await dialog.getByRole("radio", { name: "Utvalda körningar" }).click();
-    await dialog.getByRole("textbox", { name: "Körnings-id" }).fill("not-a-run");
+    await dialog.getByRole("textbox", { name: "Körnings-ID" }).fill("not-a-run");
     await dialog.getByRole("textbox", { name: "Skäl" }).fill("Tillsyn");
     await dialog.getByLabelText("Omprövas senast").fill(addLocalDays(TODAY, 30));
     await dialog.getByRole("button", { name: "Lägg spärr" }).click();
@@ -274,7 +274,7 @@ describe("legal holds section", () => {
       .toBeVisible();
     expect(placeFlowRetentionHold).not.toHaveBeenCalled();
 
-    await dialog.getByRole("textbox", { name: "Körnings-id" }).fill(`${RUN_ID}\n${RUN_ID}`);
+    await dialog.getByRole("textbox", { name: "Körnings-ID" }).fill(`${RUN_ID}\n${RUN_ID}`);
     await dialog.getByLabelText("Slutdatum (valfritt)").fill("2099-03-31");
     await dialog.getByRole("button", { name: "Lägg spärr" }).click();
 
@@ -299,7 +299,7 @@ describe("legal holds section", () => {
 
     const dialog = await openPlaceDialog();
     await dialog.getByRole("radio", { name: "Utvalda körningar" }).click();
-    await dialog.getByRole("textbox", { name: "Körnings-id" }).fill(RUN_ID);
+    await dialog.getByRole("textbox", { name: "Körnings-ID" }).fill(RUN_ID);
     await dialog.getByRole("textbox", { name: "Skäl" }).fill("Tillsyn");
     await dialog.getByLabelText("Omprövas senast").fill(addLocalDays(TODAY, 30));
     await dialog.getByRole("button", { name: "Lägg spärr" }).click();
@@ -325,12 +325,12 @@ describe("legal holds section", () => {
     await expect
       .element(dialog.getByText(/följer sin gallringspolicy igen och kan gallras/))
       .toBeVisible();
-    await dialog.getByRole("button", { name: "Häv" }).click();
+    await dialog.getByRole("button", { name: "Häv spärren" }).click();
     await expect.element(dialog.getByText("Ange ett skäl på 1–512 tecken.")).toBeVisible();
     expect(releaseFlowRetentionHold).not.toHaveBeenCalled();
 
     await dialog.getByRole("textbox", { name: "Skäl till hävning" }).fill("Begäran besvarad");
-    await dialog.getByRole("button", { name: "Häv" }).click();
+    await dialog.getByRole("button", { name: "Häv spärren" }).click();
 
     await vi.waitFor(() =>
       expect(releaseFlowRetentionHold).toHaveBeenCalledExactlyOnceWith({
@@ -355,12 +355,12 @@ describe("legal holds section", () => {
     });
 
     await page
-      .getByRole("button", { name: "Ompröva spärren: Hela flödet, även kommande körningar" })
+      .getByRole("button", { name: "Flytta omprövningen: Hela flödet, även kommande körningar" })
       .click();
     const dialog = page.getByRole("alertdialog");
     await expect.element(dialog.getByText(/Spärren fortsätter att stoppa gallring/)).toBeVisible();
     await dialog.getByLabelText("Nytt omprövningsdatum").fill(current);
-    await dialog.getByRole("button", { name: "Ompröva" }).click();
+    await dialog.getByRole("button", { name: "Flytta omprövning" }).click();
     await expect
       .element(dialog.getByText("Välj ett datum efter det nuvarande, högst 365 dagar fram."))
       .toBeVisible();
@@ -370,7 +370,7 @@ describe("legal holds section", () => {
     const next = addLocalDays(current, 60);
     await dialog.getByLabelText("Nytt omprövningsdatum").fill(next);
     await dialog.getByRole("textbox", { name: "Varför spärren behövs" }).fill("Fortfarande öppen");
-    await dialog.getByRole("button", { name: "Ompröva" }).click();
+    await dialog.getByRole("button", { name: "Flytta omprövning" }).click();
 
     await vi.waitFor(() =>
       expect(extendFlowRetentionHoldReview).toHaveBeenCalledExactlyOnceWith({
@@ -395,7 +395,7 @@ describe("legal holds section", () => {
       .click();
     const dialog = page.getByRole("alertdialog");
     await dialog.getByRole("textbox", { name: "Skäl till hävning" }).fill("Klar");
-    await dialog.getByRole("button", { name: "Häv" }).click();
+    await dialog.getByRole("button", { name: "Häv spärren" }).click();
 
     await expect.element(dialog.getByText("Spärren är redan hävd.")).toBeVisible();
     // The list is out of date: it is read again.
@@ -444,7 +444,9 @@ describe("legal holds section", () => {
       .toBeDisabled();
     await expect
       .element(
-        page.getByRole("button", { name: "Ompröva spärren: Hela flödet, även kommande körningar" })
+        page.getByRole("button", {
+          name: "Flytta omprövningen: Hela flödet, även kommande körningar"
+        })
       )
       .toBeDisabled();
   });
@@ -507,7 +509,7 @@ describe("legal holds section", () => {
     await page.getByRole("button", { name: /^Häv spärren/ }).click();
     const dialog = page.getByRole("alertdialog");
     await dialog.getByRole("textbox", { name: "Skäl till hävning" }).fill("Besvarad");
-    await dialog.getByRole("button", { name: "Häv" }).click();
+    await dialog.getByRole("button", { name: "Häv spärren" }).click();
 
     // The emptied page is left for the previous one; paging still works.
     await expect.element(page.getByText("Visar 201–400")).toBeVisible();
@@ -568,7 +570,7 @@ describe("legal holds section", () => {
     });
 
     await page
-      .getByRole("button", { name: "Ompröva spärren: Hela flödet, även kommande körningar" })
+      .getByRole("button", { name: "Flytta omprövningen: Hela flödet, även kommande körningar" })
       .click();
     const dialog = page.getByRole("alertdialog");
     await expect
@@ -576,7 +578,7 @@ describe("legal holds section", () => {
         dialog.getByText(/ligger redan längre fram än den längsta tillåtna tiden \(90 dagar\)/)
       )
       .toBeVisible();
-    await expect.element(dialog.getByRole("button", { name: "Ompröva" })).toBeDisabled();
+    await expect.element(dialog.getByRole("button", { name: "Flytta omprövning" })).toBeDisabled();
     expect(extendFlowRetentionHoldReview).not.toHaveBeenCalled();
   });
 });

@@ -183,7 +183,7 @@
         <DropdownMenu.Content align="end" class="min-w-[10rem]">
           <DropdownMenu.Item variant="destructive" onclick={() => (draftPendingDiscard = row)}>
             <IconTrash class="size-4" />
-            {m.ai_builder_discard_draft()}
+            {m.ai_builder_draft_discard_action()}
           </DropdownMenu.Item>
         </DropdownMenu.Content>
       </DropdownMenu.Root>

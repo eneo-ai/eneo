@@ -327,8 +327,8 @@ describe("flowRuntimeErrorMapping", () => {
     [
       "flow_run_invalid_idempotency_key",
       [
-        "The retry key is empty or too long. Send a key between 1 and 255 characters.",
-        "Nyckeln för säkra omförsök är tom eller för lång. Skicka en nyckel med 1 till 255 tecken."
+        "The run could not be submitted safely. Reload the page and try again. Contact support if it keeps happening.",
+        "Körningen kunde inte skickas på ett säkert sätt. Ladda om sidan och försök igen. Kontakta support om felet återkommer."
       ]
     ],
     [

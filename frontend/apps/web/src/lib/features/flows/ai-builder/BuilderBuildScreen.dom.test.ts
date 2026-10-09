@@ -59,5 +59,16 @@ describe("BuilderBuildScreen", () => {
     expect(
       screen.getByText(m.ai_builder_build_more_steps({ first: "7", last: "30" }))
     ).toBeTruthy();
+    // Nothing is decided yet, so no step is claimed to change.
+    expect(screen.getAllByText(m.ai_builder_node_may_change())).toHaveLength(6);
+    expect(screen.queryByText(m.ai_builder_node_changes())).toBeNull();
+  });
+
+  it("keeps the trailing ellipsis inside the translated narration", () => {
+    render(BuilderBuildScreen, {
+      props: { status: "checking_flow", mode: "create", flowSteps: [], targetStepNumber: null }
+    });
+    expect(screen.getByText(m.ai_builder_build_status_checking())).toBeTruthy();
+    expect(m.ai_builder_build_status_checking().endsWith("…")).toBe(true);
   });
 });

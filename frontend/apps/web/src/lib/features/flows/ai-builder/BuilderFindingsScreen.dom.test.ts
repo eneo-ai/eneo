@@ -1,6 +1,7 @@
 import { cleanup, fireEvent, render, screen } from "@testing-library/svelte";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { createRawSnippet } from "svelte";
+import { formatList } from "$lib/core/formatting/formatList";
 import { m } from "$lib/paraglide/messages";
 import { withLocale } from "../testLocale";
 import type { AIBuilderFlowReviewPacket } from "./protocol";
@@ -390,7 +391,7 @@ describe("BuilderFindingsScreen suggestions", () => {
         expect(hint).toMatch(/instruktioner|instructions/i);
         expect(hint).toMatch(/underlag|material/i);
         expect(hint).toMatch(/resultat|results/i);
-        expect(hint).toMatch(/planeringsmodell|planning model/i);
+        expect(hint).toMatch(/den modell du har valt|the model you have chosen/i);
         closed.unmount();
 
         render(BuilderFindingsScreen, {
@@ -555,7 +556,7 @@ describe("BuilderFindingsScreen suggestions", () => {
         // Each row's checkbox carries its own accessible name, including its
         // ordinal, so two findings on one scope stay two distinct choices.
         const stepsOneTwo = m.ai_builder_review_suggestion_steps({
-          steps: `1 ${m.ai_builder_review_suggestion_steps_join()} 2`
+          steps: formatList(["1", "2"])
         });
         const kindDuplicated = m.ai_builder_review_suggestion_kind_duplicated_work();
         const secondCard = screen.getByRole("checkbox", {

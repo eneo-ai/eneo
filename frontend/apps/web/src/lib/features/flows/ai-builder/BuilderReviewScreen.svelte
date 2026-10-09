@@ -4,6 +4,7 @@
   import type { Snippet } from "svelte";
   import { SvelteSet } from "svelte/reactivity";
   import { onDestroy, tick, untrack } from "svelte";
+  import { formatList } from "$lib/core/formatting/formatList";
   import { m } from "$lib/paraglide/messages";
   import IconLoaderCircle from "@lucide/svelte/icons/loader-circle";
   import { getLocale } from "$lib/paraglide/runtime";
@@ -23,6 +24,14 @@
   import { getAIBuilderService } from "./FlowAIBuilderService.svelte.ts";
   import { describeFailure, type FailureAction } from "./aiBuilderFailurePresentation";
   import { fieldTypeLabel } from "./aiBuilderSummaryText";
+  import { aiBuilderErrorText } from "./aiBuilderError";
+  import {
+    advisoryStepRef,
+    advisoryText,
+    flowNoteText,
+    lintWarningText
+  } from "./builderAdvisoryText";
+  import * as AlertDialog from "$lib/components/ui/alert-dialog/index.js";
   import type {
     AIBuilderEditContext,
     AIBuilderStatus,
@@ -609,18 +618,15 @@
   const otherAdvisories = $derived(
     advisories.filter((a) => a.code !== "flow_description_update_required")
   );
-  // The server writes advisory prose in English. The stable part of the contract
-  // is the code, so a code we know is read in the reader's language and the
-  // server's sentence is only the fallback for one we do not know yet.
-  function advisoryText(advisory: EditAdvisory): string {
-    switch (advisory.code) {
-      case "flow_description_update_required":
-        return m.ai_builder_advisory_flow_description_update_required();
-      case "mapped_file_limit_exceeds_policy":
-        return m.ai_builder_advisory_mapped_file_limit_exceeds_policy();
-      default:
-        return advisory.message;
-    }
+  // The words are the code's (builderAdvisoryText); an advisory scoped to one
+  // step names it, as a quality warning does.
+  function advisoryStepLabel(advisory: EditAdvisory): string | null {
+    const ref = advisoryStepRef(advisory);
+    if (!ref) return null;
+    const index = steps.findIndex(
+      (step) => step.plan_step_ref === ref || step.existing_step_ref === ref
+    );
+    return index === -1 ? null : `${index + 1}. ${steps[index].name}`;
   }
 
   const descriptionDiff = $derived.by(() => {
@@ -644,7 +650,7 @@
   }
   function fieldsChangedSentence(labels: string[]): string {
     const locale = getLocale();
-    const fields = new Intl.ListFormat(locale, { type: "conjunction" }).format(
+    const fields = formatList(
       labels.map((label) => label.charAt(0).toLocaleLowerCase(locale) + label.slice(1))
     );
     const sentence = m.ai_builder_change_list_fields_changed({ fields });
@@ -717,7 +723,7 @@
       entries.push({
         key: "form_fields",
         subject: m.ai_builder_form_fields_title(),
-        what: new Intl.ListFormat(getLocale(), { type: "conjunction" }).format(parts.map(String)),
+        what: formatList(parts.map(String)),
         step: null
       });
     }
@@ -733,17 +739,8 @@
     (plan?.proposal.lint_warnings ?? []).filter((warning) => warning.severity === "info")
   );
   // The lint message is the critic's repair instruction, written for the
-  // model; the screen only ever shows its own calm copy for a note.
-  const flowNoteCopy: Record<string, () => string> = {
-    json_output_no_contract: () => m.ai_builder_flow_note_json_output_no_contract(),
-    json_output_text_interpolation: () => m.ai_builder_flow_note_json_output_text_interpolation(),
-    shadowed_form_field_bare_reference: () =>
-      m.ai_builder_flow_note_shadowed_form_field_bare_reference(),
-    unused_form_field: () => m.ai_builder_flow_note_unused_form_field(),
-    vague_step_name: () => m.ai_builder_flow_note_vague_step_name()
-  };
-  const flowNoteText = (note: { code: string }): string =>
-    (flowNoteCopy[note.code] ?? m.ai_builder_flow_note_generic)();
+  // model; the screen only ever shows its own copy for a warning or a note
+  // (builderAdvisoryText).
 
   // ---- Errors, conflicts, prerequisites ------------------------------------
 
@@ -766,12 +763,34 @@
   );
   const createFailed = $derived(isGeneralApplyError && isCreateMode);
   const createOutcomeUnknown = $derived(createFailed && service.createFailureOutcome === "unknown");
-  const generalApplyErrorMessage = $derived.by(() => {
-    if (!service.applyError) return "";
-    if (service.applyError.code === "transcription_model_required") {
-      return m.ai_builder_missing_transcription_model_description();
-    }
-    return service.applyError.message;
+  // The code's words, or which operation failed; never the server's prose.
+  const generalApplyErrorMessage = $derived(
+    service.applyError ? aiBuilderErrorText(service.applyError) : ""
+  );
+  // "Steg: 1 skapat och 2 uppdaterade.": only what happened, in agreement.
+  const appliedCountsLine = $derived.by(() => {
+    const result = service.applyResult;
+    if (!result) return null;
+    const part = (count: number, one: () => string, other: (p: { count: number }) => string) =>
+      count === 0 ? null : count === 1 ? one() : other({ count });
+    const parts = [
+      part(
+        result.steps_created,
+        () => m.ai_builder_applied_count_created_one({ count: 1 }),
+        m.ai_builder_applied_count_created
+      ),
+      part(
+        result.steps_updated,
+        () => m.ai_builder_applied_count_updated_one({ count: 1 }),
+        m.ai_builder_applied_count_updated
+      ),
+      part(
+        result.steps_removed,
+        () => m.ai_builder_applied_count_removed_one({ count: 1 }),
+        m.ai_builder_applied_count_removed
+      )
+    ].filter((value): value is string => value !== null);
+    return parts.length > 0 ? m.ai_builder_applied_counts({ list: formatList(parts) }) : null;
   });
   const publishedVersion = $derived(
     service.applyError?.code === "flow_is_published" &&
@@ -832,14 +851,23 @@
       : null
   );
 
-  const conflictDescription = $derived.by(() => {
+  const conflictCopy = $derived.by(() => {
     switch (service.conflict?.kind) {
       case "send_in_progress":
-        return m.ai_builder_conflict_send_in_progress();
+        return {
+          title: m.ai_builder_conflict_in_progress_title(),
+          description: m.ai_builder_conflict_send_in_progress()
+        };
       case "stale_plan":
-        return m.ai_builder_conflict_stale_plan();
+        return {
+          title: m.ai_builder_conflict_elsewhere_title(),
+          description: m.ai_builder_conflict_stale_plan()
+        };
       default:
-        return m.ai_builder_conflict_stale_revision();
+        return {
+          title: m.ai_builder_conflict_flow_changed_title(),
+          description: m.ai_builder_conflict_stale_revision()
+        };
     }
   });
 
@@ -1051,8 +1079,12 @@
     }
   }
 
+  // Unpublishing stops the published flow from running, so it is confirmed
+  // in a dialog whose button names the action.
+  let unpublishDialogOpen = $state(false);
+
   async function handleUnpublishAndApply() {
-    if (!window.confirm(m.ai_builder_published_flow_confirm())) return;
+    unpublishDialogOpen = false;
     try {
       const result = await service.unpublishAndApplyPlan();
       onapplied?.({ flow_id: result.flow_id, focusStepIndex });
@@ -1117,14 +1149,15 @@
 {#snippet conflictCard()}
   <div class="border-warning-default/40 bg-warning-dimmer rounded-lg border p-3.5" role="status">
     <p class="text-warning-stronger text-[0.8125rem] font-semibold">
-      {m.ai_builder_conflict_elsewhere_title()}
+      {conflictCopy.title}
     </p>
     <p class="text-warning-stronger/80 mt-0.5 text-xs leading-relaxed text-pretty">
-      {conflictDescription}
+      {conflictCopy.description}
     </p>
     <div class="mt-3 flex flex-wrap gap-2">
+      <!-- The Builder's one label for fetching the latest state. -->
       <Button size="sm" onclick={() => void service.recoverFromConflict()}>
-        {m.ai_builder_conflict_refresh()}
+        {m.ai_builder_failure_action_refresh()}
       </Button>
       <Button
         variant="outline"
@@ -1158,9 +1191,13 @@
           >
             <span class="font-semibold">{m.ai_builder_plan_updated_announce()}</span>
             <span class="text-pretty">
-              {revisedStepCount > 0
-                ? m.ai_builder_plan_updated_detail({ count: revisedStepCount })
-                : m.ai_builder_plan_updated_no_step_changes()}
+              {revisedStepCount === 0
+                ? m.ai_builder_plan_updated_no_step_changes()
+                : isCreateMode
+                  ? m.ai_builder_plan_updated_detail({ count: revisedStepCount })
+                  : revisedStepCount === 1
+                    ? m.ai_builder_plan_updated_detail_edit_one({ count: revisedStepCount })
+                    : m.ai_builder_plan_updated_detail_edit({ count: revisedStepCount })}
             </span>
           </div>
         {/if}
@@ -1250,9 +1287,7 @@
                 <p class="text-secondary mt-1 text-[0.8125rem]">
                   {isCreateMode ? m.ai_builder_draft_pill() : m.ai_builder_change_pill()}
                   <span aria-hidden="true">·</span>
-                  {isCreateMode
-                    ? m.ai_builder_plan_meta_steps_nothing_created({ count: stepCount })
-                    : m.ai_builder_plan_meta_steps_only({ count: stepCount })}
+                  {m.ai_builder_plan_meta_steps_only({ count: stepCount })}
                 </p>
                 {#if spec.flow_description && !descriptionDiff && !hasDescriptionAdvisory}
                   <p
@@ -1424,7 +1459,8 @@
                       {m.ai_builder_advisory_section_title()}
                     </h3>
                     <ul class="flex list-none flex-col gap-1.5 p-0">
-                      {#each otherAdvisories as advisory (advisory.code)}
+                      {#each otherAdvisories as advisory, index (`${advisory.code}-${advisory.field ?? index}`)}
+                        {@const stepLabel = advisoryStepLabel(advisory)}
                         <li
                           class="rounded-md px-3 py-2 text-[0.8125rem] leading-relaxed
                       {advisory.severity === 'warning'
@@ -1433,6 +1469,10 @@
                               ? 'bg-negative-dimmer text-negative-stronger'
                               : 'bg-secondary text-secondary'}"
                         >
+                          {#if stepLabel}
+                            <span class="font-semibold">{stepLabel}</span>
+                            <span class="mx-1 opacity-60" aria-hidden="true">·</span>
+                          {/if}
                           {advisoryText(advisory)}
                         </li>
                       {/each}
@@ -1465,7 +1505,7 @@
                             >
                             <span class="text-warning-stronger/60 mx-1" aria-hidden="true">·</span>
                           {/if}
-                          {warning.message}
+                          {lintWarningText(warning)}
                         </li>
                       {/each}
                     </ul>
@@ -1797,13 +1837,11 @@
                           <p class="text-positive-stronger text-[0.8125rem] font-semibold">
                             {m.ai_builder_applied_success_edit()}
                           </p>
-                          <p class="text-positive-stronger/80 mt-0.5 text-xs leading-relaxed">
-                            {m.ai_builder_applied_counts({
-                              created: service.applyResult.steps_created,
-                              updated: service.applyResult.steps_updated,
-                              removed: service.applyResult.steps_removed
-                            })}
-                          </p>
+                          {#if appliedCountsLine}
+                            <p class="text-positive-stronger/80 mt-0.5 text-xs leading-relaxed">
+                              {appliedCountsLine}
+                            </p>
+                          {/if}
                           {#if service.canContinueEditing}
                             <Button
                               variant="outline"
@@ -1836,7 +1874,7 @@
                           <Button
                             size="sm"
                             disabled={service.isBusy}
-                            onclick={handleUnpublishAndApply}
+                            onclick={() => (unpublishDialogOpen = true)}
                           >
                             {service.pendingOperationKind === "unpublishing"
                               ? m.ai_builder_applying()
@@ -1867,8 +1905,8 @@
                           {m.ai_builder_unpublished_apply_failed_title()}
                         </p>
                         <p class="text-warning-stronger/80 mt-0.5 text-xs leading-relaxed">
-                          {m.ai_builder_unpublished_apply_failed_description({
-                            message: service.applyError?.message ?? ""
+                          {m.ai_builder_unpublished_apply_failed_body({
+                            message: generalApplyErrorMessage
                           })}
                         </p>
                         <div class="mt-2.5 flex flex-wrap gap-2">
@@ -2165,7 +2203,7 @@
                  published flow first (the backend rejects apply while published). -->
             <span class="text-secondary text-xs">
               {isCreateMode
-                ? m.ai_builder_footer_steps_nothing_created({ count: stepCount })
+                ? m.ai_builder_footer_nothing_created()
                 : m.ai_builder_footer_steps_change_when_approved({ count: changedStepCount })}
             </span>
             {#if isCreateMode || flowIsPublished}
@@ -2261,8 +2299,28 @@
     unchangedStepCount={stepChangeCounts?.unchanged ?? 0}
     {changedStepLine}
     phase={approvePhase}
+    {flowIsPublished}
     onconfirm={() => void handlePrimaryAction()}
   />
+
+  <AlertDialog.Root bind:open={unpublishDialogOpen}>
+    <AlertDialog.Content class="max-w-[28.75rem]">
+      <AlertDialog.Header>
+        <AlertDialog.Title>{m.ai_builder_unpublish_confirm_title()}</AlertDialog.Title>
+        <AlertDialog.Description>{m.ai_builder_published_flow_confirm()}</AlertDialog.Description>
+      </AlertDialog.Header>
+      <AlertDialog.Footer class="border-border">
+        <AlertDialog.Cancel>{m.ai_builder_approve_dialog_cancel()}</AlertDialog.Cancel>
+        <AlertDialog.Action
+          disabled={service.isBusy}
+          onclick={() => void handleUnpublishAndApply()}
+          data-testid="unpublish-confirm"
+        >
+          {m.ai_builder_unpublish_confirm_action()}
+        </AlertDialog.Action>
+      </AlertDialog.Footer>
+    </AlertDialog.Content>
+  </AlertDialog.Root>
 {:else if service.conflict}
   <div
     class="bg-secondary flex flex-1 justify-center px-7 pt-6 pb-10 max-lg:px-5 max-md:px-4 max-sm:pt-4"

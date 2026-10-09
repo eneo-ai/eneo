@@ -1,5 +1,7 @@
 import { m } from "$lib/paraglide/messages";
 
+import { aiBuilderErrorText } from "./aiBuilderError";
+
 import type {
   AIBuilderClientErrorFirstAction,
   AIBuilderClientErrorPresentation,
@@ -190,13 +192,13 @@ function specialCase(error: AIBuilderError): { heading: string; cause: string } 
   const reason = error.details.reason;
   if (reason === "delegation_without_recommendation") {
     return {
-      heading: m.ai_builder_question_delegate(),
+      heading: m.ai_builder_failure_heading_delegate(),
       cause: m.ai_builder_question_delegation_unavailable()
     };
   }
   if (reason === "delegation_without_pending_question") {
     return {
-      heading: m.ai_builder_question_delegate(),
+      heading: m.ai_builder_failure_heading_delegate(),
       cause: m.ai_builder_question_delegation_stale()
     };
   }
@@ -213,14 +215,14 @@ function specialCase(error: AIBuilderError): { heading: string; cause: string } 
   }
   if (reason === "requirements_version_stale") {
     return {
-      heading: m.ai_builder_question_delegate(),
+      heading: m.ai_builder_failure_heading_change_not_made(),
       cause: m.ai_builder_content_field_edit_stale()
     };
   }
   if (reason === "invalid_field_name") {
     const field = error.details.field_name;
     return {
-      heading: m.ai_builder_question_delegate(),
+      heading: m.ai_builder_failure_heading_change_not_made(),
       cause:
         typeof field === "string" && field.trim()
           ? m.ai_builder_content_field_edit_invalid_named({ field })
@@ -285,7 +287,8 @@ function cause(
     case "invalid_proposal":
       return m.ai_builder_failure_cause_invalid_proposal();
     case "other":
-      return error?.message ?? "";
+      // The code's words, or which operation failed; never the server's prose.
+      return error ? aiBuilderErrorText(error) : m.ai_builder_error_fallback_generic();
   }
 }
 

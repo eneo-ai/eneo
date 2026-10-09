@@ -154,7 +154,7 @@ const TABS = [
   "Gallring och bevarande",
   "Uppladdningar och körtider",
   "AI-byggaren",
-  "Sparat källunderlag"
+  "Sparad källtext"
 ];
 
 const LIMIT_LABEL = "Längsta tid till omprövning (dagar)";

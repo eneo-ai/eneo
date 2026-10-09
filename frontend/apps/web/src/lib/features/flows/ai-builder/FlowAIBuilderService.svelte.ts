@@ -30,7 +30,7 @@ import {
   type PendingPlanOperationKind
 } from "./FlowAIBuilderDriver";
 import { classifyAIBuilderConflict, type AIBuilderConflict } from "./aiBuilderConflict";
-import { parseAIBuilderError } from "./aiBuilderError";
+import { modelSendBlockMessage, parseAIBuilderError } from "./aiBuilderError";
 import type { FailureRecoveryCapabilities } from "./aiBuilderFailurePresentation";
 import type {
   AIBuilderClientErrorFirstAction,
@@ -365,24 +365,9 @@ export class FlowAIBuilderService {
 
   /** The sentence shown wherever a turn would start, or null when one may. */
   get modelSendBlockMessage(): string | null {
-    switch (this.modelSendBlock) {
-      case "models_loading":
-        return m.ai_builder_models_loading();
-      case "models_failed":
-        return m.failed_to_load_models();
-      case "model_not_listed":
-        return m.ai_builder_model_not_listed();
-      case "model_capacity_undeclared":
-        return m.ai_builder_model_capacity_undeclared();
-      case "model_capacity_too_small":
-        return m.ai_builder_model_capacity_too_small();
-      case "no_ready_model":
-        return this.#state.availableModels.length === 0
-          ? m.no_completion_model_description()
-          : m.ai_builder_no_ready_model();
-      case null:
-        return null;
-    }
+    return modelSendBlockMessage(this.modelSendBlock, {
+      anyModelListed: this.#state.availableModels.length > 0
+    });
   }
 
   get modelLoadStatus(): ModelLoadStatus {

@@ -93,7 +93,7 @@ describe("review limit editor", () => {
   test("the default is named and offers no reset", async () => {
     renderEditor({ days: 365, is_default: true });
 
-    await expect.element(page.getByText(/Standardvärdet 365 dagar gäller/)).toBeVisible();
+    await expect.element(page.getByText(/Standardvärdet 365 dagar används/)).toBeVisible();
     await expect
       .element(page.getByRole("button", { name: /Använd standard/ }))
       .not.toBeInTheDocument();
