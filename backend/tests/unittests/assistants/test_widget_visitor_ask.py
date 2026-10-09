@@ -9,9 +9,12 @@ provider.
 from unittest.mock import AsyncMock, MagicMock, patch
 from uuid import uuid4
 
-from eneo.ai_models.completion_models.completion_model import GeneratedImage
+from eneo.ai_models.completion_models.completion_model import GeneratedFile
 from eneo.assistants.api.assistant_models import KnowledgeMode
-from eneo.assistants.assistant_service import VISITOR_CAPABILITY_PURPOSES
+from eneo.assistants.assistant_service import (
+    VISITOR_CAPABILITY_PURPOSES,
+    allowed_capability_purposes,
+)
 from eneo.mcp_servers.application.capability_resolver import CapabilityResolution
 from eneo.mcp_servers.domain.entities.mcp_server import (
     INTERNAL_AUTH_TYPE,
@@ -139,10 +142,11 @@ async def test_staff_keep_image_generation_and_built_in_providers():
     ):
         await service.ask(question="hello", assistant_id=assistant.id)
 
-    assert resolve.await_args.kwargs["allowed_purposes"] == {
-        "web_search",
-        "image_generation",
-    }
+    # Staff keep every purpose their permissions allow, image generation
+    # included; only visitors are held to the allowlist.
+    allowed = resolve.await_args.kwargs["allowed_purposes"]
+    assert allowed == allowed_capability_purposes(TEST_USER.permissions)
+    assert {"web_search", "image_generation"} <= allowed
     offered = assistant.ask.await_args.kwargs["capability_mcp_servers"]
     assert [server.id for server in offered] == [web_search.id, builtin_images.id]
 
@@ -150,7 +154,7 @@ async def test_staff_keep_image_generation_and_built_in_providers():
 async def test_a_generated_image_is_never_saved_for_a_visitor():
     service, _ = _service(_visitor())
     service.file_service.save_image_from_bytes = AsyncMock()
-    image = GeneratedImage(data=b"png", mime_type="image/png", tool_call_id="c")
+    image = GeneratedFile(data=b"png", mime_type="image/png", tool_call_id="c")
 
     assert await service._save_generated_image(image) is None
     service.file_service.save_image_from_bytes.assert_not_awaited()

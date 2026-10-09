@@ -52,14 +52,50 @@ The frontend posts `code` and `state` to `POST /api/v1/auth/callback`. The backe
 JWT signature verified against the IdP's JWKS (RS256). Claims validated: `aud` (audience), `exp` (expiration), `at_hash` when present.
 
 ### Session Creation
-The email claim is checked against the tenant's `allowed_domains`, then the user is looked up by email. If no user exists and the tenant has `provisioning` enabled, the user is created just-in-time (see [JIT Provisioning](#jit-provisioning)). Finally the user's tenant is verified and an Eneo session JWT is issued.
+After token validation, both OIDC entry points delegate tenant membership and JIT admission to `UserService.resolve_federated_user`. It checks the configured domain restriction, tenant and account state, and the additional JIT requirements below before an Eneo session JWT is issued.
 </Steps>
 
 ---
 
 ## Security Mechanisms
 
-### State Token (CSRF Protection)
+### Eneo Session Identity
+
+Eneo-issued browser, internal MCP and module tokens share one identity contract:
+
+| Claim | Meaning |
+|-------|---------|
+| `token_version` | Required value `2`; older session formats are rejected |
+| `user_id` | Immutable UUID of the authenticated Eneo account |
+| `tenant_id` | UUID of the account's organization when the token was issued |
+| `credential_version` | Required integer matching the account's current credential version |
+| `iss`, `aud`, `iat`, `exp` | Required issuer, audience, issue time and expiry |
+| `sub`, `username` | Email and optional display name; never used to select the account |
+
+After signature, issuer, audience and time validation, the backend resolves the
+account by **both** `user_id` and `tenant_id`. Deleted accounts and mismatched
+identity claims cannot authenticate. Account and tenant state checks and normal
+resource permissions still apply. A name or email change cannot transfer an
+existing session to another account, including one with the same username.
+
+The identity contract belongs to Eneo session tokens. Identity-provider tokens
+are validated separately during OIDC login and exchanged for an Eneo session.
+
+#### Deploying the identity contract
+
+The transition requires users to sign in again. Pre-upgrade Eneo and module
+tokens, and pending module login tickets, are rejected; there is no fallback to
+username or email authentication. Module applications must restart the login
+handoff on an authentication failure.
+
+Update all API instances and workers together, draining old instances before
+serving traffic with the new deployment. Old instances still resolve sessions
+by username and must not remain in a rolling deployment. No account rename,
+account merge or database migration is needed for this change. A recovery build
+must retain the identity validation; rolling back to username-based
+authentication reintroduces the vulnerability.
+
+### Signed State Token
 
 The `state` parameter is a JWT signed with HS256:
 
@@ -91,6 +127,42 @@ signed_state = pyjwt.encode(
 | Correlation ID | 16 hex chars (8 bytes) | `secrets.token_hex(8)` |
 
 An expired state is rejected with `400 Authorization session expired. Please try logging in again.`; a state that fails signature validation is rejected with `400 Invalid state parameter`.
+
+### Browser Login Binding
+
+Generic OIDC login also requires a browser-bound attempt. Starting authentication
+through the `/login` page's `oidc` POST action creates a random attempt ID and
+passes it as `frontend_state` to the backend. After successful initiation, the
+action stores the same ID in the HttpOnly `oidc-login-resume` cookie, even when no
+`next` destination was requested. Its expiry follows the backend-signed state's
+`exp`: the default is 10 minutes from initiation, rather than from opening the
+login page. The cookie uses `Path=/`, `SameSite=Lax`, and `Secure` outside
+development. Single-tenant automatic login, tenant selection, and retries use
+this same action so each starts a fresh attempt.
+
+Both `/login/callback` and its `/auth/callback` alias require a matching, unexpired
+attempt before exchanging the authorization code or writing a session cookie.
+A missing, malformed, expired, or mismatched attempt returns the user to login
+with `oidc_attempt_rejected`, which asks them to start the sign-in again;
+`oidc_invalid_request` remains the identity provider's own error. A matched
+attempt is consumed, so a later callback without that cookie cannot exchange
+another code. The backend still verifies the state signature; reading its
+frontend payload for browser correlation does not replace that verification.
+
+The optional local `next` destination is separate from the required binding.
+Unsafe or oversized destinations are omitted from the cookie without allowing
+an unbound login. Module handoff destinations retain their original encoding.
+
+The cookie is host-only: start login on the same public origin as the configured
+callback. Login started on an alternate hostname cannot finish on the canonical
+hostname. Only the latest authentication attempt started in a browser is stored.
+An older tab's mismatched callback and its error-page redirect preserve the newer
+binding. Viewing the login page and a failed initiation do not replace an attempt;
+starting authentication again does. After deploying this change, attempts started
+with an older cookie format must restart login.
+
+The legacy Zitadel and MobilityGuard flows continue to use their existing local
+PKCE verifier cookies.
 
 ### Redis State Cache
 
@@ -308,7 +380,7 @@ uv run python -m eneo.cli.generate_encryption_key
 
 ### Claims Validated
 
-The backend validates these claims (`auth_service.py`):
+`auth_service.py` owns token validation; `FederatedIdentity` owns the validated email identity:
 
 | Claim | Validated? | Details |
 |-------|------------|---------|
@@ -318,6 +390,7 @@ The backend validates these claims (`auth_service.py`):
 | `iat` | **Yes** | A token issued more than the clock leeway in the future is rejected as not yet valid (`ImmatureSignatureError`); the drift is logged |
 | `nonce` | **No** | Not validated in ID token |
 | `at_hash` | Conditional | If present, must match access token hash |
+| `email_verified` | Conditional | For the standard `email`, explicit `false` rejects login before account lookup; omission is allowed for existing active members, while JIT requires `true` |
 
 **Clock skew tolerance:** 120 seconds (2 minutes) - configurable via `oidc_clock_leeway_seconds`
 
@@ -332,31 +405,42 @@ claims_mapping: OIDCClaimsMapping = federation_config.get(
 ) or {"email": "email"}
 email_claim = claims_mapping.get("email", "email")
 ...
-email = payload.get(email_claim)
+identity = FederatedIdentity.from_claims(payload, email_claim=email_claim)
+email = identity.email
 ```
 
 A missing claim is rejected with `401 Email claim not found in ID token`; a malformed address with `401 Email claim from identity provider is invalid. Contact your administrator.`
 
+An explicit boolean `email_verified: false` for the standard `email` claim is rejected before account lookup or JIT provisioning. The federation callback returns `401 Email is not verified by the identity provider`; global MobilityGuard login also rejects the token. A missing flag remains accepted for existing active members when enterprise IdPs issue administrator-controlled directory addresses without this claim. JIT creation still requires verified email, as described below.
+
+Eneo still links accounts by email, so the configured IdP must control who can claim that address. If `claims_mapping.email` uses a different claim, such as `upn`, the standard `email_verified` flag does not describe that claim and is not applied to it. Administrators must choose a claim controlled by their organization's directory. This check does not introduce an issuer/subject account binding.
+
 ### Domain Validation
 
-When `allowed_domains` is configured, the domain part of the email is lower-cased and IDNA-normalized and compared against the (equally normalized) allowlist. A non-matching domain is rejected with:
+When `allowed_domains` is configured, email domains are compared case-insensitively using IDNA2008. Unicode and punycode forms of the same domain match; distinct domains such as `faß.de` and `fass.de` do not. A non-matching domain is rejected with:
 
 ```
 403 Email domain '{domain}' is not allowed for this organization. Contact your administrator to add your domain.
 ```
 
-The outcome is logged as `callback.domain_rejected` or `callback.domain_allowed`. Configurations created from `OIDC_*` environment variables have no `allowed_domains`, so no domain check applies in that mode.
+Global OIDC uses `OIDC_ALLOWED_DOMAINS` (JSON array, default `[]`); per-tenant federation uses `allowed_domains`. An empty list leaves existing active tenant members unrestricted by domain, but cannot admit new members through JIT. The federation callback records admission refusals as `callback.user_denied` with a reason.
 
 ### JIT Provisioning
 
-After domain validation the user is looked up by email (`user_repo.get_user_by_email`). If no user exists:
+`UserService.resolve_federated_user` is the single admission owner for the federation callback and the global OIDC/MobilityGuard login endpoint. It reuses the active account in the configured tenant, rejects inactive accounts and cross-tenant matches, and checks for removed rows before considering account creation. The removed-account lookup is tenant-scoped and tests for existence because several historical rows can share an email.
 
-| `tenant.provisioning` | Result |
-|-----------------------|--------|
-| `true` | The user is created in the tenant with `state=ACTIVE`, `username` = the email's local part (lower-cased), and the tenant's `default_role_id` as its only role. If no default role is configured the user is created **without roles** and a warning is logged. An audit event `USER_CREATED` (actor type `SYSTEM`, `provisioning_method: jit_federation`) is written. |
-| `false` (default) | `403 User not found. Contact your administrator for access.` (`callback.user_missing`) |
+| Account state | Result |
+|---|---|
+| Existing active member of the tenant | Sign in, subject to any configured domain restriction. No new email-verification requirement is applied. |
+| Existing account in another tenant, or inactive/removed account | `403`; no account creation or reactivation. |
+| No account, `tenant.provisioning: false` (default) | `403`; provision through SCIM or administration. |
+| No account, `tenant.provisioning: true` | Creation requires a non-empty domain allowlist, a matching domain and the ID token's boolean `email_verified: true` for the selected address. |
 
-Provisioning is a per-tenant flag set through the sysadmin API (`POST /api/v1/sysadmin/tenants/{id}/` with `{"provisioning": true}`, optionally with `default_role_id`). A user that exists but belongs to another tenant is rejected with `403 Access denied for this organization.` (`callback.user_tenant_mismatch`).
+`FederatedIdentity.from_claims` receives validated token claims and preserves only a valid email address and its verification status. Values such as `"true"` or `1` do not count as verification. When email is selected through a custom claims mapping, standard `email_verified` only authorizes JIT if the selected address equals the standard `email` claim.
+
+Provisioning is a per-tenant flag set through the sysadmin API (`POST /api/v1/sysadmin/tenants/{id}/`). Keep it `false` when SCIM manages membership. A SCIM token does not implicitly change this setting. SCIM or an administrator can restore an account; login cannot.
+
+New accounts use `state=ACTIVE`, the email local part as username (falling back to the full email, then no username, on collisions), and the tenant's default role. Without a default role they have no roles and a warning is logged. Both paths write `USER_CREATED` with actor `SYSTEM` and `provisioning_method: jit_federation`; audit-log failure does not prevent account creation.
 
 ---
 
@@ -390,6 +474,7 @@ From `config.py`:
 | `federation_enabled` (`FEDERATION_ENABLED`) | `false` | `false`: IdP from `OIDC_*` env vars; `true`: per-tenant config via the sysadmin API |
 | `federation_per_tenant_enabled` (`FEDERATION_PER_TENANT_ENABLED`) | - | Deprecated alias for `FEDERATION_ENABLED`; logs a warning at startup, `FEDERATION_ENABLED` wins when both are set |
 | `oidc_discovery_endpoint`, `oidc_client_id`, `oidc_client_secret` | - | Global IdP used when `FEDERATION_ENABLED=false`; active when discovery endpoint and client secret are both set |
+| `oidc_allowed_domains` (`OIDC_ALLOWED_DOMAINS`) | `[]` | Global OIDC email-domain restriction; non-empty and matching domains are required for JIT |
 | `public_origin` (`PUBLIC_ORIGIN`) | - | Origin used to build `redirect_uri` when the tenant has no `canonical_public_origin`; must be `https://` (or `http://localhost`) without a path |
 | `encryption_key` (`ENCRYPTION_KEY`) | - | Fernet key; required when `FEDERATION_ENABLED=true` |
 | `eneo_super_api_key` (`ENEO_SUPER_API_KEY`) | - | Super admin key for the sysadmin API (sent as `X-API-Key`) |
@@ -462,11 +547,8 @@ Enable debug logging via the observability API (`POST /api/v1/sysadmin/observabi
 - `callback.tenant_loaded`
 - `callback.tenant_inactive`
 - `callback.email_extracted`
-- `callback.email_invalid_format`
-- `callback.domain_rejected` / `callback.domain_allowed`
+- `callback.user_denied`
 - `callback.jit_provisioning`
-- `callback.user_missing`
-- `callback.user_tenant_mismatch`
 - `callback.success`
 - `callback.unexpected_error`
 

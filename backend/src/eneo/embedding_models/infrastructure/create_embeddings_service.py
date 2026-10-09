@@ -1,3 +1,4 @@
+import asyncio
 from typing import TYPE_CHECKING, Optional, Protocol
 from uuid import UUID
 
@@ -14,6 +15,7 @@ if TYPE_CHECKING:
     from eneo.database.database import AsyncSession
     from eneo.settings.encryption_service import EncryptionService
     from eneo.tenants.tenant import TenantInDB
+    from eneo.users.user import UserInDB
 
 logger = get_logger(__name__)
 
@@ -26,15 +28,32 @@ class EmbeddingModelLike(Protocol):
     these attributes, so any object providing them will work.
     """
 
-    id: UUID
-    name: str
-    provider_id: UUID | None
-    litellm_model_name: str | None
-    family: str | None
-    max_input: int | None
-    max_batch_size: int | None
-    dimensions: int | None
-    open_source: bool
+    @property
+    def id(self) -> UUID: ...
+
+    @property
+    def name(self) -> str: ...
+
+    @property
+    def provider_id(self) -> UUID | None: ...
+
+    @property
+    def litellm_model_name(self) -> str | None: ...
+
+    @property
+    def family(self) -> str | None: ...
+
+    @property
+    def max_input(self) -> int | None: ...
+
+    @property
+    def max_batch_size(self) -> int | None: ...
+
+    @property
+    def dimensions(self) -> int | None: ...
+
+    @property
+    def open_source(self) -> bool: ...
 
 
 class CreateEmbeddingsService:
@@ -44,12 +63,20 @@ class CreateEmbeddingsService:
         config: Optional[Settings] = None,
         encryption_service: Optional["EncryptionService"] = None,
         session: Optional["AsyncSession"] = None,
+        user: Optional["UserInDB"] = None,
+        request_semaphore: asyncio.Semaphore | None = None,
+        request_timeout_seconds: float | None = None,
     ) -> None:
         super().__init__()
         self.tenant = tenant
+        # The acting user (in workers, the job's user: for a crawl, the website
+        # owner); the source of dynamic outbound-header values.
+        self.user = user
         self.config = config or SETTINGS
         self.encryption_service = encryption_service
         self.session = session
+        self.request_semaphore = request_semaphore
+        self.request_timeout_seconds = request_timeout_seconds
 
     async def _get_adapter(self, model: EmbeddingModelLike) -> EmbeddingModelAdapter:
         """Get the appropriate adapter for the embedding model.
@@ -70,12 +97,15 @@ class CreateEmbeddingsService:
         from eneo.model_providers.infrastructure.litellm_provider import (
             load_active_litellm_provider,
         )
+        from eneo.model_providers.infrastructure.outbound_headers_runtime import (
+            ProviderOutboundHeaders,
+        )
         from eneo.model_providers.infrastructure.tenant_model_credential_resolver import (
             TenantModelCredentialResolver,
         )
 
         # All models must have provider_id
-        if not hasattr(model, "provider_id") or not model.provider_id:
+        if model.provider_id is None:
             raise ValueError(
                 f"Model '{model.name}' is missing required provider_id. "
                 "All models must be associated with a ModelProvider."
@@ -103,13 +133,22 @@ class CreateEmbeddingsService:
                 provider_type=provider_type,
                 model_name=model.name,
             )
+            # Captured at crawl bootstrap alongside the credentials: a running
+            # crawl keeps the header configuration it started with (documented).
+            outbound_headers = ProviderOutboundHeaders.load(
+                provider_id=model.provider_id,
+                provider_type=provider_type,
+                stored=getattr(model, "provider_outbound_headers", None),
+                encryption=self.encryption_service,
+                user=self.user,
+            )
         else:
             # DB lookup path: requires active session
             if not self.session:
                 logger.error(
                     "Model requires database session but none available",
                     extra={
-                        "model_id": str(model.id) if hasattr(model, "id") else None,
+                        "model_id": str(model.id),
                         "model_name": model.name,
                         "provider_id": str(model.provider_id),
                         "tenant_id": str(self.tenant.id) if self.tenant else None,
@@ -141,11 +180,14 @@ class CreateEmbeddingsService:
                 model_name=model.name,
             )
             provider_type = provider.provider_type
+            outbound_headers = provider.create_outbound_headers(
+                self.encryption_service, self.user
+            )
 
-        logger.info(
+        logger.debug(
             f"Using LiteLLMEmbeddingAdapter for model '{model.name}'",
             extra={
-                "model_id": str(model.id) if hasattr(model, "id") else None,
+                "model_id": str(model.id),
                 "model_name": model.name,
                 "provider_id": str(model.provider_id),
                 "provider_type": provider_type,
@@ -158,6 +200,9 @@ class CreateEmbeddingsService:
             model,
             credential_resolver=credential_resolver,
             litellm_model_name=litellm_model_name,
+            outbound_headers=outbound_headers,
+            request_semaphore=self.request_semaphore,
+            request_timeout_seconds=self.request_timeout_seconds,
         )
 
     async def get_embeddings(

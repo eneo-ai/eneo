@@ -9,6 +9,7 @@ from eneo.main.config import get_settings
 from eneo.main.exceptions import NotFoundException
 from eneo.main.logging import get_logger
 from eneo.main.models import ChannelType
+from eneo.redis.connection import build_redis_auth_kwargs, build_redis_url
 from eneo.worker.redis import redis_lease
 from eneo.worker.worker import Worker
 
@@ -110,9 +111,10 @@ async def pull_sharepoint_content(
     try:
         settings = get_settings()
         redis_client = await redis.from_url(  # pyright: ignore[reportUnknownMemberType]  # redis stubs incomplete
-            f"redis://{settings.redis_host}:{settings.redis_port}",
+            build_redis_url(settings),
             encoding="utf8",
             decode_responses=True,
+            **build_redis_auth_kwargs(settings),
         )
 
         try:
@@ -177,9 +179,10 @@ async def sync_sharepoint_delta(
     try:
         settings = get_settings()
         redis_client = await redis.from_url(  # pyright: ignore[reportUnknownMemberType]  # redis stubs incomplete
-            f"redis://{settings.redis_host}:{settings.redis_port}",
+            build_redis_url(settings),
             encoding="utf8",
             decode_responses=True,
+            **build_redis_auth_kwargs(settings),
         )
 
         try:

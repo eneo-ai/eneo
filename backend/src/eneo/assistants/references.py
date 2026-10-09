@@ -3,6 +3,7 @@ from enum import Enum
 from typing import TYPE_CHECKING, Optional
 from uuid import UUID
 
+from eneo.embedding_models.domain.chunking import effective_chunk_config
 from eneo.files.file_models import FileType
 from eneo.info_blobs.info_blob import InfoBlobInDBWithScore
 from eneo.main.config import get_settings
@@ -10,6 +11,7 @@ from eneo.services.service import DatastoreResult
 
 if TYPE_CHECKING:
     from eneo.collections.domain.collection import Collection
+    from eneo.embedding_models.domain.embedding_model import EmbeddingModel
     from eneo.embedding_models.infrastructure.datastore import Datastore
     from eneo.files.file_models import File
     from eneo.info_blobs.info_blob import InfoBlobChunkInDBWithScore, InfoBlobInDB
@@ -24,6 +26,22 @@ if TYPE_CHECKING:
 class EmbedMethod(str, Enum):
     LAST_QUESTION = "last question"
     CONCATENATE = "concatenate"
+
+
+def _candidate_count(
+    context_window_tokens: Optional[int], embedding_model: "EmbeddingModel"
+) -> Optional[int]:
+    """How many chunks to fetch so that half the completion context can be filled.
+
+    The other half is left for the prompt, the history and the question. The chunk
+    size is the one ingest actually uses for this embedding model, so retrieval and
+    ingest agree without anything being stored. The floor keeps a small window from
+    producing an empty search.
+    """
+    if context_window_tokens is None:
+        return None
+    chunk_size = effective_chunk_config(embedding_model).chunk_size
+    return max(1, context_window_tokens // chunk_size // 2)
 
 
 class ReferencesService:
@@ -42,21 +60,12 @@ class ReferencesService:
         collections: list["Collection"],
         websites: list["Website"],
         integration_knowledge_list: Sequence["IntegrationKnowledge"] | None = None,
-        num_chunks: Optional[int] = None,
+        context_window_tokens: Optional[int] = None,
         version: int = 1,
+        num_chunks_override: int | None = None,
     ) -> list["InfoBlobChunkInDBWithScore"]:
         integration_knowledge_list = list(integration_knowledge_list or [])
         if (collections or websites or integration_knowledge_list) and input_string:
-            # Named rather than splatted from a dict: a homogeneously typed
-            # **kwargs would silently bind to any parameter semantic_search
-            # grows later.
-            if version == 1:
-                autocut_cutoff, chunk_limit = 3, 30
-            elif version == 2:
-                autocut_cutoff, chunk_limit = None, num_chunks
-            else:
-                raise ValueError(f"Unsupported retrieval version: {version}")
-
             embedding_model = None
             if collections:
                 embedding_model = collections[0].embedding_model
@@ -69,6 +78,22 @@ class ReferencesService:
             assert embedding_model is not None, (
                 "embedding_model must be set when knowledge sources are present"
             )
+
+            # Named rather than splatted from a dict: a homogeneously typed
+            # **kwargs would silently bind to any parameter semantic_search
+            # grows later.
+            if version == 1:
+                autocut_cutoff, chunk_limit = 3, 30
+            elif version == 2:
+                autocut_cutoff = None
+                chunk_limit = _candidate_count(context_window_tokens, embedding_model)
+            else:
+                raise ValueError(f"Unsupported retrieval version: {version}")
+            if num_chunks_override is not None:
+                # A caller with its own size, e.g. the widget's fixed retrieval
+                # size for visitors, instead of the context-derived default.
+                chunk_limit = num_chunks_override
+
             return await self.datastore.semantic_search(
                 input_string,
                 embedding_model=embedding_model,
@@ -167,8 +192,9 @@ class ReferencesService:
         websites: list["Website"] | None = None,
         integration_knowledge_list: list["IntegrationKnowledge"] | None = None,
         embed_method: EmbedMethod = EmbedMethod.CONCATENATE,
-        num_chunks: Optional[int] = None,
+        context_window_tokens: Optional[int] = None,
         version: int = 1,
+        num_chunks_override: int | None = None,
     ) -> "DatastoreResult":
         files = files or []
         collections = collections or []
@@ -188,8 +214,9 @@ class ReferencesService:
             collections=collections,
             websites=websites,
             integration_knowledge_list=integration_knowledge_list,
-            num_chunks=num_chunks,
+            context_window_tokens=context_window_tokens,
             version=version,
+            num_chunks_override=num_chunks_override,
         )
         no_duplicate_chunks = self._get_info_blob_chunks_without_duplicates(chunks)
         info_blobs = await self._get_info_blobs_from_chunks(no_duplicate_chunks)

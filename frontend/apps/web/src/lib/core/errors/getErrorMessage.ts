@@ -66,6 +66,10 @@ const ERROR_CODE_MESSAGES: Partial<Record<EneoErrorCode, () => string>> = {
   9056: () => m.eneo_error_9056(), // INVALID_FILENAME
   9057: () => m.eneo_error_9057(), // INFO_BLOB_ORIGINAL_UNAVAILABLE
 
+  // --- Website crawl lifecycle ---
+  9063: () => m.eneo_error_9063(), // WEBSITE_CRAWL_ACTIVE
+  9064: () => m.eneo_error_9064(), // WEBSITE_CRAWL_CLEANUP_PENDING
+
   // --- Model lifecycle ---
   9039: () => m.eneo_error_9039(), // MODEL_IN_USE
 
@@ -84,7 +88,7 @@ const ERROR_CODE_MESSAGES: Partial<Record<EneoErrorCode, () => string>> = {
   9062: () => m.eneo_error_9062(), // SKILL_REMOVAL_BUSY
 
   // --- Widgets ---
-  9063: () => m.eneo_error_9063() // ASSISTANT_PUBLISHED_AS_WIDGET
+  9070: () => m.eneo_error_9070() // ASSISTANT_PUBLISHED_AS_WIDGET
 };
 
 /**

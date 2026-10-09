@@ -361,6 +361,18 @@ const ACTION_MESSAGES = {
     name: m.audit_action_website_crawled,
     description: m.audit_action_website_crawled_description
   },
+  website_crawl_requested: {
+    name: m.audit_action_website_crawl_requested,
+    description: m.audit_action_website_crawl_requested_description
+  },
+  website_crawl_stop_requested: {
+    name: m.audit_action_website_crawl_stop_requested,
+    description: m.audit_action_website_crawl_stop_requested_description
+  },
+  website_crawl_probed: {
+    name: m.audit_action_website_crawl_probed,
+    description: m.audit_action_website_crawl_probed_description
+  },
   website_transferred: {
     name: m.audit_action_website_transferred,
     description: m.audit_action_website_transferred_description
@@ -528,6 +540,18 @@ const ACTION_MESSAGES = {
   mcp_server_tool_disabled: {
     name: m.audit_action_mcp_server_tool_disabled,
     description: m.audit_action_mcp_server_tool_disabled_description
+  },
+  model_provider_headers_updated: {
+    name: m.audit_action_model_provider_headers_updated,
+    description: m.audit_action_model_provider_headers_updated_description
+  },
+  model_provider_destination_changed: {
+    name: m.audit_action_model_provider_destination_changed,
+    description: m.audit_action_model_provider_destination_changed_description
+  },
+  model_provider_headers_previewed: {
+    name: m.audit_action_model_provider_headers_previewed,
+    description: m.audit_action_model_provider_headers_previewed_description
   },
   retention_policy_applied: {
     name: m.audit_action_retention_policy_applied,

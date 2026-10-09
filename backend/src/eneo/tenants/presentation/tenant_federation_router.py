@@ -12,6 +12,11 @@ from eneo.audit.domain.action_types import ActionType
 from eneo.audit.domain.actor_types import ActorType
 from eneo.audit.domain.entity_types import EntityType
 from eneo.authentication import auth
+from eneo.authentication.endpoint_access import (
+    Authentication,
+    Authorization,
+    endpoint_access,
+)
 from eneo.main.config import (
     Settings,
     get_settings,
@@ -489,6 +494,11 @@ async def _log_federation_update(
     ),
     responses=responses.get_responses([400, 404]),
 )
+@endpoint_access(
+    authentication=Authentication.SYSADMIN,
+    authorization=Authorization.SYSADMIN,
+    reason="Deployment administration requires the configured super API key.",
+)
 async def set_tenant_federation(
     tenant_id: UUID,
     request: SetFederationRequest,
@@ -583,6 +593,11 @@ async def set_tenant_federation(
         "PATCH requires an existing federation config. System admin only."
     ),
     responses=responses.get_responses([400, 404]),
+)
+@endpoint_access(
+    authentication=Authentication.SYSADMIN,
+    authorization=Authorization.SYSADMIN,
+    reason="Deployment administration requires the configured super API key.",
 )
 async def patch_tenant_federation(
     tenant_id: UUID,
@@ -693,6 +708,11 @@ async def patch_tenant_federation(
     description="Remove custom identity provider for tenant. System admin only.",
     responses=responses.get_responses([404]),
 )
+@endpoint_access(
+    authentication=Authentication.SYSADMIN,
+    authorization=Authorization.SYSADMIN,
+    reason="Deployment administration requires the configured super API key.",
+)
 async def delete_tenant_federation(
     tenant_id: UUID,
     container: Annotated[Container, Depends(get_container())],
@@ -744,6 +764,11 @@ async def delete_tenant_federation(
     description="View federation config with masked secrets. System admin only.",
     responses=responses.get_responses([404]),
 )
+@endpoint_access(
+    authentication=Authentication.SYSADMIN,
+    authorization=Authorization.SYSADMIN,
+    reason="Deployment administration requires the configured super API key.",
+)
 async def get_tenant_federation(
     tenant_id: UUID,
     container: Annotated[Container, Depends(get_container())],
@@ -789,6 +814,11 @@ async def get_tenant_federation(
     summary="Test tenant federation config",
     description="Test connection to tenant's IdP. System admin only.",
     responses=responses.get_responses([400, 404, 500]),
+)
+@endpoint_access(
+    authentication=Authentication.SYSADMIN,
+    authorization=Authorization.SYSADMIN,
+    reason="Deployment administration requires the configured super API key.",
 )
 async def test_tenant_federation(
     tenant_id: UUID,

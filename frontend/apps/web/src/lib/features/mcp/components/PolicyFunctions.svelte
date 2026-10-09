@@ -2,7 +2,7 @@
   import type { components } from "@eneo/eneo-js";
   import { m } from "$lib/paraglide/messages";
   import { getCapability } from "$lib/features/mcp/capabilities";
-  import { readinessMessage } from "$lib/features/mcp/readiness";
+  import { modelSupportsToolCalling, readinessMessage } from "$lib/features/mcp/readiness";
   let {
     config,
     selectedModel
@@ -34,8 +34,8 @@
               ? m.functions_default_off()
               : m.functions_default_on()}
           </p>
-          {#if selectedModel?.supports_tool_calling === false}
-            <p class="text-muted mt-1 text-xs">{m.model_does_not_support_tools()}</p>
+          {#if selectedModel != null && !modelSupportsToolCalling(selectedModel)}
+            <p class="text-muted mt-1 text-xs">{readinessMessage("model_no_tool_calling")}</p>
           {:else if !availability?.available}
             <p class="text-muted mt-1 text-xs">
               {readinessMessage(availability?.reason ?? "no_active_provider")}

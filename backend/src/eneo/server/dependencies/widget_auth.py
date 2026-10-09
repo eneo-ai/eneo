@@ -8,6 +8,7 @@ from typing import Annotated, Optional
 from fastapi import Depends, Request
 
 from eneo.authentication.api_key_request_context import resolve_client_ip
+from eneo.authentication.endpoint_access import Authentication, authenticates
 from eneo.main.config import get_settings
 from eneo.main.container.container import Container
 from eneo.main.container.container_overrides import override_user
@@ -42,6 +43,7 @@ async def get_active_widget(
 ActiveWidget = Annotated[Widget, Depends(get_active_widget)]
 
 
+@authenticates(Authentication.WIDGET_VISITOR)
 async def get_widget_principal(
     request: Request, widget: ActiveWidget, container: PublicContainer
 ) -> WidgetPrincipal:

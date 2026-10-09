@@ -11,7 +11,7 @@ from eneo.ai_models.completion_models.completion_model import (
     Completion,
     CompletionModel,
     Context,
-    GeneratedImage,
+    GeneratedFile,
     ResponseType,
 )
 from eneo.completion_models.infrastructure.completion_service import CompletionService
@@ -171,7 +171,7 @@ async def test_non_streaming_uses_adapter_cumulative_input_estimate():
 async def test_generated_image_chunks_pass_through_tool_call_handling():
     """MCP image blocks reach the ask path as FILES chunks, in stream order."""
     completion_model = _make_completion_model()
-    image = GeneratedImage(data=b"\x89PNG", mime_type="image/png")
+    image = GeneratedFile(data=b"\x89PNG", mime_type="image/png")
 
     class _ImageAdapter(_DummyAdapter):
         async def iterate_stream(self, **kwargs):

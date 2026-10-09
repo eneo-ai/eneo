@@ -68,6 +68,22 @@ def test_tool_call_sse_preserves_null_tool_call_id():
     assert payload["tools"][0]["tool_call_id"] is None
 
 
+def test_tool_call_delta_sse_carries_the_call_and_its_next_arguments():
+    event = to_sse_response(
+        Completion(
+            response_type=ResponseType.TOOL_CALL_DELTA,
+            tool_call_id="call_1",
+            arguments_delta='{"title":"Pl',
+        ),
+        uuid4(),
+    )
+
+    assert event.event == "tool_call_delta"
+    payload = json.loads(event.data)
+    assert payload["tool_call_id"] == "call_1"
+    assert payload["arguments_delta"] == '{"title":"Pl'
+
+
 def test_tool_call_sse_carries_the_capability_purpose():
     """A capability provider's call is rendered by purpose, so the purpose
     must reach the client alongside the provider's name."""
@@ -92,6 +108,42 @@ def test_tool_call_sse_carries_the_capability_purpose():
     assert tools[0]["purpose"] == "web_search"
     assert tools[0]["server_name"] == "GDM Safe Search"
     assert tools[1]["purpose"] is None
+
+
+@pytest.mark.parametrize(
+    "response_type",
+    [ResponseType.TOOL_CALL, ResponseType.TOOL_APPROVAL_REQUIRED],
+)
+def test_tool_sse_tells_the_client_which_server_is_eneos_own(response_type):
+    """An admin can name an external server "files", so the client cannot tell
+    Eneo's own tools from the name. The flag reaches it on tool calls and on
+    the approval request the user is asked to decide."""
+    event = to_sse_response(
+        Completion(
+            response_type=response_type,
+            approval_id=str(uuid4()),
+            tool_calls_metadata=[
+                ToolCallMetadata(
+                    server_name="files", tool_name="read_file", is_internal=True
+                ),
+                ToolCallMetadata(
+                    server_name="files", tool_name="echo", is_internal=False
+                ),
+                ToolCallMetadata(
+                    server_name="Ask a file",
+                    tool_name="query_table",
+                    is_internal=False,
+                    is_bundled=True,
+                ),
+            ],
+        ),
+        uuid4(),
+    )
+
+    tools = json.loads(event.data)["tools"]
+
+    assert [tool["is_internal"] for tool in tools] == [True, False, False]
+    assert [tool["is_bundled"] for tool in tools] == [None, None, True]
 
 
 def test_token_usage_sse_separates_turn_cost_from_context_headroom():

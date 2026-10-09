@@ -23,7 +23,6 @@ from eneo.authentication.auth_dependencies import (
     require_api_key_scope_check,
     require_file_delete_scope_guard,
     require_resource_permission_for_method,
-    require_session_auth,
 )
 from eneo.authentication.auth_models import ApiKeyPermission
 from eneo.authentication.federation_router import router as federation_router
@@ -388,15 +387,15 @@ router.include_router(
     dependencies=TENANT_ADMIN_API_KEY_GUARDS,
 )
 # Widget configuration decides what the public internet can reach, so the
-# editor/admin surface is session-only: a scoped API key must never be able
-# to open, retarget or re-origin a widget. The visitor surface below carries
-# its own token authentication and never resolves an Eneo user.
+# editor/admin surface is session-only (Authentication.SESSION on every
+# endpoint): a scoped API key must never be able to open, retarget or
+# re-origin a widget. The visitor surface below carries its own token
+# authentication and never resolves an Eneo user.
 router.include_router(
     space_widgets_router,
     prefix="/spaces",
     tags=["widgets"],
     dependencies=[
-        Depends(require_session_auth),
         Depends(require_resource_permission_for_method("spaces")),
         Depends(
             require_api_key_scope_check(resource_type="space", path_param="space_id")
@@ -407,7 +406,6 @@ router.include_router(
     widgets_router,
     prefix="/widgets",
     tags=["widgets"],
-    dependencies=[Depends(require_session_auth)],
 )
 router.include_router(public_widgets_router, prefix="/widgets", tags=["widgets"])
 router.include_router(
@@ -426,7 +424,6 @@ router.include_router(
     widget_templates_router,
     prefix="/widget-templates",
     tags=["widgets"],
-    dependencies=[Depends(require_session_auth)],
 )
 router.include_router(
     admin_widget_templates_router,
@@ -641,7 +638,6 @@ router.include_router(
     whats_new_router,
     prefix="/whats-new",
     tags=["whats-new"],
-    dependencies=[Depends(require_session_auth)],
 )
 router.include_router(
     sharepoint_webhook_router, prefix="/integrations", tags=["integrations"]

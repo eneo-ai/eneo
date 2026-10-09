@@ -139,6 +139,9 @@ class SSEReasoning(SSEBase):
 
 class SSEFiles(SSEBase):
     generated_files: list[FilePublic]
+    # The tool call that produced the file, when one did; history carries the
+    # same link as `generated_file_ids` on the tool call.
+    tool_call_id: Optional[str] = None
 
 
 class SSEEneoEvent(SSEBase):
@@ -151,6 +154,18 @@ class SSEToolCall(SSEBase):
     eneo_event_type: EneoEventType = EneoEventType.TOOL_CALL
     tools: list[ToolCallInfo]
     mcp_tool_references: list[McpToolReferencePublic] = []
+
+
+class SSEToolCallDelta(SSEBase):
+    """The next piece of a pending tool call's arguments, as raw JSON text.
+
+    Sent while the model writes the call, so a client can show what it will
+    do (the text of a document) before it runs. Signed reference tokens are
+    redacted. The complete arguments follow in the call's `tool_call` event.
+    """
+
+    tool_call_id: str
+    arguments_delta: str
 
 
 class ToolCallResultPublic(BaseModel):
@@ -239,6 +254,7 @@ SSE_MODELS = [
     SSEReasoning,
     SSEEneoEvent,
     SSEToolCall,
+    SSEToolCallDelta,
     SSEToolApprovalRequired,
     SSEToolApprovalTimeout,
     SSETokenUsage,

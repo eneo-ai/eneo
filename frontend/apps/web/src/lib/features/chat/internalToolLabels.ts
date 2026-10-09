@@ -10,7 +10,13 @@ import { getCapability, type CapabilityPurpose } from "$lib/features/mcp/capabil
 type ToolArgs = Record<string, unknown> | undefined;
 
 /** The parts of a tool call the display rules need. */
-type ToolCallLike = { server_name: string; purpose?: string | null };
+type ToolCallLike = {
+  server_name: string;
+  purpose?: string | null;
+  is_internal?: boolean | null;
+  /** Stamped by the backend for a server built into Eneo (the bundled tool runtime). */
+  is_bundled?: boolean | null;
+};
 
 type CatalogLabels = { title: () => string; description: () => string };
 
@@ -20,7 +26,9 @@ type CatalogLabels = { title: () => string; description: () => string };
  * are shown as-is; this mapping only overrides names Eneo itself ships, so
  * they follow the UI language instead of the server-side English titles.
  * Keyed by server name so an external server exposing a tool named e.g.
- * `search_knowledge` cannot pass itself off as built-in Eneo knowledge.
+ * `search_knowledge` cannot pass itself off as built-in Eneo knowledge. The
+ * name alone proves nothing either, since an admin can name an external
+ * server "files": look entries up through `internalServer`, never directly.
  */
 const INTERNAL_SERVERS: Record<
   string,
@@ -142,7 +150,19 @@ const CAPABILITY_STEPS: Record<
       return query ? m.tool_web_search_query_done({ query }) : m.tool_web_search_done();
     }
   },
-  image_generation: INTERNAL_SERVERS.image_generation.tools.generate_image
+  image_generation: INTERNAL_SERVERS.image_generation.tools.generate_image,
+  file_analysis: {
+    running: () => m.tool_file_analysis(),
+    done: () => m.tool_file_analysis_done()
+  },
+  charts: {
+    running: () => m.tool_charts(),
+    done: () => m.tool_charts_done()
+  },
+  file_creation: {
+    running: () => m.tool_file_creation(),
+    done: () => m.tool_file_creation_done()
+  }
 };
 
 function capabilityPurpose(purpose: string | null | undefined): CapabilityPurpose | null {
@@ -155,11 +175,34 @@ function capabilityPurpose(purpose: string | null | undefined): CapabilityPurpos
  * renders them with their own pill (SkillActivationStep); these helpers only
  * cover the labels shared with other built-in steps.
  */
-export const SKILLS_SERVER = "skills";
+const SKILLS_SERVER = "skills";
 
-/** Whether a server name refers to one of Eneo's built-in loopback servers. */
-export function isInternalServer(serverName: string): boolean {
-  return serverName === SKILLS_SERVER || serverName in INTERNAL_SERVERS;
+/**
+ * Whether a tool call ran on Eneo's own server of that name. The backend
+ * stamps `is_internal` from the server the call was routed to, so an external
+ * server an admin named "files", "knowledge" or "skills" does not borrow the
+ * built-in labels. Rows persisted before the flag existed carry none and fall
+ * back to the name.
+ */
+function isOwnServer(isInternal: boolean | null | undefined): boolean {
+  return isInternal !== false;
+}
+
+/** The built-in server a tool call ran on, or undefined for any other server. */
+function internalServer(serverName: string, isInternal?: boolean | null) {
+  return isOwnServer(isInternal) ? INTERNAL_SERVERS[serverName] : undefined;
+}
+
+/** Whether a tool call is a Skill activation step rather than a server named "skills". */
+export function isSkillActivation(call: ToolCallLike): boolean {
+  return call.server_name === SKILLS_SERVER && isOwnServer(call.is_internal);
+}
+
+/** Whether a tool call ran on one of Eneo's built-in loopback servers. */
+export function isInternalToolCall(call: ToolCallLike): boolean {
+  return (
+    isSkillActivation(call) || internalServer(call.server_name, call.is_internal) !== undefined
+  );
 }
 
 /**
@@ -169,7 +212,7 @@ export function isInternalServer(serverName: string): boolean {
  * persisted before `purpose` existed fall back to the server name alone.
  */
 export function isBuiltinToolCall(call: ToolCallLike): boolean {
-  return capabilityPurpose(call.purpose) !== null || isInternalServer(call.server_name);
+  return capabilityPurpose(call.purpose) !== null || isInternalToolCall(call);
 }
 
 /**
@@ -180,9 +223,10 @@ export function internalToolDoneLabel(
   toolName: string,
   serverName: string,
   args?: ToolArgs,
-  purpose?: string | null
+  purpose?: string | null,
+  isInternal?: boolean | null
 ): string | null {
-  const internal = INTERNAL_SERVERS[serverName]?.tools[toolName]?.done(args);
+  const internal = internalServer(serverName, isInternal)?.tools[toolName]?.done(args);
   if (internal) return internal;
   const capability = capabilityPurpose(purpose);
   return capability ? CAPABILITY_STEPS[capability].done(args) : null;
@@ -198,12 +242,13 @@ export function toolDisplayName(
   serverName: string,
   title?: string | null,
   args?: ToolArgs,
-  purpose?: string | null
+  purpose?: string | null,
+  isInternal?: boolean | null
 ): string {
-  if (serverName === SKILLS_SERVER) {
+  if (isSkillActivation({ server_name: serverName, is_internal: isInternal })) {
     return m.tool_activate_skill({ name: title ?? toolName });
   }
-  const internal = INTERNAL_SERVERS[serverName]?.tools[toolName]?.running(args);
+  const internal = internalServer(serverName, isInternal)?.tools[toolName]?.running(args);
   if (internal) return internal;
   const capability = capabilityPurpose(purpose);
   if (capability) return CAPABILITY_STEPS[capability].running(args);
@@ -214,9 +259,13 @@ export function toolDisplayName(
  * Display name for the server line under a tool call: Eneo's own servers and
  * capabilities by their localized name, external general servers by name.
  */
-export function serverDisplayName(serverName: string, purpose?: string | null): string {
-  if (serverName === SKILLS_SERVER) return m.skills();
-  const internal = INTERNAL_SERVERS[serverName]?.label();
+export function serverDisplayName(
+  serverName: string,
+  purpose?: string | null,
+  isInternal?: boolean | null
+): string {
+  if (isSkillActivation({ server_name: serverName, is_internal: isInternal })) return m.skills();
+  const internal = internalServer(serverName, isInternal)?.label();
   if (internal) return internal;
   const capability = capabilityPurpose(purpose);
   return capability ? (getCapability(capability)?.label() ?? serverName) : serverName;
@@ -225,12 +274,16 @@ export function serverDisplayName(serverName: string, purpose?: string | null): 
 /**
  * The provider's own name for a capability call served by an external
  * provider ("GDM Safe Search"), shown as the step's detail so the source
- * stays visible; null for Eneo's own servers and general tools.
+ * stays visible; null for Eneo's own servers (loopback or built in), and
+ * for general tools.
  */
 export function capabilityProviderDetail(call: ToolCallLike): string | null {
-  if (capabilityPurpose(call.purpose) === null || isInternalServer(call.server_name)) {
+  if (capabilityPurpose(call.purpose) === null || isInternalToolCall(call)) {
     return null;
   }
+  // A provider built into Eneo is Eneo's own, like the loopback servers: the
+  // step label already says what happened, so no provider is named.
+  if (call.is_bundled) return null;
   return call.server_name;
 }
 
@@ -245,9 +298,10 @@ const FILE_DOWNLOAD_PATH = /\/api\/v1\/files\/([0-9a-fA-F-]{36})\/original\/down
 export function internalReadFileId(
   serverName: string,
   toolName: string,
-  args?: Record<string, unknown>
+  args?: Record<string, unknown>,
+  isInternal?: boolean | null
 ): string | null {
-  if (serverName !== "files" || toolName !== "read_file") return null;
+  if (serverName !== "files" || toolName !== "read_file" || !isOwnServer(isInternal)) return null;
   const url = args?.url;
   if (typeof url !== "string") return null;
   try {

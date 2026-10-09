@@ -41,7 +41,7 @@ from eneo.database.tables.org_space_assistant_roles_table import (
 from eneo.database.tables.prompts_table import Prompts, PromptsAssistants
 from eneo.database.tables.spaces_table import Spaces
 from eneo.database.tables.users_table import Users
-from eneo.database.tables.websites_table import CrawlRuns, Websites
+from eneo.database.tables.websites_table import Websites
 from eneo.files.file_content_loader import FileAttachmentGroup, FileContentLoader
 from eneo.files.file_models import File, FileMetadata, FileType
 from eneo.files.file_repo import FileRepository
@@ -369,9 +369,9 @@ class AssistantRepository:
         return [
             selectinload(Assistants.user).selectinload(Users.tenant),
             selectinload(Assistants.user).selectinload(Users.roles),
-            selectinload(Assistants.websites)
-            .selectinload(Websites.latest_crawl)  # type: ignore[attr-defined]
-            .selectinload(CrawlRuns.job),
+            selectinload(Assistants.websites).selectinload(
+                Websites.latest_crawl  # type: ignore[attr-defined]
+            ),
             selectinload(Assistants.websites).selectinload(Websites.embedding_model),
             selectinload(Assistants.attachments).selectinload(AssistantsFiles.file),
             selectinload(Assistants.template).selectinload(
@@ -457,8 +457,12 @@ class AssistantRepository:
         return await self.session.scalar(stmt)
 
     async def _set_attachments(
-        self, assistant_in_db: Assistants, attachments: list[File]
+        self,
+        assistant_in_db: Assistants,
+        attachments: list[File],
+        inline_text_by_id: Mapping[UUID, bool] | None = None,
     ):
+        inline_text_by_id = inline_text_by_id or {}
         # Delete all
         stmt = sa.delete(AssistantsFiles).where(
             AssistantsFiles.assistant_id == assistant_in_db.id
@@ -468,7 +472,11 @@ class AssistantRepository:
         # Add attachments
         if attachments:
             attachments_dicts = [
-                dict(assistant_id=assistant_in_db.id, file_id=file.id)
+                dict(
+                    assistant_id=assistant_in_db.id,
+                    file_id=file.id,
+                    inline_text=inline_text_by_id.get(file.id, True),
+                )
                 for file in attachments
             ]
 
@@ -718,7 +726,11 @@ class AssistantRepository:
         # Assign groups and websites
         await self._set_collections(entry_in_db, assistant.collections)
         await self._set_websites(entry_in_db, assistant.websites)
-        await self._set_attachments(entry_in_db, attachments=assistant.attachments)
+        await self._set_attachments(
+            entry_in_db,
+            attachments=assistant.attachments,
+            inline_text_by_id=assistant.attachment_inline_text,
+        )
 
         if assistant.prompt:
             await self._add_prompt(assistant_id=entry_in_db.id, prompt=assistant.prompt)
@@ -1026,7 +1038,11 @@ class AssistantRepository:
         await self._set_integration_knowledge(
             entry_in_db, assistant.integration_knowledge_list
         )
-        await self._set_attachments(entry_in_db, assistant.attachments)
+        await self._set_attachments(
+            entry_in_db,
+            attachments=assistant.attachments,
+            inline_text_by_id=assistant.attachment_inline_text,
+        )
 
         # Set MCP servers/tool overrides explicitly when provided by caller.
         # Backward-compatible fallback to legacy side-channel attributes.

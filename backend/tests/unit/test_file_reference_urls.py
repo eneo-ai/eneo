@@ -7,6 +7,7 @@ object-content subsystem; these tests only exercise the reference surface.
 """
 
 import json
+import time
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock
 from uuid import UUID, uuid4
@@ -40,6 +41,7 @@ from eneo.files.file_reference import (
     url_only_file_ids,
 )
 from eneo.files.file_service import FileService
+from eneo.files.model_file_references import file_handle
 from eneo.main.exceptions import UnauthorizedException
 
 
@@ -48,7 +50,7 @@ class TestSignedTokenTenantClaim:
         file_id, tenant_id = uuid4(), uuid4()
         token = generate_signed_token(
             file_id=file_id,
-            expires_at=2_000_000_000,
+            expires_at=int(time.time()) + 60,
             content_disposition=ContentDisposition.ATTACHMENT,
             tenant_id=tenant_id,
         )
@@ -60,7 +62,7 @@ class TestSignedTokenTenantClaim:
         file_id, tenant_id = uuid4(), uuid4()
         token = generate_file_original_download_token(
             file_id=file_id,
-            expires_at=2_000_000_000,
+            expires_at=int(time.time()) + 60,
             content_disposition=ContentDisposition.ATTACHMENT,
             tenant_id=tenant_id,
         )
@@ -71,7 +73,7 @@ class TestSignedTokenTenantClaim:
     def test_tampered_tenant_is_rejected(self):
         token = generate_signed_token(
             file_id=uuid4(),
-            expires_at=2_000_000_000,
+            expires_at=int(time.time()) + 60,
             content_disposition=ContentDisposition.ATTACHMENT,
             tenant_id=uuid4(),
         )
@@ -117,6 +119,7 @@ class TestBuildSignedOriginalDownloadUrl:
             file_id=uuid4(),
             base_url="https://eneo.example.se",
             expires_in=10 * FILE_ORIGINAL_SIGNED_URL_MAXIMUM_EXPIRY_SECONDS,
+            tenant_id=uuid4(),
         )
         payload = verify_file_original_download_token(url.split("token=")[1])
         assert payload is not None
@@ -141,8 +144,9 @@ class TestFileReferencesString:
         with_url, without_url = uuid4(), uuid4()
         files = [self._file(with_url), self._file(without_url)]
         block = build_file_references_string(files, {with_url: "https://x/dl"})
-        assert "https://x/dl" in block
-        assert block.count('"url":') == 1
+        assert file_handle(with_url) in block
+        assert "https://x/dl" not in block
+        assert block.count('"file_ref":') == 1
 
     def test_empty_when_no_file_in_map(self):
         assert build_file_references_string([self._file(uuid4())], {}) == ""
@@ -154,7 +158,7 @@ class TestFileReferencesString:
         # (ATTACHED_FILE_REFERENCES_INSTRUCTION), stated once per request.
         fid = uuid4()
         block = build_file_references_string([self._file(fid)], {fid: "https://x/dl"})
-        assert "signed file reference" in block
+        assert "file_ref" in block
         assert "raw bytes are NOT in this prompt" in block
         assert "read_file" not in block
         assert "re-upload" not in block
@@ -180,7 +184,8 @@ class TestInlineFileTextToggle:
             inline_file_text=True,
         )
         assert "row1,row2" in out  # extracted text inlined
-        assert "https://x/dl" in out  # plus the fetchable URL
+        assert file_handle(fid) in out
+        assert "https://x/dl" not in out
 
     def test_inline_off_drops_text_for_referenced_file(self):
         fid = uuid4()
@@ -191,7 +196,8 @@ class TestInlineFileTextToggle:
             inline_file_text=False,
         )
         assert "huge-csv-body" not in out  # text kept out of the context window
-        assert "https://x/dl" in out  # only the URL is surfaced
+        assert file_handle(fid) in out
+        assert "https://x/dl" not in out
 
     def test_inline_off_still_inlines_file_without_url(self):
         with_url, without_url = uuid4(), uuid4()
@@ -332,7 +338,11 @@ class TestSendPathUrlOnlyFiltering:
             service,
             files=[stored_parent, plain_parent],
             session=SimpleNamespace(questions=[]),
-            assistant=SimpleNamespace(attachments=[], inline_file_text=False),
+            assistant=SimpleNamespace(
+                attachments=[],
+                inline_file_text=False,
+                url_only_attachment_ids=lambda model: set(),
+            ),
             completion_model=SimpleNamespace(vision=True),
         )
 
@@ -390,7 +400,11 @@ class TestSendPathUrlOnlyFiltering:
 
         await AssistantService._assert_message_attachments_fit(
             service,
-            assistant=SimpleNamespace(attachments=[], inline_file_text=False),
+            assistant=SimpleNamespace(
+                attachments=[],
+                inline_file_text=False,
+                url_only_attachment_ids=lambda model: set(),
+            ),
             model=SimpleNamespace(vision=True, max_input_tokens=100_000, name="gpt-4o"),
             prompt_text="prompt",
             files=[stored, plain],
@@ -568,9 +582,9 @@ class TestImageReferenceRendering:
             {image_id: "https://x/i", doc_id: "https://x/d"},
         )
         lines = [json.loads(line) for line in block.split("\n\n", 1)[1].splitlines()]
-        assert [(entry["kind"], entry["url"]) for entry in lines] == [
-            ("image", "https://x/i"),
-            ("document", "https://x/d"),
+        assert [(entry["kind"], entry["file_ref"]) for entry in lines] == [
+            ("image", file_handle(image_id)),
+            ("document", file_handle(doc_id)),
         ]
 
     def test_image_gets_a_reference_entry_but_no_inline_text(self):
@@ -581,13 +595,14 @@ class TestImageReferenceRendering:
             file_reference_urls={image_id: "https://x/i"},
         )
         assert '"kind": "image"' in out
-        assert "https://x/i" in out
+        assert file_handle(image_id) in out
+        assert "https://x/i" not in out
         assert out.endswith("make it blue")
         # Images carry no text to inline; the reference block is the only addition.
         assert out.count("photo.png") == 1
 
 
-class TestGeneratedImageMintAudit:
+class TestGeneratedFileMintAudit:
     async def test_previous_turn_generated_images_are_audited_once(self, monkeypatch):
         _enable_file_references(monkeypatch)
         audit_service = AsyncMock()
@@ -632,3 +647,155 @@ class TestGeneratedImageMintAudit:
             c.kwargs["entity_id"] for c in audit_service.log_async.await_args_list
         ]
         assert audited == [latest.id]
+
+
+def _content_file(
+    *,
+    file_type: FileType = FileType.TEXT,
+    name: str = "kontoplan.xlsx",
+    text: str = "konto 1910 kassa",
+    parent_file_id: UUID | None = None,
+    original_available: bool = True,
+):
+    from datetime import datetime, timezone
+
+    from eneo.files.file_models import File
+
+    now = datetime.now(timezone.utc)
+    return File(
+        id=uuid4(),
+        created_at=now,
+        updated_at=now,
+        name=name,
+        checksum="0",
+        size=len(text),
+        mimetype="text/plain" if file_type == FileType.TEXT else "image/png",
+        file_type=file_type,
+        text=text if file_type == FileType.TEXT else None,
+        blob=None if file_type == FileType.TEXT else b"",
+        user_id=uuid4(),
+        tenant_id=uuid4(),
+        parent_file_id=parent_file_id,
+        original_available=original_available,
+    )
+
+
+class TestUrlOnlyAttachmentIds:
+    """Persistent attachments carry a per-file mode instead of the toggle."""
+
+    def test_only_open_with_tool_attachments_with_original_are_url_only(
+        self, monkeypatch
+    ):
+        _enable_file_references(monkeypatch)
+        tool_file, prompt_file, legacy = (
+            _stub_file(),
+            _stub_file(),
+            _stub_file(original_available=False),
+        )
+        model = SimpleNamespace(supports_tool_calling=True)
+
+        result = file_reference_mod.url_only_attachment_ids(
+            [tool_file, prompt_file, legacy],
+            {tool_file.id: False, legacy.id: False},
+            model,
+        )
+
+        assert result == {tool_file.id}
+
+    def test_empty_for_model_without_tool_calling(self, monkeypatch):
+        _enable_file_references(monkeypatch)
+        tool_file = _stub_file()
+
+        result = file_reference_mod.url_only_attachment_ids(
+            [tool_file],
+            {tool_file.id: False},
+            SimpleNamespace(supports_tool_calling=False),
+        )
+
+        assert result == set()
+
+    def test_empty_without_base_url(self, monkeypatch):
+        _enable_file_references(monkeypatch, base_url=None)
+        tool_file = _stub_file()
+
+        result = file_reference_mod.url_only_attachment_ids(
+            [tool_file],
+            {tool_file.id: False},
+            SimpleNamespace(supports_tool_calling=True),
+        )
+
+        assert result == set()
+
+    def test_inlined_attachments_drop_url_only_files_and_their_pages(self):
+        tool_file, prompt_file = _stub_file(), _stub_file()
+        tool_page = _stub_file(file_type=FileType.IMAGE, parent_file_id=tool_file.id)
+        prompt_page = _stub_file(
+            file_type=FileType.IMAGE, parent_file_id=prompt_file.id
+        )
+
+        result = file_reference_mod.inlined_attachments(
+            [tool_file, prompt_file, tool_page, prompt_page], {tool_file.id}
+        )
+
+        assert result == [prompt_file, prompt_page]
+
+    def test_inlined_attachments_untouched_without_url_only_ids(self):
+        files = [_stub_file(), _stub_file()]
+
+        assert file_reference_mod.inlined_attachments(files, set()) == files
+
+
+class TestAssistantAttachmentReferences:
+    """URL-only attachments render on the current message, not in the prompt."""
+
+    def _context(self, prompt_files, url_only_ids, urls):
+        return ContextBuilder().build_context(
+            input_str="vilket konto?",
+            max_tokens=100_000,
+            model_name="gpt-4o",
+            prompt="Du är en ekonomiassistent.",
+            prompt_files=prompt_files,
+            file_reference_urls=urls,
+            url_only_prompt_file_ids=url_only_ids,
+        )
+
+    def test_url_only_attachment_text_leaves_the_prompt_for_a_reference(self):
+        kontoplan = _content_file(text="konto 1910 kassa")
+        guide = _content_file(name="guide.md", text="skriv kortfattat")
+        urls = {kontoplan.id: "https://x/dl/kontoplan"}
+
+        context = self._context([kontoplan, guide], {kontoplan.id}, urls)
+
+        assert "konto 1910 kassa" not in context.prompt
+        assert "skriv kortfattat" in context.prompt
+        assert "attached to this assistant by its author" in context.prompt
+        assert "Files attached to this assistant by its author" in context.input
+        assert file_handle(kontoplan.id) in context.input
+        assert urls[kontoplan.id] not in context.input
+        assert "vilket konto?" in context.input
+
+    def test_no_reference_block_without_url_only_attachments(self):
+        kontoplan = _content_file(text="konto 1910 kassa")
+
+        context = self._context([kontoplan], set(), {})
+
+        assert "konto 1910 kassa" in context.prompt
+        assert "attached to this assistant" not in context.input
+
+    def test_reference_block_is_counted_in_the_token_budget(self):
+        kontoplan = _content_file(text="x")
+        urls = {kontoplan.id: "https://x/dl/kontoplan"}
+
+        with_block = self._context([kontoplan], {kontoplan.id}, urls)
+        without_block = self._context([kontoplan], set(), {})
+
+        assert with_block.token_count > without_block.token_count
+
+    def test_pages_rendered_from_url_only_attachment_are_not_sent(self):
+        kontoplan = _content_file()
+        page = _content_file(file_type=FileType.IMAGE, parent_file_id=kontoplan.id)
+        urls = {kontoplan.id: "https://x/dl/kontoplan"}
+
+        context = self._context([kontoplan, page], {kontoplan.id}, urls)
+
+        assert context.images == []

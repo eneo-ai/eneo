@@ -1,6 +1,7 @@
 import base64
 import binascii
-from datetime import datetime, timedelta, timezone
+from collections.abc import Mapping
+from datetime import datetime, timezone
 from enum import Enum
 from typing import TYPE_CHECKING, Literal, Optional
 from uuid import UUID
@@ -16,7 +17,6 @@ from pydantic import (
 )
 
 from eneo.audit.domain.actor_types import ActorType
-from eneo.main.config import get_settings
 from eneo.widgets.domain.visitor import WidgetVisitorContext
 
 if TYPE_CHECKING:
@@ -38,28 +38,27 @@ class ScopedMcpClaims(BaseModel):
 
 
 class JWTMeta(BaseModel):
-    iss: str = get_settings().jwt_issuer  # who issued it
-    aud: str = get_settings().jwt_audience  # who it's intended for
-    iat: float = datetime.timestamp(datetime.now(timezone.utc))  # issued at time
-    exp: float = datetime.timestamp(
-        datetime.now(timezone.utc) + timedelta(minutes=get_settings().jwt_expiry_time)
-    )  # expiry time
+    # Received tokens must carry their own metadata; never invent missing claims.
+    iss: str
+    aud: str
+    iat: float
+    exp: float
 
 
 class JWTCreds(BaseModel):
-    """How we'll identify users"""
+    """Immutable Eneo session identity, shared by API, MCP and module tokens."""
 
+    token_version: Literal[2]
+    user_id: UUID
+    tenant_id: UUID
+    credential_version: int = Field(ge=0, strict=True)
+    # Retained as descriptive claims for clients; never used to resolve a user.
     sub: EmailStr
     username: Optional[str] = None
-    # Missing claims decode as version 0 for rolling compatibility with tokens
-    # minted before credential-version based session invalidation existed.
-    credential_version: int = Field(default=0, ge=0)
 
 
 class JWTPayload(JWTMeta, JWTCreds):
-    """
-    JWT Payload right before it's encoded - combine meta and username
-    """
+    """Verified Eneo session claims, including the required identity version."""
 
     pass
 
@@ -714,6 +713,39 @@ class ApiKeyUsageResponse(BaseModel):
     items: list[ApiKeyUsageEvent]
     limit: int
     next_cursor: Optional[datetime] = None
+
+
+class FederatedIdentity(BaseModel):
+    """Email identity extracted only after the OIDC token has been validated."""
+
+    model_config = ConfigDict(frozen=True)
+
+    email: EmailStr
+    email_verified: bool = Field(strict=True)
+
+    @classmethod
+    def from_claims(
+        cls, claims: Mapping[str, object], email_claim: str = "email"
+    ) -> "FederatedIdentity":
+        email = claims.get(email_claim)
+        if not isinstance(email, str) or not email:
+            raise ValueError("Email claim not found in ID token")
+        if email_claim == "email" and claims.get("email_verified") is False:
+            raise ValueError("Email is not verified by the identity provider")
+        try:
+            return cls(
+                email=email,
+                # The standard verification claim verifies the standard email,
+                # not an unrelated address selected by a custom claims mapping.
+                email_verified=(
+                    claims.get("email_verified") is True
+                    and claims.get("email") == email
+                ),
+            )
+        except ValueError as exc:
+            raise ValueError(
+                "Email claim from identity provider is invalid. Contact your administrator."
+            ) from exc
 
 
 class OpenIdConnectLogin(BaseModel):

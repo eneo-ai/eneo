@@ -1,0 +1,48 @@
+{
+  "name": "@eneo/tool-runtime",
+  "version": "0.1.0",
+  "private": true,
+  "license": "MIT",
+  "type": "module",
+  "packageManager": "bun@1.3.14",
+  "scripts": {
+    "start": "bun src/main.ts",
+    "dev": "bun run build:views && bun --watch src/main.ts",
+    "build:views": "bun scripts/build-views.ts",
+    "typecheck": "tsc --noEmit",
+    "build:landrun": "docker run --rm -v \"$PWD/bin:/out\" -e CGO_ENABLED=0 -e GOBIN=/out golang:1.27-bookworm go install github.com/zouuup/landrun/cmd/landrun@v0.1.17",
+    "test": "bun run build:views && bun test tests --timeout 30000"
+  },
+  "dependencies": {
+    "@duckdb/node-api": "1.5.2-r.1",
+    "@jitl/quickjs-ng-wasmfile-release-sync": "0.32.0",
+    "@modelcontextprotocol/sdk": "1.31.0",
+    "@resvg/resvg-js": "^2.6.2",
+    "docx": "^9.7.1",
+    "echarts": "6.1.0",
+    "exceljs": "4.4.0",
+    "ipaddr.js": "^2.5.0",
+    "jszip": "^3.10.2",
+    "saxes": "5.0.1",
+    "marked": "^18.0.13",
+    "pdfkit": "^0.20.2",
+    "quickjs-emscripten-core": "0.32.0",
+    "zod": "^4.6.5"
+  },
+  "devDependencies": {
+    "@astryxdesign/core": "0.6.4",
+    "@astryxdesign/theme-neutral": "0.6.4",
+    "@modelcontextprotocol/ext-apps": "2.0.3",
+    "@stylexjs/stylex": "0.19.1",
+    "@types/bun": "1.3.14",
+    "@types/pdfkit": "^0.17.3",
+    "@types/react": "19.3.0",
+    "@types/react-dom": "19.3.0",
+    "@vitejs/plugin-react": "6.1.1",
+    "react": "19.3.0",
+    "react-dom": "19.3.0",
+    "typescript": "6.0.3",
+    "vite": "8.3.2",
+    "vite-plugin-singlefile": "2.3.3"
+  }
+}

@@ -73,7 +73,7 @@ class StubExtractor:
     def __init__(self, result: str | Exception):
         self.result = result
 
-    def extract(
+    async def extract_bounded(
         self, filepath: Path, mimetype: str, filename: str | None = None
     ) -> str:
         if isinstance(self.result, Exception):
@@ -362,7 +362,7 @@ async def test_upload_failure_preserves_committed_prior_knowledge(
         monkeypatch.setattr(
             Datastore,
             "_chunk_text",
-            lambda self, info_blob: (_ for _ in ()).throw(
+            lambda self, info_blob, embedding_model: (_ for _ in ()).throw(
                 RuntimeError("chunking failed")
             ),
         )

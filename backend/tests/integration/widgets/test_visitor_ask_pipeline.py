@@ -20,7 +20,7 @@ import sqlalchemy as sa
 
 from eneo.ai_models.completion_models.completion_model import (
     Completion,
-    GeneratedImage,
+    GeneratedFile,
     McpToolReference,
     ResponseType,
     TokenUsage,
@@ -224,6 +224,11 @@ async def visitor_pipeline(
         return await original_get_response(self, **kwargs)
 
     class _Proxy:
+        def allow_file_references(self, file_ids: object) -> None:
+            # The completion layer registers the files it minted links for;
+            # a visitor turn has none.
+            return None
+
         async def prepare_tools_for_context(self) -> None:
             return None
 
@@ -302,7 +307,7 @@ async def visitor_pipeline(
             )
             yield Completion(
                 response_type=ResponseType.FILES,
-                image=GeneratedImage(
+                image=GeneratedFile(
                     data=b"\x89PNG\r\n\x1a\n",
                     mime_type="image/png",
                     tool_call_id="call_1",

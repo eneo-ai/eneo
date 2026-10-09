@@ -1,0 +1,12 @@
+# Explicit opt-out: compose with the standard deployment file.
+services:
+  tool-runtime:
+    profiles: [disabled-tool-runtime]
+  backend:
+    environment:
+      TOOL_RUNTIME_URL: ""
+      TOOL_RUNTIME_TOKEN: ""
+  worker:
+    environment:
+      TOOL_RUNTIME_URL: ""
+      TOOL_RUNTIME_TOKEN: ""

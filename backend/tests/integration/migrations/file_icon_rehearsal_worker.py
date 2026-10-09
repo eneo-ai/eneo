@@ -1,8 +1,8 @@
-"""The File/Icon backfill worker process for the bridge rehearsal.
+"""Run only the File/Icon backfill in the rehearsal subprocess.
 
-Kept apart from the rehearsal test module, whose imports load the whole
-application. The rehearsal's RSS ceiling is meant for the backfill worker,
-not for every router and feature package the test itself needs.
+The parent integration test imports API and test infrastructure that the
+backfill does not need. Keeping this entry point separate makes its RSS
+measurement reflect the worker rather than that test harness.
 """
 
 from __future__ import annotations
@@ -25,7 +25,24 @@ from eneo.object_content.file_icon_backfill import (
 )
 
 
-async def _worker_main():
+def _peak_rss_bytes() -> int:
+    if sys.platform == "linux":
+        # Linux preserves ru_maxrss across execve, including the pytest parent's
+        # peak. VmHWM belongs to this worker's new address space after execve.
+        for line in Path("/proc/self/status").read_text().splitlines():
+            fields = line.split()
+            if fields and fields[0] == "VmHWM:":
+                if len(fields) != 3 or fields[2] != "kB":
+                    raise ValueError(f"Unexpected VmHWM format: {line}")
+                return int(fields[1]) * 1024
+        raise RuntimeError("VmHWM is missing from /proc/self/status")
+
+    units = 1 if sys.platform == "darwin" else 1024
+    return int(resource.getrusage(resource.RUSAGE_SELF).ru_maxrss * units)
+
+
+async def _worker_main() -> None:
+    rss_after_imports = _peak_rss_bytes()
     database = DatabaseSessionManager()
     database.init(os.environ["ENEO_REHEARSAL_CHILD_DATABASE"])
     worker = FileIconBackfill(
@@ -35,14 +52,18 @@ async def _worker_main():
         ObjectContentService(ObjectContentCoreSettings(_env_file=None), database),
         database,
     )
+    rss_after_init = _peak_rss_bytes()
     started = time.perf_counter()
     runs = 0
     active_seconds = 0.0
+    rss_after_first_run: int | None = None
     try:
         async with asyncio.timeout(240):
             while True:
                 batch_started = time.perf_counter()
                 result = await worker.run_once()
+                if rss_after_first_run is None:
+                    rss_after_first_run = _peak_rss_bytes()
                 active_seconds += time.perf_counter() - batch_started
                 runs += 1
                 if result.state is FileIconBackfillState.COMPLETE:
@@ -57,8 +78,12 @@ async def _worker_main():
                     "elapsed_seconds": time.perf_counter() - started,
                     "active_seconds": active_seconds,
                     "schedule": "repeated run_once with 50 ms gaps; production minute cron not exercised",
-                    "max_rss_bytes": int(
-                        usage.ru_maxrss * (1 if sys.platform == "darwin" else 1024)
+                    "rss_after_imports_bytes": rss_after_imports,
+                    "rss_after_init_bytes": rss_after_init,
+                    "rss_after_first_run_bytes": rss_after_first_run,
+                    "max_rss_bytes": _peak_rss_bytes(),
+                    "rss_measurement": (
+                        "procfs_vmhwm" if sys.platform == "linux" else "getrusage"
                     ),
                     "cpu_seconds": usage.ru_utime + usage.ru_stime,
                     "application_loaded": "eneo.main.container.container"

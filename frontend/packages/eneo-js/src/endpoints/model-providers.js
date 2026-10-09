@@ -45,6 +45,7 @@ export function initModelProviders(client) {
      * @param {{[key: string]: unknown}} provider.credentials Provider credentials
      * @param {{[key: string]: unknown}} [provider.config] Provider configuration
      * @param {boolean} [provider.is_active] Whether provider is active
+     * @param {import('../types/resources').OutboundHeaderInput[]} [provider.outbound_headers] Outbound HTTP headers
      * @throws {EneoError}
      * */
     create: async (provider) => {
@@ -66,6 +67,9 @@ export function initModelProviders(client) {
      * @param {{[key: string]: unknown}} [update.credentials]
      * @param {{[key: string]: unknown}} [update.config]
      * @param {boolean} [update.is_active]
+     * @param {import('../types/resources').OutboundHeaderInput[]} [update.outbound_headers]
+     *   Replaces the configured headers. An entry with an `id` and no `value`
+     *   keeps its stored value; a stored header whose `id` is absent is deleted.
      * @throws {EneoError}
      * */
     update: async ({ id }, update) => {
@@ -221,6 +225,43 @@ export function initModelProviders(client) {
         method: "post",
         params: { path: { provider_id: id } }
       });
+
+      return res;
+    },
+
+    /**
+     * Metadata for the outbound header editor: the dynamic values a header
+     * value may use, and the provider types that support outbound headers.
+     * @returns {Promise<import('../types/resources').OutboundHeaderOptions>}
+     * @throws {EneoError}
+     * */
+    getOutboundHeaderOptions: async () => {
+      const res = await client.fetch("/api/v1/admin/model-providers/outbound-headers/options/", {
+        method: "get"
+      });
+
+      return res;
+    },
+
+    /**
+     * Resolve a provider's outbound headers for a user in the tenant, without
+     * sending anything. A secret header returns its state only.
+     * @param {{id: string}} provider
+     * @param {{userId: string}} body
+     * @returns {Promise<import('../types/resources').OutboundHeaderPreview>}
+     * @throws {EneoError}
+     * */
+    previewOutboundHeaders: async ({ id }, { userId }) => {
+      const res = await client.fetch(
+        "/api/v1/admin/model-providers/{provider_id}/outbound-headers/preview/",
+        {
+          method: "post",
+          params: { path: { provider_id: id } },
+          requestBody: {
+            "application/json": { user_id: userId }
+          }
+        }
+      );
 
       return res;
     }

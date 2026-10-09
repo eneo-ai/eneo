@@ -90,6 +90,9 @@ class TestCategoryMappings:
             ActionType.MODULE_ADDED_TO_TENANT,
             ActionType.MODULE_REMOVED_FROM_TENANT,
             ActionType.MODULE_CLIENT_CONFIG_UPDATED,
+            ActionType.MODEL_PROVIDER_HEADERS_UPDATED,
+            ActionType.MODEL_PROVIDER_DESTINATION_CHANGED,
+            ActionType.MODEL_PROVIDER_HEADERS_PREVIEWED,
         ]
 
         for action_type in admin_action_types:
@@ -156,8 +159,8 @@ class TestCategoryMappings:
             for action, cat in CATEGORY_MAPPINGS.items()
             if cat == "integration_events"
         ]
-        assert len(integration_actions) == 19, (
-            f"Expected 19 integration events, got {len(integration_actions)}"
+        assert len(integration_actions) == 22, (
+            f"Expected 22 integration events, got {len(integration_actions)}"
         )
 
     def test_mcp_events_mapping(self):

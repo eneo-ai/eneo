@@ -5,10 +5,12 @@ export const load: PageLoad = async (event) => {
   event.depends("admin:models:load");
   event.depends("admin:model-providers:load");
   const { eneo } = await event.parent();
-  const [mcpSettings, securityClassifications, providers] = await Promise.all([
+  const [mcpSettings, securityClassifications, providers, bundled] = await Promise.all([
     eneo.mcpServers.listSettings(),
     eneo.securityClassifications.list(),
-    eneo.modelProviders.list()
+    eneo.modelProviders.list(),
+    // Optional: an older backend without the bundled runtime lists nothing.
+    eneo.mcpServers.listBundled().catch(() => ({ items: [], count: 0 }))
   ]);
-  return { mcpSettings, securityClassifications, providers };
+  return { mcpSettings, securityClassifications, providers, bundled };
 };

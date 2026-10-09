@@ -11,7 +11,7 @@ from typing import Annotated, Any, Literal
 from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel, Field, field_validator
 
-from eneo.authentication.auth_dependencies import require_permission
+from eneo.authentication.endpoint_access import Authentication, endpoint_access
 from eneo.main.config import Settings, get_settings
 from eneo.main.container.container import Container
 from eneo.main.exceptions import NotFoundException
@@ -36,10 +36,7 @@ def check_feature_enabled(
 
 router = APIRouter(
     prefix="/credentials",
-    dependencies=[
-        Depends(check_feature_enabled),
-        Depends(require_permission(Permission.ADMIN)),
-    ],
+    dependencies=[Depends(check_feature_enabled)],
 )
 
 Provider = Literal[
@@ -117,6 +114,11 @@ class ListCredentialsResponse(BaseModel):
     "Tenant admin only. Provider-specific fields are validated.",
     responses=responses.get_responses([400, 403]),
 )
+@endpoint_access(
+    authentication=Authentication.USER,
+    authorization=Permission.ADMIN,
+    reason="Organization administration requires the admin permission.",
+)
 async def set_credential(
     provider: Provider,
     request: SetCredentialRequest,
@@ -153,6 +155,11 @@ async def set_credential(
     description="List all configured API credentials with masked keys and encryption status. "
     "Tenant admin only.",
     responses=responses.get_responses([403, 404]),
+)
+@endpoint_access(
+    authentication=Authentication.USER,
+    authorization=Permission.ADMIN,
+    reason="Organization administration requires the admin permission.",
 )
 async def list_credentials(
     container: Annotated[Container, Depends(get_container(with_user=True))],

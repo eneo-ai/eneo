@@ -39,6 +39,9 @@ class _AsyncChunkStream:
 
 
 class _FakeMCPProxy:
+    def model_result_text(self, text: str) -> str:
+        return text
+
     def __init__(self) -> None:
         self.calls: list[list[tuple[str, dict[str, object]]]] = []
 
@@ -57,6 +60,14 @@ class _FakeMCPProxy:
         if name == "server__lookup":
             return ("server", "lookup", "Lookup")
         return None
+
+    def is_internal_tool(self, name: str) -> bool:
+        del name
+        return False
+
+    def is_bundled_tool(self, name: str) -> bool:
+        del name
+        return False
 
     def get_tool_purpose(self, name: str) -> str | None:
         del name

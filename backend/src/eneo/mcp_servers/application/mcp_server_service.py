@@ -6,7 +6,6 @@ from uuid import UUID
 
 from sqlalchemy.exc import IntegrityError
 
-from eneo.main.config import get_settings
 from eneo.main.exceptions import (
     BadRequestException,
     NameCollisionException,
@@ -16,11 +15,14 @@ from eneo.main.exceptions import (
     UnauthorizedException,
 )
 from eneo.main.models import NOT_PROVIDED, NotProvided
+from eneo.mcp_servers.application.bundled_tools import forget_catalogs
 from eneo.mcp_servers.domain.entities.mcp_server import (
     AUDIENCE_EVERYONE,
     AUDIENCE_GROUPS,
     AUDIENCES,
     BUILTIN_PROVIDER_PURPOSES,
+    BUNDLED_AUTH_TYPE,
+    BUNDLED_TOOLS,
     DEFAULT_AUDIENCE_PRIORITY,
     GENERAL_PURPOSE,
     INTERNAL_AUTH_TYPE,
@@ -30,12 +32,17 @@ from eneo.mcp_servers.domain.entities.mcp_server import (
     MCPServer,
     MCPServerAudienceGroup,
     MCPServerTool,
+    bundled_tool_name,
     is_builtin_provider,
+    is_bundled_server,
     is_capability_purpose,
 )
 from eneo.mcp_servers.infrastructure.client.mcp_client import (
     MCPClient,
     MCPClientError,
+    bundled_endpoint,
+    endpoint_url,
+    loopback_endpoint,
 )
 from eneo.mcp_servers.infrastructure.identity_headers import build_identity_headers
 from eneo.model_providers.infrastructure.litellm_provider import (
@@ -139,6 +146,49 @@ class MCPServerCreateResult:
     server: MCPServer
     connection: ConnectionResult
     deactivated_server_ids: list[UUID] | None = None
+
+
+@dataclass
+class BundledTool:
+    """A server the bundled tool runtime offers, as seen by one tenant."""
+
+    tool: str
+    # The purpose the added server serves ("general" or a capability).
+    purpose: str
+    # The deployment configures the runtime (URL and token are both set).
+    available: bool
+    # The tenant's row for it, once an admin has added it.
+    mcp_server_id: UUID | None = None
+
+
+# Initial name and description of a bundled server when an admin adds it;
+# both are ordinary editable fields afterwards.
+BUNDLED_TOOL_NAMES: dict[str, str] = {
+    "compute": "Compute",
+    "charts": "Charts",
+    "file-analysis": "Ask a file",
+    "file-creation": "Create a file",
+}
+BUNDLED_TOOL_DESCRIPTIONS: dict[str, str] = {
+    "charts": (
+        "Creates interactive bar, line, pie and scatter charts, with PNG image "
+        "export, from inline values or a CSV/XLSX file in the conversation."
+    ),
+    "file-analysis": (
+        "Answers questions about attached files in an isolated sandbox: CSV "
+        "and Excel files are inspected and queried with DuckDB. Files are "
+        "fetched through short-lived signed links."
+    ),
+    "file-creation": (
+        "Creates Word (DOCX), PDF and Excel (XLSX) files in an isolated "
+        "sandbox, optionally from a Word template in the conversation. The "
+        "files are saved in the conversation."
+    ),
+    "compute": (
+        "Runs JavaScript over JSON in an isolated sandbox for exact "
+        "calculations. No network, files or state between calls."
+    ),
+}
 
 
 @dataclass
@@ -272,6 +322,13 @@ class MCPServerService:
                     "authenticates it with a scoped token."
                 )
             return
+        if is_bundled_server(http_auth_type):
+            if config:
+                raise BadRequestException(
+                    "A bundled server carries no credentials; Eneo authenticates "
+                    "it with the deployment's tool runtime token."
+                )
+            return
 
         token = (config or {}).get("token")
         if token is not None:
@@ -305,9 +362,33 @@ class MCPServerService:
 
     @staticmethod
     def builtin_provider_url(purpose: str) -> str:
-        """Loopback endpoint of the built-in provider for ``purpose``."""
-        base = get_settings().internal_mcp_base_url.rstrip("/")
-        return f"{base}/internal-mcp/{purpose}/mcp"
+        """Loopback endpoint of the built-in provider for ``purpose``.
+
+        Stored on the row for display only: connections resolve the endpoint
+        again each time (``endpoint_url``), so a changed
+        ``INTERNAL_MCP_BASE_URL`` takes effect without saving the provider.
+        """
+        return loopback_endpoint(purpose)
+
+    @staticmethod
+    def bundled_tool_url(tool: str) -> str | None:
+        """Endpoint of ``tool`` in the bundled tool runtime, if one is configured.
+
+        Stored on the row to name the tool it serves: connections resolve the
+        endpoint again each time (``endpoint_url``), so a changed
+        ``TOOL_RUNTIME_URL`` takes effect without adding the server again.
+        """
+        return bundled_endpoint(tool)
+
+    @staticmethod
+    def _bundled_tool_name(http_url: str) -> str | None:
+        return bundled_tool_name(http_url)
+
+    @classmethod
+    def _bundled_tool_of(cls, server: MCPServer) -> str | None:
+        if not is_bundled_server(server.http_auth_type):
+            return None
+        return cls._bundled_tool_name(server.http_url)
 
     async def _resolve_builtin_image_model(
         self, purpose: str, image_model_id: UUID | None
@@ -464,6 +545,14 @@ class MCPServerService:
             )
         elif not http_url:
             raise BadRequestException("http_url is required")
+        if is_bundled_server(http_auth_type):
+            # The runtime endpoint fixes the row's purpose and identity mode.
+            spec = BUNDLED_TOOLS.get(self._bundled_tool_name(str(http_url)) or "")
+            if spec is None or purpose != spec.purpose:
+                raise BadRequestException(
+                    "A bundled server serves its tool's own purpose"
+                )
+            forward_identity = spec.forward_identity
         http_url = str(http_url)
         user_groups = await self._resolve_audience(
             purpose, audience, list(user_group_ids or [])
@@ -547,6 +636,63 @@ class MCPServerService:
         )
 
     @validate_permissions(Permission.ADMIN)
+    async def list_bundled_tools(self) -> list[BundledTool]:
+        """The bundled runtime's tools and whether this tenant has added them."""
+        added = {
+            tool: server
+            for server in await self.repo.query(
+                tenant_id=self.user.tenant_id, http_auth_type=BUNDLED_AUTH_TYPE
+            )
+            if (tool := self._bundled_tool_of(server)) is not None
+            and server.purpose == BUNDLED_TOOLS[tool].purpose
+        }
+        return [
+            BundledTool(
+                tool=tool,
+                purpose=spec.purpose,
+                available=self.bundled_tool_url(tool) is not None,
+                mcp_server_id=added[tool].id if tool in added else None,
+            )
+            for tool, spec in BUNDLED_TOOLS.items()
+        ]
+
+    @validate_permissions(Permission.ADMIN)
+    async def create_bundled_mcp_server(
+        self, tool: str, activate: bool = False
+    ) -> MCPServerCreateResult:
+        """Add one of the bundled tool runtime's servers to this tenant.
+
+        The row is an ordinary server: it goes through the same connection
+        test and tool discovery as any other. A general server is then enabled
+        per space like any other; a capability provider is saved inactive
+        unless ``activate`` switches it in as the tenant's default. Only its
+        URL and credential come from the deployment instead of the admin.
+        """
+        if tool not in BUNDLED_TOOLS:
+            raise NotFoundException(f"Unknown bundled tool '{tool}'")
+        url = self.bundled_tool_url(tool)
+        if url is None:
+            raise BadRequestException(
+                "The bundled tool runtime is not configured for this deployment"
+            )
+        if any(
+            self._bundled_tool_of(server) == tool
+            and server.purpose == BUNDLED_TOOLS[tool].purpose
+            for server in await self.repo.query(
+                tenant_id=self.user.tenant_id, http_auth_type=BUNDLED_AUTH_TYPE
+            )
+        ):
+            raise NameCollisionException(f"The bundled '{tool}' server already exists")
+        return await self.create_mcp_server(
+            name=BUNDLED_TOOL_NAMES[tool],
+            http_url=url,
+            http_auth_type=BUNDLED_AUTH_TYPE,
+            purpose=BUNDLED_TOOLS[tool].purpose,
+            description=BUNDLED_TOOL_DESCRIPTIONS[tool],
+            activate=activate,
+        )
+
+    @validate_permissions(Permission.ADMIN)
     async def update_mcp_server(
         self,
         mcp_server_id: UUID,
@@ -590,6 +736,29 @@ class MCPServerService:
         active is rejected by the activation index.
         """
         mcp_server = await self._get_server_for_tenant(mcp_server_id)
+        if is_bundled_server(http_auth_type) and not is_bundled_server(
+            mcp_server.http_auth_type
+        ):
+            raise BadRequestException(
+                "Bundled servers are added from the bundled tool runtime"
+            )
+        if is_bundled_server(mcp_server.http_auth_type) and (
+            (http_url is not None and str(http_url) != mcp_server.http_url)
+            or (
+                http_auth_type is not None
+                and http_auth_type != mcp_server.http_auth_type
+            )
+            or http_auth_config_schema is not None
+            or (
+                forward_identity is not None
+                and forward_identity != mcp_server.forward_identity
+            )
+            or (purpose is not None and purpose != mcp_server.purpose)
+        ):
+            raise BadRequestException(
+                "A bundled server's connection is managed by the deployment; "
+                "only its name, description, limits and tools can change"
+            )
         # Track whether connection-affecting fields are actually changing
         url_changed = http_url is not None and str(http_url) != mcp_server.http_url
         auth_type_changed = (
@@ -751,7 +920,11 @@ class MCPServerService:
             or credentials_changed
             or identity_mode_changed
         ):
-            if mcp_server.http_auth_type in ("none", INTERNAL_AUTH_TYPE):
+            if mcp_server.http_auth_type in (
+                "none",
+                INTERNAL_AUTH_TYPE,
+                BUNDLED_AUTH_TYPE,
+            ):
                 test_credentials = None
             elif http_auth_config_schema is not None:
                 # New credentials provided — use plaintext for test
@@ -840,7 +1013,7 @@ class MCPServerService:
         """
         try:
             logger.info(
-                f"Testing connection to MCP server: {mcp_server.name} at {mcp_server.http_url}"
+                f"Testing connection to MCP server: {mcp_server.name} at {endpoint_url(mcp_server)}"
             )
 
             # Connect with shorter timeout for faster feedback during creation.
@@ -865,9 +1038,9 @@ class MCPServerService:
         except MCPClientError as e:
             error_msg = str(e)
             if "Connection refused" in error_msg:
-                error_msg = f"Could not connect to {mcp_server.http_url}. Please verify the URL and that the server is running."
+                error_msg = f"Could not connect to {endpoint_url(mcp_server)}. Please verify the URL and that the server is running."
             elif "timed out" in error_msg.lower():
-                error_msg = f"Connection to {mcp_server.http_url} timed out. The server may be slow or unreachable."
+                error_msg = f"Connection to {endpoint_url(mcp_server)} timed out. The server may be slow or unreachable."
             logger.warning(f"Connection test failed for {mcp_server.name}: {e}")
             return [], ConnectionResult(success=False, error_message=error_msg)
 
@@ -920,9 +1093,9 @@ class MCPServerService:
         except MCPClientError as e:
             error_msg = str(e)
             if "Connection refused" in error_msg:
-                error_msg = f"Could not connect to {mcp_server.http_url}. Please verify the URL and that the server is running."
+                error_msg = f"Could not connect to {endpoint_url(mcp_server)}. Please verify the URL and that the server is running."
             elif "timed out" in error_msg.lower():
-                error_msg = f"Connection to {mcp_server.http_url} timed out. The server may be slow or unreachable."
+                error_msg = f"Connection to {endpoint_url(mcp_server)} timed out. The server may be slow or unreachable."
             logger.warning(f"Failed to discover tools for {mcp_server.name}: {e}")
             return ToolSyncResult(
                 connection=ConnectionResult(success=False, error_message=error_msg)
@@ -1065,10 +1238,15 @@ class MCPServerService:
             )
 
         result = await self.discover_and_sync_tools(mcp_server, auth_credentials)
-        if is_builtin_provider(mcp_server.http_auth_type):
+        if is_builtin_provider(mcp_server.http_auth_type) or is_bundled_server(
+            mcp_server.http_auth_type
+        ):
             # The approval gate guards against a compromised remote; a built-in
-            # provider's definitions are Eneo's own code.
+            # provider's and the bundled runtime's definitions are Eneo's own
+            # code. Completions list the runtime live, so forget what they
+            # cached and let the next answer see the refreshed catalog too.
             await self.approve_all_tool_changes(mcp_server_id)
+            forget_catalogs()
         return result
 
     @validate_permissions(Permission.ADMIN)

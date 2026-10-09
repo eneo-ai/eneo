@@ -12,24 +12,38 @@ import asyncio
 import json
 import re
 import time
+from collections.abc import Iterable, Mapping
 from types import TracebackType
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, cast
 from uuid import UUID
 
-from eneo.authentication.signed_urls import looks_like_reference_url
+from eneo.authentication.signed_urls import (
+    reference_file_ids,
+    use_current_file_references,
+)
+from eneo.files.model_file_references import (
+    FILE_HANDLE_INSTRUCTION,
+    UnknownFileReference,
+    model_file_references,
+    model_file_schema,
+    resolve_file_handles,
+)
 from eneo.internal_mcp.constants import (
     FILES_SERVER_NAME,
     IMAGE_GENERATION_SERVER_NAME,
 )
+from eneo.libs.json_text import contains_null_character
 from eneo.main.config import get_settings
 from eneo.main.logging import get_logger
 from eneo.mcp_servers.domain.entities.mcp_server import (
+    GENERATED_FILE_TYPES_BY_PURPOSE,
     MCPServer,
     MCPServerTool,
-    is_builtin_provider,
+    generated_filename,
     is_capability_purpose,
 )
 from eneo.mcp_servers.infrastructure.client.mcp_client import (
+    MCPAuthenticationError,
     MCPClient,
     MCPClientError,
     validate_tool_catalog,
@@ -61,6 +75,22 @@ REFERENCE_URL_VALID_NOTICE = (
     "references: tell the user that the tool cannot access the file from where "
     "it runs."
 )
+# Returned instead of calling the tool when its arguments carry a signed link to
+# a file this request minted no reference for.
+FOREIGN_REFERENCE_NOTICE = (
+    "The tool was not called: a file link in its arguments does not belong to "
+    "this conversation. Only the reference urls given for this conversation's "
+    "own files can be passed to tools. If the user wants that file used here, "
+    "ask them to attach it to this conversation."
+)
+AUTH_DENIED_NOTICE = (
+    "Access was denied by this MCP tool. Check its permissions or the "
+    "credentials used by its server."
+)
+_AUTH_DENIED_ERROR = re.compile(
+    r"(?:error:\s*)?(?:unauthorized|(?:http\s*)?401(?:\s+unauthorized)?)",
+    re.IGNORECASE,
+)
 MCP_IDENTITY_CATALOG_PREPARATION_TIMEOUT_SECONDS = float(
     _settings.mcp_client_connect_timeout_seconds
     + _settings.mcp_client_list_tools_timeout_seconds
@@ -79,7 +109,8 @@ def _trace_server_name(server: MCPServer) -> str:
     files servers are; that lets the chat label them in the UI language
     instead of showing the server-side English title under the row's name.
     """
-    if is_builtin_provider(server.http_auth_type) and server.purpose:
+    if server.is_internal and is_capability_purpose(server.purpose):
+        assert server.purpose is not None
         return server.purpose
     return server.name
 
@@ -90,9 +121,7 @@ def _tool_call_timeout_for(server: MCPServer) -> int | None:
     The built-in image generation provider runs an image model whose calls
     routinely outlast a general MCP tool call, so it gets its own budget.
     """
-    if is_builtin_provider(server.http_auth_type) and (
-        server.purpose == IMAGE_GENERATION_SERVER_NAME
-    ):
+    if server.is_internal and server.purpose == IMAGE_GENERATION_SERVER_NAME:
         return _settings.image_generation_timeout_seconds
     return None
 
@@ -155,6 +184,11 @@ class MCPProxySession:
         # if entered and exited from different tasks. Captured lazily on first
         # connect because session construction is synchronous.
         self._owner_task: asyncio.Task[Any] | None = None
+
+        # Files whose signed reference links this request minted. Tool-call
+        # arguments may only carry links to these (see allow_file_references).
+        self._reference_file_ids: set[UUID] = set()
+        self._reference_urls: dict[UUID, str] = {}
 
         # Build tool registry from DB (no connections needed)
         self._tool_registry: dict[str, tuple[MCPServer, str, str | None]] = {}
@@ -609,7 +643,9 @@ class MCPProxySession:
         """
         self._failed_server_ids.add(server_id)
 
-    def _truncate_tool_result(self, result: dict[str, Any]) -> dict[str, Any]:
+    def _truncate_tool_result(
+        self, result: dict[str, Any], purpose: str | None = None
+    ) -> dict[str, Any]:
         """Trim an oversized tool result to the budget instead of failing it.
 
         Leading content blocks are kept whole until the budget runs out; the
@@ -617,12 +653,19 @@ class MCPProxySession:
         dropped. A trailing notice tells the model the output was truncated,
         so e.g. a large page extraction still yields its head as usable,
         citable content rather than an error.
+
+        ``purpose`` is the producing server's purpose: only a document or
+        spreadsheet provider's binary resources become generated files.
         """
         blocks: list[dict[str, Any]] = result.get("content") or []
-        # Image blocks never reach the model as text (they become generated
-        # files), so they are sized separately and excluded from the char
-        # budget; only text-like blocks compete for it.
+        carried_blob = any(block.get("blob") for block in blocks)
+        # Image and file blocks never reach the model as text (they become
+        # generated files), so they are sized separately and excluded from the
+        # char budget; only text-like blocks compete for it.
         image_blocks, image_notices = self._admit_image_blocks(blocks)
+        file_blocks, blocks, file_notices = self._admit_file_blocks(blocks, purpose)
+        image_blocks = image_blocks + file_blocks
+        image_notices = image_notices + file_notices
         text_blocks = [block for block in blocks if block.get("type") != "image"]
         if image_notices:
             text_blocks = text_blocks + image_notices
@@ -631,8 +674,9 @@ class MCPProxySession:
         text_result = {**result, "content": text_blocks}
         serialized = json.dumps(text_result, ensure_ascii=False, default=str)
         if len(serialized) <= max_chars:
-            if not image_blocks and not image_notices:
+            if not image_blocks and not image_notices and not carried_blob:
                 return result
+            # Rebuilt, never the original: stripped blobs must not travel on.
             return {**result, "content": text_blocks + image_blocks}
 
         remaining = max_chars
@@ -667,6 +711,82 @@ class MCPProxySession:
         )
         kept.append({"type": "text", "text": notice})
         return {**result, "content": kept + image_blocks}
+
+    @staticmethod
+    def _admit_file_blocks(
+        blocks: list[dict[str, Any]], purpose: str | None
+    ) -> tuple[list[dict[str, Any]], list[dict[str, Any]], list[dict[str, Any]]]:
+        """Split binary embedded resources into admitted generated files.
+
+        Returns ``(file_blocks, remaining_blocks, notices)``. A resource's blob
+        is admitted when the producing server provides a file-delivering
+        purpose, the declared type is one that purpose delivers, the decoded
+        size fits the byte cap and the per-result count cap holds. Admitted
+        resources leave the result and come back as ``file`` blocks; every
+        other blob is stripped, so the resource stays an ordinary (citable)
+        result and its bytes never reach the model.
+        """
+        allowed = GENERATED_FILE_TYPES_BY_PURPOSE.get(purpose or "", frozenset())
+        max_bytes = _settings.mcp_tool_file_max_bytes
+        max_count = _settings.mcp_tool_file_max_count
+        admitted: list[dict[str, Any]] = []
+        remaining: list[dict[str, Any]] = []
+        notices: list[dict[str, Any]] = []
+        for block in blocks:
+            if block.get("type") != "resource" or not block.get("blob"):
+                remaining.append(block)
+                continue
+            stripped = {key: value for key, value in block.items() if key != "blob"}
+            mime_type = (
+                str(block.get("mime_type") or "").split(";", 1)[0].strip().lower()
+            )
+            if mime_type not in allowed:
+                if allowed:
+                    notices.append(
+                        {
+                            "type": "text",
+                            "text": (
+                                f"[A file of unsupported type {mime_type!r} was "
+                                "dropped.]"
+                            ),
+                        }
+                    )
+                remaining.append(stripped)
+                continue
+            encoded = str(block["blob"])
+            decoded_size = len(encoded) * 3 // 4
+            if decoded_size > max_bytes:
+                notices.append(
+                    {
+                        "type": "text",
+                        "text": (
+                            f"[A file of ~{decoded_size / (1024 * 1024):.1f} MB "
+                            f"exceeded the {max_bytes // (1024 * 1024)} MB limit and "
+                            "was dropped.]"
+                        ),
+                    }
+                )
+                continue
+            if len(admitted) >= max_count:
+                notices.append(
+                    {
+                        "type": "text",
+                        "text": (
+                            f"[A file beyond the {max_count} per result limit was "
+                            "dropped.]"
+                        ),
+                    }
+                )
+                continue
+            admitted.append(
+                {
+                    "type": "file",
+                    "data": encoded,
+                    "mime_type": mime_type,
+                    "filename": generated_filename(block.get("uri"), mime_type),
+                }
+            )
+        return admitted, remaining, notices
 
     @staticmethod
     def _admit_image_blocks(
@@ -744,7 +864,25 @@ class MCPProxySession:
         Returns:
             List of tool definitions ready for LLM consumption
         """
-        return self._tools_for_llm
+        # The provider schema remains authoritative on the wire. Only the model
+        # interface accepts local file handles in URL slots.
+        return [
+            {
+                **tool,
+                "function": {
+                    **tool["function"],
+                    "description": FILE_HANDLE_INSTRUCTION
+                    + "\n\n"
+                    + tool["function"]["description"],
+                    "parameters": model_file_schema(tool["function"]["parameters"]),
+                },
+            }
+            for tool in self._tools_for_llm
+        ]
+
+    def model_result_text(self, text: str) -> str:
+        """Strip file credentials only from model text, preserving provider UI resources."""
+        return cast(str, model_file_references(text, self._reference_urls))
 
     def get_allowed_tool_names(self) -> set[str]:
         """
@@ -772,6 +910,30 @@ class MCPProxySession:
             return None
         server, original_tool_name, title = self._tool_registry[prefixed_tool_name]
         return (_trace_server_name(server), original_tool_name, title)
+
+    def is_internal_tool(self, prefixed_tool_name: str) -> bool:
+        """Whether a prefixed tool belongs to one of Eneo's own loopback servers.
+
+        Decided by ``MCPServer.is_internal`` (the ephemeral knowledge and
+        files servers, and built-in provider rows), never by the server's
+        name: an admin-registered server named like an internal one is still
+        external. Unknown tools are external.
+        """
+        entry = self._tool_registry.get(prefixed_tool_name)
+        if entry is None:
+            return False
+        return bool(entry[0].is_internal)
+
+    def is_bundled_tool(self, prefixed_tool_name: str) -> bool:
+        """Whether a prefixed tool belongs to a server built into Eneo.
+
+        Decided by ``MCPServer.is_bundled`` (the row's auth type), never by
+        the server's name. Unknown tools are external.
+        """
+        entry = self._tool_registry.get(prefixed_tool_name)
+        if entry is None:
+            return False
+        return bool(entry[0].is_bundled)
 
     def get_tool_purpose(self, prefixed_tool_name: str) -> str | None:
         """The capability a tool call serves, or None for general servers.
@@ -864,6 +1026,25 @@ class MCPProxySession:
             )
             return client
 
+    def allow_file_references(
+        self, file_ids: Iterable[UUID] | Mapping[UUID, str]
+    ) -> None:
+        """Admit signed reference links to these files in tool-call arguments.
+
+        The completion layer registers the files it minted links for: this
+        conversation's attachments and the files its tools generated. A signed
+        link is a bearer credential bound to a file and its tenant only, so a
+        still-valid link to another conversation's file, reaching the model
+        through pasted text or a tool result, would otherwise be fetched by
+        whichever tool the model handed it to. Links to any other file are
+        refused in :meth:`call_tool` before a server is contacted. Passing a
+        mapping also registers the current issued URLs for exact tool inputs;
+        these URLs are request-local credentials and must never be logged.
+        """
+        self._reference_file_ids.update(file_ids)
+        if isinstance(file_ids, Mapping):
+            self._reference_urls.update(cast(Mapping[UUID, str], file_ids))
+
     def _files_read_file_entry(self) -> tuple[str, str | None] | None:
         """Prefixed name + title of the loopback read_file, when registered.
 
@@ -872,7 +1053,11 @@ class MCPProxySession:
         stale.
         """
         for prefixed_name, (server, name, title) in self._tool_registry.items():
-            if server.name == FILES_SERVER_NAME and name == "read_file":
+            if (
+                server.is_internal
+                and server.name == FILES_SERVER_NAME
+                and name == "read_file"
+            ):
                 return prefixed_name, title
         return None
 
@@ -889,10 +1074,7 @@ class MCPProxySession:
         when a remote tool could not fetch it. Empty when no argument is a
         reference or read_file itself failed.
         """
-        if not any(
-            isinstance(value, str) and looks_like_reference_url(value)
-            for value in arguments.values()
-        ):
+        if not reference_file_ids(arguments, include_redacted=True):
             return ""
         entry = self._files_read_file_entry()
         if entry is None:
@@ -923,6 +1105,37 @@ class MCPProxySession:
             "is_error": True,
         }
 
+    @staticmethod
+    def _is_auth_denied_result(result: dict[str, Any]) -> bool:
+        if not result.get("is_error"):
+            return False
+        content: object = result.get("content")
+        if not isinstance(content, list):
+            return False
+        for block in cast("list[object]", content[:3]):
+            if not isinstance(block, dict):
+                continue
+            block_values = cast("dict[str, object]", block)
+            raw_text = block_values.get("text")
+            if not isinstance(raw_text, str):
+                continue
+            text = raw_text.strip()
+            if len(text) > 512:
+                continue
+            if _AUTH_DENIED_ERROR.fullmatch(text):
+                return True
+            try:
+                payload: object = json.loads(text)
+            except json.JSONDecodeError:
+                continue
+            if isinstance(payload, dict):
+                error = cast("dict[str, object]", payload).get("error")
+                if isinstance(error, str) and _AUTH_DENIED_ERROR.fullmatch(
+                    error.strip()
+                ):
+                    return True
+        return False
+
     async def call_tool(
         self,
         tool_name: str,
@@ -952,6 +1165,60 @@ class MCPProxySession:
             raise ValueError(f"Tool not found in proxy registry: {tool_name}")
 
         server, original_tool_name, _ = self._tool_registry[tool_name]
+
+        if contains_null_character(arguments):
+            return {
+                "content": [
+                    {
+                        "type": "text",
+                        "text": (
+                            "INVALID_TEXT: Tool arguments contain a null control character (U+0000). "
+                            "The tool was not executed. Correct the affected text using the source "
+                            "data, use ordinary spaces for number grouping, and retry the call. "
+                            "Do not claim that a file has been created."
+                        ),
+                    }
+                ],
+                "is_error": True,
+            }
+
+        try:
+            arguments = resolve_file_handles(arguments, self._reference_urls)
+        except UnknownFileReference:
+            return {
+                "content": [
+                    {
+                        "type": "text",
+                        "text": (
+                            "UNKNOWN_FILE_REFERENCE: Use an exact file_ref from the current "
+                            "conversation attachments or generated-file results. The tool was "
+                            "not executed. Do not construct URLs or ask for a re-upload."
+                        ),
+                    }
+                ],
+                "is_error": True,
+            }
+
+        foreign_file_ids = (
+            reference_file_ids(arguments, include_redacted=True)
+            - self._reference_file_ids
+        )
+        if foreign_file_ids:
+            logger.warning(
+                "[MCPProxy] Refused %s on '%s': reference link to a file outside "
+                "this conversation",
+                original_tool_name,
+                server.name,
+                extra={"file_ids": sorted(map(str, foreign_file_ids))},
+            )
+            return {
+                "content": [{"type": "text", "text": FOREIGN_REFERENCE_NOTICE}],
+                "is_error": True,
+            }
+
+        # Use the request's issued link, not a token copied/generated by the
+        # model. Admission runs first; resolution uses the trusted origin and file route.
+        arguments = use_current_file_references(arguments, self._reference_urls)
 
         logger.debug(f"[MCPProxy] Calling {original_tool_name} on '{server.name}'")
 
@@ -987,21 +1254,30 @@ class MCPProxySession:
             logger.debug(
                 f"[MCPProxy] {original_tool_name} completed in {elapsed_ms:.0f}ms [{status}]"
             )
+            # A protocol-level result proves the server responded, even when
+            # its tool reports an application or permission error. Only client
+            # failures count toward the server-wide circuit breaker.
+            await self._record_success(server.id)
+            auth_denied = self._is_auth_denied_result(result)
+            result = self._truncate_tool_result(result, server.purpose)
             if is_error:
-                await self._record_failure(server.id)
-            else:
-                await self._record_success(server.id)
-            result = self._truncate_tool_result(result)
-            if is_error:
+                blocks: list[Any] = list(result.get("content") or [])
+                if auth_denied:
+                    blocks.append({"type": "text", "text": AUTH_DENIED_NOTICE})
                 # A tool that failed on a reference URL should not be retried
                 # into a loop; appended after truncation so the pointer to the
                 # built-in reader survives it.
                 hint = self._reference_fallback_hint(tool_name, arguments)
                 if hint:
-                    blocks: list[Any] = list(result.get("content") or [])
                     blocks.append({"type": "text", "text": hint})
+                if auth_denied or hint:
                     result = {**result, "content": blocks}
             return result
+        except MCPAuthenticationError:
+            return {
+                "content": [{"type": "text", "text": AUTH_DENIED_NOTICE}],
+                "is_error": True,
+            }
         except MCPClientError:
             self._mark_server_failed(server.id)
             await self._record_failure(server.id)

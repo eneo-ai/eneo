@@ -215,6 +215,8 @@ def test_tool_event_keeps_the_call_and_the_argument_the_widget_shows():
             "result": None,
             "mcp_tool_name": "casefiles__search_casefiles",
             "purpose": None,
+            "is_internal": None,
+            "is_bundled": None,
             "meta": None,
             "generated_file_ids": None,
         }

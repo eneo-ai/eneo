@@ -460,7 +460,7 @@ def _start_worker(url, path, *, lease_seconds):
     return subprocess.Popen(
         [
             sys.executable,
-            str(Path(__file__).with_name("file_icon_rehearsal_worker.py")),
+            str(Path(__file__).resolve().with_name("file_icon_rehearsal_worker.py")),
         ],
         env=environment,
         stdin=subprocess.DEVNULL,
@@ -574,6 +574,11 @@ async def test_released_upgrade_recovers_from_process_death_and_backup_restore(
         assert (
             report["worker"]["max_rss_bytes"]
             <= report["acceptance"]["maximum_worker_rss_bytes"]
+        ), (
+            f"worker RSS bytes: imports={report['worker']['rss_after_imports_bytes']}, "
+            f"init={report['worker']['rss_after_init_bytes']}, "
+            f"first_run={report['worker']['rss_after_first_run_bytes']}, "
+            f"peak={report['worker']['max_rss_bytes']}"
         )
         _assert_adopted(url)
         assert _source_facts(url) == state["expected_sources"]

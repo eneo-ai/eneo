@@ -22,7 +22,9 @@ SCIM provisioning in Eneo provides:
 | Groups synchronized | No | Yes |
 | Visible to admins before login | No | Yes |
 
-The two can coexist. SCIM reconciles existing JIT-created users automatically — no duplicates are created.
+For deployments using SCIM, keep tenant `provisioning: false` so that SCIM owns account creation and reactivation. OIDC still handles sign-in to existing active tenant accounts; it does not create an account when SCIM has not provisioned the user. An inactive or removed account cannot be recreated by signing in, even if JIT is enabled. Enabling or revoking a SCIM token does not change the JIT flag automatically.
+
+SCIM reconciles existing accounts created previously through JIT. If you deliberately enable both, every new account created through JIT must also pass the [JIT admission checks](/guides/oidc-federation/single-tenant#user-provisioning).
 
 ---
 
@@ -35,7 +37,7 @@ Eneo exposes a SCIM 2.0 server at `/scim/v2`, separate from the main `/api/v1/` 
 | Method | Path | Purpose |
 |---|---|---|
 | GET | `/scim/v2/ServiceProviderConfig` | Discover server capabilities |
-| GET | `/scim/v2/Schemas` | User and Group attribute schemas |
+| GET | `/scim/v2/Schemas` | User, Enterprise User and Group attribute schemas |
 | GET | `/scim/v2/ResourceTypes` | Available resource types |
 | POST / GET / PUT / PATCH / DELETE | `/scim/v2/Users` | User CRUD |
 | POST / GET / PUT / PATCH / DELETE | `/scim/v2/Groups` | Group CRUD |
@@ -143,6 +145,8 @@ Entra's default User mappings work for Eneo. The minimum required attributes are
 
 For Group mappings, the defaults also work. Members are referenced by the user's SCIM resource `id` (the Eneo user UUID returned when the user was provisioned) in `members[].value`, not by `externalId`.
 
+Organizational attributes such as department or cost center are optional. Eneo stores them when the mapping sends them to the Enterprise User extension — see [Enterprise User attributes](#enterprise-user-attributes).
+
 ---
 
 ## Step 3: Verify the integration
@@ -200,6 +204,58 @@ The reconciliation flow on first provisioning:
 4. An audit event `SCIM_USER_RECONCILED` is logged so the reconciliation is visible.
 
 This means initial Entra provisioning is safe to run against any existing tenant.
+
+---
+
+## Enterprise User attributes
+
+Eneo stores the SCIM Enterprise User extension (RFC 7643 §4.3, schema `urn:ietf:params:scim:schemas:extension:enterprise:2.0:User`) on each user. It is advertised in `/Schemas`, and the `User` entry in `/ResourceTypes` lists it as an optional extension.
+
+| Attribute | Stored as |
+|---|---|
+| `employeeNumber`, `costCenter`, `organization`, `division`, `department` | A single string each |
+| `manager` | Its `value` and `$ref`. `manager.displayName` is read-only in the standard and is not stored or returned |
+
+An attribute is only stored if your identity provider sends it. Check the attribute mappings of your provisioning configuration, and expect some users to have no value: optional directory fields are often empty.
+
+### What Eneo keeps and what it ignores
+
+- **Other schema extensions** in a request are accepted and ignored. They are not stored, and the response does not include them.
+- **Attributes the Enterprise User extension does not define** are dropped, however they arrive: inside the extension object, as a `PATCH` path, or as a fully qualified name. The rest of the request is applied, and the backend logs `scim.user.enterprise_attributes_dropped` at WARNING with the attribute names, never their values.
+- **Responses echo what was stored**, not what was sent. The extension's URN is listed in the response `schemas` only when something is stored, so comparing a response with its request shows what was retained.
+- **Attribute names are case-insensitive** (`costcenter` and `costCenter` are the same attribute).
+- **`null` or an empty string removes an attribute.** `null` for the whole extension clears it, and so does a `PUT` without the extension.
+
+Values are checked rather than converted. A request is rejected with `400 invalidValue`, and nothing is written, when:
+
+- a string attribute is not a string
+- `manager` is neither an object with `value` and/or `$ref` nor a bare identifier string (which is stored as the manager's `value`)
+- a single value is longer than 1,024 characters
+- the extension object has more than 64 attributes or is larger than 16 KiB
+
+### PATCH
+
+`PATCH` supports `add`, `replace` and `remove` on the extension:
+
+| Path | Effect |
+|---|---|
+| `urn:…:enterprise:2.0:User:department` | Sets or removes that attribute |
+| `urn:…:enterprise:2.0:User:manager.value` | Sets or removes one part of the manager reference |
+| `urn:…:enterprise:2.0:User` | `add`/`replace` sets the attributes named in the value and leaves the others unchanged. `remove`, or a `null` value, clears the whole extension |
+| No path, with the extension URN (or fully qualified attribute names) as keys in the value | Sets the named attributes |
+
+With any of these forms, `add`/`replace` with a `manager` object sets only the parts (`value`, `$ref`) it contains and leaves the other part as stored. A part set to `null` is removed. An object holding only `displayName` or unknown keys changes nothing. A bare identifier string for `manager` replaces the whole reference, so a stored `$ref` is removed.
+
+A `PATCH` is all-or-nothing. If any operation is invalid, the whole request is rejected and the user is left unchanged. A path that names an attribute the extension does not define, such as `urn:…:enterprise:2.0:User:shoeSize`, is not invalid: it is dropped like an unknown attribute in the extension object. A malformed path is rejected with `400 invalidPath`: a filter such as `manager[value eq "…"]`, a sub-attribute of a string attribute such as `department.code`, or a path nested deeper than `manager.value`.
+
+### Where the attributes are visible
+
+The attributes are provisioning data. They are returned over SCIM, but they are not returned by the `/api/v1` user endpoints. They are used in two places:
+
+- **Outbound headers.** An administrator can configure a model provider to send some of them to its endpoint as HTTP headers. See [Outbound headers](/guides/ai-providers#outbound-headers). `manager` is never sent.
+- **The outbound header preview.** It shows an administrator what a chosen user's attributes resolve to for a provider. Each use is recorded in the audit log while audit logging for administrative actions is on, which is the default.
+
+They stay on the user record until your identity provider changes or removes them, including after the user is deprovisioned, because deprovisioning is a soft delete.
 
 ---
 
@@ -406,6 +462,16 @@ A 409 typically means one of:
 - The `externalId` collides with an existing user
 
 Check the `detail` field in the SCIM error response to determine the cause. Reconciliation only runs when the existing user has no `externalId` set — if a different IdP previously set one, it must be cleared first.
+
+### Provisioning logs show 400 for an Enterprise User attribute
+
+A `400 invalidValue` means a mapped attribute sent a value Eneo does not accept, for example a number instead of a string, or a value over 1,024 characters. A `400 invalidPath` means an operation's path into the Enterprise User extension is malformed, for example a filter. The `detail` field names the attribute or path. Fix the attribute mapping in your identity provider and re-run provisioning. Because a `PATCH` is all-or-nothing, none of that request's changes were applied.
+
+### An Enterprise User attribute is not stored
+
+If provisioning succeeds but an attribute never appears on the user, look for `scim.user.enterprise_attributes_dropped` in the backend logs. It names attributes your identity provider sent that the extension does not define, usually a mapping whose target is misspelled or is a custom attribute. Map the source to one of the attributes in [Enterprise User attributes](#enterprise-user-attributes).
+
+`scim.user.enterprise_extension_unreadable` means a user's stored attributes are not in a form Eneo writes, for example after a direct database edit. The log line names the user and the affected attributes. Responses for that user omit the extension until the identity provider sends those attributes again. Other users are not affected.
 
 ### OIDC sign-in fails with "Email claim not found in ID token"
 

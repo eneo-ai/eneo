@@ -12,9 +12,14 @@ from fastapi import APIRouter, Depends, Query
 from eneo.audit.application.audit_metadata import AuditMetadata
 from eneo.audit.domain.action_types import ActionType
 from eneo.audit.domain.entity_types import EntityType
+from eneo.authentication.endpoint_access import (
+    Authentication,
+    Authorization,
+    endpoint_access,
+)
 from eneo.main.container.container import Container
 from eneo.main.models import PaginatedResponse
-from eneo.roles.permissions import Permission, validate_permission
+from eneo.roles.permissions import Permission
 from eneo.server import protocol
 from eneo.server.dependencies.container import get_container
 from eneo.server.protocol import responses
@@ -52,6 +57,15 @@ policy_router = APIRouter()
 templates_router = APIRouter()
 admin_templates_router = APIRouter()
 overview_router = APIRouter()
+
+_EDITOR_REASON = (
+    "WidgetService enforces Permission.WIDGETS or ADMIN and space membership;"
+    " session-only so a scoped API key cannot reach what the public internet sees."
+)
+_ADMIN_TEMPLATES_REASON = (
+    "WidgetTemplateService enforces the widgets permission on reads and tenant-admin"
+    " rights on changes; followers are updated in the same transaction."
+)
 
 _CONFLICT_RESPONSE = {
     "model": WidgetConflictResponse,
@@ -100,6 +114,11 @@ async def _audit(
     description="List the widgets configured in a space.",
     responses=responses.get_responses([403, 404]),
 )
+@endpoint_access(
+    authentication=Authentication.SESSION,
+    authorization=Authorization.AUTHENTICATED,
+    reason=_EDITOR_REASON,
+)
 async def list_space_widgets(space_id: UUID, container: _ContainerWithUser):
     service = container.widget_service()
     assembler = container.widget_assembler()
@@ -117,6 +136,11 @@ async def list_space_widgets(space_id: UUID, container: _ContainerWithUser):
         " separate tenant-admin step."
     ),
     responses=responses.get_responses([400, 403, 404]),
+)
+@endpoint_access(
+    authentication=Authentication.SESSION,
+    authorization=Authorization.AUTHENTICATED,
+    reason=_EDITOR_REASON,
 )
 async def create_space_widget(
     space_id: UUID, body: WidgetCreate, container: _ContainerWithUser
@@ -152,6 +176,11 @@ async def create_space_widget(
     ),
     responses={**responses.get_responses([400, 403, 404]), 409: _CONFLICT_RESPONSE},
 )
+@endpoint_access(
+    authentication=Authentication.SESSION,
+    authorization=Authorization.AUTHENTICATED,
+    reason=_EDITOR_REASON,
+)
 async def link_widget_template(
     id: UUID, body: WidgetLinkTemplate, container: _ContainerWithUser
 ):
@@ -180,6 +209,11 @@ async def link_widget_template(
     ),
     responses={**responses.get_responses([400, 403, 404]), 409: _CONFLICT_RESPONSE},
 )
+@endpoint_access(
+    authentication=Authentication.SESSION,
+    authorization=Authorization.AUTHENTICATED,
+    reason=_EDITOR_REASON,
+)
 async def detach_widget_template(
     id: UUID, body: WidgetDetachTemplate, container: _ContainerWithUser
 ):
@@ -202,6 +236,11 @@ async def detach_widget_template(
     description="Get a widget's configuration and activation state.",
     responses=responses.get_responses([403, 404]),
 )
+@endpoint_access(
+    authentication=Authentication.SESSION,
+    authorization=Authorization.AUTHENTICATED,
+    reason=_EDITOR_REASON,
+)
 async def get_widget(id: UUID, container: _ContainerWithUser):
     service = container.widget_service()
     assembler = container.widget_assembler()
@@ -220,6 +259,11 @@ async def get_widget(id: UUID, container: _ContainerWithUser):
         " `widget_serving_blocked` (listing `blockers`)."
     ),
     responses={**responses.get_responses([400, 403, 404]), 409: _CONFLICT_RESPONSE},
+)
+@endpoint_access(
+    authentication=Authentication.SESSION,
+    authorization=Authorization.AUTHENTICATED,
+    reason=_EDITOR_REASON,
 )
 async def update_widget(id: UUID, body: WidgetUpdate, container: _ContainerWithUser):
     service = container.widget_service()
@@ -246,6 +290,11 @@ async def update_widget(id: UUID, body: WidgetUpdate, container: _ContainerWithU
     response_model=WidgetUsagePublic,
     description="Daily usage for a widget: questions, tokens and blocked requests.",
     responses=responses.get_responses([403, 404]),
+)
+@endpoint_access(
+    authentication=Authentication.SESSION,
+    authorization=Authorization.AUTHENTICATED,
+    reason=_EDITOR_REASON,
 )
 async def get_widget_usage(
     id: UUID,
@@ -288,6 +337,11 @@ async def get_widget_usage(
     ),
     responses=responses.get_responses([400, 403, 404]),
 )
+@endpoint_access(
+    authentication=Authentication.SESSION,
+    authorization=Authorization.AUTHENTICATED,
+    reason=_EDITOR_REASON,
+)
 async def create_widget_preview_token(id: UUID, container: _ContainerWithUser):
     service = container.widget_service()
     view = await service.get_widget(id)
@@ -308,6 +362,11 @@ async def create_widget_preview_token(id: UUID, container: _ContainerWithUser):
         " is incomplete."
     ),
     responses={**responses.get_responses([400, 403, 404]), 409: _CONFLICT_RESPONSE},
+)
+@endpoint_access(
+    authentication=Authentication.SESSION,
+    authorization=Permission.ADMIN,
+    reason=_EDITOR_REASON,
 )
 async def activate_widget(id: UUID, container: _ContainerWithUser):
     service = container.widget_service()
@@ -332,6 +391,11 @@ async def activate_widget(id: UUID, container: _ContainerWithUser):
     ),
     responses={**responses.get_responses([400, 403, 404]), 409: _CONFLICT_RESPONSE},
 )
+@endpoint_access(
+    authentication=Authentication.SESSION,
+    authorization=Authorization.AUTHENTICATED,
+    reason=_EDITOR_REASON,
+)
 async def pause_widget(id: UUID, container: _ContainerWithUser):
     service = container.widget_service()
     assembler = container.widget_assembler()
@@ -351,6 +415,11 @@ async def pause_widget(id: UUID, container: _ContainerWithUser):
     response_model=WidgetPublic,
     description="Archive a widget permanently. Tenant admins only.",
     responses={**responses.get_responses([400, 403, 404]), 409: _CONFLICT_RESPONSE},
+)
+@endpoint_access(
+    authentication=Authentication.SESSION,
+    authorization=Permission.ADMIN,
+    reason=_EDITOR_REASON,
 )
 async def archive_widget(id: UUID, container: _ContainerWithUser):
     service = container.widget_service()
@@ -376,6 +445,11 @@ async def archive_widget(id: UUID, container: _ContainerWithUser):
     ),
     responses=responses.get_responses([403]),
 )
+@endpoint_access(
+    authentication=Authentication.USER,
+    authorization=Authorization.AUTHENTICATED,
+    reason="Readable by everyone with the widgets permission so editors can check their settings; WidgetService enforces it.",
+)
 async def get_widget_policy(container: _ContainerWithUser):
     service = container.widget_service()
     assembler = container.widget_assembler()
@@ -387,6 +461,11 @@ async def get_widget_policy(container: _ContainerWithUser):
     response_model=WidgetPolicyPublic,
     description="Update the tenant's widget policy guardrails.",
     responses=responses.get_responses([400, 403]),
+)
+@endpoint_access(
+    authentication=Authentication.USER,
+    authorization=Permission.ADMIN,
+    reason="Tenant admins set the policy guardrails every widget is held to.",
 )
 async def update_widget_policy(body: WidgetPolicyUpdate, container: _ContainerWithUser):
     service = container.widget_service()
@@ -427,9 +506,13 @@ async def update_widget_policy(body: WidgetPolicyUpdate, container: _ContainerWi
     ),
     responses=responses.get_responses([403]),
 )
+@endpoint_access(
+    authentication=Authentication.USER,
+    authorization=Permission.ADMIN,
+    reason="Tenant admins see every widget in the organisation with its usage.",
+)
 async def get_widget_overview(container: _ContainerWithUser):
     user = container.user()
-    validate_permission(user, Permission.ADMIN)
     policy = container.widget_service().get_policy()
     rows = await container.widget_overview_repo().list_tenant(
         user.tenant_id, today=container.widget_budget().today()
@@ -562,6 +645,11 @@ async def _audit_template(
     ),
     responses=responses.get_responses([403]),
 )
+@endpoint_access(
+    authentication=Authentication.SESSION,
+    authorization=Authorization.AUTHENTICATED,
+    reason=_ADMIN_TEMPLATES_REASON,
+)
 async def list_widget_templates(container: _ContainerWithUser):
     service = container.widget_template_service()
     templates = await service.list_templates()
@@ -577,6 +665,11 @@ async def list_widget_templates(container: _ContainerWithUser):
     status_code=201,
     description="Create a widget template. Tenant admins only.",
     responses=responses.get_responses([400, 403]),
+)
+@endpoint_access(
+    authentication=Authentication.USER,
+    authorization=Permission.ADMIN,
+    reason=_ADMIN_TEMPLATES_REASON,
 )
 async def create_widget_template(
     body: WidgetTemplateCreate, container: _ContainerWithUser
@@ -600,6 +693,11 @@ async def create_widget_template(
     description="A widget template. Tenant admins only.",
     responses=responses.get_responses([403, 404]),
 )
+@endpoint_access(
+    authentication=Authentication.USER,
+    authorization=Authorization.AUTHENTICATED,
+    reason=_ADMIN_TEMPLATES_REASON,
+)
 async def get_widget_template(id: UUID, container: _ContainerWithUser):
     service = container.widget_template_service()
     template = await service.get_template(id)
@@ -616,6 +714,11 @@ async def get_widget_template(id: UUID, container: _ContainerWithUser):
         " published."
     ),
     responses=responses.get_responses([400, 403, 404]),
+)
+@endpoint_access(
+    authentication=Authentication.USER,
+    authorization=Permission.ADMIN,
+    reason=_ADMIN_TEMPLATES_REASON,
 )
 async def update_widget_template(
     id: UUID, body: WidgetTemplateUpdate, container: _ContainerWithUser
@@ -646,6 +749,11 @@ async def update_widget_template(
         " the same transaction."
     ),
     responses=responses.get_responses([400, 403, 404]),
+)
+@endpoint_access(
+    authentication=Authentication.USER,
+    authorization=Permission.ADMIN,
+    reason=_ADMIN_TEMPLATES_REASON,
 )
 async def publish_widget_template(id: UUID, container: _ContainerWithUser):
     service = container.widget_template_service()
@@ -692,6 +800,11 @@ async def publish_widget_template(id: UUID, container: _ContainerWithUser):
             "description": "Widgets still follow the template.",
         },
     },
+)
+@endpoint_access(
+    authentication=Authentication.USER,
+    authorization=Permission.ADMIN,
+    reason=_ADMIN_TEMPLATES_REASON,
 )
 async def delete_widget_template(id: UUID, container: _ContainerWithUser) -> None:
     template = await container.widget_template_service().delete_template(id)

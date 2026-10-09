@@ -1,15 +1,26 @@
 <script lang="ts">
   import { getEneo } from "$lib/core/Eneo";
-  import { Cloud, Earth, Info, LoaderCircle, RefreshCw } from "@lucide/svelte";
+  import { Cloud, Earth, Info, LoaderCircle, RefreshCw, Search } from "@lucide/svelte";
   import { Button } from "$lib/components/ui/button/index.js";
   import { Checkbox } from "$lib/components/ui/checkbox/index.js";
+  import * as InputGroup from "$lib/components/ui/input-group/index.js";
+  import SharePointFilterChips from "./SharePointFilterChips.svelte";
+  import SharePointFilterMenu from "./SharePointFilterMenu.svelte";
   import type { components } from "@eneo/eneo-js";
   import SharePointFolderTreeNode from "./SharePointFolderTreeNode.svelte";
+  import SharePointSearchResults from "./SharePointSearchResults.svelte";
   import { m } from "$lib/paraglide/messages";
   import { buildSharePointSelectionKey } from "./selectionKey";
-  import { fetchSharePointFixtureTree, type SharePointFixtureScenario } from "./fixtureMode";
+  import {
+    fetchSharePointFixtureSearch,
+    fetchSharePointFixtureTree,
+    type SharePointFixtureScenario
+  } from "./fixtureMode";
   import {
     createSharePointTreeNode,
+    isSharePointItemCovered,
+    normalizeSharePointTreeQuery,
+    type SharePointFilterColumn,
     type SharePointTreeItem,
     type SharePointTreeNode
   } from "./treeState";
@@ -36,7 +47,8 @@
       web_url: item.web_url ?? undefined,
       has_children: item.has_children,
       size: item.size ?? undefined,
-      modified: item.modified ?? undefined
+      modified: item.modified ?? undefined,
+      source_metadata: item.source_metadata ?? []
     };
   }
 
@@ -51,6 +63,10 @@
     selectedItemKeys?: string[];
     selectedPaths?: string[];
     onToggleSelect: (item: SharePointTreeItem) => void;
+    /** Selects every given item that is not already covered by the selection. */
+    onSelectMany?: (items: SharePointTreeItem[]) => void;
+    /** Removes the given items from the selection. */
+    onDeselectMany?: (items: SharePointTreeItem[]) => void;
   }
 
   let {
@@ -63,7 +79,9 @@
     fixtureScenario,
     selectedItemKeys = [],
     selectedPaths = [],
-    onToggleSelect
+    onToggleSelect,
+    onSelectMany,
+    onDeselectMany
   }: Props = $props();
 
   const eneo = getEneo();
@@ -76,6 +94,125 @@
   let rootItems = $state<SharePointTreeNode[]>([]);
   let rootLoading = $state(false);
   let rootLoadError = $state(false);
+  // Library columns a person can filter on without typing, from the root listing.
+  let columns = $state<SharePointFilterColumn[]>([]);
+  let search = $state("");
+  let facets = $state<Record<string, string>>({});
+  const query = $derived(normalizeSharePointTreeQuery(search));
+  const activeFacets = $derived(
+    Object.fromEntries(Object.entries(facets).filter(([, value]) => value !== ""))
+  );
+  // A search runs against the whole library, so its results replace the tree.
+  const searching = $derived(query !== "" || Object.keys(activeFacets).length > 0);
+
+  let searchResults = $state<SharePointTreeItem[]>([]);
+  let searchLoading = $state(false);
+  let searchError = $state(false);
+  let searchTruncated = $state(false);
+  let searchGeneration = 0;
+  let searchTimer: ReturnType<typeof setTimeout> | undefined;
+
+  const editableMatches = $derived(
+    searchResults.filter(
+      (item) =>
+        selectedItemKeySet.has(buildSharePointSelectionKey(item)) ||
+        !isSharePointItemCovered(item, selectedItemKeySet, selectedPaths)
+    )
+  );
+  const allMatchesSelected = $derived(
+    editableMatches.length > 0 &&
+      editableMatches.every((item) => selectedItemKeySet.has(buildSharePointSelectionKey(item)))
+  );
+  const canSelectMatches = $derived(
+    Boolean(onSelectMany && onDeselectMany) &&
+      searching &&
+      !searchLoading &&
+      !searchError &&
+      searchResults.length > 0
+  );
+
+  function toggleAllMatches() {
+    if (allMatchesSelected) {
+      onDeselectMany?.(editableMatches);
+    } else {
+      onSelectMany?.(editableMatches);
+    }
+  }
+
+  function clearSearch() {
+    search = "";
+    facets = {};
+  }
+
+  async function runSearch() {
+    const generation = ++searchGeneration;
+    const source = currentTreeSource();
+    const text = search.trim();
+    const filters = activeFacets;
+    if (!text && Object.keys(filters).length === 0) {
+      searchResults = [];
+      searchLoading = false;
+      searchError = false;
+      searchTruncated = false;
+      return;
+    }
+    searchLoading = true;
+    searchError = false;
+    try {
+      const response = source.fixtureScenario
+        ? await fetchSharePointFixtureSearch(eneo.client, source.fixtureScenario, {
+            siteId: source.siteId,
+            driveId: source.driveId,
+            text,
+            filters
+          })
+        : await eneo.client.fetch("/api/v1/integrations/{user_integration_id}/sharepoint/search/", {
+            method: "get",
+            params: {
+              path: { user_integration_id: source.userIntegrationId },
+              query: {
+                space_id: source.spaceId,
+                site_id: source.siteId,
+                drive_id: source.driveId,
+                q: text,
+                filter: Object.entries(filters).map(([name, value]) => `${name}:${value}`)
+              }
+            }
+          });
+      if (generation !== searchGeneration) return;
+      searchResults = response.items
+        .map(normalizeTreeItem)
+        .filter((item): item is SharePointTreeItem => item !== null);
+      searchTruncated = response.truncated ?? false;
+    } catch (error) {
+      if (generation !== searchGeneration) return;
+      searchError = true;
+      searchResults = [];
+      console.error("Error searching SharePoint library:", error);
+    } finally {
+      if (generation === searchGeneration) searchLoading = false;
+    }
+  }
+
+  // Invalidate old results as soon as the query, filters or source changes.
+  // Only the request is debounced; stale hits cannot be selected meanwhile.
+  $effect(() => {
+    void search;
+    void facets;
+    void currentTreeSource();
+    clearTimeout(searchTimer);
+    searchGeneration += 1;
+    searchResults = [];
+    searchError = false;
+    searchTruncated = false;
+    searchLoading = searching;
+    if (searching) searchTimer = setTimeout(() => void runSearch(), 300);
+    return () => {
+      clearTimeout(searchTimer);
+      searchGeneration += 1;
+    };
+  });
+
   let treeGeneration = 0;
   let selectedItemKeySet = $derived.by(() => new Set(selectedItemKeys));
   let siteRootSelected = $derived(selectedItemKeySet.has(siteRootSelectionKey));
@@ -85,11 +222,11 @@
     return { userIntegrationId, spaceId, siteId, driveId, fixtureScenario };
   }
 
-  async function fetchTreeItems(
+  async function fetchTree(
     source: TreeSource,
     folderId?: string,
     folderPath?: string
-  ): Promise<SharePointTreeNode[]> {
+  ): Promise<{ items: SharePointTreeNode[]; columns: SharePointFilterColumn[] }> {
     const queryParams: {
       space_id: string;
       site_id?: string;
@@ -118,10 +255,21 @@
           }
         });
 
-    return response.items
-      .map(normalizeTreeItem)
-      .filter((item): item is SharePointTreeItem => item !== null)
-      .map(createSharePointTreeNode);
+    return {
+      items: response.items
+        .map(normalizeTreeItem)
+        .filter((item): item is SharePointTreeItem => item !== null)
+        .map(createSharePointTreeNode),
+      columns: response.columns ?? []
+    };
+  }
+
+  async function fetchTreeItems(
+    source: TreeSource,
+    folderId?: string,
+    folderPath?: string
+  ): Promise<SharePointTreeNode[]> {
+    return (await fetchTree(source, folderId, folderPath)).items;
   }
 
   async function loadRoot(source: TreeSource) {
@@ -131,9 +279,10 @@
     rootLoadError = false;
 
     try {
-      const items = await fetchTreeItems(source);
+      const tree = await fetchTree(source);
       if (generation !== treeGeneration) return;
-      rootItems = items;
+      rootItems = tree.items;
+      columns = tree.columns;
     } catch (error) {
       if (generation !== treeGeneration) return;
       rootLoadError = true;
@@ -200,68 +349,140 @@
     {m.sharepoint_tree_selection_description()}
   </p>
 
-  <div
-    class="border-border bg-card min-h-56 flex-1 overflow-x-hidden overflow-y-auto rounded-lg border"
-    aria-busy={rootLoading}
-  >
-    {#if rootLoading}
-      <div
-        class="text-muted-foreground flex items-center justify-center gap-2 px-4 py-10"
-        role="status"
-      >
-        <LoaderCircle class="size-4 animate-spin" aria-hidden="true" />
-        {m.sharepoint_loading_content()}
-      </div>
-    {:else if rootLoadError}
-      <div class="flex flex-col items-center gap-3 px-4 py-10 text-center" role="alert">
-        <p class="text-destructive text-sm">{m.sharepoint_tree_load_error()}</p>
-        <Button variant="outline" size="sm" onclick={() => loadRoot(currentTreeSource())}>
-          <RefreshCw aria-hidden="true" />
-          {m.retry()}
-        </Button>
-      </div>
-    {:else if rootItems.length === 0}
-      <div class="text-muted-foreground px-4 py-10 text-center text-sm">
-        {m.no_items()}
-      </div>
-    {:else}
-      <div
-        class="border-border flex min-h-11 w-full items-center gap-2 border-b px-3 text-left transition-colors
-          {siteRootSelected ? 'bg-accent-dimmer/60' : 'hover:bg-muted/50'}"
-      >
-        <Checkbox
-          id="sharepoint-entire-site"
-          aria-label={isOneDrive ? m.import_entire_onedrive() : m.import_entire_site()}
-          checked={siteRootSelected}
-          indeterminate={siteRootIndeterminate}
-          onCheckedChange={handleImportEntireSite}
+  <div class="flex flex-col gap-2">
+    <!-- The search field and the filter button keep their place; chosen
+         filters appear on their own row below so nothing shifts when added. -->
+    <div class="flex items-center gap-2">
+      <InputGroup.Root class="bg-background min-w-0 flex-1">
+        <InputGroup.Addon>
+          <Search class="size-4 shrink-0 opacity-60" aria-hidden="true" />
+        </InputGroup.Addon>
+        <InputGroup.Input
+          type="search"
+          bind:value={search}
+          placeholder={m.sharepoint_search_content({ name: siteName })}
+          aria-label={m.sharepoint_search_content({ name: siteName })}
+          aria-describedby="sharepoint-search-help"
+          autocomplete="off"
         />
-        <label
-          for="sharepoint-entire-site"
-          class="flex h-10 min-w-0 flex-1 cursor-pointer items-center gap-2 px-2 font-medium"
-        >
-          {#if isOneDrive}
-            <Cloud class="text-muted-foreground size-4 shrink-0" aria-hidden="true" />
-          {:else}
-            <Earth class="text-muted-foreground size-4 shrink-0" aria-hidden="true" />
-          {/if}
-          {isOneDrive ? m.import_entire_onedrive() : m.import_entire_site()}
-        </label>
+      </InputGroup.Root>
+      <SharePointFilterMenu {columns} {facets} onChange={(next) => (facets = next)} />
+    </div>
+    <SharePointFilterChips {columns} {facets} onChange={(next) => (facets = next)} />
+    <div class="flex flex-wrap items-center justify-between gap-x-3 gap-y-1 px-1">
+      <p id="sharepoint-search-help" class="text-muted-foreground text-xs" aria-live="polite">
+        {#if searching && !searchLoading && !searchError}
+          {searchResults.length === 1
+            ? m.sharepoint_search_results_one({ count: String(searchResults.length) })
+            : m.sharepoint_search_results_other({ count: String(searchResults.length) })}
+        {:else}
+          {m.sharepoint_search_help()}
+        {/if}
+      </p>
+      <div class="flex flex-wrap items-center gap-2">
+        {#if searching}
+          <Button variant="ghost" size="sm" onclick={clearSearch}>
+            {m.sharepoint_search_clear()}
+          </Button>
+        {/if}
+        {#if canSelectMatches}
+          <!-- One press instead of a checkbox per hit. -->
+          <Button
+            variant="outline"
+            size="sm"
+            disabled={siteRootSelected || editableMatches.length === 0}
+            title={siteRootSelected || editableMatches.length === 0
+              ? m.sharepoint_selected_by_parent()
+              : undefined}
+            onclick={toggleAllMatches}
+          >
+            {editableMatches.length === 0
+              ? m.sharepoint_selected_by_parent()
+              : allMatchesSelected
+                ? m.sharepoint_deselect_all_matches()
+                : m.sharepoint_select_all_matches({ count: String(editableMatches.length) })}
+          </Button>
+        {/if}
       </div>
-
-      <ul role="tree" aria-label={siteName} class="flex flex-col">
-        {#each rootItems as item (buildSharePointSelectionKey(item))}
-          <SharePointFolderTreeNode
-            node={item}
-            {selectedItemKeySet}
-            {selectedPaths}
-            ancestorSelected={siteRootSelected}
-            {onToggleSelect}
-            onToggleExpanded={toggleNodeExpanded}
-            onRetryLoad={retryNodeLoad}
-          />
-        {/each}
-      </ul>
-    {/if}
+    </div>
   </div>
+
+  {#if searching}
+    <SharePointSearchResults
+      items={searchResults}
+      {query}
+      loading={searchLoading}
+      error={searchError}
+      truncated={searchTruncated}
+      {selectedItemKeySet}
+      {selectedPaths}
+      {onToggleSelect}
+      onRetry={() => void runSearch()}
+    />
+  {:else}
+    <div
+      class="border-border bg-card min-h-56 flex-1 overflow-x-hidden overflow-y-auto rounded-lg border"
+      aria-busy={rootLoading}
+    >
+      {#if rootLoading}
+        <div
+          class="text-muted-foreground flex items-center justify-center gap-2 px-4 py-10"
+          role="status"
+        >
+          <LoaderCircle class="size-4 animate-spin" aria-hidden="true" />
+          {m.sharepoint_loading_content()}
+        </div>
+      {:else if rootLoadError}
+        <div class="flex flex-col items-center gap-3 px-4 py-10 text-center" role="alert">
+          <p class="text-destructive text-sm">{m.sharepoint_tree_load_error()}</p>
+          <Button variant="outline" size="sm" onclick={() => loadRoot(currentTreeSource())}>
+            <RefreshCw aria-hidden="true" />
+            {m.retry()}
+          </Button>
+        </div>
+      {:else if rootItems.length === 0}
+        <div class="text-muted-foreground px-4 py-10 text-center text-sm">
+          {m.no_items()}
+        </div>
+      {:else}
+        <div
+          class="border-border flex min-h-11 w-full items-center gap-2 border-b px-3 text-left transition-colors
+          {siteRootSelected ? 'bg-accent-dimmer/60' : 'hover:bg-muted/50'}"
+        >
+          <Checkbox
+            id="sharepoint-entire-site"
+            aria-label={isOneDrive ? m.import_entire_onedrive() : m.import_entire_site()}
+            checked={siteRootSelected}
+            indeterminate={siteRootIndeterminate}
+            onCheckedChange={handleImportEntireSite}
+          />
+          <label
+            for="sharepoint-entire-site"
+            class="flex h-10 min-w-0 flex-1 cursor-pointer items-center gap-2 px-2 font-medium"
+          >
+            {#if isOneDrive}
+              <Cloud class="text-muted-foreground size-4 shrink-0" aria-hidden="true" />
+            {:else}
+              <Earth class="text-muted-foreground size-4 shrink-0" aria-hidden="true" />
+            {/if}
+            {isOneDrive ? m.import_entire_onedrive() : m.import_entire_site()}
+          </label>
+        </div>
+
+        <ul role="tree" aria-label={siteName} class="flex flex-col">
+          {#each rootItems as item (buildSharePointSelectionKey(item))}
+            <SharePointFolderTreeNode
+              node={item}
+              {selectedItemKeySet}
+              {selectedPaths}
+              ancestorSelected={siteRootSelected}
+              {onToggleSelect}
+              onToggleExpanded={toggleNodeExpanded}
+              onRetryLoad={retryNodeLoad}
+            />
+          {/each}
+        </ul>
+      {/if}
+    </div>
+  {/if}
 </div>

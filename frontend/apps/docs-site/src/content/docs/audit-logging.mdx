@@ -83,9 +83,13 @@ Conversation data (questions and app runs) follows a hierarchical retention poli
 2. Space `data_retention_days`
 3. `null` means keep forever
 
+When the purge job deletes a question or app run, it also deletes the files attached to it, such as uploaded documents, audio recordings and their transcriptions, once no other chat, assistant, app or app run uses them. A file that is still used elsewhere is kept until its last use is removed. The stored bytes are then removed by the object content lifecycle; see [Files nothing uses anymore](/guides/object-content-storage#files-nothing-uses-anymore).
+
 There is no tenant-level conversation retention setting: it was removed from the retention-policy API (`PUT /api/v1/audit/retention-policy` accepts only `retention_days`) to prevent accidental data loss. The purge job still honours the legacy `conversation_retention_enabled`/`conversation_retention_days` columns on the tenant's audit retention policy row if they were set directly in the database, but no API or UI writes them.
 
-Use assistant/app-level overrides when you need shorter retention than the space default.
+In shared and organization spaces, changing or clearing an assistant/app override requires the same space administration permission as changing the space policy. Editors can continue editing other settings but cannot change retention. Personal-space owners retain control of their own assistants and apps.
+
+The existing valid range is 1–2555 days. The space value is a default, not a maximum: administrators can choose a shorter or longer assistant/app override within that range. Setting the override to `null` restores inheritance; omitting it from an update leaves it unchanged. If neither the assistant/app nor its space has a policy, data is kept indefinitely (unless a legacy tenant policy applies).
 
 ## Export formats
 

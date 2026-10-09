@@ -6,6 +6,9 @@ FROM node:22-bookworm-slim AS builder
 COPY --from=oven/bun:1.3.14-slim /usr/local/bin/bun /usr/local/bin/bun
 
 WORKDIR /app
+ARG APP_VERSION=0.0.0-dev
+ARG APP_REVISION=unknown
+ENV APP_VERSION=${APP_VERSION} APP_REVISION=${APP_REVISION}
 COPY . .
 
 ENV NODE_OPTIONS=--max-old-space-size=8192
@@ -32,3 +35,7 @@ EXPOSE 3000
 USER node
 ENV NODE_ENV="production"
 CMD ["node", "build"]
+
+ARG APP_VERSION=0.0.0-dev
+ARG APP_REVISION=unknown
+ENV APP_VERSION=${APP_VERSION} APP_REVISION=${APP_REVISION}

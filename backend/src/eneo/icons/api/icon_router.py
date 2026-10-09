@@ -3,6 +3,11 @@ from uuid import UUID
 
 from fastapi import APIRouter, Depends, Response, UploadFile
 
+from eneo.authentication.endpoint_access import (
+    Authentication,
+    Authorization,
+    endpoint_access,
+)
 from eneo.icons.api.icon_models import IconPublic
 from eneo.main.container.container import Container
 from eneo.server.dependencies.container import get_container
@@ -41,6 +46,11 @@ _ContainerWithUploadAdmission = Annotated[
         **responses.get_responses([503]),
     },
 )
+@endpoint_access(
+    authentication=Authentication.PUBLIC,
+    authorization=Authorization.PUBLIC,
+    reason="Public icon content is used in shared and login views.",
+)
 async def get_icon(id: UUID, container: _NonTransactionalContainer) -> Response:
     icon_service = container.icon_service()
     download = await icon_service.open_icon(id)
@@ -66,6 +76,11 @@ async def get_icon(id: UUID, container: _NonTransactionalContainer) -> Response:
         "image limit. Returns the icon ID."
     ),
 )
+@endpoint_access(
+    authentication=Authentication.USER,
+    authorization=Authorization.AUTHENTICATED,
+    reason="IconService authorizes mutations for the caller and target icon.",
+)
 async def create_icon(
     file: UploadFile,
     container: _ContainerWithUploadAdmission,
@@ -86,6 +101,11 @@ async def create_icon(
     summary="Delete icon",
     description="Delete an icon by ID. Requires authentication and ownership.",
     responses={204: {"description": "Deleted"}, 404: {"description": "Not found"}},
+)
+@endpoint_access(
+    authentication=Authentication.USER,
+    authorization=Authorization.AUTHENTICATED,
+    reason="IconService authorizes mutations for the caller and target icon.",
 )
 async def delete_icon(id: UUID, container: _ContainerWithUser) -> None:
     icon_service = container.icon_service()

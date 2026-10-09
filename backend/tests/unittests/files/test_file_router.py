@@ -1,7 +1,7 @@
 from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
 from datetime import UTC, datetime
-from unittest.mock import AsyncMock, MagicMock
+from unittest.mock import ANY, AsyncMock, MagicMock
 from uuid import uuid4
 
 import pytest
@@ -18,6 +18,7 @@ from eneo.files.file_models import (
     FileContentVariant,
     FileInfo,
     FileMetadata,
+    FilePublic,
     FileType,
     OriginalSignedURLRequest,
 )
@@ -108,6 +109,10 @@ def test_upload_request_resolves_shared_container_once_before_file_work(
         return saved
 
     file_service.save_file.side_effect = save_file
+    # The response is the public projection (carries has_download_reference).
+    file_service.get_public_file_by_id.return_value = FilePublic(
+        **saved.model_dump(), has_download_reference=True
+    )
     audit_service = AsyncMock()
     audit_service.log_async.side_effect = audit_error
     container = MagicMock()
@@ -167,6 +172,8 @@ async def test_upload_enqueues_audit_only_after_file_success() -> None:
         return file
 
     service.save_file.side_effect = save_file
+    public_file = FilePublic(**file.model_dump(), has_download_reference=True)
+    service.get_public_file_by_id.return_value = public_file
     audit_service = AsyncMock()
     session = MagicMock()
 
@@ -197,9 +204,11 @@ async def test_upload_enqueues_audit_only_after_file_success() -> None:
         container=Container(),
     )
 
-    assert result == file
+    assert result == public_file
     assert events == ["save", "log"]
-    session.begin.assert_called_once()
+    # One transaction for the audit row, one for the public projection.
+    assert session.begin.call_count == 2
+    service.get_public_file_by_id.assert_awaited_once_with(file.id)
     audit_service.log_async.assert_awaited_once()
     audit_service.log.assert_not_awaited()
 
@@ -290,6 +299,7 @@ async def test_download_file_signed_raises_not_found_for_missing_content(monkeyp
     file_id = uuid4()
     payload = {
         "file_id": str(file_id),
+        "tenant_id": str(uuid4()),
         "content_disposition": "inline",
     }
 
@@ -308,7 +318,10 @@ async def test_download_file_signed_raises_not_found_for_missing_content(monkeyp
 
     with pytest.raises(NotFoundException, match="File content not found"):
         await file_router.download_file_signed(
-            id=file_id, token="token", range=None, container=Container()
+            id=file_id,
+            access=file_router.authorize_signed_file(id=file_id, token="token"),
+            range=None,
+            container=Container(),
         )
 
 
@@ -319,6 +332,7 @@ def test_processing_download_returns_and_documents_object_store_503(monkeypatch)
         "verify_signed_token",
         lambda _: {
             "file_id": str(file_id),
+            "tenant_id": str(uuid4()),
             "content_disposition": "inline",
         },
     )
@@ -377,7 +391,9 @@ async def test_original_download_rejects_processing_token(monkeypatch):
     with pytest.raises(AuthenticationException, match="Invalid or expired token"):
         await file_router.download_original_file_signed(
             id=file_id,
-            token="token",
+            access=file_router.authorize_original_signed_file(
+                id=file_id, token="token"
+            ),
             range=None,
             container=object(),
         )
@@ -390,6 +406,7 @@ async def test_original_download_rejects_token_for_another_file(monkeypatch):
         "verify_file_original_download_token",
         lambda _: {
             "file_id": str(uuid4()),
+            "tenant_id": str(uuid4()),
             "content_disposition": "attachment",
         },
     )
@@ -397,7 +414,9 @@ async def test_original_download_rejects_token_for_another_file(monkeypatch):
     with pytest.raises(UnauthorizedException, match="not valid for this file"):
         await file_router.download_original_file_signed(
             id=requested_file_id,
-            token="token",
+            access=file_router.authorize_original_signed_file(
+                id=requested_file_id, token="token"
+            ),
             range=None,
             container=object(),
         )
@@ -412,6 +431,7 @@ async def test_unsatisfiable_original_range_uses_known_size_without_reopening(
         "verify_file_original_download_token",
         lambda _: {
             "file_id": str(file_id),
+            "tenant_id": str(uuid4()),
             "content_disposition": "attachment",
         },
     )
@@ -429,7 +449,7 @@ async def test_unsatisfiable_original_range_uses_known_size_without_reopening(
 
     response = await file_router.download_original_file_signed(
         id=file_id,
-        token="token",
+        access=file_router.authorize_original_signed_file(id=file_id, token="token"),
         range="bytes=999-",
         container=Container(),
     )
@@ -441,7 +461,7 @@ async def test_unsatisfiable_original_range_uses_known_size_without_reopening(
     service.get_original_download_no_auth.assert_awaited_once_with(
         file_id,
         range_header="bytes=999-",
-        expected_tenant_id=None,
+        expected_tenant_id=ANY,
     )
 
 
@@ -499,7 +519,7 @@ async def test_original_download_audits_the_redemption(monkeypatch):
 
     response = await file_router.download_original_file_signed(
         id=file_id,
-        token="token",
+        access=file_router.authorize_original_signed_file(id=file_id, token="token"),
         range=None,
         container=Container(),
     )
@@ -516,8 +536,9 @@ async def test_original_download_audits_the_redemption(monkeypatch):
     assert audit["metadata"]["extra"] == {
         "content_disposition": "attachment",
         "ranged": False,
-        "tenant_claim_present": True,
         "content_length": 5,
+        "cache_revalidated": False,
+        "transferred_bytes": 5,
     }
 
 
@@ -526,7 +547,11 @@ async def test_original_download_is_served_when_audit_storage_fails(monkeypatch)
     monkeypatch.setattr(
         file_router,
         "verify_file_original_download_token",
-        lambda _: {"file_id": str(file_id), "content_disposition": "inline"},
+        lambda _: {
+            "file_id": str(file_id),
+            "tenant_id": str(uuid4()),
+            "content_disposition": "inline",
+        },
     )
 
     async def chunks() -> AsyncGenerator[bytes]:
@@ -568,7 +593,7 @@ async def test_original_download_is_served_when_audit_storage_fails(monkeypatch)
 
     response = await file_router.download_original_file_signed(
         id=file_id,
-        token="token",
+        access=file_router.authorize_original_signed_file(id=file_id, token="token"),
         range=None,
         container=Container(),
     )
@@ -584,6 +609,7 @@ async def test_legacy_unsatisfiable_range_preserves_empty_response(monkeypatch):
         "verify_signed_token",
         lambda _: {
             "file_id": str(file_id),
+            "tenant_id": str(uuid4()),
             "content_disposition": "attachment",
         },
     )
@@ -601,7 +627,7 @@ async def test_legacy_unsatisfiable_range_preserves_empty_response(monkeypatch):
 
     response = await file_router.download_file_signed(
         id=file_id,
-        token="token",
+        access=file_router.authorize_signed_file(id=file_id, token="token"),
         range="bytes=999-",
         container=Container(),
     )
@@ -862,12 +888,11 @@ def test_download_claims_return_tenant_claim_when_present():
     assert expected_tenant == tenant_id
 
 
-def test_download_claims_tolerate_absent_tenant_claim():
+def test_download_claims_reject_absent_tenant_claim():
+    """A token that cannot name its tenant is not a valid credential."""
     file_id = uuid4()
-    disposition, expected_tenant = file_router._validate_download_claims(
-        file_id=file_id,
-        payload={"file_id": str(file_id), "content_disposition": "attachment"},
-    )
-
-    assert disposition is ContentDisposition.ATTACHMENT
-    assert expected_tenant is None
+    with pytest.raises(AuthenticationException, match="Invalid token claims"):
+        file_router._validate_download_claims(
+            file_id=file_id,
+            payload={"file_id": str(file_id), "content_disposition": "attachment"},
+        )

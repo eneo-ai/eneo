@@ -1,15 +1,15 @@
 from typing import TYPE_CHECKING, Any, Dict, Optional
 from uuid import UUID
 
-from eneo.main.exceptions import BadRequestException, NotFoundException
+from eneo.main.exceptions import BadRequestException
 from eneo.main.logging import get_logger
 
 if TYPE_CHECKING:
     from eneo.integration.application.sharepoint_auth_router import (
         SharePointAuthRouter,
     )
-    from eneo.integration.domain.repositories.user_integration_repo import (
-        UserIntegrationRepository,
+    from eneo.integration.application.user_integration_service import (
+        UserIntegrationService,
     )
     from eneo.spaces.space_repo import SpaceRepository
 
@@ -17,120 +17,33 @@ logger = get_logger(__name__)
 
 
 class SharePointTreeService:
-    """Service for browsing SharePoint folder structure with hybrid auth support.
+    """Service for browsing SharePoint with an authorized integration.
 
     Supports both user OAuth and tenant app authentication via SharePointAuthRouter.
     """
 
     def __init__(
         self,
-        user_integration_repo: "UserIntegrationRepository",
+        user_integration_service: "UserIntegrationService",
         sharepoint_auth_router: "SharePointAuthRouter",
         space_repo: "SpaceRepository",
     ) -> None:
         super().__init__()
-        self.user_integration_repo = user_integration_repo
+        self.user_integration_service = user_integration_service
         self.sharepoint_auth_router = sharepoint_auth_router
         self.space_repo = space_repo
 
-    async def get_folder_tree(
-        self,
-        user_integration_id: UUID,
-        space_id: UUID,
-        site_id: Optional[str] = None,
-        drive_id: Optional[str] = None,
-        folder_id: Optional[str] = None,
-        folder_path: str = "",
-    ) -> dict[str, Any]:
-        """Get folder tree from SharePoint site or OneDrive using hybrid authentication.
-
-        Args:
-            user_integration_id: User's integration ID
-            space_id: Space context (determines auth method)
-            site_id: SharePoint site ID (required for SharePoint sites)
-            drive_id: Direct drive ID (required for OneDrive)
-            folder_id: Folder ID to browse (None for root)
-            folder_path: Current folder path
-
-        Returns:
-            Dictionary with folder tree structure
-
-        Raises:
-            BadRequestException: integration not authenticated, token acquisition
-                failed, or neither site_id nor drive_id provided.
-            NotFoundException: user integration or space not found.
-        """
-        if not site_id and not drive_id:
-            raise BadRequestException("Either site_id or drive_id must be provided")
-        from eneo.integration.infrastructure.preview_service.sharepoint_tree_service import (
-            SharePointTreeService as InfraSharePointTreeService,
+    async def _connect(
+        self, user_integration_id: UUID, space_id: UUID
+    ) -> tuple[Any, Any]:
+        """The connection's token and refresh callback after every authorization check."""
+        space = await self.space_repo.one(id=space_id)
+        connection = await self.user_integration_service.get_authorized_integration(
+            user_integration_id, space=space
         )
-
-        logger.info(
-            "SharePoint tree request started",
-            extra={
-                "user_integration_id": str(user_integration_id),
-                "space_id": str(space_id),
-                "site_id": site_id,
-                "drive_id": drive_id,
-                "folder_id": folder_id,
-                "folder_path": folder_path,
-            },
-        )
-
-        try:
-            user_integration = await self.user_integration_repo.one(
-                id=user_integration_id
-            )
-            logger.debug(
-                "User integration found",
-                extra={
-                    "integration_id": str(user_integration.id),
-                    "authenticated": user_integration.authenticated,
-                    "auth_type": user_integration.auth_type,
-                    "tenant_id": str(user_integration.tenant_integration.tenant_id),
-                },
-            )
-        except Exception as e:
-            logger.error(
-                f"Failed to fetch user integration: {type(e).__name__}: {str(e)}",
-                extra={"user_integration_id": str(user_integration_id)},
-                exc_info=True,
-            )
-            raise NotFoundException(
-                f"User integration {user_integration_id} not found"
-            ) from e
-
-        if not user_integration.authenticated:
-            logger.error(
-                "User integration not authenticated",
-                extra={"user_integration_id": str(user_integration_id)},
-            )
-            raise BadRequestException(
-                f"User integration {user_integration_id} is not authenticated"
-            )
-
-        try:
-            space = await self.space_repo.one(id=space_id)
-            logger.debug(
-                "Space found",
-                extra={
-                    "space_id": str(space.id),
-                    "is_personal": space.is_personal(),
-                    "is_organization": space.is_organization(),
-                },
-            )
-        except Exception as e:
-            logger.error(
-                f"Failed to fetch space: {type(e).__name__}: {str(e)}",
-                extra={"space_id": str(space_id)},
-                exc_info=True,
-            )
-            raise NotFoundException(f"Space {space_id} not found") from e
-
-        if not space:
-            logger.error("Space is None after fetch", extra={"space_id": str(space_id)})
-            raise NotFoundException(f"Space {space_id} not found")
+        user_integration = connection.integration
+        if user_integration.integration_type != "sharepoint":
+            raise BadRequestException("Integration is not a SharePoint connection")
 
         space_type = (
             "personal"
@@ -148,7 +61,7 @@ class SharePointTreeService:
 
         try:
             token = await self.sharepoint_auth_router.get_token_for_integration(
-                user_integration=user_integration, space=space
+                connection=connection
             )
             assert token is not None
             logger.info(
@@ -196,6 +109,59 @@ class SharePointTreeService:
                 "refresh_token": refreshed_token.refresh_token,
             }
 
+        return token, token_refresh_callback
+
+    async def get_folder_tree(
+        self,
+        user_integration_id: UUID,
+        space_id: UUID,
+        site_id: Optional[str] = None,
+        drive_id: Optional[str] = None,
+        folder_id: Optional[str] = None,
+        folder_path: str = "",
+    ) -> dict[str, Any]:
+        """Get a SharePoint or OneDrive folder tree with the approved connection.
+
+        Args:
+            user_integration_id: User's integration ID
+            space_id: Space where the caller must have integration import rights
+            site_id: SharePoint site ID (required for SharePoint sites)
+            drive_id: Direct drive ID (required for OneDrive)
+            folder_id: Folder ID to browse (None for root)
+            folder_path: Current folder path
+
+        Returns:
+            Dictionary with folder tree structure
+
+        Raises:
+            BadRequestException: integration not authenticated, token acquisition
+                failed, or neither site_id nor drive_id provided.
+            NotFoundException: user integration or space not found.
+            UnauthorizedException: caller cannot import into the space or use
+                organization credentials.
+        """
+        if not site_id and not drive_id:
+            raise BadRequestException("Either site_id or drive_id must be provided")
+        from eneo.integration.infrastructure.preview_service.sharepoint_tree_service import (
+            SharePointTreeService as InfraSharePointTreeService,
+        )
+
+        logger.info(
+            "SharePoint tree request started",
+            extra={
+                "user_integration_id": str(user_integration_id),
+                "space_id": str(space_id),
+                "site_id": site_id,
+                "drive_id": drive_id,
+                "folder_id": folder_id,
+                "folder_path": folder_path,
+            },
+        )
+
+        token, token_refresh_callback = await self._connect(
+            user_integration_id, space_id
+        )
+
         try:
             service = InfraSharePointTreeService(
                 token_refresh_callback=token_refresh_callback
@@ -228,4 +194,47 @@ class SharePointTreeService:
             )
             raise BadRequestException(
                 f"Failed to fetch SharePoint folder tree: {str(e)}"
+            ) from e
+
+    async def search_library(
+        self,
+        user_integration_id: UUID,
+        space_id: UUID,
+        site_id: Optional[str] = None,
+        drive_id: Optional[str] = None,
+        text: str = "",
+        filters: Optional[dict[str, str]] = None,
+    ) -> dict[str, Any]:
+        """Files anywhere in a library matching free text and column filters.
+
+        Same authorization as browsing the tree; see ``get_folder_tree``.
+        """
+        if not site_id and not drive_id:
+            raise BadRequestException("Either site_id or drive_id must be provided")
+        from eneo.integration.infrastructure.preview_service.sharepoint_tree_service import (
+            SharePointTreeService as InfraSharePointTreeService,
+        )
+
+        token, token_refresh_callback = await self._connect(
+            user_integration_id, space_id
+        )
+        try:
+            service = InfraSharePointTreeService(
+                token_refresh_callback=token_refresh_callback
+            )
+            return await service.search_library(
+                token=token,
+                site_id=site_id,
+                drive_id=drive_id,
+                text=text,
+                filters=filters,
+            )
+        except Exception as e:
+            logger.error(
+                f"Failed to search SharePoint library: {type(e).__name__}: {str(e)}",
+                extra={"site_id": site_id, "drive_id": drive_id},
+                exc_info=True,
+            )
+            raise BadRequestException(
+                f"Failed to search SharePoint library: {str(e)}"
             ) from e

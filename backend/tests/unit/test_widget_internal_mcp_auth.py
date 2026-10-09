@@ -71,6 +71,7 @@ def case() -> WidgetAuthCase:
     tenant_repo.get = AsyncMock(return_value=tenant)
     user_repo = MagicMock()
     user_repo.get_user_by_username = AsyncMock(return_value=None)
+    user_repo.get_user_by_id_and_tenant_id = AsyncMock(return_value=None)
     user_service = UserService(
         user_repo=user_repo,
         auth_service=AuthService(),
@@ -305,7 +306,9 @@ async def test_normal_account_still_uses_existing_authentication(
         account, assistant_id=case.widget.target_id
     )
     assert scoped_claims_from_token(token).widget_visitor is None
-    case.user_service.repo.get_user_by_username.return_value = account
+    # Develop's loopback audience: the account is looked up by the token's
+    # user and tenant ids, never by username.
+    case.user_service.repo.get_user_by_id_and_tenant_id.return_value = account
     async with internal_tool_context(_ctx(token)) as context:
         assert context.user is account
         assert context.user.active_widget is None
@@ -356,13 +359,17 @@ async def test_resolved_visitor_uses_live_retention_policy(case: WidgetAuthCase)
     assert user.active_widget is not None and user.active_widget.never_persist is True
 
 
-async def test_old_account_shaped_visitor_token_fails_with_original_error(
+async def test_account_shaped_visitor_token_is_refused_by_audience(
     case: WidgetAuthCase, tool_container: Container
 ):
+    """A session-audience token never reaches the loopback tools, however it
+    is shaped: the loopback audience is checked before any account lookup."""
     token = AuthService().create_access_token_for_user(
         case.user, extra_claims={"assistant_id": str(case.widget.target_id)}
     )
-    with pytest.raises(AuthenticationException, match="No authenticated user"):
+    with pytest.raises(
+        AuthenticationException, match="Invalid internal MCP credential"
+    ):
         async with internal_tool_context(_ctx(token)):
             pytest.fail("Synthetic username authenticated as an account")
 

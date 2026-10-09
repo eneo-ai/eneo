@@ -6,7 +6,7 @@ from uuid import uuid4
 
 import pytest
 
-from eneo.ai_models.completion_models.completion_model import GeneratedImage
+from eneo.ai_models.completion_models.completion_model import GeneratedFile
 from eneo.assistants.assistant_service import (
     AssistantService,
     _attach_generated_file_ids,
@@ -34,7 +34,7 @@ def _service() -> AssistantService:
 )
 async def test_generated_image_is_saved_with_matching_extension(mime_type, extension):
     service = _service()
-    image = GeneratedImage(
+    image = GeneratedFile(
         data=b"\x89PNG", mime_type=mime_type, tool_call_id="c1", mcp_tool_name="t"
     )
 

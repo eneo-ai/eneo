@@ -80,8 +80,14 @@ class FileContentRangeError(Exception):
 class FileBase(BaseModel):
     name: str
     checksum: str
+    # Bytes of the primary representation: for a text file its extracted text,
+    # which is what attachment budgets count.
     size: int
     mimetype: Optional[str] = None
+    # Bytes of the exact original (what a download delivers), when one is
+    # stored. Differs from ``size`` for documents, whose primary
+    # representation is extracted text.
+    original_size: Optional[int] = None
 
     file_type: FileType
 
@@ -132,6 +138,9 @@ class FilePublic(InDB):
     name: str
     mimetype: str
     size: int
+    # Size of the file as downloaded, when its exact original is stored; show
+    # this to users rather than ``size``.
+    original_size: Optional[int] = None
     transcription: Optional[str] = None
     token_count: Optional[int] = None  # Token count for the file's content
     # Public capability signal only; never expose storage internals. The chat
@@ -167,14 +176,19 @@ class FileRestrictions(BaseModel):
     limit: Limit
 
 
+# Signed links are stateless bearer credentials and cannot be revoked, so
+# every purpose has a hard maximum lifetime enforced at mint and at redemption.
+FILE_PROCESSING_SIGNED_URL_MAXIMUM_EXPIRY_SECONDS = 7 * 24 * 60 * 60
+FILE_ORIGINAL_SIGNED_URL_MAXIMUM_EXPIRY_SECONDS = 60 * 60
+
+
 class SignedURLRequest(BaseModel):
     # Default 1 hour; capped at 7 days so a leaked URL cannot stay valid
-    # indefinitely (tokens are stateless and cannot be revoked).
-    expires_in: int = Field(default=3600, ge=1, le=604_800)
+    # indefinitely.
+    expires_in: int = Field(
+        default=3600, ge=1, le=FILE_PROCESSING_SIGNED_URL_MAXIMUM_EXPIRY_SECONDS
+    )
     content_disposition: ContentDisposition = ContentDisposition.ATTACHMENT
-
-
-FILE_ORIGINAL_SIGNED_URL_MAXIMUM_EXPIRY_SECONDS = 60 * 60
 
 
 class OriginalSignedURLRequest(SignedURLRequest):

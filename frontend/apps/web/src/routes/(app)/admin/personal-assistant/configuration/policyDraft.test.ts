@@ -532,7 +532,10 @@ describe("PolicyDraft", () => {
 
     expect(draft.capabilityRows.map((row) => row.purpose)).toEqual([
       "web_search",
-      "image_generation"
+      "image_generation",
+      "file_analysis",
+      "file_creation",
+      "charts"
     ]);
     // Stored intent stays selected across provider changes.
     expect(draft.mcpSelections.has("capability:web_search")).toBe(true);

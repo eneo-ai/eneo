@@ -118,6 +118,7 @@ class InfoBlobChunkRepo:
                 InfoBlobChunks.embedding.cosine_distance(embedding),
                 InfoBlobs.title,
                 InfoBlobs.url,
+                InfoBlobs.source_metadata,
             )
             .join(InfoBlobs)
             .where(active_info_blob_version())
@@ -142,6 +143,7 @@ class InfoBlobChunkRepo:
                 score=1 - chunk[1],
                 info_blob_title=chunk[2],
                 info_blob_url=chunk[3],
+                info_blob_source_metadata=chunk[4] or [],
             )
             for chunk in chunks_in_db
         ]

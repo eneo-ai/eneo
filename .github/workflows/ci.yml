@@ -1,14 +1,15 @@
 name: CI
 
 on:
+  workflow_call:
   push:
     branches:
       - develop
-      - 'release/**'
+      - "release/**"
   pull_request:
     branches:
       - develop
-      - 'release/**'
+      - "release/**"
   # Merge queue candidates (develop + queued PRs). Every scoped job runs in
   # full here (their conditions only scope pull_request events), and the
   # aggregate CI job reports the required "CI" check on the candidate.
@@ -40,7 +41,7 @@ env:
   JWT_ALGORITHM: HS256
   JWT_SECRET: ci-test-jwt-secret-not-for-production-0123456789
   JWT_TOKEN_PREFIX: Bearer
-  URL_SIGNING_KEY: test_key
+  URL_SIGNING_KEY: unit-test-url-signing-key-with-at-least-32-bytes
   ENCRYPTION_KEY: yPIAaWTENh5knUuz75NYHblR3672X-7lH-W6AD4F1hs=
   OPENAI_API_KEY: test-api-key
 
@@ -258,6 +259,17 @@ jobs:
           TESTCONTAINERS_RYUK_DISABLED: "true"
           DOCKER_HOST: unix:///var/run/docker.sock
 
+      - name: Verify crawler migration rollback
+        # These tests own disposable databases and deliberately change their schema.
+        run: >-
+          uv run pytest -q -m migration_isolation
+          tests/integration/migrations/test_crawl_lifecycle_round_trip.py
+          tests/integration/migrations/test_website_source_url_identity.py
+          tests/integration/migrations/test_crawler_develop_rollback.py
+        env:
+          TESTCONTAINERS_RYUK_DISABLED: "true"
+          DOCKER_HOST: unix:///var/run/docker.sock
+
       - name: Verify File/Icon upgrade, optional cleanup and widget migrations on PostgreSQL 13
         if: matrix.suite == 'migrations'
         # Migration tests are opt-in and run outside the parallel suite. The
@@ -292,6 +304,7 @@ jobs:
         run: |
           node .github/scripts/ensure-project-fields.mjs --self-test
           node .github/scripts/project-intake.mjs --self-test
+          node --test --test-concurrency=1 .github/scripts/label-policy.test.mjs .github/scripts/project-intake.test.mjs
           node .github/scripts/ci-change-scope.mjs --self-test
           node .github/scripts/check-user-facing.mjs --self-test
           node scripts/collect_user_facing.mjs --self-test

@@ -4,35 +4,46 @@ import hmac
 import json
 import re
 import time
+from collections.abc import Mapping
 from typing import Any, cast
-from urllib.parse import parse_qs, urlsplit
+from urllib.parse import parse_qs, unquote, urlsplit
 from uuid import UUID
 
 from eneo.files.file_models import (
     FILE_ORIGINAL_SIGNED_URL_MAXIMUM_EXPIRY_SECONDS,
+    FILE_PROCESSING_SIGNED_URL_MAXIMUM_EXPIRY_SECONDS,
     ContentDisposition,
 )
 from eneo.main.config import get_settings
 
 
-def _get_signing_key():
-    """Get the signing key from settings."""
-    return get_settings().url_signing_key.encode()
+def _get_signing_key() -> bytes:
+    """The configured signing key; its strength is validated at startup."""
+    return get_settings().url_signing_key.encode("utf-8")
 
 
 SIGNING_KEY = _get_signing_key()
+
+# Token contract version. Every claim below is required; anything older is
+# rejected outright because it cannot prove its lifetime or its tenant.
+TOKEN_VERSION = 2
+
+FILE_PROCESSING_DOWNLOAD_AUDIENCE = "file_processing_download"
 FILE_ORIGINAL_DOWNLOAD_AUDIENCE = "file_original_download"
 INFO_BLOB_ORIGINAL_DOWNLOAD_AUDIENCE = "info_blob_original_download"
-_FILE_ORIGINAL_DOWNLOAD_KEY = hmac.new(
-    SIGNING_KEY,
-    b"eneo:file-original-download:v1",
-    hashlib.sha256,
-).digest()
-_INFO_BLOB_ORIGINAL_DOWNLOAD_KEY = hmac.new(
-    SIGNING_KEY,
-    b"eneo:info-blob-original-download:v1",
-    hashlib.sha256,
-).digest()
+
+# How far in the future ``issued_at`` may lie before the token is rejected;
+# covers clock skew between replicas without admitting pre-dated tokens.
+MAX_FUTURE_ISSUANCE_SECONDS = 60
+
+
+def _derive_key(purpose: bytes) -> bytes:
+    return hmac.new(SIGNING_KEY, purpose, hashlib.sha256).digest()
+
+
+_FILE_PROCESSING_DOWNLOAD_KEY = _derive_key(b"eneo:file-processing-download:v2")
+_FILE_ORIGINAL_DOWNLOAD_KEY = _derive_key(b"eneo:file-original-download:v2")
+_INFO_BLOB_ORIGINAL_DOWNLOAD_KEY = _derive_key(b"eneo:info-blob-original-download:v2")
 
 
 def _generate_token(
@@ -41,46 +52,154 @@ def _generate_token(
     content_disposition: ContentDisposition,
     *,
     signing_key: bytes,
-    audience: str | None,
-    tenant_id: UUID | None = None,
-    resource_claim: str = "file_id",
+    audience: str,
+    tenant_id: UUID,
+    resource_claim: str,
+    maximum_lifetime_seconds: int,
+    issued_at: int | None = None,
 ) -> str:
+    """Sign a version-2 download token.
+
+    The lifetime is checked here as well as at the API boundary so no caller
+    can mint a link that outlives its purpose's maximum.
+    """
+    issued_at = int(time.time()) if issued_at is None else issued_at
+    lifetime = expires_at - issued_at
+    if lifetime <= 0:
+        raise ValueError("A signed download token must expire after it is issued")
+    if lifetime > maximum_lifetime_seconds:
+        raise ValueError(
+            "A signed download token may not live longer than "
+            f"{maximum_lifetime_seconds} seconds"
+        )
+
     payload: dict[str, Any] = {
+        "v": TOKEN_VERSION,
+        "aud": audience,
         resource_claim: str(resource_id),
+        # Bind the credential to the tenant that owns the resource, so a
+        # leaked link cannot be redeemed against another tenant's copy.
+        "tenant_id": str(tenant_id),
+        "issued_at": issued_at,
         "expires_at": expires_at,
         "content_disposition": content_disposition.value,
     }
-    if audience is not None:
-        payload["aud"] = audience
-    # Bind leaked download credentials to the tenant that minted them.
-    if tenant_id is not None:
-        payload["tenant_id"] = str(tenant_id)
-
-    # Encode the payload as JSON and then base64
     message = base64.urlsafe_b64encode(json.dumps(payload).encode()).decode()
-
-    # Create a signature using HMAC-SHA256
     signature = hmac.new(signing_key, message.encode(), hashlib.sha256).digest()
     signature_b64 = base64.urlsafe_b64encode(signature).decode()
-
-    # Return the token in the format message.signature
     return f"{message}.{signature_b64}"
+
+
+def _is_int(value: object) -> bool:
+    return isinstance(value, int) and not isinstance(value, bool)
+
+
+def _is_uuid_string(value: object) -> bool:
+    if not isinstance(value, str):
+        return False
+    try:
+        UUID(value)
+    except ValueError:
+        return False
+    return True
+
+
+def _verify_token(
+    token: str,
+    *,
+    signing_key: bytes,
+    audience: str,
+    resource_claim: str,
+    maximum_lifetime_seconds: int,
+) -> dict[str, Any] | None:
+    """Verify signature, contract version, claim types and lifetime.
+
+    Returns the payload only when every required claim is present and well
+    formed, the audience matches the verifier's purpose, the token was issued
+    before it expires, its lifetime is within the purpose's maximum, it has
+    not expired, and it was not issued more than a short skew in the future.
+    Anything else, including every token from the previous contract, is
+    rejected.
+    """
+    try:
+        message, signature_b64 = token.split(".")
+        signature = base64.urlsafe_b64decode(signature_b64)
+    except Exception:
+        return None
+    # Only the canonical encoding of a 32-byte digest is a signature; trailing
+    # or substituted characters that decode to the same bytes are rejected.
+    if (
+        len(signature) != hashlib.sha256().digest_size
+        or base64.urlsafe_b64encode(signature).decode() != signature_b64
+    ):
+        return None
+
+    expected_signature = hmac.new(
+        signing_key, message.encode(), hashlib.sha256
+    ).digest()
+    if not hmac.compare_digest(signature, expected_signature):
+        return None
+
+    try:
+        payload = json.loads(base64.urlsafe_b64decode(message).decode())
+    except Exception:
+        return None
+    if not isinstance(payload, dict):
+        return None
+    claims = cast(dict[str, object], payload)
+
+    if claims.get("v") != TOKEN_VERSION:
+        return None
+    if claims.get("aud") != audience:
+        return None
+    if not _is_uuid_string(claims.get(resource_claim)):
+        return None
+    if not _is_uuid_string(claims.get("tenant_id")):
+        return None
+    disposition = claims.get("content_disposition")
+    if not isinstance(disposition, str) or disposition not in {
+        item.value for item in ContentDisposition
+    }:
+        return None
+    issued_at = claims.get("issued_at")
+    expires_at = claims.get("expires_at")
+    if not _is_int(issued_at) or not _is_int(expires_at):
+        return None
+    issued_at = cast(int, issued_at)
+    expires_at = cast(int, expires_at)
+    if issued_at >= expires_at:
+        return None
+    if expires_at - issued_at > maximum_lifetime_seconds:
+        return None
+
+    now = int(time.time())
+    if expires_at < now:
+        return None
+    if issued_at > now + MAX_FUTURE_ISSUANCE_SECONDS:
+        return None
+
+    return cast(dict[str, Any], claims)
 
 
 def generate_signed_token(
     file_id: UUID,
     expires_at: int,
     content_disposition: ContentDisposition,
-    tenant_id: UUID | None = None,
+    tenant_id: UUID,
+    *,
+    issued_at: int | None = None,
 ) -> str:
-    """Generate a legacy processing-download token."""
+    """Generate a processing-download token (extracted or derived content)."""
     return _generate_token(
         file_id,
         expires_at,
         content_disposition,
-        signing_key=SIGNING_KEY,
-        audience=None,
+        signing_key=_FILE_PROCESSING_DOWNLOAD_KEY,
+        audience=FILE_PROCESSING_DOWNLOAD_AUDIENCE,
         tenant_id=tenant_id,
+        resource_claim="file_id",
+        maximum_lifetime_seconds=FILE_PROCESSING_SIGNED_URL_MAXIMUM_EXPIRY_SECONDS,
+        issued_at=issued_at,
     )
 
 
@@ -88,7 +207,9 @@ def generate_file_original_download_token(
     file_id: UUID,
     expires_at: int,
     content_disposition: ContentDisposition,
-    tenant_id: UUID | None = None,
+    tenant_id: UUID,
+    *,
+    issued_at: int | None = None,
 ) -> str:
     """Generate a token that is valid only for exact-original downloads."""
     return _generate_token(
@@ -98,59 +219,10 @@ def generate_file_original_download_token(
         signing_key=_FILE_ORIGINAL_DOWNLOAD_KEY,
         audience=FILE_ORIGINAL_DOWNLOAD_AUDIENCE,
         tenant_id=tenant_id,
+        resource_claim="file_id",
+        maximum_lifetime_seconds=FILE_ORIGINAL_SIGNED_URL_MAXIMUM_EXPIRY_SECONDS,
+        issued_at=issued_at,
     )
-
-
-def _verify_token(token: str, *, signing_key: bytes) -> dict[str, Any] | None:
-    try:
-        # Split the token into message and signature parts
-        if "." not in token:
-            return None
-
-        message, signature_b64 = token.split(".")
-
-        # Decode the signature
-        try:
-            signature = base64.urlsafe_b64decode(signature_b64)
-        except Exception:
-            return None
-
-        # Compute the expected signature
-        expected_signature = hmac.new(
-            signing_key, message.encode(), hashlib.sha256
-        ).digest()
-
-        # Compare signatures using constant-time comparison to prevent timing attacks
-        if not hmac.compare_digest(signature, expected_signature):
-            return None
-
-        # Decode the payload
-        try:
-            payload_json = base64.urlsafe_b64decode(message).decode()
-            payload = json.loads(payload_json)
-        except Exception:
-            return None
-
-        # Check if the URL has expired
-        if payload["expires_at"] < int(time.time()):
-            return None
-
-        return payload
-    except Exception:
-        return None
-
-
-def verify_signed_token(token: str) -> dict[str, Any] | None:
-    """Verify a legacy processing-download token."""
-    return _verify_token(token, signing_key=SIGNING_KEY)
-
-
-def verify_file_original_download_token(token: str) -> dict[str, Any] | None:
-    """Verify an exact-original token using its purpose-separated key."""
-    payload = _verify_token(token, signing_key=_FILE_ORIGINAL_DOWNLOAD_KEY)
-    if payload is None or payload.get("aud") != FILE_ORIGINAL_DOWNLOAD_AUDIENCE:
-        return None
-    return payload
 
 
 def generate_info_blob_original_download_token(
@@ -158,6 +230,8 @@ def generate_info_blob_original_download_token(
     expires_at: int,
     content_disposition: ContentDisposition,
     tenant_id: UUID,
+    *,
+    issued_at: int | None = None,
 ) -> str:
     """Generate a purpose-separated token for an InfoBlob original."""
     return _generate_token(
@@ -168,17 +242,42 @@ def generate_info_blob_original_download_token(
         audience=INFO_BLOB_ORIGINAL_DOWNLOAD_AUDIENCE,
         tenant_id=tenant_id,
         resource_claim="info_blob_id",
+        maximum_lifetime_seconds=FILE_ORIGINAL_SIGNED_URL_MAXIMUM_EXPIRY_SECONDS,
+        issued_at=issued_at,
+    )
+
+
+def verify_signed_token(token: str) -> dict[str, Any] | None:
+    """Verify a processing-download token."""
+    return _verify_token(
+        token,
+        signing_key=_FILE_PROCESSING_DOWNLOAD_KEY,
+        audience=FILE_PROCESSING_DOWNLOAD_AUDIENCE,
+        resource_claim="file_id",
+        maximum_lifetime_seconds=FILE_PROCESSING_SIGNED_URL_MAXIMUM_EXPIRY_SECONDS,
+    )
+
+
+def verify_file_original_download_token(token: str) -> dict[str, Any] | None:
+    """Verify an exact-original token using its purpose-separated key."""
+    return _verify_token(
+        token,
+        signing_key=_FILE_ORIGINAL_DOWNLOAD_KEY,
+        audience=FILE_ORIGINAL_DOWNLOAD_AUDIENCE,
+        resource_claim="file_id",
+        maximum_lifetime_seconds=FILE_ORIGINAL_SIGNED_URL_MAXIMUM_EXPIRY_SECONDS,
     )
 
 
 def verify_info_blob_original_download_token(token: str) -> dict[str, Any] | None:
     """Verify an InfoBlob original token and its explicit audience."""
-    payload = _verify_token(token, signing_key=_INFO_BLOB_ORIGINAL_DOWNLOAD_KEY)
-    if payload is None or payload.get("aud") != INFO_BLOB_ORIGINAL_DOWNLOAD_AUDIENCE:
-        return None
-    if "info_blob_id" not in payload:
-        return None
-    return payload
+    return _verify_token(
+        token,
+        signing_key=_INFO_BLOB_ORIGINAL_DOWNLOAD_KEY,
+        audience=INFO_BLOB_ORIGINAL_DOWNLOAD_AUDIENCE,
+        resource_claim="info_blob_id",
+        maximum_lifetime_seconds=FILE_ORIGINAL_SIGNED_URL_MAXIMUM_EXPIRY_SECONDS,
+    )
 
 
 # Path suffix of a signed original-download URL (the shape minted by
@@ -216,10 +315,48 @@ def parse_file_reference_url(url: str) -> tuple[UUID, str] | None:
 
 
 _REFERENCE_TOKEN = re.compile(
-    r"(?P<prefix>/original/download/?\?(?:[^\s\"'<>]*?&)?token=)"
+    r"(?P<prefix>/original/download[^\s?\"'<>]*\?(?:[^\s\"'<>]*?&)?token=)"
     r"[A-Za-z0-9_\-=.]+"
 )
 REDACTED_TOKEN = "REDACTED"
+
+
+_REDACTED_REFERENCE_URL = re.compile(
+    r"https?://[^\s\"'<>]*?/api/v1/files/(?P<file_id>[0-9a-fA-F-]{36})"
+    r"/original/download/?\?[^\s\"'<>]*?token=" + REDACTED_TOKEN + r"[^\s\"'<>]*"
+)
+
+
+def restore_reference_tokens(value: object, fresh_urls: Mapping[UUID, str]) -> object:
+    """Swap redacted reference URLs for this request's freshly minted ones.
+
+    The inverse of :func:`redact_reference_tokens` for replay: history keeps
+    tool-call arguments with the token redacted, and a model replaying them
+    tends to copy the URL from its own earlier call. Each redacted link to a
+    file with a fresh URL in ``fresh_urls`` becomes that URL, so a copied link
+    works. The fresh URL is minted for this request anyway and is never
+    persisted. Links to files without one stay redacted.
+    """
+    if isinstance(value, str):
+
+        def fresh(match: re.Match[str]) -> str:
+            try:
+                file_id = UUID(match.group("file_id"))
+            except ValueError:
+                return match.group(0)
+            return fresh_urls.get(file_id, match.group(0))
+
+        return _REDACTED_REFERENCE_URL.sub(fresh, value)
+    if isinstance(value, dict):
+        mapping = cast(dict[object, object], value)
+        return {
+            key: restore_reference_tokens(item, fresh_urls)
+            for key, item in mapping.items()
+        }
+    if isinstance(value, list):
+        entries = cast(list[object], value)
+        return [restore_reference_tokens(item, fresh_urls) for item in entries]
+    return value
 
 
 def redact_reference_tokens(value: object) -> object:
@@ -243,6 +380,78 @@ def redact_reference_tokens(value: object) -> object:
     return value
 
 
+# The same link inside JSON text that is still being written, where "/" and
+# "&" may be escaped ("\/", "&").
+_REFERENCE_TOKEN_IN_JSON = re.compile(
+    r"(?P<prefix>\\?/original\\?/download[^\s?\"'<>]*\?"
+    r"(?:[^\s\"'<>]*?(?:&|\\u0026))?token=)"
+    r"[A-Za-z0-9_\-=.]+"
+)
+
+
+def redact_reference_tokens_in_json(text: str) -> str:
+    """Replace the signed token of every reference URL in raw JSON ``text``.
+
+    For tool-call arguments forwarded while the model is still writing them,
+    before they can be parsed. A token that has only begun is replaced as
+    well, so the redacted text of a longer prefix always extends the redacted
+    text of a shorter one.
+    """
+    return _REFERENCE_TOKEN_IN_JSON.sub(rf"\g<prefix>{REDACTED_TOKEN}", text)
+
+
+_REFERENCE_LINK = re.compile(
+    r"/api/v1/files/(?P<file_id>[0-9a-fA-F-]{36})/original/download/?"
+    r"\?(?:[^\s\"'<>]*?&)?token=(?P<token>[A-Za-z0-9_\-=.]+)"
+)
+
+
+# Admission must also recognize tokenless/malformed references. Otherwise a
+# model typo can hide a file identity from the conversation boundary check.
+_REFERENCE_LOCATION = re.compile(
+    r"/api/v1/files/(?P<file_id>[0-9a-fA-F-]{36})/original/download(?=$|[/\s?\"'<>])"
+)
+
+# A structured input can have a missing token or a stray final path component.
+# This is only for lookup in the already-authorized map, never for HTTP access.
+_REPAIRABLE_REFERENCE_PATH = re.compile(
+    r"/api/v1/files/(?P<file_id>[0-9a-fA-F-]{36})/original/download"
+    r"(?P<tail>(?:/[A-Za-z0-9_-]+)?/?)$"
+)
+
+
+def reference_file_ids(value: object, *, include_redacted: bool = False) -> set[UUID]:
+    """File ids of every signed reference link found anywhere in ``value``.
+
+    Walks strings, dicts and lists like :func:`redact_reference_tokens`, so a
+    link nested in an argument object or embedded in longer text is found.
+    Strings are percent-decoded first: the download route decodes its path, so
+    an encoded link reaches the same file. Shape only, no verification. A
+    redacted link carries no credential and is skipped unless asked for.
+    With ``include_redacted``, admission also sees tokenless/malformed references.
+    """
+    file_ids: set[UUID] = set()
+    if isinstance(value, str):
+        pattern = _REFERENCE_LOCATION if include_redacted else _REFERENCE_LINK
+        for match in pattern.finditer(unquote(value)):
+            if not include_redacted and match.group("token") == REDACTED_TOKEN:
+                continue
+            try:
+                file_ids.add(UUID(match.group("file_id")))
+            except ValueError:
+                continue
+        return file_ids
+    if isinstance(value, dict):
+        entries = list(cast(dict[object, object], value).values())
+    elif isinstance(value, list):
+        entries = cast(list[object], value)
+    else:
+        return file_ids
+    for item in entries:
+        file_ids |= reference_file_ids(item, include_redacted=include_redacted)
+    return file_ids
+
+
 def looks_like_reference_url(url: str) -> bool:
     """Whether ``url`` has the shape of a signed attachment reference.
 
@@ -257,7 +466,7 @@ def build_signed_original_download_url(
     file_id: UUID,
     base_url: str,
     expires_in: int,
-    tenant_id: UUID | None = None,
+    tenant_id: UUID,
     content_disposition: ContentDisposition = ContentDisposition.ATTACHMENT,
 ) -> str:
     """Build an absolute signed URL for an exact-original download.
@@ -267,15 +476,64 @@ def build_signed_original_download_url(
     (no trailing slash). ``expires_in`` is clamped to the original-download
     token maximum so a config value cannot extend a leaked URL's lifetime.
     """
-    expires_in = min(expires_in, FILE_ORIGINAL_SIGNED_URL_MAXIMUM_EXPIRY_SECONDS)
-    expires_at = int(time.time()) + expires_in
+    expires_in = max(
+        1, min(expires_in, FILE_ORIGINAL_SIGNED_URL_MAXIMUM_EXPIRY_SECONDS)
+    )
+    issued_at = int(time.time())
     token = generate_file_original_download_token(
         file_id=file_id,
-        expires_at=expires_at,
+        expires_at=issued_at + expires_in,
         content_disposition=content_disposition,
         tenant_id=tenant_id,
+        issued_at=issued_at,
     )
     return (
         f"{base_url.rstrip('/')}/api/v1/files/{file_id}/original/download/"
         f"?token={token}"
     )
+
+
+def use_current_file_references(value: Any, current_urls: Mapping[UUID, str]) -> Any:
+    """Bind exact tool URL inputs to this request's authorized reference links.
+
+    Models can copy an older/damaged token, omit it, or append a stray path
+    component. The trusted completion layer supplies current links only for
+    accessible conversation files. Match file identity, origin and the original
+    download route; replace the entire URL, never mint credentials from model input,
+    attach a token to a foreign host, or resolve arbitrary URLs in prose.
+    The original-download endpoint still performs its normal authorization.
+    """
+    if isinstance(value, str):
+        if not value.startswith(("https://", "http://")):
+            return value
+        # Do not rewrite embedded prose or let urlsplit silently strip controls.
+        if re.search(r"[\s\x00-\x1f\x7f\"'<>]", value):
+            return value
+        try:
+            supplied = urlsplit(value)
+            match = _REPAIRABLE_REFERENCE_PATH.search(supplied.path)
+            current = current_urls.get(UUID(match.group("file_id"))) if match else None
+            if current is None or match is None:
+                return value
+            trusted = urlsplit(current)
+        except ValueError:
+            return value
+        if (
+            supplied.scheme == trusted.scheme
+            and supplied.netloc == trusted.netloc
+            and supplied.path[: match.start("tail")] == trusted.path.rstrip("/")
+            and not supplied.fragment
+        ):
+            return current
+        return value
+    if isinstance(value, dict):
+        return {
+            key: use_current_file_references(item, current_urls)
+            for key, item in cast(dict[str, Any], value).items()
+        }
+    if isinstance(value, list):
+        return [
+            use_current_file_references(item, current_urls)
+            for item in cast(list[Any], value)
+        ]
+    return value

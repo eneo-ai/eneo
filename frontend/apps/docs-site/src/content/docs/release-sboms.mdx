@@ -1,7 +1,7 @@
 # Release SBOMs
 
 Each Eneo release includes Software Bill of Materials (SBOM) files for the
-published backend, frontend, and bundled object-store container images. The files are attached to the
+published backend, frontend, tools runtime, and bundled object-store container images. The files are attached to the
 GitHub Release so you can download the dependency inventory for the exact
 version you run.
 
@@ -13,6 +13,7 @@ The release workflow covers:
 
 - `ghcr.io/eneo-ai/eneo-backend:<version>`
 - `ghcr.io/eneo-ai/eneo-frontend:<version>`
+- `ghcr.io/eneo-ai/eneo-tool-runtime:<version>`
 - `ghcr.io/eneo-ai/eneo-seaweedfs:<bundled store version>`
 
 For a release tag such as `v2.0.0`, the application image tag is `2.0.0`.
@@ -24,15 +25,15 @@ a tag such as `v2.0.0-rc.2` gets SBOM files for that prerelease.
 
 ## How the release flow works
 
-When maintainers publish a GitHub Release, the release SBOM workflow runs
-automatically:
+After the application coordinator attaches a completed release bundle, it calls
+the release SBOM workflow automatically:
 
-1. The workflow reads the release tag and derives the container image tag.
+1. The workflow reads the release tag and downloads and verifies its completed bundle.
 2. It checks out the release tag for source-based dependency inventory and
    reads the bundled store version from `docker/seaweedfs/VERSION`.
-3. It waits for the matching backend and frontend images in GitHub Container
-   Registry and resolves the already-published Eneo SeaweedFS version tag.
-4. It resolves immutable `linux/amd64` digests and the SeaweedFS `linux/arm64`
+3. It reads backend, frontend and tools-runtime digests from the bundle and
+   resolves the already-published Eneo SeaweedFS version tag.
+4. It resolves immutable `linux/amd64` digests and the tools-runtime and SeaweedFS `linux/arm64`
    digest.
 5. It scans those digest references, not only the mutable image tags.
 6. It installs frontend dependencies with Bun's frozen lockfile and generates a
@@ -87,12 +88,12 @@ The diagram follows the same path as the release workflow:
 
 ```mermaid
 flowchart TD
-  release["GitHub Release<br/>published"]
+  release["Complete release bundle<br/>published"]
   manual["Manual dry run"]
-  tag["Derive image tag<br/>from release tag"]
+  tag["Verify bundle<br/>and source revision"]
   digests["Resolve immutable<br/>GHCR platform digests"]
 
-  syft["Syft scans full images<br/>backend, frontend, SeaweedFS"]
+  syft["Syft scans full images<br/>backend, frontend, tools runtime, SeaweedFS"]
   python["CycloneDX Python scans<br/>backend /app/.venv"]
   source["CycloneDX Generator scans frontend source<br/>installed from frozen lockfile"]
 
@@ -137,7 +138,7 @@ flowchart TD
 Eneo publishes a small set of files because each file answers a different
 question.
 
-The backend, frontend, and SeaweedFS image SBOMs are the main release inventory. They are
+The backend, frontend, tools-runtime, and SeaweedFS image SBOMs are the main release inventory. They are
 generated with [Syft](https://github.com/anchore/syft), which scans container
 images and filesystems and can export several SBOM formats. For Eneo, Syft
 scans the released image digests and creates:
@@ -351,3 +352,14 @@ These references explain the formats and tools used by Eneo:
 
 To compare two releases, compare the SBOM files from both release pages. Package
 additions, removals, and version changes show what changed between the images.
+
+## Application bundle
+
+The application image workflow publishes `release.json` and `release.env` only
+after all three application images pass their checks and a combined smoke test.
+They record a shared version, source revision and immutable digests. The runtime
+no longer has an independent version file. SeaweedFS keeps its existing separate
+upstream-based versioning. External deployment systems should consume the
+complete application bundle, since floating aliases cannot update atomically.
+
+The publication coordinator calls the SBOM workflow after the complete bundle is attached. Application SBOMs scan the bundle's recorded digests; the manual workflow also requires that completed bundle.

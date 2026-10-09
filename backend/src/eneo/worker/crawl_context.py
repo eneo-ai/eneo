@@ -12,6 +12,11 @@ from enum import Enum
 from typing import Any
 from uuid import UUID
 
+import numpy as np
+from numpy.typing import NDArray
+
+Float32Vector = NDArray[np.float32]
+
 
 class FailureReason(str, Enum):
     """Categorized failure reasons for crawl page persistence.
@@ -33,9 +38,20 @@ class FailureReason(str, Enum):
     # Database issues
     DB_ERROR = "DB_ERROR"  # Database error during persistence
 
+    TENANT_QUOTA_EXCEEDED = "TENANT_QUOTA_EXCEEDED"
+    USER_QUOTA_EXCEEDED = "USER_QUOTA_EXCEEDED"
+
     # Configuration issues
     NO_EMBEDDING_MODEL = "NO_EMBEDDING_MODEL"  # No embedding model configured
     MISSING_PROVIDER = "MISSING_PROVIDER"  # Embedding model has no provider_id
+
+
+QUOTA_FAILURE_REASONS = frozenset(
+    {
+        FailureReason.TENANT_QUOTA_EXCEEDED.value,
+        FailureReason.USER_QUOTA_EXCEEDED.value,
+    }
+)
 
 
 @dataclass(frozen=True)
@@ -62,6 +78,9 @@ class EmbeddingModelSpec:
     - provider_type: e.g. "openai", "azure", "infinity"
     - provider_credentials: encrypted credentials dict from provider
     - provider_config: additional provider config dict
+    - provider_outbound_headers: configured outbound headers (stored form,
+      secrets still encrypted). Like the credentials, a snapshot: a running
+      crawl keeps the header configuration it started with.
     """
 
     id: UUID
@@ -76,6 +95,9 @@ class EmbeddingModelSpec:
     provider_type: str | None = None
     provider_credentials: dict[str, Any] | None = None
     provider_config: dict[str, Any] | None = None
+    provider_outbound_headers: list[dict[str, Any]] | None = field(
+        default=None, repr=False
+    )
 
 
 @dataclass(frozen=True)
@@ -102,6 +124,8 @@ class CrawlContext:
     tenant_id: UUID
     tenant_slug: str | None
     user_id: UUID
+    attempt_id: UUID
+    lease_owner: str
 
     # Embedding model - extract ALL fields to avoid lazy-load
     embedding_model_id: UUID | None
@@ -158,10 +182,12 @@ class PreparedPage:
     # Content data
     content: str
     content_hash: bytes  # SHA-256 for change detection (future deduplication)
+    http_etag: str | None
+    http_last_modified: str | None
 
     # Pre-computed embeddings (Phase 1 result)
     chunks: list[str]  # Text chunks
-    embeddings: list[list[float]]  # Embedding vectors per chunk
+    embeddings: list[Float32Vector]  # Compact vectors retained until persistence
 
     # Context for persistence
     tenant_id: UUID

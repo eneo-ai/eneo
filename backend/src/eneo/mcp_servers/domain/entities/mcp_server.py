@@ -1,7 +1,9 @@
+import re
 from collections.abc import Iterable
 from dataclasses import dataclass
 from datetime import datetime
 from typing import TYPE_CHECKING, Any, Optional
+from urllib.parse import unquote, urlsplit
 from uuid import UUID
 
 from eneo.base.base_entity import Entity
@@ -31,7 +33,66 @@ MCP_TOOL_DEFINITION_HARD_MAX_BYTES = 1024 * 1024
 # provider pin, and the ask path substitutes the active provider. The tuple
 # order is the order resolved providers are prepended in at ask time.
 GENERAL_PURPOSE = "general"
-CAPABILITY_PURPOSES: tuple[CapabilityPurpose, ...] = ("web_search", "image_generation")
+CAPABILITY_PURPOSES: tuple[CapabilityPurpose, ...] = (
+    "web_search",
+    "image_generation",
+    "file_analysis",
+    "file_creation",
+    "charts",
+)
+
+# Purposes whose providers deliver files. A binary embedded resource of one
+# of the listed types, returned by an active provider of that purpose, is
+# admitted as a generated file; the same resource from any other server stays
+# an ordinary result. Eligibility is host configuration, never provider
+# metadata.
+DOCX_MIME_TYPE = (
+    "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+)
+XLSX_MIME_TYPE = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+PDF_MIME_TYPE = "application/pdf"
+CSV_MIME_TYPE = "text/csv"
+TXT_MIME_TYPE = "text/plain"
+MARKDOWN_MIME_TYPE = "text/markdown"
+GENERATED_FILE_TYPES_BY_PURPOSE: dict[str, frozenset[str]] = {
+    # Text and Markdown come from filling a template of that format.
+    "file_creation": frozenset(
+        {
+            DOCX_MIME_TYPE,
+            PDF_MIME_TYPE,
+            XLSX_MIME_TYPE,
+            TXT_MIME_TYPE,
+            MARKDOWN_MIME_TYPE,
+        }
+    ),
+    # A full query result, so large data moves between tools as a file
+    # instead of through the model.
+    "file_analysis": frozenset({CSV_MIME_TYPE}),
+}
+_GENERATED_FILE_EXTENSIONS: dict[str, str] = {
+    DOCX_MIME_TYPE: "docx",
+    XLSX_MIME_TYPE: "xlsx",
+    PDF_MIME_TYPE: "pdf",
+    CSV_MIME_TYPE: "csv",
+    TXT_MIME_TYPE: "txt",
+    MARKDOWN_MIME_TYPE: "md",
+}
+_UNSAFE_FILENAME_CHARACTERS = re.compile(r"[\x00-\x1f\x7f/\\:*?\"<>|]+")
+
+
+def generated_filename(uri: str | None, mime_type: str) -> str:
+    """A safe display name for a generated file, with the extension its type
+    implies. Taken from the resource URI's last path segment when there is
+    one; the provider cannot choose a path, a hidden name or another type."""
+    extension = _GENERATED_FILE_EXTENSIONS.get(mime_type, "bin")
+    segment = unquote(urlsplit(uri or "").path.rstrip("/").rsplit("/", 1)[-1])
+    stem = _UNSAFE_FILENAME_CHARACTERS.sub("_", segment).strip(" .")
+    base, dot, extension_part = stem.rpartition(".")
+    if dot and base and re.fullmatch(r"[A-Za-z0-9]{1,5}", extension_part):
+        stem = base.strip(" .")
+    stem = stem[:120] or "document"
+    return f"{stem}.{extension}"
+
 
 # Who a capability provider serves. "everyone" is the tenant's default provider
 # for its purpose (at most one active per tenant and purpose); "groups" targets
@@ -56,6 +117,41 @@ BUILTIN_PROVIDER_PURPOSES: tuple[str, ...] = ("image_generation",)
 
 def is_builtin_provider(http_auth_type: str | None) -> bool:
     return http_auth_type == INTERNAL_AUTH_TYPE
+
+
+# A bundled server runs in the optional tool runtime shipped with Eneo (an
+# isolated container, never the backend process). It is an ordinary server
+# otherwise: its URL is derived from ``tool_runtime_url`` when an admin adds
+# it, and the bearer comes from ``tool_runtime_token`` at connect time, so no
+# credential is ever stored on the row. Only the bundled-server preset creates
+# such rows; the generic create and update API cannot. Each runtime endpoint
+# fixes the purpose its row serves and whether it needs the caller's identity
+# (file analysis scopes its parsed-file cache per tenant and user).
+BUNDLED_AUTH_TYPE = "bundled"
+
+
+@dataclass(frozen=True)
+class BundledToolSpec:
+    purpose: str
+    forward_identity: bool
+
+
+BUNDLED_TOOLS: dict[str, BundledToolSpec] = {
+    "compute": BundledToolSpec(purpose=GENERAL_PURPOSE, forward_identity=False),
+    "charts": BundledToolSpec(purpose="charts", forward_identity=False),
+    "file-analysis": BundledToolSpec(purpose="file_analysis", forward_identity=True),
+    "file-creation": BundledToolSpec(purpose="file_creation", forward_identity=False),
+}
+
+
+def is_bundled_server(http_auth_type: str | None) -> bool:
+    return http_auth_type == BUNDLED_AUTH_TYPE
+
+
+def bundled_tool_name(http_url: str) -> str | None:
+    """The runtime tool a bundled row serves: the last segment of its URL."""
+    tool = http_url.rstrip("/").rsplit("/", 1)[-1]
+    return tool if tool in BUNDLED_TOOLS else None
 
 
 @dataclass(frozen=True)
@@ -224,6 +320,7 @@ class MCPServer(Entity):
         documentation_url: Optional[str] = None,
         tools: Optional[list[MCPServerTool]] = None,
         security_classification: Optional["SecurityClassification"] = None,
+        is_internal: bool = False,
         id: Optional[UUID] = None,
         created_at: Optional[datetime] = None,
         updated_at: Optional[datetime] = None,
@@ -231,6 +328,9 @@ class MCPServer(Entity):
         super().__init__(id=id, created_at=created_at, updated_at=updated_at)
         self.tenant_id = tenant_id
         self.name = name
+        # Set only by the loopback factory for the ephemeral servers Eneo
+        # attaches itself (knowledge, files); never mapped from a row.
+        self._is_loopback = is_internal
         self.description = description
         self.http_url = http_url
         self.http_auth_type = http_auth_type
@@ -252,6 +352,29 @@ class MCPServer(Entity):
         self.documentation_url = documentation_url
         self.tools = tools or []
         self.security_classification = security_classification
+
+    @property
+    def is_internal(self) -> bool:
+        """Whether this server is one of Eneo's own loopback servers.
+
+        True for the ephemeral knowledge and files servers a completion
+        attaches (built with ``is_internal=True``) and for a built-in provider
+        row, whose endpoint the service pins to the loopback of its purpose.
+        Never derived from the name: an admin-registered server called
+        "knowledge" or "files" is external, so its tools stay subject to user
+        approval and are never mistaken for Eneo's own.
+        """
+        return self._is_loopback or is_builtin_provider(self.http_auth_type)
+
+    @property
+    def is_bundled(self) -> bool:
+        """Whether this server runs in the bundled tool runtime (built into Eneo).
+
+        Decided by the row's auth type, which only the bundled-server preset
+        can set, never by its name: an admin may rename the row freely and
+        clients still label its calls as Eneo's own.
+        """
+        return is_bundled_server(self.http_auth_type)
 
     @property
     def user_group_ids(self) -> list[UUID]:

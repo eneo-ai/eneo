@@ -22,6 +22,7 @@ import {
   type SSE
 } from "@eneo/eneo-js";
 import { SvelteMap } from "svelte/reactivity";
+import type { CapabilityPurpose } from "$lib/features/mcp/capabilities";
 
 export type PendingToolApproval = {
   approvalId: string;
@@ -624,8 +625,7 @@ export class ChatService {
           disabledMcpServerIds: disabledMcpServerIds?.filter((id) => !id.startsWith("capability:")),
           disabledCapabilities: disabledMcpServerIds
             ?.filter((id) => id.startsWith("capability:"))
-            .map((id) => id.slice("capability:".length)) as
-            ("web_search" | "image_generation")[] | undefined,
+            .map((id) => id.slice("capability:".length)) as CapabilityPurpose[] | undefined,
           callbacks: {
             onFirstChunk: (chunk) => {
               if (isStale()) return;

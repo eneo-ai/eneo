@@ -11,9 +11,9 @@
 -->
 
 <script lang="ts">
-  import type { ModelProviderPublic } from "@eneo/eneo-js";
+  import type { ModelProviderPublic, OutboundHeaderOptions } from "@eneo/eneo-js";
   import type { Writable } from "svelte/store";
-  import { onMount } from "svelte";
+  import { onMount, untrack } from "svelte";
   import { LoaderCircle } from "@lucide/svelte";
 
   import { invalidate } from "$app/navigation";
@@ -29,6 +29,17 @@
   import { Button } from "$lib/components/ui/button/index.js";
 
   import ProviderGlyph from "./components/ProviderGlyph.svelte";
+  import OutboundHeadersEditor from "./OutboundHeadersEditor.svelte";
+  import OutboundHeadersPreview from "./OutboundHeadersPreview.svelte";
+  import {
+    headersPayload,
+    isRowComplete,
+    loadOutboundHeaderOptions,
+    rowsFromHeaders,
+    secretsKeptFromStorage,
+    supportsOutboundHeaders,
+    type HeaderRow
+  } from "./outboundHeaders";
   import {
     formatProviderLabel,
     formatFieldLabel,
@@ -73,8 +84,31 @@
     }
   }
 
+  // --- Outbound header options (lazy, cached) --------------------------------
+  let headerOptions = $state<OutboundHeaderOptions | null>(null);
+  let headerOptionsError = $state(false);
+
+  async function loadHeaderOptions() {
+    if (headerOptions) return;
+    headerOptionsError = false;
+    try {
+      headerOptions = await loadOutboundHeaderOptions(eneo);
+    } catch {
+      // The editor offers a retry; until then headers are left unchanged.
+      headerOptionsError = true;
+    }
+  }
+
   $effect(() => {
-    if (dialogOpen) void loadCapabilities();
+    if (dialogOpen) {
+      void loadCapabilities();
+    }
+  });
+
+  // Once per opening: a failure is retried from the editor, not by whichever
+  // state this effect would otherwise happen to track.
+  $effect(() => {
+    if (dialogOpen) untrack(() => void loadHeaderOptions());
   });
 
   const fields: ModelProviderFieldDef[] = $derived(
@@ -86,6 +120,55 @@
   let isActive = $state(true);
   let isEditingApiKey = $state(false);
   let fieldValues = $state<Record<string, string>>({});
+  let headerRows = $state<HeaderRow[]>([]);
+  let seededHeaders = $state("");
+
+  const headersEditable = $derived(
+    supportsOutboundHeaders(headerOptions, provider?.provider_type ?? "")
+  );
+  const headersComplete = $derived(headerRows.every((row) => isRowComplete(row, headerOptions)));
+  const headersChanged = $derived(JSON.stringify(headersPayload(headerRows)) !== seededHeaders);
+
+  // The endpoint the stored key was entered for, in comparable form.
+  let seededEndpoint = $state("");
+
+  /**
+   * Canonical form for deciding whether an endpoint edit changes the
+   * destination: scheme and host are case-insensitive, a default port equals
+   * no port, and trailing slashes are ignored. The backend applies the same
+   * rule and is authoritative.
+   */
+  function comparableEndpoint(value: string): string {
+    const trimmed = value.trim();
+    if (!trimmed) return "";
+    try {
+      const url = new URL(trimmed.includes("://") ? trimmed : `https://${trimmed}`);
+      const path = url.pathname.replace(/\/+$/, "");
+      return `${url.protocol}//${url.host}${path}${url.search}`.toLowerCase();
+    } catch {
+      return trimmed.replace(/\/+$/, "").toLowerCase();
+    }
+  }
+
+  // A stored key is never sent to a destination it was not entered for, so
+  // changing the endpoint of a provider that has a key means typing the key
+  // again. Derived, not effect-driven, so the form cannot drift out of sync.
+  const endpointChanged = $derived(
+    comparableEndpoint(fieldValues.endpoint ?? "") !== seededEndpoint
+  );
+  const keyRequiredForEndpointChange = $derived(
+    Boolean(provider?.masked_api_key) && endpointChanged
+  );
+  const showApiKeyInput = $derived(isEditingApiKey || keyRequiredForEndpointChange);
+  // The same rule for stored secret header values and fallbacks.
+  const secretsRequiredForEndpointChange = $derived(
+    headersEditable && endpointChanged ? secretsKeptFromStorage(headerRows) : []
+  );
+  const secretsRequiredMessage = $derived(
+    m.provider_endpoint_change_requires_secret_headers({
+      names: secretsRequiredForEndpointChange.join(", ")
+    })
+  );
 
   let isSubmitting = $state(false);
   let error = $state<string | null>(null);
@@ -117,6 +200,9 @@
       }
     }
     fieldValues = next;
+    headerRows = rowsFromHeaders(provider.outbound_headers);
+    seededHeaders = JSON.stringify(headersPayload(headerRows));
+    seededEndpoint = comparableEndpoint(next.endpoint ?? "");
 
     lastSeededFor = { id: provider.id, open: true };
   });
@@ -128,6 +214,7 @@
     config: Record<string, string>;
     is_active: boolean;
     credentials?: Record<string, string>;
+    outbound_headers?: ReturnType<typeof headersPayload>;
   } {
     const credentials: Record<string, string> = {};
     const config: Record<string, string> = {};
@@ -136,8 +223,8 @@
       const value = (fieldValues[field.name] ?? "").trim();
 
       if (field.name === "api_key") {
-        // Only include the API key when the user is actively editing it.
-        if (!isEditingApiKey || !value) continue;
+        // Only include the API key when the user is entering a new one.
+        if (!showApiKeyInput || !value) continue;
         credentials[field.name] = value;
         continue;
       }
@@ -153,6 +240,9 @@
       is_active: isActive
     };
     if (Object.keys(credentials).length > 0) payload.credentials = credentials;
+    // The list replaces the stored one, so only send it when the editor is
+    // showing it; otherwise the stored headers stay as they are.
+    if (headersEditable) payload.outbound_headers = headersPayload(headerRows);
     return payload;
   }
 
@@ -162,6 +252,14 @@
 
     if (!providerName.trim()) {
       error = m.provider_name_required();
+      return;
+    }
+    if (keyRequiredForEndpointChange && !(fieldValues.api_key ?? "").trim()) {
+      error = m.provider_endpoint_change_requires_key();
+      return;
+    }
+    if (secretsRequiredForEndpointChange.length > 0) {
+      error = secretsRequiredMessage;
       return;
     }
 
@@ -237,7 +335,7 @@
                   {formatFieldLabel(field.name)}
                 </Field.Label>
 
-                {#if provider.masked_api_key && !isEditingApiKey}
+                {#if provider.masked_api_key && !showApiKeyInput}
                   <div
                     class="border-border bg-muted/40 hover:border-foreground/30 flex items-center justify-between rounded-lg border px-4 py-2.5 transition-colors duration-150"
                   >
@@ -259,9 +357,13 @@
                     type="password"
                     bind:value={fieldValues[field.name]}
                     placeholder={getFieldPlaceholder(field.name, provider.provider_type)}
-                    required={!provider.masked_api_key}
+                    required={!provider.masked_api_key || keyRequiredForEndpointChange}
                   />
-                  {#if provider.masked_api_key}
+                  {#if keyRequiredForEndpointChange}
+                    <Field.Description>
+                      {m.provider_endpoint_change_requires_key()}
+                    </Field.Description>
+                  {:else if provider.masked_api_key}
                     <button
                       type="button"
                       class="text-muted-foreground hover:text-primary text-left text-xs underline transition-colors"
@@ -311,6 +413,25 @@
             {/if}
           {/each}
 
+          {#if secretsRequiredForEndpointChange.length > 0}
+            <p class="text-destructive text-sm" role="status">{secretsRequiredMessage}</p>
+          {/if}
+
+          <OutboundHeadersEditor
+            providerType={provider.provider_type}
+            options={headerOptions}
+            bind:rows={headerRows}
+            idPrefix="provider-header"
+            endpoint={fieldValues.endpoint}
+            optionsError={headerOptionsError}
+            onRetry={loadHeaderOptions}
+            editing
+          />
+
+          {#if headersEditable && (provider.outbound_headers?.length ?? 0) > 0}
+            <OutboundHeadersPreview providerId={provider.id} hasUnsavedChanges={headersChanged} />
+          {/if}
+
           <Field.Field orientation="horizontal" class="border-border mt-2 border-t pt-4">
             <Switch
               id="provider-is-active"
@@ -324,7 +445,7 @@
 
       <div class="border-border flex justify-end gap-2 border-t px-6 py-4">
         <Button type="button" variant="outline" onclick={handleCancel}>{m.cancel()}</Button>
-        <Button type="submit" disabled={isSubmitting || capabilitiesLoading}>
+        <Button type="submit" disabled={isSubmitting || capabilitiesLoading || !headersComplete}>
           {#if isSubmitting}
             <LoaderCircle class="animate-spin" aria-hidden="true" />
             {m.saving()}

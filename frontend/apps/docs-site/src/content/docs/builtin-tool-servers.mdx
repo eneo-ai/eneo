@@ -4,15 +4,26 @@ Eneo hosts a small set of Model Context Protocol (MCP) servers inside its own
 backend, reached over a loopback HTTP route during a completion. This page
 records what exists, the two ways such a server is attached to a completion,
 the contract every built-in tool honours, and the standpoint on **what belongs
-inside Eneo as a loopback tool and what belongs in an external MCP server**.
+inside Eneo as a loopback tool and what belongs outside the backend**.
+
+Outside the backend there are two kinds of MCP provider:
+
+- an **Eneo-bundled isolated MCP provider**: the optional tool runtime
+  (`tool-runtime/` in the repository), released with Eneo and run as its own
+  container. It serves compute, charts, file analysis and file creation.
+- an **independently operated MCP provider**: any MCP server an operator
+  connects, run and maintained by someone else.
+
+Both use the same MCP-facing mechanisms. Neither moves into the loopback
+process merely because Eneo maintains it.
 
 import { Callout } from "nextra/components";
 
 <Callout type="info">
   For how loopback routing, scoped tokens and the shared proxy work, see
   [Knowledge Retrieval and MCP Interoperability](/docs/knowledge-retrieval-and-mcp).
-  For the administrator view of web search and image generation, see [Web
-  Search & Image Generation](/guides/capabilities).
+  For the administrator view of the functions, see
+  [Functions](/guides/capabilities).
 </Callout>
 
 ## What exists today
@@ -37,7 +48,9 @@ Three servers are registered:
 /internal-mcp/image_generation/mcp   one tool  (generate_image)
 ```
 
-Web search has no loopback server. It is external-only.
+Web search has no loopback server. File analysis, file creation, compute and
+charts run in the bundled tool runtime (see
+[below](#bundled-isolated-providers)), never in the backend.
 
 ## Two attachment patterns
 
@@ -84,7 +97,11 @@ flowchart TD
   A --> R
   B --> R
   R -->|None| OK[Loopback server in eneo/internal_mcp]
-  R -->|Any| EXT[External MCP server;<br/>hand it the signed reference URL]
+  R -->|Any| M{Maintained and shipped by Eneo?}
+  M -->|Yes| BUN[Bundled isolated provider<br/>in the tool runtime]
+  M -->|No| EXT[Independently operated MCP server]
+  BUN --> REF[Either way: hand it the signed reference URL]
+  EXT --> REF
 ```
 
 ## The shared contract
@@ -95,7 +112,9 @@ for any new built-in tool:
 - Tools return MCP content types: `TextContent`, `EmbeddedResource`,
   `ImageContent`, or a `CallToolResult` whose `_meta` uses OpenTelemetry GenAI
   attribute names. The proxy turns `image` blocks into generated files for any
-  server, internal or external.
+  server, internal or external, and binary embedded resources into generated
+  files for sources of a file-delivering function (see
+  [Generated files](/guides/capabilities#generated-files)).
 - Output is self-capped through `default_page_cap` with an `offset` parameter,
   because proxy truncation is destructive.
 - Model-facing error strings are constants, and *not found* is
@@ -113,7 +132,9 @@ for any new built-in tool:
   Use Pattern A when scope comes from the request and nothing needs
   configuring. Use Pattern B when an admin picks a backing model or provider,
   or when the feature needs audience, permission, or classification gating.
-  Everything with a runtime footprint goes to an external MCP server.
+  Everything with a runtime footprint goes to an MCP server outside the
+  backend: the bundled tool runtime when Eneo maintains it, otherwise an
+  independently operated server.
 </Callout>
 
 Why the line sits there:
@@ -131,13 +152,16 @@ Why the line sits there:
 
 ### Worked example: tabular querying
 
-Tabular querying belongs **outside**. It needs an engine such as DuckDB, memory
-proportional to the file, and most likely execution sandboxing. The integration
-contract already exists: `read_file` tells the model to prefer "tabular or
-spreadsheet analysis tools" from other servers and to pass them the same signed
-URL. An external server receives the reference URL and fetches the bytes
-through the signed download endpoint, which is the standard attachment surface
-for all tools. See [How attachment references interoperate with external
+Tabular querying belongs **outside** the backend. It needs an engine (DuckDB),
+memory proportional to the file, and execution sandboxing, because the model
+writes the SQL. Eneo ships it as a bundled isolated provider: the tool runtime
+receives the signed reference URL, downloads the bytes through the signed
+download endpoint on every call, and runs each query in a separate sandbox
+process with a locked-down DuckDB. An independently operated tabular server
+plugs into the same `file_analysis` function the same way: `read_file`
+already tells the model to prefer "tabular or spreadsheet analysis tools" and
+to pass them the same URL. See [How attachment references interoperate with
+external
 MCP](/docs/knowledge-retrieval-and-mcp#how-attachment-references-interoperate-with-external-mcp).
 
 ### Worked example: image generation
@@ -149,6 +173,47 @@ concept it needed was a purpose marker and a foreign key to the image model.
 Image edits with reference images fit the same rule: the bytes come from the
 content store through `file_references.py`, and the call is still one provider
 request.
+
+## Bundled isolated providers
+
+The tool runtime is a separate Bun service in `tool-runtime/`, released as its
+own image (`ghcr.io/eneo-ai/eneo-tool-runtime`) and enabled with an optional
+Compose overlay. Operators configure it in `docs/deployment/TOOL_RUNTIME.md`.
+
+| Endpoint | Tools | Registered as |
+|---|---|---|
+| `/mcp/compute` | `run_javascript` | general server (**Compute**, built into Eneo) |
+| `/mcp/charts` | `create_chart` | general server (**Charts**, built into Eneo) |
+| `/mcp/file-analysis` | `inspect_table`, `query_table`, `assert_table` | `file_analysis` source |
+| `/mcp/file-creation` | `create_document`, `create_spreadsheet` | `file_creation` source |
+
+How it differs from a loopback server, and from an independently operated one:
+
+- **Isolation.** Every job runs in a fresh child process that inherits nothing
+  but `PATH` and a private temporary directory: no token, no credentials, no
+  other job's data. JavaScript runs in QuickJS (WebAssembly); SQL runs in a
+  DuckDB with external access, extensions and configuration locked. In the
+  reference deployment the container is read-only, drops all capabilities
+  and sits on an internal network shared only with the backend and worker.
+- **Registration.** A bundled row is an ordinary `mcp_servers` row with
+  `http_auth_type = "bundled"`, created only by the
+  `POST /api/v1/mcp-servers/bundled/{tool}/` preset. Its URL comes from
+  `TOOL_RUNTIME_URL` and its bearer from `TOOL_RUNTIME_TOKEN` at connect time,
+  so no credential is stored; the connection fields cannot be edited. Each
+  runtime endpoint fixes the row's purpose and whether identity is forwarded.
+  Tools go through normal discovery and approval.
+- **Files.** Inputs arrive as signed reference URLs in tool arguments. Eneo
+  sends its file origin in `X-Eneo-File-Origin` (bundled rows only), and the
+  runtime fetches only original-download links at that origin, on every call.
+  Outputs return as standard embedded resources (documents, CSV exports) or
+  image blocks (charts); the runtime keeps no copies.
+- **No private state.** No database, no console, no registration sync. A
+  disposable cache of parsed sheets is keyed by tenant, user and content hash
+  and never stands in for the access check.
+
+The runtime is not a plugin host. New endpoints belong there only when they
+need platform-owned isolation and Eneo maintains them; domain integrations
+(statistics APIs, open-data portals) stay independently operated servers.
 
 ## Adding a new built-in server
 
@@ -175,3 +240,14 @@ Things a new built-in server would hit that are not yet generic:
 - Test placement is inconsistent: the newest server tests sit in
   `tests/unit/internal_mcp/`, the knowledge and files tests sit at
   `tests/unit/test_*_mcp_server.py`. New servers should use the former.
+
+## Runtime releases and diagnostics
+
+The isolated provider ships in the same verified release bundle as the backend
+and frontend. Admin > Tools reports its availability, version, confinement and
+file-origin diagnostics. Calls use bounded scheduling, cancellation and a
+revalidated disposable file cache. See the [deployment guide](/guides/deployment)
+and repository `docs/deployment/TOOL_RUNTIME.md` for installation and limits.
+
+The provider also ships self-contained table and chart resources for MCP Apps
+compatible hosts. Eneo's runtime integration uses text, images and files.

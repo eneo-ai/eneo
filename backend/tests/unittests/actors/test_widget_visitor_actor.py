@@ -5,11 +5,14 @@ from uuid import uuid4
 from eneo.actors import SpaceAction, SpaceActor, SpaceResourceType
 from eneo.actors.actors.space_actor import SpaceAccessFacts
 
+TENANT_ID = uuid4()
+
 
 def _facts(space_id):
     # A shared space (the only kind that can hold a widget's assistant).
     return SpaceAccessFacts(
         id=space_id,
+        tenant_id=TENANT_ID,
         user_id=None,
         tenant_space_id=uuid4(),
         members={},
@@ -25,6 +28,7 @@ def _visitor(space_id):
     # only `active_widget` pointing at the widget's space.
     return SimpleNamespace(
         id=uuid4(),
+        tenant_id=TENANT_ID,
         permissions=set(),
         user_groups_ids=set(),
         active_api_key=None,

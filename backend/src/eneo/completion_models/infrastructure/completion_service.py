@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from collections.abc import Sequence
+from collections.abc import Collection, Sequence
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any, AsyncGenerator, Optional
 from uuid import UUID
@@ -174,6 +174,9 @@ class CompletionService:
             model=model,
             credential_resolver=credential_resolver,
             provider_type=provider.provider_type,
+            outbound_headers=provider.create_outbound_headers(
+                self.encryption_service, self.user
+            ),
         )
 
     async def prepare_skill_activation_preflight(
@@ -253,6 +256,21 @@ class CompletionService:
                     tenant_id=self.tenant.id,
                 )
         return urls
+
+    async def _mint_generated_file_url(
+        self, file: File, session: SessionInDB | None
+    ) -> str | None:
+        """Reference URL for a file a tool generated earlier in this turn.
+
+        Audited like every other mint. The next turn mints (and audits) it
+        again as a history file; over-counting one exposure is preferred to
+        missing one.
+        """
+        urls = self._build_file_reference_urls([file])
+        await self._audit_file_reference_mints(
+            files=[file], file_reference_urls=urls, session=session
+        )
+        return urls.get(file.id)
 
     async def _audit_file_reference_mints(
         self,
@@ -366,8 +384,12 @@ class CompletionService:
                 yield chunk
                 continue
 
-            # Pass through MCP tool call events directly
-            if chunk.response_type == ResponseType.TOOL_CALL:
+            # Pass through MCP tool call events directly, and the argument
+            # text of a call still being written
+            if chunk.response_type in (
+                ResponseType.TOOL_CALL,
+                ResponseType.TOOL_CALL_DELTA,
+            ):
                 yield chunk
                 continue
 
@@ -405,6 +427,7 @@ class CompletionService:
         skill_runtime: SkillActivationRuntime | None = None,
         inline_file_text: bool = True,
         knowledge_catalog: str = "",
+        url_only_prompt_file_ids: Collection[UUID] = (),
     ) -> CompletionModelResponse:
         if files is None:
             files = []
@@ -450,9 +473,25 @@ class CompletionService:
             for question in (session.questions if session else [])
             for file in [*question.files, *question.generated_files]
         ]
-        file_reference_urls = self._build_file_reference_urls(files + history_files)
+        # Persistent attachments marked "open with tool" are URL-only: their
+        # reference renders on the current message and their text stays out of
+        # the system prompt. Without tools to hand the url to, the mode is
+        # meaningless, so the attachment inlines like any other.
+        tools_advertised = bool(mcp_servers) and model.supports_tool_calling
+        referenced_prompt_files = (
+            [file for file in prompt_files if file.id in url_only_prompt_file_ids]
+            if tools_advertised and url_only_prompt_file_ids
+            else []
+        )
+        file_reference_urls = self._build_file_reference_urls(
+            files + history_files + referenced_prompt_files
+        )
         # The previous turn's generated files are minted for the first time on
-        # this turn, so they are "new" exactly once, here.
+        # this turn, so they are "new" exactly once, here. Persistent
+        # attachments are re-minted every turn of a session but represent one
+        # exposure, audited on the session's first turn (session.questions
+        # never holds the current turn at this point).
+        is_first_turn = session is None or not session.questions
         newly_referenced = [
             *files,
             *(
@@ -460,6 +499,7 @@ class CompletionService:
                 if session and session.questions
                 else []
             ),
+            *(referenced_prompt_files if is_first_turn else []),
         ]
         await self._audit_file_reference_mints(
             files=newly_referenced,
@@ -479,6 +519,8 @@ class CompletionService:
                 identity_headers=identity_headers,
                 mcp_server_tool_repo=self.mcp_server_tool_repo,
             )
+            # Tools may only be handed links to the files minted above.
+            mcp_proxy.allow_file_references(file_reference_urls)
             if model.supports_tool_calling:
                 await mcp_proxy.prepare_tools_for_context()
             logger.debug(
@@ -512,6 +554,7 @@ class CompletionService:
                 ),
                 file_reference_urls=file_reference_urls,
                 inline_file_text=inline_file_text,
+                url_only_prompt_file_ids={file.id for file in referenced_prompt_files},
             )
 
             if extended_logging:
@@ -608,6 +651,22 @@ class CompletionService:
                         pending_approval_ids=pending_approval_ids,
                     ):
                         yield chunk
+                        # The ask path has saved the file by the time the
+                        # consumer returns control. Mint its reference URL now,
+                        # before the adapter resumes and hands the tool result
+                        # to the model, so another tool can take the file in
+                        # the same turn.
+                        if (
+                            chunk.response_type == ResponseType.FILES
+                            and chunk.generated_file is not None
+                        ):
+                            chunk.reference_url = await self._mint_generated_file_url(
+                                chunk.generated_file, session
+                            )
+                            if mcp_proxy and chunk.reference_url:
+                                mcp_proxy.allow_file_references(
+                                    {chunk.generated_file.id: chunk.reference_url}
+                                )
                 finally:
                     if approval_manager:
                         for approval_id in list(pending_approval_ids):

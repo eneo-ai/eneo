@@ -8,6 +8,11 @@ from eneo.apps.app_runs.api.app_run_models import AppRunPublic
 from eneo.audit.application.audit_metadata import AuditMetadata
 from eneo.audit.domain.action_types import ActionType
 from eneo.audit.domain.entity_types import EntityType
+from eneo.authentication.endpoint_access import (
+    Authentication,
+    Authorization,
+    endpoint_access,
+)
 from eneo.main.container.container import Container
 from eneo.server.dependencies.container import get_container
 from eneo.server.protocol import responses
@@ -21,6 +26,11 @@ _WITH_USER = Depends(get_container(with_user=True))
     response_model=AppRunPublic,
     description="Get an app run by id.",
     responses=responses.get_responses([403, 404]),
+)
+@endpoint_access(
+    authentication=Authentication.USER,
+    authorization=Authorization.AUTHENTICATED,
+    reason="AppRunService enforces access to the requested app run.",
 )
 async def get_app_run(
     id: UUID,
@@ -39,6 +49,11 @@ async def get_app_run(
     status_code=204,
     description="Delete an app run by id.",
     responses=responses.get_responses([403, 404]),
+)
+@endpoint_access(
+    authentication=Authentication.USER,
+    authorization=Authorization.AUTHENTICATED,
+    reason="AppRunService enforces access to the requested app run.",
 )
 async def delete_app_run(
     id: UUID,

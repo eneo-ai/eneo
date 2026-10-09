@@ -74,6 +74,10 @@ from eneo.users.password import (
     PasswordPolicyViolationError,
     PasswordReuseError,
 )
+from eneo.websites.domain.crawl_run_repo import (
+    WebsiteCrawlActiveError,
+    WebsiteCrawlCleanupPendingError,
+)
 from eneo.widgets.domain.exceptions import (
     AssistantPublishedAsWidgetError,
     WidgetPublicError,
@@ -206,6 +210,17 @@ DOMAIN_EXCEPTION_MAP: dict[type[Exception], tuple[int, str | None, ErrorCodes]] 
         409,
         None,
         ErrorCodes.LOCAL_PASSWORD_CHANGE_UNAVAILABLE,
+    ),
+    # --- Website crawl lifecycle ---
+    WebsiteCrawlActiveError: (
+        409,
+        "Stop the active crawl before deleting this website.",
+        ErrorCodes.WEBSITE_CRAWL_ACTIVE,
+    ),
+    WebsiteCrawlCleanupPendingError: (
+        409,
+        "Crawler cleanup is still in progress; retry deletion shortly.",
+        ErrorCodes.WEBSITE_CRAWL_CLEANUP_PENDING,
     ),
     # --- Object content and files ---
     ObjectContentUnavailableError: (503, None, ErrorCodes.RESOURCE_NOT_READY),

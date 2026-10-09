@@ -6,7 +6,9 @@ from typing import Annotated
 
 from fastapi import APIRouter, Depends
 
+from eneo.authentication.endpoint_access import Authentication, endpoint_access
 from eneo.main.container.container import Container
+from eneo.roles.permissions import Permission
 from eneo.server.dependencies.container import get_container
 from eneo.server.protocol import responses
 from eneo.storage.presentation.storage_models import StorageInfoModel, StorageModel
@@ -18,7 +20,12 @@ router = APIRouter()
     "/",
     response_model=StorageModel,
     description="Get aggregated storage usage for the tenant.",
-    responses=responses.get_responses([]),
+    responses=responses.get_responses([403]),
+)
+@endpoint_access(
+    authentication=Authentication.USER,
+    authorization=Permission.ADMIN,
+    reason="This operation requires Permission.ADMIN before accessing tenant resources.",
 )
 async def get_storage(
     container: Annotated[Container, Depends(get_container(with_user=True))],
@@ -36,7 +43,12 @@ async def get_storage(
     "/spaces/",
     response_model=StorageInfoModel,
     description="Get per-space storage usage breakdown for the tenant.",
-    responses=responses.get_responses([]),
+    responses=responses.get_responses([403]),
+)
+@endpoint_access(
+    authentication=Authentication.USER,
+    authorization=Permission.ADMIN,
+    reason="This operation requires Permission.ADMIN before accessing tenant resources.",
 )
 async def get_spaces(
     container: Annotated[Container, Depends(get_container(with_user=True))],

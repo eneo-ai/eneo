@@ -14,14 +14,17 @@ if TYPE_CHECKING:
     from eneo.actors import ActorManager
     from eneo.groups_legacy.group_service import GroupService
     from eneo.skills.domain.skill_repo import SkillRepo
+    from eneo.spaces.space import Space
     from eneo.spaces.space_repo import SpaceRepository
     from eneo.spaces.space_service import SpaceService
+    from eneo.users.user import UserInDB
     from eneo.widgets.domain.widget_repo import WidgetRepo
 
 
 class ResourceMoverService:
     def __init__(
         self,
+        user: "UserInDB",
         space_service: "SpaceService",
         space_repo: "SpaceRepository",
         actor_manager: "ActorManager",
@@ -30,12 +33,30 @@ class ResourceMoverService:
         widget_repo: "WidgetRepo",
     ):
         super().__init__()
+        self.user = user
         self.space_service = space_service
         self.space_repo = space_repo
         self.actor_manager = actor_manager
         self.group_service = group_service
         self.skill_repo = skill_repo
         self.widget_repo = widget_repo
+
+    def _require_same_tenant(self, *spaces: "Space") -> None:
+        """Moves and links never cross a tenant boundary.
+
+        The caller, the source and the destination must all belong to one
+        tenant. Space permissions are checked separately; this gate holds
+        even for a principal that is privileged in both spaces.
+        """
+        for space in spaces:
+            if space.tenant_id is None or space.tenant_id != self.user.tenant_id:
+                raise UnauthorizedException("Resources cannot be moved between tenants")
+
+    def _require_resources_in_tenant(self, *tenant_ids: "UUID") -> None:
+        """Attached collections and websites must belong to the caller's tenant."""
+        for tenant_id in tenant_ids:
+            if tenant_id != self.user.tenant_id:
+                raise UnauthorizedException("Resources cannot be moved between tenants")
 
     async def link_website_to_space(self, website_id: "UUID", space_id: "UUID"):
         source_space = await self.space_service.get_space_by_website(website_id)
@@ -52,7 +73,9 @@ class ResourceMoverService:
                 "User cannot create websites in the target space"
             )
 
+        self._require_same_tenant(source_space, target_space)
         website = source_space.get_website(website_id)
+        self._require_resources_in_tenant(website.tenant_id)
 
         if website.id not in [w.id for w in target_space.websites]:
             target_space.add_website(website)
@@ -80,7 +103,9 @@ class ResourceMoverService:
                 "User does not have permission to create websites in the space"
             )
 
+        self._require_same_tenant(source_space, target_space)
         website = source_space.get_website(website_id)
+        self._require_resources_in_tenant(website.tenant_id)
 
         if website.id not in [w.id for w in target_space.websites]:
             target_space.add_website(website)
@@ -107,6 +132,10 @@ class ResourceMoverService:
             raise UnauthorizedException(
                 "User does not have permission to create collections in the space"
             )
+
+        self._require_same_tenant(source_space, target_space)
+        collection = source_space.get_collection(collection_id)
+        self._require_resources_in_tenant(collection.tenant_id)
 
         await self.group_service.import_group_to_space(
             group_id=collection_id,
@@ -136,6 +165,8 @@ class ResourceMoverService:
                 "User does not have permission to create assistants in the space"
             )
 
+        self._require_same_tenant(source_space, target_space)
+
         locked_source_space_id = await self.skill_repo.lock_assistant_space_for_update(
             assistant_id=assistant_id
         )
@@ -148,6 +179,7 @@ class ResourceMoverService:
             raise UnauthorizedException(
                 "User does not have permission to move assistant from space"
             )
+        self._require_same_tenant(source_space, target_space)
 
         assistant = source_space.get_assistant(assistant_id)
 
@@ -161,6 +193,12 @@ class ResourceMoverService:
         widgets = await self.widget_repo.list_by_target(assistant_id)
         if any(widget.status is not WidgetStatus.DRAFT for widget in widgets):
             raise AssistantPublishedAsWidgetError()
+
+        if move_resources:
+            self._require_resources_in_tenant(
+                *(collection.tenant_id for collection in assistant.collections),
+                *(website.tenant_id for website in assistant.websites),
+            )
 
         target_space.add_assistant(assistant)
         source_space.remove_assistant(assistant)

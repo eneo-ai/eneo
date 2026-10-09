@@ -88,6 +88,8 @@ Navigate to **Admin** → **Models** and click **Add Model**. The wizard guides 
 
 After adding a provider, use the **Test** button to verify that credentials are valid and the endpoint is reachable. The system makes a minimal API call to confirm connectivity.
 
+A stored API key is only ever sent to the endpoint it was entered for. When you change a provider's endpoint (scheme, host, port or base path), the edit dialog asks for the API key again and the backend rejects the change unless a new key is supplied. Renaming a provider, toggling it, or re-entering the same endpoint in a different spelling does not require the key. Providers configured without a key can change endpoint freely.
+
 ### Step 3: Enable Models for Users
 
 Once a provider is configured and models are added, tenant admins can enable specific models for their organization through the Models page.
@@ -137,6 +139,136 @@ The system will query your server's `/v1/models` endpoint to discover available 
 
 ---
 
+## Outbound headers
+
+A provider can send extra HTTP headers with every request it makes. A value can be fixed text, or resolved per request from the attributes your identity provider provisions for the user (see [Whose attributes are sent](#whose-attributes-are-sent)), or a mix of both. This is useful when the endpoint is a gateway, proxy or internal service that treats callers differently, for example to rate-limit per department or route by organisational unit. Eneo gives the values no meaning; what the receiving endpoint does with them is up to you.
+
+Tenant administrators configure headers under **Outbound headers** when they add or edit a provider in **Admin → Models**.
+
+### Where headers are sent
+
+Outbound headers are available for the self-hosted OpenAI-compatible provider type (`hosted_vllm`, shown as vLLM). Other provider types show that headers are not available.
+
+| Request | Headers sent? |
+|---|---|
+| Every completion (chat, assistants, apps and other text generation), streamed and not, including tool-call follow-ups | Yes |
+| Embeddings, for search queries, uploads and website crawls | Yes |
+| Transcription | **No: the request is blocked** while headers are configured, because LiteLLM does not forward headers on this route. Use a separate provider for transcription models |
+| Image generation | **No: the request is blocked** while headers are configured, because it is not verified that LiteLLM forwards headers on this route. Use a separate provider for image models |
+| Connectivity tests, model validation and model listing in the admin UI | No; these are not user traffic |
+
+A provider with no headers configured sends exactly what it sent before.
+
+### Values and dynamic values
+
+A value is one text field: fixed text such as `eu-north`, a dynamic value such as `{{user.department}}`, or a mix such as `tier-{{user.organization}}`. Pick dynamic values from the list next to the field. The editor flags a dynamic value it does not recognise before you save.
+
+| Dynamic value | Source | Identifies a person? |
+|---|---|---|
+| `{{user.employeeNumber}}` | SCIM Enterprise User `employeeNumber` | Yes |
+| `{{user.externalId}}` | The user's SCIM `externalId` | Yes |
+| `{{user.costCenter}}` | SCIM Enterprise User `costCenter` | No, describes a group |
+| `{{user.department}}` | SCIM Enterprise User `department` | No, describes a group |
+| `{{user.division}}` | SCIM Enterprise User `division` | No, describes a group |
+| `{{user.organization}}` | SCIM Enterprise User `organization` | No, describes a group |
+
+The SCIM attributes are only available if your identity provider sends them. See [Enterprise User attributes](/guides/scim-provisioning#enterprise-user-attributes). Expect some users to have no value.
+
+Organisational attributes describe a group, but a small enough group identifies its members, and a recipient that compares values with request times can narrow them further. Assess this against your own organisation's structure before sending them to a third party.
+
+A provider can have up to 10 headers. A header name must be a valid HTTP header name (a token as defined in RFC 9110) of at most 64 bytes, and a configured value can be up to 1,024 characters.
+
+### Encoding: what reaches the wire
+
+| Encoding | What is sent | Use for |
+|---|---|---|
+| **Percent-encode** (default) | The value URL-encoded. The receiver decodes it with `urllib.parse.unquote` or equivalent | Attribute values. The only mode that carries characters such as å, ä and ö |
+| **Send exactly as written** | The value byte for byte. Only plain ASCII is allowed | Credentials and values the receiver compares exactly |
+
+| Resolved value | Percent-encoded | Exactly as written |
+|---|---|---|
+| `Sales & Marketing` | `Sales %26 Marketing` | `Sales & Marketing` |
+| `Miljö och hälsa` | `Milj%C3%B6 och h%C3%A4lsa` | Request blocked (not ASCII) |
+| `IT/Infra` | `IT%2FInfra` | `IT/Infra` |
+| `sk-bf-aGVsbG8=` | `sk-bf-aGVsbG8%3D` | `sk-bf-aGVsbG8=` |
+
+### When a dynamic value is missing
+
+| Setting | Effect |
+|---|---|
+| **Leave the header out** (default) | The header is not sent; the request goes ahead |
+| **Send a fallback value** | A fixed fallback is sent instead. It is encoded the same way as the value, so `Övrigt` is sent as `%C3%96vrigt` with percent-encoding, and it cannot contain dynamic values |
+| **Block the request** | The request is refused before it leaves Eneo |
+
+If one dynamic value in a mixed value is missing, the setting applies to the whole header: a partial value like `tier-` is never sent.
+
+<Callout type="warning">
+  **Block the request** denies service to every user who lacks the attribute. That includes service keys, users whose identity provider has not filled in the attribute, and newly provisioned users until the next sync. The recommended setting is to leave the header out and give the receiving side a default.
+</Callout>
+
+### Blocked requests
+
+A request is also blocked, whatever the missing-value setting, when:
+
+- a resolved value contains a line break, a tab, or another control or invisible character, such as a no-break space or a zero-width space. Percent-encoding does not make these acceptable, so a directory value containing one blocks that user's requests until it is corrected;
+- a resolved value is non-ASCII with **Send exactly as written**;
+- a value is too long once encoded: 1,024 bytes per header value, and 4,096 bytes for all header names and values together.
+
+Eneo never repairs or shortens such a value.
+
+The user sees a message asking them to contact an administrator. The backend logs `outbound_headers.request_blocked` at WARNING with the provider id, header name, reason and user id. A missing dynamic value is logged as `outbound_headers.unresolved` at DEBUG. Neither log line contains a header value.
+
+### Secret headers
+
+Tick **Secret** for a header that carries a credential. Its value and fallback are encrypted when saved and never shown again. To keep a secret value when you edit the provider, leave it as it is; to replace it, choose **Change**, and choose **Cancel and keep the current value** to go back. Turning **Secret** off requires entering the value, and any fallback, again.
+
+Like a stored API key, a secret value is only sent to the endpoint it was entered for. When you change the provider's endpoint, enter the value and any fallback of each secret header again, or remove the header; otherwise the change is rejected. The edit dialog names the headers to enter again as soon as you change the endpoint.
+
+If a stored secret can no longer be read, for example because `ENCRYPTION_KEY` changed, every user's requests to the provider are blocked and the preview says why. Saving the provider while keeping that header is refused with the header named: enter its value, and any fallback, again, or remove the header.
+
+### Where headers may go
+
+- Headers are only sent to the provider's explicitly configured endpoint, and the destination is checked again on every request. An endpoint with credentials in the URL (`https://user:pass@…`) is refused.
+- Eneo does not follow redirects on these requests, so a redirect cannot carry the headers somewhere else.
+- Plain `http` endpoints are allowed, because many internal vLLM servers use them, but header values, secret ones included, then travel unencrypted. Use `https` for any endpoint that is not on the same host. The editor warns when a secret header, or a header carrying a user attribute, is configured on a plain `http` endpoint that is not loopback.
+- A deployment can restrict destinations further with `OUTBOUND_HEADERS_ALLOWED_DESTINATIONS`, a JSON list of URLs (see [Deployment](/guides/deployment)). Each entry is compared with the provider's endpoint URL, not with the path of individual requests. Matching is exact on scheme, host (case-insensitive, no suffix matching) and port, and an entry's path must match the start of the endpoint's path on `/` boundaries. The entry `https://gateway.internal/v1` allows the endpoints `https://gateway.internal/v1` and `https://gateway.internal/v1/tenant-a`, but not `https://gateway.internal` or `https://gateway.internal/v1beta`.
+- In a multi-tenant deployment, set `OUTBOUND_HEADERS_ALLOWED_DESTINATIONS` so that tenant administrators can only send headers to endpoints you have approved.
+
+If a provider's endpoint stops being an allowed destination, for example after the allow-list changes, every user's requests to that provider are blocked. Changing its headers or moving it to another endpoint that is not allowed is refused, but you can still rename or deactivate it, change it to an allowed endpoint, or remove its headers.
+
+Some header names are reserved and cannot be configured: `Authorization`, `Proxy-Authorization`, `Proxy-Authenticate`, `Cookie`, `Set-Cookie`, `Host`, `Content-Length`, `Content-Type`, `Transfer-Encoding`, `Connection`, `Keep-Alive`, `Upgrade`, `Expect`, `TE`, `Trailer`, `api-key`, `Accept`, `Accept-Encoding`, `User-Agent`, `traceparent`, `tracestate`, `baggage` and `X-Eneo-Tenant-Id`. Names are case-insensitive, so `X-Org` and `x-org` count as the same header. Names starting with `X-` are recommended.
+
+`X-Eneo-Tenant-Id` is reserved for a possible future tenant label set by Eneo itself. Eneo does not send it to model providers today, unlike [MCP servers](/guides/mcp-servers), which receive it with the other identity headers.
+
+### Preview
+
+When you edit a provider that has headers, **Preview for a user** shows what the saved configuration would send for a chosen user in your organisation, and whether their requests would be blocked. Secret headers show only whether they resolved. Previews are recorded in the audit log while audit logging is on and the **Admin Actions** category and this action are enabled, which is the default (see [Configure what gets logged](/guides/audit-logging#configure-what-gets-logged)).
+
+### Audit
+
+Changes are recorded as `model_provider_headers_updated`, with secret values masked; the record says whether each value and fallback changed, and ticking **Secret** alone changes neither. Changing the endpoint of a provider that sends headers is recorded as `model_provider_destination_changed`, with any credentials in the URL removed. Writing the same endpoint differently, such as with a trailing slash or another letter case in the host, is not a change. Previews are recorded as `model_provider_headers_previewed`, without the resolved values. Like every audit event, these follow your tenant's audit configuration.
+
+### Whose attributes are sent
+
+- A request a user makes, such as a chat message or a search, uses that user's attributes.
+- A file upload is processed with the attributes of the user who uploaded it.
+- A website crawl, whether started by hand or on schedule, uses the attributes of the website's owner. If the crawl feeder is turned off (`CRAWL_FEEDER_ENABLED=false`), a crawl started by hand uses the attributes of the user who started it.
+- A [SharePoint integration](/guides/sharepoint-integration) connected as a tenant app is not tied to a person, so a synchronisation triggered by a SharePoint webhook uses the attributes of the tenant's oldest administrator: the earliest-created active or invited user with the admin permission.
+
+### When changes take effect
+
+Each request and each upload job reads the header configuration and the user's attributes when it starts. A website crawl captures the header configuration and the attributes when it starts and keeps them until it finishes, the same way it keeps the provider's credentials. Changing or removing a header, or removing an attribute in your identity provider, therefore does not affect a crawl that is already running, and a crawl can run for up to `CRAWL_MAX_LENGTH` (10 hours by default).
+
+<Callout type="warning">
+  **Headers are assertions, not verified facts.** An administrator chooses every fixed value, so a receiver that uses these headers for access control needs its own trust model. If several Eneo tenants share one gateway, give each tenant its own gateway credential and have the gateway work out the tenant from that credential. Never work it out from a header.
+</Callout>
+
+<Callout type="info">
+  Two operational notes. LiteLLM's own debug logging (`LITELLM_LOG=DEBUG`, off by default) prints complete provider requests, header values included, so keep it off in production; Eneo logs a warning, once per process, if it is on when headers are sent. LiteLLM response caching must stay disabled (Eneo does not enable it): header values are not part of its cache key, so a cached answer would bypass them.
+</Callout>
+
+---
+
 ## Credential Management
 
 All provider credentials are managed per-tenant and encrypted at rest. There are two ways to manage credentials:
@@ -144,6 +276,7 @@ All provider credentials are managed per-tenant and encrypted at rest. There are
 ### Admin UI (Recommended)
 
 Use the Admin UI provider wizard to add, update, or remove provider credentials. This is the primary method for managing providers.
+Discovering models, testing a provider connection, and validating a model with its stored credentials require an organization administrator.
 
 ### Sysadmin API
 
@@ -217,7 +350,7 @@ Check your usage regularly:
 ### Optimize Costs
 
 - Use smaller models for simple tasks
-- Implement caching for repeated queries
+- Cache repeated queries, except on providers with [outbound headers](#outbound-headers): a cached answer would bypass them
 - Use local models for development/testing
 - Set context length limits
 

@@ -5,7 +5,12 @@ from uuid import UUID
 
 from fastapi import APIRouter, Depends, Query
 
+from eneo.authentication.endpoint_access import (
+    Authentication,
+    endpoint_access,
+)
 from eneo.main.container.container import Container
+from eneo.roles.permissions import Permission
 from eneo.server.dependencies.container import get_container
 from eneo.server.protocol import responses
 from eneo.token_usage.presentation.token_usage_models import (
@@ -45,6 +50,11 @@ EndDateQuery = Annotated[
     ),
     responses=responses.get_responses([403]),
 )
+@endpoint_access(
+    authentication=Authentication.USER,
+    authorization=Permission.ADMIN,
+    reason="Tenant usage reports require the admin permission.",
+)
 async def get_token_usage(
     container: ContainerDep,
     start_date: StartDateQuery = None,
@@ -72,6 +82,11 @@ async def get_token_usage(
         "range. If no dates are provided, the last 30 days are used."
     ),
     responses=responses.get_responses([403]),
+)
+@endpoint_access(
+    authentication=Authentication.USER,
+    authorization=Permission.ADMIN,
+    reason="Tenant usage reports require the admin permission.",
 )
 async def get_user_token_usage(
     container: ContainerDep,
@@ -124,6 +139,11 @@ async def get_user_token_usage(
     ),
     responses=responses.get_responses([403, 404]),
 )
+@endpoint_access(
+    authentication=Authentication.USER,
+    authorization=Permission.ADMIN,
+    reason="Tenant usage reports require the admin permission.",
+)
 async def get_user_summary(
     user_id: UUID,
     container: ContainerDep,
@@ -158,6 +178,11 @@ async def get_user_summary(
         "If no dates are provided, the last 30 days are used."
     ),
     responses=responses.get_responses([403, 404]),
+)
+@endpoint_access(
+    authentication=Authentication.USER,
+    authorization=Permission.ADMIN,
+    reason="Tenant usage reports require the admin permission.",
 )
 async def get_user_model_breakdown(
     user_id: UUID,

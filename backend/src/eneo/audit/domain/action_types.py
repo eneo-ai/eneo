@@ -87,6 +87,9 @@ class ActionType(str, Enum):
     WEBSITE_UPDATED = "website_updated"
     WEBSITE_DELETED = "website_deleted"
     WEBSITE_CRAWLED = "website_crawled"
+    WEBSITE_CRAWL_REQUESTED = "website_crawl_requested"
+    WEBSITE_CRAWL_STOP_REQUESTED = "website_crawl_stop_requested"
+    WEBSITE_CRAWL_PROBED = "website_crawl_probed"
     WEBSITE_TRANSFERRED = "website_transferred"
     GROUP_CHAT_CREATED = "group_chat_created"
     COLLECTION_CREATED = "collection_created"
@@ -133,6 +136,11 @@ class ActionType(str, Enum):
     MCP_SERVER_DISABLED = "mcp_server_disabled"
     MCP_SERVER_TOOL_ENABLED = "mcp_server_tool_enabled"
     MCP_SERVER_TOOL_DISABLED = "mcp_server_tool_disabled"
+
+    # Model Provider Outbound Header Actions
+    MODEL_PROVIDER_HEADERS_UPDATED = "model_provider_headers_updated"
+    MODEL_PROVIDER_DESTINATION_CHANGED = "model_provider_destination_changed"
+    MODEL_PROVIDER_HEADERS_PREVIEWED = "model_provider_headers_previewed"
 
     # Help Assistant Actions
     HELP_ASSISTANT_ROLE_ASSIGNED = "help_assistant_role_assigned"

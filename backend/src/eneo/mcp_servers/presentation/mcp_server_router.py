@@ -3,6 +3,14 @@ from __future__ import annotations
 from typing import TYPE_CHECKING, Any
 from uuid import UUID
 
+from eneo.authentication.endpoint_access import (
+    Authentication,
+    Authorization,
+    endpoint_access,
+)
+from eneo.mcp_servers.application.runtime_status import runtime_status
+from eneo.roles.permissions import Permission
+
 if TYPE_CHECKING:
     from eneo.security_classifications.domain.entities.security_classification import (
         SecurityClassification,
@@ -19,6 +27,9 @@ from eneo.main.exceptions import BadRequestException
 from eneo.main.models import NOT_PROVIDED, NotProvided, PaginatedResponse
 from eneo.mcp_servers.application.mcp_server_service import ToolChange
 from eneo.mcp_servers.presentation.models import (
+    BundledServerCreate,
+    BundledToolList,
+    BundledToolPublic,
     CapabilityActivationResponse,
     MCPConnectionStatus,
     MCPServerCreate,
@@ -42,6 +53,9 @@ from eneo.server.dependencies.container import get_container
 from eneo.server.protocol import responses
 
 router = APIRouter()
+_ORGANIZATION_ADMIN_ACCESS_REASON = (
+    "Organization administration requires the admin permission."
+)
 
 _WITH_USER = Depends(get_container(with_user=True))
 _TAGS_QUERY = Query(None)
@@ -56,6 +70,11 @@ _TAGS_QUERY = Query(None)
     "/",
     response_model=PaginatedResponse[MCPServerPublic],
     responses=responses.get_responses([404]),
+)
+@endpoint_access(
+    authentication=Authentication.USER,
+    authorization=Authorization.AUTHENTICATED,
+    reason="Tenant members may browse the MCP catalogue when configuring assistants.",
 )
 async def get_mcp_servers(
     tags: list[str] | None = _TAGS_QUERY,
@@ -80,6 +99,11 @@ async def get_mcp_servers(
     response_model=PaginatedResponse[MCPServerSettingsPublic],
     responses=responses.get_responses([404]),
 )
+@endpoint_access(
+    authentication=Authentication.USER,
+    authorization=Authorization.AUTHENTICATED,
+    reason="Tenant members need enabled MCP servers for workspace and assistant settings.",
+)
 async def get_tenant_mcp_settings(
     purpose: MCPServerPurpose | None = None,
     container: Container = _WITH_USER,
@@ -99,6 +123,11 @@ async def get_tenant_mcp_settings(
     description="Enable an MCP server for the current tenant with optional credentials.",
     response_model=MCPServerSettingsPublic,
     responses=responses.get_responses([400, 403, 404]),
+)
+@endpoint_access(
+    authentication=Authentication.USER,
+    authorization=Permission.ADMIN,
+    reason=_ORGANIZATION_ADMIN_ACCESS_REASON,
 )
 async def enable_mcp_for_tenant(
     mcp_server_id: UUID,
@@ -137,6 +166,11 @@ async def enable_mcp_for_tenant(
     response_model=MCPServerSettingsPublic,
     responses=responses.get_responses([400, 403, 404]),
 )
+@endpoint_access(
+    authentication=Authentication.USER,
+    authorization=Permission.ADMIN,
+    reason=_ORGANIZATION_ADMIN_ACCESS_REASON,
+)
 async def update_mcp_settings(
     mcp_server_id: UUID,
     data: MCPServerSettingsUpdate,
@@ -159,6 +193,11 @@ async def update_mcp_settings(
     description="Disable an MCP server for the current tenant.",
     status_code=204,
     responses=responses.get_responses([403, 404]),
+)
+@endpoint_access(
+    authentication=Authentication.USER,
+    authorization=Permission.ADMIN,
+    reason=_ORGANIZATION_ADMIN_ACCESS_REASON,
 )
 async def disable_mcp_for_tenant(
     mcp_server_id: UUID,
@@ -195,6 +234,11 @@ async def disable_mcp_for_tenant(
     description="Update tenant-level enablement for a tool (admin only).",
     response_model=MCPServerToolPublic,
     responses=responses.get_responses([403, 404]),
+)
+@endpoint_access(
+    authentication=Authentication.USER,
+    authorization=Permission.ADMIN,
+    reason=_ORGANIZATION_ADMIN_ACCESS_REASON,
 )
 async def update_tenant_tool_enabled(
     tool_id: UUID,
@@ -241,6 +285,114 @@ async def update_tenant_tool_enabled(
 
 
 # ============================================================================
+# Bundled tool runtime (MUST come before /{id}/ routes)
+# ============================================================================
+
+
+@router.get(
+    "/bundled/",
+    response_model=BundledToolList,
+    responses=responses.get_responses([403]),
+)
+@endpoint_access(
+    authentication=Authentication.USER,
+    authorization=Permission.ADMIN,
+    reason=_ORGANIZATION_ADMIN_ACCESS_REASON,
+)
+async def get_bundled_tools(container: Container = _WITH_USER):
+    """List the bundled tool runtime's servers and whether they are added."""
+    service = container.mcp_server_service()
+    tools = await service.list_bundled_tools()
+    return BundledToolList(
+        runtime=await runtime_status(),
+        items=[
+            BundledToolPublic(
+                tool=tool.tool,
+                purpose=tool.purpose,
+                available=tool.available,
+                mcp_server_id=tool.mcp_server_id,
+            )
+            for tool in tools
+        ],
+    )
+
+
+@router.post(
+    "/bundled/{tool}/",
+    description=(
+        "Add a server of the bundled tool runtime to this tenant (admin only). "
+        "Its URL and credential come from the deployment; its tools are then "
+        "reviewed and enabled like any other server's."
+    ),
+    response_model=MCPServerCreateResponse,
+    responses=responses.get_responses([400, 403, 404, 409]),
+)
+@endpoint_access(
+    authentication=Authentication.USER,
+    authorization=Permission.ADMIN,
+    reason=_ORGANIZATION_ADMIN_ACCESS_REASON,
+)
+async def create_bundled_mcp_server(
+    tool: str,
+    data: BundledServerCreate,
+    container: Container = _WITH_USER,
+    _user_for_creation: None = Depends(require_user_for_creation),
+):
+    service = container.mcp_server_service()
+    assembler = container.mcp_server_assembler()
+    activate = data.activate
+
+    result = await service.create_bundled_mcp_server(tool, activate=activate)
+    if not result.connection.success:
+        raise BadRequestException(
+            result.connection.error_message
+            or "Failed to connect to the bundled tool runtime"
+        )
+
+    user = container.user()
+    audit_service = container.audit_service()
+    await audit_service.log_async(
+        tenant_id=user.tenant_id,
+        user=user,
+        action=ActionType.MCP_SERVER_CREATED,
+        entity_type=EntityType.MCP_SERVER,
+        entity_id=result.server.id,
+        description=f"Added bundled MCP server '{result.server.name}'",
+        metadata=AuditMetadata.standard(
+            actor=user, target=result.server, extra={"bundled_tool": tool}
+        ),
+    )
+    if activate:
+        await audit_service.log_async(
+            tenant_id=user.tenant_id,
+            user=user,
+            action=ActionType.MCP_SERVER_ENABLED,
+            entity_type=EntityType.MCP_SERVER,
+            entity_id=result.server.id,
+            description=f"Activated {result.server.purpose} provider",
+            metadata=AuditMetadata.standard(
+                actor=user,
+                target=result.server,
+                extra={
+                    "purpose": result.server.purpose,
+                    "deactivated_server_ids": [
+                        str(i) for i in result.deactivated_server_ids or []
+                    ],
+                },
+            ),
+        )
+
+    return MCPServerCreateResponse(
+        server=assembler.from_domain_to_model(result.server),
+        connection=MCPConnectionStatus(
+            success=result.connection.success,
+            tools_discovered=result.connection.tools_discovered,
+            error_message=result.connection.error_message,
+        ),
+    )
+
+
+# ============================================================================
 # Global MCP Server Catalog Endpoints - Specific ID routes (MUST come after /settings/)
 # ============================================================================
 
@@ -249,6 +401,11 @@ async def update_tenant_tool_enabled(
     "/{id}/",
     response_model=MCPServerPublic,
     responses=responses.get_responses([404]),
+)
+@endpoint_access(
+    authentication=Authentication.USER,
+    authorization=Authorization.AUTHENTICATED,
+    reason="Tenant members may inspect MCP catalogue entries for their assistants.",
 )
 async def get_mcp_server(
     id: UUID,
@@ -267,6 +424,11 @@ async def get_mcp_server(
     description="Create a new MCP server in global catalog (admin only).",
     response_model=MCPServerCreateResponse,
     responses=responses.get_responses([400, 403, 409]),
+)
+@endpoint_access(
+    authentication=Authentication.USER,
+    authorization=Permission.ADMIN,
+    reason=_ORGANIZATION_ADMIN_ACCESS_REASON,
 )
 async def create_mcp_server(
     data: MCPServerCreate,
@@ -366,6 +528,11 @@ async def create_mcp_server(
     description="Update an MCP server in global catalog (admin only).",
     response_model=MCPServerPublic,
     responses=responses.get_responses([400, 403, 404, 409]),
+)
+@endpoint_access(
+    authentication=Authentication.USER,
+    authorization=Permission.ADMIN,
+    reason=_ORGANIZATION_ADMIN_ACCESS_REASON,
 )
 async def update_mcp_server(
     id: UUID,
@@ -513,6 +680,11 @@ async def update_mcp_server(
     status_code=204,
     responses=responses.get_responses([403, 404]),
 )
+@endpoint_access(
+    authentication=Authentication.USER,
+    authorization=Permission.ADMIN,
+    reason=_ORGANIZATION_ADMIN_ACCESS_REASON,
+)
 async def delete_mcp_server(
     id: UUID,
     container: Container = _WITH_USER,
@@ -552,6 +724,11 @@ async def delete_mcp_server(
     ),
     response_model=CapabilityActivationResponse,
     responses=responses.get_responses([400, 403, 404]),
+)
+@endpoint_access(
+    authentication=Authentication.USER,
+    authorization=Permission.ADMIN,
+    reason=_ORGANIZATION_ADMIN_ACCESS_REASON,
 )
 async def activate_capability_provider(
     id: UUID,
@@ -604,6 +781,11 @@ async def activate_capability_provider(
     response_model=MCPServerPublic,
     responses=responses.get_responses([400, 403, 404]),
 )
+@endpoint_access(
+    authentication=Authentication.USER,
+    authorization=Permission.ADMIN,
+    reason=_ORGANIZATION_ADMIN_ACCESS_REASON,
+)
 async def deactivate_capability_provider(
     id: UUID,
     container: Container = _WITH_USER,
@@ -644,6 +826,11 @@ async def deactivate_capability_provider(
     response_model=MCPServerToolList,
     responses=responses.get_responses([404]),
 )
+@endpoint_access(
+    authentication=Authentication.USER,
+    authorization=Authorization.AUTHENTICATED,
+    reason="Tenant members may inspect tools available to their assistants.",
+)
 async def get_mcp_server_tools(
     id: UUID,
     container: Container = _WITH_USER,
@@ -662,6 +849,11 @@ async def get_mcp_server_tools(
     description="Sync tools from remote MCP server (admin only).",
     response_model=MCPServerToolSyncResponse,
     responses=responses.get_responses([400, 403, 404]),
+)
+@endpoint_access(
+    authentication=Authentication.USER,
+    authorization=Permission.ADMIN,
+    reason=_ORGANIZATION_ADMIN_ACCESS_REASON,
 )
 async def sync_mcp_server_tools(
     id: UUID,
@@ -715,6 +907,11 @@ async def sync_mcp_server_tools(
     response_model=ToolReviewResponse,
     responses=responses.get_responses([400, 403, 404]),
 )
+@endpoint_access(
+    authentication=Authentication.USER,
+    authorization=Permission.ADMIN,
+    reason=_ORGANIZATION_ADMIN_ACCESS_REASON,
+)
 async def approve_tool_changes(
     id: UUID,
     data: ToolReviewRequest,
@@ -759,6 +956,11 @@ async def approve_tool_changes(
     description="Reject pending tool changes (admin only).",
     response_model=ToolReviewResponse,
     responses=responses.get_responses([400, 403, 404]),
+)
+@endpoint_access(
+    authentication=Authentication.USER,
+    authorization=Permission.ADMIN,
+    reason=_ORGANIZATION_ADMIN_ACCESS_REASON,
 )
 async def reject_tool_changes(
     id: UUID,
@@ -806,6 +1008,11 @@ async def reject_tool_changes(
     response_model=ToolReviewResponse,
     responses=responses.get_responses([400, 403, 404]),
 )
+@endpoint_access(
+    authentication=Authentication.USER,
+    authorization=Permission.ADMIN,
+    reason=_ORGANIZATION_ADMIN_ACCESS_REASON,
+)
 async def approve_all_tool_changes(
     id: UUID,
     container: Container = _WITH_USER,
@@ -840,6 +1047,11 @@ async def approve_all_tool_changes(
     description="Set or clear the admin display name for a tool (admin only).",
     response_model=MCPServerToolPublic,
     responses=responses.get_responses([400, 403, 404]),
+)
+@endpoint_access(
+    authentication=Authentication.USER,
+    authorization=Permission.ADMIN,
+    reason=_ORGANIZATION_ADMIN_ACCESS_REASON,
 )
 async def update_tool_display_name(
     id: UUID,
@@ -892,6 +1104,11 @@ async def update_tool_display_name(
     description="Update global default enabled status for a tool (admin only).",
     response_model=MCPServerToolPublic,
     responses=responses.get_responses([403, 404]),
+)
+@endpoint_access(
+    authentication=Authentication.USER,
+    authorization=Permission.ADMIN,
+    reason=_ORGANIZATION_ADMIN_ACCESS_REASON,
 )
 async def update_tool_default_enabled(
     id: UUID,

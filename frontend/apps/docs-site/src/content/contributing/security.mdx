@@ -32,6 +32,83 @@ When this check fails, update the dependency to a safe version, remove it, or do
 
 CodeQL advanced setup is paused while maintainers evaluate a code-scanning setup that gives developers useful feedback without high false-positive noise. Re-enable code scanning only with a tuned query set and a triage process that keeps alerts actionable.
 
+## Declare access on every endpoint
+
+Every HTTP and WebSocket endpoint must explicitly declare **authentication**
+(which identity it accepts) and **authorization** (who may invoke the operation).
+There is no implicit "logged in is enough" default and no exemption based on a
+URL prefix. This implements the deny-by-default and per-request checking
+principles in the [OWASP Authorization Cheat Sheet](https://cheatsheetseries.owasp.org/cheatsheets/Authorization_Cheat_Sheet.html).
+It does not establish compliance with the whole OWASP ASVS standard.
+
+Declare the policy immediately below the route decorator, and retain the real
+authentication dependency:
+
+```python
+@router.post(
+    "/{provider_id}/test/",
+    response_model=ProviderTestResult,
+    description="Test connectivity using the provider's stored credentials.",
+    responses=responses.get_responses([403, 404]),
+)
+@endpoint_access(
+    authentication=Authentication.USER,
+    authorization=Permission.ADMIN,
+    reason="Uses organization-managed provider credentials.",
+)
+async def test_provider(provider_id: UUID, user: CurrentUser):
+    ...
+```
+
+The canonical declaration and enforcement live in
+`backend/src/eneo/authentication/endpoint_access.py`. Existing `Permission`
+values and domain services remain the owners of role permissions, tenant
+boundaries, space membership and object ownership. Endpoint admission never
+replaces those resource checks. Use a named permission whenever the operation
+requires one. `Authorization.AUTHENTICATED` is an explicit grant to authenticated
+callers, suitable for a shared catalogue or an operation whose service restricts
+access to the caller's own resources; its reason must identify that purpose.
+When several routes rely on the same access rule, reuse a router-local named
+constant for their `reason`. Keep the full `@endpoint_access` declaration on
+each route, and use separate reasons when the underlying checks differ.
+
+The declaration is the single source for the endpoint's permission and session
+requirements. Do not repeat these with `validate_permission` in handlers or
+separate permission/session dependencies. Domain service permission checks remain
+necessary for internal callers. Storage administration also retains its stricter
+active-user and active-tenant checks; these protect identity lifecycle, independently
+of the declared `Permission.STORAGE`.
+
+Choose `Authentication.SESSION` when API keys must be rejected. The existing
+API-key scope, permission and real-user guards still apply. SCIM tokens,
+deployment administrator keys, module credentials and signed file URLs have
+separate policies and authentication dependencies. Public operations such as
+login entry points and health probes must declare both `Authentication.PUBLIC`
+and `Authorization.PUBLIC`, with a reason.
+
+Application construction checks every registered route, including nested
+routers and mounted APIs. A missing declaration or missing authentication
+dependency prevents startup. The request guard also rejects missing or
+misconfigured access contracts, and user authentication enforces the declared
+permission before the handler executes. Generated documentation and internal
+MCP transport routes have explicit declarations at their registration sites;
+MCP tools still authorize each tool invocation.
+
+`scripts/check_route_metadata.py --all` checks declarations and rejects duplicate
+endpoint permission/session gates without importing the application. CI also runs
+`tests/unit/test_endpoint_access.py` and `tests/unit/test_endpoint_access_matrix.py`.
+The matrix exercises the shipped user-authentication dependency graphs, rejecting
+anonymous callers, users missing the declared permission and API keys on session-only
+endpoints before handler dispatch. When adding an endpoint, add behavior tests showing
+that anonymous callers and callers without the required permission cannot
+reach its side effects, while an authorized caller succeeds. For resource
+operations, test another user's or tenant's resource as well. A declaration
+cannot prove that the chosen permission or domain rule is correct.
+
+The request adapter reads FastAPI's effective dependency context so inherited
+authentication is included. Its scope layout is framework-specific; retain
+the nested-router and mounted-API tests when upgrading FastAPI.
+
 ## Required Checks in Branch Protection
 
 The `develop` ruleset should require these checks:

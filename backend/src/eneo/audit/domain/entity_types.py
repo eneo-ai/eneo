@@ -34,6 +34,7 @@ class EntityType(str, Enum):
     AUDIT_LOG = "audit_log"
     SESSION = "session"
     MCP_SERVER = "mcp_server"
+    MODEL_PROVIDER = "model_provider"
     MCP_SERVER_TOOL = "mcp_server_tool"
     USER_GROUP = "user_group"
     WIDGET = "widget"

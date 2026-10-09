@@ -1,3 +1,5 @@
+import asyncio
+from contextlib import AsyncExitStack
 from typing import TYPE_CHECKING, Optional
 
 from tenacity import (
@@ -8,13 +10,23 @@ from tenacity import (
 )
 from typing_extensions import override
 
-from eneo.embedding_models.infrastructure.adapters.base import EmbeddingModelAdapter
+from eneo.embedding_models.domain.chunking import E5_PASSAGE_PREFIX
+from eneo.embedding_models.infrastructure.adapters.base import (
+    EmbeddingModelAdapter,
+    PartialEmbeddingBatchError,
+)
 from eneo.files.chunk_embedding_list import ChunkEmbeddingList
 from eneo.main.config import get_settings
+from eneo.main.exceptions import ProviderRejectedRequestException
 from eneo.main.logging import get_logger
 from eneo.model_providers.infrastructure import litellm_transport
 from eneo.model_providers.infrastructure.litellm_provider import (
     build_litellm_provider_kwargs,
+)
+from eneo.model_providers.infrastructure.outbound_headers_runtime import (
+    ProviderOutboundHeaders,
+    apply_outbound_headers,
+    mask_outbound_headers,
 )
 from eneo.model_providers.infrastructure.tenant_model_credential_resolver import (
     TenantModelCredentialResolver,
@@ -30,24 +42,26 @@ if TYPE_CHECKING:
 logger = get_logger(__name__)
 
 
-class LiteLLMEmbeddingAdapter(EmbeddingModelAdapter):
-    def _mask_sensitive_params(self, params: dict[str, object]) -> dict[str, object]:
-        """Return copy of params with masked API key for safe logging."""
-        safe_params = dict(params)
-        if "api_key" in safe_params:
-            key = safe_params["api_key"]
-            if isinstance(key, str):
-                safe_params["api_key"] = f"...{key[-4:]}" if len(key) > 4 else "***"
-        return safe_params
+class _EmbeddingRequestDeadlineExceeded(TimeoutError):
+    """The crawler-owned request deadline expired after dispatch."""
 
+
+class LiteLLMEmbeddingAdapter(EmbeddingModelAdapter):
     def __init__(
         self,
         model: "EmbeddingModelLike",
         credential_resolver: Optional[TenantModelCredentialResolver] = None,
         litellm_model_name: Optional[str] = None,
+        outbound_headers: Optional[ProviderOutboundHeaders] = None,
+        request_semaphore: asyncio.Semaphore | None = None,
+        request_timeout_seconds: float | None = None,
     ) -> None:
         super().__init__(model)
         self.credential_resolver = credential_resolver
+        self.outbound_headers = outbound_headers
+        self.request_semaphore = request_semaphore
+        self.request_timeout_seconds = request_timeout_seconds
+        self._provider_kwargs: dict[str, object] | None = None
 
         # Use explicit litellm_model_name if provided (supports frozen dataclasses
         # like EmbeddingModelSpec where the name is constructed from provider info).
@@ -58,28 +72,27 @@ class LiteLLMEmbeddingAdapter(EmbeddingModelAdapter):
             f"[LiteLLM] Initializing embedding adapter for model: {model.name} -> {self.litellm_model}"
         )
 
+    @staticmethod
+    def _mask_sensitive_params(params: dict[str, object]) -> dict[str, object]:
+        """Params fit for a debug log: no API key or input, header names only."""
+        return mask_outbound_headers(
+            {
+                key: value
+                for key, value in params.items()
+                if key not in {"api_key", "input"}
+            }
+        )
+
     @override
     async def get_embeddings(self, chunks: list["InfoBlobChunk"]) -> ChunkEmbeddingList:
         chunk_embedding_list = ChunkEmbeddingList()
-        batch_size = getattr(self.model, "max_batch_size", None) or 32
-        total_chunks = len(chunks)
-        total_batches = (
-            (total_chunks + batch_size - 1) // batch_size if total_chunks else 0
-        )
-        logger.debug(
-            "[LiteLLM] Model %s (family=%s) batching %s chunks into %s batches (size=%s)",
-            self.model.name,
-            self.model.family,
-            total_chunks,
-            total_batches,
-            batch_size,
-        )
+        completed_count = 0
 
         for chunked_chunks in self._chunk_chunks(chunks):
             # Add "passage:" prefix for E5 models, use text directly for others
             if self.model.family == "e5":
                 texts_for_chunks = [
-                    f"passage: {chunk.text}" for chunk in chunked_chunks
+                    f"{E5_PASSAGE_PREFIX}{chunk.text}" for chunk in chunked_chunks
                 ]
                 logger.debug(
                     "[LiteLLM] %s: Using 'passage:' prefix (family=%s)",
@@ -94,10 +107,18 @@ class LiteLLMEmbeddingAdapter(EmbeddingModelAdapter):
                     self.model.family,
                 )
 
-            embeddings_for_chunks: list[list[float]] = await self._get_embeddings(
-                texts=texts_for_chunks
-            )
-            chunk_embedding_list.add(chunked_chunks, embeddings_for_chunks)
+            try:
+                embeddings_for_chunks: list[list[float]] = await self._get_embeddings(
+                    texts=texts_for_chunks
+                )
+                chunk_embedding_list.add(chunked_chunks, embeddings_for_chunks)
+            except Exception as error:
+                raise PartialEmbeddingBatchError(
+                    completed=chunk_embedding_list,
+                    completed_count=completed_count,
+                    cause=error,
+                ) from error
+            completed_count += len(chunked_chunks)
 
         return chunk_embedding_list
 
@@ -127,7 +148,10 @@ class LiteLLMEmbeddingAdapter(EmbeddingModelAdapter):
         wait=wait_random_exponential(min=1, max=20),
         stop=stop_after_attempt(3),
         retry=retry_if_not_exception_type(
-            litellm_transport.NON_RETRYABLE_PROVIDER_ERRORS
+            (
+                *litellm_transport.NON_RETRYABLE_PROVIDER_ERRORS,
+                _EmbeddingRequestDeadlineExceeded,
+            )
         ),
         reraise=True,
     )
@@ -158,38 +182,61 @@ class LiteLLMEmbeddingAdapter(EmbeddingModelAdapter):
 
             # Inject tenant-specific credentials if credential_resolver is provided
             if self.credential_resolver:
-                provider = self.credential_resolver.provider_type
-
-                params.update(build_litellm_provider_kwargs(self.credential_resolver))
-
-                # Inject endpoint for providers with custom endpoints
-                settings = get_settings()
-                if provider == "infinity":
-                    endpoint_fallback = settings.infinity_url
-                else:
-                    endpoint_fallback = None
-
-                endpoint = params.get("api_base") or endpoint_fallback
-
-                if endpoint:
-                    params["api_base"] = endpoint
-                    logger.debug(
-                        f"[LiteLLM] {self.litellm_model}: Injecting endpoint for {provider}: {endpoint}"
+                if self._provider_kwargs is None:
+                    provider = self.credential_resolver.provider_type
+                    provider_kwargs = build_litellm_provider_kwargs(
+                        self.credential_resolver
                     )
 
-            safe_params = {k: v for k, v in params.items() if k != "input"}
+                    # Inject endpoint for providers with custom endpoints.
+                    settings = get_settings()
+                    endpoint_fallback = (
+                        settings.infinity_url if provider == "infinity" else None
+                    )
+                    endpoint = provider_kwargs.get("api_base") or endpoint_fallback
+                    if endpoint:
+                        provider_kwargs["api_base"] = endpoint
+                        logger.debug(
+                            f"[LiteLLM] {self.litellm_model}: Injecting endpoint for {provider}: {endpoint}"
+                        )
+                    self._provider_kwargs = provider_kwargs
+
+                params.update(self._provider_kwargs)
+
+            # After the endpoint is final, so the destination check sees it.
+            apply_outbound_headers(params, self.outbound_headers)
+
+            safe_params = self._mask_sensitive_params(params)
             logger.debug(
                 f"[LiteLLM] {self.litellm_model}: Making embedding request with {len(texts)} texts and params: "
-                f"{self._mask_sensitive_params(safe_params)}"
+                f"{safe_params}"
             )
 
-            # Call LiteLLM API to get the embeddings
-            response = await litellm_transport.aembedding(**params)
+            # Queueing for a global slot must not consume the provider timeout.
+            request_deadline: asyncio.Timeout | None = None
+            try:
+                async with AsyncExitStack() as request_stack:
+                    if self.request_semaphore is not None:
+                        await request_stack.enter_async_context(self.request_semaphore)
+                    if self.request_timeout_seconds is not None:
+                        request_deadline = asyncio.timeout(self.request_timeout_seconds)
+                        await request_stack.enter_async_context(request_deadline)
+                    response = await litellm_transport.aembedding(**params)
+            except TimeoutError as error:
+                if request_deadline is None or not request_deadline.expired():
+                    raise
+                raise _EmbeddingRequestDeadlineExceeded(
+                    "Embedding request deadline exceeded"
+                ) from error
 
             logger.debug(
                 f"[LiteLLM] {self.litellm_model}: Embedding request successful"
             )
 
+        except (ProviderRejectedRequestException, _EmbeddingRequestDeadlineExceeded):
+            # A blocked outbound header is raised before any network call and
+            # already logged; neither is a LiteLLM failure.
+            raise
         except Exception as e:
             logger.exception(
                 f"[LiteLLM] {self.litellm_model}: Unknown LiteLLM exception:"

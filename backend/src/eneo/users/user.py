@@ -1,7 +1,7 @@
 from dataclasses import dataclass
 from datetime import datetime
 from enum import Enum
-from typing import TYPE_CHECKING, Annotated, Generic, Literal, Optional, TypeVar
+from typing import TYPE_CHECKING, Annotated, Any, Generic, Literal, Optional, TypeVar
 from uuid import UUID
 
 from pydantic import (
@@ -20,7 +20,7 @@ from eneo.authentication.auth_models import (
 from eneo.main.models import BaseModel, InDB, ModelId, partial_model
 from eneo.roles.permissions import Permission
 from eneo.roles.role import RoleInDB, RolePublic
-from eneo.tenants.tenant import TenantInDB
+from eneo.tenants.tenant import TenantInDB, TenantPublic
 from eneo.users.password import LOCAL_PASSWORD_POLICY, LocalPasswordPolicy
 from eneo.widgets.domain.visitor import WidgetVisitorContext
 
@@ -301,6 +301,14 @@ class UserInDB(UserInDBBase):
         default=None,
         description="Timestamp when user was soft-deleted (null for active users)",
     )
+    # IdP provisioning data, readable in-process only. `exclude=True` keeps both
+    # out of every response built from this model (e.g. sysadmin endpoints that
+    # return UserInDB), so no tenant- or admin-facing API starts exposing them;
+    # `repr=False` keeps the attributes out of any log line that formats a user.
+    external_id: Optional[str] = Field(default=None, exclude=True, repr=False)
+    scim_extensions: Optional[dict[str, Any]] = Field(
+        default=None, exclude=True, repr=False
+    )
 
     @computed_field
     @property
@@ -324,10 +332,6 @@ class UserInDB(UserInDBBase):
     @property
     def can_view_model_pricing(self) -> bool:
         return Permission.ADMIN in self.permissions or self.tenant.show_model_pricing
-
-
-class UserCreated(UserInDB):
-    access_token: Optional[AccessToken] = None
 
 
 class UserPublicBase(InDB, UserBase):
@@ -403,6 +407,33 @@ class UserAdminView(UserPublicBase):
 
     roles: list[RolePublic]
     user_groups: list[UserGroupRead]
+
+
+class UserSysAdminView(UserAdminView):
+    """
+    A user as returned by the sysadmin API, which spans tenants.
+
+    Declares what is returned instead of inheriting from UserInDB, so the
+    password hash, salt, API key hashes and the tenant's stored provider and
+    federation secrets are left out.
+    """
+
+    tenant_id: UUID
+    tenant: TenantPublic
+
+    @classmethod
+    def from_user(cls, user: UserInDB) -> "UserSysAdminView":
+        return cls(**user.model_dump())
+
+
+class UserSysAdminCreated(UserSysAdminView):
+    access_token: AccessToken
+
+    @classmethod
+    def from_user_and_token(
+        cls, user: UserInDB, access_token: AccessToken
+    ) -> "UserSysAdminCreated":
+        return cls(**user.model_dump(), access_token=access_token)
 
 
 class UserUpdatePublic(BaseModel):

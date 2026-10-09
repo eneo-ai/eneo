@@ -21,6 +21,46 @@ export interface paths {
     patch?: never;
     trace?: never;
   };
+  "/api/v1/crawl-runs/{id}/failures/": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /**
+     * List failed crawl addresses
+     * @description Read a bounded page of recorded page and file failures, oldest first. Older runs retain aggregate counts but may have no recorded addresses.
+     */
+    get: operations["get_crawl_failures_api_v1_crawl_runs__id__failures__get"];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/v1/crawl-runs/{id}/cancel/": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    /**
+     * Stop a crawl run
+     * @description Persist an idempotent cancellation request. Queued work stops immediately; running work transitions through the stopping phase.
+     */
+    post: operations["cancel_crawl_run_api_v1_crawl_runs__id__cancel__post"];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
   "/api/v1/apps/{id}/": {
     parameters: {
       query?: never;
@@ -2050,6 +2090,166 @@ export interface paths {
     get: operations["get_conversation_insight_session_api_v1_analysis_conversation_insights_sessions__session_id___get"];
     put?: never;
     post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/v1/admin/crawler/": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /**
+     * Get Crawler Overview
+     * @description Read tenant-wide crawl metadata and totals. Requires admin permission; includes private-space operational metadata without granting content access.
+     */
+    get: operations["get_crawler_overview_api_v1_admin_crawler__get"];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/v1/admin/crawler/websites/": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /**
+     * List Admin Scheduled Websites
+     * @description Read every website with a crawl schedule in the administrator's tenant, when each is next due and how its last run ended. Requires admin permission; does not grant content access.
+     */
+    get: operations["list_admin_scheduled_websites_api_v1_admin_crawler_websites__get"];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/v1/admin/crawler/runs/{id}/": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /**
+     * Get Crawler Details
+     * @description Read a crawl's owning space, source owner, recorded manual initiator, indexed storage and current source state. Requires tenant admin permission; does not grant access to indexed content.
+     */
+    get: operations["get_crawler_details_api_v1_admin_crawler_runs__id___get"];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/v1/admin/crawler/runs/{id}/failures/": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /**
+     * Get Crawler Failures
+     * @description Read recorded failure addresses for a crawl in the administrator's tenant.
+     */
+    get: operations["get_crawler_failures_api_v1_admin_crawler_runs__id__failures__get"];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/v1/admin/crawler/websites/{id}/runs/": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /**
+     * Get Admin Website Runs
+     * @description Read paginated crawl history for one website in the administrator's tenant, including runs older than 24 hours. Does not grant private content access.
+     */
+    get: operations["get_admin_website_runs_api_v1_admin_crawler_websites__id__runs__get"];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/v1/admin/crawler/websites/{id}/matches/": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /**
+     * Get Admin Website Matches
+     * @description Read a bounded page of other source registrations with this exact website address in the administrator's tenant. Matching addresses do not imply identical indexed content.
+     */
+    get: operations["get_admin_website_matches_api_v1_admin_crawler_websites__id__matches__get"];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/v1/admin/crawler/websites/{id}/run/": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    /**
+     * Request Admin Crawl
+     * @description Request a crawl with the website's current settings. Tenant admin permission permits this operation in private spaces without granting content access. Returns the existing active run when present. Requires a user identity; retry starts a new full crawl. A new run executes as the requesting administrator, whose storage quota covers newly published content versions.
+     */
+    post: operations["request_admin_crawl_api_v1_admin_crawler_websites__id__run__post"];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/v1/admin/crawler/runs/{id}/cancel/": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    /**
+     * Cancel Admin Crawl
+     * @description Request cancellation of this exact run. Tenant admin permission permits this operation in private spaces without granting content access. Queued work cancels immediately; running work enters stopping. An already finished run is returned unchanged.
+     */
+    post: operations["cancel_admin_crawl_api_v1_admin_crawler_runs__id__cancel__post"];
     delete?: never;
     options?: never;
     head?: never;
@@ -4215,6 +4415,26 @@ export interface paths {
     patch?: never;
     trace?: never;
   };
+  "/api/v1/admin/model-providers/outbound-headers/options/": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /**
+     * Get Outbound Header Options
+     * @description Metadata for the outbound header editor: the dynamic values a header value may use, and the provider types that support outbound headers.
+     */
+    get: operations["get_outbound_header_options_api_v1_admin_model_providers_outbound_headers_options__get"];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
   "/api/v1/admin/model-providers/{provider_id}/": {
     parameters: {
       query?: never;
@@ -4238,6 +4458,26 @@ export interface paths {
      * @description Delete a model provider.
      */
     delete: operations["delete_provider_api_v1_admin_model_providers__provider_id___delete"];
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/v1/admin/model-providers/{provider_id}/outbound-headers/preview/": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    /**
+     * Preview Outbound Headers
+     * @description Resolve the provider's outbound headers for a user in this tenant, without sending anything. A secret header returns its state only.
+     */
+    post: operations["preview_outbound_headers_api_v1_admin_model_providers__provider_id__outbound_headers_preview__post"];
+    delete?: never;
     options?: never;
     head?: never;
     patch?: never;
@@ -5287,6 +5527,7 @@ export interface paths {
      *         **Features:**
      *         - Maximum 50 websites per request (safety limit)
      *         - Individual failures don't stop the batch
+     *         - A website with an active crawl returns that existing run
      *         - Returns detailed status for each website
      *
      *         **Example Request:**
@@ -5303,19 +5544,54 @@ export interface paths {
      *         ```json
      *         {
      *           "total": 2,
-     *           "queued": 1,
-     *           "failed": 1,
+     *           "queued": 2,
+     *           "failed": 0,
      *           "crawl_runs": [...],
-     *           "errors": [
-     *             {
-     *               "website_id": "123e4567-e89b-12d3-a456-426614174001",
-     *               "error": "Crawl already in progress for this website"
-     *             }
-     *           ]
+     *           "errors": []
      *         }
      *         ```
      */
     post: operations["bulk_run_crawl_api_v1_websites_bulk_run__post"];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/v1/websites/bulk/stop/": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    /**
+     * Stop active crawls for selected websites
+     * @description Stops the active crawl, if any, for up to 50 websites. Websites without an active crawl are reported separately and do not fail the batch.
+     */
+    post: operations["bulk_stop_crawl_api_v1_websites_bulk_stop__post"];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/v1/websites/bulk/delete/": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    /**
+     * Delete selected website sources
+     * @description Permanently deletes up to 50 website sources, their indexed content, and their crawl history. Sources with active crawls remain in place while their crawl is stopped and must be submitted again after cleanup completes.
+     */
+    post: operations["bulk_delete_websites_api_v1_websites_bulk_delete__post"];
     delete?: never;
     options?: never;
     head?: never;
@@ -5339,7 +5615,7 @@ export interface paths {
     post: operations["update_website_api_v1_websites__id___post"];
     /**
      * Delete Website
-     * @description Delete a website by id.
+     * @description Delete a website by id. Returns a conflict while its crawl is active or durable crawler cleanup is still pending.
      */
     delete: operations["delete_website_api_v1_websites__id___delete"];
     options?: never;
@@ -5358,20 +5634,15 @@ export interface paths {
     put?: never;
     /**
      * Trigger a crawl
-     * @description Manually trigger a crawl for a specific website. This can be used to:
-     *         - Recrawl a website to update its content
-     *         - Force a crawl outside the automatic update schedule
-     *         - Retry a failed crawl
+     * @description Manually trigger or retry a crawl for a specific website. If the website
+     *         already has an active crawl, the existing durable run is returned instead
+     *         of creating duplicate work.
      *
      *         The crawl will use the website's configured settings (crawler engine, crawl type, etc.).
      *
-     *         **Status Flow:**
-     *         1. `queued` - Crawl is waiting to start
-     *         2. `in progress` - Crawl is actively running
-     *         3. `complete` - Crawl finished successfully
-     *         4. `failed` - Crawl encountered an error
-     *
-     *         Returns the new crawl run with status information.
+     *         `phase` describes the lifecycle (`pending_dispatch`, `queued`, `running`,
+     *         `finalizing`, `stopping`, or `terminal`). A terminal run's `outcome`
+     *         describes whether it completed, failed, or was cancelled.
      */
     post: operations["run_crawl_api_v1_websites__id__run__post"];
     delete?: never;
@@ -5389,9 +5660,29 @@ export interface paths {
     };
     /**
      * Get Crawl Runs
-     * @description List crawl runs for a website by id.
+     * @description List newest crawl runs first. A cursor continues into older history; new runs appear on refresh.
      */
     get: operations["get_crawl_runs_api_v1_websites__id__runs__get"];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/v1/websites/{id}/runs/latest/": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /**
+     * Get Latest Crawl Run
+     * @description Read the latest crawl run without loading the full website or run history.
+     */
+    get: operations["get_latest_crawl_run_api_v1_websites__id__runs_latest__get"];
     put?: never;
     post?: never;
     delete?: never;
@@ -5429,6 +5720,23 @@ export interface paths {
     };
     /** Get Info Blobs */
     get: operations["get_info_blobs_api_v1_websites__id__info_blobs__get"];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/v1/websites/{id}/info-blobs/page/": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /** Get Info Blob Page */
+    get: operations["get_info_blob_page_api_v1_websites__id__info_blobs_page__get"];
     put?: never;
     post?: never;
     delete?: never;
@@ -6046,6 +6354,26 @@ export interface paths {
     patch?: never;
     trace?: never;
   };
+  "/api/v1/integrations/sharepoint/fixtures/{scenario}/search/": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /**
+     * Search Sharepoint Fixture
+     * @description Search a development-only SharePoint fixture by text and column values. No Microsoft Graph request is made. Requires SHAREPOINT_FIXTURE_MODE_ENABLED=true.
+     */
+    get: operations["search_sharepoint_fixture_api_v1_integrations_sharepoint_fixtures__scenario__search__get"];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
   "/api/v1/integrations/": {
     parameters: {
       query?: never;
@@ -6097,7 +6425,7 @@ export interface paths {
     put?: never;
     /**
      * Add Tenant Integration
-     * @description Add an integration to the tenant.
+     * @description Add an integration to the tenant. Requires administrator permission.
      */
     post: operations["add_tenant_integration_api_v1_integrations_tenant_add__integration_id___post"];
     delete?: never;
@@ -6118,7 +6446,7 @@ export interface paths {
     post?: never;
     /**
      * Remove Tenant Integration
-     * @description Remove an integration from the tenant.
+     * @description Remove an integration from the tenant. Requires administrator permission.
      */
     delete: operations["remove_tenant_integration_api_v1_integrations_tenant_remove__tenant_integration_id___delete"];
     options?: never;
@@ -6218,6 +6546,26 @@ export interface paths {
      * @description Get preview data for a user integration.
      */
     get: operations["get_integration_preview_api_v1_integrations__user_integration_id__preview__get"];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/v1/integrations/{user_integration_id}/sharepoint/search/": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /**
+     * Search Sharepoint Library
+     * @description Search a SharePoint library or OneDrive by free text and column values, across every folder.
+     */
+    get: operations["search_sharepoint_library_api_v1_integrations__user_integration_id__sharepoint_search__get"];
     put?: never;
     post?: never;
     delete?: never;
@@ -6352,6 +6700,46 @@ export interface paths {
      */
     put: operations["update_tenant_tool_enabled_api_v1_mcp_servers_settings_tools__tool_id___put"];
     post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/v1/mcp-servers/bundled/": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /**
+     * Get Bundled Tools
+     * @description List the bundled tool runtime's servers and whether they are added.
+     */
+    get: operations["get_bundled_tools_api_v1_mcp_servers_bundled__get"];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/v1/mcp-servers/bundled/{tool}/": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    /**
+     * Create Bundled Mcp Server
+     * @description Add a server of the bundled tool runtime to this tenant (admin only). Its URL and credential come from the deployment; its tools are then reviewed and enabled like any other server's.
+     */
+    post: operations["create_bundled_mcp_server_api_v1_mcp_servers_bundled__tool___post"];
     delete?: never;
     options?: never;
     head?: never;
@@ -7807,7 +8195,7 @@ export interface paths {
     };
     /**
      * Gen Url
-     * @description Generate the OAuth2 authorization URL for a tenant integration.
+     * @description Generate the OAuth2 authorization URL for an integration in the current tenant.
      */
     get: operations["gen_url_api_v1_integrations_auth__tenant_integration_id__url__get"];
     put?: never;
@@ -7829,7 +8217,7 @@ export interface paths {
     put?: never;
     /**
      * On Auth Callback
-     * @description Complete the OAuth2 callback by exchanging the auth code for a user integration.
+     * @description Complete the OAuth2 callback for an integration in the current tenant.
      */
     post: operations["on_auth_callback_api_v1_integrations_auth_callback_token__post"];
     delete?: never;
@@ -8906,41 +9294,6 @@ export interface paths {
 export type webhooks = Record<string, never>;
 export interface components {
   schemas: {
-    /**
-     * ARQHealth
-     * @description Parsed ARQ health metrics (clean view).
-     */
-    ARQHealth: {
-      /** Heartbeat Ttl Seconds */
-      heartbeat_ttl_seconds?: number | null;
-      /** Age Seconds */
-      age_seconds?: number | null;
-      /**
-       * J Complete
-       * @default 0
-       */
-      j_complete?: number;
-      /**
-       * J Failed
-       * @default 0
-       */
-      j_failed?: number;
-      /**
-       * J Retried
-       * @default 0
-       */
-      j_retried?: number;
-      /**
-       * J Ongoing
-       * @default 0
-       */
-      j_ongoing?: number;
-      /**
-       * Queued
-       * @default 0
-       */
-      queued?: number;
-    };
     /** AcceptedFileType */
     AcceptedFileType: {
       /** Mimetype */
@@ -9152,6 +9505,9 @@ export interface components {
       | "website_updated"
       | "website_deleted"
       | "website_crawled"
+      | "website_crawl_requested"
+      | "website_crawl_stop_requested"
+      | "website_crawl_probed"
       | "website_transferred"
       | "group_chat_created"
       | "collection_created"
@@ -9194,6 +9550,9 @@ export interface components {
       | "mcp_server_disabled"
       | "mcp_server_tool_enabled"
       | "mcp_server_tool_disabled"
+      | "model_provider_headers_updated"
+      | "model_provider_destination_changed"
+      | "model_provider_headers_previewed"
       | "help_assistant_role_assigned"
       | "help_assistant_role_unassigned"
       | "help_assistant_role_toggled_enabled"
@@ -9279,6 +9638,250 @@ export interface components {
       value: {
         [key: string]: string;
       }[];
+    };
+    /** AdminCrawlerCalendar */
+    AdminCrawlerCalendar: {
+      /** Time Zone */
+      time_zone: string;
+      today: components["schemas"]["AdminCrawlerDaySummary"];
+      yesterday: components["schemas"]["AdminCrawlerDaySummary"];
+    };
+    /** AdminCrawlerDaySummary */
+    AdminCrawlerDaySummary: {
+      /**
+       * Date
+       * Format: date
+       */
+      date: string;
+      /**
+       * Completed
+       * @description Completed runs, including runs with only missing resources.
+       */
+      completed: number;
+      /**
+       * Partial
+       * @description Incomplete runs needing attention; excludes completed runs with only missing resources.
+       */
+      partial: number;
+      /** Failed */
+      failed: number;
+      /** Cancelled */
+      cancelled: number;
+    };
+    /** AdminCrawlerDetails */
+    AdminCrawlerDetails: {
+      run: components["schemas"]["CrawlRunPublic"];
+      /**
+       * Website Id
+       * Format: uuid
+       */
+      website_id: string;
+      /** Website Name */
+      website_name: string | null;
+      /** Website Url */
+      website_url: string;
+      /** Space Name */
+      space_name: string | null;
+      /** Started At */
+      started_at: string | null;
+      /** Last Indexed At */
+      last_indexed_at: string | null;
+      /** Space Id */
+      space_id: string | null;
+      owner: components["schemas"]["AdminCrawlerUser"];
+      initiated_by: components["schemas"]["AdminCrawlerUser"] | null;
+      /** Indexed Size */
+      indexed_size: number;
+      /** Stored Resources */
+      stored_resources: number;
+      update_interval: components["schemas"]["UpdateInterval"];
+      /** Next Retry At */
+      next_retry_at: string | null;
+      /** Consecutive Failures */
+      consecutive_failures: number;
+      active_run: components["schemas"]["CrawlRunPublic"] | null;
+      latest_run: components["schemas"]["CrawlRunPublic"] | null;
+    };
+    /** AdminCrawlerItem */
+    AdminCrawlerItem: {
+      run: components["schemas"]["CrawlRunPublic"];
+      /**
+       * Website Id
+       * Format: uuid
+       */
+      website_id: string;
+      /** Website Name */
+      website_name: string | null;
+      /** Website Url */
+      website_url: string;
+      /** Space Name */
+      space_name: string | null;
+      /** Started At */
+      started_at: string | null;
+      /** Last Indexed At */
+      last_indexed_at: string | null;
+    };
+    /** AdminCrawlerOverview */
+    AdminCrawlerOverview: {
+      /**
+       * As Of
+       * Format: date-time
+       */
+      as_of: string;
+      summary: components["schemas"]["AdminCrawlerSummary"];
+      calendar: components["schemas"]["AdminCrawlerCalendar"];
+      /** Items */
+      items: components["schemas"]["AdminCrawlerItem"][];
+      /** Next Cursor */
+      next_cursor: string | null;
+      scheduler: components["schemas"]["AdminCrawlerSchedulerHealth"];
+    };
+    /** AdminCrawlerRelatedPage */
+    AdminCrawlerRelatedPage: {
+      /** Items */
+      items: components["schemas"]["AdminCrawlerRelatedWebsite"][];
+      /** Next Cursor */
+      next_cursor: string | null;
+    };
+    /** AdminCrawlerRelatedWebsite */
+    AdminCrawlerRelatedWebsite: {
+      /**
+       * Website Id
+       * Format: uuid
+       */
+      website_id: string;
+      /** Website Name */
+      website_name: string | null;
+      /** Website Url */
+      website_url: string;
+      /** Space Id */
+      space_id: string | null;
+      /** Space Name */
+      space_name: string | null;
+      /** Indexed Size */
+      indexed_size: number;
+      /** Last Indexed At */
+      last_indexed_at: string | null;
+      /** Latest Run Id */
+      latest_run_id: string | null;
+    };
+    /** AdminCrawlerScheduledWebsite */
+    AdminCrawlerScheduledWebsite: {
+      /**
+       * Website Id
+       * Format: uuid
+       */
+      website_id: string;
+      /** Website Name */
+      website_name: string | null;
+      /** Website Url */
+      website_url: string;
+      /** Space Id */
+      space_id: string | null;
+      /** Space Name */
+      space_name: string | null;
+      update_interval: components["schemas"]["UpdateInterval"];
+      /** Last Crawled At */
+      last_crawled_at: string | null;
+      /** Last Indexed At */
+      last_indexed_at: string | null;
+      /** Consecutive Failures */
+      consecutive_failures: number;
+      /** Next Retry At */
+      next_retry_at: string | null;
+      /**
+       * Auto Disabled
+       * @description Interval is never because repeated failures disabled it.
+       */
+      auto_disabled: boolean;
+      latest_run: components["schemas"]["CrawlRunPublic"] | null;
+      /** Active Run Id */
+      active_run_id: string | null;
+      /**
+       * Interval Due At
+       * @description last_crawled_at plus the interval, or the registration time when never crawled; null when disabled.
+       */
+      interval_due_at: string | null;
+      /**
+       * Next Due At
+       * @description Earliest hourly scheduler tick (UTC, minute 0) that can pick the website up; weekly websites only on Fridays UTC. Null when disabled or while a crawl run is active.
+       */
+      next_due_at: string | null;
+      schedule_state: components["schemas"]["ScheduleState"];
+      /**
+       * Blocked Until
+       * @description Circuit-breaker deadline while blocked_backoff.
+       */
+      blocked_until: string | null;
+    };
+    /** AdminCrawlerScheduledWebsitePage */
+    AdminCrawlerScheduledWebsitePage: {
+      /**
+       * As Of
+       * Format: date-time
+       */
+      as_of: string;
+      /** Items */
+      items: components["schemas"]["AdminCrawlerScheduledWebsite"][];
+      /** Total Count */
+      total_count: number;
+      /** Next Cursor */
+      next_cursor: string | null;
+    };
+    /** AdminCrawlerSchedulerHealth */
+    AdminCrawlerSchedulerHealth: {
+      /**
+       * Status
+       * @description ok: the hourly scheduler ran recently and admitted every due website in this tenant; degraded: it ran but some admissions failed; stale: no run recorded within stale_after_minutes; unknown: the marker could not be read.
+       * @enum {string}
+       */
+      status: "ok" | "degraded" | "stale" | "unknown";
+      /**
+       * Ran At
+       * @description When the last scheduler run finished, if a marker exists.
+       */
+      ran_at: string | null;
+      /**
+       * Stale After Minutes
+       * @default 65
+       */
+      stale_after_minutes?: number;
+      /**
+       * Due
+       * @description Websites in this tenant that were due in that run.
+       */
+      due: number | null;
+      /**
+       * Admitted
+       * @description Of those, how many were handed to the crawler.
+       */
+      admitted: number | null;
+      /**
+       * Failed
+       * @description Of those, how many could not be admitted; see the worker log.
+       */
+      failed: number | null;
+    };
+    /** AdminCrawlerSummary */
+    AdminCrawlerSummary: {
+      /** Ongoing */
+      ongoing: number;
+      /** Queued */
+      queued: number;
+      /** Issues */
+      issues: number;
+    };
+    /** AdminCrawlerUser */
+    AdminCrawlerUser: {
+      /**
+       * Id
+       * Format: uuid
+       */
+      id: string;
+      /** Username */
+      username: string | null;
+      /** Email */
+      email: string;
     };
     /** AllowedOriginCreate */
     AllowedOriginCreate: {
@@ -9796,85 +10399,6 @@ export interface components {
       /** Search Match Reasons */
       search_match_reasons?: components["schemas"]["ApiKeySearchMatchReason"][] | null;
     };
-    /** ApiKeyV2InDB */
-    ApiKeyV2InDB: {
-      /**
-       * Id
-       * Format: uuid
-       */
-      id: string;
-      /** @default user */
-      ownership?: components["schemas"]["ApiKeyOwnership"];
-      /** Owner User Id */
-      owner_user_id?: string | null;
-      /** Key Prefix */
-      key_prefix: string;
-      /** Key Suffix */
-      key_suffix: string;
-      /** Name */
-      name: string;
-      /** Description */
-      description?: string | null;
-      key_type: components["schemas"]["ApiKeyType"];
-      permission: components["schemas"]["ApiKeyPermission"];
-      scope_type: components["schemas"]["ApiKeyScopeType"];
-      /** Scope Id */
-      scope_id?: string | null;
-      /** Allowed Origins */
-      allowed_origins?: string[] | null;
-      /** Allowed Ips */
-      allowed_ips?: string[] | null;
-      resource_permissions?: {
-        [key: string]: string;
-      } | null;
-      state: components["schemas"]["ApiKeyState"];
-      /** Expires At */
-      expires_at?: string | null;
-      /** Last Used At */
-      last_used_at?: string | null;
-      /** Revoked At */
-      revoked_at?: string | null;
-      revoked_reason_code?: components["schemas"]["ApiKeyStateReasonCode"] | null;
-      /** Revoked Reason Text */
-      revoked_reason_text?: string | null;
-      /** Suspended At */
-      suspended_at?: string | null;
-      suspended_reason_code?: components["schemas"]["ApiKeyStateReasonCode"] | null;
-      /** Suspended Reason Text */
-      suspended_reason_text?: string | null;
-      /** Rotation Grace Until */
-      rotation_grace_until?: string | null;
-      /** Rate Limit */
-      rate_limit?: number | null;
-      /** Created At */
-      created_at?: string | null;
-      /** Updated At */
-      updated_at?: string | null;
-      /** Rotated From Key Id */
-      rotated_from_key_id?: string | null;
-      /** Created By User Id */
-      created_by_user_id?: string | null;
-      owner_user?: components["schemas"]["ApiKeyUserSnapshot"] | null;
-      created_by_user?: components["schemas"]["ApiKeyUserSnapshot"] | null;
-      /** Search Match Reasons */
-      search_match_reasons?: components["schemas"]["ApiKeySearchMatchReason"][] | null;
-      /**
-       * Tenant Id
-       * Format: uuid
-       */
-      tenant_id: string;
-      /** Created By Key Id */
-      created_by_key_id?: string | null;
-      /**
-       * Delegation Depth
-       * @default 0
-       */
-      delegation_depth?: number;
-      /** Key Hash */
-      key_hash: string;
-      /** Hash Version */
-      hash_version: string;
-    };
     /** AppFleetAdvanceCountsPublic */
     AppFleetAdvanceCountsPublic: {
       /** Advanced */
@@ -10284,7 +10808,10 @@ export interface components {
       completion_model?: components["schemas"]["ModelId"] | null;
       completion_model_kwargs?: components["schemas"]["ModelKwargs"] | null;
       transcription_model?: components["schemas"]["ModelId"] | null;
-      /** Data Retention Days */
+      /**
+       * Data Retention Days
+       * @description Conversation retention override. Requires space administration permission in shared and organization spaces. Set to null to inherit the space policy; omit to leave unchanged.
+       */
       data_retention_days?: number | null;
       /**
        * Icon Id
@@ -10316,7 +10843,9 @@ export interface components {
     /** AskAssistant */
     AskAssistant: {
       /** Disabled Capabilities */
-      disabled_capabilities?: ("web_search" | "image_generation")[];
+      disabled_capabilities?: (
+        "web_search" | "image_generation" | "file_analysis" | "file_creation" | "charts"
+      )[];
       /** Disabled Mcp Server Ids */
       disabled_mcp_server_ids?: string[];
       /** Question */
@@ -10409,6 +10938,54 @@ export interface components {
       /** Active User Count */
       active_user_count: number;
     };
+    /** AssistantAttachmentInput */
+    AssistantAttachmentInput: {
+      /**
+       * Id
+       * Format: uuid
+       */
+      id: string;
+      /**
+       * Inline Text
+       * @description True: the attachment's text is placed in the prompt on every turn. False: the assistant gets a signed reference URL instead and opens the file with a tool when needed (requires a stored original and a model that can call tools; otherwise the text is inlined).
+       * @default true
+       */
+      inline_text?: boolean;
+    };
+    /** AssistantAttachmentPublic */
+    AssistantAttachmentPublic: {
+      /** Created At */
+      created_at?: string | null;
+      /** Updated At */
+      updated_at?: string | null;
+      /**
+       * Id
+       * Format: uuid
+       */
+      id: string;
+      /** Name */
+      name: string;
+      /** Mimetype */
+      mimetype: string;
+      /** Size */
+      size: number;
+      /** Original Size */
+      original_size?: number | null;
+      /** Transcription */
+      transcription?: string | null;
+      /** Token Count */
+      token_count?: number | null;
+      /**
+       * Has Download Reference
+       * @default false
+       */
+      has_download_reference?: boolean;
+      /**
+       * Inline Text
+       * @default true
+       */
+      inline_text?: boolean;
+    };
     /** AssistantCreatePublic */
     AssistantCreatePublic: {
       /** Name */
@@ -10425,7 +11002,8 @@ export interface components {
        */
       logging_enabled?: boolean | null;
       /** Enabled Capabilities */
-      enabled_capabilities?: ("web_search" | "image_generation")[] | null;
+      enabled_capabilities?:
+        ("web_search" | "image_generation" | "file_analysis" | "file_creation" | "charts")[] | null;
       /**
        * Space Id
        * Format: uuid
@@ -10607,7 +11185,9 @@ export interface components {
        */
       id: string;
       /** Enabled Capabilities */
-      enabled_capabilities?: ("web_search" | "image_generation")[];
+      enabled_capabilities?: (
+        "web_search" | "image_generation" | "file_analysis" | "file_creation" | "charts"
+      )[];
       /** Available Capabilities */
       available_capabilities?: components["schemas"]["CapabilityAvailability"][];
       /** Name */
@@ -10622,7 +11202,7 @@ export interface components {
       /** Logging Enabled */
       logging_enabled: boolean | null;
       /** Attachments */
-      attachments: components["schemas"]["FilePublic"][];
+      attachments: components["schemas"]["AssistantAttachmentPublic"][];
       allowed_attachments: components["schemas"]["FileRestrictions"];
       /** Groups */
       groups: components["schemas"]["CollectionPublic"][];
@@ -11269,11 +11849,73 @@ export interface components {
       /** Failed */
       failed: number;
       /** Crawl Runs */
-      crawl_runs: components["schemas"]["eneo__websites__presentation__website_models__CrawlRunPublic"][];
+      crawl_runs: components["schemas"]["CrawlRunPublic"][];
       /** Errors */
-      errors: {
-        [key: string]: string;
-      }[];
+      errors: components["schemas"]["WebsiteBulkActionError"][];
+    };
+    /**
+     * BulkCrawlStopResponse
+     * @description Result of stopping active crawls for a bounded website selection.
+     */
+    BulkCrawlStopResponse: {
+      /** Total */
+      total: number;
+      /** Stopped */
+      stopped: number;
+      /** Not Running */
+      not_running: number;
+      /** Failed */
+      failed: number;
+      /** Crawl Runs */
+      crawl_runs: components["schemas"]["CrawlRunPublic"][];
+      /** Errors */
+      errors: components["schemas"]["WebsiteBulkActionError"][];
+    };
+    /**
+     * BulkWebsiteDeleteResponse
+     * @description Result of permanently deleting a bounded website selection.
+     */
+    BulkWebsiteDeleteResponse: {
+      /** Total */
+      total: number;
+      /** Deleted */
+      deleted: number;
+      /** Not Found */
+      not_found: number;
+      /** Failed */
+      failed: number;
+      /** Errors */
+      errors: components["schemas"]["WebsiteBulkActionError"][];
+    };
+    /** BundledServerCreate */
+    BundledServerCreate: {
+      /**
+       * Activate
+       * @default false
+       */
+      activate?: boolean;
+    };
+    /** BundledToolList */
+    BundledToolList: {
+      /** Items */
+      items: components["schemas"]["BundledToolPublic"][];
+      runtime?: components["schemas"]["RuntimeStatus"] | null;
+      /** Count */
+      readonly count: number;
+    };
+    /**
+     * BundledToolPublic
+     * @description A server the bundled tool runtime offers to this tenant.
+     */
+    BundledToolPublic: {
+      /** Tool */
+      tool: string;
+      /** Purpose */
+      purpose: string;
+      /** Available */
+      available: boolean;
+      /** Mcp Server Id */
+      mcp_server_id?: string | null;
     };
     /**
      * CallbackRequest
@@ -11309,7 +11951,7 @@ export interface components {
        * Purpose
        * @enum {string}
        */
-      purpose: "web_search" | "image_generation";
+      purpose: "web_search" | "image_generation" | "file_analysis" | "file_creation" | "charts";
       /** Available */
       available: boolean;
       /** Reason */
@@ -11983,7 +12625,9 @@ export interface components {
        */
       disabled_mcp_server_ids?: string[];
       /** Disabled Capabilities */
-      disabled_capabilities?: ("web_search" | "image_generation")[];
+      disabled_capabilities?: (
+        "web_search" | "image_generation" | "file_analysis" | "file_creation" | "charts"
+      )[];
     };
     /** Counts */
     Counts: {
@@ -11995,37 +12639,209 @@ export interface components {
       questions: number;
     };
     /**
+     * CrawlFailureCode
+     * @enum {string}
+     */
+    CrawlFailureCode:
+      | "dispatch_failed"
+      | "invalid_dispatch"
+      | "worker_interrupted"
+      | "lease_expired"
+      | "remote_unreachable"
+      | "remote_blocked"
+      | "timed_out"
+      | "processing_failed"
+      | "resources_missing"
+      | "page_limit_reached"
+      | "content_skipped"
+      | "tenant_quota_exceeded"
+      | "user_quota_exceeded"
+      | "cancelled";
+    /** CrawlFailurePagePublic */
+    CrawlFailurePagePublic: {
+      /**
+       * Items
+       * @description List of items returned in the response
+       */
+      items: components["schemas"]["CrawlResourceFailurePublic"][];
+      /** Limit */
+      limit?: number | null;
+      /** Next Cursor */
+      next_cursor?: string | null;
+      /** Previous Cursor */
+      previous_cursor?: string | null;
+      /** Total Count */
+      total_count: number;
+      run: components["schemas"]["CrawlRunPublic"];
+      /**
+       * Details Available
+       * @description False when this run predates collection of failed resource addresses.
+       */
+      details_available: boolean;
+      /**
+       * Count
+       * @description Number of items returned in the response
+       */
+      readonly count: number;
+    };
+    /**
+     * CrawlHistoryPeriod
+     * @enum {string}
+     */
+    CrawlHistoryPeriod: "last_24_hours" | "today" | "yesterday";
+    /**
+     * CrawlLifecycleHealth
+     * @description Authoritative active crawl state from PostgreSQL.
+     */
+    CrawlLifecycleHealth: {
+      /**
+       * Database Ok
+       * @default true
+       */
+      database_ok?: boolean;
+      /** Pending Dispatch */
+      pending_dispatch?: number | null;
+      /** Queued */
+      queued?: number | null;
+      /** Running */
+      running?: number | null;
+      /** Finalizing */
+      finalizing?: number | null;
+      /** Stopping */
+      stopping?: number | null;
+      /** Active Total */
+      active_total?: number | null;
+      /** Expired Leases */
+      expired_leases?: number | null;
+      /** Pending Transport Cleanup */
+      pending_transport_cleanup?: number | null;
+      /** Oldest Active Age Seconds */
+      oldest_active_age_seconds?: number | null;
+    };
+    /**
+     * CrawlOrigin
+     * @enum {string}
+     */
+    CrawlOrigin: "manual" | "scheduled" | "legacy";
+    /**
+     * CrawlOutcome
+     * @enum {string}
+     */
+    CrawlOutcome:
+      "succeeded" | "unchanged" | "empty" | "partial" | "failed" | "cancelled" | "interrupted";
+    /**
+     * CrawlPhase
+     * @enum {string}
+     */
+    CrawlPhase: "pending_dispatch" | "queued" | "running" | "finalizing" | "stopping" | "terminal";
+    /** CrawlResourceFailurePublic */
+    CrawlResourceFailurePublic: {
+      /**
+       * Id
+       * Format: uuid
+       */
+      id: string;
+      /** Url */
+      url: string;
+      /**
+       * Reason
+       * @description Failure reason code, localized by the client.
+       */
+      reason: string;
+      kind: components["schemas"]["CrawlResourceKind"];
+    };
+    /**
+     * CrawlResourceKind
+     * @enum {string}
+     */
+    CrawlResourceKind: "page" | "file";
+    /** CrawlRunPublic */
+    CrawlRunPublic: {
+      /** Created At */
+      created_at?: string | null;
+      /** Updated At */
+      updated_at?: string | null;
+      /**
+       * Id
+       * Format: uuid
+       */
+      id: string;
+      /**
+       * Pages Crawled
+       * @description Pages that were (re)indexed in this run.
+       */
+      pages_crawled: number | null;
+      /** Files Downloaded */
+      files_downloaded: number | null;
+      /** Pages Failed */
+      pages_failed: number | null;
+      /** Files Failed */
+      files_failed: number | null;
+      /**
+       * Pages Unchanged
+       * @description Pages verified unchanged and left as they were (HTTP 304 or identical content). Null for runs recorded before this was tracked.
+       */
+      pages_unchanged?: number | null;
+      /**
+       * Files Unchanged
+       * @description Files verified unchanged and left as they were. Null for runs recorded before this was tracked.
+       */
+      files_unchanged?: number | null;
+      /** Failure Summary */
+      failure_summary?: {
+        [key: string]: number;
+      } | null;
+      status: components["schemas"]["Status"];
+      phase: components["schemas"]["CrawlPhase"];
+      outcome: components["schemas"]["CrawlOutcome"] | null;
+      origin: components["schemas"]["CrawlOrigin"];
+      /** Result Location */
+      result_location: string | null;
+      /** Finished At */
+      finished_at: string | null;
+      failure_code: components["schemas"]["CrawlFailureCode"] | null;
+      /** Failure Detail */
+      failure_detail: string | null;
+      /** Cancel Requested At */
+      cancel_requested_at: string | null;
+      /** Attempt Count */
+      attempt_count: number;
+    };
+    /**
      * CrawlType
      * @enum {string}
      */
     CrawlType: "crawl" | "sitemap";
     /**
-     * CrawlerActivity
-     * @description Real-time crawler activity from multiple sources.
+     * CrawlerCapacityHealth
+     * @description Configured cluster-wide crawl admission capacity.
      */
-    CrawlerActivity: {
-      /** Db In Progress */
-      db_in_progress?: number | null;
-      /**
-       * Db Query Ok
-       * @default true
-       */
-      db_query_ok?: boolean;
-      /**
-       * Arq Ongoing
-       * @default 0
-       */
-      arq_ongoing?: number;
-      /** Delta */
-      delta?: number | null;
+    CrawlerCapacityHealth: {
+      /** Max Concurrent Crawl Jobs */
+      max_concurrent_crawl_jobs: number;
+    };
+    /**
+     * CrawlerHealthDebugInfo
+     * @description Queue names and Redis database used by the health snapshot.
+     */
+    CrawlerHealthDebugInfo: {
+      /** Redis Db */
+      redis_db?: number | null;
+      /** Dispatcher Queue Name */
+      dispatcher_queue_name: string;
+      /** Executor Queue Name */
+      executor_queue_name: string;
     };
     /**
      * CrawlerHealthResponse
      * @description Crawler health status with operator-friendly signals.
      */
     CrawlerHealthResponse: {
-      /** Status */
-      status: string;
+      /**
+       * Status
+       * @enum {string}
+       */
+      status: "HEALTHY" | "DEGRADED" | "UNHEALTHY" | "UNKNOWN";
       /** Status Flags */
       status_flags?: string[];
       /**
@@ -12035,13 +12851,10 @@ export interface components {
       status_reason?: string;
       /** Response Timestamp Utc */
       response_timestamp_utc: string;
-      crawler_activity?: components["schemas"]["CrawlerActivity"];
-      arq?: components["schemas"]["ARQHealth"];
-      watchdog?: components["schemas"]["WatchdogMetrics"];
-      feeder?: components["schemas"]["FeederLeader"];
-      pending?: components["schemas"]["PendingQueueSummary"];
-      thresholds: components["schemas"]["HealthThresholds"];
-      debug?: components["schemas"]["DebugInfo"];
+      lifecycle?: components["schemas"]["CrawlLifecycleHealth"];
+      transport?: components["schemas"]["CrawlerTransportHealth"];
+      capacity: components["schemas"]["CrawlerCapacityHealth"];
+      debug: components["schemas"]["CrawlerHealthDebugInfo"];
     };
     /**
      * CrawlerSettingsResponse
@@ -12062,13 +12875,8 @@ export interface components {
      *                 "closespider_itemcount": 20000,
      *                 "obey_robots": true,
      *                 "autothrottle_enabled": true,
-     *                 "tenant_worker_concurrency_limit": 4,
-     *                 "crawl_stale_threshold_minutes": 30,
      *                 "crawl_heartbeat_interval_seconds": 300,
-     *                 "crawl_feeder_enabled": false,
-     *                 "crawl_feeder_interval_seconds": 10,
-     *                 "crawl_feeder_batch_size": 10,
-     *                 "crawl_job_max_age_seconds": 1800
+     *                 "crawl_page_batch_size": 100
      *             },
      *             "overrides": ["download_timeout", "dns_timeout"],
      *             "updated_at": "2025-10-22T10:00:00+00:00"
@@ -12087,19 +12895,14 @@ export interface components {
        * @example {
        *       "autothrottle_enabled": true,
        *       "closespider_itemcount": 20000,
-       *       "crawl_feeder_batch_size": 10,
-       *       "crawl_feeder_enabled": false,
-       *       "crawl_feeder_interval_seconds": 10,
        *       "crawl_heartbeat_interval_seconds": 300,
-       *       "crawl_job_max_age_seconds": 1800,
        *       "crawl_max_length": 14400,
-       *       "crawl_stale_threshold_minutes": 30,
+       *       "crawl_page_batch_size": 100,
        *       "dns_timeout": 30,
        *       "download_max_size": 10485760,
        *       "download_timeout": 90,
        *       "obey_robots": true,
-       *       "retry_times": 2,
-       *       "tenant_worker_concurrency_limit": 4
+       *       "retry_times": 2
        *     }
        */
       settings: {
@@ -12139,13 +12942,8 @@ export interface components {
      *             "closespider_itemcount": 20000,
      *             "obey_robots": true,
      *             "autothrottle_enabled": true,
-     *             "tenant_worker_concurrency_limit": 4,
-     *             "crawl_stale_threshold_minutes": 30,
      *             "crawl_heartbeat_interval_seconds": 300,
-     *             "crawl_feeder_enabled": false,
-     *             "crawl_feeder_interval_seconds": 10,
-     *             "crawl_feeder_batch_size": 10,
-     *             "crawl_job_max_age_seconds": 1800
+     *             "crawl_page_batch_size": 100
      *         }
      *
      *     Example - Partial update (adjust timeouts only):
@@ -12187,7 +12985,7 @@ export interface components {
       retry_times?: number | null;
       /**
        * Closespider Itemcount
-       * @description Maximum pages to crawl before stopping (100 to 100k)
+       * @description Maximum pages and linked files to process per crawl (100 to 100k)
        * @example 20000
        */
       closespider_itemcount?: number | null;
@@ -12199,22 +12997,10 @@ export interface components {
       obey_robots?: boolean | null;
       /**
        * Autothrottle Enabled
-       * @description Enable automatic request throttling based on server response times
+       * @description Enable conservative pacing between bounded request batches
        * @example true
        */
       autothrottle_enabled?: boolean | null;
-      /**
-       * Tenant Worker Concurrency Limit
-       * @description Maximum concurrent crawl jobs per tenant (0 = unlimited, 1 to 50)
-       * @example 4
-       */
-      tenant_worker_concurrency_limit?: number | null;
-      /**
-       * Crawl Stale Threshold Minutes
-       * @description Minutes without activity before IN_PROGRESS job is considered stale (5 min to 24 hours)
-       * @example 30
-       */
-      crawl_stale_threshold_minutes?: number | null;
       /**
        * Crawl Heartbeat Interval Seconds
        * @description Heartbeat interval to signal job is alive (30s to 1 hour)
@@ -12222,29 +13008,23 @@ export interface components {
        */
       crawl_heartbeat_interval_seconds?: number | null;
       /**
-       * Crawl Feeder Enabled
-       * @description Enable crawl feeder service for rate-limited job enqueueing
-       * @example false
+       * Crawl Page Batch Size
+       * @description Commit after every N pages during crawl (10 to 1000)
+       * @example 100
        */
-      crawl_feeder_enabled?: boolean | null;
-      /**
-       * Crawl Feeder Interval Seconds
-       * @description Feeder check interval in seconds (5s to 5 min)
-       * @example 10
-       */
-      crawl_feeder_interval_seconds?: number | null;
-      /**
-       * Crawl Feeder Batch Size
-       * @description Maximum jobs to enqueue per feeder cycle per tenant (1 to 100)
-       * @example 10
-       */
-      crawl_feeder_batch_size?: number | null;
-      /**
-       * Crawl Job Max Age Seconds
-       * @description Maximum job retry age before permanent failure (5 min to 2 hours)
-       * @example 1800
-       */
-      crawl_job_max_age_seconds?: number | null;
+      crawl_page_batch_size?: number | null;
+    };
+    /**
+     * CrawlerTransportHealth
+     * @description Dedicated queue depth and liveness of both crawler worker roles.
+     */
+    CrawlerTransportHealth: {
+      /** Reconciliation Heartbeat Ttl Seconds */
+      reconciliation_heartbeat_ttl_seconds?: number | null;
+      /** Executor Heartbeat Ttl Seconds */
+      executor_heartbeat_ttl_seconds?: number | null;
+      /** Queued */
+      queued?: number | null;
     };
     /** CreateGroupRequest */
     CreateGroupRequest: {
@@ -12263,7 +13043,8 @@ export interface components {
       /** Name */
       name: string;
       /** Enabled Capabilities */
-      enabled_capabilities?: ("web_search" | "image_generation")[] | null;
+      enabled_capabilities?:
+        ("web_search" | "image_generation" | "file_analysis" | "file_creation" | "charts")[] | null;
       from_template?: components["schemas"]["TemplateCreate"] | null;
     };
     /** CreateSpaceGroupsRequest */
@@ -12436,6 +13217,48 @@ export interface components {
        */
       readonly count: number;
     };
+    /** CursorPaginatedResponse[CrawlRunPublic] */
+    CursorPaginatedResponse_CrawlRunPublic_: {
+      /**
+       * Items
+       * @description List of items returned in the response
+       */
+      items: components["schemas"]["CrawlRunPublic"][];
+      /** Limit */
+      limit?: number | null;
+      /** Next Cursor */
+      next_cursor?: string | null;
+      /** Previous Cursor */
+      previous_cursor?: string | null;
+      /** Total Count */
+      total_count: number;
+      /**
+       * Count
+       * @description Number of items returned in the response
+       */
+      readonly count: number;
+    };
+    /** CursorPaginatedResponse[InfoBlobPublicNoText] */
+    CursorPaginatedResponse_InfoBlobPublicNoText_: {
+      /**
+       * Items
+       * @description List of items returned in the response
+       */
+      items: components["schemas"]["InfoBlobPublicNoText"][];
+      /** Limit */
+      limit?: number | null;
+      /** Next Cursor */
+      next_cursor?: string | null;
+      /** Previous Cursor */
+      previous_cursor?: string | null;
+      /** Total Count */
+      total_count: number;
+      /**
+       * Count
+       * @description Number of items returned in the response
+       */
+      readonly count: number;
+    };
     /** CursorPaginatedResponse[SessionMetadataPublic] */
     CursorPaginatedResponse_SessionMetadataPublic_: {
       /**
@@ -12524,28 +13347,6 @@ export interface components {
     Dashboard: {
       spaces: components["schemas"]["PaginatedResponse_SpaceDashboard_"];
     };
-    /**
-     * DebugInfo
-     * @description Raw data for debugging - noisy, not for quick reads.
-     */
-    DebugInfo: {
-      /**
-       * Arq Raw
-       * @default
-       */
-      arq_raw?: string;
-      /** Arq Timestamp */
-      arq_timestamp?: string | null;
-      /** Watchdog Timestamp */
-      watchdog_timestamp?: string | null;
-      /** Redis Db */
-      redis_db?: number | null;
-      /**
-       * Queue Name
-       * @default arq:queue
-       */
-      queue_name?: string;
-    };
     /** DefaultAssistant */
     DefaultAssistant: {
       /**
@@ -12563,7 +13364,9 @@ export interface components {
        */
       id: string;
       /** Enabled Capabilities */
-      enabled_capabilities?: ("web_search" | "image_generation")[];
+      enabled_capabilities?: (
+        "web_search" | "image_generation" | "file_analysis" | "file_creation" | "charts"
+      )[];
       /** Available Capabilities */
       available_capabilities?: components["schemas"]["CapabilityAvailability"][];
       /** Name */
@@ -12578,7 +13381,7 @@ export interface components {
       /** Logging Enabled */
       logging_enabled: boolean | null;
       /** Attachments */
-      attachments: components["schemas"]["FilePublic"][];
+      attachments: components["schemas"]["AssistantAttachmentPublic"][];
       allowed_attachments: components["schemas"]["FileRestrictions"];
       /** Groups */
       groups: components["schemas"]["CollectionPublic"][];
@@ -12769,14 +13572,41 @@ export interface components {
       /** Transcription Audio Limit Bytes */
       transcription_audio_limit_bytes: number;
     };
+    /** DynamicValuePublic */
+    DynamicValuePublic: {
+      /**
+       * Token
+       * @description Used in a header value as {{token}}
+       */
+      token: string;
+      /**
+       * Source
+       * @enum {string}
+       */
+      source: "scim_enterprise" | "external_id";
+      /**
+       * Attribute
+       * @description The provisioned attribute the token reads
+       */
+      attribute: string;
+      /**
+       * Classification
+       * @enum {string}
+       */
+      classification: "identifying" | "organisational";
+    };
     /** EffectiveConfigPublic */
     EffectiveConfigPublic: {
       /** Available Capabilities */
       available_capabilities?: components["schemas"]["CapabilityAvailability"][];
       /** Enabled Capabilities */
-      enabled_capabilities?: ("web_search" | "image_generation")[];
+      enabled_capabilities?: (
+        "web_search" | "image_generation" | "file_analysis" | "file_creation" | "charts"
+      )[];
       /** Default Disabled Capabilities */
-      default_disabled_capabilities?: ("web_search" | "image_generation")[];
+      default_disabled_capabilities?: (
+        "web_search" | "image_generation" | "file_analysis" | "file_creation" | "charts"
+      )[];
       /** Models Enforced */
       models_enforced: boolean;
       /** Available Models */
@@ -13183,6 +14013,7 @@ export interface components {
       | "audit_log"
       | "session"
       | "mcp_server"
+      | "model_provider"
       | "mcp_server_tool"
       | "user_group"
       | "widget"
@@ -13255,7 +14086,9 @@ export interface components {
       | 9060
       | 9061
       | 9062
-      | 9063;
+      | 9063
+      | 9064
+      | 9070;
     /**
      * ExpiringKeySummaryItem
      * @description Lightweight summary of a single expiring API key.
@@ -13504,21 +14337,6 @@ export interface components {
       /** Tenant Count */
       tenant_count: number;
     };
-    /**
-     * FeederLeader
-     * @description Feeder leader election status.
-     */
-    FeederLeader: {
-      /** Leader Id */
-      leader_id?: string | null;
-      /** Leader Ttl Seconds */
-      leader_ttl_seconds?: number | null;
-      /**
-       * Status
-       * @default UNKNOWN
-       */
-      status?: string;
-    };
     /** FileDeletionPreview */
     FileDeletionPreview: {
       /**
@@ -13562,6 +14380,8 @@ export interface components {
       mimetype: string;
       /** Size */
       size: number;
+      /** Original Size */
+      original_size?: number | null;
       /** Transcription */
       transcription?: string | null;
       /** Token Count */
@@ -13899,18 +14719,6 @@ export interface components {
       detail?: components["schemas"]["ValidationError"][];
     };
     /**
-     * HealthThresholds
-     * @description Thresholds used for status decisions - helps explain status.
-     */
-    HealthThresholds: {
-      /** Feeder Interval Seconds */
-      feeder_interval_seconds: number;
-      /** Watchdog Stale Threshold Seconds */
-      watchdog_stale_threshold_seconds: number;
-      /** Heartbeat Ttl Expected Seconds */
-      heartbeat_ttl_expected_seconds: number;
-    };
-    /**
      * HelperKind
      * @description Kinds of Help Assistants shipped with Eneo.
      * @enum {string}
@@ -14210,6 +15018,11 @@ export interface components {
       website_id?: string | null;
       /** Original Available */
       original_available: boolean;
+      /**
+       * Source Metadata
+       * @default []
+       */
+      source_metadata?: components["schemas"]["SourceMetadataEntry"][];
       /** Score */
       score: number;
     };
@@ -14257,6 +15070,11 @@ export interface components {
       website_id?: string | null;
       /** Original Available */
       original_available: boolean;
+      /**
+       * Source Metadata
+       * @default []
+       */
+      source_metadata?: components["schemas"]["SourceMetadataEntry"][];
       /** Text */
       text: string;
     };
@@ -14278,6 +15096,11 @@ export interface components {
       website_id?: string | null;
       /** Original Available */
       original_available: boolean;
+      /**
+       * Source Metadata
+       * @default []
+       */
+      source_metadata?: components["schemas"]["SourceMetadataEntry"][];
     };
     /** InfoBlobUpdatePublic */
     InfoBlobUpdatePublic: {
@@ -14508,10 +15331,22 @@ export interface components {
       | "processing_interrupted"
       | "invalid_job_payload"
       | "quota_exceeded"
+      | "tenant_quota_exceeded"
+      | "user_quota_exceeded"
       | "storage_limit_exceeded"
       | "storage_unavailable"
       | "storage_verification_failed"
-      | "knowledge_source_conflict";
+      | "knowledge_source_conflict"
+      | "dispatch_failed"
+      | "invalid_dispatch"
+      | "worker_interrupted"
+      | "lease_expired"
+      | "remote_unreachable"
+      | "remote_blocked"
+      | "timed_out"
+      | "resources_missing"
+      | "page_limit_reached"
+      | "content_skipped";
     /** JobPublic */
     JobPublic: {
       /** Created At */
@@ -14671,7 +15506,13 @@ export interface components {
        * @default general
        * @enum {string}
        */
-      purpose?: "general" | "web_search" | "image_generation";
+      purpose?:
+        | "general"
+        | "web_search"
+        | "image_generation"
+        | "file_analysis"
+        | "file_creation"
+        | "charts";
       /** Description */
       description?: string | null;
       /** Http Auth Config Schema */
@@ -14755,7 +15596,13 @@ export interface components {
        * @default general
        * @enum {string}
        */
-      purpose?: "general" | "web_search" | "image_generation";
+      purpose?:
+        | "general"
+        | "web_search"
+        | "image_generation"
+        | "file_analysis"
+        | "file_creation"
+        | "charts";
       /** Image Model Id */
       image_model_id?: string | null;
       image_model?: components["schemas"]["MCPServerBackingModelPublic"] | null;
@@ -14878,7 +15725,13 @@ export interface components {
        * @default general
        * @enum {string}
        */
-      purpose?: "general" | "web_search" | "image_generation";
+      purpose?:
+        | "general"
+        | "web_search"
+        | "image_generation"
+        | "file_analysis"
+        | "file_creation"
+        | "charts";
       /** Image Model Id */
       image_model_id?: string | null;
       image_model?: components["schemas"]["MCPServerBackingModelPublic"] | null;
@@ -15083,7 +15936,16 @@ export interface components {
       /** Http Auth Type */
       http_auth_type?: ("none" | "bearer" | "api_key_header" | "internal") | null;
       /** Purpose */
-      purpose?: ("general" | "web_search" | "image_generation") | null;
+      purpose?:
+        | (
+            | "general"
+            | "web_search"
+            | "image_generation"
+            | "file_analysis"
+            | "file_creation"
+            | "charts"
+          )
+        | null;
       /** Description */
       description?: string | null;
       /** Http Auth Config Schema */
@@ -15560,6 +16422,11 @@ export interface components {
        * @default true
        */
       is_active?: boolean;
+      /**
+       * Outbound Headers
+       * @description Outbound HTTP headers to configure
+       */
+      outbound_headers?: components["schemas"]["OutboundHeaderInput"][];
     };
     /**
      * ModelProviderPublic
@@ -15588,6 +16455,11 @@ export interface components {
       is_active: boolean;
       /** Masked Api Key */
       masked_api_key?: string | null;
+      /**
+       * Outbound Headers
+       * @default []
+       */
+      outbound_headers?: components["schemas"]["OutboundHeaderPublic"][];
       /**
        * Created At
        * Format: date-time
@@ -15628,6 +16500,11 @@ export interface components {
        * @description Whether the provider is active
        */
       is_active?: boolean | null;
+      /**
+       * Outbound Headers
+       * @description Replaces the configured outbound headers; omit to leave them unchanged
+       */
+      outbound_headers?: components["schemas"]["OutboundHeaderInput"][] | null;
     };
     /** ModelUsage */
     ModelUsage: {
@@ -16283,6 +17160,167 @@ export interface components {
       content_disposition?: components["schemas"]["ContentDisposition"];
     };
     /**
+     * OutboundHeaderInput
+     * @description One outbound header in a create or update.
+     *
+     *     Write convention (the list replaces the stored one):
+     *     an entry with an `id` and no `value` keeps the stored value; with a `value`,
+     *     replaces it; an entry without an `id` is new and must supply `value`; a
+     *     stored header whose `id` is absent is deleted. `fallback` follows the same
+     *     rule, and `null` clears it.
+     */
+    OutboundHeaderInput: {
+      /**
+       * Id
+       * @description Server-assigned id; omit for a new header
+       */
+      id?: string | null;
+      /**
+       * Name
+       * @description HTTP header name (RFC 9110 token)
+       */
+      name: string;
+      /**
+       * Value
+       * @description Literal text and {{token}} dynamic values. Omit to keep the stored value.
+       */
+      value?: string | null;
+      /**
+       * Encoding
+       * @description percent: percent-encode the resolved value (receiver unquotes); none: send byte-exact (printable ASCII only)
+       * @default percent
+       * @enum {string}
+       */
+      encoding?: "percent" | "none";
+      /**
+       * Secret
+       * @description Encrypt at rest and never return the value
+       * @default false
+       */
+      secret?: boolean;
+      /**
+       * On Missing
+       * @description What to do when a dynamic value has no value for the user
+       * @default omit
+       * @enum {string}
+       */
+      on_missing?: "omit" | "fallback" | "fail";
+      /**
+       * Fallback
+       * @description Literal sent when on_missing is 'fallback'. Omit to keep the stored one.
+       */
+      fallback?: string | null;
+    };
+    /**
+     * OutboundHeaderOptions
+     * @description Server-owned metadata for the outbound header editor.
+     */
+    OutboundHeaderOptions: {
+      /** Dynamic Values */
+      dynamic_values: components["schemas"]["DynamicValuePublic"][];
+      /** Supported Provider Types */
+      supported_provider_types: string[];
+      /** Max Headers */
+      max_headers: number;
+    };
+    /** OutboundHeaderPreview */
+    OutboundHeaderPreview: {
+      /**
+       * User Id
+       * Format: uuid
+       */
+      user_id: string;
+      /** Headers */
+      headers: components["schemas"]["OutboundHeaderPreviewItem"][];
+      /**
+       * Destination Problem
+       * @description Why requests to this provider's endpoint would be blocked
+       */
+      destination_problem?: string | null;
+      /**
+       * Blocked
+       * @description Whether this user's requests would be blocked
+       */
+      blocked: boolean;
+      /**
+       * Blocked Reason
+       * @description Why the headers block this user's requests, e.g. 'missing_required_value', 'total_size_exceeded' or 'decryption_failed' (a stored secret cannot be read)
+       */
+      blocked_reason?: string | null;
+    };
+    /** OutboundHeaderPreviewItem */
+    OutboundHeaderPreviewItem: {
+      /** Name */
+      name: string;
+      /** Secret */
+      secret: boolean;
+      /**
+       * State
+       * @enum {string}
+       */
+      state: "resolved" | "missing" | "invalid";
+      /**
+       * Value
+       * @description The value as it would be sent. Never returned for a secret header.
+       */
+      value?: string | null;
+      /**
+       * Policy
+       * @description The missing-value policy applied, when state is 'missing'
+       */
+      policy?: ("omit" | "fallback" | "fail") | null;
+      /**
+       * Reason
+       * @description Why the value is invalid
+       */
+      reason?: string | null;
+      /**
+       * Missing Dynamic Values
+       * @default []
+       */
+      missing_dynamic_values?: string[];
+    };
+    /** OutboundHeaderPreviewRequest */
+    OutboundHeaderPreviewRequest: {
+      /**
+       * User Id
+       * Format: uuid
+       * @description The tenant user to resolve the headers for
+       */
+      user_id: string;
+    };
+    /**
+     * OutboundHeaderPublic
+     * @description A configured header. A secret header's value and fallback are masked.
+     */
+    OutboundHeaderPublic: {
+      /** Id */
+      id: string;
+      /** Name */
+      name: string;
+      /** Value */
+      value: string;
+      /**
+       * Encoding
+       * @enum {string}
+       */
+      encoding: "percent" | "none";
+      /** Secret */
+      secret: boolean;
+      /**
+       * On Missing
+       * @enum {string}
+       */
+      on_missing: "omit" | "fallback" | "fail";
+      /** Fallback */
+      fallback?: string | null;
+      /**
+       * Classification
+       * @description The most sensitive kind of dynamic value the header sends; known for a secret header although its value is masked
+       */
+      classification?: ("identifying" | "organisational") | null;
+    };
+    /**
      * Outcome
      * @description Indicate success or failure of audited action
      * @enum {string}
@@ -16525,19 +17563,6 @@ export interface components {
        * @description List of items returned in the response
        */
       items: components["schemas"]["CompletionModelPublic"][];
-      /**
-       * Count
-       * @description Number of items returned in the response
-       */
-      readonly count: number;
-    };
-    /** PaginatedResponse[CrawlRunPublic] */
-    PaginatedResponse_CrawlRunPublic_: {
-      /**
-       * Items
-       * @description List of items returned in the response
-       */
-      items: components["schemas"]["eneo__websites__presentation__website_models__CrawlRunPublic"][];
       /**
        * Count
        * @description Number of items returned in the response
@@ -16895,13 +17920,13 @@ export interface components {
        */
       readonly count: number;
     };
-    /** PaginatedResponse[UserInDB] */
-    PaginatedResponse_UserInDB_: {
+    /** PaginatedResponse[UserSysAdminView] */
+    PaginatedResponse_UserSysAdminView_: {
       /**
        * Items
        * @description List of items returned in the response
        */
-      items: components["schemas"]["UserInDB"][];
+      items: components["schemas"]["UserSysAdminView"][];
       /**
        * Count
        * @description Number of items returned in the response
@@ -17079,7 +18104,8 @@ export interface components {
        */
       logging_enabled?: boolean | null;
       /** Enabled Capabilities */
-      enabled_capabilities?: ("web_search" | "image_generation")[] | null;
+      enabled_capabilities?:
+        ("web_search" | "image_generation" | "file_analysis" | "file_creation" | "charts")[] | null;
       /** Space Id */
       space_id?: string | null;
       prompt?: components["schemas"]["PromptCreate"] | null;
@@ -17102,7 +18128,7 @@ export interface components {
        */
       completion_model?: components["schemas"]["ModelId"] | null;
       /** Attachments */
-      attachments?: components["schemas"]["ModelId"][] | null;
+      attachments?: components["schemas"]["AssistantAttachmentInput"][] | null;
       /** Mcp Tools */
       mcp_tools?: components["schemas"]["MCPToolSetting"][] | null;
       /**
@@ -17123,7 +18149,10 @@ export interface components {
       inline_file_text?: boolean | null;
       /** @description How attached knowledge reaches the model: 'tool' exposes it as a searchable MCP tool the model calls on demand; 'inject' retrieves on every turn and packs results into the prompt. */
       knowledge_mode?: components["schemas"]["KnowledgeMode"] | null;
-      /** Data Retention Days */
+      /**
+       * Data Retention Days
+       * @description Conversation retention override. Requires space administration permission in shared and organization spaces. Set to null to inherit the space policy; omit to leave unchanged.
+       */
       data_retention_days?: number | null;
       /**
        * Metadata Json
@@ -17248,7 +18277,8 @@ export interface components {
     /** PartialUpdateSpaceRequest */
     PartialUpdateSpaceRequest: {
       /** Enabled Capabilities */
-      enabled_capabilities?: ("web_search" | "image_generation")[] | null;
+      enabled_capabilities?:
+        ("web_search" | "image_generation" | "file_analysis" | "file_creation" | "charts")[] | null;
       /** Name */
       name?: string | null;
       /** Description */
@@ -17375,26 +18405,6 @@ export interface components {
       updated_at: string;
     };
     /**
-     * PendingQueueSummary
-     * @description Pending crawl queue summary.
-     */
-    PendingQueueSummary: {
-      /**
-       * Total
-       * @default 0
-       */
-      total?: number;
-      /**
-       * Tenant Count
-       * @default 0
-       */
-      tenant_count?: number;
-      /** Top Tenants */
-      top_tenants?: {
-        [key: string]: number;
-      };
-    };
-    /**
      * Permission
      * @enum {string}
      */
@@ -17420,7 +18430,10 @@ export interface components {
       | "widgets"
       | "assistant_debug"
       | "web_search"
-      | "image_generation";
+      | "image_generation"
+      | "file_analysis"
+      | "file_creation"
+      | "charts";
     /** PermissionPublic */
     PermissionPublic: {
       name: components["schemas"]["Permission"];
@@ -17465,7 +18478,7 @@ export interface components {
        * Purpose
        * @enum {string}
        */
-      purpose: "web_search" | "image_generation";
+      purpose: "web_search" | "image_generation" | "file_analysis" | "file_creation" | "charts";
       /**
        * Is Default Enabled
        * @default true
@@ -17530,6 +18543,22 @@ export interface components {
       other_bytes: number;
     };
     /**
+     * PreflightAttachment
+     * @description A persistent attachment as the assistant editor is about to save it.
+     */
+    PreflightAttachment: {
+      /**
+       * Id
+       * Format: uuid
+       */
+      id: string;
+      /**
+       * Inline Text
+       * @default true
+       */
+      inline_text?: boolean;
+    };
+    /**
      * PreflightRequest
      * @description Request shape for /conversations/preflight.
      *
@@ -17560,6 +18589,8 @@ export interface components {
       tools?: components["schemas"]["UseTools"] | null;
       /** Assistant Prompt */
       assistant_prompt?: string | null;
+      /** Attachments */
+      attachments?: components["schemas"]["PreflightAttachment"][] | null;
     };
     /**
      * PreflightResponse
@@ -18140,29 +19171,6 @@ export interface components {
       /** Permissions */
       permissions: components["schemas"]["Permission"][];
     };
-    /** RoleInDB */
-    RoleInDB: {
-      /** Created At */
-      created_at?: string | null;
-      /** Updated At */
-      updated_at?: string | null;
-      /**
-       * Id
-       * Format: uuid
-       */
-      id: string;
-      /** Name */
-      name: string;
-      /** Permissions */
-      permissions: components["schemas"]["Permission"][];
-      /**
-       * Tenant Id
-       * Format: uuid
-       */
-      tenant_id: string;
-      /** Predefined Source */
-      predefined_source?: string | null;
-    };
     /** RolePublic */
     RolePublic: {
       /** Created At */
@@ -18213,6 +19221,66 @@ export interface components {
        */
       files?: components["schemas"]["ModelId"][];
     };
+    /** RuntimeStatus */
+    RuntimeStatus: {
+      /**
+       * Configured
+       * @default false
+       */
+      configured?: boolean;
+      /**
+       * State
+       * @default not_configured
+       * @enum {string}
+       */
+      state?: "not_configured" | "ready" | "unreachable" | "unauthorized" | "unverified";
+      /** Expected Version */
+      expected_version: string;
+      /**
+       * Expected Revision
+       * @default unknown
+       */
+      expected_revision?: string;
+      /** Version */
+      version?: string | null;
+      /** Revision */
+      revision?: string | null;
+      /** Warnings */
+      warnings?: (
+        | "version_mismatch"
+        | "revision_mismatch"
+        | "unverified"
+        | "confinement_unavailable"
+        | "file_origin_unreachable"
+        | "file_origin_not_allowed"
+        | "file_origin_unknown"
+      )[];
+      /** Files Confined */
+      files_confined?: boolean | null;
+      /** Tcp Confined */
+      tcp_confined?: boolean | null;
+      /**
+       * File Origin
+       * @default unknown
+       * @enum {string}
+       */
+      file_origin?: "reachable" | "unreachable" | "not_allowed" | "unknown";
+      /**
+       * Active
+       * @default 0
+       */
+      active?: number;
+      /**
+       * Queued
+       * @default 0
+       */
+      queued?: number;
+    };
+    /**
+     * ScheduleState
+     * @enum {string}
+     */
+    ScheduleState: "due" | "waiting" | "blocked_active_run" | "blocked_backoff" | "disabled";
     /** ScimTokenCreatedResponse */
     ScimTokenCreatedResponse: {
       /**
@@ -18755,6 +19823,26 @@ export interface components {
        */
       developer_tools_available?: boolean;
     };
+    /**
+     * SharePointFilterColumn
+     * @description A library column a person can filter on without typing a value.
+     */
+    SharePointFilterColumn: {
+      /** Name */
+      name: string;
+      /** Label */
+      label: string;
+      /**
+       * Kind
+       * @enum {string}
+       */
+      kind: "choice" | "boolean";
+      /**
+       * Choices
+       * @default []
+       */
+      choices?: string[];
+    };
     /** SharePointFixturePreviewResponse */
     SharePointFixturePreviewResponse: {
       /** Items */
@@ -18774,6 +19862,27 @@ export interface components {
      * @enum {string}
      */
     SharePointFixtureScenario: "representative" | "large_tenant" | "empty";
+    /** SharePointFixtureSearchResponse */
+    SharePointFixtureSearchResponse: {
+      /** Items */
+      items: components["schemas"]["SharePointTreeItem"][];
+      /**
+       * Truncated
+       * @default false
+       */
+      truncated?: boolean;
+      /** Drive Id */
+      drive_id: string;
+      /** Site Id */
+      site_id?: string | null;
+      /**
+       * Fixture
+       * @default true
+       * @constant
+       */
+      fixture?: true;
+      scenario: components["schemas"]["SharePointFixtureScenario"];
+    };
     /** SharePointFixtureTreeResponse */
     SharePointFixtureTreeResponse: {
       /** Items */
@@ -18787,12 +19896,34 @@ export interface components {
       /** Site Id */
       site_id?: string | null;
       /**
+       * Columns
+       * @default []
+       */
+      columns?: components["schemas"]["SharePointFilterColumn"][];
+      /**
        * Fixture
        * @default true
        * @constant
        */
       fixture?: true;
       scenario: components["schemas"]["SharePointFixtureScenario"];
+    };
+    /**
+     * SharePointSearchResponse
+     * @description Files anywhere in a library that match a text and column filters.
+     */
+    SharePointSearchResponse: {
+      /** Items */
+      items: components["schemas"]["SharePointTreeItem"][];
+      /**
+       * Truncated
+       * @default false
+       */
+      truncated?: boolean;
+      /** Drive Id */
+      drive_id: string;
+      /** Site Id */
+      site_id?: string | null;
     };
     /**
      * SharePointSubscriptionPublic
@@ -18884,6 +20015,11 @@ export interface components {
       modified?: string | null;
       /** Web Url */
       web_url?: string | null;
+      /**
+       * Source Metadata
+       * @default []
+       */
+      source_metadata?: components["schemas"]["SourceMetadataEntry"][];
     };
     /** SharePointTreeResponse */
     SharePointTreeResponse: {
@@ -18897,6 +20033,11 @@ export interface components {
       drive_id: string;
       /** Site Id */
       site_id?: string | null;
+      /**
+       * Columns
+       * @default []
+       */
+      columns?: components["schemas"]["SharePointFilterColumn"][];
     };
     /** SignedURLRequest */
     SignedURLRequest: {
@@ -19627,6 +20768,29 @@ export interface components {
      * @enum {string}
      */
     SortOrder: "asc" | "desc";
+    /**
+     * SourceMetadataEntry
+     * @description One document property from the source system, e.g. a SharePoint column.
+     *
+     *     ``name`` is the source's stable identifier for the property, ``label`` the
+     *     human readable name the source shows, ``value`` the normalised value as
+     *     text (a list for multi-value properties). ``kind`` lets presentation format
+     *     dates and booleans without re-parsing the value.
+     */
+    SourceMetadataEntry: {
+      /** Name */
+      name: string;
+      /** Label */
+      label: string;
+      /** Value */
+      value: string | string[];
+      /**
+       * Kind
+       * @default text
+       * @enum {string}
+       */
+      kind?: "text" | "choice" | "date" | "number" | "boolean" | "url";
+    };
     /** SpaceDashboard */
     SpaceDashboard: {
       /**
@@ -19735,7 +20899,9 @@ export interface components {
       /** Data Retention Days */
       data_retention_days?: number | null;
       /** Enabled Capabilities */
-      enabled_capabilities?: ("web_search" | "image_generation")[];
+      enabled_capabilities?: (
+        "web_search" | "image_generation" | "file_analysis" | "file_creation" | "charts"
+      )[];
       /** Available Capabilities */
       available_capabilities?: components["schemas"]["CapabilityAvailability"][];
       /** Embedding Models */
@@ -20498,78 +21664,6 @@ export interface components {
       /** @description Security classification reference (null clears it) */
       security_classification?: components["schemas"]["ModelId"] | null;
     };
-    /** TenantInDB */
-    TenantInDB: {
-      /** Created At */
-      created_at?: string | null;
-      /** Updated At */
-      updated_at?: string | null;
-      /**
-       * Id
-       * Format: uuid
-       */
-      id: string;
-      /** Privacy Policy */
-      privacy_policy?: string | null;
-      /** Name */
-      name: string;
-      /** Display Name */
-      display_name?: string | null;
-      /** Slug */
-      slug?: string | null;
-      /** Quota Limit */
-      quota_limit: number;
-      /** Domain */
-      domain?: string | null;
-      /** Zitadel Org Id */
-      zitadel_org_id?: string | null;
-      /**
-       * Provisioning
-       * @default false
-       */
-      provisioning?: boolean;
-      /** @default active */
-      state?: components["schemas"]["TenantState"];
-      /**
-       * Security Enabled
-       * @default false
-       */
-      security_enabled?: boolean;
-      /**
-       * Show Model Pricing
-       * @default true
-       */
-      show_model_pricing?: boolean;
-      /** Default Role Id */
-      default_role_id?: string | null;
-      /**
-       * Modules
-       * @default []
-       */
-      modules?: components["schemas"]["ModuleInDB"][];
-      /** Api Credentials */
-      api_credentials?: {
-        [key: string]: unknown;
-      };
-      /** Federation Config */
-      federation_config?: {
-        [key: string]: unknown;
-      };
-      /** Crawler Settings */
-      crawler_settings?: {
-        [key: string]: unknown;
-      };
-      /** Api Key Policy */
-      api_key_policy?: {
-        [key: string]: unknown;
-      };
-      /** Widget Policy */
-      widget_policy?: {
-        [key: string]: unknown;
-      };
-      /** Favorite Providers */
-      favorite_providers?: string[];
-    };
     /**
      * TenantInfo
      * @description Public tenant information for selector grid.
@@ -21078,6 +22172,10 @@ export interface components {
       mcp_tool_name?: string | null;
       /** Purpose */
       purpose?: string | null;
+      /** Is Internal */
+      is_internal?: boolean | null;
+      /** Is Bundled */
+      is_bundled?: boolean | null;
       /** Meta */
       meta?: {
         [key: string]: unknown;
@@ -21402,7 +22500,9 @@ export interface components {
     /** UpdateSpaceDryRunResponse */
     UpdateSpaceDryRunResponse: {
       /** Capabilities */
-      capabilities?: ("web_search" | "image_generation")[];
+      capabilities?: (
+        "web_search" | "image_generation" | "file_analysis" | "file_creation" | "charts"
+      )[];
       /** Assistants */
       assistants: components["schemas"]["AssistantSparse"][];
       /** Group Chats */
@@ -21580,91 +22680,6 @@ export interface components {
       /** User Groups */
       user_groups: components["schemas"]["UserGroupRead"][];
     };
-    /** UserCreated */
-    UserCreated: {
-      /**
-       * Email
-       * Format: email
-       * @description Valid email address
-       * @example john.doe@municipality.se
-       */
-      email: string;
-      /**
-       * Username
-       * @description Unique username (optional, will use email prefix if not provided)
-       * @example john.doe
-       */
-      username?: string | null;
-      /** Created At */
-      created_at?: string | null;
-      /** Updated At */
-      updated_at?: string | null;
-      /**
-       * Id
-       * Format: uuid
-       */
-      id: string;
-      /**
-       * Tenant Id
-       * Format: uuid
-       */
-      tenant_id: string;
-      /** Password */
-      password?: string | null;
-      /** Salt */
-      salt?: string | null;
-      /**
-       * Used Tokens
-       * @default 0
-       */
-      used_tokens?: number;
-      /**
-       * Email Verified
-       * @default false
-       */
-      email_verified?: boolean;
-      /**
-       * Is Active
-       * @default true
-       */
-      is_active?: boolean;
-      state: components["schemas"]["UserState"];
-      /** Quota Limit */
-      quota_limit?: number | null;
-      /**
-       * Credential Version
-       * @default 0
-       */
-      credential_version?: number;
-      /**
-       * User Groups
-       * @default []
-       */
-      user_groups?: components["schemas"]["UserGroupInDBRead"][];
-      tenant: components["schemas"]["TenantInDB"];
-      active_api_key?: components["schemas"]["ApiKeyV2InDB"] | null;
-      active_widget?: components["schemas"]["WidgetVisitorContext"] | null;
-      /**
-       * Roles
-       * @default []
-       */
-      roles?: components["schemas"]["RoleInDB"][];
-      /**
-       * Quota Used
-       * @default 0
-       */
-      quota_used?: number;
-      /**
-       * Deleted At
-       * @description Timestamp when user was soft-deleted (null for active users)
-       */
-      deleted_at?: string | null;
-      access_token?: components["schemas"]["AccessToken"] | null;
-      /** User Groups Ids */
-      readonly user_groups_ids: string[];
-      /** Permissions */
-      readonly permissions: components["schemas"]["Permission"][];
-    };
     /**
      * UserDeletedListItem
      * @description User information for deleted users list operations
@@ -21699,22 +22714,6 @@ export interface components {
     UserGroupCreateRequest: {
       /** Name */
       name: string;
-    };
-    /** UserGroupInDBRead */
-    UserGroupInDBRead: {
-      /** Created At */
-      created_at?: string | null;
-      /** Updated At */
-      updated_at?: string | null;
-      /**
-       * Id
-       * Format: uuid
-       */
-      id: string;
-      /** Name */
-      name: string;
-      /** State */
-      state?: string | null;
     };
     /** UserGroupPublic */
     UserGroupPublic: {
@@ -21758,90 +22757,6 @@ export interface components {
        * @default []
        */
       users?: components["schemas"]["ModelId"][];
-    };
-    /** UserInDB */
-    UserInDB: {
-      /**
-       * Email
-       * Format: email
-       * @description Valid email address
-       * @example john.doe@municipality.se
-       */
-      email: string;
-      /**
-       * Username
-       * @description Unique username (optional, will use email prefix if not provided)
-       * @example john.doe
-       */
-      username?: string | null;
-      /** Created At */
-      created_at?: string | null;
-      /** Updated At */
-      updated_at?: string | null;
-      /**
-       * Id
-       * Format: uuid
-       */
-      id: string;
-      /**
-       * Tenant Id
-       * Format: uuid
-       */
-      tenant_id: string;
-      /** Password */
-      password?: string | null;
-      /** Salt */
-      salt?: string | null;
-      /**
-       * Used Tokens
-       * @default 0
-       */
-      used_tokens?: number;
-      /**
-       * Email Verified
-       * @default false
-       */
-      email_verified?: boolean;
-      /**
-       * Is Active
-       * @default true
-       */
-      is_active?: boolean;
-      state: components["schemas"]["UserState"];
-      /** Quota Limit */
-      quota_limit?: number | null;
-      /**
-       * Credential Version
-       * @default 0
-       */
-      credential_version?: number;
-      /**
-       * User Groups
-       * @default []
-       */
-      user_groups?: components["schemas"]["UserGroupInDBRead"][];
-      tenant: components["schemas"]["TenantInDB"];
-      active_api_key?: components["schemas"]["ApiKeyV2InDB"] | null;
-      active_widget?: components["schemas"]["WidgetVisitorContext"] | null;
-      /**
-       * Roles
-       * @default []
-       */
-      roles?: components["schemas"]["RoleInDB"][];
-      /**
-       * Quota Used
-       * @default 0
-       */
-      quota_used?: number;
-      /**
-       * Deleted At
-       * @description Timestamp when user was soft-deleted (null for active users)
-       */
-      deleted_at?: string | null;
-      /** User Groups Ids */
-      readonly user_groups_ids: string[];
-      /** Permissions */
-      readonly permissions: components["schemas"]["Permission"][];
     };
     /** UserIntegration */
     UserIntegration: {
@@ -22018,6 +22933,112 @@ export interface components {
        * @example 2025-09-10T08:30:00Z
        */
       state_changed_at: string | null;
+    };
+    /** UserSysAdminCreated */
+    UserSysAdminCreated: {
+      /**
+       * Email
+       * Format: email
+       * @description Valid email address
+       * @example john.doe@municipality.se
+       */
+      email: string;
+      /**
+       * Username
+       * @description Unique username (optional, will use email prefix if not provided)
+       * @example john.doe
+       */
+      username?: string | null;
+      /** Created At */
+      created_at?: string | null;
+      /** Updated At */
+      updated_at?: string | null;
+      /**
+       * Id
+       * Format: uuid
+       */
+      id: string;
+      /**
+       * Quota Used
+       * @default 0
+       */
+      quota_used?: number;
+      /** Used Tokens */
+      used_tokens: number;
+      /** Email Verified */
+      email_verified: boolean;
+      /** Quota Limit */
+      quota_limit: number | null;
+      /** Is Active */
+      is_active: boolean;
+      state: components["schemas"]["UserState"];
+      /** Roles */
+      roles: components["schemas"]["RolePublic"][];
+      /** User Groups */
+      user_groups: components["schemas"]["UserGroupRead"][];
+      /**
+       * Tenant Id
+       * Format: uuid
+       */
+      tenant_id: string;
+      tenant: components["schemas"]["TenantPublic"];
+      access_token: components["schemas"]["AccessToken"];
+    };
+    /**
+     * UserSysAdminView
+     * @description A user as returned by the sysadmin API, which spans tenants.
+     *
+     *     Declares what is returned instead of inheriting from UserInDB, so the
+     *     password hash, salt, API key hashes and the tenant's stored provider and
+     *     federation secrets are left out.
+     */
+    UserSysAdminView: {
+      /**
+       * Email
+       * Format: email
+       * @description Valid email address
+       * @example john.doe@municipality.se
+       */
+      email: string;
+      /**
+       * Username
+       * @description Unique username (optional, will use email prefix if not provided)
+       * @example john.doe
+       */
+      username?: string | null;
+      /** Created At */
+      created_at?: string | null;
+      /** Updated At */
+      updated_at?: string | null;
+      /**
+       * Id
+       * Format: uuid
+       */
+      id: string;
+      /**
+       * Quota Used
+       * @default 0
+       */
+      quota_used?: number;
+      /** Used Tokens */
+      used_tokens: number;
+      /** Email Verified */
+      email_verified: boolean;
+      /** Quota Limit */
+      quota_limit: number | null;
+      /** Is Active */
+      is_active: boolean;
+      state: components["schemas"]["UserState"];
+      /** Roles */
+      roles: components["schemas"]["RolePublic"][];
+      /** User Groups */
+      user_groups: components["schemas"]["UserGroupRead"][];
+      /**
+       * Tenant Id
+       * Format: uuid
+       */
+      tenant_id: string;
+      tenant: components["schemas"]["TenantPublic"];
     };
     /** UserTokenUsage */
     UserTokenUsage: {
@@ -22239,43 +23260,28 @@ export interface components {
       previous_token?: string | null;
     };
     /**
-     * WatchdogMetrics
-     * @description Watchdog activity metrics.
+     * WebsiteBulkActionError
+     * @description One website-level failure in a bounded bulk action.
      */
-    WatchdogMetrics: {
-      /** Age Seconds */
-      age_seconds?: number | null;
+    WebsiteBulkActionError: {
       /**
-       * Zombies Reconciled
-       * @default 0
+       * Website Id
+       * Format: uuid
        */
-      zombies_reconciled?: number;
-      /**
-       * Expired Killed
-       * @default 0
-       */
-      expired_killed?: number;
-      /**
-       * Rescued
-       * @default 0
-       */
-      rescued?: number;
-      /**
-       * Early Zombies Failed
-       * @default 0
-       */
-      early_zombies_failed?: number;
-      /**
-       * Long Running Failed
-       * @default 0
-       */
-      long_running_failed?: number;
-      /**
-       * Slots Released
-       * @default 0
-       */
-      slots_released?: number;
+      website_id: string;
+      /** @description Stable machine-readable website action error code */
+      error: components["schemas"]["WebsiteBulkErrorCode"];
     };
+    /**
+     * WebsiteBulkErrorCode
+     * @enum {string}
+     */
+    WebsiteBulkErrorCode:
+      | "not_authorized"
+      | "not_found"
+      | "crawl_stop_requested"
+      | "crawl_active"
+      | "crawl_cleanup_pending";
     /** WebsiteCreate */
     WebsiteCreate: {
       /** Name */
@@ -22394,9 +23400,12 @@ export interface components {
       download_files: boolean;
       crawl_type: components["schemas"]["CrawlType"];
       update_interval: components["schemas"]["UpdateInterval"];
-      latest_crawl:
-        | components["schemas"]["eneo__websites__presentation__website_models__CrawlRunPublic"]
-        | null;
+      latest_crawl: components["schemas"]["CrawlRunPublic"] | null;
+      /**
+       * Last Indexed At
+       * @description Completion time of the latest successful, unchanged, empty, or partial indexing run. A later active or failed run does not replace it.
+       */
+      last_indexed_at: string | null;
       embedding_model: components["schemas"]["EmbeddingModelPublic"];
       metadata: components["schemas"]["WebsiteMetadata"];
       /**
@@ -23151,52 +24160,6 @@ export interface components {
       daily_token_budget: number;
     };
     /**
-     * WidgetVisitorContext
-     * @description Carried on the synthetic visitor ``UserInDB`` (``active_widget``).
-     *
-     *     Mirrors ``active_api_key`` for service keys: the only access path into a
-     *     space is the widget itself, and sessions are owned by widget + visitor.
-     */
-    WidgetVisitorContext: {
-      /**
-       * Widget Id
-       * Format: uuid
-       */
-      widget_id: string;
-      /**
-       * Visitor Id
-       * Format: uuid
-       */
-      visitor_id: string;
-      /**
-       * Tenant Id
-       * Format: uuid
-       */
-      tenant_id: string;
-      /**
-       * Space Id
-       * Format: uuid
-       */
-      space_id: string;
-      /**
-       * Target Id
-       * Format: uuid
-       */
-      target_id: string;
-      /** Token Generation */
-      token_generation: number;
-      /**
-       * Preview
-       * @default false
-       */
-      preview?: boolean;
-      /**
-       * Never Persist
-       * @default false
-       */
-      never_persist?: boolean;
-    };
-    /**
      * WizardType
      * @enum {string}
      */
@@ -23456,65 +24419,6 @@ export interface components {
        */
       set_at: string;
     };
-    /** CrawlRunPublic */
-    eneo__websites__crawl_dependencies__crawl_models__CrawlRunPublic: {
-      /** Created At */
-      created_at?: string | null;
-      /** Updated At */
-      updated_at?: string | null;
-      /**
-       * Id
-       * Format: uuid
-       */
-      id: string;
-      /** Pages Crawled */
-      pages_crawled?: number | null;
-      /** Files Downloaded */
-      files_downloaded?: number | null;
-      /** Pages Failed */
-      pages_failed?: number | null;
-      /** Files Failed */
-      files_failed?: number | null;
-      /** Failure Summary */
-      failure_summary?: {
-        [key: string]: number;
-      } | null;
-      /** @default queued */
-      status?: components["schemas"]["Status"] | null;
-      /** Result Location */
-      result_location?: string | null;
-      /** Finished At */
-      finished_at?: string | null;
-    };
-    /** CrawlRunPublic */
-    eneo__websites__presentation__website_models__CrawlRunPublic: {
-      /** Created At */
-      created_at?: string | null;
-      /** Updated At */
-      updated_at?: string | null;
-      /**
-       * Id
-       * Format: uuid
-       */
-      id: string;
-      /** Pages Crawled */
-      pages_crawled: number | null;
-      /** Files Downloaded */
-      files_downloaded: number | null;
-      /** Pages Failed */
-      pages_failed: number | null;
-      /** Files Failed */
-      files_failed: number | null;
-      /** Failure Summary */
-      failure_summary?: {
-        [key: string]: number;
-      } | null;
-      status: components["schemas"]["Status"];
-      /** Result Location */
-      result_location: string | null;
-      /** Finished At */
-      finished_at: string | null;
-    };
     /** @enum {string} */
     EneoEventType:
       | "generating_image"
@@ -23575,6 +24479,25 @@ export interface components {
        * @default []
        */
       mcp_tool_references?: components["schemas"]["McpToolReferencePublic"][];
+    };
+    /**
+     * SSEToolCallDelta
+     * @description The next piece of a pending tool call's arguments, as raw JSON text.
+     *
+     *     Sent while the model writes the call, so a client can show what it will
+     *     do (the text of a document) before it runs. Signed reference tokens are
+     *     redacted. The complete arguments follow in the call's `tool_call` event.
+     */
+    SSEToolCallDelta: {
+      /**
+       * Session Id
+       * Format: uuid
+       */
+      session_id: string;
+      /** Tool Call Id */
+      tool_call_id: string;
+      /** Arguments Delta */
+      arguments_delta: string;
     };
     /**
      * SSEToolApprovalRequired
@@ -23663,6 +24586,11 @@ export interface components {
       session_id: string;
       /** Generated Files */
       generated_files: components["schemas"]["FilePublic"][];
+      /**
+       * Tool Call Id
+       * @default null
+       */
+      tool_call_id?: string | null;
     };
     /** SSEFirstChunk */
     SSEFirstChunk: {
@@ -23747,7 +24675,120 @@ export interface operations {
           [name: string]: unknown;
         };
         content: {
-          "application/json": components["schemas"]["eneo__websites__crawl_dependencies__crawl_models__CrawlRunPublic"];
+          "application/json": components["schemas"]["CrawlRunPublic"];
+        };
+      };
+      /** @description Not Found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  get_crawl_failures_api_v1_crawl_runs__id__failures__get: {
+    parameters: {
+      query?: {
+        limit?: number;
+        cursor?: string | null;
+        kind?: components["schemas"]["CrawlResourceKind"] | null;
+      };
+      header?: never;
+      path: {
+        /** @description Unique identifier of the crawl run */
+        id: string;
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["CrawlFailurePagePublic"];
+        };
+      };
+      /** @description Bad Request */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Not Found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  cancel_crawl_run_api_v1_crawl_runs__id__cancel__post: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description Unique identifier of the crawl run to stop */
+        id: string;
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["CrawlRunPublic"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
         };
       };
       /** @description Not Found */
@@ -25920,6 +26961,15 @@ export interface operations {
           "application/json": components["schemas"]["HTTPValidationError"];
         };
       };
+      /** @description Too Many Requests */
+      429: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
       /** @description Internal Server Error */
       500: {
         headers: {
@@ -25964,6 +27014,15 @@ export interface operations {
       };
       /** @description Unauthorized */
       401: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
         headers: {
           [name: string]: unknown;
         };
@@ -28350,6 +29409,8 @@ export interface operations {
                 mimetype: string;
                 /** Size */
                 size: number;
+                /** Original Size */
+                original_size?: number | null;
                 /** Transcription */
                 transcription?: string | null;
                 /** Token Count */
@@ -28378,6 +29439,11 @@ export interface operations {
                 website_id?: string | null;
                 /** Original Available */
                 original_available: boolean;
+                /**
+                 * Source Metadata
+                 * @default []
+                 */
+                source_metadata?: components["schemas"]["SourceMetadataEntry"][];
                 /** Score */
                 score: number;
               };
@@ -28470,6 +29536,29 @@ export interface operations {
                 description: string | null;
                 /** Security Level */
                 security_level: number;
+              };
+              /**
+               * SourceMetadataEntry
+               * @description One document property from the source system, e.g. a SharePoint column.
+               *
+               *     ``name`` is the source's stable identifier for the property, ``label`` the
+               *     human readable name the source shows, ``value`` the normalised value as
+               *     text (a list for multi-value properties). ``kind`` lets presentation format
+               *     dates and booleans without re-parsing the value.
+               */
+              SourceMetadataEntry: {
+                /** Name */
+                name: string;
+                /** Label */
+                label: string;
+                /** Value */
+                value: string | string[];
+                /**
+                 * Kind
+                 * @default text
+                 * @enum {string}
+                 */
+                kind?: "text" | "choice" | "date" | "number" | "boolean" | "url";
               };
               /** SupportedModelKwargs */
               SupportedModelKwargs: {
@@ -28766,6 +29855,8 @@ export interface operations {
                 mimetype: string;
                 /** Size */
                 size: number;
+                /** Original Size */
+                original_size?: number | null;
                 /** Transcription */
                 transcription?: string | null;
                 /** Token Count */
@@ -28794,6 +29885,11 @@ export interface operations {
                 website_id?: string | null;
                 /** Original Available */
                 original_available: boolean;
+                /**
+                 * Source Metadata
+                 * @default []
+                 */
+                source_metadata?: components["schemas"]["SourceMetadataEntry"][];
                 /** Score */
                 score: number;
               };
@@ -28886,6 +29982,29 @@ export interface operations {
                 description: string | null;
                 /** Security Level */
                 security_level: number;
+              };
+              /**
+               * SourceMetadataEntry
+               * @description One document property from the source system, e.g. a SharePoint column.
+               *
+               *     ``name`` is the source's stable identifier for the property, ``label`` the
+               *     human readable name the source shows, ``value`` the normalised value as
+               *     text (a list for multi-value properties). ``kind`` lets presentation format
+               *     dates and booleans without re-parsing the value.
+               */
+              SourceMetadataEntry: {
+                /** Name */
+                name: string;
+                /** Label */
+                label: string;
+                /** Value */
+                value: string | string[];
+                /**
+                 * Kind
+                 * @default text
+                 * @enum {string}
+                 */
+                kind?: "text" | "choice" | "date" | "number" | "boolean" | "url";
               };
               /** SupportedModelKwargs */
               SupportedModelKwargs: {
@@ -29668,6 +30787,11 @@ export interface operations {
                     website_id?: string | null;
                     /** Original Available */
                     original_available: boolean;
+                    /**
+                     * Source Metadata
+                     * @default []
+                     */
+                    source_metadata?: components["schemas"]["SourceMetadataEntry"][];
                     /** Score */
                     score: number;
                   };
@@ -29684,6 +30808,29 @@ export interface operations {
                     embedding_model_id: string;
                     /** Size */
                     size: number;
+                  };
+                  /**
+                   * SourceMetadataEntry
+                   * @description One document property from the source system, e.g. a SharePoint column.
+                   *
+                   *     ``name`` is the source's stable identifier for the property, ``label`` the
+                   *     human readable name the source shows, ``value`` the normalised value as
+                   *     text (a list for multi-value properties). ``kind`` lets presentation format
+                   *     dates and booleans without re-parsing the value.
+                   */
+                  SourceMetadataEntry: {
+                    /** Name */
+                    name: string;
+                    /** Label */
+                    label: string;
+                    /** Value */
+                    value: string | string[];
+                    /**
+                     * Kind
+                     * @default text
+                     * @enum {string}
+                     */
+                    kind?: "text" | "choice" | "date" | "number" | "boolean" | "url";
                   };
                 };
               }
@@ -29797,6 +30944,10 @@ export interface operations {
                     mcp_tool_name?: string | null;
                     /** Purpose */
                     purpose?: string | null;
+                    /** Is Internal */
+                    is_internal?: boolean | null;
+                    /** Is Bundled */
+                    is_bundled?: boolean | null;
                     /** Meta */
                     meta?: {
                       [key: string]: unknown;
@@ -29856,6 +31007,10 @@ export interface operations {
                     mcp_tool_name?: string | null;
                     /** Purpose */
                     purpose?: string | null;
+                    /** Is Internal */
+                    is_internal?: boolean | null;
+                    /** Is Bundled */
+                    is_bundled?: boolean | null;
                     /** Meta */
                     meta?: {
                       [key: string]: unknown;
@@ -29915,6 +31070,10 @@ export interface operations {
                     mcp_tool_name?: string | null;
                     /** Purpose */
                     purpose?: string | null;
+                    /** Is Internal */
+                    is_internal?: boolean | null;
+                    /** Is Bundled */
+                    is_bundled?: boolean | null;
                     /** Meta */
                     meta?: {
                       [key: string]: unknown;
@@ -29932,6 +31091,8 @@ export interface operations {
                 session_id: string;
                 /** Generated Files */
                 generated_files: components["schemas"]["FilePublic"][];
+                /** Tool Call Id */
+                tool_call_id?: string | null;
                 $defs: {
                   /** FilePublic */
                   FilePublic: {
@@ -29950,6 +31111,8 @@ export interface operations {
                     mimetype: string;
                     /** Size */
                     size: number;
+                    /** Original Size */
+                    original_size?: number | null;
                     /** Transcription */
                     transcription?: string | null;
                     /** Token Count */
@@ -30106,6 +31269,8 @@ export interface operations {
                     mimetype: string;
                     /** Size */
                     size: number;
+                    /** Original Size */
+                    original_size?: number | null;
                     /** Transcription */
                     transcription?: string | null;
                     /** Token Count */
@@ -30134,6 +31299,11 @@ export interface operations {
                     website_id?: string | null;
                     /** Original Available */
                     original_available: boolean;
+                    /**
+                     * Source Metadata
+                     * @default []
+                     */
+                    source_metadata?: components["schemas"]["SourceMetadataEntry"][];
                     /** Score */
                     score: number;
                   };
@@ -30226,6 +31396,29 @@ export interface operations {
                     description: string | null;
                     /** Security Level */
                     security_level: number;
+                  };
+                  /**
+                   * SourceMetadataEntry
+                   * @description One document property from the source system, e.g. a SharePoint column.
+                   *
+                   *     ``name`` is the source's stable identifier for the property, ``label`` the
+                   *     human readable name the source shows, ``value`` the normalised value as
+                   *     text (a list for multi-value properties). ``kind`` lets presentation format
+                   *     dates and booleans without re-parsing the value.
+                   */
+                  SourceMetadataEntry: {
+                    /** Name */
+                    name: string;
+                    /** Label */
+                    label: string;
+                    /** Value */
+                    value: string | string[];
+                    /**
+                     * Kind
+                     * @default text
+                     * @enum {string}
+                     */
+                    kind?: "text" | "choice" | "date" | "number" | "boolean" | "url";
                   };
                   /** SupportedModelKwargs */
                   SupportedModelKwargs: {
@@ -31841,6 +33034,15 @@ export interface operations {
           "application/json": components["schemas"]["AnalysisJobStatusResponse"];
         };
       };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
       /** @description Not Found */
       404: {
         headers: {
@@ -31944,6 +33146,443 @@ export interface operations {
         };
         content: {
           "application/json": components["schemas"]["SessionPublic"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Not Found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  get_crawler_overview_api_v1_admin_crawler__get: {
+    parameters: {
+      query?: {
+        view?: "active" | "recent" | "all";
+        status?:
+          | components["schemas"]["CrawlPhase"]
+          | components["schemas"]["CrawlOutcome"]
+          | ("issues" | "completed" | "warnings" | "unsuccessful")
+          | null;
+        period?: components["schemas"]["CrawlHistoryPeriod"];
+        /** @description IANA time zone used for today and yesterday. */
+        time_zone?: string;
+        search?: string;
+        limit?: number;
+        cursor?: string | null;
+      };
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["AdminCrawlerOverview"];
+        };
+      };
+      /** @description Bad Request */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  list_admin_scheduled_websites_api_v1_admin_crawler_websites__get: {
+    parameters: {
+      query?: {
+        search?: string;
+        /** @description Filter on one interval. Omit for every scheduled website; 'never' lists disabled websites instead. */
+        interval?: components["schemas"]["UpdateInterval"] | null;
+        state?: ("due" | "waiting" | "blocked") | null;
+        sort?: "next_due" | "last_crawled" | "url";
+        limit?: number;
+        cursor?: string | null;
+      };
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["AdminCrawlerScheduledWebsitePage"];
+        };
+      };
+      /** @description Bad Request */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  get_crawler_details_api_v1_admin_crawler_runs__id___get: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        id: string;
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["AdminCrawlerDetails"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Not Found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  get_crawler_failures_api_v1_admin_crawler_runs__id__failures__get: {
+    parameters: {
+      query?: {
+        limit?: number;
+        cursor?: string | null;
+        kind?: components["schemas"]["CrawlResourceKind"] | null;
+      };
+      header?: never;
+      path: {
+        id: string;
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["CrawlFailurePagePublic"];
+        };
+      };
+      /** @description Bad Request */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Not Found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  get_admin_website_runs_api_v1_admin_crawler_websites__id__runs__get: {
+    parameters: {
+      query?: {
+        limit?: number;
+        cursor?: string | null;
+      };
+      header?: never;
+      path: {
+        id: string;
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["CursorPaginatedResponse_CrawlRunPublic_"];
+        };
+      };
+      /** @description Bad Request */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Not Found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  get_admin_website_matches_api_v1_admin_crawler_websites__id__matches__get: {
+    parameters: {
+      query?: {
+        limit?: number;
+        cursor?: string | null;
+      };
+      header?: never;
+      path: {
+        id: string;
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["AdminCrawlerRelatedPage"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Not Found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  request_admin_crawl_api_v1_admin_crawler_websites__id__run__post: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        id: string;
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["CrawlRunPublic"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Not Found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  cancel_admin_crawl_api_v1_admin_crawler_runs__id__cancel__post: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        id: string;
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["CrawlRunPublic"];
         };
       };
       /** @description Forbidden */
@@ -35513,6 +37152,15 @@ export interface operations {
           "application/json": components["schemas"]["UserGroupPublic"];
         };
       };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
       /** @description Not Found */
       404: {
         headers: {
@@ -36795,6 +38443,8 @@ export interface operations {
                 mimetype: string;
                 /** Size */
                 size: number;
+                /** Original Size */
+                original_size?: number | null;
                 /** Transcription */
                 transcription?: string | null;
                 /** Token Count */
@@ -36823,6 +38473,11 @@ export interface operations {
                 website_id?: string | null;
                 /** Original Available */
                 original_available: boolean;
+                /**
+                 * Source Metadata
+                 * @default []
+                 */
+                source_metadata?: components["schemas"]["SourceMetadataEntry"][];
                 /** Score */
                 score: number;
               };
@@ -36915,6 +38570,29 @@ export interface operations {
                 description: string | null;
                 /** Security Level */
                 security_level: number;
+              };
+              /**
+               * SourceMetadataEntry
+               * @description One document property from the source system, e.g. a SharePoint column.
+               *
+               *     ``name`` is the source's stable identifier for the property, ``label`` the
+               *     human readable name the source shows, ``value`` the normalised value as
+               *     text (a list for multi-value properties). ``kind`` lets presentation format
+               *     dates and booleans without re-parsing the value.
+               */
+              SourceMetadataEntry: {
+                /** Name */
+                name: string;
+                /** Label */
+                label: string;
+                /** Value */
+                value: string | string[];
+                /**
+                 * Kind
+                 * @default text
+                 * @enum {string}
+                 */
+                kind?: "text" | "choice" | "date" | "number" | "boolean" | "url";
               };
               /** SupportedModelKwargs */
               SupportedModelKwargs: {
@@ -38815,6 +40493,15 @@ export interface operations {
           };
         };
       };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
       /** @description Validation Error */
       422: {
         headers: {
@@ -38857,6 +40544,35 @@ export interface operations {
         };
         content: {
           "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  get_outbound_header_options_api_v1_admin_model_providers_outbound_headers_options__get: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["OutboundHeaderOptions"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
         };
       };
     };
@@ -38941,6 +40657,15 @@ export interface operations {
         };
         content: {
           "application/json": components["schemas"]["ModelProviderPublic"];
+        };
+      };
+      /** @description Bad Request */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
         };
       };
       /** @description Forbidden */
@@ -39059,6 +40784,68 @@ export interface operations {
       };
     };
   };
+  preview_outbound_headers_api_v1_admin_model_providers__provider_id__outbound_headers_preview__post: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        provider_id: string;
+      };
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["OutboundHeaderPreviewRequest"];
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["OutboundHeaderPreview"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Not Found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+      /** @description Service Unavailable */
+      503: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+    };
+  };
   list_provider_models_api_v1_admin_model_providers__provider_id__models__get: {
     parameters: {
       query?: {
@@ -39082,6 +40869,15 @@ export interface operations {
           "application/json": {
             [key: string]: unknown;
           }[];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
         };
       };
       /** @description Not Found */
@@ -39133,6 +40929,15 @@ export interface operations {
           "application/json": {
             [key: string]: unknown;
           };
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
         };
       };
       /** @description Not Found */
@@ -39188,6 +40993,15 @@ export interface operations {
           "application/json": {
             [key: string]: unknown;
           };
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
         };
       };
       /** @description Not Found */
@@ -40417,6 +42231,7 @@ export interface operations {
       };
       header?: {
         range?: string | null;
+        "if-none-match"?: string | null;
       };
       path: {
         id: string;
@@ -40434,6 +42249,13 @@ export interface operations {
       };
       /** @description Successfully downloaded part of the original audio */
       206: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content?: never;
+      };
+      /** @description Access revalidated; original content is unchanged */
+      304: {
         headers: {
           [name: string]: unknown;
         };
@@ -42489,6 +44311,108 @@ export interface operations {
       };
     };
   };
+  bulk_stop_crawl_api_v1_websites_bulk_stop__post: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["BulkCrawlRequest"];
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["BulkCrawlStopResponse"];
+        };
+      };
+      /** @description Bad Request */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  bulk_delete_websites_api_v1_websites_bulk_delete__post: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["BulkCrawlRequest"];
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["BulkWebsiteDeleteResponse"];
+        };
+      };
+      /** @description Bad Request */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
   get_website_api_v1_websites__id___get: {
     parameters: {
       query?: never;
@@ -42614,8 +44538,26 @@ export interface operations {
           "application/json": unknown;
         };
       };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
       /** @description Not Found */
       404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Conflict */
+      409: {
         headers: {
           [name: string]: unknown;
         };
@@ -42652,7 +44594,7 @@ export interface operations {
           [name: string]: unknown;
         };
         content: {
-          "application/json": components["schemas"]["eneo__websites__presentation__website_models__CrawlRunPublic"];
+          "application/json": components["schemas"]["CrawlRunPublic"];
         };
       };
       /** @description Forbidden */
@@ -42695,6 +44637,68 @@ export interface operations {
   };
   get_crawl_runs_api_v1_websites__id__runs__get: {
     parameters: {
+      query?: {
+        limit?: number;
+        cursor?: string | null;
+      };
+      header?: never;
+      path: {
+        /** @description Unique identifier of the website */
+        id: string;
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["CursorPaginatedResponse_CrawlRunPublic_"];
+        };
+      };
+      /** @description Bad Request */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Not Found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  get_latest_crawl_run_api_v1_websites__id__runs_latest__get: {
+    parameters: {
       query?: never;
       header?: never;
       path: {
@@ -42711,7 +44715,7 @@ export interface operations {
           [name: string]: unknown;
         };
         content: {
-          "application/json": components["schemas"]["PaginatedResponse_CrawlRunPublic_"];
+          "application/json": components["schemas"]["CrawlRunPublic"] | null;
         };
       };
       /** @description Forbidden */
@@ -42814,6 +44818,68 @@ export interface operations {
         };
         content: {
           "application/json": components["schemas"]["PaginatedResponse_InfoBlobPublicNoText_"];
+        };
+      };
+      /** @description Bad Request */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Not Found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  get_info_blob_page_api_v1_websites__id__info_blobs_page__get: {
+    parameters: {
+      query?: {
+        limit?: number;
+        cursor?: string | null;
+      };
+      header?: never;
+      path: {
+        /** @description Unique identifier of the website */
+        id: string;
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["CursorPaginatedResponse_InfoBlobPublicNoText_"];
         };
       };
       /** @description Bad Request */
@@ -43126,6 +45192,15 @@ export interface operations {
           "application/json": components["schemas"]["StorageModel"];
         };
       };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
     };
   };
   get_spaces_api_v1_storage_spaces__get: {
@@ -43144,6 +45219,15 @@ export interface operations {
         };
         content: {
           "application/json": components["schemas"]["StorageInfoModel"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
         };
       };
     };
@@ -43888,6 +45972,15 @@ export interface operations {
         };
         content?: never;
       };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
       /** @description Not Found */
       404: {
         headers: {
@@ -44546,6 +46639,60 @@ export interface operations {
       };
     };
   };
+  search_sharepoint_fixture_api_v1_integrations_sharepoint_fixtures__scenario__search__get: {
+    parameters: {
+      query?: {
+        site_id?: string | null;
+        drive_id?: string | null;
+        q?: string;
+        filter?: string[];
+      };
+      header?: never;
+      path: {
+        scenario: components["schemas"]["SharePointFixtureScenario"];
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["SharePointFixtureSearchResponse"];
+        };
+      };
+      /** @description Bad Request */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Not Found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
   get_integrations_api_v1_integrations__get: {
     parameters: {
       query?: never;
@@ -44626,6 +46773,15 @@ export interface operations {
           "application/json": components["schemas"]["GeneralError"];
         };
       };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
       /** @description Not Found */
       404: {
         headers: {
@@ -44663,6 +46819,15 @@ export interface operations {
           [name: string]: unknown;
         };
         content?: never;
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
       };
       /** @description Not Found */
       404: {
@@ -44722,6 +46887,15 @@ export interface operations {
         };
         content: {
           "application/json": components["schemas"]["UserIntegrationList"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
         };
       };
       /** @description Not Found */
@@ -44816,6 +46990,15 @@ export interface operations {
           "application/json": components["schemas"]["PaginatedSyncLogList"];
         };
       };
+      /** @description Not Found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
       /** @description Validation Error */
       422: {
         headers: {
@@ -44856,6 +47039,84 @@ export interface operations {
           "application/json": components["schemas"]["GeneralError"];
         };
       };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Not Found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  search_sharepoint_library_api_v1_integrations__user_integration_id__sharepoint_search__get: {
+    parameters: {
+      query: {
+        /** @description Space ID (requires integration import rights) */
+        space_id: string;
+        /** @description SharePoint site ID (required for SharePoint) */
+        site_id?: string | null;
+        /** @description Drive ID (required for OneDrive) */
+        drive_id?: string | null;
+        /** @description Free text matched against names, content and properties */
+        q?: string;
+        /** @description Column filter as `Column:value`, repeatable. Columns come from the tree response; yes/no columns take true or false. */
+        filter?: string[];
+      };
+      header?: never;
+      path: {
+        user_integration_id: string;
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["SharePointSearchResponse"];
+        };
+      };
+      /** @description Bad Request */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
       /** @description Not Found */
       404: {
         headers: {
@@ -44879,7 +47140,7 @@ export interface operations {
   get_sharepoint_folder_tree_api_v1_integrations__user_integration_id__sharepoint_tree__get: {
     parameters: {
       query: {
-        /** @description Space ID (for auth routing) */
+        /** @description Space ID (requires integration import rights) */
         space_id: string;
         /** @description SharePoint site ID (required for SharePoint) */
         site_id?: string | null;
@@ -44909,6 +47170,15 @@ export interface operations {
       };
       /** @description Bad Request */
       400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
         headers: {
           [name: string]: unknown;
         };
@@ -44980,7 +47250,16 @@ export interface operations {
     parameters: {
       query?: {
         tags?: string[] | null;
-        purpose?: ("general" | "web_search" | "image_generation") | null;
+        purpose?:
+          | (
+              | "general"
+              | "web_search"
+              | "image_generation"
+              | "file_analysis"
+              | "file_creation"
+              | "charts"
+            )
+          | null;
       };
       header?: never;
       path?: never;
@@ -45080,7 +47359,16 @@ export interface operations {
   get_tenant_mcp_settings_api_v1_mcp_servers_settings__get: {
     parameters: {
       query?: {
-        purpose?: ("general" | "web_search" | "image_generation") | null;
+        purpose?:
+          | (
+              | "general"
+              | "web_search"
+              | "image_generation"
+              | "file_analysis"
+              | "file_creation"
+              | "charts"
+            )
+          | null;
       };
       header?: never;
       path?: never;
@@ -45323,6 +47611,106 @@ export interface operations {
       };
       /** @description Not Found */
       404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  get_bundled_tools_api_v1_mcp_servers_bundled__get: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["BundledToolList"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+    };
+  };
+  create_bundled_mcp_server_api_v1_mcp_servers_bundled__tool___post: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        tool: string;
+      };
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["BundledServerCreate"];
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["MCPServerCreateResponse"];
+        };
+      };
+      /** @description Bad Request */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Not Found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Conflict */
+      409: {
         headers: {
           [name: string]: unknown;
         };
@@ -49551,6 +51939,15 @@ export interface operations {
           "application/json": components["schemas"]["RoleAssignmentPublic"] | null;
         };
       };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
       /** @description Not Found */
       404: {
         headers: {
@@ -49866,6 +52263,11 @@ export interface operations {
                 website_id?: string | null;
                 /** Original Available */
                 original_available: boolean;
+                /**
+                 * Source Metadata
+                 * @default []
+                 */
+                source_metadata?: components["schemas"]["SourceMetadataEntry"][];
                 /** Score */
                 score: number;
               };
@@ -49882,6 +52284,29 @@ export interface operations {
                 embedding_model_id: string;
                 /** Size */
                 size: number;
+              };
+              /**
+               * SourceMetadataEntry
+               * @description One document property from the source system, e.g. a SharePoint column.
+               *
+               *     ``name`` is the source's stable identifier for the property, ``label`` the
+               *     human readable name the source shows, ``value`` the normalised value as
+               *     text (a list for multi-value properties). ``kind`` lets presentation format
+               *     dates and booleans without re-parsing the value.
+               */
+              SourceMetadataEntry: {
+                /** Name */
+                name: string;
+                /** Label */
+                label: string;
+                /** Value */
+                value: string | string[];
+                /**
+                 * Kind
+                 * @default text
+                 * @enum {string}
+                 */
+                kind?: "text" | "choice" | "date" | "number" | "boolean" | "url";
               };
             };
           };
@@ -50020,6 +52445,11 @@ export interface operations {
                 website_id?: string | null;
                 /** Original Available */
                 original_available: boolean;
+                /**
+                 * Source Metadata
+                 * @default []
+                 */
+                source_metadata?: components["schemas"]["SourceMetadataEntry"][];
                 /** Score */
                 score: number;
               };
@@ -50036,6 +52466,29 @@ export interface operations {
                 embedding_model_id: string;
                 /** Size */
                 size: number;
+              };
+              /**
+               * SourceMetadataEntry
+               * @description One document property from the source system, e.g. a SharePoint column.
+               *
+               *     ``name`` is the source's stable identifier for the property, ``label`` the
+               *     human readable name the source shows, ``value`` the normalised value as
+               *     text (a list for multi-value properties). ``kind`` lets presentation format
+               *     dates and booleans without re-parsing the value.
+               */
+              SourceMetadataEntry: {
+                /** Name */
+                name: string;
+                /** Label */
+                label: string;
+                /** Value */
+                value: string | string[];
+                /**
+                 * Kind
+                 * @default text
+                 * @enum {string}
+                 */
+                kind?: "text" | "choice" | "date" | "number" | "boolean" | "url";
               };
             };
           };
@@ -50347,7 +52800,7 @@ export interface operations {
           [name: string]: unknown;
         };
         content: {
-          "application/json": components["schemas"]["PaginatedResponse_UserInDB_"];
+          "application/json": components["schemas"]["PaginatedResponse_UserSysAdminView_"];
         };
       };
       /** @description Unauthorized */
@@ -50380,7 +52833,7 @@ export interface operations {
           [name: string]: unknown;
         };
         content: {
-          "application/json": components["schemas"]["UserCreated"];
+          "application/json": components["schemas"]["UserSysAdminCreated"];
         };
       };
       /** @description Bad Request */
@@ -50429,7 +52882,7 @@ export interface operations {
           [name: string]: unknown;
         };
         content: {
-          "application/json": components["schemas"]["UserInDB"];
+          "application/json": components["schemas"]["UserSysAdminView"];
         };
       };
       /** @description Unauthorized */
@@ -50482,7 +52935,7 @@ export interface operations {
           [name: string]: unknown;
         };
         content: {
-          "application/json": components["schemas"]["UserInDB"];
+          "application/json": components["schemas"]["UserSysAdminView"];
         };
       };
       /** @description Bad Request */
@@ -51758,6 +54211,15 @@ export interface operations {
         };
         content: {
           "application/json": components["schemas"]["EmbeddingModelSparse"];
+        };
+      };
+      /** @description Bad Request */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
         };
       };
       /** @description Unauthorized */
@@ -53660,9 +56122,7 @@ export interface operations {
   };
   crawler_health_api_healthz_crawler_get: {
     parameters: {
-      query?: {
-        include_all?: boolean;
-      };
+      query?: never;
       header?: never;
       path?: never;
       cookie?: never;
@@ -53678,13 +56138,13 @@ export interface operations {
           "application/json": components["schemas"]["CrawlerHealthResponse"];
         };
       };
-      /** @description Validation Error */
-      422: {
+      /** @description Missing or invalid super API key */
+      401: {
         headers: {
           [name: string]: unknown;
         };
         content: {
-          "application/json": components["schemas"]["HTTPValidationError"];
+          "application/json": components["schemas"]["GeneralError"];
         };
       };
     };

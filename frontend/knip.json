@@ -26,10 +26,14 @@
         "src/hooks.ts"
       ],
       "ignore": [
-        "src/lib/paraglide/**"
+        "src/lib/paraglide/**",
+        "plugins/fixtures/**"
       ]
     },
     "packages/ui": {
+      "entry": [
+        "src/lib/index.ts"
+      ],
       "ignore": [
         "src/icons/Icon.svelte"
       ]

@@ -27,6 +27,21 @@ body:
     validations:
       required: true
 
+  - type: dropdown
+    id: area
+    attributes:
+      label: Area
+      description: Choose the affected area. Other requires maintainer triage.
+      options:
+        - Backend
+        - Frontend
+        - Infra
+        - Docs
+        - Security
+        - Other
+    validations:
+      required: true
+
   - type: textarea
     id: alternatives
     attributes:

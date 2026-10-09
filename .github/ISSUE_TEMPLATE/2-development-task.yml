@@ -1,20 +1,20 @@
 name: Development task
 description: A buildable work item that belongs to an epic.
 title: "[Task]: "
-labels: ["kind:task", "enhancement"]
+labels: ["kind:task"]
 projects: ["eneo-ai/5"]
 type: task
 body:
   - type: markdown
     attributes:
       value: |
-        Development tasks must belong to an epic. Add this task as a GitHub sub-issue of the epic when available, and reference the epic below. When you open a pull request for this task, put `Fixes #123` in the PR body so GitHub links the implementation back to this task.
+        Development tasks must belong to an epic. Reference the epic below and automation adds this task as its sub-issue. When you open a pull request for this task, put `Fixes #123` in the PR body or link the task under Development in the PR sidebar.
 
   - type: input
     id: parent_epic
     attributes:
       label: Parent epic
-      description: Required. Link the epic issue, for example #123. This is used by automation and roadmap export.
+      description: Required. The epic issue, for example #123. Automation adds this task as its sub-issue.
       placeholder: "#123"
     validations:
       required: true
@@ -46,7 +46,6 @@ body:
         - Docs
         - Security
         - Other
-      default: 5
     validations:
       required: true
 

@@ -21,6 +21,7 @@ from eneo.authentication.auth_dependencies import (
     INFO_BLOBS_READ_OVERRIDES,
     KNOWLEDGE_READ_OVERRIDES,
 )
+from eneo.authentication.endpoint_access import access_for
 from eneo.main.config import get_settings
 from eneo.roles.permissions import Permission
 from tests.unit.api_key_test_utils import (
@@ -128,7 +129,7 @@ INTENTIONALLY_UNGUARDED = {
     "/settings": "Admin settings endpoints are mounted on a dedicated router with admin scope + admin key guards",
     "/users": "Admin mutation endpoints (POST /admin/invite/, PATCH /admin/{id}/, DELETE /admin/{id}/) are on users_admin_router with admin scope + admin key guards. GET / carries route-level admin scope + admin key guards (no-op for bearer tokens) so scoped API keys cannot enumerate the tenant directory while space-admin bearer users still populate member pickers. /me/ and /tenant/ safe for any scoped key.",
     "/admin": "Admin endpoints are mounted with admin scope + admin key guards, "
-    "except /admin/modules which is session-only (require_session_auth + "
+    "except /admin/modules which is session-only (Authentication.SESSION + "
     "Permission.MODULES) and rejects API keys outright",
     "/dashboard": "Read-only aggregation endpoint with scope guard",
     "/icons": "Public static assets",
@@ -157,7 +158,7 @@ INTENTIONALLY_UNGUARDED = {
     "/audit": "Admin audit endpoints with admin scope + admin key guards",
     "/mcp-servers": "MCP server management is tenant-admin infrastructure with admin scope + admin key guards",
     "/skills": "Skill catalogue and organisation lifecycle endpoints require session authentication; service-layer actor and tenant checks authorize reads, bindings, and admin-only publication",
-    "/whats-new": "Per-user What's new read state; session-only (require_session_auth) and scoped to the caller's own row",
+    "/whats-new": "Per-user What's new read state; session-only (Authentication.SESSION) and scoped to the caller's own row",
     "/auth": "Public federation/auth endpoints — no user auth required",
     "/api-docs": "Public API documentation endpoint",
     "/help-assistants": "HelperRunService enforces ResourcePermission.EDIT on the target "
@@ -165,7 +166,7 @@ INTENTIONALLY_UNGUARDED = {
     "router-level resource_permission_for_method check would be a no-op here — there is "
     "no single resource_type/path-param pair that captures the gating. Mutating routes "
     "are listed individually in MUTATING_ALLOWLIST_EXACT.",
-    "/widgets": "Editor/admin widget routes are session-only (require_session_auth, "
+    "/widgets": "Editor/admin widget routes are session-only (Authentication.SESSION, "
     "checked route by route in TestHighRiskExactRouteGuards); "
     "WidgetService authorizes per space via the space actor plus Permission.WIDGETS "
     "and Permission.ADMIN. The visitor routes (/widgets/{public_id}/...) authenticate "
@@ -193,7 +194,7 @@ INTENTIONALLY_SCOPE_FREE = {
     "/help-assistants": "Helper-run endpoints take the target assistant id in the body, "
     "not the URL, so a path-level scope check would not gate anything. The HelperRunService "
     "enforces edit-permission on the body's target_id and actor identity on the run.",
-    "/skills": "Skill catalogue and organisation lifecycle endpoints reject API keys with require_session_auth; service-layer checks authorize the authenticated user",
+    "/skills": "Skill catalogue and organisation lifecycle endpoints reject API keys with Authentication.SESSION; service-layer checks authorize the authenticated user",
     "/widgets": "Anonymous visitor routes (config, challenge, visitor-sessions, ask, "
     "sessions, feedback) are authenticated by widget visitor tokens bound to one "
     "widget; no API key context exists. The admin routes under the same prefix are "
@@ -264,7 +265,7 @@ class TestRouteCoverage:
             if _route_has_scope_check_dep(route):
                 continue
             if route_is_session_only(route):
-                # Session-only surfaces reject API keys via require_session_auth,
+                # Session-only surfaces reject API keys via Authentication.SESSION,
                 # so an API-key scope guard would be a structural no-op.
                 continue
 
@@ -533,7 +534,7 @@ class TestHighRiskExactRouteGuards:
             "/skills/organization/{skill_id}/adoption/",
             "/skills/organization/{skill_id}/adoption",
         )
-        assert _route_has_dep_name(route, "require_session_auth"), (
+        assert route_is_session_only(route), (
             "GET /skills/organization/{skill_id}/adoption/ must remain "
             "session-only; OrganizationSkillService performs the tenant-admin check"
         )
@@ -560,7 +561,7 @@ class TestHighRiskExactRouteGuards:
         route = _find_route_by_method_and_paths(
             "GET", "/assistants/{id}/widget-status/", "/assistants/{id}/widget-status"
         )
-        assert _route_has_dep_name(route, "require_session_auth")
+        assert route_is_session_only(route)
         assert "assistants" in _route_resource_permission_types(route)
 
     def test_widget_visitor_routes_never_resolve_a_user(self):
@@ -621,12 +622,8 @@ class TestHighRiskExactRouteGuards:
             "/conversations/{session_id}/messages/{message_id}/diagnostics/",
             "/conversations/{session_id}/messages/{message_id}/diagnostics",
         )
-        assert _route_has_dep_name(route, "require_session_auth")
-        granted_permissions = {
-            closure.get("permission")
-            for closure in route_dependency_closures(route, "_dep")
-        }
-        assert Permission.ASSISTANT_DEBUG in granted_permissions
+        assert route_is_session_only(route)
+        assert access_for(route.endpoint).authorization is Permission.ASSISTANT_DEBUG
 
     def test_integrations_admin_route_has_scope_and_admin_key_guards(self):
         route = _find_route_by_method_and_paths(
@@ -717,7 +714,7 @@ class TestHighRiskExactRouteGuards:
         route = _find_route_by_method_and_paths(
             "GET", "/logging/{message_id}/", "/logging/{message_id}"
         )
-        assert _route_has_dep_name(route, "require_session_auth")
+        assert route_is_session_only(route)
 
     def test_files_routes_have_scope_resource_and_delete_scope_guards(self):
         list_route = _find_route_by_method_and_paths("GET", "/files/", "/files")
@@ -1044,7 +1041,7 @@ class TestMutatingRoutesArePerRouteGuarded:
                 continue
             if info.has_resource_perm_dep or info.has_api_key_permission_dep:
                 continue
-            if info.has_session_auth_dep:
+            if info.has_session_policy:
                 # Session-only surfaces (e.g. /admin/modules, /skills
                 # organization lifecycle) reject API keys outright, so
                 # API-key-layer mutation guards are structural no-ops.

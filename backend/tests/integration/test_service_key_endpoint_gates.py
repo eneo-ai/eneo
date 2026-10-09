@@ -165,7 +165,7 @@ async def test_api_key_lifecycle_mutations_reject_service_keys(
     client, tenant_admin_service_secret, admin_token, method, path
 ):
     """No API key — including a TENANT+ADMIN service key — can call api-key
-    lifecycle mutations. require_session_auth rejects them all with 403."""
+    lifecycle mutations. The SESSION policy rejects them all with 403."""
     # Mint a target key so the path resolves to something real for endpoints
     # that take {id}.
     payload = await _create_service_key(
@@ -349,6 +349,7 @@ _CREATION_ENDPOINTS: list[tuple[str, str, dict | None]] = [
     ("POST", f"/api/v1/groups/{_STUB_ID}/info-blobs/", {"info_blobs": []}),
     ("POST", "/api/v1/roles/", {"name": "x", "permissions": []}),
     ("POST", "/api/v1/mcp-servers/", {"name": "x", "url": "https://example.com"}),
+    ("POST", "/api/v1/mcp-servers/bundled/compute/", {}),
     (
         "POST",
         "/api/v1/help-assistants/runs/",

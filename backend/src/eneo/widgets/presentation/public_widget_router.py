@@ -9,6 +9,11 @@ from uuid import UUID
 from fastapi import APIRouter, Request, Response
 
 from eneo.assistants.api import assistant_protocol
+from eneo.authentication.endpoint_access import (
+    Authentication,
+    Authorization,
+    endpoint_access,
+)
 from eneo.main.config import get_settings
 from eneo.server.dependencies.widget_auth import (
     ActiveWidget,
@@ -42,6 +47,16 @@ from eneo.widgets.presentation.public_widget_models import (
 # path shape (admin ids are UUIDs, public ids are `wgt_…`).
 router = APIRouter()
 
+_PUBLIC_REASON = (
+    "Anonymous visitor bootstrap for an active widget: the public id is the only"
+    " input, and WidgetAuthenticationService, ALTCHA and the per-widget limiter"
+    " gate it."
+)
+_VISITOR_REASON = (
+    "A short-lived visitor token bound to one widget; WidgetAskService checks that"
+    " the session belongs to this widget and visitor."
+)
+
 
 def _etag(config: WidgetPublicConfig) -> str:
     # Over what is served, not the row: the tenant policy changes the served
@@ -62,6 +77,11 @@ def _etag(config: WidgetPublicConfig) -> str:
         **responses.get_responses([404]),
         304: {"description": "Not modified (matching ETag)."},
     },
+)
+@endpoint_access(
+    authentication=Authentication.PUBLIC,
+    authorization=Authorization.PUBLIC,
+    reason=_PUBLIC_REASON,
 )
 async def get_widget_config(request: Request, response: Response, widget: ActiveWidget):
     config = WidgetPublicConfig(
@@ -98,6 +118,11 @@ async def get_widget_config(request: Request, response: Response, widget: Active
     ),
     responses=responses.get_responses([404, 429, 503]),
 )
+@endpoint_access(
+    authentication=Authentication.PUBLIC,
+    authorization=Authorization.PUBLIC,
+    reason=_PUBLIC_REASON,
+)
 async def get_widget_challenge(
     request: Request,
     response: Response,
@@ -119,6 +144,11 @@ async def get_widget_challenge(
         " `previous_token` while it is valid or recently expired."
     ),
     responses=responses.get_responses([400, 401, 404, 429, 503]),
+)
+@endpoint_access(
+    authentication=Authentication.PUBLIC,
+    authorization=Authorization.PUBLIC,
+    reason=_PUBLIC_REASON,
 )
 async def create_visitor_session(
     request: Request,
@@ -180,6 +210,11 @@ def _principal(request: Request) -> WidgetPrincipal:
     ),
     responses=responses.streaming_response(AskChatResponse, [400, 401, 404, 429, 503]),
 )
+@endpoint_access(
+    authentication=Authentication.WIDGET_VISITOR,
+    authorization=Authorization.WIDGET_VISITOR,
+    reason=_VISITOR_REASON,
+)
 async def ask_widget(request: Request, body: WidgetAsk, container: VisitorContainer):
     response = await container.widget_ask_service().ask(
         _principal(request),
@@ -205,6 +240,11 @@ async def ask_widget(request: Request, body: WidgetAsk, container: VisitorContai
     ),
     responses=responses.get_responses([401, 404]),
 )
+@endpoint_access(
+    authentication=Authentication.WIDGET_VISITOR,
+    authorization=Authorization.WIDGET_VISITOR,
+    reason=_VISITOR_REASON,
+)
 async def get_widget_session(
     request: Request, session_id: UUID, container: VisitorContainer
 ):
@@ -224,6 +264,11 @@ async def get_widget_session(
         " the stream."
     ),
     responses=responses.get_responses([401, 404]),
+)
+@endpoint_access(
+    authentication=Authentication.WIDGET_VISITOR,
+    authorization=Authorization.WIDGET_VISITOR,
+    reason=_VISITOR_REASON,
 )
 async def leave_widget_feedback(
     request: Request,

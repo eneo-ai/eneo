@@ -29,6 +29,7 @@
   import { TriangleAlert, X } from "@lucide/svelte";
   import { getErrorMessage } from "$lib/core/errors/getErrorMessage";
   import { isCapabilityPurpose } from "$lib/features/mcp/capabilities";
+  import { modelSupportsToolCalling } from "$lib/features/mcp/readiness";
   import { chatCapabilities } from "../../chatCapabilities";
   import { getContextErrorInfo, isConversationSubmitDisabled } from "./conversationInputState";
 
@@ -301,6 +302,16 @@
     return [];
   });
 
+  const effectiveModel = $derived.by(() => {
+    const partner = chat.partner;
+    if (!partner || !("completion_model" in partner)) return undefined;
+    return selectEffectiveChatModel(partner.completion_model, partner.effective_config);
+  });
+  // A model without tool calling never receives any tool: the backend drops
+  // MCP servers, capabilities and loopback tools alike. Every tool row then
+  // reads as unavailable for that reason, unless a more specific one applies.
+  const supportsToolCalling = $derived(modelSupportsToolCalling(effectiveModel));
+
   // The tenant's capability providers (web search, image generation) flow
   // through the same MCP inheritance chain as other servers but are presented
   // as capabilities, not servers: split them out of the generic rows and give
@@ -309,13 +320,23 @@
   const generalMcpServers = $derived(
     mcpServers
       .filter((server) => !isCapabilityPurpose(server.purpose))
-      .map((server) => ({
-        ...server,
-        available: server.is_enabled !== false,
-        reason: server.is_enabled === false ? "server_disabled" : null
-      }))
+      .map((server) => {
+        const reason =
+          server.is_enabled === false
+            ? "server_disabled"
+            : supportsToolCalling
+              ? null
+              : "model_no_tool_calling";
+        return { ...server, available: reason === null, reason };
+      })
   );
-  const capabilityServers = $derived(chatCapabilities(chat.partner, user));
+  const capabilityServers = $derived(
+    chatCapabilities(chat.partner, user).map((capability) =>
+      supportsToolCalling || !capability.available
+        ? capability
+        : { ...capability, available: false, reason: "model_no_tool_calling" }
+    )
+  );
   const toolPreferenceIds = $derived([...generalMcpServers, ...capabilityServers].map((s) => s.id));
 
   $effect(() => {
@@ -406,19 +427,14 @@
     return typeof partner?.knowledge_mode === "string" ? partner.knowledge_mode : undefined;
   });
 
-  const effectiveModel = $derived.by(() => {
-    const partner = chat.partner;
-    if (!partner || !("completion_model" in partner)) return undefined;
-    return selectEffectiveChatModel(partner.completion_model, partner.effective_config);
-  });
-  const supportsToolCalling = $derived(effectiveModel?.supports_tool_calling === true);
   const runtimeKnowledgeMode = $derived(
     effectiveKnowledgeMode(partnerKnowledgeMode, supportsToolCalling)
   );
 
-  // Current uploads and persisted user-message attachments are the only files
-  // the backend's files server considers. Assistant prompt attachments remain
-  // inline and therefore do not activate this tool.
+  // Files the backend's files server considers: current uploads, persisted
+  // user-message attachments, and the assistant's own attachments marked
+  // "open with tool" (inline_text false). Inlined assistant attachments never
+  // get a reference URL and so do not activate the tool.
   const hasDownloadReference = $derived.by(() => {
     const pending = $attachments
       .map((attachment) => attachment.fileRef)
@@ -426,21 +442,25 @@
     const history = (chat.currentConversation?.messages ?? []).flatMap(
       (message) => message.files ?? []
     );
-    return [...pending, ...history].some((file) => file.has_download_reference === true);
+    // Group chats type their (always empty) attachments without a mode.
+    const toolAttachments = (chat.partner?.attachments ?? []).filter(
+      (file) => "inline_text" in file && file.inline_text === false
+    );
+    return [...pending, ...history, ...toolAttachments].some(
+      (file) => file.has_download_reference === true
+    );
   });
 
   // Eneo's built-in loopback MCP servers that will be active for this partner:
   // always on, not togglable, but surfaced next to the external servers so the
   // user sees every tool the model can reach. Mirrors the backend attach gates
-  // (knowledge_mode "tool" + knowledge attached; inline_file_text off means
-  // attachments reach the model as signed URLs read by the files server).
+  // (knowledge_mode "tool" + knowledge attached; some file reaching the model
+  // as a signed URL read by the files server).
   const internalMcpServers = $derived.by(() => {
-    const partner = chat.partner as Record<string, unknown> | null;
     return internalMcpServerNames({
       supportsToolCalling,
       hasKnowledge,
       storedKnowledgeMode: partnerKnowledgeMode,
-      inlineFileText: partner?.inline_file_text !== false,
       hasDownloadReference
     }).map((name) => ({ name }));
   });
@@ -474,18 +494,19 @@
   onStop={() => abortController?.abort("User cancelled")}
   class="max-w-[74ch] md:w-full"
 >
-  {#if !chat.hasCompletionModel}
-    <div
-      class="bg-card/80 absolute inset-0 z-10 flex items-center justify-center rounded-2xl backdrop-blur-[1px]"
-    >
-      <div class="text-muted-foreground flex items-center gap-2 px-4 text-sm">
-        <TriangleAlert class="h-4 w-4 flex-shrink-0" />
-        <p>{m.no_completion_model_description()}</p>
-      </div>
-    </div>
-  {/if}
-
   <PromptInput.Body>
+    {#if !chat.hasCompletionModel}
+      <!-- Cover only the text field: the footer stays usable so the user can
+           pick a model themselves whenever the selector has one to offer. -->
+      <div
+        class="bg-card/80 absolute inset-0 z-10 flex items-center justify-center rounded-t-2xl backdrop-blur-[1px]"
+      >
+        <div class="text-muted-foreground flex items-center gap-2 px-4 text-sm">
+          <TriangleAlert class="h-4 w-4 flex-shrink-0" />
+          <p>{m.no_completion_model_description()}</p>
+        </div>
+      </div>
+    {/if}
     <MentionInput onpaste={queueUploadsFromClipboard}></MentionInput>
   </PromptInput.Body>
 
@@ -560,6 +581,7 @@
           servers={generalMcpServers}
           {capabilityServers}
           internalServers={internalMcpServers}
+          modelSupportsTools={supportsToolCalling}
           disabledServerIds={disabledMcpServerIds}
           onSelectionChange={persistMcpServerSelection}
           bind:autoAcceptTools

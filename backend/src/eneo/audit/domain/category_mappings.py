@@ -130,7 +130,7 @@ CATEGORY_MAPPINGS = {
     ActionType.FILE_ORIGINAL_DOWNLOADED.value: "file_operations",
     ActionType.FILE_SIGNED_URL_MINTED.value: "file_operations",
     ActionType.INFO_BLOB_ORIGINAL_DOWNLOAD_LINK_CREATED.value: "file_operations",
-    # Integration Events (12 actions)
+    # Integration Events (20 actions)
     ActionType.INTEGRATION_ADDED.value: "integration_events",
     ActionType.INTEGRATION_REMOVED.value: "integration_events",
     ActionType.INTEGRATION_CONNECTED.value: "integration_events",
@@ -142,6 +142,9 @@ CATEGORY_MAPPINGS = {
     ActionType.WEBSITE_UPDATED.value: "integration_events",
     ActionType.WEBSITE_DELETED.value: "integration_events",
     ActionType.WEBSITE_CRAWLED.value: "integration_events",
+    ActionType.WEBSITE_CRAWL_REQUESTED.value: "integration_events",
+    ActionType.WEBSITE_CRAWL_STOP_REQUESTED.value: "integration_events",
+    ActionType.WEBSITE_CRAWL_PROBED.value: "integration_events",
     ActionType.WEBSITE_TRANSFERRED.value: "integration_events",
     ActionType.MCP_SERVER_CREATED.value: "integration_events",
     ActionType.MCP_SERVER_UPDATED.value: "integration_events",
@@ -150,6 +153,10 @@ CATEGORY_MAPPINGS = {
     ActionType.MCP_SERVER_DISABLED.value: "integration_events",
     ActionType.MCP_SERVER_TOOL_ENABLED.value: "integration_events",
     ActionType.MCP_SERVER_TOOL_DISABLED.value: "integration_events",
+    # Model Provider Outbound Header Actions (3 actions)
+    ActionType.MODEL_PROVIDER_HEADERS_UPDATED.value: "admin_actions",
+    ActionType.MODEL_PROVIDER_DESTINATION_CHANGED.value: "admin_actions",
+    ActionType.MODEL_PROVIDER_HEADERS_PREVIEWED.value: "admin_actions",
     # Help Assistant Actions (6 actions)
     ActionType.HELP_ASSISTANT_ROLE_ASSIGNED.value: "admin_actions",
     ActionType.HELP_ASSISTANT_ROLE_UNASSIGNED.value: "admin_actions",

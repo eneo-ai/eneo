@@ -1,17 +1,67 @@
+from collections.abc import Sequence
 from datetime import datetime
 from typing import TYPE_CHECKING, Any, Optional
+from urllib.parse import urlsplit
 from uuid import UUID, uuid4
 
-from eneo.main.exceptions import BadRequestException, NameCollisionException
+from eneo.embedding_models.domain.embedding_model_repo import (
+    guard_embedding_provider_update,
+)
+from eneo.main.config import get_settings
+from eneo.main.exceptions import (
+    BadRequestException,
+    EncryptionNotConfiguredException,
+    NameCollisionException,
+)
 from eneo.model_providers.domain.model_defaults_lookup import resolve_model_defaults
 from eneo.model_providers.domain.model_provider import ModelProvider
+from eneo.model_providers.domain.outbound_header_destinations import (
+    DestinationProblem,
+    destination_problem,
+    parse_allow_list,
+)
+from eneo.model_providers.domain.outbound_header_writes import (
+    OutboundHeaderWrite,
+    StoredSecretUnreadable,
+    apply_header_writes,
+    retained_secret_headers,
+)
+from eneo.model_providers.domain.outbound_headers import (
+    HeaderOutcome,
+    OutboundHeaderConfigError,
+    OutboundHeadersBlocked,
+    evaluate_headers,
+    request_headers,
+)
+from eneo.model_providers.infrastructure.litellm_provider import (
+    embedding_provider_configuration,
+)
 from eneo.model_providers.infrastructure.model_provider_repository import (
     ModelProviderRepository,
+)
+from eneo.model_providers.infrastructure.outbound_headers_runtime import (
+    decrypt_stored_headers,
+)
+from eneo.model_providers.infrastructure.tenant_model_credential_resolver import (
+    TenantModelCredentialResolver,
 )
 from eneo.settings.encryption_service import EncryptionService
 
 if TYPE_CHECKING:
-    pass
+    from eneo.users.user import UserInDB
+
+_DESTINATION_MESSAGES: dict[DestinationProblem, str] = {
+    "no_endpoint": (
+        "Outbound headers need an explicitly configured endpoint; without one, "
+        "requests go to the vendor's public default"
+    ),
+    "invalid_endpoint": "The provider endpoint is not a valid http(s) URL",
+    "credentials_in_url": "The provider endpoint must not contain credentials",
+    "not_allowed": (
+        "The provider endpoint is not in this deployment's allowed destinations "
+        "for outbound headers"
+    ),
+}
 
 
 # Default base URLs for providers that don't ask the user for one.
@@ -38,6 +88,58 @@ def _normalize_endpoint_base(base: str) -> str:
     if s.endswith("/v1"):
         s = s[:-3].rstrip("/")
     return s
+
+
+def effective_endpoint(provider_type: str, config: dict[str, Any]) -> str | None:
+    """The destination a provider's credentials are sent to.
+
+    A configured ``endpoint`` wins; otherwise the provider type's default,
+    when it has one. ``None`` means the transport picks the destination
+    itself (LiteLLM's built-in base for that provider).
+    """
+    raw = config.get("endpoint")
+    if isinstance(raw, str) and raw.strip():
+        return raw.strip()
+    return _DEFAULT_ENDPOINTS.get(provider_type)
+
+
+def normalize_destination(endpoint: str | None) -> str | None:
+    """Canonical ``scheme://host[:port]/path`` for comparing destinations.
+
+    Scheme and host are case-insensitive, a default port is the same as no
+    port, and trailing slashes do not change where a request goes. A
+    different scheme, host, port, base path or query does.
+    """
+    if endpoint is None:
+        return None
+    value = endpoint.strip()
+    if not value:
+        return None
+    parts = urlsplit(value if "://" in value else f"//{value}")
+    scheme = parts.scheme.lower()
+    host = (parts.hostname or "").lower()
+    try:
+        port: int | None = parts.port
+    except ValueError:
+        port = None
+        host = parts.netloc.lower()
+    if (scheme, port) in (("http", 80), ("https", 443)):
+        port = None
+    netloc = f"{host}:{port}" if port is not None else host
+    path = parts.path.rstrip("/")
+    query = f"?{parts.query}" if parts.query else ""
+    return f"{scheme}://{netloc}{path}{query}"
+
+
+def _has_stored_api_key(credentials: dict[str, Any]) -> bool:
+    value = credentials.get("api_key")
+    return isinstance(value, str) and bool(value.strip())
+
+
+def _is_masked_api_key(value: str) -> bool:
+    """A value that is only the display form of a key, never a key."""
+    stripped = value.strip()
+    return stripped.startswith("...") or set(stripped) <= set("*•·")
 
 
 def _coerce_to_epoch(value: Any) -> float:
@@ -301,9 +403,11 @@ class ModelProviderService:
         """Get all providers for the tenant."""
         return await self.repository.all(active_only=active_only)
 
-    async def get_by_id(self, provider_id: UUID) -> ModelProvider:
-        """Get a provider by ID."""
-        return await self.repository.get_by_id(provider_id)
+    async def get_by_id(
+        self, provider_id: UUID, *, for_update: bool = False
+    ) -> ModelProvider:
+        """Get a provider by ID; ``for_update`` holds its row lock until commit."""
+        return await self.repository.get_by_id(provider_id, for_update=for_update)
 
     @staticmethod
     def _validate_required_fields(
@@ -324,6 +428,67 @@ class ModelProviderService:
                         f"Field '{field['name']}' is required for provider '{provider_type}'"
                     )
 
+    def _apply_header_writes(
+        self,
+        stored: list[dict[str, Any]],
+        writes: Sequence[OutboundHeaderWrite],
+        provider_type: str,
+    ) -> list[dict[str, Any]]:
+        try:
+            return apply_header_writes(
+                stored,
+                writes,
+                provider_type=provider_type,
+                encrypt=self.encryption.encrypt,
+                decrypt=self.read_header_secret,
+            )
+        except OutboundHeaderConfigError as exc:
+            raise BadRequestException(str(exc)) from exc
+
+    def read_header_secret(self, ciphertext: str) -> str:
+        """Decrypt a stored header secret. A rotated or missing key raises
+        ``StoredSecretUnreadable``, which the edit that repairs it turns into
+        a 400 instead of a 500."""
+        try:
+            return self.encryption.decrypt(ciphertext)
+        except (ValueError, EncryptionNotConfiguredException):
+            # Not chained: the message can quote the ciphertext.
+            raise StoredSecretUnreadable from None
+
+    def request_endpoint(self, provider: ModelProvider) -> str | None:
+        """The endpoint this provider's requests go to.
+
+        Resolved by the same lookup the request kwargs use, so an ``endpoint``
+        in ``credentials`` shadowing the visible one in ``config`` is what gets
+        checked. Only the endpoint is read: a stored key that no longer
+        decrypts must not block the edit that replaces it. Unlike the
+        module-level ``effective_endpoint``, which the API-key rule uses, there
+        is no vendor default: headers need an explicitly configured endpoint.
+        """
+        resolver = TenantModelCredentialResolver(
+            provider_id=provider.id,
+            provider_type=provider.provider_type,
+            credentials=provider.credentials,
+            config=provider.config,
+            encryption_service=self.encryption,
+        )
+        return resolver.get_credential_field("endpoint")
+
+    def _header_destination_problem(
+        self, provider: ModelProvider
+    ) -> DestinationProblem | None:
+        allowed = parse_allow_list(get_settings().outbound_headers_allowed_destinations)
+        return destination_problem(self.request_endpoint(provider), allowed)
+
+    def _check_header_destination(self, provider: ModelProvider) -> None:
+        """Refuse to save headers aimed at a disallowed destination — including
+        when only the endpoint changed. Re-checked at send as well."""
+        if not provider.outbound_headers:
+            return
+        problem = self._header_destination_problem(provider)
+        if problem is not None:
+            raise BadRequestException(_DESTINATION_MESSAGES[problem])
+
     async def create(
         self,
         tenant_id: UUID,
@@ -332,6 +497,7 @@ class ModelProviderService:
         credentials: dict[str, Any],
         config: dict[str, Any],
         is_active: bool = True,
+        outbound_headers: Sequence[OutboundHeaderWrite] = (),
     ) -> ModelProvider:
         """Create a new provider."""
         # Check for duplicate names
@@ -360,6 +526,10 @@ class ModelProviderService:
             created_at=now,
             updated_at=now,
         )
+        provider.outbound_headers = self._apply_header_writes(
+            [], outbound_headers, provider_type
+        )
+        self._check_header_destination(provider)
 
         return await self.repository.create(provider)
 
@@ -370,10 +540,43 @@ class ModelProviderService:
         credentials: Optional[dict[str, Any]] = None,
         config: Optional[dict[str, Any]] = None,
         is_active: Optional[bool] = None,
+        outbound_headers: Optional[Sequence[OutboundHeaderWrite]] = None,
     ) -> ModelProvider:
-        """Update an existing provider."""
+        """Update an existing provider.
+
+        ``outbound_headers`` replaces the header list (``None`` leaves it
+        unchanged). The destination is re-validated when the header list or
+        the destination changes, because an edit to ``config`` or
+        ``credentials`` alone can move where headers are sent. An edit that
+        changes neither, such as a rename or deactivation, is not refused for
+        a destination the deployment no longer allows: sends stay blocked.
+        """
         # Get existing provider
-        provider = await self.repository.get_by_id(provider_id)
+        provider = await self.repository.get_by_id(provider_id, for_update=True)
+        # Captured before the edit: kept secrets were entered for this destination.
+        kept_secrets = retained_secret_headers(
+            provider.outbound_headers, outbound_headers
+        )
+        previous_headers = list(provider.outbound_headers)
+        previous_destination = self.request_endpoint(provider)
+
+        merged_config = {**provider.config, **(config or {})}
+        next_credentials = (
+            credentials if credentials is not None else provider.credentials
+        )
+        if embedding_provider_configuration(
+            provider.provider_type, provider.credentials, provider.config
+        ) != embedding_provider_configuration(
+            provider.provider_type, next_credentials, merged_config
+        ):
+            # Locking the provider also blocks new model attachments until the
+            # semantic edit commits. Model locks coordinate knowledge assignments.
+            await guard_embedding_provider_update(self.repository.session, provider_id)
+        # A frozen embedding route is refused above; an allowed destination
+        # change still has to come with its own key.
+        self._require_replacement_key_for_new_destination(
+            provider, merged_config, credentials
+        )
 
         # Check for duplicate names if name is being changed
         if name is not None and name != provider.name:
@@ -389,13 +592,116 @@ class ModelProviderService:
 
         if config is not None:
             # Merge with existing config so unchanged fields are preserved
-            merged = {**provider.config, **config}
-            provider.config = merged
+            provider.config = merged_config
 
         if is_active is not None:
             provider.is_active = is_active
 
+        if outbound_headers is not None:
+            provider.outbound_headers = self._apply_header_writes(
+                provider.outbound_headers, outbound_headers, provider.provider_type
+            )
+        destination_moved = normalize_destination(
+            previous_destination
+        ) != normalize_destination(self.request_endpoint(provider))
+        if destination_moved or provider.outbound_headers != previous_headers:
+            self._check_header_destination(provider)
+        self._require_reentered_secrets_for_new_destination(
+            provider, kept_secrets, previous_destination
+        )
+
         return await self.repository.update(provider)
+
+    async def preview_outbound_headers(
+        self, provider: ModelProvider, user: "UserInDB"
+    ) -> tuple[list[HeaderOutcome], DestinationProblem | None, bool, str | None]:
+        """What this provider's headers would do for ``user``, without sending.
+
+        Returns the per-header outcomes, any destination problem, whether the
+        user's requests would be blocked, and the reason the headers themselves
+        block them (e.g. ``total_size_exceeded``, which no single header
+        explains). Callers must not return a secret header's value.
+        """
+        problem = (
+            self._header_destination_problem(provider)
+            if provider.outbound_headers
+            else None
+        )
+        try:
+            headers = decrypt_stored_headers(provider.outbound_headers, self.encryption)
+        except (ValueError, EncryptionNotConfiguredException):
+            # Blocked at send for the same reason. Not logged: the exception
+            # message can quote the ciphertext.
+            return [], problem, True, "decryption_failed"
+        outcomes = evaluate_headers(headers, user)
+        try:
+            request_headers(outcomes)
+        except OutboundHeadersBlocked as exc:
+            return outcomes, problem, True, exc.reason
+        return outcomes, problem, problem is not None, None
+
+    @staticmethod
+    def _require_replacement_key_for_new_destination(
+        provider: ModelProvider,
+        merged_config: dict[str, Any],
+        credentials: Optional[dict[str, Any]],
+    ) -> None:
+        """A stored key is never sent to a destination it was not entered for.
+
+        When the effective endpoint changes and the provider holds a key, the
+        update must carry an explicitly typed replacement. An omitted, blank
+        or masked display value is rejected before anything is written. Keys
+        entered for an unchanged destination are validated only for shape.
+        """
+        if credentials is not None:
+            raw = credentials.get("api_key")
+            if isinstance(raw, str) and raw.strip() and _is_masked_api_key(raw):
+                raise BadRequestException(
+                    "The API key looks like the masked display value; "
+                    "enter the actual key."
+                )
+
+        current = normalize_destination(
+            effective_endpoint(provider.provider_type, provider.config)
+        )
+        proposed = normalize_destination(
+            effective_endpoint(provider.provider_type, merged_config)
+        )
+        if current == proposed or not _has_stored_api_key(provider.credentials):
+            return
+
+        replacement = credentials.get("api_key") if credentials is not None else None
+        if not isinstance(replacement, str) or not replacement.strip():
+            raise BadRequestException(
+                "Changing the provider endpoint requires entering a new API key; "
+                "the stored key is not reused for a different destination."
+            )
+
+    def _require_reentered_secrets_for_new_destination(
+        self,
+        provider: ModelProvider,
+        kept_secrets: list[str],
+        previous_destination: str | None,
+    ) -> None:
+        """A stored secret header value or fallback is never sent to a
+        destination it was not entered for, just like the API key.
+
+        Destinations are compared as the request resolves them (credentials
+        before config). When the edit moves it, each secret header must be
+        re-entered in full or removed.
+        """
+        if not kept_secrets:
+            return
+        if normalize_destination(previous_destination) == normalize_destination(
+            self.request_endpoint(provider)
+        ):
+            return
+        names = ", ".join(f"'{name}'" for name in kept_secrets)
+        raise BadRequestException(
+            "Changing the provider endpoint requires entering the value and any "
+            f"fallback of each secret header again, or removing it: {names}. "
+            "Stored secrets are not reused for a different destination."
+        )
 
     async def delete(self, provider_id: UUID) -> None:
         """Delete a provider.

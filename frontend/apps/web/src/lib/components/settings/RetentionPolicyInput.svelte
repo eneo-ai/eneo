@@ -17,6 +17,7 @@
     inheritedFrom?: "space" | "tenant" | null;
     labelId?: string;
     descriptionId?: string;
+    disabled?: boolean;
   }
 
   /* eslint-disable @typescript-eslint/no-unused-vars -- props are part of component's public API */
@@ -26,7 +27,8 @@
     inheritedDays = null,
     inheritedFrom = null,
     labelId,
-    descriptionId
+    descriptionId,
+    disabled = false
   }: Props = $props();
   /* eslint-enable @typescript-eslint/no-unused-vars */
 
@@ -76,6 +78,7 @@
       id={`${uid}-override`}
       checked={isOverrideEnabled}
       onCheckedChange={handleSwitchChange}
+      {disabled}
     />
   </Field.Field>
 
@@ -84,6 +87,7 @@
     <div class="border-default flex items-center gap-2 border-t pt-2">
       <Input
         type="number"
+        {disabled}
         bind:value={inputValue}
         min={1}
         max={2555}

@@ -38,11 +38,15 @@ class ModelProviderRepository:
             ModelProvider.create_from_db(provider_db) for provider_db in providers_db
         ]
 
-    async def get_by_id(self, provider_id: UUID) -> ModelProvider:
+    async def get_by_id(
+        self, provider_id: UUID, *, for_update: bool = False
+    ) -> ModelProvider:
         """Get a provider by ID."""
         stmt = sa.select(ModelProviders).where(
             ModelProviders.id == provider_id, ModelProviders.tenant_id == self.tenant_id
         )
+        if for_update:
+            stmt = stmt.with_for_update().execution_options(populate_existing=True)
 
         result = await self.session.execute(stmt)
         provider_db = result.scalar_one_or_none()
@@ -75,6 +79,7 @@ class ModelProviderRepository:
                 provider_type=provider.provider_type,
                 credentials=provider.credentials,
                 config=provider.config,
+                outbound_headers=provider.outbound_headers or None,
                 is_active=provider.is_active,
             )
         )
@@ -101,6 +106,8 @@ class ModelProviderRepository:
         provider_db.provider_type = provider.provider_type
         provider_db.credentials = provider.credentials
         provider_db.config = provider.config
+        # A new list each time: the JSONB column has no mutation tracking.
+        provider_db.outbound_headers = list(provider.outbound_headers) or None
         provider_db.is_active = provider.is_active
 
         await self.session.flush()

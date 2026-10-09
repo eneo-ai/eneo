@@ -21,7 +21,8 @@
         url: isImage ? (attachmentUrlService.getUrl(file) ?? null) : null,
         extension,
         mimetype: file.mimetype,
-        size: file.size
+        // The uploaded file's size; `size` counts the extracted text of a document.
+        size: file.original_size ?? file.size
       };
     })
   );

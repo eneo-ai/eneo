@@ -45,6 +45,7 @@ from eneo.internal_mcp.knowledge import (
     search_knowledge,
 )
 from eneo.main.exceptions import AuthenticationException, NotFoundException
+from tests.fixtures import TEST_USER
 
 
 def _chunk(**overrides):
@@ -170,7 +171,9 @@ class TestTokenScoping:
     """The dev-env JWT secret is short; the warning is about the env, not the code."""
 
     def _user(self):
-        return SimpleNamespace(email="anna@kommun.se", username="anna")
+        return TEST_USER.model_copy(
+            update={"email": "anna@kommun.se", "username": "anna"}
+        )
 
     def test_scoped_token_round_trips_assistant_id(self):
         assistant_id = uuid4()

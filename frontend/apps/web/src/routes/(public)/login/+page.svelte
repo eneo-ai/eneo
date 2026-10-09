@@ -1,6 +1,6 @@
 <script lang="ts">
   import { page } from "$app/state";
-  import { enhance } from "$app/forms";
+  import { deserialize, enhance } from "$app/forms";
   import { goto } from "$app/navigation";
   import { browser } from "$app/environment";
   import { onMount, tick } from "svelte";
@@ -36,7 +36,14 @@
     "no_code_received",
     "oidc_callback_failed",
     "oidc_forbidden",
-    "oidc_unauthorized"
+    "oidc_unauthorized",
+    "oidc_invalid_request",
+    "oidc_attempt_rejected",
+    "oidc_oauth_error",
+    "oidc_access_denied",
+    "oidc_unauthorized_client",
+    "oidc_server_error",
+    "oidc_temporarily_unavailable"
   ]);
 
   // Reactive state that updates when URL changes
@@ -61,7 +68,7 @@
     oidcCorrelationId = rawCorrelation;
     oidcRawDetail = rawRawDetail;
 
-    if (rawTenant) {
+    if (rawTenant && tenantFederationEnabled) {
       activeTenantSlug = rawTenant;
     }
   });
@@ -73,6 +80,11 @@
   // Survives the loading-view swap so a typo in the password doesn't cost the email too.
   let email = $state("");
   let upLoginCorrelationId = $state<string | null>(null);
+  let loginAttemptsRemaining = $state<number | null>(null);
+  let loginRetryAfterSeconds = $state<number | null>(null);
+  const loginRetryAfterMinutes = $derived(
+    loginRetryAfterSeconds === null ? null : Math.max(1, Math.ceil(loginRetryAfterSeconds / 60))
+  );
   let loginErrorAlert = $state<HTMLDivElement | null>(null);
   let isAwaitingLoginResponse = $state(false);
   let showTenantSelector = $state(false);
@@ -94,14 +106,17 @@
     message !== null ||
       oidcErrorCode !== null ||
       showUsernameAndPassword !== null ||
+      page.url.searchParams.get("tenant") !== null ||
       activeTenantSlug !== null
   );
 
   const hasExternalLogin = $derived(
-    Boolean(data.mobilityguardLink || data.singleTenantOidcLink || oidcErrorCode)
+    Boolean(data.mobilityguardLink || data.hasSingleTenantOidc || oidcErrorCode)
   );
   const showCredentialsForm = $derived(
-    Boolean(showUsernameAndPassword) || (!data.mobilityguardLink && !data.singleTenantOidcLink)
+    Boolean(showUsernameAndPassword) ||
+      federationError !== null ||
+      (!data.mobilityguardLink && !data.hasSingleTenantOidc)
   );
 
   // Determine which loading message to display
@@ -123,7 +138,7 @@
     if (isInitializing && tenantFederationEnabled && !activeTenantSlug) {
       return m.loading_organizations();
     }
-    if ((data.zitadelLink || data.singleTenantOidcLink) && !hasQueryParams) {
+    if ((data.zitadelLink || data.hasSingleTenantOidc) && !hasQueryParams) {
       return m.redirecting_to_authentication();
     }
     return undefined;
@@ -159,10 +174,12 @@
     };
   });
 
-  // Handle automatic redirects reactively
-  $effect(() => {
+  // Handle automatic redirects reactively. Named so tests can run the effect
+  // itself instead of relying on declaration order.
+  function redirectToExternalLogin() {
     if (!browser) return;
     if (showTenantSelector) return;
+    if (isAwaitingLoginResponse || federationError) return;
 
     // We don't redirect on the server so we can render a loader/spinner during the redirection period
     if (data.zitadelLink && !hasQueryParams) {
@@ -172,15 +189,19 @@
     }
 
     // Single-tenant OIDC: redirect to IdP immediately (unless user wants to see login form)
-    if (data.singleTenantOidcLink && !hasQueryParams) {
-      isInitializing = true; // Keep showing loader during redirect
-      window.location.href = data.singleTenantOidcLink;
+    if (data.hasSingleTenantOidc && !hasQueryParams) {
+      void beginOidcLogin();
     }
-  });
+  }
+  $effect(redirectToExternalLogin);
 
   // Check for tenant-based federation on mount
   onMount(async () => {
     if (!browser) return;
+    if (!tenantFederationEnabled) {
+      isInitializing = false;
+      return;
+    }
 
     if (activeTenantSlug) {
       sessionStorage.setItem(LAST_TENANT_KEY, activeTenantSlug);
@@ -197,11 +218,6 @@
     // EARLY EXIT: Only skip initialization when we're already on the username/password form
     // without an explicit tenant slug in the URL (prevents flashing when user opted out of SSO)
     if (activeTenantSlug && !showTenantSelector && !explicitTenantParam) {
-      isInitializing = false;
-      return;
-    }
-
-    if (!tenantFederationEnabled) {
       isInitializing = false;
       return;
     }
@@ -226,7 +242,7 @@
     }
 
     if (tenant && /^[a-z0-9-]+$/.test(tenant)) {
-      const success = await beginTenantLogin(tenant);
+      const success = await beginOidcLogin(tenant);
       if (success) {
         // Keep isInitializing=true to show loader until redirect completes
         return;
@@ -273,36 +289,42 @@
     await replaceQueryParams(["message", "detailCode", "correlation", "rawDetail"]);
   }
 
-  async function beginTenantLogin(slug: string): Promise<boolean> {
+  async function beginOidcLogin(slug?: string): Promise<boolean> {
+    if (isAwaitingLoginResponse) return false;
+    isAwaitingLoginResponse = true;
+    const tenantSlug = tenantFederationEnabled ? slug : undefined;
     try {
-      rememberTenant(slug);
+      if (tenantSlug) rememberTenant(tenantSlug);
       federationError = null;
       await clearOidcErrorFromUrl();
       showTenantSelector = false;
-      isAwaitingLoginResponse = true;
-
-      // Dynamic import to avoid SSR issues
-      const { eneo } = await import("$lib/api/client");
-
-      const response = await eneo.auth.initiateAuth({
-        tenant: slug,
-        state: data.oidcFrontendState
+      const form = new FormData();
+      const next = page.url.searchParams.get("next");
+      if (next !== null) form.set("next", next);
+      if (tenantSlug) form.set("tenant", tenantSlug);
+      const response = await fetch("?/oidc", {
+        method: "POST",
+        headers: { Accept: "application/json", "x-sveltekit-action": "true" },
+        body: form
       });
+      const result = deserialize(await response.text());
+      if (result.type !== "redirect") throw new Error("OIDC initiation failed");
 
       // Allow natural browser history navigation - back button returns to tenant selector
-      window.location.href = response.authorization_url;
+      window.location.href = result.location;
       return true;
     } catch (err) {
-      console.error("Failed to initiate federation auth:", err);
+      console.error("Failed to initiate OIDC authentication:", err);
       federationError = m.failed_to_start_authentication();
       isAwaitingLoginResponse = false;
+      isInitializing = false;
       showTenantSelector = preloadedTenants.length > 0;
       return false;
     }
   }
 
   async function handleTenantSelect(slug: string) {
-    await beginTenantLogin(slug);
+    await beginOidcLogin(slug);
   }
 
   async function loadTenantsAndMaybeShow({ forceShow = false }: { forceShow?: boolean } = {}) {
@@ -335,12 +357,12 @@
   }
 
   async function retryTenantLogin() {
-    if (!activeTenantSlug) {
+    if (!activeTenantSlug && !data.hasSingleTenantOidc) {
       await loadTenantsAndMaybeShow({ forceShow: true });
       return;
     }
 
-    await beginTenantLogin(activeTenantSlug);
+    await beginOidcLogin(tenantFederationEnabled ? (activeTenantSlug ?? undefined) : undefined);
   }
 
   async function chooseAnotherTenant() {
@@ -362,6 +384,9 @@
   }
 
   function getOidcErrorMessage(): string {
+    if (oidcErrorCode === "oidc_attempt_rejected") {
+      return m.oidc_error_attempt_rejected();
+    }
     if (oidcErrorDetailCode === "access_denied") {
       return m.oidc_error_forbidden();
     }
@@ -376,7 +401,7 @@
   <title>Eneo.ai – {m.login()}</title>
 </svelte:head>
 
-{#if isInitializing || isAwaitingLoginResponse || isSubmittingUPLogin || ((data.zitadelLink || data.singleTenantOidcLink) && !hasQueryParams)}
+{#if isInitializing || isAwaitingLoginResponse || isSubmittingUPLogin}
   <!-- Overlays the page so the outgoing loader doesn't push the incoming view down mid-fade. -->
   <div class="absolute inset-0" transition:fade={{ duration: fadeDuration }}>
     <LoadingScreen message={loadingMessage} />
@@ -429,7 +454,7 @@
         </AuthAlert>
 
         <div class="flex flex-col gap-2">
-          {#if activeTenantSlug}
+          {#if activeTenantSlug || data.hasSingleTenantOidc}
             <Button
               type="button"
               size="lg"
@@ -444,18 +469,31 @@
               {/if}
             </Button>
           {/if}
-          <Button
-            type="button"
-            variant="outline"
-            size="lg"
-            class="w-full"
-            onclick={chooseAnotherTenant}
-          >
-            {m.oidc_choose_another_org()}
-          </Button>
+          {#if tenantFederationEnabled}
+            <Button
+              type="button"
+              variant="outline"
+              size="lg"
+              class="w-full"
+              onclick={chooseAnotherTenant}
+            >
+              {m.oidc_choose_another_org()}
+            </Button>
+          {/if}
         </div>
       {:else}
         <LoginStatusAlert {message} />
+
+        {#if federationError}
+          <AuthAlert tone="error" title={m.failed_to_login()}>
+            <p>{federationError}</p>
+          </AuthAlert>
+          {#if data.hasSingleTenantOidc}
+            <Button type="button" size="lg" class="w-full" onclick={() => beginOidcLogin()}>
+              {m.oidc_retry_login()}
+            </Button>
+          {/if}
+        {/if}
 
         <form
           method="POST"
@@ -465,6 +503,8 @@
             isSubmittingUPLogin = true;
             loginFailed = false;
             upLoginCorrelationId = null;
+            loginAttemptsRemaining = null;
+            loginRetryAfterSeconds = null;
 
             return async ({ result }) => {
               if (result.type === "redirect") {
@@ -479,6 +519,8 @@
               // Capture correlation ID from form action result
               if (result.type === "failure" && result.data) {
                 upLoginCorrelationId = (result.data.correlationId as string) || null;
+                loginAttemptsRemaining = (result.data.attemptsRemaining as number | null) ?? null;
+                loginRetryAfterSeconds = (result.data.retryAfterSeconds as number | null) ?? null;
               }
               await tick();
               loginErrorAlert?.focus();
@@ -489,7 +531,14 @@
 
           {#if loginFailed}
             <AuthAlert tone="error" id="login-error" tabindex={-1} bind:ref={loginErrorAlert}>
-              <p>{m.incorrect_credentials()}</p>
+              {#if loginAttemptsRemaining === 0 && loginRetryAfterMinutes !== null}
+                <p>{m.login_too_many_attempts({ minutes: loginRetryAfterMinutes })}</p>
+              {:else}
+                <p>{m.incorrect_credentials()}</p>
+                {#if loginAttemptsRemaining !== null}
+                  <p>{m.login_attempts_remaining({ count: loginAttemptsRemaining })}</p>
+                {/if}
+              {/if}
               {#if upLoginCorrelationId}
                 <CorrelationReference correlationId={upLoginCorrelationId} />
               {/if}
@@ -532,8 +581,10 @@
                 {m.login()}
               {/if}
             </Button>
-          {:else if data.singleTenantOidcLink}
-            <Button size="lg" class="w-full" href={data.singleTenantOidcLink}>{m.login()}</Button>
+          {:else if data.hasSingleTenantOidc}
+            <Button type="button" size="lg" class="w-full" onclick={() => beginOidcLogin()}
+              >{m.login()}</Button
+            >
           {:else if data.mobilityguardLink}
             <Button size="lg" class="w-full" href={data.mobilityguardLink}>{m.login()}</Button>
           {/if}
