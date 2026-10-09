@@ -212,7 +212,7 @@
     <RuntimeStatus status={(data.bundled as { runtime?: RuntimeDiagnostics }).runtime} />
     <Page.Tab id="functions">
       <div class="py-6 pr-6">
-        <div class="mx-auto flex w-full max-w-5xl flex-col gap-6">
+        <div class="flex flex-col gap-6">
           <p class="text-secondary max-w-[72ch] text-sm">{m.tools_functions_description()}</p>
           {#if messagePurpose === null}{@render messages()}{/if}
           {#each CAPABILITIES as capability (capability.purpose)}
