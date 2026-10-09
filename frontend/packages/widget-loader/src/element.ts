@@ -18,7 +18,10 @@ export const EVENT_PREFIX = "eneo-widget:";
 /** Dispatched on the document when an element connects; the API replays queued commands on it. */
 export const CONNECTED_EVENT = "eneo-widget:connected";
 
-const CLOSE_ANIMATION_MS = 180;
+const CLOSE_ANIMATION_MS = 240;
+/** How long the panel grows or shrinks when the chat asks to expand or collapse. */
+const EXPAND_ANIMATION_MS = 240;
+const EXPAND_EASING = "cubic-bezier(0.2, 0.8, 0.2, 1)";
 /** How long the launcher waits for the saved settings before it shows with its attributes. */
 const SETTINGS_TIMEOUT_MS = 3000;
 // `allow-forms`: the composer and the comment dialog are forms, and a sandbox
@@ -81,6 +84,12 @@ function reducedMotion(): boolean {
 export class EneoWidgetElement extends HTMLElement {
   /** Origin the loader script was served from; set by the bootstrap. */
   static defaultBaseUrl = "";
+  /**
+   * How long a loaded frame document may stay out of sight while the chat
+   * boots. The chat reports `ready` well within this on any device; a page
+   * that never does (an error page without chat JS) is shown when it ends.
+   */
+  static readyGraceMs = 1500;
 
   static get observedAttributes(): string[] {
     return ["color-scheme", "label", "launcher"];
@@ -88,6 +97,7 @@ export class EneoWidgetElement extends HTMLElement {
 
   private launcher!: HTMLButtonElement;
   private panel!: HTMLDivElement;
+  private backdrop!: HTMLDivElement;
   private badge!: HTMLSpanElement;
   private frame: HTMLIFrameElement | null = null;
   private frameReady = false;
@@ -103,6 +113,7 @@ export class EneoWidgetElement extends HTMLElement {
   private widgetTitle: string | null = null;
   private lastFocus: Element | null = null;
   private closeTimer: ReturnType<typeof setTimeout> | null = null;
+  private revealTimer: ReturnType<typeof setTimeout> | null = null;
   /** Host elements made inert while the panel covers the page. */
   private inerted: Element[] = [];
   private viewportFrame: number | null = null;
@@ -291,6 +302,10 @@ export class EneoWidgetElement extends HTMLElement {
     // visit; run on a detached element it would leak viewport listeners.
     this.openWhenSettled = false;
     this.prefetchWhenSettled = false;
+    if (this.revealTimer) {
+      clearTimeout(this.revealTimer);
+      this.revealTimer = null;
+    }
     window.removeEventListener("message", this.onMessage);
     this.schemeQuery?.removeEventListener("change", this.onSchemeChange);
     this.unwatch();
@@ -328,6 +343,7 @@ export class EneoWidgetElement extends HTMLElement {
     root.prepend(stylesheet);
     this.launcher = root.querySelector(".launcher") as HTMLButtonElement;
     this.panel = root.querySelector(".panel") as HTMLDivElement;
+    this.backdrop = root.querySelector(".backdrop") as HTMLDivElement;
     this.badge = root.querySelector(".badge") as HTMLSpanElement;
     this.launcher.addEventListener("click", () => this.toggle());
     root.querySelector(".loading-close button")!.addEventListener("click", () => this.closePanel());
@@ -376,9 +392,21 @@ export class EneoWidgetElement extends HTMLElement {
     frame.setAttribute("sandbox", SANDBOX);
     frame.setAttribute("referrerpolicy", "strict-origin");
     frame.setAttribute("allow", "clipboard-write");
-    // Document load also releases the loading indicator for an unavailable/error page
-    // which cannot complete the interactive chat's ready handshake.
-    frame.addEventListener("load", () => this.setAttribute("loaded", ""), { once: true });
+    // The document stays out of sight until the chat reports ready, so its
+    // header never shows up under the loader's own loading row. A document
+    // that never reports (an error page without chat JS) is revealed when
+    // the grace period ends, with that row still there to close it.
+    frame.addEventListener(
+      "load",
+      () => {
+        if (this.frameReady) return;
+        this.revealTimer = setTimeout(() => {
+          this.revealTimer = null;
+          if (!this.frameReady) this.setAttribute("loaded", "");
+        }, EneoWidgetElement.readyGraceMs);
+      },
+      { once: true }
+    );
     frame.src = this.frameUrl;
     this.panel.appendChild(frame);
     this.frame = frame;
@@ -412,6 +440,9 @@ export class EneoWidgetElement extends HTMLElement {
     this.isOpen = true;
     this.unread = 0;
     const frame = this.ensureFrame();
+    // Transitions start with the first open; see the stylesheet.
+    this.launcher.classList.add("motion");
+    this.backdrop.classList.add("motion");
     this.setAttribute("open", "");
     this.launcher.setAttribute("aria-expanded", "true");
     this.syncLauncher();
@@ -493,6 +524,10 @@ export class EneoWidgetElement extends HTMLElement {
     switch (message.type) {
       case "ready":
         this.frameReady = true;
+        if (this.revealTimer) {
+          clearTimeout(this.revealTimer);
+          this.revealTimer = null;
+        }
         // The embed header replaces the loader's mobile close row when ready.
         this.setAttribute("ready", "");
         this.colors = message.payload?.colors ?? null;
@@ -594,9 +629,40 @@ export class EneoWidgetElement extends HTMLElement {
 
   private setExpanded(expanded: boolean): void {
     if (this.expandedPanel === expanded) return;
+    const before = this.panel.getBoundingClientRect();
     this.expandedPanel = expanded;
     this.toggleAttribute("expanded", expanded);
     this.layout();
+    this.animateBox(before);
+  }
+
+  /**
+   * Plays the panel from the box it had to the box it has now (FLIP): the
+   * stylesheet switches between the floating and the full-viewport layout in
+   * one step, and the animation covers the distance. The frame dims during
+   * the move so its stretched text is not what the visitor watches.
+   */
+  private animateBox(before: DOMRect): void {
+    if (reducedMotion() || typeof this.panel.animate !== "function") return;
+    const after = this.panel.getBoundingClientRect();
+    if (after.width === 0 || after.height === 0) return;
+    const dx = before.left - after.left;
+    const dy = before.top - after.top;
+    const sx = before.width / after.width;
+    const sy = before.height / after.height;
+    if (dx === 0 && dy === 0 && sx === 1 && sy === 1) return;
+    const options = { duration: EXPAND_ANIMATION_MS, easing: EXPAND_EASING };
+    this.panel.animate(
+      [
+        {
+          transformOrigin: "top left",
+          transform: `translate(${dx}px, ${dy}px) scale(${sx}, ${sy})`
+        },
+        { transformOrigin: "top left", transform: "none" }
+      ],
+      options
+    );
+    this.frame?.animate([{ opacity: 0.4 }, { opacity: 1 }], options);
   }
 
   /**

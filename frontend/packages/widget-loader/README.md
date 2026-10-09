@@ -100,9 +100,21 @@ with a visible focus ring. The panel is a `role="dialog"` named "Chatt" /
 "Chat", and the iframe is named after the widget's title, which the embed page
 reports with `ready` (`frame-title` overrides it). Opening moves focus into the
 iframe; `Escape` inside it closes the panel and focus returns to the launcher
-(or to the element that was focused when the launcher is hidden). `Escape` on
-the host page closes the panel too and leaves focus where it is, so an open
-panel never keeps covering what the visitor moved on to (WCAG 2.4.11).
+(or to the element that was focused when the launcher is hidden); in the
+enlarged layout the chat shrinks the panel on the first `Escape` and closes on
+the next. `Escape` on the host page closes the panel too and leaves focus where
+it is, so an open panel never keeps covering what the visitor moved on to
+(WCAG 2.4.11).
+
+The frame document stays out of sight until the chat reports `ready`, so the
+chat's header never appears under the loader's own loading row; a document
+that never reports (an error page without chat JS) is shown after a grace
+period of 1.5 s, with the loading row still there to close it. Opening grows
+the panel out of the launcher's corner, the launcher's icon cross-fades, the
+phone sheet's backdrop fades, and expanding plays the panel between its two
+boxes (a FLIP animation); all of it is off under `prefers-reduced-motion`. The
+launcher and the close controls carry transparent borders, so forced-colour
+modes (Windows contrast themes) draw their edges.
 
 Beside the page the panel is a non-modal dialog. Full screen it is modal:
 `aria-modal="true"`, and every host element around `<eneo-widget>` up to
