@@ -120,6 +120,7 @@ Only `ACTIVE` keys proceed. Revoked, expired, rotation-grace-expired, and suspen
 
 - **IP validation** (`sk_` keys): If `allowed_ips` is configured, the client IP must match at least one CIDR block
 - **Origin validation** (`pk_` keys): The request must include an `Origin` header, and the origin must match one of the key's configured `allowed_origins`. A `pk_` key with no origins configured is rejected. Failures return `403` with `code: "origin_not_allowed"`.
+- **No origin check** (`sk_` keys): A secret key identifies a server, so the CORS layer accepts an active `sk_` request whatever `Origin` header a proxy or framework attached to it. IP validation still applies.
 
 ### 5. Rate Limiting
 

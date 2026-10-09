@@ -860,6 +860,7 @@
   "invalid_login_request": "Inloggningsbegäran var ogiltig. Rensa din webbläsarcache och försök igen.",
   "login_process_interrupted": "Inloggningsprocessen avbröts",
   "login_too_many_attempts": "För många misslyckade inloggningsförsök. Försök igen om {minutes} min.",
+  "login_unavailable": "Inloggningen kunde inte genomföras just nu. Försök igen om en stund, och kontakta er administratör om det fortsätter.",
   "authentication_incomplete": "Autentiseringsprocessen var ofullständig. Se till att cookies är aktiverade och försök igen.",
   "login_failed_general": "Inloggning misslyckades",
   "authentication_error_occurred": "Ett fel uppstod under autentiseringen. Försök igen eller kontakta support.",

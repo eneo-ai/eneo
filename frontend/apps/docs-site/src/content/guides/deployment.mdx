@@ -174,7 +174,10 @@ Edit `env_frontend.env`:
 - `ENEO_BACKEND_URL` - the external backend URL used by server-side rendering
   (e.g., `https://eneo.example.com`)
 - `ENEO_BACKEND_SERVER_URL` - the internal Docker URL that SSR requests are
-  rewritten to, skipping the reverse proxy (`http://backend:8000`)
+  rewritten to, skipping the reverse proxy (`http://backend:8000`). When
+  `ENEO_BACKEND_URL` is the app's own origin, as above, SSR requests are plain
+  server-to-server calls without a browser `Origin` header and do not depend
+  on the CORS allowlist
 - `PUBLIC_ENEO_BACKEND_URL` - the backend origin used by the browser
   (e.g., `https://eneo.example.com`). **Do not append `/api`**: the client
   adds `/api/v1/...` itself.
@@ -463,7 +466,7 @@ value and a comment.
     | Variable | Template value | Description |
     |----------|----------------|-------------|
     | `ENEO_BACKEND_URL` | `https://your-domain.com` | Backend URL for server-side rendering: the **external** https URL |
-    | `ENEO_BACKEND_SERVER_URL` | `http://backend:8000` | Internal server-to-server URL. SSR requests to `ENEO_BACKEND_URL` are rewritten to this address, skipping the reverse proxy |
+    | `ENEO_BACKEND_SERVER_URL` | `http://backend:8000` | Internal server-to-server URL. SSR requests to `ENEO_BACKEND_URL` are rewritten to this address, skipping the reverse proxy. Leave it empty to call `ENEO_BACKEND_URL` through the proxy instead. With `ENEO_BACKEND_URL` on the app's own origin these calls carry no browser `Origin` header; a backend on another origin must allow the app origin, as it must for the browser |
     | `PUBLIC_ENEO_BACKEND_URL` | `https://your-domain.com` | Backend origin used by the browser. **Bare origin, no `/api`** - the client appends `/api/v1/...` |
     | `ORIGIN` | `https://your-domain.com` | Cookie/CORS origin (same as `PUBLIC_ORIGIN`) |
     | `PUBLIC_ORIGIN` | `https://your-domain.com` | External URL; required for OIDC login and logout |

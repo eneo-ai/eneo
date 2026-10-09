@@ -16,7 +16,10 @@ from starlette.responses import JSONResponse, PlainTextResponse, Response
 from starlette.types import ASGIApp, Message, Receive, Scope, Send
 
 from eneo.main.exceptions import ErrorCodes
+from eneo.main.logging import get_logger
 from eneo.main.models import GeneralError
+
+logger = get_logger(__name__)
 
 ALL_METHODS = ("DELETE", "GET", "HEAD", "OPTIONS", "PATCH", "POST", "PUT")
 SAFELISTED_HEADERS = {"Accept", "Accept-Language", "Content-Language", "Content-Type"}
@@ -115,6 +118,17 @@ class CORSMiddleware:
             # so it answers in the API error contract. A server-side caller
             # that forwards the browser's Origin header lands here on every
             # method, and a bare text body leaves it nothing to act on.
+            # The refusal happens before routing and before the trace-id
+            # middleware, so without this line nothing in the log ties a
+            # caller's 400 to its unregistered origin. Only what identifies
+            # the request is logged: no headers, no body.
+            logger.warning(
+                "CORS origin refused: %s %s from origin %s",
+                method,
+                scope.get("path"),
+                origin,
+                extra={"origin": origin, "method": method, "path": scope.get("path")},
+            )
             response = JSONResponse(
                 status_code=400,
                 headers={"Vary": "Origin"},

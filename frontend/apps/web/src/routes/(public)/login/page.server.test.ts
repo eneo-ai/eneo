@@ -177,6 +177,27 @@ describe("login resume", () => {
     });
   });
 
+  test("a backend that could not answer is reported as unavailable, not as bad credentials", async () => {
+    const form = new FormData();
+    form.set("email", "user@example.com");
+    form.set("password", "secret");
+    mocks.loginWithEneo.mockResolvedValue({
+      success: false,
+      correlationId: null,
+      reason: "unavailable"
+    });
+
+    const result = await actions.login!({
+      request: new Request("https://eneo.example/login?/login", { method: "POST", body: form }),
+      cookies: { delete: vi.fn() }
+    } as never);
+
+    expect(result).toMatchObject({
+      status: 503,
+      data: { failed: true, reason: "unavailable", correlationId: null }
+    });
+  });
+
   test("a failure without limit details reports none", async () => {
     const form = new FormData();
     form.set("email", "user@example.com");
@@ -190,7 +211,12 @@ describe("login resume", () => {
 
     expect(result).toMatchObject({
       status: 400,
-      data: { failed: true, attemptsRemaining: null, retryAfterSeconds: null }
+      data: {
+        failed: true,
+        reason: "credentials",
+        attemptsRemaining: null,
+        retryAfterSeconds: null
+      }
     });
   });
 
