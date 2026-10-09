@@ -16,6 +16,7 @@ def _service(space):
     )
     space_repo = MagicMock()
     space_repo.lock = AsyncMock()
+    space_repo.one = AsyncMock(return_value=space)
     assistant_repo = MagicMock()
     assistant_repo.apply_update = AsyncMock()
     assistant_repo.add = AsyncMock()

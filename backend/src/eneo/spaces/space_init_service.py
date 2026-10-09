@@ -54,17 +54,20 @@ class SpaceInitService:
         self.effective_config_service = effective_config_service
 
     async def _update_space_with_default_assistant(self, space: "Space"):
+        # Callers either authorized the requested Space or resolved the caller's
+        # own tenant hub for initialization. Hub initialization must also work
+        # for non-members, without granting them read access to the hub.
         assert space.id is not None
         space_id = space.id
         await self.space_repo.lock(space_id)
-        space = await self.space_service.get_space(space_id)
+        space = await self.space_repo.one(space_id)
         if space.default_assistant is not None or space.default_assistant_load_failed:
             return space
         default_assistant = await self.assistant_service.create_default_assistant(
             "Default", space
         )
         await self.assistant_repo.add(default_assistant)
-        return await self.space_service.get_space(space_id)
+        return await self.space_repo.one(space_id)
 
     async def _ensure_tenant_space(self) -> "Space":
         hub = await self.space_service.get_or_create_tenant_space()

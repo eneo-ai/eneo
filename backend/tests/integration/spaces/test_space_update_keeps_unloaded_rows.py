@@ -42,14 +42,64 @@ from eneo.database.tables.users_table import Users
 from eneo.database.tables.websites_spaces_table import WebsitesSpaces
 from eneo.database.tables.websites_table import Websites
 from eneo.group_chat.domain.entities.group_chat import GroupChatAssistantData
-from eneo.main.exceptions import BadRequestException
+from eneo.main.exceptions import BadRequestException, UnauthorizedException
 from eneo.spaces.space_update import SpaceUpdate
 from eneo.sysadmin.stored_model_configuration import (
     ConfigurationRepair,
     StoredModelConfigurationRepository,
 )
+from eneo.users.user import UserAdd, UserState
 
 CORRUPT_KWARGS = {"temperature": "hot"}
+
+
+@pytest.mark.parametrize("personal", [True, False], ids=["personal", "shared"])
+async def test_nonmember_can_initialize_own_space_without_reading_tenant_hub(
+    db_container, admin_user, personal
+):
+    async with db_container() as container:
+        owner = await container.user_repo().add(
+            UserAdd(
+                email=f"space-owner-{uuid4().hex}@example.com",
+                username="Space owner",
+                state=UserState.ACTIVE,
+                tenant_id=admin_user.tenant_id,
+            )
+        )
+
+    async with db_container(user=owner) as container:
+        init_service = container.space_init_service()
+        hub = await container.space_service().get_or_create_tenant_space()
+        assert hub.default_assistant is None
+        assert owner.id not in hub.members
+        # Public reads must still enforce membership, including before the hub
+        # has a default assistant. Initialization must not widen that access.
+        with pytest.raises(UnauthorizedException):
+            await init_service.get_space(hub.id)
+        if personal:
+            space = await init_service.get_personal_space()
+        else:
+            space = await init_service.create_space("Owner's shared space")
+        assert space.default_assistant is not None
+        assert space.tenant_space_id == hub.id
+        with pytest.raises(UnauthorizedException):
+            await init_service.get_space(hub.id)
+        hub_id = hub.id
+        space_id = space.id
+        default_id = space.default_assistant.id
+
+    async with db_container() as container:
+        hub = await container.space_repo().one(hub_id)
+        assert hub.default_assistant is not None
+        assert owner.id not in hub.members
+        stored_defaults = (
+            await container.session().scalars(
+                sa.select(Assistants.id).where(
+                    Assistants.space_id == space_id, Assistants.is_default.is_(True)
+                )
+            )
+        ).all()
+        assert stored_defaults == [default_id]
 
 
 async def test_concurrent_settings_and_chat_edits_preserve_both_results(
