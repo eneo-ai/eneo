@@ -18,6 +18,7 @@
   import LoginStatusAlert from "$lib/features/auth/components/LoginStatusAlert.svelte";
   import PasswordInput from "$lib/features/auth/components/PasswordInput.svelte";
   import TenantSelector from "$lib/features/auth/components/TenantSelector.svelte";
+  import type { EneoLoginFailureReason } from "$lib/features/auth/eneo.server";
   import { m } from "$lib/paraglide/messages";
   import { localizeHref } from "$lib/paraglide/runtime";
 
@@ -75,6 +76,7 @@
   let upLoginCorrelationId = $state<string | null>(null);
   let loginAttemptsRemaining = $state<number | null>(null);
   let loginRetryAfterSeconds = $state<number | null>(null);
+  let loginFailureReason = $state<EneoLoginFailureReason>("credentials");
   const loginRetryAfterMinutes = $derived(
     loginRetryAfterSeconds === null ? null : Math.max(1, Math.ceil(loginRetryAfterSeconds / 60))
   );
@@ -472,6 +474,7 @@
             upLoginCorrelationId = null;
             loginAttemptsRemaining = null;
             loginRetryAfterSeconds = null;
+            loginFailureReason = "credentials";
 
             return async ({ result }) => {
               if (result.type === "redirect") {
@@ -488,6 +491,8 @@
                 upLoginCorrelationId = (result.data.correlationId as string) || null;
                 loginAttemptsRemaining = (result.data.attemptsRemaining as number | null) ?? null;
                 loginRetryAfterSeconds = (result.data.retryAfterSeconds as number | null) ?? null;
+                loginFailureReason =
+                  (result.data.reason as EneoLoginFailureReason | undefined) ?? "credentials";
               }
               await tick();
               loginErrorAlert?.focus();
@@ -498,7 +503,9 @@
 
           {#if loginFailed}
             <AuthAlert tone="error" id="login-error" tabindex={-1} bind:ref={loginErrorAlert}>
-              {#if loginAttemptsRemaining === 0 && loginRetryAfterMinutes !== null}
+              {#if loginFailureReason === "unavailable"}
+                <p>{m.login_unavailable()}</p>
+              {:else if loginAttemptsRemaining === 0 && loginRetryAfterMinutes !== null}
                 <p>{m.login_too_many_attempts({ minutes: loginRetryAfterMinutes })}</p>
               {:else}
                 <p>{m.incorrect_credentials()}</p>

@@ -15,6 +15,10 @@ from starlette.datastructures import URL, Headers, MutableHeaders
 from starlette.responses import PlainTextResponse, Response
 from starlette.types import ASGIApp, Message, Receive, Scope, Send
 
+from eneo.main.logging import get_logger
+
+logger = get_logger(__name__)
+
 ALL_METHODS = ("DELETE", "GET", "HEAD", "OPTIONS", "PATCH", "POST", "PUT")
 SAFELISTED_HEADERS = {"Accept", "Accept-Language", "Content-Language", "Content-Type"}
 
@@ -108,6 +112,17 @@ class CORSMiddleware:
         if not await self.is_allowed_origin(
             origin=origin, request_headers=headers, request_url=URL(scope=scope)
         ):
+            # The refusal happens before routing and before the trace-id
+            # middleware, so without this line nothing in the log ties a
+            # caller's 400 to its unregistered origin. Only what identifies
+            # the request is logged: no headers, no body.
+            logger.warning(
+                "CORS origin refused: %s %s from origin %s",
+                method,
+                scope.get("path"),
+                origin,
+                extra={"origin": origin, "method": method, "path": scope.get("path")},
+            )
             response = PlainTextResponse(
                 "Disallowed CORS origin",
                 status_code=400,

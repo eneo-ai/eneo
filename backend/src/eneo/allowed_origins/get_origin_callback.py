@@ -145,18 +145,29 @@ async def get_origin(
 
                 if resolved is not None:
                     key = resolved.key
+                    state = compute_effective_state(
+                        revoked_at=key.revoked_at,
+                        suspended_at=key.suspended_at,
+                        expires_at=key.expires_at,
+                        rotation_grace_until=key.rotation_grace_until,
+                    )
+                    # A secret key identifies a server, not a browser page, and
+                    # policy forbids origin restrictions on it. The allowlist is
+                    # a browser control, so an active sk_ request passes whatever
+                    # Origin a proxy or framework attached. Any other state falls
+                    # through and stays fail-closed until authentication rejects
+                    # the key.
+                    if (
+                        ApiKeyType(key.key_type) == ApiKeyType.SK
+                        and state == ApiKeyState.ACTIVE
+                    ):
+                        return True
                     tenant_origins = await repo.get_by_tenant(key.tenant_id)
                     tenant_matches = _matches(
                         origin, [entry.url for entry in tenant_origins]
                     )
                     require_tenant_origin = (
                         await api_key_repo.tenant_requires_allowed_origin(key.tenant_id)
-                    )
-                    state = compute_effective_state(
-                        revoked_at=key.revoked_at,
-                        suspended_at=key.suspended_at,
-                        expires_at=key.expires_at,
-                        rotation_grace_until=key.rotation_grace_until,
                     )
                     key_matches = (
                         ApiKeyType(key.key_type) == ApiKeyType.PK
