@@ -240,6 +240,50 @@ backend/
 
 ---
 
+### Space persistence ownership
+
+A loaded Space is a read projection. It can omit invalid applications, deleted
+members, deprecated models and disabled MCP servers, and can include knowledge
+inherited from its organization. It is never a complete database snapshot and
+must not be written back as one.
+
+| Write owner | Responsibility |
+| --- | --- |
+| `SpaceRepository` | Space settings, individual user/group memberships, explicit model/server/capability selections |
+| `AssistantRepository` | One assistant, its prompt and explicit knowledge, attachment and tool selections |
+| `GroupChatRepository` | One group chat and explicit replacements of its assistant seats |
+| `GroupRepository` | Collection configuration and distribution to Spaces |
+| `WebsiteRepository` | Website configuration and distribution; crawl lifecycle remains with `CrawlRunRepository` |
+| App, service and integration repositories | Their existing resource lifecycles |
+
+Services authorize the operation and validate its requested values before
+passing explicit write intent to the owning repository. Omitted relationships
+are untouched. An explicitly submitted list replaces that relationship;
+`[]` clears it, including currently hidden targets. The shared association writer
+compares that explicit selection with stored rows and writes only differences.
+Unchanged rows keep their timestamps. Renaming a Space cannot delete an assistant
+or materialize inherited knowledge as a direct distribution.
+
+Replacement writes lock their parent in the request transaction. Assistant moves
+lock both Spaces in ID order, then the assistant; group chat seat replacements
+take the same Space lock before validating membership. Moves update ownership
+without deleting the assistant or its history. Concurrent changes to distinct
+resources do not overwrite each other. Two explicit replacements of the same
+relationship remain serialized, last-writer-wins operations; there is no
+client-visible optimistic version contract.
+
+The security classification preview reports affected IDs without editing the
+Space projection. A committed classification change explicitly removes
+incompatible stored model/server selections, including hidden ones. The default
+assistant is a supported group chat member through the API and is included when
+resolving seats.
+
+Malformed stored model options remain visible to operators through the
+[inspection and repair API](/docs/api#inspect-and-repair-invalid-model-options).
+No schema migration or automatic data normalization is required. Roll back by
+redeploying the previous application only if its aggregate-save defect is
+acceptable; previously deleted resources require restoration from a backup.
+
 ### Database (PostgreSQL + pgvector)
 
 **Technology:**

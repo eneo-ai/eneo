@@ -2,6 +2,7 @@ import logging
 from typing import TYPE_CHECKING
 
 from eneo.ai_models.completion_models.completion_model import ModelKwargs
+from eneo.assistants.assistant_update import AssistantUpdate
 from eneo.governance_policy.domain.policy_resolver import (
     select_effective_completion_model,
 )
@@ -53,11 +54,17 @@ class SpaceInitService:
         self.effective_config_service = effective_config_service
 
     async def _update_space_with_default_assistant(self, space: "Space"):
+        assert space.id is not None
+        space_id = space.id
+        await self.space_repo.lock(space_id)
+        space = await self.space_service.get_space(space_id)
+        if space.default_assistant is not None or space.default_assistant_load_failed:
+            return space
         default_assistant = await self.assistant_service.create_default_assistant(
             "Default", space
         )
-        space.add_assistant(default_assistant)
-        return await self.space_repo.update(space)
+        await self.assistant_repo.add(default_assistant)
+        return await self.space_service.get_space(space_id)
 
     async def _ensure_tenant_space(self) -> "Space":
         hub = await self.space_service.get_or_create_tenant_space()
@@ -135,7 +142,14 @@ class SpaceInitService:
             _unusable_reason(current),
             fallback.id,
         )
-        await self.assistant_repo.update(assistant)
+        await self.assistant_repo.apply_update(
+            assistant.id,
+            assistant.space_id,
+            AssistantUpdate(
+                completion_model_id=fallback.id,
+                completion_model_kwargs=ModelKwargs(),
+            ),
+        )
         return space
 
     async def _fallback_completion_model(

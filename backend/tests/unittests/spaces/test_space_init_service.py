@@ -2,10 +2,12 @@ from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock
 from uuid import uuid4
 
+from eneo.ai_models.completion_models.completion_model import ModelKwargs
 from eneo.spaces.space_init_service import SpaceInitService
 
 
 def _service(space):
+    space.id = uuid4()
     space_service = MagicMock()
     space_service.get_space = AsyncMock(return_value=space)
     assistant_service = MagicMock()
@@ -13,9 +15,10 @@ def _service(space):
         return_value=SimpleNamespace(id=uuid4())
     )
     space_repo = MagicMock()
-    space_repo.update = AsyncMock(side_effect=lambda s: s)
+    space_repo.lock = AsyncMock()
     assistant_repo = MagicMock()
-    assistant_repo.update = AsyncMock()
+    assistant_repo.apply_update = AsyncMock()
+    assistant_repo.add = AsyncMock()
     init_service = SpaceInitService(
         user=MagicMock(),
         space_service=space_service,
@@ -72,6 +75,7 @@ def _model(*, can_access=True, deleted_at=None, migrated_to_model_id=None):
 def _personal_space(*, current_model, space_models, org_default=None):
     assistant = SimpleNamespace(
         id=uuid4(),
+        space_id=uuid4(),
         is_default=True,
         completion_model=current_model,
         update=MagicMock(),
@@ -122,10 +126,13 @@ async def test_personal_space_assigns_default_model_when_assistant_has_none():
     assistant.update.assert_called_once()
     assert assistant.update.call_args.kwargs["completion_model"] is org_default
     assert "completion_model_kwargs" in assistant.update.call_args.kwargs
-    init_service.assistant_repo.update.assert_awaited_once_with(assistant)
+    init_service.assistant_repo.apply_update.assert_awaited_once()
+    args = init_service.assistant_repo.apply_update.await_args.args
+    assert args[:2] == (assistant.id, assistant.space_id)
+    assert args[2].completion_model_kwargs == ModelKwargs()
     # Only the assistant row is written; a full space rewrite would delete
     # sibling assistants the loader skipped as invalid.
-    init_service.space_repo.update.assert_not_awaited()
+    init_service.space_repo.lock.assert_not_awaited()
 
 
 async def test_personal_space_replaces_deleted_model():
@@ -139,7 +146,10 @@ async def test_personal_space_replaces_deleted_model():
     await init_service.get_personal_space()
 
     assert assistant.update.call_args.kwargs["completion_model"] is org_default
-    init_service.assistant_repo.update.assert_awaited_once_with(assistant)
+    init_service.assistant_repo.apply_update.assert_awaited_once()
+    args = init_service.assistant_repo.apply_update.await_args.args
+    assert args[:2] == (assistant.id, assistant.space_id)
+    assert args[2].completion_model_kwargs == ModelKwargs()
 
 
 async def test_personal_space_replaces_disabled_model():
@@ -153,7 +163,10 @@ async def test_personal_space_replaces_disabled_model():
     await init_service.get_personal_space()
 
     assert assistant.update.call_args.kwargs["completion_model"] is org_default
-    init_service.assistant_repo.update.assert_awaited_once_with(assistant)
+    init_service.assistant_repo.apply_update.assert_awaited_once()
+    args = init_service.assistant_repo.apply_update.await_args.args
+    assert args[:2] == (assistant.id, assistant.space_id)
+    assert args[2].completion_model_kwargs == ModelKwargs()
 
 
 async def test_personal_space_keeps_usable_model():
@@ -169,7 +182,7 @@ async def test_personal_space_keeps_usable_model():
     await init_service.get_personal_space()
 
     assistant.update.assert_not_called()
-    init_service.assistant_repo.update.assert_not_awaited()
+    init_service.assistant_repo.apply_update.assert_not_awaited()
 
 
 async def test_personal_space_without_usable_models_leaves_assistant_alone():
@@ -183,7 +196,7 @@ async def test_personal_space_without_usable_models_leaves_assistant_alone():
     await init_service.get_personal_space()
 
     assistant.update.assert_not_called()
-    init_service.assistant_repo.update.assert_not_awaited()
+    init_service.assistant_repo.apply_update.assert_not_awaited()
 
 
 async def test_personal_space_without_any_models_leaves_assistant_alone():
@@ -193,7 +206,7 @@ async def test_personal_space_without_any_models_leaves_assistant_alone():
     await init_service.get_personal_space()
 
     assistant.update.assert_not_called()
-    init_service.assistant_repo.update.assert_not_awaited()
+    init_service.assistant_repo.apply_update.assert_not_awaited()
 
 
 async def test_personal_space_policy_does_not_override_users_choice():
@@ -216,7 +229,7 @@ async def test_personal_space_policy_does_not_override_users_choice():
     await init_service.get_personal_space()
 
     assistant.update.assert_not_called()
-    init_service.assistant_repo.update.assert_not_awaited()
+    init_service.assistant_repo.apply_update.assert_not_awaited()
 
 
 async def test_personal_space_policy_stores_policy_default_when_model_missing():
@@ -239,7 +252,10 @@ async def test_personal_space_policy_stores_policy_default_when_model_missing():
     await init_service.get_personal_space()
 
     assert assistant.update.call_args.kwargs["completion_model"] is policy_default
-    init_service.assistant_repo.update.assert_awaited_once_with(assistant)
+    init_service.assistant_repo.apply_update.assert_awaited_once()
+    args = init_service.assistant_repo.apply_update.await_args.args
+    assert args[:2] == (assistant.id, assistant.space_id)
+    assert args[2].completion_model_kwargs == ModelKwargs()
 
 
 async def test_personal_space_policy_with_empty_whitelist_leaves_assistant_alone():
@@ -254,7 +270,7 @@ async def test_personal_space_policy_with_empty_whitelist_leaves_assistant_alone
     await init_service.get_personal_space()
 
     assistant.update.assert_not_called()
-    init_service.assistant_repo.update.assert_not_awaited()
+    init_service.assistant_repo.apply_update.assert_not_awaited()
 
 
 async def test_personal_space_policy_off_falls_back_to_org_default():

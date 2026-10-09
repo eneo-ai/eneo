@@ -30,6 +30,7 @@ async def test_stop_denies_access_without_cancelling_and_explains_permission() -
         space_service=SimpleNamespace(
             get_space_by_website=AsyncMock(return_value=SimpleNamespace())
         ),
+        website_repo=AsyncMock(),
         space_repo=SimpleNamespace(),
         crawl_run_repo=SimpleNamespace(
             one=AsyncMock(return_value=SimpleNamespace(website_id=website_id))
@@ -79,6 +80,7 @@ async def test_bulk_stop_only_cancels_active_websites() -> None:
     service = WebsiteCRUDService(
         user=SimpleNamespace(),
         space_service=space_service,
+        website_repo=AsyncMock(),
         space_repo=SimpleNamespace(),
         crawl_run_repo=crawl_run_repo,
         actor_manager=actor_manager,
@@ -105,6 +107,7 @@ async def test_bulk_stop_rolls_back_unexpected_failures() -> None:
                 side_effect=ConnectionError("database connection lost")
             )
         ),
+        website_repo=AsyncMock(),
         space_repo=SimpleNamespace(),
         crawl_run_repo=SimpleNamespace(),
         actor_manager=SimpleNamespace(),
@@ -121,6 +124,7 @@ async def test_bulk_run_reports_expected_failure_with_website_identity() -> None
     service = WebsiteCRUDService(
         user=SimpleNamespace(),
         space_service=SimpleNamespace(),
+        website_repo=AsyncMock(),
         space_repo=SimpleNamespace(),
         crawl_run_repo=SimpleNamespace(),
         actor_manager=SimpleNamespace(),
@@ -146,6 +150,7 @@ async def test_bulk_run_does_not_hide_infrastructure_failures() -> None:
     service = WebsiteCRUDService(
         user=SimpleNamespace(),
         space_service=SimpleNamespace(),
+        website_repo=AsyncMock(),
         space_repo=SimpleNamespace(),
         crawl_run_repo=SimpleNamespace(),
         actor_manager=SimpleNamespace(),
@@ -187,6 +192,7 @@ async def test_delete_preserves_source_while_crawl_cleanup_is_pending() -> None:
     service = WebsiteCRUDService(
         user=SimpleNamespace(),
         space_service=space_service,
+        website_repo=AsyncMock(),
         space_repo=space_repo,
         crawl_run_repo=crawl_run_repo,
         actor_manager=actor_manager,
@@ -211,6 +217,7 @@ async def test_bulk_delete_reports_stale_sources_without_failing_the_batch() -> 
     service = WebsiteCRUDService(
         user=SimpleNamespace(),
         space_service=SimpleNamespace(),
+        website_repo=AsyncMock(),
         space_repo=SimpleNamespace(),
         crawl_run_repo=crawl_run_repo,
         actor_manager=SimpleNamespace(),
@@ -256,6 +263,7 @@ async def test_bulk_delete_stops_active_crawl_and_keeps_source_selected_for_retr
     service = WebsiteCRUDService(
         user=SimpleNamespace(),
         space_service=SimpleNamespace(),
+        website_repo=AsyncMock(),
         space_repo=SimpleNamespace(),
         crawl_run_repo=crawl_run_repo,
         actor_manager=SimpleNamespace(),
@@ -285,6 +293,7 @@ async def test_bulk_delete_reports_an_active_crawl_admitted_during_deletion() ->
     service = WebsiteCRUDService(
         user=SimpleNamespace(),
         space_service=SimpleNamespace(),
+        website_repo=AsyncMock(),
         space_repo=SimpleNamespace(),
         crawl_run_repo=SimpleNamespace(
             get_active_for_website=AsyncMock(return_value=None)

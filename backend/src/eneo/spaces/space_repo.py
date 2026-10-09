@@ -1,17 +1,21 @@
 from collections.abc import Sequence
 from copy import deepcopy
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Any, Optional, Protocol
+from typing import TYPE_CHECKING, Any, Optional
 from uuid import UUID
 
 import sqlalchemy as sa
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.exc import IntegrityError
-from sqlalchemy.orm import aliased, selectinload
+from sqlalchemy.orm import selectinload
 from sqlalchemy.sql.dml import ReturningInsert, ReturningUpdate
 
 from eneo.actors.actors.space_actor import SpaceAccessFacts, SpaceRoleFact
 from eneo.authentication.auth_models import ApiKeyScopeType
+from eneo.database.association_writes import (
+    replace_association_ids,
+    replace_association_values,
+)
 from eneo.database.database import AsyncSession
 from eneo.database.tables.ai_models_table import (
     CompletionModels,
@@ -25,12 +29,10 @@ from eneo.database.tables.assistant_template_table import AssistantTemplates
 from eneo.database.tables.capabilities_table import SpaceCapabilities
 from eneo.database.tables.collections_table import CollectionsTable
 from eneo.database.tables.group_chats_table import (
-    GroupChatsAssistantsMapping,
     GroupChatsTable,
 )
 from eneo.database.tables.groups_spaces_table import GroupsSpaces
 from eneo.database.tables.info_blobs_table import InfoBlobs, active_info_blob_version
-from eneo.database.tables.info_blobs_table import InfoBlobs as InfoBlobsTable
 from eneo.database.tables.integration_knowledge_spaces_table import (
     IntegrationKnowledgesSpaces,
 )
@@ -81,10 +83,11 @@ from eneo.main.exceptions import (
 )
 from eneo.main.logging import get_logger
 from eneo.mcp_servers.domain.entities.mcp_server import GENERAL_PURPOSE
-from eneo.spaces.api.space_models import SpaceGroupMember, SpaceMember
+from eneo.spaces.api.space_models import SpaceGroupMember, SpaceMember, SpaceRoleValue
 from eneo.spaces.space import Space
 from eneo.spaces.space_applications_projection import SpaceApplicationsProjection
 from eneo.spaces.space_factory import SpaceFactory
+from eneo.spaces.space_update import SpaceUpdate
 from eneo.spaces.utils.space_utils import effective_space_ids_for
 from eneo.user_groups.user_group import UserGroupState
 
@@ -98,35 +101,20 @@ class AssistantMCPServerProjection:
     mcp_servers: "tuple[MCPServer, ...]"
 
 
-class _HasId(Protocol):
-    """Minimal protocol for objects that carry an `.id` UUID (used by _set_*_models helpers)."""
-
-    id: UUID
-
-
 if TYPE_CHECKING:
-    from eneo.apps import AppRepository
-    from eneo.assistants.assistant import Assistant
-    from eneo.assistants.assistant_repo import AssistantRepository
-    from eneo.collections.domain.collection import Collection
     from eneo.completion_models.domain.completion_model_repo import (
         CompletionModelRepository,
     )
     from eneo.embedding_models.domain.embedding_model_repo import (
         EmbeddingModelRepository,
     )
-    from eneo.group_chat.domain.entities.group_chat import GroupChat
     from eneo.info_blobs.info_blob import InfoBlobInDB
     from eneo.mcp_servers.domain.entities.mcp_server import MCPServer
-    from eneo.transcription_models.domain.transcription_model import (
-        TranscriptionModel,
-    )
     from eneo.transcription_models.domain.transcription_model_repo import (
         TranscriptionModelRepository,
     )
     from eneo.users.user import UserInDB
     from eneo.websites.domain.http_auth_credentials import HttpAuthCredentials
-    from eneo.websites.domain.website import Website
     from eneo.websites.infrastructure.http_auth_encryption import (
         HttpAuthEncryptionService,
     )
@@ -220,8 +208,6 @@ class SpaceRepository:
         user: "UserInDB",
         factory: SpaceFactory,
         file_content_loader: FileContentLoader,
-        app_repo: Optional["AppRepository"],
-        assistant_repo: "AssistantRepository",
         completion_model_repo: "CompletionModelRepository",
         transcription_model_repo: "TranscriptionModelRepository",
         embedding_model_repo: "EmbeddingModelRepository",
@@ -232,11 +218,9 @@ class SpaceRepository:
         self.user = user
         self.factory = factory
         self.file_content_loader = file_content_loader
-        self.app_repo = app_repo
         self.completion_model_repo = completion_model_repo
         self.transcription_model_repo = transcription_model_repo
         self.embedding_model_repo = embedding_model_repo
-        self.assistant_repo = assistant_repo
         self.http_auth_encryption = http_auth_encryption
 
     async def _load_application_attachments(
@@ -367,551 +351,200 @@ class SpaceRepository:
         # unpack explicitly so pyright sees tuple[CollectionsTable, int].
         return [(row[0], row[1]) for row in rows]
 
-    async def _get_completion_models(
-        self, space_in_db: Spaces
-    ) -> Sequence[CompletionModels]:
-        space_id = space_in_db.id
+    async def lock(self, space_id: UUID) -> None:
+        """Serialize related settings/membership writes within the caller's transaction."""
+        found = await self.session.scalar(
+            sa.select(Spaces.id)
+            .where(Spaces.id == space_id, Spaces.tenant_id == self.user.tenant_id)
+            .with_for_update()
+        )
+        if found is None:
+            raise NotFoundException("Space not found")
 
-        cm = aliased(CompletionModels)
-        scm = aliased(SpacesCompletionModels)
-
-        # Settings are now directly on the model table
-        stmt = (
-            sa.select(cm)
-            .join(scm, scm.completion_model_id == cm.id)
-            .filter(scm.space_id == space_id)
-            .order_by(cm.org, cm.created_at, cm.nickname)
+    async def add_member(self, space_id: UUID, member: SpaceMember) -> None:
+        await self.lock(space_id)
+        await self.session.execute(
+            pg_insert(SpacesUsers)
+            .values(space_id=space_id, user_id=member.id, role=member.role.value)
+            .on_conflict_do_nothing()
         )
 
-        res = await self.session.execute(stmt)
-        return res.scalars().all()
-
-    async def _get_embedding_models(
-        self, space_in_db: Spaces
-    ) -> Sequence[EmbeddingModels]:
-        space_id = space_in_db.id
-
-        em = aliased(EmbeddingModels)
-        sem = aliased(SpacesEmbeddingModels)
-
-        # Settings are now directly on the model table
-        stmt = (
-            sa.select(em)
-            .join(sem, sem.embedding_model_id == em.id)
-            .filter(sem.space_id == space_id)
-        )
-
-        res = await self.session.execute(stmt)
-        return res.scalars().all()
-
-    async def _get_transcription_models(
-        self, space_in_db: Spaces
-    ) -> Sequence[TranscriptionModels]:
-        space_id = space_in_db.id
-
-        tm = aliased(TranscriptionModels)
-        stm = aliased(SpacesTranscriptionModels)
-
-        # Settings are now directly on the model table
-        stmt = (
-            sa.select(tm)
-            .join(stm, stm.transcription_model_id == tm.id)
-            .filter(stm.space_id == space_id)
-        )
-
-        res = await self.session.execute(stmt)
-        return res.scalars().all()
-
-    async def _set_embedding_models(
-        self, space_in_db: Spaces, embedding_models: Sequence[_HasId]
-    ):
-        # Delete all
-        stmt = sa.delete(SpacesEmbeddingModels).where(
-            SpacesEmbeddingModels.space_id == space_in_db.id
-        )
-        await self.session.execute(stmt)
-
-        if embedding_models:
-            stmt = sa.insert(SpacesEmbeddingModels).values(
-                [
-                    dict(embedding_model_id=embedding_model.id, space_id=space_in_db.id)
-                    for embedding_model in embedding_models
-                ]
+    async def remove_member(self, space_id: UUID, user_id: UUID) -> None:
+        await self.lock(space_id)
+        await self.session.execute(
+            sa.delete(SpacesUsers).where(
+                SpacesUsers.space_id == space_id, SpacesUsers.user_id == user_id
             )
-            await self.session.execute(stmt)
-
-    async def _set_completion_models(
-        self, space_in_db: Spaces, completion_models: Sequence[_HasId]
-    ):
-        # Delete all
-        stmt = sa.delete(SpacesCompletionModels).where(
-            SpacesCompletionModels.space_id == space_in_db.id
         )
-        await self.session.execute(stmt)
 
-        if completion_models:
-            stmt = sa.insert(SpacesCompletionModels).values(
-                [
-                    dict(
-                        completion_model_id=completion_model.id, space_id=space_in_db.id
-                    )
-                    for completion_model in completion_models
-                ]
-            )
-            await self.session.execute(stmt)
-
-    async def _set_transcription_models(
-        self,
-        space_in_db: Spaces,
-        transcription_models: "Sequence[TranscriptionModel]",
-    ):
-        # Delete all
-        stmt = sa.delete(SpacesTranscriptionModels).where(
-            SpacesTranscriptionModels.space_id == space_in_db.id
+    async def change_member_role(
+        self, space_id: UUID, user_id: UUID, role: SpaceRoleValue
+    ) -> None:
+        await self.lock(space_id)
+        await self.session.execute(
+            sa.update(SpacesUsers)
+            .where(SpacesUsers.space_id == space_id, SpacesUsers.user_id == user_id)
+            .values(role=role.value)
         )
-        await self.session.execute(stmt)
 
-        if transcription_models:
-            stmt = sa.insert(SpacesTranscriptionModels).values(
-                [
-                    dict(transcription_model_id=model.id, space_id=space_in_db.id)
-                    for model in transcription_models
-                ]
-            )
-            await self.session.execute(stmt)
-
-    async def _set_mcp_servers(
-        self, space_in_db: Spaces, mcp_servers: list["MCPServer"]
-    ):
-        # Delete all
-        stmt = sa.delete(SpacesMCPServers).where(
-            SpacesMCPServers.space_id == space_in_db.id
+    async def add_group_member(self, space_id: UUID, member: SpaceGroupMember) -> None:
+        await self.lock(space_id)
+        await self.session.execute(
+            pg_insert(SpacesUserGroups)
+            .values(space_id=space_id, user_group_id=member.id, role=member.role.value)
+            .on_conflict_do_nothing()
         )
-        await self.session.execute(stmt)
 
-        if mcp_servers:
-            stmt = sa.insert(SpacesMCPServers).values(
-                [
-                    dict(mcp_server_id=server.id, space_id=space_in_db.id)
-                    for server in mcp_servers
-                ]
+    async def remove_group_member(self, space_id: UUID, group_id: UUID) -> None:
+        await self.lock(space_id)
+        await self.session.execute(
+            sa.delete(SpacesUserGroups).where(
+                SpacesUserGroups.space_id == space_id,
+                SpacesUserGroups.user_group_id == group_id,
             )
-            await self.session.execute(stmt)
-
-    async def _set_mcp_tools(
-        self,
-        space_in_db: Spaces,
-        tool_settings: list[tuple[UUID, bool]],
-        valid_server_ids: list[UUID],
-    ):
-        """Set space-level tool enablement settings.
-
-        Args:
-            space_in_db: The space database object
-            tool_settings: List of (tool_id, is_enabled) tuples
-            valid_server_ids: List of MCP server IDs that are selected for this space
-
-        Raises:
-            BadRequestException: If any tool_id doesn't belong to the selected servers
-        """
-        # Delete all existing settings
-        stmt = sa.delete(SpacesMCPServerTools).where(
-            SpacesMCPServerTools.space_id == space_in_db.id
         )
-        await self.session.execute(stmt)
 
-        if tool_settings:
-            # Last-wins dedupe: the composite PK (space_id, tool_id) makes a
-            # duplicated tool in the payload a 500 otherwise.
-            tool_settings = list({t[0]: t for t in tool_settings}.values())
-            tool_ids = [t[0] for t in tool_settings]
-
-            # Validate all tools belong to selected servers
-            valid_query = (
-                sa.select(MCPServerToolsTable.id)
-                .where(MCPServerToolsTable.id.in_(tool_ids))
-                .where(MCPServerToolsTable.mcp_server_id.in_(valid_server_ids))
-            )
-            result = await self.session.execute(valid_query)
-            valid_tool_ids = set(row[0] for row in result.fetchall())
-
-            invalid_ids = set(tool_ids) - valid_tool_ids
-            if invalid_ids:
-                raise BadRequestException(f"Invalid tool IDs: {invalid_ids}")
-
-            stmt = sa.insert(SpacesMCPServerTools).values(
-                [
-                    dict(
-                        space_id=space_in_db.id,
-                        mcp_server_tool_id=tool_id,
-                        is_enabled=is_enabled,
-                    )
-                    for tool_id, is_enabled in tool_settings
-                ]
-            )
-            await self.session.execute(stmt)
-
-    async def _set_members(self, space_in_db: Spaces, members: dict[UUID, SpaceMember]):
-        # Delete all
-        stmt = sa.delete(SpacesUsers).where(SpacesUsers.space_id == space_in_db.id)
-        await self.session.execute(stmt)
-
-        # Add members
-        if members:
-            spaces_users = [
-                dict(
-                    space_id=space_in_db.id,
-                    user_id=member.id,
-                    role=member.role.value,
-                )
-                for member in members.values()
-            ]
-
-            stmt = sa.insert(SpacesUsers).values(spaces_users)
-            await self.session.execute(stmt)
-
-        # This allows the newly added members to be reflected in the space
-        await self.session.refresh(space_in_db)
-
-    async def _set_group_members(
-        self, space_in_db: Spaces, group_members: dict[UUID, SpaceGroupMember]
-    ):
-        """Persist group members for a space."""
-        # Delete all existing group members
-        stmt = sa.delete(SpacesUserGroups).where(
-            SpacesUserGroups.space_id == space_in_db.id
-        )
-        await self.session.execute(stmt)
-
-        # Add group members
-        if group_members:
-            spaces_user_groups = [
-                dict(
-                    space_id=space_in_db.id,
-                    user_group_id=group_member.id,
-                    role=group_member.role.value,
-                )
-                for group_member in group_members.values()
-            ]
-
-            stmt = sa.insert(SpacesUserGroups).values(spaces_user_groups)
-            await self.session.execute(stmt)
-
-        # Refresh to reflect changes
-        await self.session.refresh(space_in_db)
-
-    async def _set_assistants(self, space_in_db: Spaces, assistants: list["Assistant"]):
-        new_assistants = [assistant for assistant in assistants if assistant.is_new]
-        existing_assistants = [
-            assistant for assistant in assistants if not assistant.is_new
-        ]
-
-        for assistant in new_assistants:
-            assistant.space_id = space_in_db.id  # type: ignore[attr-defined]
-            await self.assistant_repo.add(assistant)
-
-        for assistant in existing_assistants:
-            assistant.space_id = space_in_db.id  # type: ignore[attr-defined]
-            await self.assistant_repo.update(assistant)
-
-        # Delete all assistants that are not in the list
-        # Don't delete the default assistant
-        stmt = (
-            sa.delete(Assistants)
-            .where(Assistants.space_id == space_in_db.id)
-            .where(Assistants.id.notin_([assistant.id for assistant in assistants]))
-            .where(Assistants.is_default == False)  # noqa
-        )
-        await self.session.execute(stmt)
-
-    async def _set_default_assistant(
-        self, space_in_db: Spaces, assistant: Optional["Assistant"]
-    ):
-        if assistant is None:
-            return
-
-        # Unset all others
-        stmt = (
-            sa.update(Assistants)
-            .values(is_default=False)
-            .where(Assistants.space_id == space_in_db.id)
-            .where(Assistants.id != assistant.id)
-        )
-        await self.session.execute(stmt)
-
-        # Set the default to default
-        stmt = (
-            sa.update(Assistants)
-            .values(is_default=True)
-            .where(Assistants.id == assistant.id)
-        )
-        await self.session.execute(stmt)
-
-    async def _set_group_chats(
-        self, space_in_db: Spaces, group_chats: list["GroupChat"]
-    ):
-        new_group_chats = [
-            group_chat for group_chat in group_chats if group_chat.is_new
-        ]
-        existing_group_chats = [
-            group_chat for group_chat in group_chats if not group_chat.is_new
-        ]
-
-        if new_group_chats:
-            stmt = sa.insert(GroupChatsTable).values(
-                [
-                    dict(
-                        id=group_chat.id,
-                        name=group_chat.name,
-                        space_id=space_in_db.id,
-                        user_id=group_chat.user_id,
-                        type="group-chat",
-                        allow_mentions=group_chat.allow_mentions,
-                        show_response_label=group_chat.show_response_label,
-                        published=group_chat.published,
-                        insight_enabled=group_chat.insight_enabled,
-                        icon_id=group_chat.icon_id,
-                    )
-                    for group_chat in new_group_chats
-                ]
-            )
-            await self.session.execute(stmt)
-
-        for group_chat in existing_group_chats:
-            stmt = (
-                sa.update(GroupChatsTable)
-                .values(
-                    name=group_chat.name,
-                    space_id=space_in_db.id,
-                    allow_mentions=group_chat.allow_mentions,
-                    show_response_label=group_chat.show_response_label,
-                    published=group_chat.published,
-                    insight_enabled=group_chat.insight_enabled,
-                    metadata_json=group_chat.metadata_json,
-                    icon_id=group_chat.icon_id,
-                )
-                .where(GroupChatsTable.id == group_chat.id)
-            )
-
-            await self.session.execute(stmt)
-
-            # Delete all group chat assistants
-            stmt = sa.delete(GroupChatsAssistantsMapping).where(
-                GroupChatsAssistantsMapping.group_chat_id == group_chat.id
-            )
-            await self.session.execute(stmt)
-
-            # Add new group chat assistants
-            if group_chat.assistants:
-                stmt = sa.insert(GroupChatsAssistantsMapping).values(
-                    [
-                        dict(
-                            group_chat_id=group_chat.id,
-                            assistant_id=group_chat_assistant.assistant.id,
-                            user_description=group_chat_assistant.user_description,
-                        )
-                        for group_chat_assistant in group_chat.assistants
-                    ]
-                )
-                await self.session.execute(stmt)
-
-        # Delete all group chats that are not in the list
-        stmt = (
-            sa.delete(GroupChatsTable)
-            .where(GroupChatsTable.space_id == space_in_db.id)
+    async def change_group_member_role(
+        self, space_id: UUID, group_id: UUID, role: SpaceRoleValue
+    ) -> None:
+        await self.lock(space_id)
+        await self.session.execute(
+            sa.update(SpacesUserGroups)
             .where(
-                GroupChatsTable.id.notin_([group_chat.id for group_chat in group_chats])
+                SpacesUserGroups.space_id == space_id,
+                SpacesUserGroups.user_group_id == group_id,
             )
+            .values(role=role.value)
         )
-        await self.session.execute(stmt)
 
-    async def _set_collections(
-        self, space_in_db: Spaces, collections: list["Collection"]
-    ):
-        def _set_size_subquery(collection: "Collection"):
-            return (
-                sa.select(sa.func.coalesce(sa.func.sum(InfoBlobsTable.size), 0))
-                .where(
-                    InfoBlobsTable.group_id == collection.id,
-                    active_info_blob_version(),
-                )
-                .scalar_subquery()
-            )
-
-        # Skapa nya collections (owner_space sätts EN gång vid skapande)
-        new_collections = [c for c in collections if c.is_new]
-        if new_collections:
-            stmt = sa.insert(CollectionsTable).values(
-                [
-                    dict(
-                        id=c.id,
-                        name=c.name,
-                        size=_set_size_subquery(c),
-                        tenant_id=c.tenant_id,
-                        user_id=c.user_id,
-                        embedding_model_id=c.embedding_model.id,
-                        space_id=c.space_id,  # Space_id blir som owner_space_id
-                    )
-                    for c in new_collections
-                ]
-            )
-            await self.session.execute(stmt)
-
-        # Uppdatera metadata på befintliga förutom space_id (Ägarbyte görs via annan metod)
-        existing = [c for c in collections if not c.is_new]
-        for c in existing:
-            stmt = (
-                sa.update(CollectionsTable)
-                .values(
-                    name=c.name,
-                    size=_set_size_subquery(c),
-                    embedding_model_id=c.embedding_model.id,
-                )
-                .where(CollectionsTable.id == c.id)
-            )
-            await self.session.execute(stmt)
-
-        res = await self.session.execute(
-            sa.select(GroupsSpaces.collection_id).where(
-                GroupsSpaces.space_id == space_in_db.id
-            )
+    async def enable_completion_model(self, space_id: UUID, model_id: UUID) -> None:
+        await self.lock(space_id)
+        await self.session.execute(
+            pg_insert(SpacesCompletionModels)
+            .values(space_id=space_id, completion_model_id=model_id)
+            .on_conflict_do_nothing()
         )
-        current_ids = {row[0] for row in res.all()}
 
-        desired_ids = {c.id for c in collections}
-
-        to_add = desired_ids - current_ids
-        to_remove = current_ids - desired_ids
-
-        if to_add:
-            ins = pg_insert(GroupsSpaces).values(
-                [dict(collection_id=cid, space_id=space_in_db.id) for cid in to_add]
-            )
-            ins = ins.on_conflict_do_nothing(
-                index_elements=[GroupsSpaces.collection_id, GroupsSpaces.space_id]
-            )
-            await self.session.execute(ins)
-
-        if to_remove:
+    async def update_settings(self, space_id: UUID, change: SpaceUpdate) -> None:
+        await self.lock(space_id)
+        values = change.scalar_values()
+        if values:
             await self.session.execute(
-                sa.delete(GroupsSpaces).where(
-                    sa.and_(
-                        GroupsSpaces.space_id == space_in_db.id,
-                        GroupsSpaces.collection_id.in_(to_remove),
+                sa.update(Spaces).where(Spaces.id == space_id).values(**values)
+            )
+        if change.completion_model_ids is not None:
+            await replace_association_ids(
+                self.session,
+                SpacesCompletionModels,
+                SpacesCompletionModels.space_id,
+                space_id,
+                SpacesCompletionModels.completion_model_id,
+                change.completion_model_ids,
+            )
+        if change.embedding_model_ids is not None:
+            await replace_association_ids(
+                self.session,
+                SpacesEmbeddingModels,
+                SpacesEmbeddingModels.space_id,
+                space_id,
+                SpacesEmbeddingModels.embedding_model_id,
+                change.embedding_model_ids,
+            )
+        if change.transcription_model_ids is not None:
+            await replace_association_ids(
+                self.session,
+                SpacesTranscriptionModels,
+                SpacesTranscriptionModels.space_id,
+                space_id,
+                SpacesTranscriptionModels.transcription_model_id,
+                change.transcription_model_ids,
+            )
+        if change.mcp_server_ids is not None:
+            await replace_association_ids(
+                self.session,
+                SpacesMCPServers,
+                SpacesMCPServers.space_id,
+                space_id,
+                SpacesMCPServers.mcp_server_id,
+                change.mcp_server_ids,
+            )
+        if change.enabled_capabilities is not None:
+            await replace_association_ids(
+                self.session,
+                SpaceCapabilities,
+                SpaceCapabilities.space_id,
+                space_id,
+                SpaceCapabilities.purpose,
+                change.enabled_capabilities,
+            )
+        if change.minimum_security_level is not None:
+            compatible = sa.select(SecurityClassificationDBModel.id).where(
+                SecurityClassificationDBModel.tenant_id == self.user.tenant_id,
+                SecurityClassificationDBModel.security_level
+                >= change.minimum_security_level,
+            )
+            for mapping, target, model in (
+                (
+                    SpacesCompletionModels,
+                    SpacesCompletionModels.completion_model_id,
+                    CompletionModels,
+                ),
+                (
+                    SpacesEmbeddingModels,
+                    SpacesEmbeddingModels.embedding_model_id,
+                    EmbeddingModels,
+                ),
+                (
+                    SpacesTranscriptionModels,
+                    SpacesTranscriptionModels.transcription_model_id,
+                    TranscriptionModels,
+                ),
+                (SpacesMCPServers, SpacesMCPServers.mcp_server_id, MCPServersTable),
+            ):
+                incompatible = sa.select(model.id).where(
+                    sa.or_(
+                        model.security_classification_id.is_(None),
+                        model.security_classification_id.not_in(compatible),
+                    )
+                )
+                if model is MCPServersTable:
+                    # Function markers are governed through the resolved
+                    # provider; preserve the domain's classification rule.
+                    incompatible = incompatible.where(
+                        MCPServersTable.purpose == "general"
+                    )
+                await self.session.execute(
+                    sa.delete(mapping).where(
+                        mapping.space_id == space_id,
+                        target.in_(incompatible),
+                    )
+                )
+        if change.mcp_tools is not None:
+            selected_servers = sa.select(SpacesMCPServers.mcp_server_id).where(
+                SpacesMCPServers.space_id == space_id
+            )
+            valid = set(
+                await self.session.scalars(
+                    sa.select(MCPServerToolsTable.id).where(
+                        MCPServerToolsTable.mcp_server_id.in_(selected_servers),
+                        MCPServerToolsTable.id.in_(
+                            [key for key, _ in change.mcp_tools]
+                        ),
                     )
                 )
             )
-
-    async def _set_websites(self, space_in_db: Spaces, websites: list["Website"]):
-        """Persist websites with encrypted auth credentials.
-
-        Why: Repository is the encryption boundary. Domain entities have plaintext
-        credentials, but database gets encrypted values.
-        """
-
-        def _set_size_subquery(website: "Website"):
-            return (
-                sa.select(sa.func.coalesce(sa.func.sum(InfoBlobsTable.size), 0))
-                .where(
-                    InfoBlobsTable.website_id == website.id,
-                    active_info_blob_version(),
+            if {key for key, _ in change.mcp_tools} - valid:
+                raise BadRequestException(
+                    "Tool is not assigned to the space's MCP servers"
                 )
-                .scalar_subquery()
-            )
-
-        def _prepare_auth_fields(website: "Website") -> dict[str, str | None]:
-            """Encrypt HTTP auth credentials if present."""
-            if website.http_auth:
-                username, encrypted_password, auth_domain = (
-                    self.http_auth_encryption.encrypt_credentials(website.http_auth)
-                )
-                return {
-                    "http_auth_username": username,
-                    "encrypted_auth_password": encrypted_password,
-                    "http_auth_domain": auth_domain,
-                }
-            else:
-                return {
-                    "http_auth_username": None,
-                    "encrypted_auth_password": None,
-                    "http_auth_domain": None,
-                }
-
-        new_websites = [website for website in websites if website.is_new]
-        existing_websites = [website for website in websites if not website.is_new]
-
-        if new_websites:
-            values: list[dict[str, object]] = []
-            for website in new_websites:
-                auth_fields = _prepare_auth_fields(website)
-                values.append(
-                    dict(
-                        id=website.id,
-                        name=website.name,
-                        url=website.url,
-                        download_files=website.download_files,
-                        crawl_type=website.crawl_type,
-                        update_interval=website.update_interval,
-                        size=_set_size_subquery(website),
-                        tenant_id=website.tenant_id,
-                        user_id=website.user_id,
-                        embedding_model_id=website.embedding_model.id,
-                        space_id=space_in_db.id,
-                        **auth_fields,
-                    )
-                )
-            stmt = sa.insert(WebsitesTable).values(values)
-            await self.session.execute(stmt)
-
-        for website in existing_websites:
-            auth_fields = _prepare_auth_fields(website)
-            stmt = (
-                sa.update(WebsitesTable)
-                .values(
-                    name=website.name,
-                    url=website.url,
-                    download_files=website.download_files,
-                    crawl_type=website.crawl_type,
-                    update_interval=website.update_interval,
-                    size=_set_size_subquery(website),
-                    embedding_model_id=website.embedding_model.id,
-                    **auth_fields,
-                )
-                .where(WebsitesTable.id == website.id)
-            )
-            await self.session.execute(stmt)
-
-        res = await self.session.execute(
-            sa.select(WebsitesSpaces.website_id).where(
-                WebsitesSpaces.space_id == space_in_db.id
-            )
-        )
-        current_ids = {row[0] for row in res.all()}
-        desired_ids = {w.id for w in websites}
-
-        to_add = desired_ids - current_ids
-        to_remove = current_ids - desired_ids
-
-        if to_add:
-            ins = (
-                pg_insert(WebsitesSpaces)
-                .values(
-                    [dict(website_id=wid, space_id=space_in_db.id) for wid in to_add]
-                )
-                .on_conflict_do_nothing(
-                    index_elements=[WebsitesSpaces.website_id, WebsitesSpaces.space_id]
-                )
-            )
-            await self.session.execute(ins)
-
-        if to_remove:
-            await self.session.execute(
-                sa.delete(WebsitesSpaces).where(
-                    sa.and_(
-                        WebsitesSpaces.space_id == space_in_db.id,
-                        WebsitesSpaces.website_id.in_(to_remove),
-                    )
-                )
+            await replace_association_values(
+                self.session,
+                SpacesMCPServerTools,
+                SpacesMCPServerTools.space_id,
+                space_id,
+                SpacesMCPServerTools.mcp_server_tool_id,
+                SpacesMCPServerTools.is_enabled,
+                dict(change.mcp_tools),
             )
 
     async def _load_assistant_mcp_server_tools_with_overrides(
@@ -1165,6 +798,7 @@ class SpaceRepository:
     async def _get_assistants(self, space_id: UUID) -> Sequence[Assistants]:
         stmt = (
             sa.select(Assistants)
+            .execution_options(populate_existing=True)
             .where(Assistants.space_id == space_id)
             .options(
                 selectinload(Assistants.assistant_websites),
@@ -1231,6 +865,7 @@ class SpaceRepository:
         # Fetch all services for the space
         stmt = (
             sa.select(Services)
+            .execution_options(populate_existing=True)
             .where(Services.space_id == space_id)
             .options(
                 selectinload(Services.service_groups),
@@ -1248,6 +883,7 @@ class SpaceRepository:
         # Fetch all group chats for the space
         stmt = (
             sa.select(GroupChatsTable)
+            .execution_options(populate_existing=True)
             .where(GroupChatsTable.space_id == space_id)
             .options(selectinload(GroupChatsTable.group_chat_assistants))
         )
@@ -1433,6 +1069,7 @@ class SpaceRepository:
     async def _get_apps(self, space_id: UUID) -> Sequence[Apps]:
         stmt = (
             sa.select(Apps)
+            .execution_options(populate_existing=True)
             .where(Apps.space_id == space_id)
             .options(
                 selectinload(Apps.input_fields),
@@ -1630,7 +1267,9 @@ class SpaceRepository:
         for option in self._options():
             query = query.options(option)
 
-        return await self.session.scalar(query)
+        return await self.session.scalar(
+            query.execution_options(populate_existing=True)
+        )
 
     async def _get_records_with_options(
         self, query: sa.Select[tuple[Spaces]]
@@ -1638,7 +1277,9 @@ class SpaceRepository:
         for option in self._options():
             query = query.options(option)
 
-        result = await self.session.scalars(query)
+        result = await self.session.scalars(
+            query.execution_options(populate_existing=True)
+        )
         return result.all()
 
     async def add(self, space: Space) -> Space:
@@ -1660,20 +1301,22 @@ class SpaceRepository:
             raise UniqueException("Users can only have one personal space") from e
 
         assert entry_in_db is not None
-        entry_in_db.capabilities = [
-            SpaceCapabilities(purpose=p)
-            for p in sorted(set(space.enabled_capabilities))
-        ]
-        await self._set_completion_models(entry_in_db, space.completion_models)
-        await self._set_embedding_models(entry_in_db, space.embedding_models)
-        await self._set_transcription_models(entry_in_db, space.transcription_models)
-        await self._set_mcp_servers(entry_in_db, space.mcp_servers)
-        await self._set_members(entry_in_db, space.members)
-        await self._set_group_members(entry_in_db, space.group_members)
-        await self._set_default_assistant(entry_in_db, space.default_assistant)
-        await self._set_collections(entry_in_db, space.collections)
-        await self._set_websites(entry_in_db, space.websites)
-        await self._set_group_chats(entry_in_db, space.group_chats)
+        # Creation seeds only Space-owned settings. Child resources have their
+        # own create operations, so even initialization cannot reconcile them.
+        await self.update_settings(
+            entry_in_db.id,
+            SpaceUpdate(
+                completion_model_ids=[m.id for m in space.completion_models],
+                embedding_model_ids=[m.id for m in space.embedding_models],
+                transcription_model_ids=[m.id for m in space.transcription_models],
+                mcp_server_ids=[server.id for server in space.mcp_servers],
+                enabled_capabilities=space.enabled_capabilities,
+            ),
+        )
+        for member in space.members.values():
+            await self.add_member(entry_in_db.id, member)
+        for group_member in space.group_members.values():
+            await self.add_group_member(entry_in_db.id, group_member)
         return await self.one(id=entry_in_db.id)
 
     def _in_caller_tenant(
@@ -1749,6 +1392,7 @@ class SpaceRepository:
         assistants = (
             await self.session.scalars(
                 sa.select(Assistants)
+                .execution_options(populate_existing=True)
                 .where(Assistants.space_id == id)
                 .order_by(Assistants.created_at)
             )
@@ -1780,56 +1424,6 @@ class SpaceRepository:
             services_in_db=services,
             completion_models=completion_models,
         )
-
-    async def update(
-        self, space: Space, mcp_tool_settings: list[tuple[UUID, bool]] | None = None
-    ) -> Space:
-        query = (
-            sa.update(Spaces)
-            .values(
-                name=space.name,
-                description=space.description,
-                security_classification_id=(
-                    space.security_classification.id
-                    if space.security_classification is not None
-                    else None
-                ),
-                data_retention_days=space.data_retention_days,
-                icon_id=space.icon_id,
-            )
-            .where(Spaces.id == space.id)
-            .returning(Spaces)
-        )
-        entry_in_db = await self._get_record_with_options(query)
-        assert entry_in_db is not None
-
-        entry_in_db.capabilities = [
-            SpaceCapabilities(purpose=p)
-            for p in sorted(set(space.enabled_capabilities))
-        ]
-        await self._set_completion_models(entry_in_db, space.completion_models)
-        await self._set_embedding_models(entry_in_db, space.embedding_models)
-        await self._set_transcription_models(entry_in_db, space.transcription_models)
-        await self._set_mcp_servers(entry_in_db, space.mcp_servers)
-        if mcp_tool_settings is not None:
-            await self._set_mcp_tools(
-                entry_in_db,
-                mcp_tool_settings,
-                valid_server_ids=[s.id for s in space.mcp_servers],
-            )
-        await self._set_members(entry_in_db, space.members)
-        await self._set_group_members(entry_in_db, space.group_members)
-        await self._set_default_assistant(entry_in_db, space.default_assistant)
-        await self._set_collections(entry_in_db, space.collections)
-        await self._set_websites(entry_in_db, space.websites)
-        await self._set_assistants(
-            entry_in_db,
-            space.assistants
-            + ([space.default_assistant] if space.default_assistant else []),
-        )
-        await self._set_group_chats(entry_in_db, space.group_chats)
-
-        return await self.one(id=entry_in_db.id)
 
     async def delete(self, id: UUID):
         query = sa.delete(Spaces).where(Spaces.id == id)
@@ -2275,19 +1869,3 @@ class SpaceRepository:
         )
         # Use repo.add to ensure all relationships are properly set up
         return await self.add(space)
-
-    async def hard_delete_website(self, website_id: UUID, owner_space_id: UUID):
-        ws = WebsitesTable
-        wss = WebsitesSpaces
-
-        owned = await self.session.scalar(
-            sa.select(ws.id).where(
-                sa.and_(ws.id == website_id, ws.space_id == owner_space_id)
-            )
-        )
-        if not owned:
-            return
-
-        await self.session.execute(sa.delete(wss).where(wss.website_id == website_id))
-
-        await self.session.execute(sa.delete(ws).where(ws.id == website_id))

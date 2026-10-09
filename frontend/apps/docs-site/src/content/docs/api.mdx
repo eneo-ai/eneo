@@ -341,6 +341,63 @@ If Redis is unavailable the backend fails closed with `503` and `code: "rate_lim
 
 ---
 
+## Inspect and repair invalid model options
+
+Deployment operators can inspect stored model options that fail `ModelKwargs`
+validation, including assistants omitted by the Space loader. These endpoints
+require the **super API key**, like the other `/sysadmin` endpoints. They do not
+use a tenant administrator's ordinary API key. Paths below assume
+`API_PREFIX=/api/v1`.
+
+```http
+GET /api/v1/sysadmin/tenants/{tenant_id}/model-configurations/assistant/invalid/?limit=100
+```
+
+Use `assistant`, `app` or `service` as the resource kind. The response reports
+`scanned`, invalid resource and Space IDs, redacted field/error codes, and a source
+`fingerprint`. It does not return prompts, credentials or invalid input values.
+Follow `next_after` by sending it as `after`; a page with no invalid entries may
+still have another page. The maximum page size is 200, and counts describe only
+the scanned page.
+
+Choose the intended values from the resource's known configuration or backup.
+There is no reliable automatic conversion for values such as a non-numeric
+temperature. Preview the repair first:
+
+```http
+POST /api/v1/sysadmin/tenants/{tenant_id}/model-configurations/assistant/{resource_id}/repair/
+Content-Type: application/json
+
+{
+  "expected_fingerprint": "<fingerprint from inspection>",
+  "replacement": {"temperature": 0.4},
+  "dry_run": true
+}
+```
+
+The replacement is the complete desired model-options object. Omitted fields
+take `ModelKwargs` defaults. Review the intended settings, retain a protected
+backup of the original row, then submit the same request with `dry_run: false`.
+The server validates the replacement, locks the resource and refuses to overwrite
+a source changed since inspection. Repeating a successful repair returns
+`unchanged`. Valid configurations must be edited through their ordinary settings
+endpoint. Repairs retain the resource ID, history and relationships, and log the
+tenant/resource IDs and before/after fingerprints without option values.
+
+Reload the Space after repair. An assistant that was hidden because of invalid
+model options becomes loadable again, and its existing group chat seats reappear.
+Group chats have no model-options field of their own. Other loader validation
+failures are identified by the structured `Skipping invalid ... row while loading
+space` log, including `space_item_kind`, `space_item_id` and
+`space_item_space_id`; this inspector specifically covers model-option validation.
+Do not delete and recreate a resource to clear a validation error.
+
+Normal assistant/service requests validate model options. Template payloads can
+store raw option dictionaries, which are validated when an application is
+instantiated. Legacy data and direct SQL/import writes therefore need inspection;
+an invalid row alone does not establish which path wrote it. Avoid raw SQL updates
+that bypass the validated repair path.
+
 ## Related pages
 
 - [API Key Management](/docs/api-key-management) for key types, scopes, permissions, guardrails, and lifecycle
