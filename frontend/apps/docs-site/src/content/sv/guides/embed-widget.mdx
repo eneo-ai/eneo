@@ -1,6 +1,6 @@
 ---
 title: Bädda in en chattwidget på webbplatsen
-translationSource: guides/embed-widget.mdx@3e1f02b37c41
+translationSource: guides/embed-widget.mdx@05d6a9299eb0
 ---
 
 # Bädda in en chattwidget på webbplatsen
@@ -561,6 +561,13 @@ Widgeten är byggd för WCAG 2.2 AA:
   chatten är öppen; en stängknapp upptill finns även under laddning. När chatten
   stängs återställs sidans scrollposition. Öppningsanimationen stängs av för
   besökare som har valt minskad rörelse.
+- På bredare skärmar erbjuder chattens sidhuvud **Förstora chatten**, som ger
+  samma modala dialogruta över hela fönstret som på en telefon. Samma knapp, nu
+  **Förminska chatten**, lägger tillbaka panelen bredvid sidan, och det gör även
+  stängning. Skärmläsare får höra när chatten förstoras eller får sin vanliga
+  storlek igen, och i en bred panel behåller konversationen och frågefältet en
+  läsbar kolumnbredd. Knappen visas bara med laddare 1.0.9 eller nyare, så en
+  webbplats som låst en äldre version behåller panelen den har.
 - Medan den inbäddade sidan laddas visas en liten indikator och ett laddningsmeddelande
   på widgetens språk. Animationen stängs av vid minskad rörelse. En felsida förblir
   synlig om chatten inte kan starta.
@@ -598,6 +605,8 @@ inställningar för ljust och mörkt läge och för minskad rörelse. På telefo
 öppnas chatten som en rundad panel från nederkanten, även när tangentbordet
 visas. I breda, låga fönster används hela
 höjden. Sidan bakom låses och döljs för skärmläsare tills chatten stängs.
+På större skärmar kan chatten förstoras till hela fönstret med en knapp i
+chattens sidhuvud och förminskas igen med samma knapp.
 
 Kända begränsningar: svaren skapas av en AI-modell och kan vara felaktiga. Svar
 kan innehålla länkar till källor som öppnas i en ny flik. Chatten visas i en

@@ -67,18 +67,30 @@ export function parseWidgetSettings(raw: unknown): WidgetSettings | null {
   };
 }
 
+/**
+ * How the panel is shown right now, reported to the embed page so its header
+ * can offer the matching control. `full` is true whenever the panel covers the
+ * viewport, whether a small screen forced it or the chat asked to expand.
+ */
+export type PanelLayout = { full: boolean; expanded: boolean };
+
 /** Messages the embed page sends to the loader. */
 export type FrameMessage =
   | { type: "ready"; payload?: ReadyPayload }
   | { type: "close" }
   | { type: "conversation_started" }
-  | { type: "unread"; payload: { count: number } };
+  | { type: "unread"; payload: { count: number } }
+  // The chat's header asks the loader to grow the panel over the whole
+  // viewport, or to put it back beside the page.
+  | { type: "expand" }
+  | { type: "collapse" };
 
 /** Messages the loader sends to the embed page. */
 export type HostMessage =
   | { type: "open" }
   | { type: "theme"; payload: { scheme: ColorScheme } }
-  | { type: "context"; payload: PageContext };
+  | { type: "context"; payload: PageContext }
+  | { type: "layout"; payload: PanelLayout };
 
 export function envelope(message: HostMessage): Record<string, unknown> {
   return { ns: BRIDGE_NAMESPACE, v: BRIDGE_VERSION, ...message };
@@ -103,6 +115,10 @@ export function parseFrameMessage(data: unknown): FrameMessage | null {
     }
     case "close":
       return { type: "close" };
+    case "expand":
+      return { type: "expand" };
+    case "collapse":
+      return { type: "collapse" };
     case "conversation_started":
       // No payload by design: the host page never receives conversation ids.
       return { type: "conversation_started" };

@@ -111,6 +111,15 @@ elements the page made inert itself are left alone. It also follows the visual
 viewport so the on-screen keyboard never covers the composer. Transitions
 respect `prefers-reduced-motion`.
 
+On wider screens the chat's own header can ask for the same full-viewport
+panel (the `expand` and `collapse` bridge messages; the element reflects the
+state as an `expanded` attribute for the stylesheet). The loader tells the
+embed page how the panel is shown (`layout`: full or not, expanded or not),
+so the chat offers the control only where it does something: never on a small
+screen that already fills the viewport, and as "shrink" while expanded. Closing
+always puts the panel back beside the page. Loaders before 1.0.9 know none of
+these messages and ignore them; the embed page then shows no such control.
+
 Hosts should also offer a visible "Chat with us" link early on the page that
 calls `Eneo('open')`: the launcher is appended to `<body>`, so keyboard and
 screen reader users otherwise reach it last.

@@ -1,7 +1,8 @@
 /**
  * Where the panel becomes a modal dialog: a phone, or a viewport
  * too short for the floating panel, such as a laptop zoomed to 200 %. In `em`
- * so a larger default font size switches earlier.
+ * so a larger default font size switches earlier. On wider screens the chat's
+ * header can ask for the same layout; see `:host([expanded])` below.
  */
 export const FULL_SCREEN_MEDIA = "(max-width: 40em), (max-height: 31.25em)";
 
@@ -181,6 +182,17 @@ export const styles = `
     border-radius: 20px 20px 0 0;
   }
 }
+/* Expanded from the chat's own header on a wide screen: the same full-viewport
+   panel. Only a running chat can ask, and its header closes the panel, so the
+   launcher is not needed as a way out. */
+:host([expanded]) .panel {
+  position: fixed;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  border-radius: 0;
+}
+:host([expanded]) .launcher { display: none; }
 @media (prefers-reduced-motion: reduce) {
   .launcher, .panel { transition: none; }
   .loading-indicator { animation: none; }

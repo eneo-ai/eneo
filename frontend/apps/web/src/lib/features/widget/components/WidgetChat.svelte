@@ -14,11 +14,11 @@
   import { launcherColors } from "../contrast";
   import { isHttpUrl, linkHost } from "../urls";
   import * as AlertDialog from "$lib/components/ui/alert-dialog/index.js";
-  import { MessageSquarePlus, X } from "@lucide/svelte";
+  import { Maximize2, MessageSquarePlus, Minimize2, X } from "@lucide/svelte";
   import { solveWithAltcha } from "../altcha";
   import { Announcer } from "../announcer.svelte";
   import { answerText } from "../answerText";
-  import { createEmbedBridge } from "../embedBridge";
+  import { createEmbedBridge, type PanelLayout } from "../embedBridge";
   import { VisitorSession, isTokenRejected, isWidgetUnavailable } from "../visitorSession";
   import {
     MAX_COOLDOWN_SECONDS,
@@ -52,6 +52,8 @@
   let challengeReady = $state(untrack(() => config.bot_protection === "altcha"));
   let composer = $state<WidgetComposer | null>(null);
   let draft = $state("");
+  // How the loader shows the panel; null until a loader that reports it says.
+  let layout = $state<PanelLayout | null>(null);
   let title = $state<HTMLHeadingElement | null>(null);
   let chatRoot = $state<HTMLElement | null>(null);
   let log = $state<HTMLElement | null>(null);
@@ -104,9 +106,24 @@
         if (matchMedia("(pointer: coarse)").matches) title?.focus({ preventScroll: true });
         else composer?.focus();
       },
-      onTheme: (scheme) => initial.onTheme?.(scheme)
+      onTheme: (scheme) => initial.onTheme?.(scheme),
+      onLayout: (next) => {
+        const before = layout;
+        layout = next;
+        // The control's name follows the new state; a screen reader also
+        // hears that the request took effect. The first layout is not news.
+        if (before && before.expanded !== next.expanded) {
+          announcer.announce(
+            next.expanded ? m.widget_expanded_announced() : m.widget_collapsed_announced()
+          );
+        }
+      }
     }
   });
+  // Expand grows the panel over the host page on a wide screen; on a small
+  // screen the loader already fills the viewport, so there is nothing to offer.
+  const expanded = $derived(layout?.expanded ?? false);
+  const canExpand = $derived(bridge.embedded && layout !== null && (!layout.full || expanded));
 
   const messages = $derived(chat.currentConversation.messages ?? []);
   // The service appends the message once the backend confirms it; until then
@@ -359,6 +376,22 @@
           <MessageSquarePlus class="size-5" aria-hidden="true" />
         </button>
       {/if}
+      {#if canExpand}
+        <!-- One control whose name follows its effect, like the launcher's. -->
+        <button
+          type="button"
+          class="widget-header-button"
+          onclick={() => (expanded ? bridge.collapse() : bridge.expand())}
+          aria-label={expanded ? m.widget_collapse() : m.widget_expand()}
+          title={expanded ? m.widget_collapse() : m.widget_expand()}
+        >
+          {#if expanded}
+            <Minimize2 class="size-5" aria-hidden="true" />
+          {:else}
+            <Maximize2 class="size-5" aria-hidden="true" />
+          {/if}
+        </button>
+      {/if}
       {#if bridge.embedded}
         <button
           type="button"
@@ -375,116 +408,123 @@
 
   <!-- The conversation is the page's main landmark; header and footer frame it. -->
   <main class="widget-log min-h-0 flex-1 overflow-y-auto px-4 py-4" bind:this={log}>
-    {#if unavailable}
-      <p class="text-secondary text-center text-sm">{m.widget_not_available_body()}</p>
-    {:else if messages.length === 0 && !showPending}
-      {#if config.texts.welcome}
-        <p class="text-primary text-base whitespace-pre-wrap">{config.texts.welcome}</p>
-      {/if}
-      {#if !busy && draft.length === 0 && config.texts.suggested_questions?.length}
-        <ul
-          class="widget-suggestions mt-4 flex flex-col gap-2"
-          aria-label={m.widget_suggested_questions()}
-        >
-          {#each config.texts.suggested_questions as suggestion, index (index)}
-            <li>
-              <button
-                type="button"
-                class="border-default bg-primary text-primary hover:bg-secondary min-h-[44px] w-full rounded-lg border px-3 py-2 text-left text-sm"
-                disabled={unavailable || coolingDown}
-                onclick={() => void send(suggestion)}>{suggestion}</button
-              >
-            </li>
-          {/each}
-        </ul>
-      {/if}
-    {:else}
-      <!-- The list keeps its semantics; the log role sits on a wrapper so list
+    <div class="widget-column">
+      {#if unavailable}
+        <p class="text-secondary text-center text-sm">{m.widget_not_available_body()}</p>
+      {:else if messages.length === 0 && !showPending}
+        {#if config.texts.welcome}
+          <p class="text-primary text-base whitespace-pre-wrap">{config.texts.welcome}</p>
+        {/if}
+        {#if !busy && draft.length === 0 && config.texts.suggested_questions?.length}
+          <ul
+            class="widget-suggestions mt-4 flex flex-col gap-2"
+            aria-label={m.widget_suggested_questions()}
+          >
+            {#each config.texts.suggested_questions as suggestion, index (index)}
+              <li>
+                <button
+                  type="button"
+                  class="border-default bg-primary text-primary hover:bg-secondary min-h-[44px] w-full rounded-lg border px-3 py-2 text-left text-sm"
+                  disabled={unavailable || coolingDown}
+                  onclick={() => void send(suggestion)}>{suggestion}</button
+                >
+              </li>
+            {/each}
+          </ul>
+        {/if}
+      {:else}
+        <!-- The list keeps its semantics; the log role sits on a wrapper so list
            items stay inside a real list (axe: listitem). Its implicit polite
            live region is switched off: streamed chunks would be read token by
            token, and the announcement region below reports completion. -->
-      <div role="log" aria-live="off" aria-label={m.widget_conversation_log()}>
-        <ol class="flex flex-col gap-6">
-          {#each messages as message, index (index)}
-            <WidgetMessage
-              {message}
-              {index}
-              isLast={index === messages.length - 1}
-              isLoading={chat.askQuestion.isLoading}
-              showSources={config.show_sources ?? true}
-              showActivity={config.show_tool_activity ?? true}
-            />
-          {/each}
-          {#if showPending && pendingQuestion !== null}
-            <li class="flex flex-col gap-3">
-              <WidgetQuestionBubble text={pendingQuestion} />
-              <!-- Announced once when the question is sent, not by the dots. -->
-              <div aria-hidden="true"><TypingIndicator /></div>
-            </li>
-          {/if}
-        </ol>
-      </div>
-      {#if !singleTurn && chat.currentConversation.id && rateableSession === chat.currentConversation.id}
-        <WidgetFeedback
-          sessionId={chat.currentConversation.id}
-          collectsText={config.collects_feedback_text}
-          restored={chat.currentConversation.feedback ?? null}
-          disabled={status === "sending" || chat.askQuestion.isLoading}
-          submit={submitFeedback}
-        />
+        <div role="log" aria-live="off" aria-label={m.widget_conversation_log()}>
+          <ol class="flex flex-col gap-6">
+            {#each messages as message, index (index)}
+              <WidgetMessage
+                {message}
+                {index}
+                isLast={index === messages.length - 1}
+                isLoading={chat.askQuestion.isLoading}
+                showSources={config.show_sources ?? true}
+                showActivity={config.show_tool_activity ?? true}
+              />
+            {/each}
+            {#if showPending && pendingQuestion !== null}
+              <li class="flex flex-col gap-3">
+                <WidgetQuestionBubble text={pendingQuestion} />
+                <!-- Announced once when the question is sent, not by the dots. -->
+                <div aria-hidden="true"><TypingIndicator /></div>
+              </li>
+            {/if}
+          </ol>
+        </div>
+        {#if !singleTurn && chat.currentConversation.id && rateableSession === chat.currentConversation.id}
+          <WidgetFeedback
+            sessionId={chat.currentConversation.id}
+            collectsText={config.collects_feedback_text}
+            restored={chat.currentConversation.feedback ?? null}
+            disabled={status === "sending" || chat.askQuestion.isLoading}
+            submit={submitFeedback}
+          />
+        {/if}
       {/if}
-    {/if}
+    </div>
   </main>
 
   <div class="sr-only" aria-live="polite" aria-atomic="true">{announcer.text}</div>
 
-  <footer class="border-default flex flex-col gap-2 border-t px-4 py-3">
-    {#if errorMessage}
-      <p role="alert" class="bg-negative-dimmer text-negative-default rounded-lg px-3 py-2 text-sm">
-        {errorMessage}
-      </p>
-    {/if}
-    {#if status === "verifying"}
-      <p class="text-secondary text-xs">{m.widget_verifying()}</p>
-    {/if}
-    {#if answered}
-      <div class="flex flex-wrap items-center justify-between gap-2">
-        <p class="text-secondary text-xs">{m.widget_single_turn_hint()}</p>
-        <button
-          type="button"
-          bind:this={newQuestionButton}
-          class="widget-new-question bg-primary text-primary hover:bg-secondary flex items-center gap-1.5 border px-3 py-1.5 text-sm"
-          onclick={startOver}
+  <footer class="border-default border-t px-4 py-3">
+    <div class="widget-column flex flex-col gap-2">
+      {#if errorMessage}
+        <p
+          role="alert"
+          class="bg-negative-dimmer text-negative-default rounded-lg px-3 py-2 text-sm"
         >
-          <MessageSquarePlus class="size-4" aria-hidden="true" />
-          {m.widget_new_question()}
-        </button>
-      </div>
-    {/if}
-    <WidgetComposer
-      bind:this={composer}
-      placeholder={config.texts.placeholder || m.widget_input_placeholder()}
-      maxLength={config.max_question_chars}
-      disabled={unavailable || answered || coolingDown}
-      {busy}
-      bind:value={draft}
-      onSend={(question) => void send(question)}
-    />
-    {#if config.texts.footer_text || config.texts.footer_link_url}
-      <p class="text-secondary text-xs">
-        {config.texts.footer_text}
-        {#if config.texts.footer_link_url && isHttpUrl(config.texts.footer_link_url)}
-          <!-- eslint-disable svelte/no-navigation-without-resolve -- external link from widget configuration -->
-          <a
-            class="underline underline-offset-2"
-            href={config.texts.footer_link_url}
-            target="_blank"
-            rel="noopener noreferrer"
-            >{config.texts.footer_link_label || linkHost(config.texts.footer_link_url)}</a
+          {errorMessage}
+        </p>
+      {/if}
+      {#if status === "verifying"}
+        <p class="text-secondary text-xs">{m.widget_verifying()}</p>
+      {/if}
+      {#if answered}
+        <div class="flex flex-wrap items-center justify-between gap-2">
+          <p class="text-secondary text-xs">{m.widget_single_turn_hint()}</p>
+          <button
+            type="button"
+            bind:this={newQuestionButton}
+            class="widget-new-question bg-primary text-primary hover:bg-secondary flex items-center gap-1.5 border px-3 py-1.5 text-sm"
+            onclick={startOver}
           >
-        {/if}
-      </p>
-    {/if}
+            <MessageSquarePlus class="size-4" aria-hidden="true" />
+            {m.widget_new_question()}
+          </button>
+        </div>
+      {/if}
+      <WidgetComposer
+        bind:this={composer}
+        placeholder={config.texts.placeholder || m.widget_input_placeholder()}
+        maxLength={config.max_question_chars}
+        disabled={unavailable || answered || coolingDown}
+        {busy}
+        bind:value={draft}
+        onSend={(question) => void send(question)}
+      />
+      {#if config.texts.footer_text || config.texts.footer_link_url}
+        <p class="text-secondary text-xs">
+          {config.texts.footer_text}
+          {#if config.texts.footer_link_url && isHttpUrl(config.texts.footer_link_url)}
+            <!-- eslint-disable svelte/no-navigation-without-resolve -- external link from widget configuration -->
+            <a
+              class="underline underline-offset-2"
+              href={config.texts.footer_link_url}
+              target="_blank"
+              rel="noopener noreferrer"
+              >{config.texts.footer_link_label || linkHost(config.texts.footer_link_url)}</a
+            >
+          {/if}
+        </p>
+      {/if}
+    </div>
   </footer>
 
   <AlertDialog.Root bind:open={confirmStartOver}>
@@ -519,6 +559,15 @@
 </div>
 
 <style>
+  /* Conversation and composer keep a readable measure when the panel is
+     wide: expanded over the host page, or the stand-alone page on a desktop.
+     The header stays edge to edge so its controls sit where the panel's
+     corners are. In a 400px panel the column is simply the panel. */
+  .widget-column {
+    width: 100%;
+    max-width: 42rem;
+    margin-inline: auto;
+  }
   .widget-chat {
     overscroll-behavior: contain;
     overflow-y: auto;

@@ -1219,3 +1219,119 @@ describe("WidgetChat when text is enlarged or spaced out", () => {
     }
   });
 });
+
+describe("WidgetChat inside the loader's panel", () => {
+  const HOST = "https://www.kommun.se";
+  const layoutMessage = (full: boolean, expanded: boolean) => ({
+    ns: "eneo-widget",
+    v: 1,
+    type: "layout",
+    payload: { full, expanded }
+  });
+
+  /** What a loader on the host page would send; the test page runs in a frame too. */
+  function fromLoader(data: unknown) {
+    window.dispatchEvent(
+      new MessageEvent("message", { data, origin: HOST, source: window.parent })
+    );
+  }
+
+  function renderFramed() {
+    return render(EmbedApp, {
+      config: config(),
+      publicId: "wgt_test",
+      baseUrl: "http://localhost",
+      hostOrigin: HOST,
+      hostScheme: null
+    });
+  }
+
+  const expandButton = () => page.getByRole("button", { name: "widget_expand" });
+  const shrinkButton = () => page.getByRole("button", { name: "widget_collapse" });
+
+  test("offers to enlarge only once a loader has reported the panel's layout", async () => {
+    const posted = vi.spyOn(window.parent, "postMessage");
+    renderFramed();
+    // Framed: the header closes the panel, but a loader from before the
+    // layout message cannot enlarge it, so nothing is offered yet.
+    await expect.element(page.getByRole("button", { name: "widget_close" })).toBeVisible();
+    expect(expandButton().query()).toBeNull();
+
+    fromLoader(layoutMessage(false, false));
+    await expect.element(expandButton()).toBeVisible();
+    await userEvent.click(expandButton());
+    expect(posted).toHaveBeenCalledWith({ ns: "eneo-widget", v: 1, type: "expand" }, HOST);
+
+    // The loader confirms; the same control now shrinks, and keeps focus.
+    fromLoader(layoutMessage(true, true));
+    await expect.element(shrinkButton()).toBeVisible();
+    expect(expandButton().query()).toBeNull();
+    expect(document.activeElement).toBe(shrinkButton().element());
+    // The icon alone is silent; a screen reader hears that it took effect.
+    await vi.waitFor(() => expect(announced()).toBe("widget_expanded_announced"));
+    await userEvent.click(shrinkButton());
+    expect(posted).toHaveBeenCalledWith({ ns: "eneo-widget", v: 1, type: "collapse" }, HOST);
+
+    fromLoader(layoutMessage(false, false));
+    await expect.element(expandButton()).toBeVisible();
+    await vi.waitFor(() => expect(announced()).toBe("widget_collapsed_announced"));
+  });
+
+  test("the first layout is not announced", async () => {
+    renderFramed();
+    await expect.element(page.getByRole("button", { name: "widget_close" })).toBeVisible();
+    fromLoader(layoutMessage(true, true));
+    await expect.element(shrinkButton()).toBeVisible();
+    // Long enough for the announcer's delay to have passed.
+    await new Promise((resolve) => setTimeout(resolve, 300));
+    expect(announced()).toBe("");
+  });
+
+  test("keeps the conversation and the composer in a readable column when wide", async () => {
+    renderFramed();
+    await expect.element(composer()).toBeVisible();
+    const columns = document.querySelectorAll("[data-widget-chat] .widget-column");
+    // One in the conversation, one around the composer; the header runs edge to edge.
+    expect(columns).toHaveLength(2);
+    // 42rem, whatever root size the embed page uses.
+    const rem = parseFloat(getComputedStyle(document.documentElement).fontSize);
+    for (const column of columns) {
+      expect(getComputedStyle(column).maxWidth).toBe(`${42 * rem}px`);
+    }
+    expect(document.querySelector("[data-widget-chat] header .widget-column")).toBeNull();
+  });
+
+  test("offers nothing on a small screen that already fills the viewport", async () => {
+    renderFramed();
+    await expect.element(page.getByRole("button", { name: "widget_close" })).toBeVisible();
+    fromLoader(layoutMessage(true, false));
+    // A later message is handled; the control is not merely slow to appear.
+    fromLoader({ ns: "eneo-widget", v: 1, type: "theme", payload: { scheme: "dark" } });
+    await vi.waitFor(() => expect(document.documentElement.dataset.theme).toBe("dark"));
+    expect(expandButton().query()).toBeNull();
+    expect(shrinkButton().query()).toBeNull();
+  });
+
+  test("ignores a layout from anywhere but the host page", async () => {
+    renderFramed();
+    await expect.element(page.getByRole("button", { name: "widget_close" })).toBeVisible();
+    window.dispatchEvent(
+      new MessageEvent("message", {
+        data: layoutMessage(false, false),
+        origin: "https://evil.example",
+        source: window.parent
+      })
+    );
+    fromLoader({ ns: "eneo-widget", v: 1, type: "theme", payload: { scheme: "dark" } });
+    await vi.waitFor(() => expect(document.documentElement.dataset.theme).toBe("dark"));
+    expect(expandButton().query()).toBeNull();
+  });
+
+  test("the enlarged chat's header passes axe", async () => {
+    renderFramed();
+    await expect.element(page.getByRole("button", { name: "widget_close" })).toBeVisible();
+    fromLoader(layoutMessage(true, true));
+    await expect.element(shrinkButton()).toBeVisible();
+    expect(await violations()).toEqual([]);
+  });
+});

@@ -6,6 +6,7 @@ import {
   type HostMessage,
   type LauncherColors,
   type PageContext,
+  type PanelLayout,
   type WidgetSettings
 } from "./protocol";
 import { FULL_SCREEN_MEDIA } from "./styles";
@@ -92,6 +93,10 @@ export class EneoWidgetElement extends HTMLElement {
   private frameReady = false;
   private pendingOpen = false;
   private isOpen = false;
+  /** Grown over the viewport at the chat's request; cleared on close. */
+  private expandedPanel = false;
+  /** The last layout the embed page was told about, so viewport scrolls do not repeat it. */
+  private lastLayout: PanelLayout | null = null;
   private unread = 0;
   private context: PageContext | null = null;
   private colors: LauncherColors | null = null;
@@ -171,9 +176,17 @@ export class EneoWidgetElement extends HTMLElement {
     return this.isOpen;
   }
 
-  /** Whether an open panel fills the screen; see `FULL_SCREEN_MEDIA`. */
+  /** Whether an open panel fills the screen: a small viewport (`FULL_SCREEN_MEDIA`) or expanded. */
   get fullScreen(): boolean {
-    return typeof matchMedia === "function" && matchMedia(FULL_SCREEN_MEDIA).matches;
+    return (
+      this.expandedPanel ||
+      (typeof matchMedia === "function" && matchMedia(FULL_SCREEN_MEDIA).matches)
+    );
+  }
+
+  /** Whether the chat asked for the panel to cover the viewport. */
+  get expanded(): boolean {
+    return this.expandedPanel;
   }
 
   /** The frame's accessible name: the host's `frame-title`, else the widget's own title. */
@@ -425,6 +438,10 @@ export class EneoWidgetElement extends HTMLElement {
     this.isOpen = false;
     this.pendingOpen = false;
     this.removeAttribute("open");
+    // The next open starts beside the page again, and the launcher is back
+    // before focus returns to it.
+    this.expandedPanel = false;
+    this.removeAttribute("expanded");
     this.launcher.setAttribute("aria-expanded", "false");
     this.syncLauncher();
     this.panel.classList.remove("open");
@@ -489,10 +506,19 @@ export class EneoWidgetElement extends HTMLElement {
           this.send({ type: "open" });
           this.frame.focus();
         }
+        // A page that reloads inside the frame starts without a layout.
+        this.lastLayout = null;
+        this.layout();
         this.emit("ready");
         break;
       case "close":
         this.closePanel();
+        break;
+      case "expand":
+      case "collapse":
+        // Only the chat's own header asks, so the page is up and can close
+        // the panel again; a closed panel has nothing to grow.
+        if (this.isOpen) this.setExpanded(message.type === "expand");
         break;
       case "unread":
         if (!this.isOpen) {
@@ -563,6 +589,27 @@ export class EneoWidgetElement extends HTMLElement {
       this.panel.removeAttribute("aria-modal");
       this.releasePage();
     }
+    this.sendLayout({ full, expanded: this.expandedPanel });
+  }
+
+  private setExpanded(expanded: boolean): void {
+    if (this.expandedPanel === expanded) return;
+    this.expandedPanel = expanded;
+    this.toggleAttribute("expanded", expanded);
+    this.layout();
+  }
+
+  /**
+   * The embed page shows an expand control only where it does something:
+   * never on a small screen that already fills the viewport, and as "shrink"
+   * while expanded. Sent when the layout changes, not on every viewport scroll.
+   */
+  private sendLayout(layout: PanelLayout): void {
+    if (!this.frameReady) return;
+    const last = this.lastLayout;
+    if (last && last.full === layout.full && last.expanded === layout.expanded) return;
+    this.lastLayout = layout;
+    this.send({ type: "layout", payload: layout });
   }
 
   /** Everything around `node` up to `<body>`; elements the page made inert stay its own. */

@@ -344,18 +344,21 @@ describe("opening", () => {
     expect(frameOf(element)!.src).not.toContain("/en/embed/");
   });
 
-  it("does not talk to the iframe before it reports ready, then sends theme and open", async () => {
-    const element = await mount({ "color-scheme": "dark" });
-    const post = spyOnSeam(element, "post");
-    element.openPanel();
-    expect(post).not.toHaveBeenCalled();
+  it("does not talk to the iframe before it reports ready, then sends theme, open and layout", async () => {
+    await atViewport(1024, 768, async () => {
+      const element = await mount({ "color-scheme": "dark" });
+      const post = spyOnSeam(element, "post");
+      element.openPanel();
+      expect(post).not.toHaveBeenCalled();
 
-    deliver(element, frameMessage("ready"));
-    const sent = post.mock.calls.map((call) => (call as unknown[])[1]);
-    expect(sent).toEqual([
-      { ns: BRIDGE_NAMESPACE, v: 1, type: "theme", payload: { scheme: "dark" } },
-      { ns: BRIDGE_NAMESPACE, v: 1, type: "open" }
-    ]);
+      deliver(element, frameMessage("ready"));
+      const sent = post.mock.calls.map((call) => (call as unknown[])[1]);
+      expect(sent).toEqual([
+        { ns: BRIDGE_NAMESPACE, v: 1, type: "theme", payload: { scheme: "dark" } },
+        { ns: BRIDGE_NAMESPACE, v: 1, type: "open" },
+        { ns: BRIDGE_NAMESPACE, v: 1, type: "layout", payload: { full: false, expanded: false } }
+      ]);
+    });
   });
 
   it("tells the embed page which scheme the host page actually shows", async () => {
@@ -660,6 +663,119 @@ describe("small screens", () => {
   });
 });
 
+describe("expanding from the chat", () => {
+  function panelOf(element: EneoWidgetElement): HTMLElement {
+    return element.shadowRoot!.getElementById("eneo-panel")!;
+  }
+
+  /** The layout messages the loader sent the embed page, in order. */
+  function layouts(post: ReturnType<typeof spyOnSeam>): unknown[] {
+    return post.mock.calls
+      .map((call) => (call as unknown[])[1] as { type: string; payload?: unknown })
+      .filter((message) => message.type === "layout")
+      .map((message) => message.payload);
+  }
+
+  it("grows the panel over the page at the chat's request and shrinks it back", async () => {
+    await atViewport(1024, 768, async () => {
+      const main = document.createElement("main");
+      main.innerHTML = "<button>Sök</button>";
+      document.body.append(main);
+      const element = await mount();
+      const post = spyOnSeam(element, "post");
+      element.openPanel();
+      deliver(element, frameMessage("ready"));
+      expect(element.expanded).toBe(false);
+      expect(getComputedStyle(panelOf(element)).position).toBe("absolute");
+
+      deliver(element, frameMessage("expand"));
+      expect(element.expanded).toBe(true);
+      expect(element.hasAttribute("expanded")).toBe(true);
+      // The same modal, full-viewport panel as on a small screen.
+      expect(getComputedStyle(panelOf(element)).position).toBe("fixed");
+      expect(panelOf(element).getAttribute("aria-modal")).toBe("true");
+      expect(main.hasAttribute("inert")).toBe(true);
+      // The chat's header shrinks and closes the panel; no launcher under it.
+      expect(getComputedStyle(launcherOf(element)).display).toBe("none");
+
+      deliver(element, frameMessage("collapse"));
+      expect(element.expanded).toBe(false);
+      expect(element.hasAttribute("expanded")).toBe(false);
+      expect(getComputedStyle(panelOf(element)).position).toBe("absolute");
+      expect(panelOf(element).hasAttribute("aria-modal")).toBe(false);
+      expect(main.hasAttribute("inert")).toBe(false);
+      expect(getComputedStyle(launcherOf(element)).display).not.toBe("none");
+
+      expect(layouts(post)).toEqual([
+        { full: false, expanded: false },
+        { full: true, expanded: true },
+        { full: false, expanded: false }
+      ]);
+    });
+  });
+
+  it("ignores a request while the panel is closed", async () => {
+    await atViewport(1024, 768, async () => {
+      const element = await mount();
+      element.prefetch();
+      deliver(element, frameMessage("ready"));
+      deliver(element, frameMessage("expand"));
+      expect(element.expanded).toBe(false);
+      expect(element.hasAttribute("expanded")).toBe(false);
+    });
+  });
+
+  it("opens beside the page again after closing, with the launcher back for focus", async () => {
+    await atViewport(1024, 768, async () => {
+      const element = await mount();
+      launcherOf(element).focus();
+      launcherOf(element).click();
+      deliver(element, frameMessage("ready"));
+      deliver(element, frameMessage("expand"));
+      expect(element.expanded).toBe(true);
+
+      deliver(element, frameMessage("close"));
+      expect(element.open).toBe(false);
+      expect(element.expanded).toBe(false);
+      expect(element.hasAttribute("expanded")).toBe(false);
+      expect(element.shadowRoot!.activeElement).toBe(launcherOf(element));
+
+      element.openPanel();
+      expect(element.expanded).toBe(false);
+      expect(getComputedStyle(panelOf(element)).position).toBe("absolute");
+    });
+  });
+
+  it("reports a small screen as already full, and a layout only when it changes", async () => {
+    await atViewport(375, 812, async () => {
+      const element = await mount();
+      const post = spyOnSeam(element, "post");
+      element.openPanel();
+      deliver(element, frameMessage("ready"));
+      expect(layouts(post)).toEqual([{ full: true, expanded: false }]);
+
+      // Viewport scrolls and resizes re-run the layout without repeating it.
+      window.dispatchEvent(new Event("resize"));
+      window.visualViewport?.dispatchEvent(new Event("scroll"));
+      expect(layouts(post)).toEqual([{ full: true, expanded: false }]);
+    });
+  });
+
+  it("tells the embed page the layout again after it reloads", async () => {
+    await atViewport(1024, 768, async () => {
+      const element = await mount();
+      const post = spyOnSeam(element, "post");
+      element.openPanel();
+      deliver(element, frameMessage("ready"));
+      deliver(element, frameMessage("ready"));
+      expect(layouts(post)).toEqual([
+        { full: false, expanded: false },
+        { full: false, expanded: false }
+      ]);
+    });
+  });
+});
+
 describe("messages from the iframe", () => {
   it("closes the panel and returns focus to the launcher", async () => {
     const element = await mount();
@@ -756,7 +872,7 @@ describe("host controls", () => {
     deliver(element, frameMessage("ready"));
     element.setAttribute("color-scheme", "light");
     const types = post.mock.calls.map((call) => ((call as unknown[])[1] as { type: string }).type);
-    expect(types).toEqual(["theme", "context", "open", "theme"]);
+    expect(types).toEqual(["theme", "context", "open", "layout", "theme"]);
     expect((post.mock.calls[1] as unknown[])[1]).toMatchObject({
       type: "context",
       payload: { page_url: "https://host.example/page", page_title: "Sida" }
