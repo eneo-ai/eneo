@@ -50,10 +50,19 @@ export async function renderDocument(
       };
     });
   }
-  if (options.template) throw new RenderError("A template applies to Word (docx) output only.");
   if (format !== "pdf") throw new RenderError("A document is rendered as docx or pdf.");
-  const { renderPdf } = await import("./pdf");
-  return renderPdf(document, { ...options, images });
+  // A PDF follows the same template: its page, fonts, header and footer come from the Word
+  // rendering, and the content is laid out by the PDF engine.
+  return wordErrors(async () => {
+    const { renderPdf } = await import("./pdf");
+    const { builtinTemplate } = await import("./word/builtin");
+    const template = options.template ?? (await builtinTemplate(document.language));
+    return renderPdf(document, {
+      template,
+      images,
+      organisationName: options.organisationName,
+    });
+  });
 }
 
 /** A template that is not a usable Word file is a render failure the caller can read. */

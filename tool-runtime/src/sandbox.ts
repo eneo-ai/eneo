@@ -1,6 +1,6 @@
 import { checkCancellation, work } from "./work";
 import { spawn } from "node:child_process";
-import { existsSync } from "node:fs";
+import { existsSync, realpathSync } from "node:fs";
 import { mkdir, mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
@@ -15,6 +15,18 @@ const CHILD_PATH = join(RUNTIME_ROOT, "src", "child.ts");
 // landrun (github.com/zouuup/landrun) applies Landlock to a command before it starts. The
 // image installs it; elsewhere `bun run build:landrun` puts it in bin/.
 const LANDRUN = [join(RUNTIME_ROOT, "bin", "landrun"), "/usr/local/bin/landrun"];
+// The Python that renders PDFs (tools/documents/engine/pdf.ts): a venv in the image, or
+// wherever PDF_PYTHON points on a developer machine. Its interpreter is usually a symlink
+// out of the venv, so the real binary is allowed as well.
+const PDF_PYTHON = process.env.PDF_PYTHON ?? "/opt/pdf/bin/python3";
+const PDF_PYTHON_ROOT = dirname(dirname(PDF_PYTHON));
+const PDF_PYTHON_BINARY = (() => {
+  try {
+    return realpathSync(PDF_PYTHON);
+  } catch {
+    return PDF_PYTHON;
+  }
+})();
 
 // What a Bun child needs whatever its job: its own binary and the dynamic loader, shared
 // libraries, this runtime's code, fonts, time zones, the container's memory and CPU limits,
@@ -29,8 +41,14 @@ const BASE_RULES = [
   // directory it passes, so the child runs in the runtime's own directory and may read from
   // the top of that tree: /app in the image, where it holds nothing but this code.
   ["--ro", `/${RUNTIME_ROOT.split("/")[1]}`],
+  ["--rox", "/usr/local/lib"],
   ["--ro", "/usr/share/fonts"],
   ["--ro", "/usr/local/share/fonts"],
+  // The PDF sidecar: its Python, fontconfig's configuration and prebuilt cache.
+  ["--rox", PDF_PYTHON_ROOT],
+  ["--rox", PDF_PYTHON_BINARY],
+  ["--ro", "/etc/fonts"],
+  ["--ro", "/var/cache/fontconfig"],
   ["--ro", "/usr/share/zoneinfo"],
   ["--ro", "/etc/localtime"],
   ["--ro", "/sys/fs/cgroup"],
@@ -95,7 +113,7 @@ export function confinement(job: SandboxJob, directory: string): string[] {
     // image lacks (a font directory, /lib64) are skipped.
     "--best-effort",
     "--ignore-missing",
-    ...["--env", "PATH", "--env", "TMPDIR"],
+    ...["--env", "PATH", "--env", "TMPDIR", "--env", "PDF_PYTHON"],
     ...BASE_RULES,
     ...["--rw", directory],
     ...(paths.read ?? []).flatMap((path) => ["--ro", path]),
@@ -124,6 +142,7 @@ export async function runIsolated(
   const directory = await mkdtemp(join(ROOT, `${process.pid}-`));
   const env: Record<string, string> = { TMPDIR: directory };
   if (process.env.PATH) env.PATH = process.env.PATH;
+  if (process.env.PDF_PYTHON) env.PDF_PYTHON = process.env.PDF_PYTHON;
   const seconds = Math.ceil(timeoutMs / 1000);
   try {
     const launcher = confinement(job, directory);

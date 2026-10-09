@@ -40,6 +40,8 @@ export type ServerOptions = {
   version?: string;
   /** Eneo's built-in document template, served at GET /templates/builtin.docx?language=sv|en. */
   builtinTemplate?: (language: "sv" | "en") => Promise<Buffer>;
+  /** Largest request body accepted; defaults to 256 KiB. */
+  maxBodyBytes?: number;
 };
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -186,7 +188,7 @@ export function createHandler(options: ServerOptions) {
     active++;
     let control = false;
     try {
-      const body = await boundedJson(request);
+      const body = await boundedJson(request, options.maxBodyBytes);
       if (
         !body ||
         typeof body !== "object" ||
@@ -366,7 +368,7 @@ class BodyError extends Error {
   }
 }
 
-async function boundedJson(request: Request): Promise<unknown> {
+async function boundedJson(request: Request, maxBytes = MAX_BODY_BYTES): Promise<unknown> {
   if (!request.body) throw new BodyError("Missing body", 400);
   const reader = request.body.getReader();
   const chunks: Uint8Array[] = [];
@@ -382,7 +384,7 @@ async function boundedJson(request: Request): Promise<unknown> {
       if (timedOut) throw new BodyError("Request body timed out", 408);
       if (done) break;
       bytes += value.length;
-      if (bytes > MAX_BODY_BYTES) {
+      if (bytes > maxBytes) {
         await reader.cancel();
         throw new BodyError("Request too large", 413);
       }

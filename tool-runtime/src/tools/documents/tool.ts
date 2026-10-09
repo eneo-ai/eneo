@@ -336,7 +336,7 @@ export function documentTools(
     template: documentReference
       .optional()
       .describe(
-        "A Word template from the conversation, when the user names one or attaches one for that purpose: the signed url and filename of the .docx. Leave it out otherwise: Eneo applies the organisation's document template on its own. The content is rendered into the template in its own styles, keeping its headers, footers and page setup. The document goes into a rich content control tagged content (or dokument), else where a paragraph reads {{content}}, else in place of the template's body. Only with format docx.",
+        "A Word template from the conversation, when the user names one or attaches one for that purpose: the signed url and filename of the .docx. Leave it out otherwise: Eneo applies the organisation's document template on its own. The content is rendered into the template in its own styles, keeping its headers, footers and page setup. The document goes into a rich content control tagged content (or dokument), else where a paragraph reads {{content}}, else in place of the template's body. With format docx or pdf: a PDF takes the template's page, fonts, header and footer.",
       ),
     fields: placeholderValues(config.max_content_chars)
       .optional()
@@ -392,8 +392,11 @@ export function documentTools(
         const earlierFormat = args.revises?.filename.split(".").pop()!.toLowerCase() as
           "md" | "docx" | "pdf" | undefined;
         const format = args.format ?? (args.template ? "docx" : (earlierFormat ?? "md"));
-        if (args.template && format !== "docx")
-          throw new ToolError("TEMPLATE_FORMAT", "A template applies to Word (docx) output only.");
+        if (args.template && format === "md")
+          throw new ToolError(
+            "TEMPLATE_FORMAT",
+            "A template applies to Word (docx) and PDF output, not to a Markdown document.",
+          );
         const images = args.images ?? [];
         const ids = images.flatMap((image) => image.id ?? []);
         if (new Set(ids).size !== ids.length)
@@ -402,8 +405,7 @@ export function documentTools(
         // The layout comes from the template, else from the Word file being revised, whose
         // own layout (and the template it was made from) carries over to the new version.
         const layout =
-          args.template ??
-          (earlierFormat === "docx" && format === "docx" ? args.revises : undefined);
+          args.template ?? (earlierFormat === "docx" && format !== "md" ? args.revises : undefined);
         if (args.fields && !args.template)
           throw new ToolError(
             "FIELDS_WITHOUT_TEMPLATE",

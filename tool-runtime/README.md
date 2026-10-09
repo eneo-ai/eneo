@@ -42,6 +42,17 @@ documentation lives in `docs/deployment/TOOL_RUNTIME.md`.
   organisation are filled from the call; `fields` and `fill_template.values` cover
   the rest, and an empty value removes a control. `src/tools/documents/engine/word/`
   holds the inspection, numbering and control handling around the docx patcher.
+- A PDF follows the same template. The document is rendered into the Word template
+  first; its page size and margins, body and heading faces, header, footer (with page
+  numbers) and logo are read from that file (`engine/pdf-profile.ts`) and become the
+  stylesheet of a semantic HTML rendering (`engine/html.ts`) that WeasyPrint lays out
+  as a tagged PDF/UA-1 document. WeasyPrint runs in a Python venv the image installs
+  at `/opt/pdf` (`scripts/render_pdf.py`, pinned with hashes in
+  `scripts/requirements-pdf.txt`); `PDF_PYTHON` points a developer machine at another
+  interpreter, and PDF tests skip when none is found. The image ships DejaVu,
+  Liberation, Carlito and Caladea, so Calibri and Cambria templates lay out as in Word;
+  other fonts fall back to the nearest of these. Text headers and footers and one logo
+  are reproduced; table-based or multi-column headers are not.
 - `GET /health/live` and `GET /health/ready` are the health endpoints.
 
 ## Layout
@@ -55,6 +66,7 @@ documentation lives in `docs/deployment/TOOL_RUNTIME.md`.
 | `src/tools/compute/`         | QuickJS engine, limits and the tool definition           |
 | `src/tools/tabular/`         | Download policy, parsed-sheet cache, DuckDB/XLSX engines |
 | `src/tools/documents/`       | Markdown parser, DOCX/PDF/XLSX renderers, Word templates |
+| `scripts/render_pdf.py`      | The WeasyPrint sidecar the PDF renderer spawns            |
 | `src/tools/charts/`    | Chart spec, ECharts app and SVG/resvg image export       |
 | `src/tools/files/`           | Signed Eneo file references shared by all file inputs    |
 
@@ -162,6 +174,9 @@ start-up log line reports what is enforced (`"confinement":{"files":true,"tcp":t
 | `TABULAR_CACHE_TTL_SECONDS` | 1800 | How long unused original bytes and parsed sheets stay on `/tmp` (60 to 86400) |
 | `TOOL_RUNTIME_REQUIRE_CONFINEMENT` | false | Refuse to start or run jobs unless children are confined |
 | `DOCUMENT_ORGANISATION_NAME` | none | Name in generated document footers |
+| `DOCUMENT_MAX_CONTENT_CHARS` | 50000 | Markdown characters a document may hold (5000 to 1000000); the request body cap follows |
+| `DOCUMENT_PDF_CONCURRENCY` | 2 | PDF renders at a time (each a Python sidecar) |
+| `PDF_PYTHON` | /opt/pdf/bin/python3 | The Python with WeasyPrint, for development outside the image |
 
 Releases share the frontend/backend version and source revision. The image
 publication workflow (`.github/workflows/build_and_push_images.yml`) calls the runtime validation/build workflow and publishes one

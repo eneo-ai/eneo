@@ -115,8 +115,16 @@ const fileAccess = {
   maxBytes: tabular.max_upload_bytes,
   timeoutMs: tabular.download_timeout_ms,
 };
+// PDFs run a Python sidecar each, so they queue separately from the native-job slots.
+const pdfScheduler = new Scheduler(
+  config.pdfConcurrency,
+  config.maxConcurrency,
+  config.maxConcurrency,
+);
 const render = fileRenderer((job) =>
-  slot(async () => (await isolate({ job }, renderTimeoutMs)) as RenderResult),
+  (job.format === "pdf" ? pdfScheduler.run.bind(pdfScheduler) : slot)(
+    async () => (await isolate({ job }, renderTimeoutMs)) as RenderResult,
+  ),
 );
 const inspector = fileInspector((job) =>
   slot(async () => (await isolate({ job }, renderTimeoutMs)) as InspectResult),
@@ -161,6 +169,7 @@ const fetch = createHandler({
   allowedFileOrigins: config.tabular.allowedFileOrigins,
   endpoints,
   builtinTemplate,
+  maxBodyBytes: config.maxBodyBytes,
 });
 
 // The token stays in this process only; sandbox children are spawned without it.

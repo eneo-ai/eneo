@@ -5,6 +5,9 @@ import { documentConfigSchema } from "../../src/tools/documents/config";
 import { executeRender } from "../../src/tools/documents/execute";
 import { documentTools, fileRenderer } from "../../src/tools/documents/tool";
 import { imageDimensions } from "../../src/tools/documents/engine/images";
+import { pdfAvailable } from "../../src/tools/documents/engine/pdf";
+
+const PDF = await pdfAvailable();
 import { pageContentSize } from "../../src/tools/documents/engine/word/inspect";
 import { RichResult } from "../../src/tools/types";
 import { chartTools } from "../../src/tools/charts/tool";
@@ -84,7 +87,7 @@ describe("document chart images", () => {
     }
   });
 
-  test("tall figures shrink to fit and move together with their caption", async () => {
+  test.skipIf(!PDF)("tall figures shrink to fit and move together with their caption", async () => {
     const tall = Buffer.from(
       new Resvg(
         '<svg xmlns="http://www.w3.org/2000/svg" width="100" height="2000"><rect width="100" height="2000" fill="steelblue"/></svg>',
@@ -131,14 +134,17 @@ describe("document chart images", () => {
     expect(Number(dimensions[1]) / 12700).toBeLessThanOrEqual(452);
   });
 
-  test("PDF contains the chart and captions, with enough room on the page", async () => {
-    const output = (await tool().execute({ ...input, format: "pdf" }, context)) as RichResult;
-    const bytes = bytesOf(output);
-    expect(bytes.subarray(0, 5).toString()).toBe("%PDF-");
-    expect(bytes.toString("latin1")).toContain("/Subtype /Image");
-    expect(output.structured.pages).toBe(1);
-    await Bun.write("/tmp/eneo-report-with-chart.pdf", bytes);
-  });
+  test.skipIf(!PDF)(
+    "PDF contains the chart and captions, with enough room on the page",
+    async () => {
+      const output = (await tool().execute({ ...input, format: "pdf" }, context)) as RichResult;
+      const bytes = bytesOf(output);
+      expect(bytes.subarray(0, 5).toString()).toBe("%PDF-");
+      expect(bytes.toString("latin1")).toContain("/Subtype /Image");
+      expect(output.structured.pages).toBe(1);
+      await Bun.write("/tmp/eneo-report-with-chart.pdf", bytes);
+    },
+  );
 
   test("templates and revisions keep embedded media with collision-free relationships", async () => {
     const first = bytesOf((await tool().execute(input, context)) as RichResult);

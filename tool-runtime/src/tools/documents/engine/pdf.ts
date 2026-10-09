@@ -1,228 +1,126 @@
-import PDFDocument from "pdfkit";
-import { parseMarkdown, plainText, type Block, type Inline } from "../markdown/parse";
+// Runs inside sandbox children only. A PDF is the document laid out by WeasyPrint from HTML
+// and CSS, tagged for accessibility (PDF/UA structure), in the organisation's profile: the
+// document is first rendered into its Word template, and the page, fonts, colours, header,
+// footer and logo are read from that file (pdf-profile.ts). WeasyPrint runs as a Python
+// sidecar the runtime image installs; the child spawns it inside its own confinement with
+// the render directory as the only place it may read or write.
+import { mkdir, mkdtemp, readFile, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { dirname, join } from "node:path";
+import { fileURLToPath } from "node:url";
+import { parseMarkdown } from "../markdown/parse";
 import type { DocumentSpec } from "../ports";
-import { RenderError, type Rendered } from "./render";
-
-// The image ships DejaVu (fonts-dejavu-core); the child's environment is allowlisted, so the
-// paths are constants rather than settings.
-const FONT_DIR = "/usr/share/fonts/truetype/dejavu";
-// fonts-dejavu-core has no oblique faces; italic text is rendered upright.
-const FONTS = {
-  body: `${FONT_DIR}/DejaVuSans.ttf`,
-  bold: `${FONT_DIR}/DejaVuSans-Bold.ttf`,
-  mono: `${FONT_DIR}/DejaVuSansMono.ttf`,
-};
+import { renderHtml, type HtmlImage } from "./html";
 import { fitImage, type DocumentImages } from "./images";
+import { pdfProfile, profileCss } from "./pdf-profile";
+import { RenderError, type Rendered } from "./render";
+import { renderIntoTemplate } from "./word/apply";
+import { LANGUAGE_TAGS } from "./word/builtin";
 
-const MARGIN = 56;
-const BODY = 10.5;
-const HEADINGS = [20, 15, 12.5];
-function fontFor(run: Inline): keyof typeof FONTS {
-  if (run.code) return "mono";
-  if (run.bold) return "bold";
-  return "body";
+/** The Python with WeasyPrint; the image installs it here, a developer may point elsewhere. */
+export const PDF_PYTHON = process.env.PDF_PYTHON ?? "/opt/pdf/bin/python3";
+const SCRIPT = fileURLToPath(new URL("../../../../scripts/render_pdf.py", import.meta.url));
+const SIDE_CAR_TIMEOUT_MS = 20_000;
+const MAX_STDERR = 2_000;
+
+/** Whether the sidecar is installed; tests skip PDF cases without it. */
+export async function pdfAvailable(): Promise<boolean> {
+  return (await Bun.file(PDF_PYTHON).exists()) && (await Bun.file(SCRIPT).exists());
 }
-async function fontsAvailable(): Promise<void> {
-  for (const path of Object.values(FONTS))
-    if (!(await Bun.file(path).exists()))
-      throw new RenderError("PDF fonts are missing on this runtime; install fonts-dejavu-core.");
-}
+
 export async function renderPdf(
   document: Extract<DocumentSpec, { kind: "markdown" }>,
-  options: { organisationName?: string; images?: DocumentImages } = {},
+  options: { template: Buffer; images: DocumentImages; organisationName?: string },
 ): Promise<Rendered> {
-  await fontsAvailable();
-  const blocks = parseMarkdown(document.content);
-  const pdf = new PDFDocument({
-    size: "A4",
-    margins: { top: MARGIN, bottom: MARGIN + 16, left: MARGIN, right: MARGIN },
-    bufferPages: true,
-    info: { Title: document.title, Author: options.organisationName ?? "Eneo" },
-    lang: document.language,
+  if (!(await pdfAvailable()))
+    throw new RenderError("PDF rendering is not installed on this runtime (WeasyPrint sidecar).");
+  // The Word rendering carries the template's filled header, footer and styles.
+  const docx = await renderIntoTemplate(options.template, document, {
+    images: options.images,
+    organisationName: options.organisationName,
   });
-  for (const [name, path] of Object.entries(FONTS)) pdf.registerFont(name, path);
-  const chunks: Buffer[] = [];
-  pdf.on("data", (chunk: Buffer) => chunks.push(chunk));
-  const finished = new Promise<void>((resolve, reject) => {
-    pdf.on("end", () => resolve());
-    pdf.on("error", reject);
-  });
-  const width = () => pdf.page.width - pdf.page.margins.left - pdf.page.margins.right;
-  const writeRuns = (inlines: Inline[], size: number, extra: PDFKit.Mixins.TextOptions = {}) => {
-    const pieces = inlines.filter((r) => r.text.length);
-    if (!pieces.length) return pdf.moveDown(0.3);
-    pieces.forEach((run, index) => {
-      pdf.font(fontFor(run)).fontSize(size);
-      const last = index === pieces.length - 1;
-      pdf.text(run.text, {
-        ...extra,
-        continued: !last,
-        link: run.link,
-        underline: !!run.link,
-        strike: run.strike,
-      });
+  const directory = await mkdtemp(join(process.env.TMPDIR ?? tmpdir(), "eneo-pdf-"));
+  await mkdir(join(directory, "cache"), { recursive: true, mode: 0o700 });
+  const profile = await pdfProfile(docx, directory);
+  // Figures are sized as in the Word file: to the page's content area, with room for a caption.
+  const toPt = 72 / 25.4;
+  const { page } = profile;
+  const content = {
+    width: (page.widthMm - page.marginMm.left - page.marginMm.right) * toPt,
+    height: (page.heightMm - page.marginMm.top - page.marginMm.bottom) * toPt,
+  };
+  const images = new Map<string, HtmlImage>();
+  let index = 0;
+  for (const [id, image] of options.images) {
+    const file = `img-${index++}.${image.type}`;
+    await writeFile(join(directory, file), image.bytes, { mode: 0o600 });
+    const size = fitImage(image, content.width, content.height - 120);
+    images.set(id, {
+      file,
+      ...(image.caption ? { caption: image.caption } : {}),
+      widthPt: size.width,
+      heightPt: size.height,
     });
-    return pdf;
+  }
+  const blocks = parseMarkdown(document.content);
+  const lead = !(blocks[0]?.type === "heading" && blocks[0].level === 1);
+  const language = LANGUAGE_TAGS[document.language] ?? document.language;
+  const html = renderHtml(blocks, {
+    title: document.title,
+    language,
+    author: options.organisationName,
+    lead,
+    images,
+    header: profile.header,
+    footer: profile.footer,
+  });
+  await writeFile(join(directory, "document.html"), html, { mode: 0o600 });
+  await writeFile(join(directory, "document.css"), profileCss(profile), { mode: 0o600 });
+  const job = {
+    base_dir: directory,
+    html_path: join(directory, "document.html"),
+    css_path: join(directory, "document.css"),
+    output_path: join(directory, "output.pdf"),
+    pdf_variant: "pdf/ua-1",
   };
-  const write = (list: Block[], indent = 0) => {
-    for (const block of list) {
-      switch (block.type) {
-        case "image": {
-          const image = options.images!.get(block.id)!;
-          const availableWidth = width() - indent;
-          pdf.font("body").fontSize(9);
-          const captionHeight = image.caption
-            ? pdf.heightOfString(image.caption, { width: availableWidth }) + 8
-            : 0;
-          const size = fitImage(
-            image,
-            availableWidth,
-            pdf.page.height - pdf.page.margins.top - pdf.page.margins.bottom - captionHeight - 16,
-          );
-          if (pdf.y + size.height + captionHeight + 12 > pdf.page.height - pdf.page.margins.bottom)
-            pdf.addPage();
-          const x = pdf.page.margins.left + indent + (availableWidth - size.width) / 2;
-          const y = pdf.y;
-          pdf.image(image.bytes, x, y, { width: size.width, height: size.height });
-          pdf.x = pdf.page.margins.left;
-          pdf.y = y + size.height + 6;
-          if (image.caption)
-            pdf.font("body").fontSize(9).text(image.caption, {
-              width: availableWidth,
-              align: "center",
-            });
-          pdf.moveDown(0.5);
-          break;
-        }
-        case "heading":
-          pdf.moveDown(block.level === 1 ? 0.6 : 0.4);
-          writeRuns(
-            block.runs.map((r) => ({ ...r, bold: true })),
-            HEADINGS[block.level - 1]!,
-            { indent },
-          );
-          pdf.moveDown(0.3);
-          break;
-        case "paragraph":
-          writeRuns(block.runs, BODY, { indent, align: "left" });
-          pdf.moveDown(0.5);
-          break;
-        case "list":
-          block.items.forEach((item, index) => {
-            const marker = block.ordered ? `${block.start + index}.` : "•";
-            const x = pdf.page.margins.left + indent;
-            const y = pdf.y;
-            pdf.font("body").fontSize(BODY).text(marker, x, y, { width: 18, lineBreak: false });
-            pdf.x = x + 18;
-            pdf.y = y;
-            const saved = pdf.page.margins.left;
-            pdf.page.margins.left = x + 18;
-            writeRuns(item.runs, BODY, { width: width() });
-            pdf.moveDown(0.2);
-            write(item.children, 0);
-            pdf.page.margins.left = saved;
-            pdf.x = saved;
-          });
-          pdf.moveDown(0.3);
-          break;
-        case "table": {
-          const columns = block.header.length || 1;
-          const columnWidth = (width() - indent) / columns;
-          const drawRow = (cells: Inline[][], header: boolean) => {
-            const x0 = pdf.page.margins.left + indent;
-            let height = 0;
-            cells.forEach((cell) => {
-              pdf.font(header ? "bold" : "body").fontSize(BODY - 1);
-              height = Math.max(
-                height,
-                pdf.heightOfString(plainText(cell) || " ", { width: columnWidth - 6 }),
-              );
-            });
-            if (pdf.y + height + 6 > pdf.page.height - pdf.page.margins.bottom) pdf.addPage();
-            const y = pdf.y;
-            cells.forEach((cell, index) => {
-              pdf.font(header ? "bold" : "body").fontSize(BODY - 1);
-              pdf.text(plainText(cell), x0 + index * columnWidth + 3, y + 3, {
-                width: columnWidth - 6,
-              });
-            });
-            pdf
-              .moveTo(x0, y + height + 6)
-              .lineTo(x0 + columnWidth * columns, y + height + 6)
-              .lineWidth(header ? 1 : 0.3)
-              .strokeColor("#888888")
-              .stroke();
-            pdf.x = pdf.page.margins.left;
-            pdf.y = y + height + 8;
-          };
-          drawRow(block.header, true);
-          for (const row of block.rows) drawRow(row, false);
-          pdf.moveDown(0.5);
-          break;
-        }
-        case "quote": {
-          const saved = pdf.page.margins.left;
-          pdf.page.margins.left = saved + 18;
-          pdf.x = pdf.page.margins.left;
-          write(
-            block.blocks.map((b) =>
-              b.type === "paragraph"
-                ? { ...b, runs: b.runs.map((r) => ({ ...r, italic: true })) }
-                : b,
-            ),
-            0,
-          );
-          pdf.page.margins.left = saved;
-          pdf.x = saved;
-          break;
-        }
-        case "code":
-          pdf
-            .font("mono")
-            .fontSize(BODY - 1.5)
-            .text(block.text, { indent });
-          pdf.moveDown(0.6);
-          break;
-        case "hr":
-          pdf.moveDown(0.2);
-          pdf
-            .moveTo(pdf.page.margins.left, pdf.y)
-            .lineTo(pdf.page.width - pdf.page.margins.right, pdf.y)
-            .lineWidth(0.5)
-            .strokeColor("#999999")
-            .stroke();
-          pdf.moveDown(0.6);
-          break;
-        case "pagebreak":
-          pdf.addPage();
-          break;
-      }
+  await writeFile(join(directory, "job.json"), JSON.stringify(job), { mode: 0o600 });
+  const pages = await runSidecar(directory);
+  const buffer = await readFile(job.output_path);
+  if (buffer.subarray(0, 5).toString() !== "%PDF-")
+    throw new RenderError("The PDF renderer produced no document.");
+  return { buffer, pages };
+}
+
+async function runSidecar(directory: string): Promise<number> {
+  const child = Bun.spawn([PDF_PYTHON, "-I", "-B", SCRIPT, join(directory, "job.json")], {
+    cwd: directory,
+    env: {
+      HOME: directory,
+      TMPDIR: directory,
+      XDG_CACHE_HOME: join(directory, "cache"),
+      LANG: "C.UTF-8",
+      LC_ALL: "C.UTF-8",
+    },
+    stdin: "ignore",
+    stdout: "pipe",
+    stderr: "pipe",
+  });
+  const timer = setTimeout(() => child.kill("SIGKILL"), SIDE_CAR_TIMEOUT_MS);
+  try {
+    const [stdout, stderr, code] = await Promise.all([
+      new Response(child.stdout).text(),
+      new Response(child.stderr).text(),
+      child.exited,
+    ]);
+    if (code !== 0) {
+      const detail = stderr.trim().split("\n").filter(Boolean).at(-1)?.slice(0, MAX_STDERR);
+      throw new RenderError(
+        `The PDF renderer failed${detail ? `: ${detail}` : ""}. Simplify the document and retry.`,
+      );
     }
-  };
-  const startsWithTitle = blocks[0]?.type === "heading" && blocks[0].level === 1;
-  if (!startsWithTitle) {
-    pdf.font("bold").fontSize(HEADINGS[0]!).text(document.title);
-    pdf.moveDown(0.5);
+    const pages = Number((JSON.parse(stdout) as { pages?: unknown }).pages);
+    return Number.isInteger(pages) && pages > 0 ? pages : 1;
+  } finally {
+    clearTimeout(timer);
   }
-  write(blocks);
-  const range = pdf.bufferedPageRange();
-  for (let index = 0; index < range.count; index++) {
-    pdf.switchToPage(index);
-    const footer = `${options.organisationName ? `${options.organisationName} · ` : ""}${document.language === "en" ? "Page" : "Sida"} ${index + 1} ${document.language === "en" ? "of" : "av"} ${range.count}`;
-    const bottom = pdf.page.margins.bottom;
-    pdf.page.margins.bottom = 0;
-    pdf
-      .font("body")
-      .fontSize(8)
-      .fillColor("#666666")
-      .text(footer, MARGIN, pdf.page.height - MARGIN + 4, {
-        width: pdf.page.width - 2 * MARGIN,
-        align: "center",
-        lineBreak: false,
-      });
-    pdf.page.margins.bottom = bottom;
-  }
-  pdf.end();
-  await finished;
-  return { buffer: Buffer.concat(chunks), pages: range.count };
 }
