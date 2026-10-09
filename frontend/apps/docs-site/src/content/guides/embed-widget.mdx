@@ -21,7 +21,7 @@ A widget publishes the assistant as it is configured. There is no separate tool 
 - **The assistant's own MCP servers**: those enabled on the assistant that the space's security classification allows, with their tools as configured. Visitors are anonymous: a server set to forward user identity receives no identity headers, and no tool call waits for anyone's approval.
 - **Web search**, when both the space and the assistant have it switched on and the model can call tools. Web search runs on the organisation's external search server (see [Web search and image generation](/guides/capabilities)).
 
-Never available to visitors, whatever the assistant's configuration: image generation, file uploads, attachment reading, built-in function providers, and images that a tool returns, which are dropped. Only publish knowledge and tools that are appropriate for anonymous visitors.
+Never available to visitors, whatever the assistant's configuration: image generation, file analysis, file creation and charts, file uploads, attachment reading, built-in function providers, and images or files that a tool returns, which are dropped. Only publish knowledge and tools that are appropriate for anonymous visitors.
 
 <Callout type="warning">
   Changing the assistant's MCP servers or functions changes what an active
@@ -41,7 +41,7 @@ Everything a visitor receives passes one filter on the server. The visitor never
 You need the **widgets** permission and edit rights on the assistant.
 
 1. Publish the assistant in its space (Assistant → **Publishing**).
-2. On the same page, open **Web widget**. Create the widget, optionally from one of the organisation's templates. Use an assistant in a shared or personal space; organisation spaces cannot host widgets because anonymous visitors cannot read their assistants.
+2. On the same page, open **Web widget**. Create the widget, optionally from one of the organisation's templates. Use an assistant in a shared space. Organisation spaces cannot host widgets because anonymous visitors cannot read their assistants, and personal spaces are not supported yet: a widget belongs to the organisation, not to one account, and a widget through which a signed-in person reaches their own personal assistant is a separate, planned feature.
 3. Configure it. Every change is saved automatically. The page is organised in the order you work:
    - **Content**: name and language, the **Show sources** and **Show tool activity** switches, then the texts visitors read: title, welcome message, suggested questions (added one by one, at most four), the required description under the title (by default an AI disclosure) and a footer note with an optional link (a data-handling reminder, a "powered by" line, whatever fits).
    - **Appearance**: link the widget to one of the organisation's templates if you like (the parts the template locks are then read-only here until you detach it), then the primary colour (a contrast check tells you when it is too light), an optional header colour and logo (Eneo's logo marks the spot until you set your own), colour scheme, position and corner radius. Text on your colours is chosen automatically for contrast. Colours chosen for a light page rarely work on a dark one, so **Dark mode** can have its own primary and header colour (checked against the dark panel); leave them empty and dark mode keeps the light-mode colours. The chat button on your site takes the widget's colour too, and its dark-mode colour on a dark page, from the moment it appears. The live preview follows the theme you are using in Eneo unless the widget pins light or dark.
@@ -183,7 +183,7 @@ Operators can tune the visitor surface with backend environment variables. The d
 | `WIDGET_BUDGET_RESERVATION_TOKENS`       | `8000`             | Tokens reserved against the daily budget before each answer and settled to the measured usage afterwards. An admission estimate, not a cap on an answer.                                            |
 | `WIDGET_RETRIEVAL_CHUNKS`                | `30`               | Knowledge passages retrieved for each visitor question.                                                                                                                                             |
 
-The per-widget limits (messages per visitor and per IP address, question length, conversation length, daily budget) are set on each widget's **Rules** tab within the tenant policy.
+The per-widget limits (messages per visitor and per IP address, question length, conversation length, daily budget) are set on each widget's **Rules** tab within the tenant policy. The per-IP limit assumes one visitor per address; a school, a library or a town hall often sends every visitor through one address, so a widget on such a site needs a higher per-IP limit (and a correspondingly higher policy ceiling) or its visitors start sharing one allowance.
 
 ### Behind a reverse proxy
 
@@ -229,6 +229,7 @@ The widget is built for WCAG 2.2 AA:
 - Suggested questions sit below the welcome text in the scrollable conversation, rather than above the input. They disappear when the visitor starts typing. On touch screens they also hide while the input is focused, leaving room for the keyboard.
 - The input stays at the bottom when the phone keyboard opens. Text can be enlarged: if the header, input and minimum reading area no longer fit, the whole panel scrolls so every control remains reachable.
 - Everything works with the keyboard, colours meet contrast requirements and the chat follows the browser's settings for colour scheme and reduced motion. Editors get a contrast check on the colour they choose.
+- The chat runs in its own frame on the Eneo origin, so the browser's own settings reach it (zoom, default font size, colour scheme, reduced motion, forced colours, screen readers and browser extensions) while the host site's own aids do not: a text-size control that changes the page's root font size, a contrast mode set by a class on the page, or a read-aloud service that reads the page's content stops at the frame. Say so in the accessibility statement and point to the browser's settings and the stand-alone page.
 
 Check the whole on the site where it is installed, including your own texts, colours and links.
 
@@ -243,7 +244,7 @@ Add a section like this to the website's accessibility statement (the template i
 
 Webbplatsen innehåller en chattassistent som drivs av [organisationens namn]s AI-plattform. Chatten öppnas som en dialogruta med en knapp som går att nå med tangentbord och skärmläsare. Den kan stängas med Escape-tangenten, och fokus återvänder då till knappen. Skärmläsare meddelar när en fråga har skickats och läser upp varje svar när det är klart. Chatten följer webbläsarens inställningar för ljust och mörkt läge och för minskad rörelse. På telefoner öppnas chatten som en rundad panel från nederkanten, även när tangentbordet visas. I breda, låga fönster används hela höjden. Sidan bakom låses och döljs för skärmläsare tills chatten stängs.
 
-Kända begränsningar: svaren skapas av en AI-modell och kan vara felaktiga. Svar kan innehålla länkar till källor som öppnas i en ny flik.
+Kända begränsningar: svaren skapas av en AI-modell och kan vara felaktiga. Svar kan innehålla länkar till källor som öppnas i en ny flik. Chatten visas i en egen ram, så webbplatsens egna hjälpmedel – textstorleksknappar, kontrastlägen och uppläsningstjänster på sidan – påverkar inte chatten; webbläsarens egna inställningar för textstorlek, zoom och färger gäller även i den. Chatten finns också som en egen sida: [adress till helsidesversionen].
 
 Om du inte kan använda chatten kan du kontakta oss på [alternativ kontaktväg]. Rapportera brister i tillgängligheten till [kontaktuppgift].
 
@@ -256,7 +257,7 @@ Om du inte kan använda chatten kan du kontakta oss på [alternativ kontaktväg]
 
 This website includes a chat assistant powered by [organisation]'s AI platform. The chat opens as a dialog from a button that can be reached with a keyboard and screen readers. It can be closed with the Escape key, after which focus returns to the button. Screen readers announce when a question has been sent and read out each answer when it is complete. The chat follows the browser's settings for light and dark mode and for reduced motion. On phones the chat opens as a rounded panel from the bottom, including while the keyboard is open. Wide, short windows use the full height. The page behind it is locked and hidden from screen readers until the chat is closed.
 
-Known limitations: answers are generated by an AI model and may be incorrect. Answers may contain links to sources that open in a new tab.
+Known limitations: answers are generated by an AI model and may be incorrect. Answers may contain links to sources that open in a new tab. The chat is shown in its own frame, so the website's own aids (text-size controls, contrast modes and read-aloud services on the page) do not affect it; the browser's own settings for text size, zoom and colours apply inside it as well. The chat is also available as a page of its own: [address of the stand-alone version].
 
 If you cannot use the chat, contact us at [alternative contact]. Report accessibility problems to [contact details].
 

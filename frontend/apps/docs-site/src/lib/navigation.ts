@@ -34,6 +34,7 @@ const swedishTitles: Readonly<Record<string, string>> = {
   "/guides/object-content-storage": "Välj innehållslagring",
   "/guides/document-processing": "Dokumentbearbetning",
   "/guides/sharepoint-integration": "SharePoint-integration",
+  "/guides/upgrade-2-2-0": "Uppgradera till 2.2.0",
   "/guides/upgrade-1-7-0": "Uppgradera till 1.7.0",
   "/contributing/project-roadmap": "Projektets planering",
   "/contributing/security": "Säkerhet",

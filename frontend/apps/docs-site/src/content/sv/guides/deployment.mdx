@@ -1,6 +1,6 @@
 ---
 title: Driftsätt Eneo
-translationSource: guides/deployment.mdx@35b1e3f6d811
+translationSource: guides/deployment.mdx@dfbcde2224ff
 ---
 
 import { Callout } from "nextra/components";
@@ -9,13 +9,13 @@ import { Callout } from "nextra/components";
 
 Den här guiden hjälper dig att installera en ny Eneo-instans med Docker Compose
 på en egen server. Referenskonfigurationen använder Traefik för HTTPS,
-PostgreSQL med pgvector för databasen, Redis för köer och en separat worker för
-bakgrundsjobb.
+PostgreSQL med pgvector för databasen, Redis för köer, separata workers för
+bakgrundsjobb och crawlning samt en isolerad körmiljö för inbyggda verktyg.
 
 <Callout type="warning">
   Exempelfilerna måste anpassas. Ersätt alla förekomster av `your-domain.com`,
-  `changeme` och `CHANGEME`. Använd filer från samma release som dina
-  containeravbildningar. `develop` beskriver nästa utgåva.
+  `changeme` och `CHANGEME`. Använd installationsfiler från den källrevision
+  som releasens `release.json` anger, så att mallarna matchar avbildningarna.
 </Callout>
 
 ## Förberedelser
@@ -37,23 +37,35 @@ det. Följ då [lagringsguiden](/guides/object-content-storage).
 
 ### Hämta rätt installationsfiler
 
+Varje release på [GitHub Releases](https://github.com/eneo-ai/eneo/releases)
+har ett paket med `release.env` och `release.json`. Paketet låser alla
+applikationsavbildningar till sina digest-värden och publiceras först när de
+gemensamma avbildningskontrollerna har gått igenom. Det finns inga `latest`-taggar
+för applikationen. Hämta paketet till en egen katalog och ta installationsfilerna
+från exakt den källrevision som `release.json` anger:
+
 ```bash
-git clone https://github.com/eneo-ai/eneo.git
-cd eneo
-# Checka ut taggen för den release du ska köra innan du fortsätter.
-cd docs/deployment
+mkdir eneo-deployment && cd eneo-deployment
+# Ladda ner release.json och release.env från den valda releasen till den här katalogen.
+ENEO_SOURCE_REVISION=$(python3 -c 'import json; print(json.load(open("release.json"))["revision"])')
+for f in docker-compose.yml docker-compose.object-content.yml docker-compose.without-tools.yml \
+  env_backend.template env_frontend.template env_db.template .env.template setup.py; do
+  curl -fLO "https://raw.githubusercontent.com/eneo-ai/eneo/$ENEO_SOURCE_REVISION/docs/deployment/$f"
+done
 cp env_backend.template env_backend.env
 cp env_frontend.template env_frontend.env
 cp env_db.template env_db.env
 cp .env.template .env
+python3 setup.py
 chmod 600 .env env_backend.env env_frontend.env env_db.env
 ```
 
-Lås avbildningarna för `frontend`, `backend`, `worker` och `db-init` till samma
-release i `docker-compose.yml`, till exempel
-`ghcr.io/eneo-ai/eneo-backend:2.2.0`. Eneos image-taggar har inget `v`-prefix.
-Undvik den föränderliga taggen `latest` i produktion. Tillgängliga taggar finns i
-[GitHub Releases](https://github.com/eneo-ai/eneo/releases).
+`python3 setup.py` skapar den körmiljöhemlighet som saknas utan att ändra
+befintliga inställningar eller skriva ut hemligheter. Klonar du i stället
+repot, checka ut revisionen i `release.json` innan du kopierar filerna. Alla
+Compose-kommandon nedan tar båda miljöfilerna:
+`docker compose --env-file .env --env-file release.env …`. Eneos image-taggar
+har inget `v`-prefix.
 
 ### Skapa hemligheter
 
@@ -67,18 +79,19 @@ openssl rand -base64 24  # POSTGRES_PASSWORD i env_backend.env OCH env_db.env
 
 Databaslösenordet måste vara identiskt i backendens och databasens miljöfiler.
 Behåll mallarnas `POSTGRES_USER=postgres` och `POSTGRES_DB=eneo` om du inte också
-anpassar alla anslutningar.
+anpassar alla anslutningar. Redis nås bara på det interna nätverket och körs
+utan lösenord som standard; vill du kräva ett sätter du `REDIS_PASSWORD` i `.env`
+bredvid `docker-compose.yml`, så läser Redis, backend, worker och
+databasinitieringen samma värde.
 
 För att spara AI-leverantörernas autentiseringsuppgifter krävs en
 `ENCRYPTION_KEY`. Backend-containern ansluter till det externa nätverket
 `proxy_tier`, så skapa nätverket först och generera sedan nyckeln med samma
-backendavbildning som ska köras. Kommandot kräver att avbildningarna är låsta
-till den release guiden beskriver; `latest` pekar på den senaste slutliga
-utgåvan och kan vara äldre:
+backendavbildning som ska köras. Releasepaketet avgör vilken avbildning det blir:
 
 ```bash
 docker network create proxy_tier
-docker compose run --rm --no-deps backend python -m eneo.cli.generate_encryption_key
+docker compose --env-file .env --env-file release.env run --rm --no-deps backend python -m eneo.cli.generate_encryption_key
 ```
 
 Spara resultatet som `ENCRYPTION_KEY` i `env_backend.env` och behåll en säker
@@ -111,7 +124,7 @@ start, stopp, uppgradering och återställning.
 ### Starta och kontrollera
 
 ```bash
-docker compose up -d
+docker compose --env-file .env --env-file release.env up -d
 docker compose ps
 docker compose logs --tail=100 backend worker db-init
 curl -fsS https://eneo.example.se/api/livez
@@ -134,6 +147,13 @@ Standardkontot är `user@example.com` med lösenordet `ChangeMePassword1!`.
 Lägg sedan till en leverantör och aktivera modeller under **Admin → Modeller**.
 Se [Konfigurera AI-leverantörer](/guides/ai-providers). Skapa därefter en yta och
 en assistent.
+
+Standardstacken innehåller den isolerade körmiljön för inbyggda verktyg. Under
+**Admin → Verktyg** visas dess anslutning, uppgifter, version och eventuella
+problem; att körmiljön finns aktiverar inga funktioner i sig. Vill du köra utan
+den lägger du till `-f docker-compose.yml -f docker-compose.without-tools.yml`
+i Compose-kommandona. Dokumentuppladdning kräver den allmänna workern och
+webbcrawlning kräver både den allmänna workern och crawler-workern.
 
 ## Reverse proxy och nätverk
 
@@ -165,7 +185,14 @@ migrering. Kör inte en rullande uppdatering för den övergången. Följ
 [uppgraderingsguiden för filer och ikoner](/guides/file-icon-storage-upgrade)
 och [backup- och återställningsrutinen](/guides/object-content-storage#back-up-and-restore).
 
-Behåll en kopia av miljöfiler, krypteringsnyckel, image-taggar och exakt
+Vid uppgradering byter du ut hela releasepaketet (`release.env` och
+`release.json`) på en gång och behåller det gamla för återställning. Uppdatera
+inte verktygsavbildningen för sig. Från 2.2 vägrar `db-init`, backend, worker
+och webbappen att starta medan en omdöpt miljövariabel är satt utan sin
+ersättare; följ [Uppgradera till 2.2.0](/guides/upgrade-2-2-0) innan du
+uppgraderar dit.
+
+Behåll en kopia av miljöfiler, krypteringsnyckel, releasepaket och exakt
 Compose-kommando. Vid återställning ska databasen och objektlagringen höra
 till samma återställningspunkt, och avbildningarna ska matcha databasschemat.
 
@@ -176,7 +203,8 @@ till samma återställningspunkt, och avbildningarna ska matcha databasschemat.
   callback-adress. Se [OIDC-guiderna](/guides/oidc-federation).
 - **Modell saknas eller kan inte sparas:** kontrollera leverantörens uppgifter,
   att modellen är aktiverad och att `ENCRYPTION_KEY` är satt.
-- **Jobb fastnar:** läs workerloggarna och `/api/healthz/crawler`. Kontrollera
+- **Jobb fastnar:** läs loggarna för båda workrarna och `/api/healthz/crawler`,
+  som kräver installationens super-API-nyckel i `X-API-Key`. Kontrollera
   kapacitet och anslutning till databas och Redis.
 
 För fler konfigurationstabeller, proxyexempel och driftsrutiner, byt till

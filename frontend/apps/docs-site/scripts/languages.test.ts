@@ -263,8 +263,12 @@ test("installation guides create the external network before any compose command
       readFileSync(new URL(`../src/content/${guide}`, import.meta.url), "utf8"),
     );
     const network = commands.indexOf("docker network create proxy_tier");
+    // Compose global options (`--env-file release.env`, `-f overlay.yml`) may
+    // precede the subcommand.
     const compose = commands.findIndex((command) =>
-      /^docker compose (run|up|create|start)\b/.test(command),
+      /^docker compose(?: (?:--env-file|-f|--file|--profile) \S+)* (run|up|create|start)\b/.test(
+        command,
+      ),
     );
     assert.ok(network >= 0 && compose >= 0, guide);
     assert.ok(

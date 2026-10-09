@@ -1,6 +1,6 @@
 ---
 title: Bädda in en chattwidget på webbplatsen
-translationSource: guides/embed-widget.mdx@bb36d9a456dc
+translationSource: guides/embed-widget.mdx@3e1f02b37c41
 ---
 
 # Bädda in en chattwidget på webbplatsen
@@ -56,8 +56,9 @@ separat verktygsinställning per widget. En besökare får:
   (se [Webbsökning och bildgenerering](/guides/capabilities)).
 
 Aldrig tillgängligt för besökare, oavsett hur assistenten är konfigurerad:
-bildgenerering, filuppladdning, läsning av bilagor, inbyggda
-funktionsleverantörer och bilder som ett verktyg returnerar, som tas bort.
+bildgenerering, filanalys, filskapande och diagram, filuppladdning, läsning av
+bilagor, inbyggda funktionsleverantörer samt bilder eller filer som ett verktyg
+returnerar, som tas bort.
 Publicera bara kunskap och verktyg som är lämpliga för anonyma besökare.
 
 <Callout type="warning">
@@ -84,9 +85,11 @@ Du behöver behörigheten för webbwidgetar och rätt att redigera assistenten.
 
 1. Publicera assistenten i dess yta under **Publicering**.
 2. Öppna **Webbwidget** på samma sida och skapa en widget, eventuellt från en
-   organisationsmall. Assistenten måste ligga i en delad eller personlig yta.
-   Organisationsytan kan inte ha widgetar eftersom anonyma besökare inte får
-   läsa dess assistenter.
+   organisationsmall. Assistenten måste ligga i en delad yta. Organisationsytan
+   kan inte ha widgetar eftersom anonyma besökare inte får läsa dess assistenter,
+   och personliga ytor stöds inte ännu: en widget tillhör organisationen, inte
+   ett enskilt konto. En widget där en inloggad person når sin egen personliga
+   assistent är en separat, planerad funktion.
 3. Anpassa widgeten. Ändringar sparas automatiskt, och sidan följer
    arbetsordningen:
    - **Innehåll**: namn och språk, reglagen **Visa källor** och **Visa
@@ -453,7 +456,11 @@ backend. Standardvärdena passar de flesta installationer.
 
 Begränsningarna per widget (meddelanden per besökare och per IP-adress,
 frågelängd, konversationslängd och daglig budget) sätts under fliken **Regler**
-för varje widget, inom organisationens policy.
+för varje widget, inom organisationens policy. Gränsen per IP-adress utgår från
+en besökare per adress; en skola, ett bibliotek eller ett kommunhus skickar ofta
+alla besökare genom en och samma adress, så en widget på en sådan webbplats
+behöver en högre gräns per IP-adress (och ett motsvarande högre tak i policyn),
+annars delar besökarna på en tilldelning.
 
 ### Bakom en omvänd proxy [#behind-a-reverse-proxy]
 
@@ -566,6 +573,14 @@ Widgeten är byggd för WCAG 2.2 AA:
 - Allt fungerar med tangentbord, färgerna uppfyller kontrastkraven och chatten
   följer webbläsarens inställningar för färgschema och minskad rörelse.
   Redaktörer får en kontrastkontroll av färgen de väljer.
+- Chatten körs i en egen ram på Eneos adress. Webbläsarens egna inställningar
+  når in i den (zoom, standardteckenstorlek, färgschema, minskad rörelse,
+  påtvingade färger, skärmläsare och webbläsartillägg), men webbplatsens egna
+  hjälpmedel gör det inte: en textstorleksknapp som ändrar sidans grundstorlek,
+  ett kontrastläge som sätts med en klass på sidan eller en uppläsningstjänst
+  som läser sidans innehåll stannar vid ramen. Skriv det i
+  tillgänglighetsredogörelsen och hänvisa till webbläsarens inställningar och
+  helsidesversionen.
 
 Kontrollera helheten på den webbplats där den installeras, inklusive era egna
 texter, färger och länkar.
@@ -585,7 +600,11 @@ visas. I breda, låga fönster används hela
 höjden. Sidan bakom låses och döljs för skärmläsare tills chatten stängs.
 
 Kända begränsningar: svaren skapas av en AI-modell och kan vara felaktiga. Svar
-kan innehålla länkar till källor som öppnas i en ny flik.
+kan innehålla länkar till källor som öppnas i en ny flik. Chatten visas i en
+egen ram, så webbplatsens egna hjälpmedel – textstorleksknappar, kontrastlägen
+och uppläsningstjänster på sidan – påverkar inte chatten; webbläsarens egna
+inställningar för textstorlek, zoom och färger gäller även i den. Chatten finns
+också som en egen sida: [adress till helsidesversionen].
 
 Om du inte kan använda chatten kan du kontakta oss på [alternativ kontaktväg].
 Rapportera brister i tillgängligheten till [kontaktuppgift].
