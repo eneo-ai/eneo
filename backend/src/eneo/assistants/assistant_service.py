@@ -434,7 +434,7 @@ class AssistantService:
 
     @property
     def _catalog_audit(self) -> "AuditService | None":
-        """Where a built-in server's catalog is recorded when a turn brings it up to date."""
+        """Where a bundled server's catalog is recorded when a turn brings it up to date."""
         return getattr(getattr(self, "completion_service", None), "audit_service", None)
 
     async def attachment_files(self, assistant_id: UUID) -> "list[File]":
