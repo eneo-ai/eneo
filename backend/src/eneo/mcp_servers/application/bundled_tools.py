@@ -11,7 +11,7 @@ picked up without anyone pressing sync and without a round-trip per answer.
 
 The persisted rows follow on their own: when the live catalog differs from
 them, it is stored as the server's approved definitions, with the views (MCP
-Apps) its tools declare. Nobody reviews a built-in server's definitions or
+Apps) its tools declare. Nobody reviews a bundled server's definitions or
 views, for the same reason nobody reviews the rest of Eneo's code, so the
 administrator's lists show a new release's tools and a tool's view is shown
 without a sync.
@@ -146,7 +146,7 @@ async def _record_stored_catalog(
             entity_type=EntityType.MCP_SERVER,
             entity_id=server.id,
             description=(
-                f"Stored the current tools of the built-in server '{server.name}'"
+                f"Stored the current tools of the bundled server '{server.name}'"
             ),
             metadata={
                 "actor": {"type": "system", "via": "bundled_tool_runtime"},

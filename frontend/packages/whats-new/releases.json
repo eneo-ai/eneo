@@ -170,6 +170,19 @@
             "href": "/admin/models",
             "anchor": "admin-models"
           }
+        },
+        {
+          "id": "sign-in-behind-reverse-proxy",
+          "type": "fixed",
+          "area": "platform",
+          "title": {
+            "en": "Sign in behind a reverse proxy",
+            "sv": "Logga in bakom en omvänd proxy"
+          },
+          "body": {
+            "en": "Signing in with username and password no longer fails with a generic error when Eneo runs behind a reverse proxy and the public address was never registered for the backend. When the sign-in service cannot be reached you are told so, instead of being asked to check your password. Integrations that use a secret API key are accepted even when their requests carry a browser Origin header.",
+            "sv": "Inloggning med användarnamn och lösenord misslyckas inte längre med ett allmänt fel när Eneo körs bakom en omvänd proxy och den publika adressen aldrig registrerats i backend. När inloggningstjänsten inte går att nå får du veta det, i stället för att uppmanas kontrollera lösenordet. Integrationer som använder en hemlig API-nyckel accepteras även när deras anrop skickar med en Origin-header från webbläsaren."
+          }
         }
       ]
     },

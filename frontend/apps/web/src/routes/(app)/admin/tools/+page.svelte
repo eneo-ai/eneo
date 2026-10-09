@@ -3,6 +3,7 @@
   import type { RuntimeDiagnostics } from "$lib/features/mcp/runtimeStatus";
   import { Page } from "$lib/components/layout";
   import { Button } from "$lib/components/ui/button/index.js";
+  import * as Card from "$lib/components/ui/card/index.js";
   import * as DropdownMenu from "$lib/components/ui/dropdown-menu/index.js";
   import * as Field from "$lib/components/ui/field/index.js";
   import { Switch } from "$lib/components/ui/switch/index.js";
@@ -171,6 +172,29 @@
   }
 </script>
 
+{#snippet statusChip(source: Provider)}
+  <span
+    class="inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-xs font-medium {source.readiness_reason
+      ? 'bg-warning-dimmer text-warning-stronger'
+      : source.is_enabled
+        ? 'bg-positive-dimmer text-positive-stronger'
+        : 'bg-secondary text-secondary'}"
+  >
+    {#if source.readiness_reason}
+      <TriangleAlert class="h-3.5 w-3.5" aria-hidden="true" />
+    {:else if source.is_enabled}
+      <CircleCheck class="h-3.5 w-3.5" aria-hidden="true" />
+    {:else}
+      <CircleDashed class="h-3.5 w-3.5" aria-hidden="true" />
+    {/if}
+    {source.readiness_reason
+      ? m.tools_blocked()
+      : source.is_enabled
+        ? m.tools_active()
+        : m.tools_inactive()}
+  </span>
+{/snippet}
+
 {#snippet messages()}
   {#if error}<p class="text-negative-default text-sm" role="alert">{error}</p>{/if}
   {#if notice}<p class="text-secondary text-sm" role="status">{notice}</p>{/if}
@@ -189,7 +213,7 @@
     <RuntimeStatus status={(data.bundled as { runtime?: RuntimeDiagnostics }).runtime} />
     <Page.Tab id="functions">
       <div class="py-6 pr-6">
-        <div class="mx-auto flex w-full max-w-5xl flex-col gap-6">
+        <div class="flex flex-col gap-6">
           <p class="text-secondary max-w-[72ch] text-sm">{m.tools_functions_description()}</p>
           {#if messagePurpose === null}{@render messages()}{/if}
           {#each CAPABILITIES as capability (capability.purpose)}
@@ -198,22 +222,28 @@
               .sort((a, b) => Number(a.audience === "groups") - Number(b.audience === "groups"))}
             {@const active = sources.find((s) => s.is_enabled && s.audience === "everyone")}
             {@const bundled = bundledProviderFor(capability.purpose)}
-            <section
-              class="border-default rounded-xl border"
+            <Card.Root
+              class="gap-0 py-0"
+              role="group"
               aria-labelledby={"capability-" + capability.purpose}
             >
-              <header
-                class="border-dimmer flex flex-wrap items-start justify-between gap-4 border-b p-5"
+              <Card.Header
+                class="border-dimmer flex flex-row flex-wrap items-start justify-between gap-4 border-b p-5 [.border-b]:pb-5"
               >
                 <div class="flex items-start gap-3">
-                  <capability.icon class="text-accent-default mt-1 h-5 w-5" aria-hidden="true" />
-                  <div>
-                    <h2 class="text-default font-semibold" id={"capability-" + capability.purpose}>
-                      {capability.label()}
-                    </h2>
-                    {#if !active}<p class="text-secondary mt-1 text-sm">
-                        {m.tools_no_default()}
-                      </p>{/if}
+                  <capability.icon class="text-accent-default mt-0.5 h-5 w-5" aria-hidden="true" />
+                  <div class="flex flex-col gap-1">
+                    <div class="flex flex-wrap items-center gap-2">
+                      <h2
+                        class="text-default font-semibold"
+                        id={"capability-" + capability.purpose}
+                      >
+                        {capability.label()}
+                      </h2>
+                      <!-- The function's state is the default source's state. -->
+                      {#if active}{@render statusChip(active)}{/if}
+                    </div>
+                    {#if !active}<p class="text-secondary text-sm">{m.tools_no_default()}</p>{/if}
                   </div>
                 </div>
                 <div class="flex flex-wrap items-center gap-2">
@@ -224,7 +254,7 @@
                     <DropdownMenu.Root>
                       <DropdownMenu.Trigger>
                         {#snippet child({ props })}
-                          <Button {...props} size="sm" disabled={addingBundled}>
+                          <Button {...props} variant="outline" size="sm" disabled={addingBundled}>
                             <Plus class="size-4" />{m.tools_add_source()}<ChevronDown
                               class="size-4"
                             />
@@ -266,7 +296,11 @@
                       </DropdownMenu.Content>
                     </DropdownMenu.Root>
                   {:else}
-                    <Button size="sm" onclick={() => configure(capability.purpose)}>
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onclick={() => configure(capability.purpose)}
+                    >
                       <Plus class="size-4" />{sources.length
                         ? m.tools_add_source()
                         : m.capability_configure({
@@ -275,227 +309,215 @@
                     </Button>
                   {/if}
                 </div>
-              </header>
-              {#if messagePurpose === capability.purpose && (error || notice)}
-                <div class="border-dimmer border-b p-5">{@render messages()}</div>
-              {/if}
-              {#if bundled && sources.length === 0}
-                <!-- First source: the provider built into Eneo, offered ahead of the external form. -->
-                <div class="flex flex-col gap-3 p-5">
-                  <div class="bg-secondary flex flex-wrap items-center gap-4 rounded-lg p-4">
-                    <span
-                      class="flex size-10 shrink-0 items-center justify-center rounded-lg {bundled.available
-                        ? 'bg-accent-dimmer text-accent-stronger'
-                        : 'bg-primary text-secondary'}"
-                    >
-                      <ShieldCheck class="size-5" aria-hidden="true" />
-                    </span>
-                    <div class="flex min-w-0 flex-1 flex-col gap-1">
-                      <div class="flex flex-wrap items-center gap-2">
-                        <span class="text-default text-sm font-semibold"
-                          >{m.mcp_auth_bundled()}</span
-                        >
-                        {#if bundled.available}
-                          <span
-                            class="bg-accent-dimmer text-accent-stronger rounded px-2 py-0.5 text-xs font-medium"
+              </Card.Header>
+              <Card.Content class="p-0">
+                {#if messagePurpose === capability.purpose && (error || notice)}
+                  <div class="border-dimmer border-b p-5">{@render messages()}</div>
+                {/if}
+                {#if bundled && sources.length === 0}
+                  <!-- First source: the provider built into Eneo, offered ahead of the external form. -->
+                  <div class="flex flex-col gap-3 p-5">
+                    <div class="bg-secondary flex flex-wrap items-center gap-4 rounded-lg p-4">
+                      <span
+                        class="flex size-10 shrink-0 items-center justify-center rounded-lg {bundled.available
+                          ? 'bg-accent-dimmer text-accent-stronger'
+                          : 'bg-primary text-secondary'}"
+                      >
+                        <ShieldCheck class="size-5" aria-hidden="true" />
+                      </span>
+                      <div class="flex min-w-0 flex-1 flex-col gap-1">
+                        <div class="flex flex-wrap items-center gap-2">
+                          <span class="text-default text-sm font-semibold"
+                            >{m.mcp_auth_bundled()}</span
                           >
-                            {m.tools_builtin_recommended()}
-                          </span>
-                        {:else}
-                          <span
-                            class="bg-primary text-secondary rounded px-2 py-0.5 text-xs font-medium"
-                          >
-                            {m.tools_builtin_unavailable()}
-                          </span>
-                        {/if}
-                      </div>
-                      <p class="text-secondary max-w-[62ch] text-sm">
-                        {#if bundled.available}
-                          {capability.bundledDescription?.() ?? m.tools_builtin_menu_description()}
-                        {:else}
-                          {m.tools_builtin_unavailable_hint()}
-                          <a
-                            href={DEPLOYMENT_GUIDE_URL}
-                            target="_blank"
-                            rel="noopener noreferrer"
-                            class="text-default font-medium underline underline-offset-2"
-                          >
-                            {m.tools_builtin_deployment_guide()}
-                          </a>
-                        {/if}
-                      </p>
-                    </div>
-                    <Button
-                      disabled={addingBundled || !bundled.available}
-                      onclick={() => addBundled(bundled.tool, true, capability)}
-                    >
-                      {m.tools_builtin_turn_on()}
-                    </Button>
-                  </div>
-                  <p class="text-secondary text-sm">
-                    {m.tools_prefer_own_service()}
-                    <button
-                      type="button"
-                      class="text-default font-medium underline underline-offset-2"
-                      onclick={() => configure(capability.purpose)}
-                    >
-                      {m.tools_connect_external()}
-                    </button>
-                  </p>
-                </div>
-              {/if}
-              {#each sources as source (source.mcp_server_id)}
-                {@const expanded = reviewing === source.mcp_server_id}
-                {@const kind = sourceKind(source)}
-                <div class="border-dimmer border-b p-5 last:border-b-0">
-                  <div
-                    class="grid grid-cols-[auto_minmax(0,1fr)] items-start gap-x-3 gap-y-4 sm:grid-cols-[auto_minmax(0,1fr)_auto]"
-                  >
-                    <Button
-                      variant="ghost"
-                      size="icon"
-                      aria-label={`${expanded ? m.governance_mcp_hide_tools() : m.governance_mcp_show_tools()}: ${source.name}`}
-                      aria-expanded={expanded}
-                      aria-controls={"source-tools-" + source.mcp_server_id}
-                      onclick={() => (reviewing = expanded ? null : source.mcp_server_id)}
-                    >
-                      <ChevronRight
-                        class="h-4 w-4 transition-transform duration-200 {expanded
-                          ? 'rotate-90'
-                          : ''}"
-                        aria-hidden="true"
-                      />
-                    </Button>
-                    <div class="min-w-0">
-                      <div class="flex flex-wrap items-center gap-2">
-                        <h3 class="text-default text-sm font-medium">
-                          {bundledIdentity(source)?.name ?? source.name}
-                        </h3>
-                        <!-- Every source carries its kind: Eneo itself, Eneo's tool service, or an external server. -->
-                        <span
-                          class="text-secondary bg-secondary inline-flex items-center gap-1 rounded px-2 py-0.5 text-xs"
-                        >
-                          <kind.icon class="size-3" aria-hidden="true" />{kind.label()}
-                        </span>
-                        {#if source.audience === "groups"}
-                          <span class="text-secondary bg-secondary rounded px-2 py-0.5 text-xs">
-                            {m.tools_group_override()}
-                          </span>
-                        {/if}
-                      </div>
-                      <p class="text-secondary mt-1 text-sm break-words">
-                        {#if source.http_auth_type === "internal"}
-                          {m.tools_source_model()} · {source.image_model?.nickname ||
-                            source.image_model?.name ||
-                            m.tools_readiness_model_missing()}
-                          {#if source.image_model?.provider_name}
-                            · {source.image_model.provider_name}{/if}
-                        {:else if source.http_auth_type === "bundled"}
-                          <!-- The runtime address is deployment plumbing; say what the provider does. -->
-                          {bundledIdentity(source)?.description ||
-                            m.tools_builtin_menu_description()}
-                        {:else}{source.http_url}{/if}
-                      </p>
-                      {#if source.audience === "groups"}
-                        <p class="text-secondary mt-1 text-xs">
-                          {(source.user_groups ?? []).map((g) => g.name).join(", ")}
-                        </p>
-                      {/if}
-                      <div class="mt-2">
-                        <span
-                          class="inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-xs font-medium {source.readiness_reason
-                            ? 'bg-warning-dimmer text-warning-stronger'
-                            : source.is_enabled
-                              ? 'bg-positive-dimmer text-positive-stronger'
-                              : 'bg-secondary text-secondary'}"
-                        >
-                          {#if source.readiness_reason}
-                            <TriangleAlert class="h-3.5 w-3.5" aria-hidden="true" />
-                          {:else if source.is_enabled}
-                            <CircleCheck class="h-3.5 w-3.5" aria-hidden="true" />
+                          {#if bundled.available}
+                            <span
+                              class="bg-accent-dimmer text-accent-stronger rounded px-2 py-0.5 text-xs font-medium"
+                            >
+                              {m.tools_builtin_recommended()}
+                            </span>
                           {:else}
-                            <CircleDashed class="h-3.5 w-3.5" aria-hidden="true" />
+                            <span
+                              class="bg-primary text-secondary rounded px-2 py-0.5 text-xs font-medium"
+                            >
+                              {m.tools_builtin_unavailable()}
+                            </span>
                           {/if}
-                          {source.readiness_reason
-                            ? m.tools_blocked()
-                            : source.is_enabled
-                              ? m.tools_active()
-                              : m.tools_inactive()}
-                        </span>
+                        </div>
+                        <p class="text-secondary max-w-[62ch] text-sm">
+                          {#if bundled.available}
+                            {capability.bundledDescription?.() ??
+                              m.tools_builtin_menu_description()}
+                          {:else}
+                            {m.tools_builtin_unavailable_hint()}
+                            <a
+                              href={DEPLOYMENT_GUIDE_URL}
+                              target="_blank"
+                              rel="noopener noreferrer"
+                              class="text-default font-medium underline underline-offset-2"
+                            >
+                              {m.tools_builtin_deployment_guide()}
+                            </a>
+                          {/if}
+                        </p>
+                      </div>
+                      <Button
+                        disabled={addingBundled || !bundled.available}
+                        onclick={() => addBundled(bundled.tool, true, capability)}
+                      >
+                        {m.tools_builtin_turn_on()}
+                      </Button>
+                    </div>
+                    <p class="text-secondary text-sm">
+                      {m.tools_prefer_own_service()}
+                      <button
+                        type="button"
+                        class="text-default font-medium underline underline-offset-2"
+                        onclick={() => configure(capability.purpose)}
+                      >
+                        {m.tools_connect_external()}
+                      </button>
+                    </p>
+                  </div>
+                {/if}
+                {#each sources as source (source.mcp_server_id)}
+                  {@const expanded = reviewing === source.mcp_server_id}
+                  {@const kind = sourceKind(source)}
+                  <div class="border-dimmer border-b p-5 last:border-b-0">
+                    <div
+                      class="grid grid-cols-[auto_minmax(0,1fr)] items-start gap-x-3 gap-y-4 sm:grid-cols-[auto_minmax(0,1fr)_auto]"
+                    >
+                      <Button
+                        variant="ghost"
+                        size="icon"
+                        aria-label={`${expanded ? m.governance_mcp_hide_tools() : m.governance_mcp_show_tools()}: ${source.name}`}
+                        aria-expanded={expanded}
+                        aria-controls={"source-tools-" + source.mcp_server_id}
+                        onclick={() => (reviewing = expanded ? null : source.mcp_server_id)}
+                      >
+                        <ChevronRight
+                          class="h-4 w-4 transition-transform duration-200 {expanded
+                            ? 'rotate-90'
+                            : ''}"
+                          aria-hidden="true"
+                        />
+                      </Button>
+                      <div class="min-w-0">
+                        <div class="flex flex-wrap items-center gap-2">
+                          <h3 class="text-default text-sm font-medium">
+                            {bundledIdentity(source)?.name ?? source.name}
+                          </h3>
+                          <!-- Every source carries its kind: Eneo itself, Eneo's tool service, or an external server. -->
+                          <span
+                            class="text-secondary bg-secondary inline-flex items-center gap-1 rounded px-2 py-0.5 text-xs"
+                          >
+                            <kind.icon class="size-3" aria-hidden="true" />{kind.label()}
+                          </span>
+                          {#if source.audience === "groups"}
+                            <span class="text-secondary bg-secondary rounded px-2 py-0.5 text-xs">
+                              {m.tools_group_override()}
+                            </span>
+                          {/if}
+                          <!-- The default source's state is in the header; every other row states its own. -->
+                          {#if source !== active}{@render statusChip(source)}{/if}
+                        </div>
+                        {#if source.http_auth_type === "internal"}
+                          <p class="text-secondary mt-1 text-sm break-words">
+                            {m.tools_source_model()} · {source.image_model?.nickname ||
+                              source.image_model?.name ||
+                              m.tools_readiness_model_missing()}
+                            {#if source.image_model?.provider_name}
+                              · {source.image_model.provider_name}{/if}
+                          </p>
+                        {:else if source.http_auth_type === "bundled"}
+                          <!-- The runtime address is deployment plumbing; say what the provider does, in one line. -->
+                          {#if capability.bundledSummary}
+                            <p class="text-secondary mt-1 text-sm">{capability.bundledSummary()}</p>
+                          {/if}
+                        {:else}
+                          <p class="text-secondary mt-1 text-sm break-words">{source.http_url}</p>
+                        {/if}
+                        {#if source.audience === "groups"}
+                          <p class="text-secondary mt-1 text-xs">
+                            {(source.user_groups ?? []).map((g) => g.name).join(", ")}
+                          </p>
+                        {/if}
                         {#if source.readiness_reason}
                           <p class="text-warning-stronger mt-2 text-sm">
                             {readinessMessage(source.readiness_reason)}
                           </p>
                         {/if}
+                        {#if !source.is_enabled && active && source.audience === "everyone"}
+                          <p class="text-secondary mt-1 text-xs">
+                            {m.tools_replace_default({ name: active.name })}
+                          </p>
+                        {/if}
                       </div>
-                      {#if !source.is_enabled && active && source.audience === "everyone"}
-                        <p class="text-secondary mt-1 text-xs">
-                          {m.tools_replace_default({ name: active.name })}
-                        </p>
-                      {/if}
-                    </div>
-                    <div
-                      class="col-start-2 flex flex-wrap items-center gap-2 sm:col-start-3 sm:row-start-1"
-                    >
-                      <DropdownMenu.Root>
-                        <DropdownMenu.Trigger>
-                          {#snippet child({ props })}
-                            <Button
-                              {...props}
-                              variant="ghost"
-                              size="icon"
-                              class="hover:bg-hover-on-fill hover:text-primary"
-                              aria-label={`${m.actions()}: ${source.name}`}
+                      <div
+                        class="col-start-2 flex flex-wrap items-center gap-2 sm:col-start-3 sm:row-start-1"
+                      >
+                        <DropdownMenu.Root>
+                          <DropdownMenu.Trigger>
+                            {#snippet child({ props })}
+                              <Button
+                                {...props}
+                                variant="ghost"
+                                size="icon"
+                                class="hover:bg-hover-on-fill hover:text-primary"
+                                aria-label={`${m.actions()}: ${source.name}`}
+                              >
+                                <IconEllipsis />
+                              </Button>
+                            {/snippet}
+                          </DropdownMenu.Trigger>
+                          <DropdownMenu.Content align="end">
+                            <DropdownMenu.Item
+                              disabled={busy !== null ||
+                                (!source.is_enabled && !!source.readiness_reason)}
+                              onSelect={() => toggle(source)}
                             >
-                              <IconEllipsis />
-                            </Button>
-                          {/snippet}
-                        </DropdownMenu.Trigger>
-                        <DropdownMenu.Content align="end">
-                          <DropdownMenu.Item
-                            disabled={busy !== null ||
-                              (!source.is_enabled && !!source.readiness_reason)}
-                            onSelect={() => toggle(source)}
-                          >
-                            {#if source.is_enabled}
-                              <Pause class="h-4 w-4" aria-hidden="true" />
-                            {:else}
-                              <Power class="h-4 w-4" aria-hidden="true" />
-                            {/if}
-                            {source.is_enabled ? m.deactivate() : m.activate()}
-                          </DropdownMenu.Item>
-                          <DropdownMenu.Item onSelect={() => configure(capability.purpose, source)}>
-                            <Pencil class="h-4 w-4" aria-hidden="true" />{m.tools_change()}
-                          </DropdownMenu.Item>
-                          <DropdownMenu.Item
-                            variant="destructive"
-                            onSelect={() => {
-                              deleting = source;
-                              deleteOpen = true;
-                            }}
-                          >
-                            <Trash2 class="h-4 w-4" aria-hidden="true" />{m.delete()}
-                          </DropdownMenu.Item>
-                        </DropdownMenu.Content>
-                      </DropdownMenu.Root>
+                              {#if source.is_enabled}
+                                <Pause class="h-4 w-4" aria-hidden="true" />
+                              {:else}
+                                <Power class="h-4 w-4" aria-hidden="true" />
+                              {/if}
+                              {source.is_enabled ? m.deactivate() : m.activate()}
+                            </DropdownMenu.Item>
+                            <DropdownMenu.Item
+                              onSelect={() => configure(capability.purpose, source)}
+                            >
+                              <Pencil class="h-4 w-4" aria-hidden="true" />{m.tools_change()}
+                            </DropdownMenu.Item>
+                            <DropdownMenu.Item
+                              variant="destructive"
+                              onSelect={() => {
+                                deleting = source;
+                                deleteOpen = true;
+                              }}
+                            >
+                              <Trash2 class="h-4 w-4" aria-hidden="true" />{m.delete()}
+                            </DropdownMenu.Item>
+                          </DropdownMenu.Content>
+                        </DropdownMenu.Root>
+                      </div>
                     </div>
+                    {#if expanded}
+                      <div id={"source-tools-" + source.mcp_server_id} class="mt-4 ml-9">
+                        {#if source.http_auth_type === "internal"}
+                          <ProviderToolsSummary tools={source.tools ?? []} server={source} />
+                        {:else}
+                          <MCPToolsPanel
+                            mcpServerId={source.mcp_server_id}
+                            serverName={source.name}
+                            tools={source.tools ?? []}
+                            eneoClient={data.eneo}
+                          />
+                        {/if}
+                      </div>
+                    {/if}
                   </div>
-                  {#if expanded}
-                    <div id={"source-tools-" + source.mcp_server_id} class="mt-4 ml-9">
-                      {#if source.http_auth_type === "internal"}
-                        <ProviderToolsSummary tools={source.tools ?? []} server={source} />
-                      {:else}
-                        <MCPToolsPanel
-                          mcpServerId={source.mcp_server_id}
-                          serverName={source.name}
-                          tools={source.tools ?? []}
-                          eneoClient={data.eneo}
-                        />
-                      {/if}
-                    </div>
-                  {/if}
-                </div>
-              {/each}
+                {/each}
+              </Card.Content>
               {#if capability.purpose === "file_creation" && sources.length > 0}
                 <!-- The templates the files are rendered into live with the capability. -->
                 <DocumentTemplates
@@ -507,7 +529,7 @@
               {/if}
               {#if capability.guide && sources.length > 0}
                 <!-- Usage guidance lives here and in the docs, not in assistant settings. -->
-                <p class="border-dimmer text-secondary border-t p-5 text-sm">
+                <Card.Footer class="border-dimmer text-secondary block p-5 text-sm">
                   {capability.guide.hint()}
                   <!-- eslint-disable svelte/no-navigation-without-resolve -- external docs link -->
                   <a
@@ -519,9 +541,9 @@
                     {capability.guide.label()}
                   </a>
                   <!-- eslint-enable svelte/no-navigation-without-resolve -->
-                </p>
+                </Card.Footer>
               {/if}
-            </section>
+            </Card.Root>
           {/each}
         </div>
       </div>

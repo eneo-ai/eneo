@@ -8,33 +8,82 @@ import { setFrontendAuthCookie } from "./auth.server";
 import { getRequestEvent } from "$app/server";
 import { getBackendUrl } from "$lib/core/environment.server";
 
+/**
+ * Why a login did not succeed, at the level the login page can act on:
+ * `credentials` is the user's to fix, `rate_limited` is temporary, and
+ * `unavailable` means the backend did not give a usable answer at all
+ * (unreachable, misconfigured, or failing) so the user should not be told to
+ * check their password.
+ */
+export type EneoLoginFailureReason = "credentials" | "rate_limited" | "unavailable";
+
 export type EneoLoginResult = {
   success: boolean;
   traceId: string | null;
   correlationId: string | null;
   attemptsRemaining?: number | null;
   retryAfterSeconds?: number | null;
+  /** Set when `success` is false. */
+  reason?: EneoLoginFailureReason;
 };
 
 function readNonNegativeInteger(value: unknown): number | null {
   return typeof value === "number" && Number.isInteger(value) && value >= 0 ? value : null;
 }
 
-async function readAttemptLimit(
-  response: Response
-): Promise<Pick<EneoLoginResult, "attemptsRemaining" | "retryAfterSeconds">> {
+type LoginFailure = Pick<EneoLoginResult, "attemptsRemaining" | "retryAfterSeconds"> & {
+  /** The backend's error code, when the body carried one. */
+  code: string | null;
+};
+
+function readCode(fields: Record<string, unknown>): string | null {
+  if (typeof fields.code === "string") return fields.code;
+  // FastAPI's own HTTPException shape: `{ "detail": { "code": ... } }`.
+  const detail = fields.detail;
+  if (typeof detail === "object" && detail !== null) {
+    const code = (detail as Record<string, unknown>).code;
+    if (typeof code === "string") return code;
+  }
+  return null;
+}
+
+/** The login endpoint answers 401 for wrong credentials, 422 for a malformed
+ * email, 429 at the attempt limit; anything else did not evaluate them. */
+function failureReason(status: number): EneoLoginFailureReason {
+  if (status === 401 || status === 422) return "credentials";
+  if (status === 429) return "rate_limited";
+  return "unavailable";
+}
+
+/**
+ * `fetch failed: connect ECONNREFUSED 10.0.0.5:8000` rather than only `fetch
+ * failed`: Node keeps the transport error in `cause`. Server log only.
+ */
+function describeFailure(error: unknown): string {
+  const parts: string[] = [];
+  let current: unknown = error;
+  for (let depth = 0; current instanceof Error && depth < 4; depth++) {
+    parts.push(current.message);
+    current = current instanceof AggregateError ? current.errors[0] : current.cause;
+  }
+  return parts.length > 0 ? parts.join(": ") : String(error);
+}
+
+async function readFailure(response: Response): Promise<LoginFailure> {
+  const empty: LoginFailure = { attemptsRemaining: null, retryAfterSeconds: null, code: null };
   try {
     const body: unknown = await response.json();
     if (typeof body !== "object" || body === null) {
-      return { attemptsRemaining: null, retryAfterSeconds: null };
+      return empty;
     }
     const fields = body as Record<string, unknown>;
     return {
       attemptsRemaining: readNonNegativeInteger(fields.attempts_remaining),
-      retryAfterSeconds: readNonNegativeInteger(fields.retry_after_seconds)
+      retryAfterSeconds: readNonNegativeInteger(fields.retry_after_seconds),
+      code: readCode(fields)
     };
   } catch {
-    return { attemptsRemaining: null, retryAfterSeconds: null };
+    return empty;
   }
 }
 
@@ -45,7 +94,8 @@ async function readAttemptLimit(
  *   ``correlationId`` is a same-value alias for ``traceId`` retained during
  *   the migration period — prefer ``traceId`` in new code. After a failure,
  *   ``attemptsRemaining`` and ``retryAfterSeconds`` carry the attempt limit's
- *   standing when the backend reported it.
+ *   standing when the backend reported it, and ``reason`` says whether the
+ *   credentials were actually rejected.
  */
 export async function loginWithEneo(username: string, password: string): Promise<EneoLoginResult> {
   // Endpoint wants urlencoded data
@@ -54,30 +104,49 @@ export async function loginWithEneo(username: string, password: string): Promise
   body.append("username", username);
   body.append("password", password);
 
+  // `event.fetch` goes through `handleFetch`, which turns this into a
+  // server-to-server call against ENEO_BACKEND_SERVER_URL.
   const { fetch } = getRequestEvent();
 
-  const response = await fetch(`${getBackendUrl()}/api/v1/users/login/token/`, {
-    body: body,
-    method: "POST",
-    headers: {
-      "Content-Type": "application/x-www-form-urlencoded;charset=UTF-8"
-    }
-  });
+  let response: Response;
+  try {
+    response = await fetch(`${getBackendUrl()}/api/v1/users/login/token/`, {
+      body,
+      method: "POST",
+      headers: {
+        "Content-Type": "application/x-www-form-urlencoded;charset=UTF-8"
+      }
+    });
+  } catch (error) {
+    // The backend never answered (wrong internal URL, DNS, closed socket), so
+    // there is no trace id. The form shows the generic failure instead of a
+    // 500 page; the reason is in the server log.
+    console.error(
+      "Username/password login failed before reaching the backend: %s",
+      describeFailure(error)
+    );
+    return { success: false, traceId: null, correlationId: null, reason: "unavailable" };
+  }
 
   // Available on both success and failure.
   const traceId = readTraceId(response.headers) ?? null;
 
   if (!response.ok) {
+    const { code, ...attemptLimit } = await readFailure(response);
+    // The code tells a misconfiguration (`disallowed_cors_origin`) apart from
+    // wrong credentials (`invalid_credentials`) without logging the body.
     console.error(
-      "Username/password login failed. Status: %s, Trace ID: %s",
+      "Username/password login failed. Status: %s, Code: %s, Trace ID: %s",
       response.status,
+      code ?? "none",
       traceId || "none"
     );
     return {
       success: false,
       traceId,
       correlationId: traceId,
-      ...(await readAttemptLimit(response))
+      reason: failureReason(response.status),
+      ...attemptLimit
     };
   }
 
@@ -88,6 +157,6 @@ export async function loginWithEneo(username: string, password: string): Promise
     return { success: true, traceId, correlationId: traceId };
   } catch (e) {
     console.error("Failed to decode login response. Trace ID: %s", traceId || "none");
-    return { success: false, traceId, correlationId: traceId };
+    return { success: false, traceId, correlationId: traceId, reason: "unavailable" };
   }
 }
