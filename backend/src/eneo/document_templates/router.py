@@ -163,6 +163,7 @@ async def upload_document_template(
 @router.get(
     "/builtin/",
     response_class=Response,
+    response_model=None,
     responses=responses.get_responses([400, 403]),
     description="Eneo's built-in document template, to adapt in Word.",
 )
@@ -280,6 +281,7 @@ async def replace_document_template_content(
 @router.get(
     "/{id}/content/",
     response_class=Response,
+    response_model=None,
     responses=responses.get_responses([403, 404]),
     description="Download the template's Word file.",
 )
