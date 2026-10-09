@@ -61,11 +61,10 @@ async def test_a_connection_stores_a_normalised_endpoint_and_an_encrypted_key(
     audited = _record_audit(monkeypatch)
 
     connection = await create_connection(
-        endpoint_url="  https://Vemsa.example.se/v1/  ", operations=["transcribe"]
+        endpoint_url="  https://Vemsa.example.se/v1/  "
     )
 
     assert connection["endpoint_url"] == "https://Vemsa.example.se"
-    assert connection["operations"] == ["transcribe"]
     assert connection["is_enabled"] is True
     assert "api_key" not in connection and "first-secret" not in str(connection)
     row = await _stored(db_container, connection["id"])
@@ -98,7 +97,6 @@ async def test_an_unusable_endpoint_is_refused_with_its_reason(
             "name": name,
             "endpoint_url": endpoint,
             "api_key": "secret",
-            "operations": ["diarize"],
         },
         headers=admin_headers,
     )
@@ -124,7 +122,6 @@ async def test_an_unusable_key_is_refused_without_touching_the_stored_one(
             "name": f"key-{uuid4().hex[:8]}",
             "endpoint_url": "https://vemsa.example.se",
             "api_key": api_key,
-            "operations": ["diarize"],
         },
         headers=admin_headers,
     )
@@ -136,24 +133,6 @@ async def test_an_unusable_key_is_refused_without_touching_the_stored_one(
     assert created.status_code == 422, created.text
     assert updated.status_code == 422, updated.text
     assert await _decrypted_key(db_container, connection["id"]) == "first-secret"
-
-
-@pytest.mark.parametrize("operations", [[], ["align"], ["transcribe", "align"]])
-async def test_only_operations_eneo_sends_can_be_declared(
-    client, admin_headers, operations
-):
-    response = await client.post(
-        BASE,
-        json={
-            "name": f"ops-{uuid4().hex[:8]}",
-            "endpoint_url": "https://vemsa.example.se",
-            "api_key": "secret",
-            "operations": operations,
-        },
-        headers=admin_headers,
-    )
-
-    assert response.status_code == 422, response.text
 
 
 async def test_the_list_pages_in_name_order(client, admin_headers, create_connection):
@@ -192,7 +171,6 @@ async def test_names_are_unique_within_the_organisation(
             "name": existing["name"],
             "endpoint_url": "https://other.example.se",
             "api_key": "secret",
-            "operations": ["diarize"],
         },
         headers=admin_headers,
     )
@@ -221,7 +199,6 @@ async def test_a_member_cannot_read_change_or_check_a_connection(
                 "name": f"member-{uuid4().hex[:8]}",
                 "endpoint_url": "https://vemsa.example.se",
                 "api_key": "secret",
-                "operations": ["diarize"],
             },
             headers=member_headers,
         ),
@@ -277,33 +254,32 @@ async def test_moving_the_endpoint_requires_a_new_key(
 async def test_an_update_changes_only_what_it_sends(
     client, admin_headers, create_connection, monkeypatch
 ):
-    connection = await create_connection(operations=["diarize"])
+    connection = await create_connection()
     audited = _record_audit(monkeypatch)
 
     response = await client.patch(
         f"{BASE}{connection['id']}/",
-        json={"is_enabled": False, "operations": ["transcribe", "diarize"]},
+        json={"is_enabled": False},
         headers=admin_headers,
     )
     refused_nulls = [
         await client.patch(
             f"{BASE}{connection['id']}/", json={field: None}, headers=admin_headers
         )
-        for field in ("name", "endpoint_url", "api_key", "operations", "is_enabled")
+        for field in ("name", "endpoint_url", "api_key", "is_enabled")
     ]
 
     assert response.status_code == 200, response.text
     updated = response.json()
     assert updated["is_enabled"] is False
-    assert updated["operations"] == ["diarize", "transcribe"]
     assert (updated["name"], updated["endpoint_url"]) == (
         connection["name"],
         connection["endpoint_url"],
     )
-    assert [r.status_code for r in refused_nulls] == [422] * 5
+    assert [r.status_code for r in refused_nulls] == [422] * 4
     [entry] = audited
     assert entry["action"].value == "transcription_service_updated"
-    assert set(entry["metadata"]["changes"]) == {"is_enabled", "operations"}
+    assert set(entry["metadata"]["changes"]) == {"is_enabled"}
 
 
 async def test_another_organisations_connection_is_not_found(
@@ -319,7 +295,6 @@ async def test_another_organisations_connection_is_not_found(
                 name="theirs",
                 endpoint_url="https://theirs.example.se",
                 api_key_encrypted="enc:fernet:v1:not-used",
-                operations=["diarize"],
             )
             .returning(TranscriptionServiceConnections.id)
         )
@@ -338,17 +313,28 @@ async def test_another_organisations_connection_is_not_found(
     assert native_service.requests == []
 
 
+@pytest.mark.parametrize(
+    "tasks, identifies_speakers",
+    [
+        ({"supported_tasks": ["diarize", "align"]}, True),
+        ({"supported_tasks": ["align"]}, False),
+        ({}, None),
+    ],
+    ids=["reports-diarize", "reports-no-diarize", "reports-no-tasks"],
+)
 async def test_a_check_asks_the_service_with_the_stored_key_and_sends_no_audio(
-    client, admin_headers, create_connection, native_service, monkeypatch
+    client,
+    admin_headers,
+    create_connection,
+    native_service,
+    monkeypatch,
+    tasks,
+    identifies_speakers,
 ):
-    connection = await create_connection(operations=["transcribe", "diarize"])
+    connection = await create_connection()
     native_service.answer = httpx.Response(
         200,
-        json={
-            "queue_accepting_jobs": True,
-            "service_version": "1.4.0",
-            "supported_tasks": ["diarize", "align"],
-        },
+        json={"queue_accepting_jobs": True, "service_version": "1.4.0", **tasks},
     )
     audited = _record_audit(monkeypatch)
 
@@ -360,8 +346,7 @@ async def test_a_check_asks_the_service_with_the_stored_key_and_sends_no_audio(
     assert response.json() == {
         "outcome": "ready",
         "detail": "accepting jobs",
-        "reported_operations": ["diarize"],
-        "missing_operations": ["transcribe"],
+        "identifies_speakers": identifies_speakers,
         "service_version": "1.4.0",
     }
     [request] = native_service.requests
@@ -414,8 +399,7 @@ async def test_a_check_reports_what_went_wrong_without_secrets(
     assert response.status_code == 200, response.text
     body = response.json()
     assert (body["outcome"], body["detail"]) == (outcome, detail)
-    assert body["reported_operations"] is None
-    assert body["missing_operations"] == []
+    assert body["identifies_speakers"] is None
     assert "secret" not in response.text
 
 

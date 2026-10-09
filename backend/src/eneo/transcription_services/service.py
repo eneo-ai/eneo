@@ -19,10 +19,7 @@ from eneo.transcription_services.client import (
     CredentialsRejected,
     TranscriptionServiceClient,
 )
-from eneo.transcription_services.models import (
-    TranscriptionOperation,
-    TranscriptionServiceConnection,
-)
+from eneo.transcription_services.models import TranscriptionServiceConnection
 
 if TYPE_CHECKING:
     from eneo.audit.application.audit_service import AuditService
@@ -49,16 +46,13 @@ class ConnectionCheckOutcome(StrEnum):
 class ConnectionCheck:
     """What the service answered to an authenticated readiness request.
 
-    No audio is sent. ``reported_operations`` is None when the service does
-    not report its operations; the declared ones then stay unverified.
-    ``missing_operations`` are declared operations the service reports it
-    does not accept.
+    No audio is sent. ``identifies_speakers`` is None when the service does
+    not report which tasks it supports.
     """
 
     outcome: ConnectionCheckOutcome
     detail: str
-    reported_operations: frozenset[TranscriptionOperation] | None
-    missing_operations: frozenset[TranscriptionOperation]
+    identifies_speakers: bool | None
     service_version: str | None
 
 
@@ -92,7 +86,6 @@ class TranscriptionServiceConnectionService:
         name: str,
         endpoint_url: str,
         api_key: str,
-        operations: frozenset[TranscriptionOperation],
         is_enabled: bool,
         security_classification: ModelId | None,
     ) -> TranscriptionServiceConnection:
@@ -106,7 +99,6 @@ class TranscriptionServiceConnectionService:
             name=name,
             endpoint_url=endpoint_url,
             api_key_encrypted=self.encryption.encrypt(api_key),
-            operations=operations,
             is_enabled=is_enabled,
             security_classification_id=await self._classification_id(
                 security_classification
@@ -127,7 +119,6 @@ class TranscriptionServiceConnectionService:
         name: str | NotProvided = NOT_PROVIDED,
         endpoint_url: str | NotProvided = NOT_PROVIDED,
         api_key: str | NotProvided = NOT_PROVIDED,
-        operations: frozenset[TranscriptionOperation] | NotProvided = NOT_PROVIDED,
         is_enabled: bool | NotProvided = NOT_PROVIDED,
         security_classification: ModelId | None | NotProvided = NOT_PROVIDED,
     ) -> TranscriptionServiceConnection:
@@ -157,8 +148,6 @@ class TranscriptionServiceConnectionService:
             row.endpoint_url = endpoint_url
         if is_provided(api_key_encrypted):
             row.api_key_encrypted = api_key_encrypted
-        if is_provided(operations):
-            row.operations = sorted(operation.value for operation in operations)
         if is_provided(is_enabled):
             row.is_enabled = is_enabled
         if is_provided(classification_id):
@@ -203,12 +192,10 @@ class TranscriptionServiceConnectionService:
             result = ConnectionCheck(
                 outcome=ConnectionCheckOutcome.CREDENTIALS_REJECTED,
                 detail="the service rejected the API key",
-                reported_operations=None,
-                missing_operations=frozenset(),
+                identifies_speakers=None,
                 service_version=None,
             )
         else:
-            reported = readiness.reported_operations
             result = ConnectionCheck(
                 outcome=ConnectionCheckOutcome.UNAVAILABLE
                 if not readiness.ready
@@ -216,10 +203,7 @@ class TranscriptionServiceConnectionService:
                 if readiness.accepting_jobs
                 else ConnectionCheckOutcome.NOT_ACCEPTING_JOBS,
                 detail=readiness.detail,
-                reported_operations=reported,
-                missing_operations=connection.operations - reported
-                if reported is not None
-                else frozenset(),
+                identifies_speakers=readiness.identifies_speakers,
                 service_version=readiness.service_version,
             )
         await self._audit(
@@ -229,7 +213,7 @@ class TranscriptionServiceConnectionService:
             extra={
                 "outcome": result.outcome.value,
                 "detail": result.detail,
-                "missing_operations": sorted(result.missing_operations),
+                "identifies_speakers": result.identifies_speakers,
             },
         )
         return result
@@ -266,7 +250,6 @@ def _facts(connection: TranscriptionServiceConnection) -> dict[str, Any]:
     classification = connection.security_classification
     return {
         "endpoint_url": connection.endpoint_url,
-        "operations": sorted(operation.value for operation in connection.operations),
         "is_enabled": connection.is_enabled,
         "security_classification_id": str(classification.id)
         if classification is not None

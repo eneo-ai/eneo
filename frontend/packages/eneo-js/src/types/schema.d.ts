@@ -36000,8 +36000,6 @@ export interface components {
       meets_security_classification: boolean;
       /** Name */
       name: string;
-      /** Operations */
-      operations: components["schemas"]["TranscriptionOperation"][];
     };
     /**
      * StartRunRequest
@@ -38009,15 +38007,6 @@ export interface components {
        */
       total_count?: number;
     };
-    /**
-     * TranscriptionOperation
-     * @description Work Eneo asks a native transcription service to do.
-     *
-     *     A service may advertise more tasks (Vemsa also realigns corrected
-     *     transcripts); Eneo neither sends those nor offers them as supported.
-     * @enum {string}
-     */
-    TranscriptionOperation: "transcribe" | "diarize";
     /** TranscriptionServiceCheckPublic */
     TranscriptionServiceCheckPublic: {
       /**
@@ -38026,16 +38015,11 @@ export interface components {
        */
       detail: string;
       /**
-       * Missing Operations
-       * @description Declared operations the service reports it does not accept. Empty when every declared operation is confirmed or none are reported.
+       * Identifies Speakers
+       * @description Whether the service reports it can identify speakers. Null: the service does not report which tasks it supports.
        */
-      missing_operations: components["schemas"]["TranscriptionOperation"][];
+      identifies_speakers: boolean | null;
       outcome: components["schemas"]["ConnectionCheckOutcome"];
-      /**
-       * Reported Operations
-       * @description Operations the service reports it accepts. Null: the service does not report them, so the declared operations are unverified.
-       */
-      reported_operations: components["schemas"]["TranscriptionOperation"][] | null;
       /**
        * Service Version
        * @description Version the service reports, when it reports one
@@ -38065,11 +38049,6 @@ export interface components {
        * @description Unique within the organisation
        */
       name: string;
-      /**
-       * Operations
-       * @description What the administrator declares the service does. A connection check reports whether the service itself confirms it.
-       */
-      operations: components["schemas"]["TranscriptionOperation"][];
       /** @description Security classification of the service */
       security_classification?: components["schemas"]["ModelId"] | null;
     };
@@ -38091,8 +38070,6 @@ export interface components {
       is_enabled: boolean;
       /** Name */
       name: string;
-      /** Operations */
-      operations: components["schemas"]["TranscriptionOperation"][];
       security_classification: components["schemas"]["SecurityClassificationPublic"] | null;
       /**
        * Updated At
@@ -38120,11 +38097,6 @@ export interface components {
       is_enabled?: boolean;
       /** Name */
       name?: string;
-      /**
-       * Operations
-       * @description What the administrator declares the service does. A connection check reports whether the service itself confirms it.
-       */
-      operations?: components["schemas"]["TranscriptionOperation"][];
       /**
        * Security Classification
        * @description Null clears the classification; omit to keep it

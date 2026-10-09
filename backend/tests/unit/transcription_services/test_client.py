@@ -685,7 +685,7 @@ def test_the_client_loads_without_flow_code() -> None:
 
 
 @pytest.mark.parametrize(
-    "body, reported, version",
+    "body, identifies_speakers, version",
     [
         ({"queue_accepting_jobs": True}, None, None),
         (
@@ -694,10 +694,14 @@ def test_the_client_loads_without_flow_code() -> None:
                 "supported_tasks": ["diarize", "align", 7],
                 "service_version": "1.4.0",
             },
-            frozenset({TranscriptionOperation.DIARIZE}),
+            True,
             "1.4.0",
         ),
-        ({"queue_accepting_jobs": True, "supported_tasks": []}, frozenset(), None),
+        (
+            {"queue_accepting_jobs": True, "supported_tasks": ["transcribe"]},
+            False,
+            None,
+        ),
         ({"queue_accepting_jobs": True, "supported_tasks": "diarize"}, None, None),
         (
             {"queue_accepting_jobs": True, "service_version": "v" * 100},
@@ -707,22 +711,22 @@ def test_the_client_loads_without_flow_code() -> None:
     ],
     ids=[
         "older-service",
-        "reports-tasks",
-        "reports-none",
+        "reports-diarize",
+        "reports-no-diarize",
         "not-a-list",
         "long-version",
     ],
 )
-async def test_readiness_reports_operations_separately_from_capacity(
-    body, reported, version
+async def test_readiness_reports_speaker_identification_separately_from_capacity(
+    body, identifies_speakers, version
 ) -> None:
     service = ScriptedService(ready_responses=[httpx.Response(200, json=body)])
 
     readiness = await make_client(service).check_readiness()
 
     assert readiness.ready is True
-    assert (readiness.reported_operations, readiness.service_version) == (
-        reported,
+    assert (readiness.identifies_speakers, readiness.service_version) == (
+        identifies_speakers,
         version,
     )
 
@@ -731,17 +735,14 @@ async def test_an_unready_service_still_reports_what_it_supports() -> None:
     service = ScriptedService(
         ready_responses=[
             httpx.Response(
-                503, json={"status": "not_ready", "supported_tasks": ["transcribe"]}
+                503, json={"status": "not_ready", "supported_tasks": ["diarize"]}
             )
         ]
     )
 
     readiness = await make_client(service).check_readiness()
 
-    assert (readiness.ready, readiness.reported_operations) == (
-        False,
-        frozenset({TranscriptionOperation.TRANSCRIBE}),
-    )
+    assert (readiness.ready, readiness.identifies_speakers) == (False, True)
 
 
 async def test_a_readiness_answer_that_never_arrives_is_bounded_in_total() -> None:

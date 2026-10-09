@@ -192,16 +192,16 @@ class TranscriptionJobResult:
 class ServiceReadiness:
     """Authenticated ``GET /v1/health/ready`` outcome for this client's token.
 
-    ``reported_operations`` are the operations Eneo uses that the service
-    says it accepts; None when the service does not report them (an older
+    ``identifies_speakers`` is whether the service lists ``diarize`` among
+    its supported tasks; None when it reports no task list (an older
     deployment). Whether the service is up or has room says nothing about
-    which operations it supports.
+    what it supports.
     """
 
     ready: bool
     accepting_jobs: bool
     detail: str
-    reported_operations: frozenset[TranscriptionOperation] | None = None
+    identifies_speakers: bool | None = None
     service_version: str | None = None
 
 
@@ -354,7 +354,7 @@ class TranscriptionServiceClient:
         if response.status_code == 401:
             raise CredentialsRejected()
         body = _json_object(response)
-        reported = _reported_operations(body.get("supported_tasks"))
+        identifies_speakers = _identifies_speakers(body.get("supported_tasks"))
         version = body.get("service_version")
         service_version = (
             version[:_SERVICE_VERSION_MAX_CHARS] if isinstance(version, str) else None
@@ -364,7 +364,7 @@ class TranscriptionServiceClient:
                 ready=False,
                 accepting_jobs=False,
                 detail=f"http {response.status_code}",
-                reported_operations=reported,
+                identifies_speakers=identifies_speakers,
                 service_version=service_version,
             )
         accepting_jobs = body.get("queue_accepting_jobs")
@@ -375,14 +375,14 @@ class TranscriptionServiceClient:
                 ready=False,
                 accepting_jobs=False,
                 detail="malformed readiness response",
-                reported_operations=reported,
+                identifies_speakers=identifies_speakers,
                 service_version=service_version,
             )
         return ServiceReadiness(
             ready=True,
             accepting_jobs=accepting_jobs,
             detail="accepting jobs" if accepting_jobs else "queue not accepting jobs",
-            reported_operations=reported,
+            identifies_speakers=identifies_speakers,
             service_version=service_version,
         )
 
@@ -545,16 +545,11 @@ def _job_result(body: dict[str, object]) -> TranscriptionJobResult:
     )
 
 
-def _reported_operations(raw: object) -> frozenset[TranscriptionOperation] | None:
-    """The reported tasks Eneo sends; others (such as ``align``) are ignored."""
+def _identifies_speakers(raw: object) -> bool | None:
+    """Whether the reported task list includes ``diarize``; None without a list."""
     if not isinstance(raw, list):
         return None
-    known = {operation.value: operation for operation in TranscriptionOperation}
-    return frozenset(
-        known[task]
-        for task in cast(list[object], raw)
-        if isinstance(task, str) and task in known
-    )
+    return TranscriptionOperation.DIARIZE.value in cast(list[object], raw)
 
 
 def _failure_kind(raw: object) -> JobFailureKind | None:

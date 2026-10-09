@@ -22,10 +22,7 @@ from eneo.main.exceptions import NameCollisionException, NotFoundException
 from eneo.security_classifications.domain.entities.security_classification import (
     SecurityClassification,
 )
-from eneo.transcription_services.models import (
-    TranscriptionOperation,
-    TranscriptionServiceConnection,
-)
+from eneo.transcription_services.models import TranscriptionServiceConnection
 
 _UNIQUE_NAME = "uq_transcription_service_connections_name"
 
@@ -122,7 +119,6 @@ class TranscriptionServiceConnectionRepository:
         name: str,
         endpoint_url: str,
         api_key_encrypted: str,
-        operations: frozenset[TranscriptionOperation],
         is_enabled: bool,
         security_classification_id: UUID | None,
     ) -> TranscriptionServiceConnection:
@@ -136,7 +132,6 @@ class TranscriptionServiceConnectionRepository:
                         name=name,
                         endpoint_url=endpoint_url,
                         api_key_encrypted=api_key_encrypted,
-                        operations=_stored_operations(operations),
                         is_enabled=is_enabled,
                         security_classification_id=security_classification_id,
                     )
@@ -209,17 +204,12 @@ def _raise_name_collision(exc: IntegrityError) -> NoReturn:
     raise exc
 
 
-def _stored_operations(operations: frozenset[TranscriptionOperation]) -> list[str]:
-    return sorted(operation.value for operation in operations)
-
-
 def _to_domain(row: TranscriptionServiceConnections) -> TranscriptionServiceConnection:
     return TranscriptionServiceConnection(
         id=row.id,
         tenant_id=row.tenant_id,
         name=row.name,
         endpoint_url=row.endpoint_url,
-        operations=frozenset(TranscriptionOperation(value) for value in row.operations),
         is_enabled=row.is_enabled,
         security_classification=SecurityClassification.to_domain(
             row.security_classification

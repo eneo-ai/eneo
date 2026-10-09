@@ -1,14 +1,7 @@
 from typing import Optional
 from uuid import UUID
 
-from sqlalchemy import (
-    ARRAY,
-    CheckConstraint,
-    ForeignKey,
-    String,
-    Text,
-    UniqueConstraint,
-)
+from sqlalchemy import ForeignKey, String, Text, UniqueConstraint
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from eneo.database.tables.base_class import BaseCrossReference, BasePublic
@@ -23,8 +16,7 @@ class TranscriptionServiceConnections(BasePublic):
 
     ``endpoint_url`` is the normalised base the ``/v1`` paths are built on;
     ``api_key_encrypted`` holds the EncryptionService token and is never
-    returned. ``operations`` is the administrator's declared subset of the
-    operations Eneo sends.
+    returned.
     """
 
     tenant_id: Mapped[UUID] = mapped_column(
@@ -33,7 +25,6 @@ class TranscriptionServiceConnections(BasePublic):
     name: Mapped[str] = mapped_column(String(200), nullable=False)
     endpoint_url: Mapped[str] = mapped_column(String(2048), nullable=False)
     api_key_encrypted: Mapped[str] = mapped_column(Text, nullable=False)
-    operations: Mapped[list[str]] = mapped_column(ARRAY(String(16)), nullable=False)
     is_enabled: Mapped[bool] = mapped_column(nullable=False, server_default="true")
     security_classification_id: Mapped[Optional[UUID]] = mapped_column(
         ForeignKey(SecurityClassification.id, ondelete="SET NULL"), nullable=True
@@ -43,11 +34,6 @@ class TranscriptionServiceConnections(BasePublic):
     __table_args__ = (
         UniqueConstraint(
             "tenant_id", "name", name="uq_transcription_service_connections_name"
-        ),
-        CheckConstraint(
-            "cardinality(operations) >= 1 "
-            "AND operations <@ ARRAY['transcribe', 'diarize']::varchar[]",
-            name="ck_transcription_service_connections_operations",
         ),
     )
 

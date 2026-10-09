@@ -45,7 +45,6 @@ def create_connection(client, admin_headers) -> Callable[..., object]:
             "name": f"vemsa-{uuid4().hex[:8]}",
             "endpoint_url": "https://vemsa.example.se/v1/",
             "api_key": "first-secret",
-            "operations": ["diarize", "transcribe"],
             **overrides,
         }
         response = await client.post(BASE, json=body, headers=admin_headers)

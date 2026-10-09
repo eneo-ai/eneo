@@ -45,7 +45,6 @@ from eneo.services.service import ServiceSparse
 from eneo.transcription_models.presentation.transcription_model_models import (
     TranscriptionModelPublic,
 )
-from eneo.transcription_services.models import TranscriptionOperation
 from eneo.users.user import UserSparse
 from eneo.websites.domain.crawl_run import CrawlType
 from eneo.websites.domain.website import UpdateInterval
@@ -167,7 +166,6 @@ class SpaceTranscriptionServiceLink(BaseModel):
 
     id: UUID
     name: str
-    operations: list[TranscriptionOperation]
     meets_security_classification: bool = Field(
         description=(
             "False when the service's security classification is below the space's."

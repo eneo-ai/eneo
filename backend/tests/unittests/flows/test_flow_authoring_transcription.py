@@ -28,7 +28,6 @@ from eneo.flows.transcription_config import (
     parse_transcription_config,
 )
 from eneo.main.exceptions import BadRequestException
-from eneo.transcription_services.models import TranscriptionOperation
 
 
 def _step(
@@ -201,8 +200,8 @@ class TestPickedSpeakerService:
         )
 
     @staticmethod
-    def _connection(*operations: TranscriptionOperation) -> SimpleNamespace:
-        return SimpleNamespace(id=uuid4(), operations=frozenset(operations))
+    def _connection() -> SimpleNamespace:
+        return SimpleNamespace(id=uuid4())
 
     def test_an_unreadable_saved_pick_names_no_service(self) -> None:
         assert (
@@ -218,7 +217,7 @@ class TestPickedSpeakerService:
         )
 
     def test_a_usable_speaker_service_is_accepted(self) -> None:
-        connection = self._connection(TranscriptionOperation.DIARIZE)
+        connection = self._connection()
 
         require_usable_speaker_service(
             connection.id,
@@ -241,19 +240,6 @@ class TestPickedSpeakerService:
             "speaker_service_id": str(service_id),
         }
 
-    def test_a_service_not_declared_for_speakers_is_refused(self) -> None:
-        connection = self._connection(TranscriptionOperation.TRANSCRIBE)
-
-        with pytest.raises(BadRequestException) as refused:
-            require_usable_speaker_service(
-                connection.id,
-                space=self._space(connection),  # pyright: ignore[reportArgumentType]
-            )
-
-        assert refused.value.code == (
-            FlowGraphIssueCode.FLOW_SPEAKER_SERVICE_CANNOT_IDENTIFY_SPEAKERS.value
-        )
-
     def test_a_malformed_choice_is_refused_when_written(self) -> None:
         with pytest.raises(BadRequestException) as refused:
             transcription_config_for_write(
@@ -268,19 +254,12 @@ class TestPickedSpeakerService:
 
     @pytest.mark.parametrize("count", [0, 1])
     def test_labels_without_a_pick_need_at_most_one_service(self, count: int) -> None:
-        services = [
-            self._connection(TranscriptionOperation.DIARIZE) for _ in range(count)
-        ]
-        # A service that cannot identify speakers is not a candidate.
-        services.append(self._connection(TranscriptionOperation.TRANSCRIBE))
+        services = [self._connection() for _ in range(count)]
 
         require_one_speaker_service(space=self._space(*services))  # pyright: ignore[reportArgumentType]
 
     def test_several_speaker_services_need_a_pick(self) -> None:
-        space = self._space(
-            self._connection(TranscriptionOperation.DIARIZE),
-            self._connection(TranscriptionOperation.DIARIZE),
-        )
+        space = self._space(self._connection(), self._connection())
 
         with pytest.raises(BadRequestException) as refused:
             require_one_speaker_service(space=space)  # pyright: ignore[reportArgumentType]

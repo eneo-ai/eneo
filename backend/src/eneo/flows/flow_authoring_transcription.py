@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from collections.abc import Sequence
-from typing import TYPE_CHECKING, NoReturn, Protocol
+from typing import TYPE_CHECKING, Protocol
 from uuid import UUID
 
 from eneo.flows.domain.flow import FlowPersistedJsonObject, clone_json_object
@@ -16,7 +16,6 @@ from eneo.flows.transcription_config import (
     parse_transcription_config,
 )
 from eneo.main.exceptions import BadRequestException
-from eneo.transcription_services.models import TranscriptionOperation
 
 if TYPE_CHECKING:
     from eneo.spaces.space import Space
@@ -96,12 +95,7 @@ def kept_speaker_service_id(metadata: FlowPersistedJsonObject | None) -> UUID | 
 def require_one_speaker_service(*, space: Space) -> None:
     """A flow that labels speakers without a pick needs the space to have one
     speaker service to use, not a choice to make; none means no labels."""
-    services = [
-        connection
-        for connection in space.usable_transcription_services
-        if TranscriptionOperation.DIARIZE in connection.operations
-    ]
-    if len(services) > 1:
+    if len(space.usable_transcription_services) > 1:
         code = FlowGraphIssueCode.FLOW_SPEAKER_SERVICE_CHOICE_REQUIRED.value
         raise BadRequestException(
             "This space has several speaker identification services; choose "
@@ -112,31 +106,16 @@ def require_one_speaker_service(*, space: Space) -> None:
 
 
 def require_usable_speaker_service(service_id: UUID, *, space: Space) -> None:
-    """Refuse a picked speaker service the space may not use, or one its
-    administrator has not declared for identifying speakers."""
-    connection = space.usable_transcription_service(service_id)
-    if connection is None:
-        _refuse(
-            FlowGraphIssueCode.FLOW_SPEAKER_SERVICE_UNAVAILABLE,
+    """Refuse a picked speaker service the space may not use."""
+    if space.usable_transcription_service(service_id) is None:
+        code = FlowGraphIssueCode.FLOW_SPEAKER_SERVICE_UNAVAILABLE.value
+        raise BadRequestException(
             "The chosen speaker identification service is not available in this "
             "space: it is not granted to the space, is turned off, or is below "
             "the space's security classification.",
-            service_id,
+            code=code,
+            context={"issue_code": code, "speaker_service_id": str(service_id)},
         )
-    if TranscriptionOperation.DIARIZE not in connection.operations:
-        _refuse(
-            FlowGraphIssueCode.FLOW_SPEAKER_SERVICE_CANNOT_IDENTIFY_SPEAKERS,
-            "The chosen service is not set up to identify speakers.",
-            service_id,
-        )
-
-
-def _refuse(code: FlowGraphIssueCode, message: str, service_id: UUID) -> NoReturn:
-    raise BadRequestException(
-        message,
-        code=code.value,
-        context={"issue_code": code.value, "speaker_service_id": str(service_id)},
-    )
 
 
 def requires_audio_transcription(steps: Sequence[AudioInputStep]) -> bool:

@@ -36,7 +36,6 @@ from eneo.server.protocol import responses
 from eneo.settings.encryption_service import EncryptionService
 from eneo.transcription_services.models import (
     ServiceEndpointError,
-    TranscriptionOperation,
     TranscriptionServiceConnection,
     parse_service_endpoint,
 )
@@ -94,10 +93,6 @@ _ENDPOINT_DESCRIPTION = (
     "credentials, query or fragment. A trailing /v1 is removed."
 )
 _API_KEY_DESCRIPTION = "Bearer key the service issued to this organisation. Write-only."
-_OPERATIONS_DESCRIPTION = (
-    "What the administrator declares the service does. A connection check "
-    "reports whether the service itself confirms it."
-)
 
 
 def _parsed_endpoint(value: str) -> str:
@@ -113,9 +108,6 @@ class TranscriptionServiceCreate(BaseModel):
     name: ServiceName = Field(description="Unique within the organisation")
     endpoint_url: str = Field(description=_ENDPOINT_DESCRIPTION)
     api_key: ServiceApiKey = Field(description=_API_KEY_DESCRIPTION)
-    operations: list[TranscriptionOperation] = Field(
-        min_length=1, description=_OPERATIONS_DESCRIPTION
-    )
     is_enabled: bool = Field(default=True, description="Disabled: no new work")
     security_classification: ModelId | None = Field(
         default=None, description="Security classification of the service"
@@ -140,9 +132,6 @@ class TranscriptionServiceUpdate(BaseModel):
     api_key: ServiceApiKey | NotProvided = Field(
         default=NOT_PROVIDED, description=_API_KEY_DESCRIPTION
     )
-    operations: Annotated[list[TranscriptionOperation], Field(min_length=1)] | (
-        NotProvided
-    ) = Field(default=NOT_PROVIDED, description=_OPERATIONS_DESCRIPTION)
     is_enabled: bool | NotProvided = Field(default=NOT_PROVIDED)
     security_classification: ModelId | None | NotProvided = Field(
         default=NOT_PROVIDED,
@@ -159,7 +148,6 @@ class TranscriptionServicePublic(BaseModel):
     id: UUID
     name: str
     endpoint_url: str
-    operations: list[TranscriptionOperation]
     is_enabled: bool
     security_classification: SecurityClassificationPublic | None
     created_at: datetime
@@ -173,7 +161,6 @@ class TranscriptionServicePublic(BaseModel):
             id=connection.id,
             name=connection.name,
             endpoint_url=connection.endpoint_url,
-            operations=sorted(connection.operations),
             is_enabled=connection.is_enabled,
             security_classification=SecurityClassificationPublic.from_domain(
                 connection.security_classification
@@ -186,16 +173,10 @@ class TranscriptionServicePublic(BaseModel):
 class TranscriptionServiceCheckPublic(BaseModel):
     outcome: ConnectionCheckOutcome
     detail: str = Field(description="What the service answered, without secrets")
-    reported_operations: list[TranscriptionOperation] | None = Field(
+    identifies_speakers: bool | None = Field(
         description=(
-            "Operations the service reports it accepts. Null: the service does "
-            "not report them, so the declared operations are unverified."
-        )
-    )
-    missing_operations: list[TranscriptionOperation] = Field(
-        description=(
-            "Declared operations the service reports it does not accept. Empty "
-            "when every declared operation is confirmed or none are reported."
+            "Whether the service reports it can identify speakers. Null: the "
+            "service does not report which tasks it supports."
         )
     )
     service_version: str | None = Field(
@@ -245,7 +226,6 @@ async def create_transcription_service(
         name=data.name,
         endpoint_url=data.endpoint_url,
         api_key=data.api_key,
-        operations=frozenset(data.operations),
         is_enabled=data.is_enabled,
         security_classification=data.security_classification,
     )
@@ -290,9 +270,6 @@ async def update_transcription_service(
         name=data.name,
         endpoint_url=data.endpoint_url,
         api_key=data.api_key,
-        operations=frozenset(data.operations)
-        if is_provided(data.operations)
-        else NOT_PROVIDED,
         is_enabled=data.is_enabled,
         security_classification=data.security_classification,
     )
@@ -338,9 +315,6 @@ async def check_transcription_service(
     return TranscriptionServiceCheckPublic(
         outcome=check.outcome,
         detail=check.detail,
-        reported_operations=sorted(check.reported_operations)
-        if check.reported_operations is not None
-        else None,
-        missing_operations=sorted(check.missing_operations),
+        identifies_speakers=check.identifies_speakers,
         service_version=check.service_version,
     )

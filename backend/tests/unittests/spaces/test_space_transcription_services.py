@@ -13,10 +13,7 @@ from eneo.security_classifications.domain.entities.security_classification impor
     SecurityClassification,
 )
 from eneo.spaces.space import Space
-from eneo.transcription_services.models import (
-    TranscriptionOperation,
-    TranscriptionServiceConnection,
-)
+from eneo.transcription_services.models import TranscriptionServiceConnection
 
 
 def _classification(level: int) -> SecurityClassification:
@@ -36,7 +33,6 @@ def _connection(level: int, *, enabled: bool = True) -> TranscriptionServiceConn
         tenant_id=uuid4(),
         name=f"vemsa-{level}",
         endpoint_url="https://vemsa.example.se",
-        operations=frozenset({TranscriptionOperation.DIARIZE}),
         is_enabled=enabled,
         security_classification=_classification(level),
         created_at=now,

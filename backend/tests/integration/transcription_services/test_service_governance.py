@@ -74,7 +74,6 @@ async def _connection(client, headers, **overrides) -> dict:
             "name": f"vemsa-{uuid4().hex[:8]}",
             "endpoint_url": "https://vemsa.example.se",
             "api_key": "secret",
-            "operations": ["diarize"],
             **overrides,
         },
         headers=headers,
@@ -128,7 +127,6 @@ async def test_a_granted_service_is_listed_and_usable_in_the_space(
         {
             "id": connection["id"],
             "name": connection["name"],
-            "operations": ["diarize"],
             "meets_security_classification": True,
             "available": True,
         }

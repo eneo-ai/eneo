@@ -34,16 +34,15 @@ class TranscriptionOperation(StrEnum):
 class TranscriptionServiceConnection:
     """An organisation's connection to one native transcription service.
 
-    ``operations`` are what the administrator declared the service does; a
-    connection test reports whether the service itself confirms them. The
-    credential is write-only and never part of this view.
+    Eneo uses it to identify speakers; a connection check reports whether the
+    service says it can. The credential is write-only and never part of this
+    view.
     """
 
     id: UUID
     tenant_id: UUID
     name: str
     endpoint_url: str
-    operations: frozenset[TranscriptionOperation]
     is_enabled: bool
     security_classification: SecurityClassification | None
     created_at: datetime

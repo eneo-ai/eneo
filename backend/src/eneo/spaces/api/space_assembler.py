@@ -717,7 +717,6 @@ class SpaceAssembler:
             SpaceTranscriptionServiceLink(
                 id=connection.id,
                 name=connection.name,
-                operations=sorted(connection.operations),
                 meets_security_classification=space.allows_security_classification(
                     connection
                 ),

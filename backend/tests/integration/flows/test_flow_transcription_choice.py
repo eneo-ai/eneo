@@ -18,7 +18,6 @@ pytestmark = [pytest.mark.integration, pytest.mark.asyncio]
 _UNAVAILABLE = "flow_speaker_service_unavailable"
 _CHOICE_REQUIRED = "flow_speaker_service_choice_required"
 _INVALID = "flow_audio_transcription_invalid"
-_CANNOT_IDENTIFY = "flow_speaker_service_cannot_identify_speakers"
 
 
 @pytest.fixture
@@ -54,14 +53,13 @@ async def _space(client: AsyncClient, headers) -> str:
     return response.json()["id"]
 
 
-async def _connection(client: AsyncClient, headers, *operations: str) -> str:
+async def _connection(client: AsyncClient, headers) -> str:
     response = await client.post(
         "/api/v1/admin/transcription-services/",
         json={
             "name": f"vemsa-{uuid4().hex[:8]}",
             "endpoint_url": "https://vemsa.example.se/",
             "api_key": "secret",
-            "operations": list(operations),
         },
         headers=headers,
     )
@@ -111,16 +109,11 @@ async def test_a_flow_picks_only_a_speaker_service_its_space_may_use(
     client: AsyncClient, headers
 ):
     space_id = await _space(client, headers)
-    transcribe_only = await _connection(client, headers, "transcribe")
-    vemsa = await _connection(client, headers, "diarize")
+    vemsa = await _connection(client, headers)
 
     _refusal(await _create(client, headers, space_id, _metadata(vemsa)), _UNAVAILABLE)
 
-    await _grant(client, headers, space_id, transcribe_only, vemsa)
-    _refusal(
-        await _create(client, headers, space_id, _metadata(transcribe_only)),
-        _CANNOT_IDENTIFY,
-    )
+    await _grant(client, headers, space_id, vemsa)
     created = await _create(client, headers, space_id, _metadata(vemsa))
     assert created.status_code == 201, created.text
     assert created.json()["metadata_json"]["wizard"][
@@ -136,7 +129,7 @@ async def test_a_draft_keeps_a_revoked_pick_but_cannot_publish_it(
     client: AsyncClient, headers
 ):
     space_id = await _space(client, headers)
-    vemsa = await _connection(client, headers, "diarize")
+    vemsa = await _connection(client, headers)
     await _grant(client, headers, space_id, vemsa)
     created = await _create(client, headers, space_id, _metadata(vemsa))
     assert created.status_code == 201, created.text
@@ -241,8 +234,8 @@ async def test_labels_without_a_pick_publish_only_when_the_space_has_one_service
     client: AsyncClient, headers
 ):
     space_id = await _space(client, headers)
-    first = await _connection(client, headers, "diarize")
-    second = await _connection(client, headers, "diarize")
+    first = await _connection(client, headers)
+    second = await _connection(client, headers)
     await _grant(client, headers, space_id, first)
     one_service = await _publishable(client, headers, space_id, _metadata(None))
     published = await client.post(

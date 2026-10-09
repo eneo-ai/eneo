@@ -5,7 +5,6 @@ from pathlib import Path
 
 import pytest
 from sqlalchemy import create_engine, inspect, text
-from sqlalchemy.exc import IntegrityError
 from testcontainers.community.postgres import PostgresContainer
 
 from alembic import command
@@ -17,7 +16,8 @@ from eneo.database.tables.transcription_services_table import (
 
 pytestmark = [pytest.mark.integration, pytest.mark.migration_isolation]
 
-_REVISION = "202610082100"
+_REVISION = "202610090800"
+_OPERATIONS_REVISION = "202610082100"
 _PREVIOUS_REVISION = "202610081100"
 _TABLES = (
     "transcription_service_connections",
@@ -66,6 +66,19 @@ def migration_database() -> Generator[tuple[str, Config], None, None]:
         yield database_url, _alembic_config(database_url)
 
 
+def _checks(database_url: str) -> set[str]:
+    engine = create_engine(database_url)
+    try:
+        return {
+            check["name"]
+            for check in inspect(engine).get_check_constraints(
+                "transcription_service_connections"
+            )
+        }
+    finally:
+        engine.dispose()
+
+
 def _tables(database_url: str) -> set[str]:
     engine = create_engine(database_url)
     try:
@@ -81,6 +94,25 @@ def test_the_tables_round_trip_and_match_the_models(
 
     command.upgrade(config, _PREVIOUS_REVISION)
     assert _tables(database_url) == set()
+
+    command.upgrade(config, _OPERATIONS_REVISION)
+    engine = create_engine(database_url)
+    with engine.begin() as connection:
+        tenant_id = connection.execute(
+            text(
+                "INSERT INTO tenants (name, quota_limit, state) "
+                "VALUES ('migration tenant', 1, 'active') RETURNING id"
+            )
+        ).scalar_one()
+        connection.execute(
+            text(
+                "INSERT INTO transcription_service_connections "
+                "(tenant_id, name, endpoint_url, api_key_encrypted, operations) "
+                "VALUES (:tenant, 'vemsa', 'https://x', 'enc', '{transcribe}')"
+            ),
+            {"tenant": tenant_id},
+        )
+    engine.dispose()
 
     command.upgrade(config, _REVISION)
     assert _tables(database_url) == set(_TABLES)
@@ -112,12 +144,7 @@ def test_the_tables_round_trip_and_match_the_models(
                 )
                 for constraint in table.foreign_key_constraints
             }
-        assert {
-            check["name"]
-            for check in inspector.get_check_constraints(
-                "transcription_service_connections"
-            )
-        } == {"ck_transcription_service_connections_operations"}
+        assert _checks(database_url) == set()
         assert {
             unique["name"]
             for unique in inspector.get_unique_constraints(
@@ -133,43 +160,18 @@ def test_the_tables_round_trip_and_match_the_models(
     finally:
         engine.dispose()
 
+    # Downgrading restores the column; a kept connection is a speaker service.
+    command.downgrade(config, _OPERATIONS_REVISION)
+    assert _checks(database_url) == {"ck_transcription_service_connections_operations"}
+    engine = create_engine(database_url)
+    try:
+        with engine.connect() as connection:
+            assert connection.execute(
+                text("SELECT operations FROM transcription_service_connections")
+            ).scalars().all() == [["diarize"]]
+    finally:
+        engine.dispose()
+
     command.downgrade(config, _PREVIOUS_REVISION)
     assert _tables(database_url) == set()
     command.upgrade(config, _REVISION)
-
-
-def test_the_database_refuses_operations_eneo_does_not_send(
-    migration_database: tuple[str, Config],
-) -> None:
-    database_url, config = migration_database
-    command.upgrade(config, _REVISION)
-    engine = create_engine(database_url)
-    try:
-        with engine.begin() as connection:
-            tenant_id = connection.execute(
-                text(
-                    "INSERT INTO tenants (name, quota_limit, state) "
-                    "VALUES ('migration tenant', 1, 'active') RETURNING id"
-                )
-            ).scalar_one()
-        for operations in ("{}", "{align}", "{transcribe,align}"):
-            with pytest.raises(IntegrityError), engine.begin() as connection:
-                connection.execute(
-                    text(
-                        "INSERT INTO transcription_service_connections "
-                        "(tenant_id, name, endpoint_url, api_key_encrypted, operations) "
-                        "VALUES (:tenant, :name, 'https://x', 'enc', :operations)"
-                    ),
-                    {"tenant": tenant_id, "name": operations, "operations": operations},
-                )
-        with engine.begin() as connection:
-            connection.execute(
-                text(
-                    "INSERT INTO transcription_service_connections "
-                    "(tenant_id, name, endpoint_url, api_key_encrypted, operations) "
-                    "VALUES (:tenant, 'ok', 'https://x', 'enc', '{diarize,transcribe}')"
-                ),
-                {"tenant": tenant_id},
-            )
-    finally:
-        engine.dispose()
