@@ -85,7 +85,7 @@ describe("resolveBackendServerUrl", () => {
 });
 
 describe("handleFetch", () => {
-  const event = {} as RequestEvent;
+  const event = { url: new URL("https://eneo.example.com/login") } as RequestEvent;
   const kitFetch = vi.fn<typeof fetch>();
   const globalFetch = vi.fn<typeof fetch>();
 
@@ -101,13 +101,13 @@ describe("handleFetch", () => {
     vi.unstubAllGlobals();
   });
 
-  function sentRequest(): Request {
-    const [request] = globalFetch.mock.calls[0];
+  function sentRequest(mock: typeof globalFetch): Request {
+    const [request] = mock.mock.calls[0];
     if (!(request instanceof Request)) throw new Error("expected a Request");
     return request;
   }
 
-  test("sends backend calls to the internal URL without a browser Origin", async () => {
+  test("sends a same-origin backend call to the internal URL without a browser Origin", async () => {
     const request = new Request("https://eneo.example.com/api/v1/users/login/token/", {
       method: "POST",
       body: new URLSearchParams({ username: "user", password: "secret" }),
@@ -118,7 +118,7 @@ describe("handleFetch", () => {
 
     expect(await response.text()).toBe("from backend");
     expect(kitFetch).not.toHaveBeenCalled();
-    const sent = sentRequest();
+    const sent = sentRequest(globalFetch);
     expect(sent.url).toBe("http://backend:8000/api/v1/users/login/token/");
     expect(sent.method).toBe("POST");
     expect(sent.headers.has("origin")).toBe(false);
@@ -133,10 +133,21 @@ describe("handleFetch", () => {
     await handleFetch({ event, request, fetch: kitFetch });
 
     expect(kitFetch).not.toHaveBeenCalled();
-    expect(sentRequest().url).toBe("https://eneo.example.com/api/v1/spaces/");
+    expect(sentRequest(globalFetch).url).toBe("https://eneo.example.com/api/v1/spaces/");
   });
 
-  test("hands requests to other hosts to SvelteKit's fetch", async () => {
+  test("keeps SvelteKit's fetch for a backend on another origin so CORS is answered", async () => {
+    state.privateEnv.ENEO_BACKEND_URL = "http://127.0.0.1:8124";
+    const request = new Request("http://127.0.0.1:8124/api/v1/spaces/");
+
+    const response = await handleFetch({ event, request, fetch: kitFetch });
+
+    expect(await response.text()).toBe("from sveltekit");
+    expect(globalFetch).not.toHaveBeenCalled();
+    expect(sentRequest(kitFetch).url).toBe("http://backend:8000/api/v1/spaces/");
+  });
+
+  test("hands requests to other hosts to SvelteKit's fetch untouched", async () => {
     const request = new Request("https://idp.example.com/token", { method: "POST", body: "x" });
 
     const response = await handleFetch({ event, request, fetch: kitFetch });

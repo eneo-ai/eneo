@@ -160,18 +160,26 @@ export function resolveBackendServerUrl(
   return `${server.origin}${serverPath}${target.pathname.slice(basePath.length)}${target.search}`;
 }
 
-export const handleFetch: HandleFetch = async ({ request, fetch }) => {
+export const handleFetch: HandleFetch = async ({ event, request, fetch }) => {
   const serverUrl = resolveBackendServerUrl(request.url);
   if (serverUrl === null) {
     return fetchWithTransientRetry(request, fetch);
   }
-
-  // Backend calls are server-to-server and deliberately skip SvelteKit's fetch
-  // wrapper. The wrapper adds `Origin: <app origin>` to every request, which
-  // the backend's CORS allowlist then has to contain (400
-  // `disallowed_cors_origin` when PUBLIC_ORIGIN was never registered), and
-  // when the backend shares the app's public origin it hands the request to
-  // this app instead of the network, so it never reaches the backend.
   const serverRequest = serverUrl === request.url ? request : new Request(serverUrl, request);
-  return fetchWithTransientRetry(serverRequest, globalThis.fetch);
+
+  if (new URL(request.url).origin === event.url.origin) {
+    // The backend is served under the app's own origin (the documented
+    // single-host setup). SvelteKit's fetch would hand the request to this app
+    // instead of the network, and it adds `Origin: <app origin>`, which the
+    // backend's CORS allowlist then has to contain (400 `disallowed_cors_origin`
+    // when PUBLIC_ORIGIN was never registered). A browser never sends a CORS
+    // request for its own origin, so neither does the server: plain fetch.
+    return fetchWithTransientRetry(serverRequest, globalThis.fetch);
+  }
+
+  // Another origin (dev and E2E stacks, split-host deployments): keep
+  // SvelteKit's fetch. It sends the app origin, and the backend answers with
+  // the CORS header that universal `load` functions require on the server,
+  // exactly as the browser will require it for the same call.
+  return fetchWithTransientRetry(serverRequest, fetch);
 };

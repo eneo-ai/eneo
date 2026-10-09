@@ -113,8 +113,12 @@ for the endpoint and the response has no trace id.
 Up to Eneo 2.2 the web app's own server-side calls carried the browser
 `Origin` as well, so an unregistered public URL also broke username/password
 login with a generic "invalid credentials" error. From 2.3.0 those calls send
-no `Origin` and do not depend on the allowlist; the web app log then names the
-backend code (`Code: disallowed_cors_origin`) if a call is still refused.
+no `Origin` when `ENEO_BACKEND_URL` is the app's own origin (the standard
+single-host setup) and do not depend on the allowlist there. A backend served
+from another origin still needs the app origin registered, as the browser
+needs it too; the web app log then names the backend code
+(`Code: disallowed_cors_origin`) and shows the user that the service could not
+be reached rather than that the password was wrong.
 
 1. **Check the backend log** – every refused request is logged as
    `CORS origin refused: <method> <path> from origin <origin>`. On startup,
