@@ -35,6 +35,15 @@ class TranscriptionServiceConnectionRepository:
         self.session = session
         self.tenant_id = tenant_id
 
+    async def count(self) -> int:
+        return (
+            await self.session.scalar(
+                sa.select(sa.func.count())
+                .select_from(TranscriptionServiceConnections)
+                .where(TranscriptionServiceConnections.tenant_id == self.tenant_id)
+            )
+        ) or 0
+
     async def list(
         self, *, limit: int | None = None, offset: int = 0
     ) -> list[TranscriptionServiceConnection]:

@@ -17,7 +17,11 @@ from pydantic import (
 from pydantic_core import PydanticCustomError
 
 from eneo.authentication.auth_dependencies import get_current_active_user
-from eneo.authentication.endpoint_access import Authentication, endpoint_access
+from eneo.authentication.endpoint_access import (
+    Authentication,
+    Authorization,
+    endpoint_access,
+)
 from eneo.database.database import AsyncSession, get_session_with_transaction
 from eneo.main.container.container import Container
 from eneo.main.models import (
@@ -35,6 +39,7 @@ from eneo.server.dependencies.container import get_container
 from eneo.server.protocol import responses
 from eneo.settings.encryption_service import EncryptionService
 from eneo.transcription_services.models import (
+    MAX_CONNECTIONS_PER_ORGANISATION,
     ServiceEndpointError,
     TranscriptionServiceConnection,
     parse_service_endpoint,
@@ -49,6 +54,9 @@ from eneo.transcription_services.service import (
 from eneo.users.user import UserInDB
 
 router = APIRouter()
+# The organisation's services by name, for whoever edits a space's resources;
+# addresses and keys stay with the administrator routes above.
+catalogue_router = APIRouter()
 
 _ACCESS_REASON = (
     "Transcription services are organisation configuration holding a credential; "
@@ -170,6 +178,28 @@ class TranscriptionServicePublic(BaseModel):
         )
 
 
+class TranscriptionServiceSummary(BaseModel):
+    """A speaker identification service as a space editor sees it."""
+
+    id: UUID
+    name: str
+    is_enabled: bool
+    security_classification: SecurityClassificationPublic | None
+
+    @classmethod
+    def from_domain(
+        cls, connection: TranscriptionServiceConnection
+    ) -> TranscriptionServiceSummary:
+        return cls(
+            id=connection.id,
+            name=connection.name,
+            is_enabled=connection.is_enabled,
+            security_classification=SecurityClassificationPublic.from_domain(
+                connection.security_classification
+            ),
+        )
+
+
 class TranscriptionServiceCheckPublic(BaseModel):
     outcome: ConnectionCheckOutcome
     detail: str = Field(description="What the service answered, without secrets")
@@ -197,7 +227,7 @@ class TranscriptionServiceCheckPublic(BaseModel):
 )
 async def list_transcription_services(
     service: ServiceDep,
-    limit: Annotated[int, Query(ge=1, le=200)] = 50,
+    limit: Annotated[int, Query(ge=1, le=MAX_CONNECTIONS_PER_ORGANISATION)] = 50,
     offset: Annotated[int, Query(ge=0)] = 0,
 ) -> OffsetPaginatedResponse[TranscriptionServicePublic]:
     page, has_more = await service.list(limit=limit, offset=offset)
@@ -317,4 +347,35 @@ async def check_transcription_service(
         detail=check.detail,
         identifies_speakers=check.identifies_speakers,
         service_version=check.service_version,
+    )
+
+
+@catalogue_router.get(
+    "/",
+    response_model=OffsetPaginatedResponse[TranscriptionServiceSummary],
+    description=(
+        "List the organisation's speaker identification services by name, "
+        "without addresses or keys, for granting them to spaces."
+    ),
+    responses=responses.get_responses([401]),
+)
+@endpoint_access(
+    authentication=Authentication.USER,
+    authorization=Authorization.AUTHENTICATED,
+    reason=(
+        "Organisation service names and classifications for space settings; "
+        "the repository scopes results to the caller's tenant."
+    ),
+)
+async def list_transcription_service_catalogue(
+    service: ServiceDep,
+    limit: Annotated[
+        int, Query(ge=1, le=MAX_CONNECTIONS_PER_ORGANISATION)
+    ] = MAX_CONNECTIONS_PER_ORGANISATION,
+    offset: Annotated[int, Query(ge=0)] = 0,
+) -> OffsetPaginatedResponse[TranscriptionServiceSummary]:
+    page, has_more = await service.list(limit=limit, offset=offset)
+    return OffsetPaginatedResponse[TranscriptionServiceSummary](
+        items=[TranscriptionServiceSummary.from_domain(item) for item in page],
+        has_more=has_more,
     )

@@ -10637,6 +10637,26 @@ export interface paths {
     patch?: never;
     trace?: never;
   };
+  "/api/v1/transcription-services/": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /**
+     * List Transcription Service Catalogue
+     * @description List the organisation's speaker identification services by name, without addresses or keys, for granting them to spaces.
+     */
+    get: operations["list_transcription_service_catalogue_api_v1_transcription_services__get"];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
   "/api/v1/user-groups/": {
     parameters: {
       query?: never;
@@ -30391,6 +30411,24 @@ export interface components {
        */
       items: components["schemas"]["TranscriptionServicePublic"][];
     };
+    /** OffsetPaginatedResponse[TranscriptionServiceSummary] */
+    OffsetPaginatedResponse_TranscriptionServiceSummary_: {
+      /**
+       * Count
+       * @description Number of items returned in the response
+       */
+      readonly count: number;
+      /**
+       * Has More
+       * @description Whether another page exists after the returned offset window
+       */
+      has_more: boolean;
+      /**
+       * Items
+       * @description List of items returned in the response
+       */
+      items: components["schemas"]["TranscriptionServiceSummary"][];
+    };
     /** OmittedTranscriptSourcePage */
     OmittedTranscriptSourcePage: {
       /** Attempt No */
@@ -38070,6 +38108,22 @@ export interface components {
        * Format: date-time
        */
       updated_at: string;
+    };
+    /**
+     * TranscriptionServiceSummary
+     * @description A speaker identification service as a space editor sees it.
+     */
+    TranscriptionServiceSummary: {
+      /**
+       * Id
+       * Format: uuid
+       */
+      id: string;
+      /** Is Enabled */
+      is_enabled: boolean;
+      /** Name */
+      name: string;
+      security_classification: components["schemas"]["SecurityClassificationPublic"] | null;
     };
     /**
      * TranscriptionServiceUpdate
@@ -77133,6 +77187,47 @@ export interface operations {
       };
       /** @description Not Found */
       404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+    };
+  };
+  list_transcription_service_catalogue_api_v1_transcription_services__get: {
+    parameters: {
+      query?: {
+        limit?: number;
+        offset?: number;
+      };
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["OffsetPaginatedResponse_TranscriptionServiceSummary_"];
+        };
+      };
+      /** @description Unauthorized */
+      401: {
         headers: {
           [name: string]: unknown;
         };

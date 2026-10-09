@@ -15,6 +15,7 @@ from eneo.database.tables.security_classifications_table import (
 from eneo.database.tables.transcription_services_table import (
     TranscriptionServiceConnections,
 )
+from eneo.transcription_services import service as service_module
 from eneo.transcription_services.models import SERVICE_ENDPOINT_MESSAGES
 from tests.integration.transcription_services.conftest import BASE
 
@@ -538,3 +539,23 @@ async def test_an_edit_committed_during_a_check_never_pairs_an_endpoint_with_ano
         ("vemsa-a.example.se", "Bearer first-secret"),
         ("vemsa-b.example.se", "Bearer second-secret"),
     }
+
+
+async def test_an_organisation_connects_at_most_one_page_of_services(
+    client, admin_headers, create_connection, monkeypatch
+):
+    monkeypatch.setattr(service_module, "MAX_CONNECTIONS_PER_ORGANISATION", 1)
+    await create_connection(name="Vemsa Sundsvall")
+
+    refused = await client.post(
+        BASE,
+        json={
+            "name": "Vemsa reserv",
+            "endpoint_url": "https://vemsa-reserv.example.se/",
+            "api_key": "secret",
+        },
+        headers=admin_headers,
+    )
+
+    assert refused.status_code == 400, refused.text
+    assert refused.json()["code"] == "transcription_service_limit_reached"

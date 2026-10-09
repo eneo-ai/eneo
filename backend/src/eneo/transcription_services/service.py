@@ -10,6 +10,7 @@ from uuid import UUID
 from eneo.audit.application.audit_metadata import AuditMetadata
 from eneo.audit.domain.action_types import ActionType
 from eneo.audit.domain.entity_types import EntityType
+from eneo.main.exceptions import BadRequestException
 from eneo.main.models import NOT_PROVIDED, ModelId, NotProvided, is_provided
 from eneo.model_providers.domain.endpoints import require_key_for_destination
 from eneo.security_classifications.tenant_validation import (
@@ -19,7 +20,10 @@ from eneo.transcription_services.client import (
     CredentialsRejected,
     TranscriptionServiceClient,
 )
-from eneo.transcription_services.models import TranscriptionServiceConnection
+from eneo.transcription_services.models import (
+    MAX_CONNECTIONS_PER_ORGANISATION,
+    TranscriptionServiceConnection,
+)
 
 if TYPE_CHECKING:
     from eneo.audit.application.audit_service import AuditService
@@ -95,6 +99,12 @@ class TranscriptionServiceConnectionService:
             key_stored=False,
             replacement_key=api_key,
         )
+        if await self.repository.count() >= MAX_CONNECTIONS_PER_ORGANISATION:
+            raise BadRequestException(
+                f"An organisation can connect at most "
+                f"{MAX_CONNECTIONS_PER_ORGANISATION} transcription services.",
+                code="transcription_service_limit_reached",
+            )
         connection = await self.repository.create(
             name=name,
             endpoint_url=endpoint_url,

@@ -10,6 +10,7 @@
   import CompletionModelsTable from "./CompletionModelsTable.svelte";
   import EmbeddingModelsTable from "./EmbeddingModelsTable.svelte";
   import TranscriptionModelsTable from "./TranscriptionModelsTable.svelte";
+  import TranscriptionServicesTable from "./TranscriptionServicesTable.svelte";
   import ImageModelsTable from "./ImageModelsTable.svelte";
   import MigrationHistoryPanel from "./MigrationHistoryPanel.svelte";
   import { m } from "$lib/paraglide/messages";
@@ -50,10 +51,28 @@
       />
     </Page.Tab>
     <Page.Tab id="transcription_models">
-      <TranscriptionModelsTable
-        transcriptionModels={data.models.transcriptionModels}
-        providers={data.providers}
-        favoriteProviders={data.favoriteProviders}
+      <!-- Two sections: models write the text, services label who speaks. -->
+      <section aria-labelledby="transcription-models-heading">
+        <header class="px-4 pt-4">
+          <h2
+            id="transcription-models-heading"
+            class="text-primary text-sm font-semibold tracking-tight"
+          >
+            {m.transcription_models_section_title()}
+          </h2>
+          <p class="text-secondary mt-1 max-w-3xl text-[0.8125rem] leading-relaxed">
+            {m.transcription_models_section_description()}
+          </p>
+        </header>
+        <TranscriptionModelsTable
+          transcriptionModels={data.models.transcriptionModels}
+          providers={data.providers}
+          favoriteProviders={data.favoriteProviders}
+        />
+      </section>
+      <TranscriptionServicesTable
+        services={data.transcriptionServices}
+        classifications={data.securityClassifications.security_classifications}
       />
     </Page.Tab>
     <Page.Tab id="image_models">

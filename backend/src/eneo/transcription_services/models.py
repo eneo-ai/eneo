@@ -17,6 +17,9 @@ if TYPE_CHECKING:
     )
 
 SERVICE_ENDPOINT_MAX_LENGTH = 2048
+# An organisation connects a handful of services; the cap keeps every list of
+# them to one page (the routes' largest page size).
+MAX_CONNECTIONS_PER_ORGANISATION = 200
 
 
 class TranscriptionOperation(StrEnum):
