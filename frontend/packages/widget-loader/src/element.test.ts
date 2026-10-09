@@ -114,6 +114,39 @@ describe("launcher", () => {
     expect(frameOf(element)).toBeNull();
   });
 
+  it("cross-fades its icon when the panel opens and keeps an edge in forced-colour modes", async () => {
+    const element = await mount();
+    const chat = element.shadowRoot!.querySelector<SVGElement>(".launcher .chat")!;
+    const close = element.shadowRoot!.querySelector<SVGElement>(".launcher .close")!;
+    expect(getComputedStyle(close).opacity).toBe("0");
+    expect(getComputedStyle(chat).opacity).toBe("1");
+    // A transparent border is what a forced-colour mode draws; the button
+    // keeps its 56px either way.
+    expect(getComputedStyle(launcherOf(element)).borderTopWidth).toBe("2px");
+    expect(launcherOf(element).offsetWidth).toBe(56);
+    element.openPanel();
+    await vi.waitFor(() => expect(getComputedStyle(close).opacity).toBe("1"));
+    expect(getComputedStyle(chat).opacity).toBe("0");
+  });
+
+  it("switches its transitions on at the first open, so a late stylesheet never fades the backdrop on page load", async () => {
+    await atViewport(375, 700, async () => {
+      const element = await mount();
+      const backdrop = element.shadowRoot!.querySelector<HTMLDivElement>(".backdrop")!;
+      const icon = launcherOf(element).querySelector("svg")!;
+      expect(getComputedStyle(backdrop).opacity).toBe("0");
+      expect(getComputedStyle(backdrop).transitionDuration).toBe("0s");
+      expect(getComputedStyle(icon).transitionDuration).toBe("0s");
+      element.openPanel();
+      expect(getComputedStyle(backdrop).transitionDuration).toBe("0.2s, 0.2s");
+      expect(getComputedStyle(icon).transitionDuration).toBe("0.15s, 0.15s");
+      await vi.waitFor(() => expect(getComputedStyle(backdrop).opacity).toBe("1"));
+      element.closePanel();
+      await vi.waitFor(() => expect(getComputedStyle(backdrop).opacity).toBe("0"));
+      expect(getComputedStyle(backdrop).visibility).toBe("hidden");
+    });
+  });
+
   it("uses the requested language and custom label", async () => {
     expect(launcherOf(await mount({ lang: "en-GB" })).getAttribute("aria-label")).toBe("Open chat");
     expect(launcherOf(await mount({ label: "Fråga oss" })).getAttribute("aria-label")).toBe(
@@ -344,18 +377,21 @@ describe("opening", () => {
     expect(frameOf(element)!.src).not.toContain("/en/embed/");
   });
 
-  it("does not talk to the iframe before it reports ready, then sends theme and open", async () => {
-    const element = await mount({ "color-scheme": "dark" });
-    const post = spyOnSeam(element, "post");
-    element.openPanel();
-    expect(post).not.toHaveBeenCalled();
+  it("does not talk to the iframe before it reports ready, then sends theme, open and layout", async () => {
+    await atViewport(1024, 768, async () => {
+      const element = await mount({ "color-scheme": "dark" });
+      const post = spyOnSeam(element, "post");
+      element.openPanel();
+      expect(post).not.toHaveBeenCalled();
 
-    deliver(element, frameMessage("ready"));
-    const sent = post.mock.calls.map((call) => (call as unknown[])[1]);
-    expect(sent).toEqual([
-      { ns: BRIDGE_NAMESPACE, v: 1, type: "theme", payload: { scheme: "dark" } },
-      { ns: BRIDGE_NAMESPACE, v: 1, type: "open" }
-    ]);
+      deliver(element, frameMessage("ready"));
+      const sent = post.mock.calls.map((call) => (call as unknown[])[1]);
+      expect(sent).toEqual([
+        { ns: BRIDGE_NAMESPACE, v: 1, type: "theme", payload: { scheme: "dark" } },
+        { ns: BRIDGE_NAMESPACE, v: 1, type: "open" },
+        { ns: BRIDGE_NAMESPACE, v: 1, type: "layout", payload: { full: false, expanded: false } }
+      ]);
+    });
   });
 
   it("tells the embed page which scheme the host page actually shows", async () => {
@@ -538,18 +574,46 @@ describe("small screens", () => {
     return element.shadowRoot!.elementFromPoint(box.left + box.width / 2, box.top + box.height / 2);
   }
 
-  it("shows a loading status until the iframe document loads, even without a ready handshake", async () => {
-    const element = await mount();
-    element.openPanel();
-    const loading = element.shadowRoot!.querySelector<HTMLElement>(".loading-state")!;
-    expect(loading.querySelector("[role='status']")!.textContent).toBe("Laddar chatten…");
-    expect(getComputedStyle(loading).display).not.toBe("none");
-    expect(getComputedStyle(frameOf(element)!).visibility).toBe("hidden");
-    // An unavailable/error document must remain visible without chat JS.
-    frameOf(element)!.dispatchEvent(new Event("load"));
-    expect(element.hasAttribute("ready")).toBe(false);
-    expect(getComputedStyle(loading).display).toBe("none");
-    expect(getComputedStyle(frameOf(element)!).visibility).toBe("visible");
+  it("keeps the frame out of sight until the chat is ready, then shows an unresponsive document after the grace period", async () => {
+    const grace = EneoWidgetElement.readyGraceMs;
+    EneoWidgetElement.readyGraceMs = 30;
+    try {
+      const element = await mount();
+      element.openPanel();
+      const loading = element.shadowRoot!.querySelector<HTMLElement>(".loading-state")!;
+      expect(loading.querySelector("[role='status']")!.textContent).toBe("Laddar chatten…");
+      expect(getComputedStyle(loading).display).not.toBe("none");
+      expect(getComputedStyle(frameOf(element)!).visibility).toBe("hidden");
+      // A document load alone changes nothing: the chat's own header must
+      // never show up under the loader's loading row while the chat boots.
+      frameOf(element)!.dispatchEvent(new Event("load"));
+      expect(element.hasAttribute("loaded")).toBe(false);
+      expect(getComputedStyle(frameOf(element)!).visibility).toBe("hidden");
+      // An unavailable/error document without chat JS is shown when the
+      // grace period ends, with the loading row still there to close it.
+      await vi.waitFor(() => expect(element.hasAttribute("loaded")).toBe(true));
+      expect(element.hasAttribute("ready")).toBe(false);
+      expect(getComputedStyle(loading).display).toBe("none");
+      expect(getComputedStyle(frameOf(element)!).visibility).toBe("visible");
+    } finally {
+      EneoWidgetElement.readyGraceMs = grace;
+    }
+  });
+
+  it("shows the frame as soon as the chat reports ready, and the grace period then changes nothing", async () => {
+    const grace = EneoWidgetElement.readyGraceMs;
+    EneoWidgetElement.readyGraceMs = 30;
+    try {
+      const element = await mount();
+      element.openPanel();
+      frameOf(element)!.dispatchEvent(new Event("load"));
+      deliver(element, frameMessage("ready"));
+      expect(getComputedStyle(frameOf(element)!).visibility).toBe("visible");
+      await new Promise((resolve) => setTimeout(resolve, 80));
+      expect(element.hasAttribute("loaded")).toBe(false);
+    } finally {
+      EneoWidgetElement.readyGraceMs = grace;
+    }
   });
 
   it("keeps a close control above the chat while loading, without a floating button over the composer", async () => {
@@ -660,6 +724,140 @@ describe("small screens", () => {
   });
 });
 
+describe("expanding from the chat", () => {
+  function panelOf(element: EneoWidgetElement): HTMLElement {
+    return element.shadowRoot!.getElementById("eneo-panel")!;
+  }
+
+  /** The layout messages the loader sent the embed page, in order. */
+  function layouts(post: ReturnType<typeof spyOnSeam>): unknown[] {
+    return (post.mock.calls as unknown[][])
+      .map((call) => call[1] as { type: string; payload?: unknown })
+      .filter((message) => message.type === "layout")
+      .map((message) => message.payload);
+  }
+
+  it("grows the panel over the page at the chat's request and shrinks it back", async () => {
+    await atViewport(1024, 768, async () => {
+      const main = document.createElement("main");
+      main.innerHTML = "<button>Sök</button>";
+      document.body.append(main);
+      const element = await mount();
+      const post = spyOnSeam(element, "post");
+      element.openPanel();
+      deliver(element, frameMessage("ready"));
+      expect(element.expanded).toBe(false);
+      expect(getComputedStyle(panelOf(element)).position).toBe("absolute");
+
+      deliver(element, frameMessage("expand"));
+      expect(element.expanded).toBe(true);
+      expect(element.hasAttribute("expanded")).toBe(true);
+      // The same modal, full-viewport panel as on a small screen.
+      expect(getComputedStyle(panelOf(element)).position).toBe("fixed");
+      expect(panelOf(element).getAttribute("aria-modal")).toBe("true");
+      expect(main.hasAttribute("inert")).toBe(true);
+      // The chat's header shrinks and closes the panel; no launcher under it.
+      expect(getComputedStyle(launcherOf(element)).display).toBe("none");
+
+      deliver(element, frameMessage("collapse"));
+      expect(element.expanded).toBe(false);
+      expect(element.hasAttribute("expanded")).toBe(false);
+      expect(getComputedStyle(panelOf(element)).position).toBe("absolute");
+      expect(panelOf(element).hasAttribute("aria-modal")).toBe(false);
+      expect(main.hasAttribute("inert")).toBe(false);
+      expect(getComputedStyle(launcherOf(element)).display).not.toBe("none");
+
+      expect(layouts(post)).toEqual([
+        { full: false, expanded: false },
+        { full: true, expanded: true },
+        { full: false, expanded: false }
+      ]);
+    });
+  });
+
+  it("plays the panel between its two boxes instead of jumping", async () => {
+    await atViewport(1024, 768, async () => {
+      const element = await mount();
+      element.openPanel();
+      deliver(element, frameMessage("ready"));
+      const panel = panelOf(element);
+      const animate = vi.spyOn(panel, "animate");
+      deliver(element, frameMessage("expand"));
+      expect(animate).toHaveBeenCalledTimes(1);
+      const [keyframes, options] = animate.mock.calls[0] as [Keyframe[], KeyframeAnimationOptions];
+      // From the floating box, smaller and offset, to the full viewport.
+      expect(String(keyframes[0].transform)).toMatch(
+        /^translate\(.+px, .+px\) scale\(0\.\d+, 0\.\d+\)$/
+      );
+      expect(keyframes[1].transform).toBe("none");
+      expect(options.duration).toBe(240);
+      deliver(element, frameMessage("collapse"));
+      expect(animate).toHaveBeenCalledTimes(2);
+    });
+  });
+
+  it("ignores a request while the panel is closed", async () => {
+    await atViewport(1024, 768, async () => {
+      const element = await mount();
+      element.prefetch();
+      deliver(element, frameMessage("ready"));
+      deliver(element, frameMessage("expand"));
+      expect(element.expanded).toBe(false);
+      expect(element.hasAttribute("expanded")).toBe(false);
+    });
+  });
+
+  it("opens beside the page again after closing, with the launcher back for focus", async () => {
+    await atViewport(1024, 768, async () => {
+      const element = await mount();
+      launcherOf(element).focus();
+      launcherOf(element).click();
+      deliver(element, frameMessage("ready"));
+      deliver(element, frameMessage("expand"));
+      expect(element.expanded).toBe(true);
+
+      deliver(element, frameMessage("close"));
+      expect(element.open).toBe(false);
+      expect(element.expanded).toBe(false);
+      expect(element.hasAttribute("expanded")).toBe(false);
+      expect(element.shadowRoot!.activeElement).toBe(launcherOf(element));
+
+      element.openPanel();
+      expect(element.expanded).toBe(false);
+      expect(getComputedStyle(panelOf(element)).position).toBe("absolute");
+    });
+  });
+
+  it("reports a small screen as already full, and a layout only when it changes", async () => {
+    await atViewport(375, 812, async () => {
+      const element = await mount();
+      const post = spyOnSeam(element, "post");
+      element.openPanel();
+      deliver(element, frameMessage("ready"));
+      expect(layouts(post)).toEqual([{ full: true, expanded: false }]);
+
+      // Viewport scrolls and resizes re-run the layout without repeating it.
+      window.dispatchEvent(new Event("resize"));
+      window.visualViewport?.dispatchEvent(new Event("scroll"));
+      expect(layouts(post)).toEqual([{ full: true, expanded: false }]);
+    });
+  });
+
+  it("tells the embed page the layout again after it reloads", async () => {
+    await atViewport(1024, 768, async () => {
+      const element = await mount();
+      const post = spyOnSeam(element, "post");
+      element.openPanel();
+      deliver(element, frameMessage("ready"));
+      deliver(element, frameMessage("ready"));
+      expect(layouts(post)).toEqual([
+        { full: false, expanded: false },
+        { full: false, expanded: false }
+      ]);
+    });
+  });
+});
+
 describe("messages from the iframe", () => {
   it("closes the panel and returns focus to the launcher", async () => {
     const element = await mount();
@@ -756,7 +954,7 @@ describe("host controls", () => {
     deliver(element, frameMessage("ready"));
     element.setAttribute("color-scheme", "light");
     const types = post.mock.calls.map((call) => ((call as unknown[])[1] as { type: string }).type);
-    expect(types).toEqual(["theme", "context", "open", "theme"]);
+    expect(types).toEqual(["theme", "context", "open", "layout", "theme"]);
     expect((post.mock.calls[1] as unknown[])[1]).toMatchObject({
       type: "context",
       payload: { page_url: "https://host.example/page", page_title: "Sida" }

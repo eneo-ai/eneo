@@ -29,6 +29,19 @@ describe("parseInbound", () => {
         payload: { page_url: "https://a", page_title: 1 }
       })
     ).toEqual({ type: "context", payload: { page_url: "https://a", page_title: undefined } });
+    expect(
+      parseInbound({
+        ns: BRIDGE_NAMESPACE,
+        v: 1,
+        type: "layout",
+        payload: { full: true, expanded: false, extra: 1 }
+      })
+    ).toEqual({ type: "layout", payload: { full: true, expanded: false } });
+    // Both flags must be real booleans; a half layout is no layout.
+    expect(
+      parseInbound({ ns: BRIDGE_NAMESPACE, v: 1, type: "layout", payload: { full: "yes" } })
+    ).toBeNull();
+    expect(parseInbound({ ns: BRIDGE_NAMESPACE, v: 1, type: "layout" })).toBeNull();
   });
 });
 
@@ -36,7 +49,7 @@ describe("createEmbedBridge", () => {
   function setup(hostOrigin: string | null = "https://www.kommun.se") {
     const target = { postMessage: vi.fn() };
     let listener: ((event: MessageEvent) => void) | null = null;
-    const handlers = { onOpen: vi.fn(), onTheme: vi.fn(), onContext: vi.fn() };
+    const handlers = { onOpen: vi.fn(), onTheme: vi.fn(), onContext: vi.fn(), onLayout: vi.fn() };
     const bridge = createEmbedBridge({
       hostOrigin,
       handlers,
@@ -105,8 +118,31 @@ describe("createEmbedBridge", () => {
     expect(handlers.onOpen).toHaveBeenCalledTimes(1);
   });
 
-  it("dispatches theme and context to handlers and can be destroyed", () => {
+  it("asks the loader to expand and to collapse the panel", () => {
+    const { bridge, target } = setup();
+    bridge.expand();
+    bridge.collapse();
+    expect(target.postMessage).toHaveBeenNthCalledWith(
+      1,
+      { ns: BRIDGE_NAMESPACE, v: 1, type: "expand" },
+      "https://www.kommun.se"
+    );
+    expect(target.postMessage).toHaveBeenNthCalledWith(
+      2,
+      { ns: BRIDGE_NAMESPACE, v: 1, type: "collapse" },
+      "https://www.kommun.se"
+    );
+  });
+
+  it("dispatches theme, context and layout to handlers and can be destroyed", () => {
     const { bridge, handlers, dispatch, hasListener } = setup();
+    dispatch("https://www.kommun.se", {
+      ns: BRIDGE_NAMESPACE,
+      v: 1,
+      type: "layout",
+      payload: { full: false, expanded: false }
+    });
+    expect(handlers.onLayout).toHaveBeenCalledWith({ full: false, expanded: false });
     dispatch("https://www.kommun.se", {
       ns: BRIDGE_NAMESPACE,
       v: 1,

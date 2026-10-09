@@ -172,14 +172,14 @@
      without being announced. -->
 <div role="status">
   {#if given}
-    <p class="text-secondary mt-2 flex items-center gap-1.5 text-xs">
+    <p class="widget-enter text-secondary mt-2 flex items-center gap-1.5 text-xs">
       <Check class="text-positive-default size-3.5 shrink-0" aria-hidden="true" />
       {sent ? m.widget_feedback_received() : m.widget_feedback_thanks()}
     </p>
   {/if}
 </div>
 {#if given}
-  <div class="flex flex-wrap items-center gap-x-3">
+  <div class="widget-enter flex flex-wrap items-center gap-x-3">
     <button
       type="button"
       bind:this={changeButton}

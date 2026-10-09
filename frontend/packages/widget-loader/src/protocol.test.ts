@@ -30,6 +30,12 @@ describe("parseFrameMessage", () => {
     expect(parseFrameMessage({ ns: BRIDGE_NAMESPACE, v: 1, type: "close" })).toEqual({
       type: "close"
     });
+    expect(parseFrameMessage({ ns: BRIDGE_NAMESPACE, v: 1, type: "expand" })).toEqual({
+      type: "expand"
+    });
+    expect(parseFrameMessage({ ns: BRIDGE_NAMESPACE, v: 1, type: "collapse" })).toEqual({
+      type: "collapse"
+    });
     // Whatever an embed page sends along, the host never gets an identifier.
     expect(
       parseFrameMessage({
@@ -88,6 +94,12 @@ describe("parseFrameMessage", () => {
       ns: BRIDGE_NAMESPACE,
       v: BRIDGE_VERSION,
       type: "open"
+    });
+    expect(envelope({ type: "layout", payload: { full: true, expanded: true } })).toEqual({
+      ns: BRIDGE_NAMESPACE,
+      v: BRIDGE_VERSION,
+      type: "layout",
+      payload: { full: true, expanded: true }
     });
   });
 });

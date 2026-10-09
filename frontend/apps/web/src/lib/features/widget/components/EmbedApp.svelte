@@ -9,7 +9,7 @@
   import { onMount, untrack } from "svelte";
   import { initChatService } from "$lib/features/chat/ChatService.svelte";
   import type { VisitorSession } from "../visitorSession";
-  import { readableOn, themeColors } from "../contrast";
+  import { DARK_SURFACE, LIGHT_SURFACE, contrastRatio, readableOn, themeColors } from "../contrast";
   import { widgetChatPartner } from "../widgetPartner";
   import WidgetChat from "./WidgetChat.svelte";
 
@@ -85,6 +85,11 @@
   const colors = $derived(themeColors(config.theme, dark));
   const accent = $derived(colors.accent);
   const header = $derived(colors.header);
+  // The focus ring takes the widget's own colour where it reads against the
+  // panel (3:1, WCAG 1.4.11); otherwise the text colour, which always does.
+  const focus = $derived(
+    contrastRatio(accent, dark ? DARK_SURFACE : LIGHT_SURFACE) >= 3 ? accent : null
+  );
 </script>
 
 <div
@@ -93,6 +98,7 @@
   style:--widget-on-accent={readableOn(accent)}
   style:--widget-header={header}
   style:--widget-on-header={header ? readableOn(header) : null}
+  style:--widget-focus={focus}
   style:--widget-radius="{config.theme.radius ?? 12}px"
 >
   <WidgetChat
@@ -111,7 +117,7 @@
      the chat uses, in both schemes (WCAG 1.4.11, 2.4.7). Unlayered, so it
      wins over the utilities that switch outlines off. */
   :global(:focus-visible) {
-    outline: 2px solid var(--text-primary);
+    outline: 2px solid var(--widget-focus, var(--text-primary));
     outline-offset: 2px;
   }
 </style>

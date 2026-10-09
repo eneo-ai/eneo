@@ -100,9 +100,21 @@ with a visible focus ring. The panel is a `role="dialog"` named "Chatt" /
 "Chat", and the iframe is named after the widget's title, which the embed page
 reports with `ready` (`frame-title` overrides it). Opening moves focus into the
 iframe; `Escape` inside it closes the panel and focus returns to the launcher
-(or to the element that was focused when the launcher is hidden). `Escape` on
-the host page closes the panel too and leaves focus where it is, so an open
-panel never keeps covering what the visitor moved on to (WCAG 2.4.11).
+(or to the element that was focused when the launcher is hidden); in the
+enlarged layout the chat shrinks the panel on the first `Escape` and closes on
+the next. `Escape` on the host page closes the panel too and leaves focus where
+it is, so an open panel never keeps covering what the visitor moved on to
+(WCAG 2.4.11).
+
+The frame document stays out of sight until the chat reports `ready`, so the
+chat's header never appears under the loader's own loading row; a document
+that never reports (an error page without chat JS) is shown after a grace
+period of 1.5 s, with the loading row still there to close it. Opening grows
+the panel out of the launcher's corner, the launcher's icon cross-fades, the
+phone sheet's backdrop fades, and expanding plays the panel between its two
+boxes (a FLIP animation); all of it is off under `prefers-reduced-motion`. The
+launcher and the close controls carry transparent borders, so forced-colour
+modes (Windows contrast themes) draw their edges.
 
 Beside the page the panel is a non-modal dialog. Full screen it is modal:
 `aria-modal="true"`, and every host element around `<eneo-widget>` up to
@@ -110,6 +122,15 @@ Beside the page the panel is a non-modal dialog. Full screen it is modal:
 elements the page made inert itself are left alone. It also follows the visual
 viewport so the on-screen keyboard never covers the composer. Transitions
 respect `prefers-reduced-motion`.
+
+On wider screens the chat's own header can ask for the same full-viewport
+panel (the `expand` and `collapse` bridge messages; the element reflects the
+state as an `expanded` attribute for the stylesheet). The loader tells the
+embed page how the panel is shown (`layout`: full or not, expanded or not),
+so the chat offers the control only where it does something: never on a small
+screen that already fills the viewport, and as "shrink" while expanded. Closing
+always puts the panel back beside the page. Loaders before 1.0.9 know none of
+these messages and ignore them; the embed page then shows no such control.
 
 Hosts should also offer a visible "Chat with us" link early on the page that
 calls `Eneo('open')`: the launcher is appended to `<body>`, so keyboard and

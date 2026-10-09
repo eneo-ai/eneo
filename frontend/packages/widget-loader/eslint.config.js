@@ -16,6 +16,6 @@ export default ts.config(
     }
   },
   {
-    ignores: ["dist/"]
+    ignores: ["dist/", "releases/"]
   }
 );

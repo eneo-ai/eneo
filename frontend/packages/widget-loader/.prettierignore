@@ -1,2 +1,4 @@
 node_modules
 dist
+# Archived pinned releases keep their exact bytes.
+releases
