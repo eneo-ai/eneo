@@ -14,6 +14,7 @@ from eneo.main.exceptions import (
     NotFoundException,
 )
 from tests.unittests.flows.test_flow_run_service import (
+    _access_policy,
     _flow,
     _flow_repo,
     _flow_run_service,
@@ -24,6 +25,7 @@ from tests.unittests.flows.test_flow_run_service import (
     flow_run_repo_mock,
 )
 from tests.unittests.flows.test_flow_transcription import _audio_file
+from tests.unittests.spaces.test_space_transcription_services import _space
 
 
 @pytest.fixture
@@ -70,6 +72,9 @@ def admission(user):
     _seed_flow_repo(flow_repo, flow)
     version_repo = AsyncMock()
     version_repo.get.return_value = _version(user=user, flow=flow)
+    # Admission settles speaker labels against the flow's space.
+    space_service = AsyncMock()
+    space_service.get_space.return_value = _space(None)
     service = _flow_run_service(
         user=user,
         flow_repo=flow_repo,
@@ -77,6 +82,12 @@ def admission(user):
         flow_version_repo=version_repo,
         runtime_upload_repo=_runtime_upload_repo(*(file.id for file in files)),
         file_repo=file_repo,
+        access_policy=_access_policy(
+            user=user,
+            flow_repo=flow_repo,
+            flow_run_repo=run_repo,
+            space_service=space_service,
+        ),
     )
     row = FlowLiveTranscripts(
         id=uuid4(),

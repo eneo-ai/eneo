@@ -62,7 +62,11 @@ from eneo.flows.runtime.tasks import enable_autobegin_for_flow_task_session
 from eneo.main.container.container import Container
 from eneo.object_content.content import ContentFailureCode, ContentState
 from tests.flow_snapshot_fixtures import assistant_snapshot
-from tests.unittests.flows.test_flow_transcription import _SpaceStub, _state
+from tests.unittests.flows.test_flow_transcription import (
+    _SpaceStub,
+    _state,
+    _transcribers,
+)
 from tests.unittests.flows.test_typed_io_executor import (
     _build_executor,
     _mock_assistant_for_execute_step,
@@ -1359,9 +1363,11 @@ async def transcript_spill_runtime(
             id=uuid4(), name="whisper-1", model_name="whisper-1", can_access=True
         )
         executor.space_repo.one.return_value = _SpaceStub([model], model)
-        executor.transcriber = SimpleNamespace(
-            transcribe=AsyncMock(
-                return_value=TranscribedAudio(text=text, duration_seconds=15000)
+        executor.transcribers = _transcribers(
+            SimpleNamespace(
+                transcribe=AsyncMock(
+                    return_value=TranscribedAudio(text=text, duration_seconds=15000)
+                )
             )
         )
         assistant = _mock_assistant_for_execute_step()

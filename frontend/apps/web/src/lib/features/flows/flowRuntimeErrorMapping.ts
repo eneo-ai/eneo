@@ -211,6 +211,7 @@ const FLOW_API_ERROR_MESSAGES = {
   typed_io_transcription_failed: m.flow_error_typed_io_transcription_failed,
   typed_io_transcription_model_missing: m.flow_error_typed_io_transcription_model_missing,
   typed_io_transcription_model_unavailable: m.flow_error_typed_io_transcription_model_unavailable,
+  typed_io_speaker_service_unavailable: m.flow_error_typed_io_speaker_service_unavailable,
   typed_io_transcription_not_enabled: m.flow_error_typed_io_transcription_not_enabled,
   typed_io_unsupported_type: m.flow_error_typed_io_unsupported_type,
   flow_published_form_schema_invalid: m.flow_error_flow_published_form_schema_invalid,

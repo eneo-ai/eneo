@@ -38,6 +38,10 @@ from eneo.security_classifications.domain.entities.security_classification impor
     SecurityClassification,
 )
 from tests.flow_snapshot_fixtures import assistant_snapshot
+from tests.unittests.spaces.test_space_transcription_services import (
+    _connection,
+    _space,
+)
 
 
 def _flow(*, step: FlowStep) -> Flow:
@@ -286,19 +290,11 @@ async def test_a_step_that_maps_speakers_requires_labels_so_a_run_cannot_choose(
             ],
         },
     )
-    with_service = get_settings().model_copy(
-        update={
-            "flow_transcription_service_url": "http://speaker-service.invalid",
-            "flow_transcription_service_api_key": "service-key",
-        }
-    )
-
     contract = await _service(
         flow_service=flow_service,
         settings_service=settings_service,
         flow_version_repo=versions,
-        settings=with_service,
-    ).get_run_contract(flow_id=flow.id, space=_SPACE)
+    ).get_run_contract(flow_id=flow.id, space=_space(None, [_connection(1)]))
 
     assert contract.transcription is not None
     assert contract.transcription.speaker_labels.model_dump() == {
@@ -310,20 +306,88 @@ async def test_a_step_that_maps_speakers_requires_labels_so_a_run_cannot_choose(
     assert contract.transcription.single_recording is True
 
     # Without one, the parts are still one recording: they take the longest recording together.
-    without_service = get_settings().model_copy(
-        update={
-            "flow_transcription_service_url": None,
-            "flow_transcription_service_api_key": None,
-        }
-    )
     unlabelled = await _service(
         flow_service=flow_service,
         settings_service=settings_service,
         flow_version_repo=versions,
-        settings=without_service,
-    ).get_run_contract(flow_id=flow.id, space=_SPACE)
+    ).get_run_contract(flow_id=flow.id, space=_space(None))
     assert unlabelled.transcription is not None
     assert unlabelled.transcription.single_recording is True
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("granted", "pick", "selectable"),
+    [
+        (0, None, False),
+        (1, None, True),
+        (2, None, False),
+        (2, 1, True),
+        # The picked service's grant was revoked; the space's other service
+        # does not stand in for the author's pick.
+        (1, "revoked", False),
+    ],
+    ids=[
+        "no_service",
+        "one_service",
+        "two_without_pick",
+        "usable_pick",
+        "revoked_pick",
+    ],
+)
+async def test_a_run_chooses_speaker_labels_only_when_a_space_service_labels_them(
+    granted: int, pick: int | str | None, selectable: bool
+) -> None:
+    connections = [_connection(1) for _ in range(granted)]
+    wizard: dict[str, object] = {
+        "transcription_enabled": True,
+        "transcription_model": {"id": str(uuid4())},
+    }
+    if pick is not None:
+        picked = uuid4() if pick == "revoked" else connections[int(pick)].id
+        wizard["transcription_speaker_service"] = {"id": str(picked)}
+    audio_step = _step(step_order=1, input_type="audio")
+    flow = _flow(step=audio_step).model_copy(update={"published_version": 1})
+    flow_service = AsyncMock()
+    flow_service.get_flow.return_value = flow
+    settings_service = AsyncMock()
+    settings_service.get_flow_input_limits_resolved.return_value = _limits()
+    versions = AsyncMock()
+    versions.get.return_value = _published_version(
+        version=1,
+        definition_json={
+            "schema_version": FLOW_DEFINITION_SCHEMA_VERSION,
+            "flow_id": str(flow.id),
+            "metadata_json": {"wizard": wizard},
+            "steps": [
+                {
+                    "step_id": str(audio_step.id),
+                    "step_order": 1,
+                    "assistant_id": str(audio_step.assistant_id),
+                    "assistant_snapshot": assistant_snapshot(audio_step.assistant_id),
+                    "input_source": "flow_input",
+                    "input_type": "audio",
+                    "input_config": {
+                        "runtime_input": {"enabled": True, "input_format": "audio"}
+                    },
+                    "output_mode": "transcribe_only",
+                    "output_type": "text",
+                },
+            ],
+        },
+    )
+
+    contract = await _service(
+        flow_service=flow_service,
+        settings_service=settings_service,
+        flow_version_repo=versions,
+    ).get_run_contract(flow_id=flow.id, space=_space(None, connections))
+
+    assert contract.transcription is not None
+    assert contract.transcription.speaker_labels.selectable is selectable
+    # The flow asks for labels by default; without a service a run gets none.
+    assert contract.transcription.speaker_labels.default is selectable
+    assert (contract.transcription.max_speakers is not None) is selectable
 
 
 @pytest.mark.asyncio
@@ -1307,7 +1371,7 @@ def test_the_speaker_count_option_names_the_participants_field(
         speaker_labels=FlowSpeakerLabelsOptionPublic(
             selectable=True, required=False, default=True
         ),
-        service_configured=True,
+        speakers_identifiable=True,
     )
 
     assert option is not None

@@ -40,7 +40,30 @@ _MODULES_PERMISSION_NOTE = (
     "Module administration uses the `modules` permission instead."
 )
 
+_SPEAKER_SERVICE_NOTE = (
+    "Speaker identification services are connected in Admin > Models > "
+    "Transcription services and granted to spaces."
+)
+
 REMOVED_VARIABLES: tuple[RemovedVariable, ...] = (
+    # Flows is unreleased; a value to lose is re-entered as a connection, so
+    # these never block startup.
+    *(
+        RemovedVariable(
+            name,
+            note=_SPEAKER_SERVICE_NOTE,
+            removed_in="2.3",
+            upgrade_guide_url=None,
+        )
+        for name in (
+            "FLOW_TRANSCRIPTION_SERVICE_URL",
+            "FLOW_TRANSCRIPTION_SERVICE_API_KEY",
+            "FLOW_TRANSCRIPTION_SERVICE_MODE",
+            "FLOW_TRANSCRIPTION_SERVICE_SUBMIT_TIMEOUT_SECONDS",
+            "FLOW_TRANSCRIPTION_SERVICE_POLL_INTERVAL_SECONDS",
+            "FLOW_TRANSCRIPTION_SERVICE_RESULT_TIMEOUT_SECONDS",
+        )
+    ),
     # Stored admin policy deliberately takes precedence even during a rollout
     # that retains this old setting, so this entry must not block startup.
     RemovedVariable(

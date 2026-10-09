@@ -13,7 +13,9 @@ from eneo.flows.transcription_config import (
     SPEAKER_SERVICE_KEY,
     FlowTranscriptionConfig,
     FlowTranscriptionConfigError,
+    SpeakerServiceGap,
     parse_transcription_config,
+    resolve_speaker_service,
 )
 from eneo.main.exceptions import BadRequestException
 
@@ -92,10 +94,12 @@ def kept_speaker_service_id(metadata: FlowPersistedJsonObject | None) -> UUID | 
         return None
 
 
-def require_one_speaker_service(*, space: Space) -> None:
+def require_one_speaker_service(
+    config: FlowTranscriptionConfig, *, space: Space
+) -> None:
     """A flow that labels speakers without a pick needs the space to have one
     speaker service to use, not a choice to make; none means no labels."""
-    if len(space.usable_transcription_services) > 1:
+    if resolve_speaker_service(config, space).gap is SpeakerServiceGap.CHOICE_REQUIRED:
         code = FlowGraphIssueCode.FLOW_SPEAKER_SERVICE_CHOICE_REQUIRED.value
         raise BadRequestException(
             "This space has several speaker identification services; choose "

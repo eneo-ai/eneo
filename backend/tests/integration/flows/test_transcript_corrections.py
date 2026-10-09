@@ -1604,6 +1604,7 @@ async def test_regeneration_snapshots_saved_review_and_keeps_original_output(
     from eneo.flows.runtime.executor import FlowRunExecutor
     from eneo.flows.runtime.flow_run_actor import FlowRunActor
     from eneo.flows.runtime.tasks import enable_autobegin_for_flow_task_session
+    from eneo.flows.runtime.transcription import FlowTranscribers
     from eneo.main.container.container import Container
 
     async with sessionmanager.session() as session:
@@ -1639,7 +1640,9 @@ async def test_regeneration_snapshots_saved_review_and_keeps_original_output(
             template_asset_repo=worker.flow_template_asset_repo(),
             encryption_service=worker.encryption_service(),
             audit_service=SimpleNamespace(log_async=AsyncMock(return_value=uuid4())),
-            transcriber=transcriber,
+            transcribers=FlowTranscribers(
+                model=transcriber, with_speaker_service=AsyncMock()
+            ),
             max_inline_text_bytes=1024 * 1024,
         )
 

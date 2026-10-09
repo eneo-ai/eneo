@@ -31,7 +31,7 @@ from eneo.database.tables.audit_log_table import AuditLog as AuditLogTable
 from eneo.database.tables.spaces_table import SpacesTranscriptionModels
 from eneo.flows.api import flow_live_transcription_socket_router
 from eneo.flows.runtime.live_transcription import tickets
-from eneo.main.config import get_settings, set_settings
+from eneo.main.config import get_settings
 from eneo.users.user import UserAdd, UserState
 from tests.integration.module_session_support import (
     enable_module,
@@ -617,32 +617,6 @@ async def test_a_model_without_realtime_support_is_refused_with_its_reason(
     assert response.json()["code"] == "flow_live_transcription_unavailable"
     assert response.json()["context"] == {"reason": "model_not_realtime"}
     assert await _started_audit_extras(db_container, flow.flow_id) == []
-
-
-@pytest.mark.parametrize(("mode", "status"), [("full", 409), ("diarize", 201)])
-async def test_live_preview_needs_the_flows_own_model_to_transcribe(
-    client, flow_process_auth_headers, db_container, mode: str, status: int
-):
-    headers = dict(flow_process_auth_headers)
-    flow = await _published_flow(client, headers, db_container)
-    original = get_settings()
-    set_settings(
-        original.model_copy(
-            update={
-                "flow_transcription_service_url": "http://speaker-service.invalid",
-                "flow_transcription_service_api_key": "service-key",
-                "flow_transcription_service_mode": mode,
-            }
-        )
-    )
-    try:
-        response = await client.post(flow.sessions_path, headers=headers)
-    finally:
-        set_settings(original)
-
-    assert response.status_code == status, response.text
-    if status == 409:
-        assert response.json()["context"] == {"reason": "transcription_service_mode"}
 
 
 async def test_a_step_without_audio_is_refused(

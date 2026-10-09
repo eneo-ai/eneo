@@ -168,7 +168,6 @@ async def test_a_run_in_flight_when_its_step_is_removed_completes_with_the_assis
             encryption_service=container.encryption_service(),
             audit_service=SimpleNamespace(log_async=AsyncMock(return_value=uuid4())),
             references_service=container.references_service(),
-            transcriber=container.transcriber(),
             config=FlowRunExecutorConfig(
                 max_inline_text_bytes=1024 * 1024,
                 http_request_timeout_seconds=2.0,

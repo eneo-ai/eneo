@@ -45,9 +45,9 @@ from eneo.flows.application.flow_trace_audit import (
 from eneo.flows.domain.flow import FlowRun
 from eneo.flows.flow_access_policy import FlowApiAction, flow_action_access_reason
 from eneo.flows.flow_api_error_code import FlowApiErrorCode
+from eneo.flows.flow_run_contract_service import speakers_identifiable_in_space
 from eneo.flows.flow_run_input_envelope import read_single_recording_steps
 from eneo.flows.published_runtime import load_published_definition
-from eneo.main.config import get_settings
 from eneo.main.container.container import Container
 from eneo.main.exceptions import AuditLoggingUnavailableException, ErrorCodes
 from eneo.main.logging import get_logger
@@ -328,7 +328,7 @@ async def get_flow_graph(
     ),
 ):
     if run_id is not None:
-        await flow_access_context.enforce_flow_scope(
+        space = await flow_access_context.enforce_flow_scope(
             request,
             container,
             flow_id=id,
@@ -342,12 +342,13 @@ async def get_flow_graph(
             run_id=run_id,
             history=True,
         )
+        wizard = versioned_view.published_definition.metadata().wizard
         return build_graph_response(
             versioned_view.published_definition.steps,
             versioned_view.step_results,
-            wizard_metadata=versioned_view.published_definition.metadata().wizard,
-            speaker_identification_available=(
-                get_settings().flow_transcription_service_configured
+            wizard_metadata=wizard,
+            speaker_identification_available=speakers_identifiable_in_space(
+                wizard, space
             ),
             speaker_labels=versioned_view.speaker_labels,
         )
@@ -363,11 +364,12 @@ async def get_flow_graph(
         version=published_access.published_version,
         tenant_id=published_access.flow.tenant_id,
     )
+    wizard = published_definition.metadata().wizard
     return build_graph_response(
         published_definition.steps,
-        wizard_metadata=published_definition.metadata().wizard,
-        speaker_identification_available=(
-            get_settings().flow_transcription_service_configured
+        wizard_metadata=wizard,
+        speaker_identification_available=speakers_identifiable_in_space(
+            wizard, published_access.space
         ),
     )
 

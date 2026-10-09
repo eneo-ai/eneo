@@ -16,6 +16,7 @@ from eneo.flows.infrastructure.flow_provider_call_recorder import (
     FlowProviderCallRecorder,
     ProviderCallEvidencePersistenceError,
 )
+from tests.unit.flows.runtime.test_remote_transcription import label
 from tests.unittests.flows import audio_spool_test_support
 
 spool_contract = audio_spool_test_support.spool_contract
@@ -130,9 +131,7 @@ async def test_stalled_acceptance_is_bounded_and_preserves_gap_identity(
 
     session.flush.side_effect = flush
     task = asyncio.create_task(
-        transcriber.transcribe(
-            file, SimpleNamespace(), file_id=row.id, observer=recorder
-        )
+        label(transcriber, file, file_id=row.id, observer=recorder)
     )
     try:
         await asyncio.wait_for(accepting.wait(), timeout=1)
@@ -187,9 +186,7 @@ async def test_interrupted_cancel_after_stalled_acceptance_keeps_gap_identity(
 
     async def run():
         async with asyncio.timeout(0.3):
-            await transcriber.transcribe(
-                file, SimpleNamespace(), file_id=row.id, observer=recorder
-            )
+            await label(transcriber, file, file_id=row.id, observer=recorder)
 
     try:
         with pytest.raises(ProviderCallEvidencePersistenceError) as exc_info:
@@ -221,9 +218,7 @@ async def test_remote_releases_spool_after_acceptance_before_polling(
 
     transcriber.wait_for_result = wait_for_result
     with pytest.raises(OpenAIException):
-        await transcriber.transcribe(
-            file, SimpleNamespace(), file_id=row.id, observer=recorder
-        )
+        await label(transcriber, file, file_id=row.id, observer=recorder)
     assert not file.path.exists()
     assert row.provider_response_id == "job-1"
     assert row.status == "outcome_unknown"
@@ -248,9 +243,7 @@ async def test_cancellation_during_acceptance_commits_job_identity(
 
     session.flush.side_effect = flush
     task = asyncio.create_task(
-        transcriber.transcribe(
-            file, SimpleNamespace(), file_id=row.id, observer=recorder
-        )
+        label(transcriber, file, file_id=row.id, observer=recorder)
     )
     try:
         await asyncio.wait_for(accepting.wait(), timeout=2)
@@ -377,9 +370,7 @@ async def test_release_failure_after_acceptance_preserves_receipt_and_cancels_jo
     with monkeypatch.context() as patch:
         patch.setattr(Path, "unlink", fail_unlink)
         with pytest.raises(OSError, match="cannot remove original"):
-            await transcriber.transcribe(
-                file, SimpleNamespace(), file_id=row.id, observer=recorder
-            )
+            await label(transcriber, file, file_id=row.id, observer=recorder)
     wait_for_result.assert_not_awaited()
     assert row.provider_response_id == "job-1"
     assert row.status == "outcome_unknown"

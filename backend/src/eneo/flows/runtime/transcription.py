@@ -3,7 +3,7 @@ from __future__ import annotations
 import json
 import re
 import time
-from collections.abc import Generator, Sequence
+from collections.abc import Awaitable, Callable, Generator, Sequence
 from contextlib import contextmanager
 from dataclasses import dataclass, field, replace
 from datetime import datetime
@@ -59,7 +59,9 @@ from eneo.flows.runtime.step_deadline import current_step_deadline_scope
 from eneo.flows.transcription_config import (
     FlowTranscriptionConfig,
     FlowTranscriptionConfigError,
+    SpeakerServiceGap,
     parse_transcription_config,
+    resolve_speaker_service,
     to_provider_language,
 )
 from eneo.main.exceptions import (
@@ -137,8 +139,8 @@ class TranscriptionFailure(TypedIOValidationException):
 class FlowStepTranscriber(Protocol):
     """What a flow audio step needs from a transcription engine.
 
-    Satisfied by ``RegistryFlowTranscriber`` (model-registry LiteLLM path) and
-    ``RemoteFlowTranscriber`` (external transcription service).
+    Satisfied by ``RegistryFlowTranscriber`` (the flow's model) and
+    ``DiarizingFlowTranscriber`` (the model, then a speaker service).
     """
 
     async def transcribe(
@@ -165,6 +167,24 @@ class FlowStepTranscriber(Protocol):
         observer: "ProviderCallObserver | None" = None,
         max_speakers: int | None = None,
     ) -> TranscribedAudio: ...
+
+
+@dataclass(frozen=True)
+class FlowTranscribers:
+    """The engines a flow audio step may use: its model alone, or its model
+    and the speaker service the step resolved."""
+
+    model: FlowStepTranscriber
+    with_speaker_service: Callable[
+        ["TranscriptionServiceConnection"], Awaitable[FlowStepTranscriber]
+    ]
+
+    async def for_step(
+        self, speaker_service: "TranscriptionServiceConnection | None"
+    ) -> FlowStepTranscriber:
+        if speaker_service is None:
+            return self.model
+        return await self.with_speaker_service(speaker_service)
 
 
 # Must stay aligned with
@@ -259,6 +279,7 @@ if TYPE_CHECKING:
     from eneo.transcription_models.domain.transcription_model import (
         TranscriptionModel,
     )
+    from eneo.transcription_services.models import TranscriptionServiceConnection
 
 
 def _empty_speakers() -> list[dict[str, Any]]:
@@ -590,15 +611,13 @@ def order_files_by_request(
     return ordered
 
 
-async def resolve_transcription_model_for_step(
+async def load_flow_space(
     *,
     flow_repo: "FlowRepository",
     space_repo: "SpaceRepository",
     flow_id: UUID,
     tenant_id: UUID,
-    config: FlowTranscriptionConfig,
-    step_order: int,
-) -> "TranscriptionModel":
+) -> "Space":
     """The flow owns its space; a step's assistant may be gone, and a deleted
     flow's run may still be finishing."""
     space_id = await flow_repo.get_space_id(
@@ -606,8 +625,44 @@ async def resolve_transcription_model_for_step(
     )
     if space_id is None:
         raise NotFoundException("Flow not found.")
-    space = await space_repo.one(space_id)
-    return select_transcription_model(space, config=config, step_order=step_order)
+    return await space_repo.one(space_id)
+
+
+def select_speaker_service(
+    space: "Space", *, config: FlowTranscriptionConfig, step_order: int
+) -> "TranscriptionServiceConnection":
+    """The service that labels this run's speakers, refused before any audio
+    is sent when the space has none the flow can use."""
+    resolution = resolve_speaker_service(config, space)
+    if resolution.connection is not None:
+        return resolution.connection
+    raise _speaker_service_refusal(
+        resolution.gap or SpeakerServiceGap.NO_SERVICE, step_order=step_order
+    )
+
+
+def _speaker_service_refusal(
+    gap: SpeakerServiceGap, *, step_order: int
+) -> TypedIOValidationException:
+    return TypedIOValidationException(
+        (
+            f"Step {step_order}: speakers cannot be identified; "
+            f"{_SPEAKER_SERVICE_GAP_MESSAGES[gap]}"
+        ),
+        code=FlowApiErrorCode.TYPED_IO_SPEAKER_SERVICE_UNAVAILABLE.value,
+        context={"speaker_service_gap": gap.value},
+    )
+
+
+_SPEAKER_SERVICE_GAP_MESSAGES = {
+    SpeakerServiceGap.NO_SERVICE: ("the space has no speaker identification service."),
+    SpeakerServiceGap.CHOICE_REQUIRED: (
+        "the space has several speaker identification services and the flow picks none."
+    ),
+    SpeakerServiceGap.PICKED_UNAVAILABLE: (
+        "the flow's speaker identification service is no longer available in the space."
+    ),
+}
 
 
 def select_transcription_model(
@@ -1105,7 +1160,7 @@ async def resolve_and_transcribe_audio_for_step(
     step_order: int,
     files: list["FileInfo"],
     requested_ids: list[UUID],
-    transcriber: FlowStepTranscriber,
+    transcribers: FlowTranscribers,
     max_files: int,
     max_inline_text_bytes: int,
     open_audio_download: OpenAudioDownload,
@@ -1144,16 +1199,32 @@ async def resolve_and_transcribe_audio_for_step(
             code=FlowApiErrorCode.TYPED_IO_TRANSCRIPTION_MODEL_MISSING.value,
         )
 
-    transcription_model = await resolve_transcription_model_for_step(
-        flow_repo=flow_repo,
-        space_repo=space_repo,
-        flow_id=flow_id,
-        tenant_id=tenant_id,
-        config=transcription_config,
-        step_order=step_order,
+    space = await load_flow_space(
+        flow_repo=flow_repo, space_repo=space_repo, flow_id=flow_id, tenant_id=tenant_id
+    )
+    transcription_model = select_transcription_model(
+        space, config=transcription_config, step_order=step_order
+    )
+    diarize = transcription_config.diarize(speaker_labels)
+    speaker_service = (
+        select_speaker_service(
+            space, config=transcription_config, step_order=step_order
+        )
+        if diarize
+        else None
     )
     ordered_files = order_files_by_request(files, requested_ids)
 
+    try:
+        transcriber = await transcribers.for_step(speaker_service)
+    except NotFoundException as exc:
+        # Removed between resolving it and reading its key: the same refusal.
+        raise _speaker_service_refusal(
+            SpeakerServiceGap.PICKED_UNAVAILABLE
+            if transcription_config.speaker_service_id is not None
+            else SpeakerServiceGap.NO_SERVICE,
+            step_order=step_order,
+        ) from exc
     return await transcribe_audio_input(
         files=ordered_files,
         transcriber=transcriber,
@@ -1164,7 +1235,7 @@ async def resolve_and_transcribe_audio_for_step(
         max_inline_text_bytes=max_inline_text_bytes,
         open_audio_download=open_audio_download,
         transcription_call_observer=transcription_call_observer,
-        diarize=transcription_config.diarize(speaker_labels),
+        diarize=diarize,
         max_speakers=max_speakers,
         source_preparation=source_preparation,
         live_transcript=live_transcript,

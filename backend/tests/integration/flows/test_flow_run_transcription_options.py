@@ -8,8 +8,7 @@ sent with the run and stay with it.
 
 from __future__ import annotations
 
-from collections.abc import Iterator, Mapping
-from contextlib import contextmanager
+from collections.abc import Mapping
 from uuid import UUID, uuid4
 
 import pytest
@@ -33,11 +32,11 @@ from eneo.flows.domain.transcript_corrections import segments_content_hash
 from eneo.flows.enums import FlowRunLifecycleSource
 from eneo.flows.flow_api_error_code import FlowApiErrorCode
 from eneo.flows.flow_run_error import FlowRunError
-from eneo.main.config import get_settings, set_settings
 from eneo.object_content.content import ObjectContentUnavailableError
 from tests.integration.flows.test_flow_live_transcription_session import (
     _published_flow,
 )
+from tests.integration.flows.test_flow_transcription_choice import _connection, _grant
 from tests.integration.flows.test_transcript_corrections import (
     SEGMENTS,
     _store_segments,
@@ -46,24 +45,14 @@ from tests.integration.flows.test_transcript_corrections import (
 pytestmark = [pytest.mark.integration, pytest.mark.asyncio]
 
 
-@contextmanager
-def _deployment(*, service_mode: str | None) -> Iterator[None]:
-    """Settings with an external transcription service in ``service_mode``, or none."""
-    original = get_settings()
-    if service_mode is not None:
-        set_settings(
-            original.model_copy(
-                update={
-                    "flow_transcription_service_url": "http://speaker-service.invalid",
-                    "flow_transcription_service_api_key": "service-key",
-                    "flow_transcription_service_mode": service_mode,
-                }
-            )
-        )
-    try:
-        yield
-    finally:
-        set_settings(original)
+async def _speaker_service(
+    client: AsyncClient, headers: Mapping[str, str], flow_id: str, *, granted: bool
+) -> None:
+    """Grant the flow's space one speaker service, or revoke its grants."""
+    flow = await client.get(f"/api/v1/flows/{flow_id}/", headers=headers)
+    assert flow.status_code == 200, flow.text
+    ids = [await _connection(client, headers)] if granted else []
+    await _grant(client, headers, flow.json()["space_id"], *ids)
 
 
 @pytest.fixture
@@ -154,43 +143,37 @@ async def _republish(
     assert published.status_code == 200, published.text
 
 
-async def test_without_a_service_the_contract_offers_live_preview_but_no_speaker_choice(
-    client, flow_process_auth_headers, db_container
+async def test_without_a_service_runs_transcribe_without_speaker_labels(
+    client, flow_process_auth_headers, db_container, dispatched
 ):
     headers = dict(flow_process_auth_headers)
-    flow = await _published_flow(client, headers, db_container)
+    # The flow's own default asks for labels; no service can give them.
+    flow = await _published_flow(client, headers, db_container, input_required=False)
 
     contract = await _contract(client, headers, flow.flow_id)
+    created = await _create_run(client, headers, flow.flow_id, {})
 
     assert contract["transcription"] == {
         "live": {"available": True, "reason": None},
-        "speaker_labels": {"selectable": False, "required": False, "default": True},
+        "speaker_labels": {"selectable": False, "required": False, "default": False},
         "max_speakers": None,
         "single_recording": True,
     }
+    assert created.status_code == 201, created.text
+    stored = (await _stored_inputs(db_container, flow.flow_id))[created.json()["id"]]
+    assert stored["speaker_labels"] is False
 
 
-@pytest.mark.parametrize(
-    ("supports_realtime", "service_mode", "reason"),
-    [(False, None, "model_not_realtime"), (True, "full", "transcription_service_mode")],
-)
 async def test_the_contract_gives_the_reason_the_live_route_refuses_with(
-    client,
-    flow_process_auth_headers,
-    db_container,
-    supports_realtime: bool,
-    service_mode: str | None,
-    reason: str,
+    client, flow_process_auth_headers, db_container
 ):
     headers = dict(flow_process_auth_headers)
-    flow = await _published_flow(
-        client, headers, db_container, supports_realtime=supports_realtime
-    )
+    flow = await _published_flow(client, headers, db_container, supports_realtime=False)
 
-    with _deployment(service_mode=service_mode):
-        contract = await _contract(client, headers, flow.flow_id)
-        refused = await client.post(flow.sessions_path, headers=headers)
+    contract = await _contract(client, headers, flow.flow_id)
+    refused = await client.post(flow.sessions_path, headers=headers)
 
+    reason = "model_not_realtime"
     assert contract["transcription"]["live"] == {"available": False, "reason": reason}
     assert refused.status_code == 409, refused.text
     assert refused.json()["context"] == {"reason": reason}
@@ -204,8 +187,10 @@ async def test_with_a_service_a_run_may_choose_and_the_flow_sets_the_default(
         client, headers, db_container, wizard={"transcription_diarization": False}
     )
 
-    with _deployment(service_mode="diarize"):
-        contract = await _contract(client, headers, flow.flow_id)
+    await _speaker_service(
+        client, flow_process_auth_headers, flow.flow_id, granted=True
+    )
+    contract = await _contract(client, headers, flow.flow_id)
 
     assert contract["transcription"] == {
         "live": {"available": True, "reason": None},
@@ -246,13 +231,13 @@ async def test_a_runs_speaker_choice_is_kept_with_the_run_and_its_idempotency_ke
     keyed = {**headers, "Idempotency-Key": "meeting-speaker-choice"}
     flow = await _published_flow(client, headers, db_container, input_required=False)
 
-    with _deployment(service_mode="diarize"):
-        chosen = await _create_run(client, keyed, flow.flow_id, choice)
-        repeated = await _create_run(client, keyed, flow.flow_id, choice)
-        changed = await _create_run(client, keyed, flow.flow_id, different_choice)
-        default = await _create_run(
-            client, headers, flow.flow_id, {"speaker_labels": None}
-        )
+    await _speaker_service(
+        client, flow_process_auth_headers, flow.flow_id, granted=True
+    )
+    chosen = await _create_run(client, keyed, flow.flow_id, choice)
+    repeated = await _create_run(client, keyed, flow.flow_id, choice)
+    changed = await _create_run(client, keyed, flow.flow_id, different_choice)
+    default = await _create_run(client, headers, flow.flow_id, {"speaker_labels": None})
     run_path = f"/api/v1/flows/{flow.flow_id}/runs/{chosen.json()['id']}/"
     read = await client.get(run_path, headers=headers)
     evidence = await client.get(f"{run_path}evidence/", headers=headers)
@@ -291,13 +276,15 @@ async def test_a_speaker_choice_the_contract_does_not_offer_creates_no_run(
     not_selectable = await _create_run(
         client, headers, flow.flow_id, {"speaker_labels": False}
     )
-    with _deployment(service_mode="diarize"):
-        smuggled = await _create_run(
-            client,
-            headers,
-            flow.flow_id,
-            {"input_payload_json": {"speaker_labels": False}},
-        )
+    await _speaker_service(
+        client, flow_process_auth_headers, flow.flow_id, granted=True
+    )
+    smuggled = await _create_run(
+        client,
+        headers,
+        flow.flow_id,
+        {"input_payload_json": {"speaker_labels": False}},
+    )
 
     assert not_selectable.status_code == 422, not_selectable.text
     assert not_selectable.json()["code"] == "flow_run_speaker_labels_not_selectable"
@@ -308,13 +295,32 @@ async def test_a_speaker_choice_the_contract_does_not_offer_creates_no_run(
     assert dispatched == []
 
 
+async def test_two_services_and_no_pick_leave_the_run_no_speaker_choice(
+    client, flow_process_auth_headers, db_container, dispatched: list[UUID]
+):
+    headers = dict(flow_process_auth_headers)
+    flow = await _published_flow(client, headers, db_container, input_required=False)
+    read = await client.get(f"/api/v1/flows/{flow.flow_id}/", headers=headers)
+    services = [await _connection(client, headers) for _ in range(2)]
+    await _grant(client, headers, read.json()["space_id"], *services)
+
+    contract = await _contract(client, headers, flow.flow_id)
+    refused = await _create_run(client, headers, flow.flow_id, {"speaker_labels": True})
+
+    assert contract["transcription"]["speaker_labels"]["selectable"] is False
+    assert contract["transcription"]["max_speakers"] is None
+    assert refused.status_code == 422, refused.text
+    assert refused.json()["code"] == "flow_run_speaker_labels_not_selectable"
+    assert dispatched == []
+
+
 @pytest.mark.parametrize(
     ("first_service", "second_service", "body", "speaker_mapping"),
     [
-        (None, "diarize", {}, False),
-        (None, "diarize", {"input_payload_json": {"antal_talare": 4}}, True),
-        ("diarize", None, {}, False),
-        ("diarize", None, {"max_speakers": 3}, False),
+        (False, True, {}, False),
+        (False, True, {"input_payload_json": {"antal_talare": 4}}, True),
+        (True, False, {}, False),
+        (True, False, {"max_speakers": 3}, False),
     ],
 )
 async def test_replay_keeps_request_identity_across_service_changes(
@@ -337,11 +343,15 @@ async def test_replay_keeps_request_identity_across_service_changes(
     )
     # Replay identity is the submitted request: a service that appears or goes
     # away between the two calls must not turn the same request into a conflict.
-    with _deployment(service_mode=first_service):
-        original = await _create_run(client, headers, flow.flow_id, body)
+    await _speaker_service(
+        client, flow_process_auth_headers, flow.flow_id, granted=first_service
+    )
+    original = await _create_run(client, headers, flow.flow_id, body)
     assert original.status_code == 201, original.text
-    with _deployment(service_mode=second_service):
-        replayed = await _create_run(client, headers, flow.flow_id, body)
+    await _speaker_service(
+        client, flow_process_auth_headers, flow.flow_id, granted=second_service
+    )
+    replayed = await _create_run(client, headers, flow.flow_id, body)
     assert replayed.status_code == 201, replayed.text
     assert replayed.json()["id"] == original.json()["id"]
     assert len(dispatched) == 1
@@ -362,8 +372,10 @@ async def test_required_labels_are_persisted_when_the_wizard_default_is_off(
         speaker_mapping=True,
         wizard={"transcription_diarization": False},
     )
-    with _deployment(service_mode="diarize"):
-        created = await _create_run(client, headers, flow.flow_id, {"max_speakers": 3})
+    await _speaker_service(
+        client, flow_process_auth_headers, flow.flow_id, granted=True
+    )
+    created = await _create_run(client, headers, flow.flow_id, {"max_speakers": 3})
     assert created.status_code == 201, created.text
     stored = (await _stored_inputs(db_container, flow.flow_id))[created.json()["id"]]
     assert stored["speaker_labels"] is True
@@ -388,12 +400,14 @@ async def test_a_run_keeps_the_flow_default_it_took_after_a_republish(
         wizard={"transcription_diarization": default},
     )
 
-    with _deployment(service_mode="diarize"):
-        created = await _create_run(client, headers, flow.flow_id, {})
-        await _republish(
-            client, headers, flow.flow_id, {"transcription_diarization": not default}
-        )
-        later = await _create_run(client, headers, flow.flow_id, {})
+    await _speaker_service(
+        client, flow_process_auth_headers, flow.flow_id, granted=True
+    )
+    created = await _create_run(client, headers, flow.flow_id, {})
+    await _republish(
+        client, headers, flow.flow_id, {"transcription_diarization": not default}
+    )
+    later = await _create_run(client, headers, flow.flow_id, {})
     read = await client.get(
         f"/api/v1/flows/{flow.flow_id}/runs/{created.json()['id']}/", headers=headers
     )
@@ -414,22 +428,24 @@ async def test_a_run_started_again_from_its_speaker_options_survives_a_republish
     headers = dict(flow_process_auth_headers)
     flow = await _published_flow(client, headers, db_container, input_required=False)
 
-    with _deployment(service_mode="diarize"):
-        original = await _create_run(client, headers, flow.flow_id, {"max_speakers": 3})
-        await _republish(
-            client, headers, flow.flow_id, {"transcription_diarization": False}
-        )
-        contract = await _contract(client, headers, flow.flow_id)
-        read = await client.get(
-            f"/api/v1/flows/{flow.flow_id}/runs/{original.json()['id']}/",
-            headers=headers,
-        )
-        again = await _create_run(
-            client,
-            headers,
-            flow.flow_id,
-            {key: read.json()[key] for key in ("speaker_labels", "max_speakers")},
-        )
+    await _speaker_service(
+        client, flow_process_auth_headers, flow.flow_id, granted=True
+    )
+    original = await _create_run(client, headers, flow.flow_id, {"max_speakers": 3})
+    await _republish(
+        client, headers, flow.flow_id, {"transcription_diarization": False}
+    )
+    contract = await _contract(client, headers, flow.flow_id)
+    read = await client.get(
+        f"/api/v1/flows/{flow.flow_id}/runs/{original.json()['id']}/",
+        headers=headers,
+    )
+    again = await _create_run(
+        client,
+        headers,
+        flow.flow_id,
+        {key: read.json()[key] for key in ("speaker_labels", "max_speakers")},
+    )
 
     assert original.status_code == 201, original.text
     assert contract["transcription"]["speaker_labels"] == {
@@ -449,8 +465,10 @@ async def test_a_flow_that_asks_for_the_count_advertises_its_form_field(
     headers = dict(flow_process_auth_headers)
     flow = await _published_flow(client, headers, db_container, speaker_mapping=True)
 
-    with _deployment(service_mode="diarize"):
-        contract = await _contract(client, headers, flow.flow_id)
+    await _speaker_service(
+        client, flow_process_auth_headers, flow.flow_id, granted=True
+    )
+    contract = await _contract(client, headers, flow.flow_id)
 
     assert contract["transcription"]["speaker_labels"] == {
         "selectable": False,
@@ -493,8 +511,10 @@ async def test_a_runs_speaker_count_is_settled_once_and_kept_with_the_run(
         speaker_mapping=speaker_mapping,
     )
 
-    with _deployment(service_mode="diarize"):
-        created = await _create_run(client, headers, flow.flow_id, body)
+    await _speaker_service(
+        client, flow_process_auth_headers, flow.flow_id, granted=True
+    )
+    created = await _create_run(client, headers, flow.flow_id, body)
 
     assert created.status_code == 201, created.text
     stored = await _stored_inputs(db_container, flow.flow_id)
@@ -504,35 +524,35 @@ async def test_a_runs_speaker_count_is_settled_once_and_kept_with_the_run(
 
 
 @pytest.mark.parametrize(
-    ("service_mode", "speaker_mapping", "body", "status", "code"),
+    ("service", "speaker_mapping", "body", "status", "code"),
     [
-        (None, False, {"max_speakers": 3}, 422, "flow_run_max_speakers_not_available"),
+        (False, False, {"max_speakers": 3}, 422, "flow_run_max_speakers_not_available"),
         (
-            "diarize",
+            True,
             False,
             {"speaker_labels": False, "max_speakers": 3},
             422,
             "flow_run_max_speakers_not_available",
         ),
-        ("diarize", False, {"max_speakers": True}, 422, "request_validation_error"),
-        ("diarize", False, {"max_speakers": 2.5}, 422, "request_validation_error"),
-        ("diarize", False, {"max_speakers": 0}, 422, "request_validation_error"),
+        (True, False, {"max_speakers": True}, 422, "request_validation_error"),
+        (True, False, {"max_speakers": 2.5}, 422, "request_validation_error"),
+        (True, False, {"max_speakers": 0}, 422, "request_validation_error"),
         (
-            "diarize",
+            True,
             False,
             {"input_payload_json": {"max_speakers": 3}},
             400,
             "flow_run_reserved_input_payload_key",
         ),
         (
-            "diarize",
+            True,
             True,
             {"input_payload_json": {"antal_talare": 2.5}},
             400,
             "flow_input_invalid_number",
         ),
         (
-            "diarize",
+            True,
             True,
             {"input_payload_json": {"antal_talare": 0}},
             400,
@@ -545,7 +565,7 @@ async def test_a_speaker_count_the_run_cannot_use_creates_no_run(
     flow_process_auth_headers,
     db_container,
     dispatched: list[UUID],
-    service_mode: str | None,
+    service: bool,
     speaker_mapping: bool,
     body: dict[str, object],
     status: int,
@@ -560,8 +580,10 @@ async def test_a_speaker_count_the_run_cannot_use_creates_no_run(
         speaker_mapping=speaker_mapping,
     )
 
-    with _deployment(service_mode=service_mode):
-        refused = await _create_run(client, headers, flow.flow_id, body)
+    await _speaker_service(
+        client, flow_process_auth_headers, flow.flow_id, granted=service
+    )
+    refused = await _create_run(client, headers, flow.flow_id, body)
 
     assert refused.status_code == status, refused.text
     assert refused.json()["code"] == code
@@ -570,13 +592,13 @@ async def test_a_speaker_count_the_run_cannot_use_creates_no_run(
 
 
 @pytest.mark.parametrize(
-    ("choice", "form_count", "replay_service_mode"),
+    ("choice", "form_count", "replay_service"),
     [
-        ({"speaker_labels": False}, None, None),
-        ({"max_speakers": 3}, None, None),
-        ({"max_speakers": None}, None, None),
-        ({"max_speakers": 3}, 0, "diarize"),
-        ({"max_speakers": None}, 0, "diarize"),
+        ({"speaker_labels": False}, None, False),
+        ({"max_speakers": 3}, None, False),
+        ({"max_speakers": None}, None, False),
+        ({"max_speakers": 3}, 0, True),
+        ({"max_speakers": None}, 0, True),
     ],
 )
 async def test_retry_and_regeneration_keep_the_source_speaker_decision(
@@ -587,7 +609,7 @@ async def test_retry_and_regeneration_keep_the_source_speaker_decision(
     dispatched: list[UUID],
     choice: dict[str, object],
     form_count: int | None,
-    replay_service_mode: str | None,
+    replay_service: bool,
 ):
     headers = dict(flow_process_auth_headers)
     flow = await _published_flow(
@@ -601,10 +623,10 @@ async def test_retry_and_regeneration_keep_the_source_speaker_decision(
     body = dict(choice)
     if form_count is not None:
         body["input_payload_json"] = {"antal_talare": form_count}
-    with _deployment(service_mode="diarize"):
-        created = [
-            await _create_run(client, headers, flow.flow_id, body) for _ in range(2)
-        ]
+    await _speaker_service(
+        client, flow_process_auth_headers, flow.flow_id, granted=True
+    )
+    created = [await _create_run(client, headers, flow.flow_id, body) for _ in range(2)]
     failed_id, completed_id = (UUID(run.json()["id"]) for run in created)
     async with db_container() as container:
         session = container.session()
@@ -676,21 +698,23 @@ async def test_retry_and_regeneration_keep_the_source_speaker_decision(
             sa.select(FlowRuns.revision).where(FlowRuns.id == completed_id)
         )
 
-    with _deployment(service_mode=replay_service_mode):
-        retried = await client.post(
-            f"/api/v1/flows/{flow.flow_id}/runs/{failed_id}/retry/",
-            headers={**headers, "Idempotency-Key": "retry-speaker-decision"},
-        )
-        regenerated = await client.post(
-            f"/api/v1/flows/{flow.flow_id}/runs/{completed_id}/steps/{flow.step_id}"
-            "/transcript-regenerations/",
-            headers={**headers, "Idempotency-Key": "regenerate-speaker-decision"},
-            json={
-                "expected_run_revision": completed_revision,
-                "expected_correction_revision": None,
-                "segments_hash": segments_content_hash(SEGMENTS),
-            },
-        )
+    await _speaker_service(
+        client, flow_process_auth_headers, flow.flow_id, granted=replay_service
+    )
+    retried = await client.post(
+        f"/api/v1/flows/{flow.flow_id}/runs/{failed_id}/retry/",
+        headers={**headers, "Idempotency-Key": "retry-speaker-decision"},
+    )
+    regenerated = await client.post(
+        f"/api/v1/flows/{flow.flow_id}/runs/{completed_id}/steps/{flow.step_id}"
+        "/transcript-regenerations/",
+        headers={**headers, "Idempotency-Key": "regenerate-speaker-decision"},
+        json={
+            "expected_run_revision": completed_revision,
+            "expected_correction_revision": None,
+            "segments_hash": segments_content_hash(SEGMENTS),
+        },
+    )
 
     assert (retried.status_code, regenerated.status_code) == (201, 201), (
         retried.text,

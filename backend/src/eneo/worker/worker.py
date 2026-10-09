@@ -256,12 +256,6 @@ class Worker:
         settings = get_settings()
         _log_startup_diagnostics(settings)
 
-        from eneo.flows.runtime.remote_transcription import (
-            log_remote_transcription_readiness,
-        )
-
-        await log_remote_transcription_readiness(settings)
-
     async def shutdown(self, ctx: ARQContext) -> None:
         del ctx
         await lifespan.shutdown()

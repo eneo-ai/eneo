@@ -33,7 +33,10 @@ from eneo.flows.infrastructure.flow_repo import (
     FlowRepository,
 )
 from eneo.flows.infrastructure.flow_version_repo import FlowVersionRepository
-from eneo.flows.runtime.transcription import resolve_transcription_model_for_step
+from eneo.flows.runtime.transcription import (
+    load_flow_space,
+    select_transcription_model,
+)
 from eneo.flows.transcription_config import FlowTranscriptionConfig
 from eneo.main.exceptions import BadRequestException, NotFoundException
 from eneo.prompts.api.prompt_models import PromptCreate
@@ -455,11 +458,14 @@ async def _flow_and_model(client, db_container, admin_user):
 
 async def _resolve(db_container, *, flow_id: UUID, tenant_id: UUID, model_id: UUID):
     async with db_container() as container:
-        return await resolve_transcription_model_for_step(
+        space = await load_flow_space(
             flow_repo=container.flow_repo(),
             space_repo=container.space_repo(),
             flow_id=flow_id,
             tenant_id=tenant_id,
+        )
+        return select_transcription_model(
+            space,
             config=FlowTranscriptionConfig(
                 enabled=True, model_id=model_id, language="sv", diarization=False
             ),

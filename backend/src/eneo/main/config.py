@@ -5,7 +5,7 @@ import os
 import sys
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Literal, Optional
+from typing import Optional
 from urllib.parse import urlparse
 
 from pydantic import (
@@ -395,29 +395,7 @@ class Settings(BaseSettings):
     # GPU) needs longer.
     flow_live_transcription_idle_timeout_seconds: int = Field(default=300, gt=0)
     flow_live_transcription_final_text_timeout_seconds: int = Field(default=60, gt=0)
-    # External transcription service: when set, flow transcribe-only steps
-    # delegate transcription to it (async job API: submit multipart, poll,
-    # fetch result) instead of the model-registry transcription path. Unset
-    # means the feature is off; knowledge uploads and app runs always use the
-    # model-registry path regardless.
     flow_transcription_include_speaker_review: bool = False
-    flow_transcription_service_url: Optional[str] = None
-    flow_transcription_service_api_key: Optional[str] = None
-    flow_transcription_service_submit_timeout_seconds: int = 600
-    flow_transcription_service_poll_interval_seconds: float = 5.0
-    flow_transcription_service_result_timeout_seconds: int = 120
-    # full: the service transcribes and diarizes. diarize: the flow's registry
-    # model transcribes (with word timestamps) and the service only adds speaker
-    # labels, so model governance and provider credentials stay in Eneo.
-    flow_transcription_service_mode: Literal["full", "diarize"] = "full"
-
-    @property
-    def flow_transcription_service_configured(self) -> bool:
-        """Whether flow audio steps delegate to the external transcription service."""
-        return bool(
-            self.flow_transcription_service_url
-            and self.flow_transcription_service_api_key
-        )
 
     # Deployment fallback for the per-mapped-step model-call ceiling. Applies when
     # an organization has never configured its own value; None disables mapped
@@ -1060,33 +1038,6 @@ class Settings(BaseSettings):
         if isinstance(value, str) and not value.strip():
             return None
         return value
-
-    @model_validator(mode="after")
-    def validate_flow_transcription_service_settings(self):
-        """Ensure external flow transcription service settings are coherent."""
-        if self.flow_transcription_service_url is not None:
-            if not self.flow_transcription_service_api_key:
-                logging.error(
-                    "FLOW_TRANSCRIPTION_SERVICE_API_KEY is required when "
-                    "FLOW_TRANSCRIPTION_SERVICE_URL is set."
-                )
-                sys.exit(1)
-
-        for name in (
-            "flow_transcription_service_submit_timeout_seconds",
-            "flow_transcription_service_poll_interval_seconds",
-            "flow_transcription_service_result_timeout_seconds",
-        ):
-            value = getattr(self, name)
-            if value <= 0:
-                logging.error(
-                    "%s must be greater than zero. Current value: %s",
-                    name.upper(),
-                    value,
-                )
-                sys.exit(1)
-
-        return self
 
     @model_validator(mode="after")
     def validate_redis_settings(self):

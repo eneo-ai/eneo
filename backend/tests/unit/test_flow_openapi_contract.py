@@ -187,7 +187,6 @@ def test_live_transcription_refusal_types_its_reason(openapi_spec):
 
     assert _extract_enum_values(openapi_spec, context["properties"]["reason"]) == {
         "transcription_disabled",
-        "transcription_service_mode",
         "model_unavailable",
         "model_not_realtime",
     }
@@ -1975,7 +1974,6 @@ def test_openapi_documents_transcription_options_and_the_run_speaker_choice(
     assert set(live) == {"available", "reason"}
     assert _extract_enum_values(openapi_spec, _non_null_schema(live["reason"])) == {
         "transcription_disabled",
-        "transcription_service_mode",
         "model_unavailable",
         "model_not_realtime",
     }
@@ -2643,6 +2641,8 @@ def test_openapi_flow_run_public_exposes_structured_error(openapi_spec: dict) ->
         "transcription_service_reason",
         "transcription_stage",
         "transcription_queue_position",
+        # Why no speaker identification service could label the run's speakers.
+        "speaker_service_gap",
         "summarization_rounds",
         "summarization_records",
         "summarization_bytes",

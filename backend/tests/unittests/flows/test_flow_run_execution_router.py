@@ -76,7 +76,6 @@ from eneo.flows.published_definition import (
     parse_published_definition,
     published_definition_checksum,
 )
-from eneo.main.config import get_settings
 from eneo.main.exceptions import (
     AuditLoggingUnavailableException,
     BadRequestException,
@@ -95,6 +94,10 @@ from tests.unittests.flows.test_flow_router import (
     _review_checkpoint,
     _run,
     _service_key,
+)
+from tests.unittests.spaces.test_space_transcription_services import (
+    _connection,
+    _space,
 )
 
 
@@ -193,7 +196,7 @@ async def test_get_flow_graph_keeps_run_version_snapshot_visible_after_unpublish
 @pytest.mark.asyncio
 @pytest.mark.parametrize(("speaker_labels", "marked"), [(None, True), (False, None)])
 async def test_get_flow_graph_says_speakers_are_labelled_only_when_the_run_labels_them(
-    monkeypatch: pytest.MonkeyPatch, speaker_labels: bool | None, marked: bool | None
+    speaker_labels: bool | None, marked: bool | None
 ):
     container = MagicMock()
     flow_run_service = AsyncMock()
@@ -240,14 +243,9 @@ async def test_get_flow_graph_says_speakers_are_labelled_only_when_the_run_label
         step_results=(),
         speaker_labels=speaker_labels,
     )
-    with_service = get_settings().model_copy(
-        update={
-            "flow_transcription_service_url": "http://speaker-service.invalid",
-            "flow_transcription_service_api_key": "service-key",
-        }
-    )
-    monkeypatch.setattr(
-        "eneo.flows.api.flow_run_steps_router.get_settings", lambda: with_service
+    # The flow's space has one usable speaker service.
+    container.space_service.return_value.get_space.return_value = _space(
+        None, [_connection(1)]
     )
 
     graph = await get_flow_graph(

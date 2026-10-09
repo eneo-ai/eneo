@@ -15,6 +15,7 @@ from eneo.flows.runtime.diarizing_transcription import (
     DiarizingFlowTranscriber,
     RegistryFlowTranscriber,
 )
+from eneo.flows.runtime.transcription import FlowTranscribers
 from eneo.main.exceptions import TypedIOValidationException
 from tests.unit.files import test_audio
 from tests.unit.flows.runtime.test_remote_transcription import (
@@ -47,9 +48,7 @@ recording = test_audio.recording
 ffmpeg = test_audio.ffmpeg
 
 
-@pytest.mark.parametrize(
-    "outcome", ["registry", "failure", "cancel", "diarize", "remote"]
-)
+@pytest.mark.parametrize("outcome", ["registry", "failure", "cancel", "diarize"])
 async def test_audio_step_uses_download_and_removes_spool(
     user, recording, ffmpeg, monkeypatch, outcome, spool_contract
 ):
@@ -112,11 +111,17 @@ async def test_audio_step_uses_download_and_removes_spool(
     )
     remote = make_transcriber(service)
     if outcome == "registry":
-        executor.transcriber = RegistryFlowTranscriber(registry)
+        executor.transcribers = FlowTranscribers(
+            model=RegistryFlowTranscriber(registry),
+            with_speaker_service=AsyncMock(side_effect=AssertionError("labels off")),
+        )
     elif outcome == "diarize":
-        executor.transcriber = DiarizingFlowTranscriber(registry, remote)
-    elif outcome == "remote":
-        executor.transcriber = remote
+        executor.transcribers = FlowTranscribers(
+            model=RegistryFlowTranscriber(registry),
+            with_speaker_service=AsyncMock(
+                return_value=DiarizingFlowTranscriber(registry, remote)
+            ),
+        )
     run = _run(user=user, payload={})
     _patch_run_input_payload(flow_run_repo, run)
 
@@ -133,20 +138,21 @@ async def test_audio_step_uses_download_and_removes_spool(
                 "wizard": {
                     "transcription_enabled": True,
                     "transcription_model": {"id": str(model.id)},
+                    "transcription_diarization": outcome != "registry",
                 }
             },
             requested_file_ids=[file.id],
             transcription_call_observer=observer,
         )
 
-    if outcome in {"registry", "diarize", "remote"}:
+    if outcome in {"registry", "diarize"}:
         result = await execute()
         if outcome == "registry":
             assert "hello" in result.text
         else:
             assert result.text == RESULT_BODY["text"]
-        assert decodes == (["duration"] if outcome == "remote" else ["wav"])
-        assert provider.await_count == (0 if outcome == "remote" else 1)
+        assert decodes == ["wav"]
+        assert provider.await_count == 1
     else:
         error = (
             asyncio.CancelledError
@@ -159,10 +165,10 @@ async def test_audio_step_uses_download_and_removes_spool(
     assert not paths[0].exists()
     assert list(temp_dir.iterdir()) == []
     assert len(download.streams) == 1
-    assert duration.await_count == (1 if outcome == "remote" else 0)
-    if outcome in {"diarize", "remote"}:
+    assert duration.await_count == 0
+    if outcome == "diarize":
         assert observer.started_facts[-1].audio_seconds == 10
-        assert len(observer.started_facts) == (2 if outcome == "diarize" else 1)
+        assert len(observer.started_facts) == 2
         assert payload in service.requests[0].read()
     file_service.get_file_content.assert_not_awaited()
 

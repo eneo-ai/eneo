@@ -1,13 +1,18 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Any, cast
+from enum import StrEnum
+from typing import TYPE_CHECKING, Any, cast
 from uuid import UUID
 
 _ALLOWED_TRANSCRIPTION_LANGUAGES = {"auto", "sv", "en"}
 # The language a run transcribes in when the flow names none.
 DEFAULT_TRANSCRIPTION_LANGUAGE = "sv"
 SPEAKER_SERVICE_KEY = "transcription_speaker_service"
+
+if TYPE_CHECKING:
+    from eneo.spaces.space import Space
+    from eneo.transcription_services.models import TranscriptionServiceConnection
 
 
 class FlowTranscriptionConfigError(ValueError):
@@ -99,6 +104,46 @@ def _reference_id(wizard: dict[str, Any], key: str) -> UUID | None:
         raise FlowTranscriptionConfigError(
             f"wizard.{key}.id must be a valid UUID."
         ) from exc
+
+
+class SpeakerServiceGap(StrEnum):
+    """Why no service can label this flow's speakers."""
+
+    NO_SERVICE = "no_service"
+    CHOICE_REQUIRED = "choice_required"
+    PICKED_UNAVAILABLE = "picked_unavailable"
+
+
+@dataclass(frozen=True)
+class SpeakerServiceResolution:
+    connection: TranscriptionServiceConnection | None
+    gap: SpeakerServiceGap | None
+
+    @property
+    def available(self) -> bool:
+        return self.connection is not None
+
+
+def resolve_speaker_service(
+    config: FlowTranscriptionConfig, space: Space
+) -> SpeakerServiceResolution:
+    """The service that would label this flow's speakers in ``space``, whether
+    or not labels are on: a run may switch them on."""
+    if config.speaker_service_id is not None:
+        connection = space.usable_transcription_service(config.speaker_service_id)
+        return SpeakerServiceResolution(
+            connection,
+            None if connection is not None else SpeakerServiceGap.PICKED_UNAVAILABLE,
+        )
+    services = space.usable_transcription_services
+    if len(services) == 1:
+        return SpeakerServiceResolution(services[0], None)
+    return SpeakerServiceResolution(
+        None,
+        SpeakerServiceGap.NO_SERVICE
+        if not services
+        else SpeakerServiceGap.CHOICE_REQUIRED,
+    )
 
 
 def to_provider_language(language: str) -> str | None:

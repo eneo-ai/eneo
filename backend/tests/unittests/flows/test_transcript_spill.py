@@ -24,6 +24,7 @@ from tests.unittests.flows.test_flow_transcription import (
     _patch_run_input_payload,
     _SpaceStub,
     _state,
+    _transcribers,
 )
 from tests.unittests.flows.test_typed_io_executor import (
     _build_executor,
@@ -84,7 +85,7 @@ async def test_per_source_audio_publishes_one_combined_attempt_source(
     executor.file_service.get_audio_download = spool_contract.downloads(
         list(files.values())
     )
-    executor.transcriber.transcribe.side_effect = [
+    executor.transcribers.model.transcribe.side_effect = [
         TranscribedAudio(
             text,
             10.0,
@@ -154,7 +155,7 @@ async def test_per_source_audio_publishes_one_combined_attempt_source(
         attempt_no=3,
         version_metadata=_metadata(executor),
     )
-    assert executor.transcriber.transcribe.await_count == 2
+    assert executor.transcribers.model.transcribe.await_count == 2
     assert assistant.get_response.await_count == 2
     insert.assert_awaited_once()
     source = insert.await_args.kwargs["source"]
@@ -239,9 +240,11 @@ def _case(user, text, spool_contract):
         id=uuid4(), name="whisper-1", model_name="whisper-1", can_access=True
     )
     executor.space_repo.one.return_value = _SpaceStub([model], model)
-    executor.transcriber = SimpleNamespace(
-        transcribe=AsyncMock(
-            return_value=TranscribedAudio(text=text, duration_seconds=15000)
+    executor.transcribers = _transcribers(
+        SimpleNamespace(
+            transcribe=AsyncMock(
+                return_value=TranscribedAudio(text=text, duration_seconds=15000)
+            )
         )
     )
     assistant = _mock_assistant_for_execute_step()

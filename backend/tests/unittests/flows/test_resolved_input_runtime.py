@@ -402,7 +402,7 @@ def _resolution_deps(
             )
         ),
         file_service=file_service,
-        transcriber=None,
+        transcribers=None,
         flow_repo=object(),
         space_repo=object(),
         flow_run_repo=run_repo,

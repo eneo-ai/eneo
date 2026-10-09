@@ -187,6 +187,11 @@ class TestStepsTheFlowEndsWith:
         )
 
 
+_LABELS_WITHOUT_PICK = parse_transcription_config(
+    {"wizard": {"transcription_enabled": True}}
+)
+
+
 class TestPickedSpeakerService:
     """A picked speaker service must be one the space may use to identify
     speakers."""
@@ -256,13 +261,13 @@ class TestPickedSpeakerService:
     def test_labels_without_a_pick_need_at_most_one_service(self, count: int) -> None:
         services = [self._connection() for _ in range(count)]
 
-        require_one_speaker_service(space=self._space(*services))  # pyright: ignore[reportArgumentType]
+        require_one_speaker_service(_LABELS_WITHOUT_PICK, space=self._space(*services))  # pyright: ignore[reportArgumentType]
 
     def test_several_speaker_services_need_a_pick(self) -> None:
         space = self._space(self._connection(), self._connection())
 
         with pytest.raises(BadRequestException) as refused:
-            require_one_speaker_service(space=space)  # pyright: ignore[reportArgumentType]
+            require_one_speaker_service(_LABELS_WITHOUT_PICK, space=space)  # pyright: ignore[reportArgumentType]
 
         assert refused.value.code == (
             FlowGraphIssueCode.FLOW_SPEAKER_SERVICE_CHOICE_REQUIRED.value

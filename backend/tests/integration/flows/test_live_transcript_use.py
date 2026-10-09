@@ -21,6 +21,7 @@ from eneo.flows.runtime.flow_run_actor import FlowRunActor
 from eneo.flows.runtime.live_transcription.repository import LiveTranscriptRepository
 from eneo.flows.runtime.live_transcription.tickets import LiveTranscriptionGrant
 from eneo.flows.runtime.tasks import enable_autobegin_for_flow_task_session
+from eneo.flows.runtime.transcription import FlowTranscribers
 from eneo.main.container.container import Container
 from eneo.main.exceptions import NotFoundException
 from eneo.server.dependencies.container import load_container_upload_admission
@@ -185,7 +186,10 @@ async def test_full_run_uses_live_segments_and_persists_evidence(
             template_asset_repo=worker.flow_template_asset_repo(),
             encryption_service=worker.encryption_service(),
             audit_service=SimpleNamespace(log_async=AsyncMock(return_value=uuid4())),
-            transcriber=RegistryFlowTranscriber(registry),
+            transcribers=FlowTranscribers(
+                model=RegistryFlowTranscriber(registry),
+                with_speaker_service=AsyncMock(),
+            ),
             max_inline_text_bytes=1024 * 1024,
             input_limits=resolve_flow_input_limits(
                 case.tenant.flow_settings, defaults=admission

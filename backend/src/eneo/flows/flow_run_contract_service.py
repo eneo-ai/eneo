@@ -64,6 +64,7 @@ from eneo.flows.runtime.live_transcription.admission import resolve_live_transcr
 from eneo.flows.transcription_config import (
     FlowTranscriptionConfigError,
     parse_transcription_config,
+    resolve_speaker_service,
 )
 from eneo.main.exceptions import BadRequestException, NotFoundException
 from eneo.main.models import NOT_PROVIDED, NotProvided
@@ -131,10 +132,11 @@ class FlowRunContractService:
         self, runtime_inputs: PublishedRuntimeInputs, space: Space
     ) -> FlowTranscriptionContractPublic | None:
         wizard_metadata = runtime_inputs.definition.metadata().wizard
+        identifiable = speakers_identifiable_in_space(wizard_metadata, space)
         speaker_labels = speaker_labels_option(
             runtime_inputs.steps,
             wizard_metadata=wizard_metadata,
-            service_configured=self.settings.flow_transcription_service_configured,
+            speakers_identifiable=identifiable,
         )
         audio_step = _audio_input_step(runtime_inputs.steps)
         if speaker_labels is None or audio_step is None:
@@ -143,7 +145,6 @@ class FlowRunContractService:
             wizard_metadata=wizard_metadata,
             space=space,
             step=audio_step,
-            settings=self.settings,
         )
         return FlowTranscriptionContractPublic(
             live=FlowLiveTranscriptionAvailabilityPublic(
@@ -153,7 +154,7 @@ class FlowRunContractService:
             max_speakers=max_speakers_option(
                 runtime_inputs.steps,
                 speaker_labels=speaker_labels,
-                service_configured=self.settings.flow_transcription_service_configured,
+                speakers_identifiable=identifiable,
             ),
             # Eneo takes the parts of one recording together whatever labels them.
             single_recording=True,
@@ -268,16 +269,30 @@ def build_final_output_contract(
     )
 
 
+def speakers_identifiable_in_space(
+    wizard_metadata: FlowPersistedJsonObject | None, space: Space
+) -> bool:
+    """Whether a connected service would label this flow's speakers in ``space``,
+    whatever the flow's own labels default: a run may switch labels on. A flow
+    that transcribes nothing never asks its space."""
+    try:
+        config = parse_transcription_config({"wizard": wizard_metadata})
+    except FlowTranscriptionConfigError:
+        return False
+    return config.enabled and resolve_speaker_service(config, space).available
+
+
 def speaker_labels_option(
     steps: Sequence[RuntimeStep],
     *,
     wizard_metadata: FlowPersistedJsonObject | None,
-    service_configured: bool,
+    speakers_identifiable: bool,
 ) -> FlowSpeakerLabelsOptionPublic | None:
     """The speaker-label choice a run gets; None when the flow transcribes no audio.
 
-    Only an external transcription service labels speakers, so without one there
-    is nothing to choose, and a step that maps speakers to names needs the labels.
+    Only a connected speaker service labels speakers, so without one there is
+    nothing to choose and a run transcribes without labels; a step that maps
+    speakers to names needs the labels whatever the space offers.
     """
     if _audio_input_step(steps) is None:
         return None
@@ -291,9 +306,9 @@ def speaker_labels_option(
         step.output_mode == FlowOutputMode.SPEAKER_MAPPING.value for step in steps
     )
     return FlowSpeakerLabelsOptionPublic(
-        selectable=service_configured and not required,
+        selectable=speakers_identifiable and not required,
         required=required,
-        default=config.diarization,
+        default=config.diarization and speakers_identifiable,
     )
 
 
@@ -301,12 +316,12 @@ def max_speakers_option(
     steps: Sequence[RuntimeStep],
     *,
     speaker_labels: FlowSpeakerLabelsOptionPublic | None,
-    service_configured: bool,
+    speakers_identifiable: bool,
 ) -> FlowMaxSpeakersOptionPublic | None:
-    """Whether a run may bound the speaker count: whenever a transcription
-    service labels speakers for the flow, whether the run chooses the labels or
-    a speaker-mapping step requires them."""
-    if speaker_labels is None or not service_configured:
+    """Whether a run may bound the speaker count: whenever a connected service
+    labels speakers for the flow, whether the run chooses the labels or a
+    speaker-mapping step requires them."""
+    if speaker_labels is None or not speakers_identifiable:
         return None
     mapping_config = _speaker_mapping_config(steps)
     return FlowMaxSpeakersOptionPublic(
@@ -321,7 +336,7 @@ def settle_max_speakers(
     steps: Sequence[RuntimeStep],
     wizard_metadata: FlowPersistedJsonObject | None,
     speaker_labels: bool | None,
-    service_configured: bool,
+    speakers_identifiable: bool,
     form_input: FlowPersistedJsonObject | None,
 ) -> int | None | NotProvided:
     """The run's upper bound on speakers, settled once at admission.
@@ -332,11 +347,13 @@ def settle_max_speakers(
     below the real count would merge unlisted voices into one person.
     """
     option = speaker_labels_option(
-        steps, wizard_metadata=wizard_metadata, service_configured=service_configured
+        steps,
+        wizard_metadata=wizard_metadata,
+        speakers_identifiable=speakers_identifiable,
     )
     labels = (
         option is not None
-        and service_configured
+        and speakers_identifiable
         and (
             option.required
             or (option.default if speaker_labels is None else speaker_labels)

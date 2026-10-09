@@ -782,7 +782,7 @@ class FlowService:
         if pick is not None:
             require_usable_speaker_service(pick, space=space)
         if needs_one:
-            require_one_speaker_service(space=space)
+            require_one_speaker_service(config, space=space)
         return space
 
     async def _validate_step_security_classification_for_steps(

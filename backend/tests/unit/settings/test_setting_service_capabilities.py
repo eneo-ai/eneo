@@ -10,8 +10,6 @@ from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock
 from uuid import uuid4
 
-import pytest
-
 from eneo.settings import setting_service
 from eneo.settings.setting_service import SettingService
 
@@ -51,32 +49,6 @@ def _make_service(*, object_store_configured: bool) -> SettingService:
         data_retention_service=AsyncMock(),
         skill_repo=AsyncMock(),
         object_content=object_content,
-    )
-
-
-@pytest.mark.parametrize("configured", [True, False])
-async def test_flow_transcription_service_configured_follows_deployment_config(
-    monkeypatch: pytest.MonkeyPatch, configured: bool
-):
-    service = _make_service(object_store_configured=False)
-    app_settings = SimpleNamespace(
-        tenant_credentials_enabled=False,
-        flow_transcription_service_configured=configured,
-        flow_transcription_service_mode="diarize",
-        sharepoint_fixture_mode_active=False,
-        is_development=False,
-    )
-    monkeypatch.setattr(setting_service, "get_app_settings", lambda: app_settings)
-    monkeypatch.setattr(
-        setting_service, "file_reference_base_url", lambda _settings: None
-    )
-
-    settings = await service.get_settings()
-
-    assert settings.flow_transcription_service_configured is configured
-    # The mode is only meaningful, and only reported, when the service exists.
-    assert settings.flow_transcription_service_mode == (
-        "diarize" if configured else None
     )
 
 

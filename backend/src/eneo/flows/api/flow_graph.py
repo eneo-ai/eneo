@@ -335,17 +335,17 @@ def annotate_speaker_identification(
     nodes: Sequence[GraphNode],
     *,
     wizard_metadata: FlowPersistedJsonObject | None,
-    service_configured: bool,
+    speakers_identifiable: bool,
     speaker_labels: bool | None = None,
 ) -> list[GraphNode]:
     """Mark audio steps whose transcription will also label speakers.
 
-    Only the external transcription service labels speakers, so without one
-    the flag stays unset regardless of the flow's own setting. A run's own
+    Only a connected speaker service labels speakers, so without one the flag
+    stays unset regardless of the flow's own setting. A run's own
     ``speaker_labels`` choice replaces that setting. Malformed metadata is not
     the graph's concern; it leaves the nodes untouched.
     """
-    if not service_configured:
+    if not speakers_identifiable:
         return list(nodes)
     try:
         config = parse_transcription_config({"wizard": wizard_metadata})
@@ -375,7 +375,7 @@ def build_graph_response(
     nodes = annotate_speaker_identification(
         nodes,
         wizard_metadata=wizard_metadata,
-        service_configured=speaker_identification_available,
+        speakers_identifiable=speaker_identification_available,
         speaker_labels=speaker_labels,
     )
     return GraphResponse(nodes=nodes, edges=edges)

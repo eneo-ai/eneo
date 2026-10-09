@@ -5,7 +5,17 @@ export type FlowWizardMetadata = {
   transcription_model?: { id: string } | null;
   transcription_language?: string;
   transcription_diarization?: boolean;
+  // The speaker identification service the author picked; absent means the
+  // space's only usable one.
+  transcription_speaker_service?: { id: string } | null;
 };
+
+type SpeakerServiceLink = { meets_security_classification: boolean; available: boolean };
+
+/** The granted services new work in the space may use (the backend's rule). */
+export function usableSpeakerServices<T extends SpeakerServiceLink>(services: T[]): T[] {
+  return services.filter((service) => service.meets_security_classification && service.available);
+}
 
 export type FlowSaveStatus = "saved" | "saving" | "unsaved";
 

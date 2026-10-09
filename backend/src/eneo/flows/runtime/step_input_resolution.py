@@ -116,7 +116,10 @@ if TYPE_CHECKING:
     from eneo.files.file_service import FileService
     from eneo.flows.infrastructure.flow_repo import FlowRepository
     from eneo.flows.runtime.step_execution_runtime import ApplyOutputCapFn
-    from eneo.flows.runtime.transcription import TranscriptSourcePreparation
+    from eneo.flows.runtime.transcription import (
+        FlowTranscribers,
+        TranscriptSourcePreparation,
+    )
     from eneo.model_providers.domain.provider_call_observer import (
         ProviderCallObserver,
     )
@@ -139,7 +142,7 @@ class StepInputResolutionDeps:
     variable_resolver: Any
     resolve_http_input_source_text: Callable[..., Awaitable[FlowHttpInputResolution]]
     file_service: FileService
-    transcriber: Any | None
+    transcribers: "FlowTranscribers | None"
     flow_repo: "FlowRepository"
     space_repo: Any
     flow_run_repo: Any
@@ -288,7 +291,7 @@ async def resolve_step_input(
     transcript_reference: FileBackedStepText | None = None
     if requested_ids:
         if runtime_input_config.input_format == "audio":
-            if deps.transcriber is None:
+            if deps.transcribers is None:
                 raise TypedIOValidationException(
                     "Transcriber service is not available for audio input execution.",
                     code=FlowApiErrorCode.TYPED_IO_TRANSCRIPTION_FAILED.value,
@@ -322,7 +325,7 @@ async def resolve_step_input(
             audio_deps = AudioRuntimeDeps(
                 apply_output_cap=deps.apply_output_cap,
                 commit=deps.commit,
-                transcriber=deps.transcriber,
+                transcribers=deps.transcribers,
                 flow_repo=deps.flow_repo,
                 space_repo=deps.space_repo,
                 flow_run_repo=deps.flow_run_repo,

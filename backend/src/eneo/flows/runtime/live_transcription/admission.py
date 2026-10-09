@@ -2,9 +2,8 @@
 
 One owner for two readers: the run contract advertises availability and the
 live-session route admits a session, so both ask this module and cannot
-disagree. The preview uses exactly the flow's own transcription model; when
-another engine would produce the final transcript (an external service in
-``full`` mode ignores the flow's model), live preview is refused instead.
+disagree. The preview uses exactly the flow's own transcription model, the
+model that writes the final transcript; a speaker service only adds labels.
 """
 
 from __future__ import annotations
@@ -23,7 +22,6 @@ from eneo.transcription_models.domain.realtime import speaks_realtime_dialect
 
 if TYPE_CHECKING:
     from eneo.flows.domain.runtime import RuntimeStep
-    from eneo.main.config import Settings
     from eneo.spaces.space import Space
     from eneo.transcription_models.domain.transcription_model import (
         TranscriptionModel,
@@ -31,7 +29,6 @@ if TYPE_CHECKING:
 
 LiveTranscriptionUnavailableReason = Literal[
     "transcription_disabled",
-    "transcription_service_mode",
     "model_unavailable",
     "model_not_realtime",
 ]
@@ -58,7 +55,6 @@ def resolve_live_transcription(
     wizard_metadata: FlowPersistedJsonObject | None,
     space: Space,
     step: RuntimeStep,
-    settings: Settings,
 ) -> LiveTranscriptionAvailability:
     """Resolve the model a live session on ``step`` would stream to.
 
@@ -72,11 +68,6 @@ def resolve_live_transcription(
         return _unavailable("transcription_disabled")
     if not config.enabled:
         return _unavailable("transcription_disabled")
-    if (
-        settings.flow_transcription_service_configured
-        and settings.flow_transcription_service_mode == "full"
-    ):
-        return _unavailable("transcription_service_mode")
     try:
         model = select_transcription_model(
             space, config=config, step_order=step.step_order

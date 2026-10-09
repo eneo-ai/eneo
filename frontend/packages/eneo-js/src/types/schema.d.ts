@@ -18148,6 +18148,7 @@ export interface components {
       | "typed_io_transcription_failed"
       | "typed_io_transcription_model_missing"
       | "typed_io_transcription_model_unavailable"
+      | "typed_io_speaker_service_unavailable"
       | "typed_io_transcription_not_enabled"
       | "typed_io_unsupported_type"
       | "flow_published_form_schema_invalid"
@@ -18950,16 +18951,9 @@ export interface components {
       available: boolean;
       /**
        * Reason
-       * @description Why live preview is unavailable: `transcription_disabled`, `transcription_service_mode` (an external service transcribes with its own model), `model_unavailable`, or `model_not_realtime`.
+       * @description Why live preview is unavailable: `transcription_disabled`, `model_unavailable`, or `model_not_realtime`.
        */
-      reason?:
-        | (
-            | "transcription_disabled"
-            | "transcription_service_mode"
-            | "model_unavailable"
-            | "model_not_realtime"
-          )
-        | null;
+      reason?: ("transcription_disabled" | "model_unavailable" | "model_not_realtime") | null;
     };
     /** FlowLiveTranscriptionModelPublic */
     FlowLiveTranscriptionModelPublic: {
@@ -19043,14 +19037,10 @@ export interface components {
     FlowLiveTranscriptionUnavailableContext: {
       /**
        * Reason
-       * @description `transcription_disabled`: the flow does not transcribe audio. `transcription_service_mode`: an external service transcribes with its own model. `model_unavailable`: the flow's transcription model is not available in its space. `model_not_realtime`: the model does not support realtime.
+       * @description `transcription_disabled`: the flow does not transcribe audio. `model_unavailable`: the flow's transcription model is not available in its space. `model_not_realtime`: the model does not support realtime.
        * @enum {string}
        */
-      reason:
-        | "transcription_disabled"
-        | "transcription_service_mode"
-        | "model_unavailable"
-        | "model_not_realtime";
+      reason: "transcription_disabled" | "model_unavailable" | "model_not_realtime";
     };
     /**
      * FlowLiveTranscriptionUnavailableError
@@ -22000,6 +21990,7 @@ export interface components {
         | "typed_io_missing_required_files"
         | "typed_io_output_parse_failed"
         | "typed_io_render_failed"
+        | "typed_io_speaker_service_unavailable"
         | "typed_io_structured_output_exceeds_limit"
         | "typed_io_template_checksum_mismatch"
         | "typed_io_template_render_failed"
@@ -22071,6 +22062,8 @@ export interface components {
       provider_work_may_have_completed?: boolean | null;
       /** @description Execution heartbeat facts used to recover a stalled worker. */
       recovery?: components["schemas"]["FlowRunRecoveryFacts"] | null;
+      /** @description Why no speaker identification service could label this run's speakers: the space has none (no_service), has several and the flow picks none (choice_required), or the flow's pick is no longer usable (picked_unavailable). Refused before any audio was sent. */
+      speaker_service_gap?: components["schemas"]["SpeakerServiceGap"] | null;
       /**
        * Step Description
        * @description Human label for the affected step, truncated to a small public diagnostic budget.
@@ -24769,6 +24762,7 @@ export interface components {
             | "typed_io_missing_required_files"
             | "typed_io_output_parse_failed"
             | "typed_io_render_failed"
+            | "typed_io_speaker_service_unavailable"
             | "typed_io_structured_output_exceeds_limit"
             | "typed_io_template_checksum_mismatch"
             | "typed_io_template_render_failed"
@@ -26154,6 +26148,7 @@ export interface components {
             | "typed_io_missing_required_files"
             | "typed_io_output_parse_failed"
             | "typed_io_render_failed"
+            | "typed_io_speaker_service_unavailable"
             | "typed_io_structured_output_exceeds_limit"
             | "typed_io_template_checksum_mismatch"
             | "typed_io_template_render_failed"
@@ -34718,13 +34713,6 @@ export interface components {
        */
       file_references_enabled?: boolean;
       /**
-       * Flow Transcription Service Configured
-       * @default false
-       */
-      flow_transcription_service_configured?: boolean;
-      /** Flow Transcription Service Mode */
-      flow_transcription_service_mode?: ("full" | "diarize") | null;
-      /**
        * Object Content Enabled
        * @default false
        */
@@ -36001,6 +35989,12 @@ export interface components {
       /** Name */
       name: string;
     };
+    /**
+     * SpeakerServiceGap
+     * @description Why no service can label this flow's speakers.
+     * @enum {string}
+     */
+    SpeakerServiceGap: "no_service" | "choice_required" | "picked_unavailable";
     /**
      * StartRunRequest
      * @description Body for ``POST /runs/`` — start a new helper run.

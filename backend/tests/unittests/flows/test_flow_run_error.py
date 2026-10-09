@@ -24,6 +24,7 @@ from eneo.flows.flow_run_error import (
     dump_flow_run_error,
     parse_flow_run_error,
 )
+from eneo.flows.transcription_config import SpeakerServiceGap
 
 
 def test_flow_run_error_from_source_requires_public_error_code() -> None:
@@ -31,7 +32,7 @@ def test_flow_run_error_from_source_requires_public_error_code() -> None:
 
 
 def test_terminal_error_retryability_covers_exact_current_catalog() -> None:
-    assert len(FLOW_RUN_TERMINAL_ERROR_RETRYABILITY) == 89
+    assert len(FLOW_RUN_TERMINAL_ERROR_RETRYABILITY) == 90
     assert FLOW_RUN_TERMINAL_ERROR_RETRYABILITY[FlowApiErrorCode.RUN_ABANDONED] is False
     assert set(FLOW_RUN_TERMINAL_ERROR_RETRYABILITY) == FLOW_RUN_TERMINAL_ERROR_CODES
     assert {
@@ -579,3 +580,22 @@ def test_persisted_malformed_contract_fact_is_an_invalid_payload():
     )
 
     _assert_corrupt_run_error(error)
+
+
+@pytest.mark.parametrize("gap", list(SpeakerServiceGap))
+def test_a_missing_speaker_service_is_reported_as_a_typed_detail(
+    gap: SpeakerServiceGap,
+) -> None:
+    details = FlowRunErrorDetails.from_budget_context(
+        {"speaker_service_gap": gap.value}
+    )
+
+    assert details is not None
+    assert details.speaker_service_gap is gap
+
+
+def test_an_unknown_speaker_service_gap_is_not_reported() -> None:
+    assert (
+        FlowRunErrorDetails.from_budget_context({"speaker_service_gap": "other"})
+        is None
+    )

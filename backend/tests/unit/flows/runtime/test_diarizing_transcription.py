@@ -11,7 +11,6 @@ from eneo.files.transcript import TranscriptSegment
 from eneo.flows.runtime.audio_spool import SpooledAudio
 from eneo.flows.runtime.diarizing_transcription import DiarizingFlowTranscriber
 from eneo.flows.runtime.recording_parts import PartBounds, RecordingAudio
-from eneo.flows.runtime.remote_transcription import RemoteFlowTranscriber
 from eneo.flows.runtime.speaker_enrichment import DIARIZATION_SKIPPED_EMPTY_TRANSCRIPT
 from eneo.main.exceptions import ProviderRejectedRequestException
 from eneo.transcription_models.infrastructure.adapters.litellm_transcription import (
@@ -199,27 +198,4 @@ async def test_a_recording_is_transcribed_per_part_and_labelled_once(tmp_path) -
     )
     assert labelled.kwargs["max_speakers"] == 3
     assert result.diarization == "external"
-    assert result.duration_seconds == 15.0
-
-
-async def test_the_full_service_transcribes_a_recording_in_one_job(tmp_path) -> None:
-    recording = _recording(tmp_path)
-    remote = RemoteFlowTranscriber.__new__(RemoteFlowTranscriber)
-    remote.transcribe = AsyncMock(  # type: ignore[method-assign]
-        return_value=TranscribedAudio("x", 15.0, diarization="external")
-    )
-
-    result = await remote.transcribe_recording(
-        recording,
-        MODEL,
-        language="sv",
-        observer=None,
-        max_speakers=None,  # type: ignore[arg-type]
-    )
-
-    remote.transcribe.assert_awaited_once()
-    call = remote.transcribe.await_args
-    assert call.args[0] is recording.joined
-    assert call.kwargs["diarize"] is True
-    assert call.kwargs["file_id"] == recording.file_ids[0]
     assert result.duration_seconds == 15.0

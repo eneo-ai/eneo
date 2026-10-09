@@ -30,6 +30,7 @@ from tests.unittests.flows.test_flow_transcription import (
     _run,
     _runtime_step,
     _SpaceStub,
+    _transcribers,
 )
 
 spool_contract = audio_spool_test_support.spool_contract
@@ -111,7 +112,7 @@ def live_audio(user, monkeypatch, spool_contract):
         max_inline_text_bytes=100_000,
     )
     deps = AudioRuntimeDeps(
-        transcriber=DiarizingFlowTranscriber(registry, remote),
+        transcribers=_transcribers(DiarizingFlowTranscriber(registry, remote)),
         flow_repo=AsyncMock(),
         space_repo=space_repo,
         flow_run_repo=run_repo,

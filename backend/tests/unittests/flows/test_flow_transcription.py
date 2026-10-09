@@ -31,7 +31,7 @@ from eneo.flows.runtime.executor import (
     RuntimeStep,
 )
 from eneo.flows.runtime.flow_run_actor import FlowRunActor
-from eneo.flows.runtime.transcription import FlowTranscriptionResult
+from eneo.flows.runtime.transcription import FlowTranscribers, FlowTranscriptionResult
 from eneo.flows.runtime.transcription_runtime import (
     AudioRuntimeDeps,
     AudioRuntimeRequest,
@@ -44,6 +44,17 @@ from eneo.transcription_models.infrastructure.adapters.litellm_transcription imp
 from tests.unittests.flows import audio_spool_test_support
 
 spool_contract = audio_spool_test_support.spool_contract
+
+# The speaker service a space offers unless a test says otherwise.
+_SPEAKER_SERVICE = SimpleNamespace(id=uuid4(), name="Vemsa", can_access=True)
+
+
+def _transcribers(engine) -> FlowTranscribers:
+    """One double for the model and the speaker-labelling engine: these tests
+    are about what the engine returns, not which one the step picks."""
+    return FlowTranscribers(
+        model=engine, with_speaker_service=AsyncMock(return_value=engine)
+    )
 
 
 def _chunked_transcriber(monkeypatch, tmp_path, chunk_texts):
@@ -146,7 +157,9 @@ async def test_empty_chunk_intervals_reach_audio_runtime_diagnostics(
             max_inline_text_bytes=100_000,
         ),
         deps=AudioRuntimeDeps(
-            transcriber=_chunked_transcriber(monkeypatch, tmp_path, chunk_texts),
+            transcribers=_transcribers(
+                _chunked_transcriber(monkeypatch, tmp_path, chunk_texts)
+            ),
             flow_repo=AsyncMock(),
             space_repo=space_repo,
             flow_run_repo=flow_run_repo,
@@ -175,10 +188,12 @@ async def test_empty_chunk_intervals_reach_audio_runtime_diagnostics(
 async def test_remote_failure_facts_survive_executor_terminalization(
     spool_contract, user, monkeypatch, failure_kind
 ):
+    from eneo.files.transcript import TranscriptSegment
     from eneo.flows.api.flow_models import FlowRunPublic
     from eneo.flows.domain.flow import FlowStepResult
     from eneo.flows.flow_run_error import dump_flow_run_error, parse_flow_run_error
     from eneo.flows.runtime import remote_transcription
+    from eneo.flows.runtime.diarizing_transcription import DiarizingFlowTranscriber
     from eneo.flows.runtime.transcription import transcribe_audio_input
     from eneo.transcription_services.client import TranscriptionServiceClient
 
@@ -211,12 +226,20 @@ async def test_remote_failure_facts_survive_executor_terminalization(
         ),
         poll_interval_seconds=0.001,
     )
+    registry = AsyncMock()
+    registry.transcribe_from_filepath = AsyncMock(
+        return_value=TranscribedAudio(
+            text="Hej.",
+            duration_seconds=1.0,
+            segments=(TranscriptSegment(text="Hej.", start=0.0, end=1.0),),
+        )
+    )
     file = _audio_file(name="audio.wav")
     with pytest.raises(TypedIOValidationException) as exc_info:
         await transcribe_audio_input(
             files=[FileInfo.model_validate(file, from_attributes=True)],
-            transcriber=remote,
-            transcription_model=SimpleNamespace(),
+            transcriber=DiarizingFlowTranscriber(registry, remote),
+            transcription_model=SimpleNamespace(model_name="whisper-1"),
             language="sv",
             step_order=1,
             max_files=1,
@@ -308,12 +331,26 @@ def _audio_file(
 
 
 class _SpaceStub:
-    def __init__(self, models: list[object], default_model: object | None = None):
+    def __init__(
+        self,
+        models: list[object],
+        default_model: object | None = None,
+        speaker_services: list[object] | None = None,
+    ):
         self.transcription_models = models
         self._default_model = default_model
+        self.usable_transcription_services = (
+            [_SPEAKER_SERVICE] if speaker_services is None else speaker_services
+        )
 
     def get_default_transcription_model(self):
         return self._default_model
+
+    def usable_transcription_service(self, connection_id):
+        return next(
+            (s for s in self.usable_transcription_services if s.id == connection_id),
+            None,
+        )
 
 
 def _run(*, user, payload: dict | None = None) -> FlowRun:
@@ -469,7 +506,7 @@ def _build_executor(
             file_max_size_bytes=12_000_000,
             audio_max_size_bytes=25_000_000,
         ),
-        transcriber=transcriber,
+        transcribers=_transcribers(transcriber),
     )
     return executor, flow_run_repo, space_repo, file_service, transcriber
 
@@ -695,6 +732,131 @@ async def test_audio_resolve_lets_the_runs_speaker_choice_replace_the_flow_defau
     assert transcriber.transcribe.await_args.kwargs["diarize"] is diarize
 
 
+def _speaker_engines(executor) -> tuple[AsyncMock, AsyncMock]:
+    """Separate model and speaker-labelling engines, to see which one a step
+    uses and whether a speaker service was connected at all."""
+    model_engine = AsyncMock()
+    model_engine.transcribe = AsyncMock(return_value=_transcribed("ok"))
+    with_speaker_service = AsyncMock(return_value=AsyncMock())
+    executor.transcribers = FlowTranscribers(
+        model=model_engine, with_speaker_service=with_speaker_service
+    )
+    return model_engine, with_speaker_service
+
+
+async def _resolve_meeting(executor, flow_run_repo, file_service, user, wizard):
+    file = _audio_file(name="meeting.wav")
+    file_service.get_files_by_ids.return_value = [file]
+    run = _run(user=user, payload={})
+    _patch_run_input_payload(flow_run_repo, run)
+    return await executor._resolve_step_input(
+        step=_runtime_step(),
+        context=executor.variable_resolver.build_context(run.input_payload_json, []),
+        run=run,
+        prior_results=[],
+        state=_state(),
+        version_metadata={"wizard": {"transcription_enabled": True, **wizard}},
+        requested_file_ids=[file.id],
+    )
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("speaker_services", "pick", "reason"),
+    [
+        ([], None, "no_service"),
+        ([_SPEAKER_SERVICE], uuid4(), "picked_unavailable"),
+    ],
+    ids=["no_service", "revoked_pick"],
+)
+async def test_labels_without_a_usable_speaker_service_are_refused_before_audio(
+    spool_contract, user, speaker_services, pick, reason
+):
+    executor, flow_run_repo, space_repo, file_service, _ = _build_executor(
+        spool_contract=spool_contract, user=user
+    )
+    model_engine, with_speaker_service = _speaker_engines(executor)
+    model = SimpleNamespace(id=uuid4(), name="whisper-1", can_access=True)
+    space_repo.one = AsyncMock(
+        return_value=_SpaceStub([model], model, speaker_services=speaker_services)
+    )
+    wizard = {
+        "transcription_model": {"id": str(model.id)},
+        "transcription_diarization": True,
+    }
+    if pick is not None:
+        wizard["transcription_speaker_service"] = {"id": str(pick)}
+
+    with pytest.raises(TypedIOValidationException) as exc_info:
+        await _resolve_meeting(executor, flow_run_repo, file_service, user, wizard)
+
+    assert exc_info.value.code == "typed_io_speaker_service_unavailable"
+    assert exc_info.value.context == {"speaker_service_gap": reason}
+    model_engine.transcribe.assert_not_awaited()
+    with_speaker_service.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("picked", "reason"), [(False, "no_service"), (True, "picked_unavailable")]
+)
+async def test_a_service_removed_before_its_key_is_read_is_the_same_refusal(
+    spool_contract, user, picked, reason
+):
+    executor, flow_run_repo, space_repo, file_service, _ = _build_executor(
+        spool_contract=spool_contract, user=user
+    )
+    model_engine, with_speaker_service = _speaker_engines(executor)
+    with_speaker_service.side_effect = NotFoundException("gone")
+    model = SimpleNamespace(id=uuid4(), name="whisper-1", can_access=True)
+    space_repo.one = AsyncMock(
+        return_value=_SpaceStub([model], model, speaker_services=[_SPEAKER_SERVICE])
+    )
+    wizard: dict[str, object] = {
+        "transcription_model": {"id": str(model.id)},
+        "transcription_diarization": True,
+    }
+    if picked:
+        wizard["transcription_speaker_service"] = {"id": str(_SPEAKER_SERVICE.id)}
+
+    with pytest.raises(TypedIOValidationException) as exc_info:
+        await _resolve_meeting(executor, flow_run_repo, file_service, user, wizard)
+
+    assert exc_info.value.code == "typed_io_speaker_service_unavailable"
+    assert exc_info.value.context == {"speaker_service_gap": reason}
+    model_engine.transcribe.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_labels_off_transcribe_with_the_model_and_connect_no_service(
+    spool_contract, user
+):
+    executor, flow_run_repo, space_repo, file_service, _ = _build_executor(
+        spool_contract=spool_contract, user=user
+    )
+    model_engine, with_speaker_service = _speaker_engines(executor)
+    model = SimpleNamespace(id=uuid4(), name="whisper-1", can_access=True)
+    # Labels off need no speaker service, so none in the space is no refusal.
+    space_repo.one = AsyncMock(
+        return_value=_SpaceStub([model], model, speaker_services=[])
+    )
+
+    await _resolve_meeting(
+        executor,
+        flow_run_repo,
+        file_service,
+        user,
+        {
+            "transcription_model": {"id": str(model.id)},
+            "transcription_diarization": False,
+        },
+    )
+
+    model_engine.transcribe.assert_awaited_once()
+    assert model_engine.transcribe.await_args.kwargs["diarize"] is False
+    with_speaker_service.assert_not_awaited()
+
+
 @pytest.mark.asyncio
 @pytest.mark.parametrize(
     ("stored", "bound"),
@@ -711,12 +873,12 @@ async def test_vemsa_receives_the_speaker_bound_the_run_settled(
 
     from eneo.files.transcript import TranscriptSegment
     from eneo.flows.runtime.diarizing_transcription import DiarizingFlowTranscriber
-    from eneo.flows.runtime.remote_transcription import build_remote_flow_transcriber
-    from eneo.main.config import Settings
+    from eneo.flows.runtime.remote_transcription import RemoteFlowTranscriber
     from tests.unit.transcription_services.scripted_service import (
         RESULT_BODY,
         ScriptedService,
         accepted,
+        make_client,
         status,
     )
 
@@ -731,14 +893,9 @@ async def test_vemsa_receives_the_speaker_bound_the_run_settled(
             httpx.Response(200, json={**RESULT_BODY, "model": "whisper-1"})
         ],
     )
-    remote = build_remote_flow_transcriber(
-        Settings.model_construct(
-            flow_transcription_service_url="http://vemsa.test",
-            flow_transcription_service_api_key="devtoken",
-            flow_transcription_service_poll_interval_seconds=0.001,
-        )
+    remote = RemoteFlowTranscriber(
+        make_client(vemsa, base_url="http://vemsa.test"), poll_interval_seconds=0.001
     )
-    remote.client._transport = httpx.MockTransport(vemsa.handler)
     registry = AsyncMock()
     registry.transcribe_from_filepath = AsyncMock(
         return_value=TranscribedAudio(
@@ -747,7 +904,12 @@ async def test_vemsa_receives_the_speaker_bound_the_run_settled(
             segments=(TranscriptSegment(text="Hej och välkomna.", start=0.0, end=5.2),),
         )
     )
-    executor.transcriber = DiarizingFlowTranscriber(registry, remote)
+    with_speaker_service = AsyncMock(
+        return_value=DiarizingFlowTranscriber(registry, remote)
+    )
+    executor.transcribers = FlowTranscribers(
+        model=AsyncMock(), with_speaker_service=with_speaker_service
+    )
     file = _audio_file(name="meeting.wav")
     file_service.get_files_by_ids.return_value = [file]
     model = SimpleNamespace(
@@ -775,6 +937,8 @@ async def test_vemsa_receives_the_speaker_bound_the_run_settled(
         requested_file_ids=[file.id],
     )
 
+    # The step connects the speaker service its flow's space offers.
+    with_speaker_service.assert_awaited_once_with(_SPEAKER_SERVICE)
     submitted = vemsa.requests[0].read()
     assert b'name="task"\r\n\r\ndiarize' in submitted
     if bound is None:
@@ -1417,7 +1581,7 @@ async def test_resolve_transcribe_attach_updates_payload_context_and_audits(
 ):
     flow_run_repo = AsyncMock()
     audit_service = AsyncMock()
-    transcriber = AsyncMock()
+    transcribers = AsyncMock()
     space_repo = AsyncMock()
     step = _runtime_step()
     run = _run(user=user, payload={})
@@ -1469,7 +1633,7 @@ async def test_resolve_transcribe_attach_updates_payload_context_and_audits(
         stage_transcript_source=lambda reference, source: None,
         commit=AsyncMock(),
         apply_output_cap=AsyncMock(side_effect=lambda **kw: (kw["text"], [])),
-        transcriber=transcriber,
+        transcribers=transcribers,
         flow_repo=AsyncMock(),
         space_repo=space_repo,
         flow_run_repo=flow_run_repo,
@@ -1564,7 +1728,7 @@ async def test_resolve_transcribe_attach_swallow_audit_errors(
         stage_transcript_source=lambda reference, source: None,
         commit=AsyncMock(),
         apply_output_cap=AsyncMock(side_effect=lambda **kw: (kw["text"], [])),
-        transcriber=AsyncMock(),
+        transcribers=AsyncMock(),
         flow_repo=AsyncMock(),
         space_repo=AsyncMock(),
         flow_run_repo=flow_run_repo,

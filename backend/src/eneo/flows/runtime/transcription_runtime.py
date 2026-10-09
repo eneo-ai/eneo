@@ -39,7 +39,7 @@ from eneo.flows.transcription_config import parse_transcription_config
 from .audio_spool import OpenAudioDownload
 from .transcription import (
     REDUCED_PRECISION_ALIGNMENTS,
-    FlowStepTranscriber,
+    FlowTranscribers,
     TranscriptSourcePreparation,
     resolve_and_transcribe_audio_for_step,
 )
@@ -93,7 +93,7 @@ class AudioRuntimeRequest:
 
 @dataclass(frozen=True)
 class AudioRuntimeDeps:
-    transcriber: FlowStepTranscriber
+    transcribers: FlowTranscribers
     flow_repo: "FlowRepository"
     space_repo: "SpaceRepository"
     flow_run_repo: "FlowRunRepository"
@@ -265,7 +265,7 @@ async def resolve_transcribe_and_attach_audio_input(
         step_order=request.step.step_order,
         files=request.files,
         requested_ids=request.requested_ids,
-        transcriber=deps.transcriber,
+        transcribers=deps.transcribers,
         max_files=request.max_audio_files,
         max_inline_text_bytes=request.max_inline_text_bytes,
         open_audio_download=deps.open_audio_download,

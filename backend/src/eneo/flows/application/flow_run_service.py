@@ -65,6 +65,7 @@ from eneo.flows.flow_run_contract_service import (
     build_final_output_contract,
     settle_max_speakers,
     speaker_labels_option,
+    speakers_identifiable_in_space,
 )
 from eneo.flows.flow_run_error import FlowRunError
 from eneo.flows.flow_run_input_envelope import (
@@ -124,8 +125,10 @@ from eneo.flows.runtime.live_transcription.repository import (
     LiveTranscriptRepository,
     LiveTranscriptScope,
 )
-from eneo.flows.transcription_config import parse_transcription_config
-from eneo.main.config import get_settings
+from eneo.flows.transcription_config import (
+    FlowTranscriptionConfigError,
+    parse_transcription_config,
+)
 from eneo.main.exceptions import NotFoundException, ValidationException
 from eneo.main.models import NOT_PROVIDED, NotProvided
 from eneo.settings.setting_service import SettingService
@@ -455,13 +458,15 @@ class FlowRunService:
             # Replay identity describes the submitted request. Only a new run
             # settles defaults against current service availability; children
             # already carry their source run's accepted decisions.
-            service_configured = get_settings().flow_transcription_service_configured
             steps = published.definition.runtime_steps()
             wizard = published.definition.metadata().wizard
+            identifiable = await self._speakers_identifiable(
+                flow=published.flow, wizard_metadata=wizard
+            )
             option = speaker_labels_option(
                 steps,
                 wizard_metadata=wizard,
-                service_configured=service_configured,
+                speakers_identifiable=identifiable,
             )
             if speaker_labels is not None and (option is None or not option.selectable):
                 raise FlowValidationException(
@@ -492,7 +497,7 @@ class FlowRunService:
                     steps=steps,
                     wizard_metadata=wizard,
                     speaker_labels=effective_speaker_labels,
-                    service_configured=service_configured,
+                    speakers_identifiable=identifiable,
                     form_input=form_input,
                 ),
             )
@@ -549,6 +554,21 @@ class FlowRunService:
                 seed=prefix_seed,
             )
         return CreateRunResult(run=created_run, created=True)
+
+    async def _speakers_identifiable(
+        self, *, flow: Flow, wizard_metadata: FlowPersistedJsonObject | None
+    ) -> bool:
+        """Whether a connected service would label the flow's speakers in its
+        space; only a flow that transcribes loads the space to ask."""
+        try:
+            if not parse_transcription_config({"wizard": wizard_metadata}).enabled:
+                return False
+        except FlowTranscriptionConfigError:
+            return False
+        space_service = self.access_policy.space_service
+        assert space_service is not None, "run admission reads the flow's space"
+        space = await space_service.get_space(flow.space_id)
+        return speakers_identifiable_in_space(wizard_metadata, space)
 
     async def _load_published_run_definition(
         self,

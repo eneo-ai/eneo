@@ -30,6 +30,7 @@ from eneo.flows.flow_api_error_code import (
     FLOW_RUN_TERMINAL_ERROR_RETRYABILITY,
     FlowApiErrorCode,
 )
+from eneo.flows.transcription_config import SpeakerServiceGap
 
 FlowRunErrorJson: TypeAlias = dict[str, object]
 FlowRunDispatchErrorJson: TypeAlias = dict[str, object]
@@ -275,6 +276,9 @@ class FlowRunContractViolation(BaseModel):
             return None
 
 
+_SPEAKER_SERVICE_GAPS = {gap.value: gap for gap in SpeakerServiceGap}
+
+
 class FlowRunErrorDetails(BaseModel):
     model_config = ConfigDict(frozen=True, extra="forbid")
 
@@ -346,6 +350,15 @@ class FlowRunErrorDetails(BaseModel):
         strict=True,
         description="Last observed transcription queue position, when reported by the service.",
     )
+    speaker_service_gap: SpeakerServiceGap | None = Field(
+        default=None,
+        description=(
+            "Why no speaker identification service could label this run's "
+            "speakers: the space has none (no_service), has several and the "
+            "flow picks none (choice_required), or the flow's pick is no longer "
+            "usable (picked_unavailable). Refused before any audio was sent."
+        ),
+    )
     completed_items: int | None = Field(
         default=None,
         ge=0,
@@ -406,6 +419,9 @@ class FlowRunErrorDetails(BaseModel):
                 else None
             ),
             transcription_queue_position=count("transcription_queue_position"),
+            speaker_service_gap=_SPEAKER_SERVICE_GAPS.get(
+                str(context.get("speaker_service_gap"))
+            ),
         )
         return details if details.model_dump(exclude_none=True) else None
 

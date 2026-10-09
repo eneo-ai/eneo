@@ -173,6 +173,7 @@ class FlowApiErrorCode(str, Enum):
     TYPED_IO_TRANSCRIPTION_MODEL_UNAVAILABLE = (
         "typed_io_transcription_model_unavailable"
     )
+    TYPED_IO_SPEAKER_SERVICE_UNAVAILABLE = "typed_io_speaker_service_unavailable"
     TYPED_IO_TRANSCRIPTION_NOT_ENABLED = "typed_io_transcription_not_enabled"
     TYPED_IO_UNSUPPORTED_TYPE = "typed_io_unsupported_type"
     PUBLISHED_FORM_SCHEMA_INVALID = "flow_published_form_schema_invalid"
@@ -285,6 +286,7 @@ FLOW_TYPED_IO_ERROR_CODES: frozenset[FlowApiErrorCode] = frozenset(
         FlowApiErrorCode.TYPED_IO_TRANSCRIPTION_FAILED,
         FlowApiErrorCode.TYPED_IO_TRANSCRIPTION_MODEL_MISSING,
         FlowApiErrorCode.TYPED_IO_TRANSCRIPTION_MODEL_UNAVAILABLE,
+        FlowApiErrorCode.TYPED_IO_SPEAKER_SERVICE_UNAVAILABLE,
         FlowApiErrorCode.TYPED_IO_TRANSCRIPTION_NOT_ENABLED,
         FlowApiErrorCode.TYPED_IO_UNSUPPORTED_TYPE,
     }

@@ -1,23 +1,18 @@
 # External transcription service for flow audio steps
 
-Flow `transcribe_only` steps can delegate transcription to an external
-speaker-diarization service (such as [Tolka](https://github.com/eneo-ai/tolka))
-instead of the model-registry LiteLLM path, or use it only for speaker
-identification. Either way the flow transcript becomes the service's rendered,
-speaker-labeled output (`[HH:MM:SS - HH:MM:SS] SPEAKER_00: ...` lines).
+Flow `transcribe_only` steps can use an external speaker identification
+service (such as Vemsa). The flow's transcription model always writes the text;
+the service only identifies who is speaking. The flow transcript becomes the
+text with speaker labels (`[HH:MM:SS - HH:MM:SS] SPEAKER_00: ...` lines).
 
-This is a deployment-level switch, not a catalog entry: either the deployment
-has a transcription service configured or it does not. Knowledge uploads and
-app runs always use the model-registry path regardless.
+An administrator connects the service under Modeller, Transkriberingstjänster
+in the admin interface, with its address and API key, and gives each space
+access to it. There is no deployment environment variable for it. Knowledge
+uploads and app runs always use the model-registry path regardless.
 
-## Modes
+## How speaker identification works
 
-| `FLOW_TRANSCRIPTION_SERVICE_MODE` | Transcription | Speaker labels | Flow model picker |
-| --- | --- | --- | --- |
-| `full` (default) | the service | the service | hidden; the flow's model is only the governance anchor |
-| `diarize` | the flow's transcription model (registry, tenant provider credentials), with word timestamps | the service, from those word timestamps (`task=diarize` job) | shown; the model does the transcribing |
-
-`diarize` mode keeps model governance in Eneo and reduces the service to a
+Model governance stays in Eneo and the service is reduced to a
 diarization backend (Tolka's `TOLKA_ENGINE=diarize` tier needs no ASR model at
 all). It costs one extra upload of the audio per file (Eneo to the provider,
 then Eneo to the service). The provider is trusted for text only:
@@ -68,22 +63,14 @@ from corrections. Speaker naming still rejects a renamed transcript above the
 inline output limit. These operations do not rewrite the generated transcript
 file; its bytes remain fixed for checkpoint history and evidence.
 
-The frontend reads the mode from `GET /api/v1/settings/`
-(`flow_transcription_service_mode`) to decide whether to show the model picker.
-
 ## Configuration
 
-Set both variables on the backend API **and** the flow execution worker
-(`task-execution-worker`); the worker is what actually calls the service.
-
-| Variable | Required | Default | Meaning |
-| --- | --- | --- | --- |
-| `FLOW_TRANSCRIPTION_SERVICE_URL` | yes (to enable) | unset | Base URL of the service, without a `/v1` suffix, e.g. `http://tolka:8000`. Unset disables the feature. |
-| `FLOW_TRANSCRIPTION_SERVICE_API_KEY` | yes when URL is set | unset | Static bearer token. Startup fails if the URL is set without it. |
-| `FLOW_TRANSCRIPTION_SERVICE_SUBMIT_TIMEOUT_SECONDS` | no | 600 | HTTP timeout for the multipart job submission (uploads can be large). |
-| `FLOW_TRANSCRIPTION_SERVICE_POLL_INTERVAL_SECONDS` | no | 5.0 | Delay between job-status polls. |
-| `FLOW_TRANSCRIPTION_SERVICE_RESULT_TIMEOUT_SECONDS` | no | 120 | HTTP timeout for status and result requests. |
-| `FLOW_TRANSCRIPTION_SERVICE_MODE` | no | `full` | `full` or `diarize`; see Modes above. |
+Connect the service in the admin interface under Modeller, Transkriberingstjänster:
+enter its base address (without a `/v1` suffix, for example `http://tolka:8000`)
+and its API key. Then give each space that needs speaker identification access
+to the connection. The backend API and the flow execution worker
+(`task-execution-worker`) both read the connection from Eneo, so no environment
+variables are needed on either.
 
 Polling uses the step attempt's remaining execution budget. By default a step may
 use the whole invocation ceiling (`TASK_EXECUTION_TIMEOUT_SECONDS` minus the
@@ -93,9 +80,9 @@ finalization allowance) less what earlier steps of the run consumed; a step's
 ### Service-side requirements (Tolka)
 
 - Provision a named credential for Eneo: `TOLKA_API_TOKENS=eneo=<secret>`, and
-  put the same secret in `FLOW_TRANSCRIPTION_SERVICE_API_KEY`. All Eneo
-  tenants share this one client identity; size
-  `TOLKA_MAX_QUEUED_JOBS_PER_CLIENT` for the whole deployment's fan-in.
+  enter the same secret as the API key of the connection in the admin interface.
+  Every space that uses the connection shares this one client identity; size
+  `TOLKA_MAX_QUEUED_JOBS_PER_CLIENT` for the combined load.
 - The flow execution worker must be able to reach the service over the
   network. Tolka's reference compose binds its API to `127.0.0.1`; expose it
   on a network the worker shares.
@@ -104,14 +91,10 @@ finalization allowance) less what earlier steps of the run consumed; a step's
 
 ## How it behaves
 
-- **Engine selection** happens once per run at worker wiring
-  (`flows/runtime/tasks.py`): URL configured means every audio step in the run
-  uses the service (`flows/runtime/remote_transcription.py`); otherwise the
-  model-registry `Transcriber` runs exactly as before.
-- **The flow's transcription model is still required.** The wizard's model
-  selection and space governance are unchanged; the selected model is the
-  entitlement anchor, while the service does the transcribing. Usage seconds
-  come from the service's measured duration.
+- **Speaker identification** applies when the flow's space has access to a
+  connected service; otherwise the transcript has no speaker labels.
+- **The flow's transcription model is always required.** The wizard's model
+  selection and space governance apply; the selected model writes the text.
 - **Job flow**: one multipart `POST /v1/jobs` per audio file (with
   `language` and `diarize` from the flow's transcription config), a
   status poll every poll-interval, then `GET /v1/jobs/{id}/result`. Submission
@@ -132,29 +115,23 @@ Run Tolka from its repo with the no-GPU fake engine:
 TOLKA_ENGINE=fake TOLKA_API_TOKENS=eneo=devtoken uv run uvicorn tolka.main:app --port 8000
 ```
 
-Then in `backend/.env` (the devcontainer reaches the host via
-`host.docker.internal`):
+Then in the admin interface under Modeller, Transkriberingstjänster, connect it with the address
+`http://host.docker.internal:8000` (the devcontainer reaches the host this way)
+and the API key `devtoken`, and give your space access to it.
 
-```bash
-FLOW_TRANSCRIPTION_SERVICE_URL=http://host.docker.internal:8000
-FLOW_TRANSCRIPTION_SERVICE_API_KEY=devtoken
-```
-
-Restart the backend and the flow execution worker, publish a flow with an
-audio runtime input, and run it with any mp3. The transcript should be the
-service's canned speaker-labeled output.
+Publish a flow with an audio runtime input, and run it with any mp3. The
+transcript should show the service's canned speaker labels.
 
 ## Troubleshooting
 
 | Symptom | Likely cause |
 | --- | --- |
-| Startup exits with `FLOW_TRANSCRIPTION_SERVICE_API_KEY is required` | URL set without a key. |
-| Step fails immediately, logs show invalid credentials | Key does not match a token in `TOLKA_API_TOKENS`. |
+| Step fails immediately, logs show invalid credentials | The connection's API key does not match a token in `TOLKA_API_TOKENS`. |
 | Step fails with `flow_step_timeout` | The step's execution budget is exhausted. Check the service's queue depth and worker health, or raise the step's `timeout_seconds` within the deployment ceiling. |
 | Steps fail with rate-limit errors | The service's per-client queue cap is full; raise `TOLKA_MAX_QUEUED_JOBS_PER_CLIENT` or add service workers. |
-| Transcript has no speaker labels | Speaker identification is off for the flow (wizard step 2), or the service ran without diarization support; check its engine tier and extras. In `diarize` mode also check the step for an `audio_diarization_skipped` diagnostic: the transcription model returned no word timestamps. |
-| `diarize` mode: service rejects jobs with 422 | The service does not accept `task=diarize` (older Tolka); upgrade it or use `full` mode. |
-| `diarize` mode: steps fail with `diarize_task_unsupported` | The service ignored `task=diarize` and transcribed with its own model (pre-task Tolka); Eneo refuses that result because it did not come from the flow's model. Upgrade the service. |
+| Transcript has no speaker labels | Speaker identification is off for the flow (wizard step 2), the space has no access to a connected service, or the service ran without diarization support; check its engine tier and extras. Also check the step for an `audio_diarization_skipped` diagnostic: the transcription model returned no word timestamps. |
+| Service rejects jobs with 422 | The service does not accept `task=diarize` (older Tolka); upgrade it. |
+| Steps fail with `diarize_task_unsupported` | The service ignored `task=diarize` and transcribed with its own model (pre-task Tolka); Eneo refuses that result because it did not come from the flow's model. Upgrade the service. |
 
 
 ## Speaker review rollout

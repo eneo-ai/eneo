@@ -18,6 +18,7 @@ from eneo.main.exceptions import TypedIOValidationException
 from tests.unit.files import test_audio
 from tests.unit.flows.runtime.test_remote_transcription import (
     RecordingObserver,
+    label,
     make_transcriber,
 )
 from tests.unit.transcription_models.infrastructure.adapters.test_litellm_transcription import (
@@ -39,13 +40,12 @@ recording = test_audio.recording
 ffmpeg = test_audio.ffmpeg
 
 
-@pytest.mark.parametrize("engine", ["registry", "remote"])
 @pytest.mark.parametrize(
     "limit, ceiling",
     [("duration_seconds", 1), ("decoded_bytes", 6000)],
 )
 async def test_oversized_audio_is_a_final_typed_refusal_before_provider_work(
-    recording, ffmpeg, monkeypatch, engine, limit, ceiling, spool_contract
+    recording, ffmpeg, monkeypatch, limit, ceiling, spool_contract
 ):
     spool_contract.duration_seconds = None
     source, _, temp_dir = recording
@@ -67,9 +67,7 @@ async def test_oversized_audio_is_a_final_typed_refusal_before_provider_work(
     monkeypatch.setattr(remote, "label_speakers", label_speakers)
     retry_sleep = AsyncMock()
     monkeypatch.setattr(adapter._transcribe_chunk.retry, "sleep", retry_sleep)
-    transcriber = (
-        DiarizingFlowTranscriber(registry, remote) if engine == "registry" else remote
-    )
+    transcriber = DiarizingFlowTranscriber(registry, remote)
     file = _audio_file(name="recording.wav")
     file.blob = source.read_bytes()
     download = spool_contract.downloads([file])
@@ -108,7 +106,7 @@ async def test_oversized_audio_is_a_final_typed_refusal_before_provider_work(
     assert list(temp_dir.iterdir()) == []
 
 
-async def test_remote_counts_duration_without_materialising_decoded_audio(
+async def test_speaker_labelling_counts_duration_without_materialising_decoded_audio(
     recording, ffmpeg, monkeypatch, spool_contract
 ):
     spool_contract.duration_seconds = None
@@ -132,8 +130,8 @@ async def test_remote_counts_duration_without_materialising_decoded_audio(
     file.blob = source.read_bytes()
     spool = await spool_contract.spool(file)
     try:
-        await make_transcriber(service).transcribe(
-            spool, _adapter().model, file_id=file.id, observer=observer
+        await label(
+            make_transcriber(service), spool, file_id=file.id, observer=observer
         )
     finally:
         await spool.aclose()

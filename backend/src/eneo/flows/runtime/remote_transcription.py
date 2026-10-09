@@ -1,11 +1,10 @@
-"""Flow audio steps transcribed by a native transcription service.
+"""Speaker labels for flow transcripts from a native speaker service.
 
-Eneo owns transcription administration (flow config, model governance, usage
-accounting) but delegates the transcription itself to a service with an async
-job API (``eneo.transcription_services.client``): submit the original audio
-bytes as a job, poll it until it reaches a terminal state, then fetch the
-structured result. The service transcribes and diarizes server-side, so its
-rendered transcript (speaker-labeled, timestamped lines) is returned verbatim.
+A flow's transcription model writes the text; the space's speaker service (an
+organisation's connection) labels who says what, through an async job API
+(``eneo.transcription_services.client``): submit the audio and the transcript
+as a diarize job, poll it until it reaches a terminal state, then fetch the
+labelled result.
 
 This module owns what a flow attempt adds around those requests: provider-call
 receipts, admission retries within the step budget, the poll schedule,
@@ -29,7 +28,6 @@ from typing import TYPE_CHECKING, Literal, NoReturn
 from uuid import UUID, uuid4
 
 from eneo.files.audio import AudioMimeTypes
-from eneo.files.transcriber import TranscribedAudio
 from eneo.flows.domain.provider_call_evidence_gap import (
     ProviderCallEvidenceGap,
     ProviderCallPersistenceOutcome,
@@ -46,7 +44,6 @@ from eneo.flows.runtime.run_cancellation import (
     RunCancelProbe,
     current_run_cancel_probe,
 )
-from eneo.flows.runtime.speaker_enrichment import enrich_transcript
 from eneo.flows.runtime.step_deadline import (
     StepDeadline,
     budget_refusal,
@@ -73,6 +70,7 @@ from eneo.model_providers.domain.provider_call_observer import (
     build_transcription_call_request_facts,
 )
 from eneo.model_providers.infrastructure import litellm_transport
+from eneo.settings.encryption_service import EncryptionService
 from eneo.transcription_services.client import (
     JOB_CANCELLED,
     JOB_COMPLETED,
@@ -90,6 +88,9 @@ from eneo.transcription_services.client import (
     UnexpectedStatus,
 )
 from eneo.transcription_services.models import TranscriptionOperation
+from eneo.transcription_services.repository import (
+    TranscriptionServiceConnectionRepository,
+)
 
 if TYPE_CHECKING:
     from collections.abc import Sequence
@@ -98,13 +99,8 @@ if TYPE_CHECKING:
         TranscriptSegment,
         TranscriptWord,
     )
-    from eneo.flows.runtime.recording_parts import RecordingAudio
-    from eneo.main.config import Settings
     from eneo.model_providers.domain.provider_call_observer import (
         ProviderCallObserver,
-    )
-    from eneo.transcription_models.domain.transcription_model import (
-        TranscriptionModel,
     )
 
 logger = get_logger(__name__)
@@ -128,94 +124,14 @@ class RemoteTranscriptionCancelledException(TranscriptionProviderError):
 
 
 class RemoteFlowTranscriber:
-    """Flow-step transcriber backed by a native transcription service.
-
-    Implements the same call surface ``Transcriber.transcribe`` exposes to the
-    flow audio step (``FlowStepTranscriber``), so the runtime swaps engines at
-    wiring time without touching step execution. The configured transcription
-    model stays the governance anchor; it is not what transcribes.
-    """
+    """A native service that labels the speakers of a transcript a flow's
+    transcription model produced."""
 
     def __init__(
         self, client: TranscriptionServiceClient, *, poll_interval_seconds: float
     ) -> None:
         self.client = client
         self.poll_interval_seconds = poll_interval_seconds
-
-    async def transcribe(
-        self,
-        file: SpooledAudio,
-        transcription_model: TranscriptionModel,
-        *,
-        file_id: UUID,
-        language: str | None = None,
-        diarize: bool = True,
-        persist_cache_to_file: bool = True,
-        observer: ProviderCallObserver | None = None,
-        max_speakers: int | None = None,
-    ) -> TranscribedAudio:
-        result, audio_seconds = await self._run_job(
-            file,
-            file_id=file_id,
-            request=TranscriptionJobRequest(
-                operation=TranscriptionOperation.TRANSCRIBE,
-                language=language,
-                diarize=diarize,
-                max_speakers=max_speakers,
-            ),
-            observer=observer,
-        )
-        return TranscribedAudio(
-            text=result.text,
-            duration_seconds=audio_seconds,
-            transcript_segments=result.segments,
-            diarization="external" if diarize else None,
-            alignment=result.alignment if diarize else None,
-            speaker_review=result.speaker_review,
-        )
-
-    async def transcribe_recording(
-        self,
-        recording: RecordingAudio,
-        transcription_model: TranscriptionModel,
-        *,
-        language: str | None,
-        observer: ProviderCallObserver | None,
-        max_speakers: int | None,
-    ) -> TranscribedAudio:
-        """The joined recording in one job: one transcript, one set of speakers."""
-        return await self.transcribe(
-            recording.joined,
-            transcription_model,
-            file_id=recording.file_ids[0],
-            language=language,
-            diarize=True,
-            persist_cache_to_file=False,
-            observer=observer,
-            max_speakers=max_speakers,
-        )
-
-    async def enrich(
-        self,
-        file: SpooledAudio,
-        transcription_model: TranscriptionModel,
-        *,
-        transcribed: TranscribedAudio,
-        file_id: UUID,
-        language: str | None = None,
-        observer: ProviderCallObserver | None = None,
-        max_speakers: int | None = None,
-    ) -> TranscribedAudio:
-        return await enrich_transcript(
-            self,
-            file,
-            transcription_model,
-            transcribed=transcribed,
-            file_id=file_id,
-            language=language,
-            observer=observer,
-            max_speakers=max_speakers,
-        )
 
     async def label_speakers(
         self,
@@ -598,12 +514,8 @@ class RemoteFlowTranscriber:
                 f"{self.client.destination_host or 'transcription-service'}"
             )
             # A diarize job is its own provider call on the same audio; the
-            # suffix keeps it distinguishable from a full transcription of it.
-            requested_model = (
-                f"{provider_model}#diarize"
-                if request.operation is TranscriptionOperation.DIARIZE
-                else provider_model
-            )
+            # suffix keeps it apart from the model call that transcribed it.
+            requested_model = f"{provider_model}#diarize"
             call_id = await observer.started(
                 build_transcription_call_request_facts(
                     requested_model=requested_model,
@@ -739,8 +651,8 @@ def _raise_provider_error(error: TranscriptionServiceError) -> NoReturn:
     """Report a failed service request as the flow's typed provider error."""
     if isinstance(error, CredentialsRejected):
         raise APIKeyNotConfiguredException(
-            "Invalid API credentials for the external transcription service. "
-            "Please verify FLOW_TRANSCRIPTION_SERVICE_API_KEY."
+            "The speaker identification service rejected its API key. An "
+            "administrator can enter a new key for the connection."
         ) from error
     if isinstance(error, SubmissionRejected):
         raise TranscriptionProviderRejectedError(
@@ -782,59 +694,33 @@ def _with_canonical_segments(
     return replace(result, segments=None)
 
 
-def build_remote_flow_transcriber(settings: Settings) -> RemoteFlowTranscriber:
-    """The deployment-wide service configured by ``FLOW_TRANSCRIPTION_SERVICE_*``.
+# Fixed bounds for one speaker-labelling job, chosen for hour-long meetings on
+# a queue that may be busy; an organisation's connection sets no timeouts.
+SPEAKER_JOB_SUBMIT_TIMEOUT_SECONDS = 600
+SPEAKER_JOB_RESULT_TIMEOUT_SECONDS = 120
+SPEAKER_JOB_POLL_INTERVAL_SECONDS = 5.0
 
-    Organisation-owned service connections replace this source. It stays for
-    flows without an explicit connection until eneo-vldb.8 has moved its
-    consumers.
-    """
-    url = settings.flow_transcription_service_url
-    api_key = settings.flow_transcription_service_api_key
-    if not url or not api_key:
-        raise APIKeyNotConfiguredException(
-            "The external transcription service is not configured."
-        )
+
+async def connect_speaker_service(
+    connection_id: UUID,
+    *,
+    repository: TranscriptionServiceConnectionRepository,
+    encryption: EncryptionService,
+    include_speaker_review: bool,
+) -> RemoteFlowTranscriber:
+    """The speaker service of ``connection_id`` as it is stored now: the
+    address and key are read together, so an edit made meanwhile never pairs
+    one with the other."""
+    connection, ciphertext = await repository.get_with_key(connection_id)
     return RemoteFlowTranscriber(
         TranscriptionServiceClient(
-            base_url=url,
-            include_speaker_review=settings.flow_transcription_include_speaker_review,
-            api_key=api_key,
-            submit_timeout_seconds=(
-                settings.flow_transcription_service_submit_timeout_seconds
-            ),
-            result_timeout_seconds=(
-                settings.flow_transcription_service_result_timeout_seconds
-            ),
+            base_url=connection.endpoint_url,
+            api_key=encryption.decrypt(ciphertext),
+            include_speaker_review=include_speaker_review,
+            submit_timeout_seconds=SPEAKER_JOB_SUBMIT_TIMEOUT_SECONDS,
+            result_timeout_seconds=SPEAKER_JOB_RESULT_TIMEOUT_SECONDS,
         ),
-        poll_interval_seconds=settings.flow_transcription_service_poll_interval_seconds,
-    )
-
-
-async def log_remote_transcription_readiness(settings: Settings) -> None:
-    """Startup diagnostic: can this deployment's token submit jobs right now?
-
-    Logs only; a service that is down at worker start may be up by the time a
-    flow runs, and each submit still handles refusal on its own.
-    """
-    if not settings.flow_transcription_service_configured:
-        return
-    transcriber = build_remote_flow_transcriber(settings)
-    try:
-        readiness = await transcriber.client.check_readiness()
-    except CredentialsRejected:
-        logger.error(
-            "remote_transcription.readiness credentials rejected",
-        )
-        return
-    log = (
-        logger.info if readiness.ready and readiness.accepting_jobs else logger.warning
-    )
-    log(
-        "remote_transcription.readiness ready=%s accepting_jobs=%s detail=%s",
-        readiness.ready,
-        readiness.accepting_jobs,
-        readiness.detail,
+        poll_interval_seconds=SPEAKER_JOB_POLL_INTERVAL_SECONDS,
     )
 
 

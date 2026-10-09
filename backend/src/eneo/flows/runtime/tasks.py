@@ -70,7 +70,8 @@ from eneo.flows.runtime.flow_run_actor import (
 )
 from eneo.flows.runtime.flow_runtime_trace import FlowRunSpanContext, trace_flow_run
 from eneo.flows.runtime.flow_webhook_delivery import FlowWebhookDeliveryResult
-from eneo.flows.runtime.remote_transcription import build_remote_flow_transcriber
+from eneo.flows.runtime.remote_transcription import connect_speaker_service
+from eneo.flows.runtime.transcription import FlowTranscribers
 from eneo.main.config import get_settings
 from eneo.main.container.container import Container
 from eneo.main.logging import get_logger
@@ -78,11 +79,16 @@ from eneo.main.request_context import clear_request_context, set_request_context
 from eneo.object_content.deployment_policy import load_upload_admission_snapshot
 from eneo.object_content.runtime import object_content_runtime
 from eneo.tasks.routing import FLOW_DRAIN_RETIRED_RUNS_TASK
+from eneo.transcription_services.repository import (
+    TranscriptionServiceConnectionRepository,
+)
 from eneo.users.user_repo import UsersRepository
 
 if TYPE_CHECKING:
     from eneo.files.transcriber import Transcriber
     from eneo.flows.runtime.transcription import FlowStepTranscriber
+    from eneo.settings.encryption_service import EncryptionService
+    from eneo.transcription_services.models import TranscriptionServiceConnection
 
 logger = get_logger(__name__)
 
@@ -371,10 +377,14 @@ async def _execute_flow_run_async_traced(
                     references_service=runtime_container.references_service(
                         datastore__create_embeddings_service__user=run_actor.user
                     ),
-                    transcriber=_build_flow_transcriber(
+                    transcribers=_flow_transcribers(
                         runtime_container.transcriber(
                             file_service=runtime_file_service, user=run_actor.user
-                        )
+                        ),
+                        repository=TranscriptionServiceConnectionRepository(
+                            session, tenant_id=tenant_id
+                        ),
+                        encryption=runtime_container.encryption_service(),
                     ),
                     transcript_words_repo=runtime_container.flow_transcript_words_repo(),
                     config=FlowRunExecutorConfig.from_settings(
@@ -942,20 +952,29 @@ async def deliver_flow_webhook_outbox() -> dict[str, int | str]:
         return await _deliver_flow_webhook_outbox()
 
 
-def _build_flow_transcriber(
+def _flow_transcribers(
     registry_transcriber: "Transcriber",
-) -> "FlowStepTranscriber":
-    """Deployment-level engine choice for flow audio steps.
+    *,
+    repository: TranscriptionServiceConnectionRepository,
+    encryption: "EncryptionService",
+) -> FlowTranscribers:
+    """The flow's model transcribes; a step that labels speakers adds the
+    speaker service it resolved from the flow's space."""
 
-    No external service: the model-registry engine. Service in ``full`` mode: it
-    replaces the engine (the flow's model stays the governance anchor). Service
-    in ``diarize`` mode: the registry engine transcribes and the service only
-    labels speakers.
-    """
-    settings = get_settings()
-    if not settings.flow_transcription_service_configured:
-        return RegistryFlowTranscriber(registry_transcriber)
-    remote = build_remote_flow_transcriber(settings)
-    if settings.flow_transcription_service_mode == "diarize":
-        return DiarizingFlowTranscriber(registry_transcriber, remote)
-    return remote
+    async def with_speaker_service(
+        connection: "TranscriptionServiceConnection",
+    ) -> FlowStepTranscriber:
+        return DiarizingFlowTranscriber(
+            registry_transcriber,
+            await connect_speaker_service(
+                connection.id,
+                repository=repository,
+                encryption=encryption,
+                include_speaker_review=get_settings().flow_transcription_include_speaker_review,
+            ),
+        )
+
+    return FlowTranscribers(
+        model=RegistryFlowTranscriber(registry_transcriber),
+        with_speaker_service=with_speaker_service,
+    )

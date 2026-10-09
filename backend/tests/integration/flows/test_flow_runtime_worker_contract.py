@@ -504,9 +504,6 @@ async def _create_runtime_worker_context(
         references_service=worker_container.references_service(
             datastore__create_embeddings_service__user=admin_user
         ),
-        transcriber=worker_container.transcriber(
-            file_service=file_service, user=admin_user
-        ),
         config=FlowRunExecutorConfig(
             max_inline_text_bytes=1024 * 1024,
             http_request_timeout_seconds=2.0,
@@ -977,7 +974,6 @@ async def test_flow_run_created_by_service_executes_to_terminal_worker_state(
             encryption_service=container.encryption_service(),
             audit_service=audit_service,
             references_service=container.references_service(),
-            transcriber=container.transcriber(),
             config=FlowRunExecutorConfig(
                 max_inline_text_bytes=1024 * 1024,
                 http_request_timeout_seconds=2.0,

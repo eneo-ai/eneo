@@ -685,7 +685,7 @@ def _audio_and_text_nodes() -> list[GraphNode]:
     ]
 
 
-def test_speaker_identification_marks_only_audio_steps_when_service_is_configured() -> (
+def test_speaker_identification_marks_only_audio_steps_when_speakers_are_identifiable() -> (
     None
 ):
     nodes = annotate_speaker_identification(
@@ -694,7 +694,7 @@ def test_speaker_identification_marks_only_audio_steps_when_service_is_configure
             "transcription_enabled": True,
             "transcription_diarization": True,
         },
-        service_configured=True,
+        speakers_identifiable=True,
     )
 
     assert [node.speaker_identification for node in nodes] == [True, None]
@@ -704,17 +704,17 @@ def test_speaker_identification_stays_unset_without_a_service_or_when_off() -> N
     wizard = {"transcription_enabled": True, "transcription_diarization": True}
 
     without_service = annotate_speaker_identification(
-        _audio_and_text_nodes(), wizard_metadata=wizard, service_configured=False
+        _audio_and_text_nodes(), wizard_metadata=wizard, speakers_identifiable=False
     )
     switched_off = annotate_speaker_identification(
         _audio_and_text_nodes(),
         wizard_metadata={**wizard, "transcription_diarization": False},
-        service_configured=True,
+        speakers_identifiable=True,
     )
     malformed = annotate_speaker_identification(
         _audio_and_text_nodes(),
         wizard_metadata={"transcription_diarization": "yes"},
-        service_configured=True,
+        speakers_identifiable=True,
     )
 
     for nodes in (without_service, switched_off, malformed):

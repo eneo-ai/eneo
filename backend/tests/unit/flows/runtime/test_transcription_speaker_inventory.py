@@ -52,7 +52,9 @@ async def _run(
         max_speakers=max_speakers,
         files=files,
         transcriber=transcriber,
-        transcription_model=SimpleNamespace(id=uuid4(), name="whisper-1"),
+        transcription_model=SimpleNamespace(
+            id=uuid4(), name="whisper-1", model_name="whisper-1"
+        ),
         language="sv",
         step_order=1,
         max_files=5,
@@ -484,6 +486,7 @@ SHARED_CASES = json.loads(
 async def test_rejected_remote_sidecar_preserves_canonical_text_across_files(
     spool_contract, damage
 ):
+    from eneo.flows.runtime.diarizing_transcription import DiarizingFlowTranscriber
     from tests.unit.flows.runtime.test_remote_transcription import make_transcriber
     from tests.unit.transcription_services.scripted_service import (
         ScriptedService,
@@ -495,6 +498,8 @@ async def test_rejected_remote_sidecar_preserves_canonical_text_across_files(
         next(case["result"] for case in SHARED_CASES if case["name"] == "overlap")
     )
     canonical = wire["text"]
+    # A diarize job echoes the flow's own model.
+    wire["model"] = "whisper-1"
     if damage == "malformed":
         wire["segments"][1]["start"] = "invalid"
     elif damage == "missing":
@@ -507,7 +512,18 @@ async def test_rejected_remote_sidecar_preserves_canonical_text_across_files(
         result_responses=[httpx.Response(200, json=wire)] * 2,
     )
     files = [_file("a.mp3"), _file("b.mp3")]
-    result = await _run(spool_contract, files, make_transcriber(service))
+    registry = SimpleNamespace(
+        transcribe_from_filepath=AsyncMock(
+            return_value=TranscribedAudio(
+                "Hej.", 10.0, segments=(TranscriptSegment("Hej.", 0.0, 4.0),)
+            )
+        )
+    )
+    result = await _run(
+        spool_contract,
+        files,
+        DiarizingFlowTranscriber(registry, make_transcriber(service)),
+    )
 
     assert result.text == (
         f"## Del 1\n\n{canonical}\n\n## Del 2\n\n"

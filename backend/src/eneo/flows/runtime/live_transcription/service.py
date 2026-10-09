@@ -86,7 +86,6 @@ class LiveTranscriptionSessionService:
             wizard_metadata=runtime_inputs.definition.metadata().wizard,
             space=space,
             step=spec.step,
-            settings=self.settings,
         )
         if availability.model is None:
             raise ConflictException(

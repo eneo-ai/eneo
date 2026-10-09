@@ -90,8 +90,7 @@ class FlowLiveTranscriptionAvailabilityPublic(BaseModel):
         default=None,
         description=(
             "Why live preview is unavailable: `transcription_disabled`, "
-            "`transcription_service_mode` (an external service transcribes with its "
-            "own model), `model_unavailable`, or `model_not_realtime`."
+            "`model_unavailable`, or `model_not_realtime`."
         ),
     )
 
@@ -100,8 +99,7 @@ class FlowLiveTranscriptionUnavailableContext(BaseModel):
     reason: LiveTranscriptionUnavailableReason = Field(
         description=(
             "`transcription_disabled`: the flow does not transcribe audio. "
-            "`transcription_service_mode`: an external service transcribes with its own "
-            "model. `model_unavailable`: the flow's transcription model is not available "
+            "`model_unavailable`: the flow's transcription model is not available "
             "in its space. `model_not_realtime`: the model does not support realtime."
         )
     )

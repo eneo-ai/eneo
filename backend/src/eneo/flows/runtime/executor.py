@@ -283,7 +283,7 @@ if TYPE_CHECKING:
     from eneo.flows.infrastructure.flow_transcript_words_repo import (
         FlowTranscriptWordsRepository,
     )
-    from eneo.flows.runtime.transcription import FlowStepTranscriber
+    from eneo.flows.runtime.transcription import FlowTranscribers
     from eneo.integration.domain.entities.integration_knowledge import (
         IntegrationKnowledge,
     )
@@ -583,7 +583,7 @@ class FlowRunExecutor:
         audit_service: AuditService | None = None,
         webhook_delivery_repo: FlowRunWebhookDeliveryRepository | None = None,
         references_service: ReferencesService | None = None,
-        transcriber: FlowStepTranscriber | None = None,
+        transcribers: FlowTranscribers | None = None,
         max_audio_files: int = 10,
         max_generic_files: int | None = None,
         config: FlowRunExecutorConfig | None = None,
@@ -631,7 +631,7 @@ class FlowRunExecutor:
         self.max_inline_text_bytes = resolved_config.max_inline_text_bytes
         self.audit_service = audit_service
         self.references_service = references_service
-        self.transcriber = transcriber
+        self.transcribers = transcribers
         # Per-run document names, derived from the pinned definition with the steps.
         self.generated_file_names: GeneratedFileNames | None = None
         self.variable_resolver = FlowVariableResolver()
@@ -2558,7 +2558,7 @@ class FlowRunExecutor:
             variable_resolver=self.variable_resolver,
             resolve_http_input_source_text=self._resolve_http_input_source_text,
             file_service=self.file_service,
-            transcriber=self.transcriber,
+            transcribers=self.transcribers,
             flow_repo=self.flow_repo,
             space_repo=self.space_repo,
             flow_run_repo=self.flow_run_repo,

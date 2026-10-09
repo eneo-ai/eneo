@@ -182,13 +182,12 @@ If `transcription` is `null`, the flow has no audio input step or does not trans
 | `reason` | Meaning |
 | --- | --- |
 | `transcription_disabled` | The flow does not transcribe audio. |
-| `transcription_service_mode` | An external transcription service in `full` mode transcribes with its own model. See the next section. |
 | `model_unavailable` | The flow has no transcription model, or its model is not available in the flow's space. |
 | `model_not_realtime` | The model is not marked for live transcription, or its provider is not of type vLLM. |
 
-### Run an external transcription service in diarize mode
+### Connect a speaker identification service
 
-If the deployment sends flow audio to an external transcription service (`FLOW_TRANSCRIPTION_SERVICE_URL` is set), set `FLOW_TRANSCRIPTION_SERVICE_MODE=diarize` to offer live transcription. In `diarize` mode the flow's own model transcribes and the service only labels speakers, so the live text and the final transcript come from the same model. In `full` mode, the default, the service transcribes with its own model, and Eneo does not offer live transcription.
+A speaker identification service (for example Vemsa) does not change live transcription. An administrator connects it under Modeller, Transkriberingstjänster in the admin interface, with its address and API key, and gives each space access to it. The flow's own transcription model always writes the text, so the live text and the final transcript come from the same model, and the service only identifies speakers. There is no deployment environment variable for it.
 
 ### Proxy and session limits
 

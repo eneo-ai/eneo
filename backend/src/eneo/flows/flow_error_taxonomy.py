@@ -1289,6 +1289,23 @@ FLOW_ERROR_TAXONOMY: dict[FlowApiErrorCode, FlowErrorTaxonomyEntry] = {
         consumer_action="Choose another model or retry after provider recovery.",
         user_action="Choose another model or try again later.",
     ),
+    FlowApiErrorCode.TYPED_IO_SPEAKER_SERVICE_UNAVAILABLE: _entry(
+        category="Typed input/output",
+        surfaced_through="Run error payload",
+        cause=(
+            "The run labels speakers but the space offers no speaker identification "
+            "service the flow can use, so it is refused before any audio is sent."
+        ),
+        consumer_action=(
+            "Read the speaker_service_gap detail (no_service, choice_required, "
+            "picked_unavailable), "
+            "then grant or pick a service and republish, or run without speaker labels."
+        ),
+        user_action=(
+            "Ask an administrator to give the space a speaker identification "
+            "service, or run the flow without speaker labels."
+        ),
+    ),
     FlowApiErrorCode.TYPED_IO_TRANSCRIPTION_NOT_ENABLED: _entry(
         category="Typed input/output",
         surfaced_through="Run error payload",
