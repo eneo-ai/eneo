@@ -19,9 +19,15 @@ DOCX = "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
 
 def _docx(marker: str = "mall") -> bytes:
     buffer = io.BytesIO()
+    # Fixed entry times, so two builds of the same marker are byte-identical.
     with zipfile.ZipFile(buffer, "w") as archive:
-        archive.writestr("[Content_Types].xml", "<Types/>")
-        archive.writestr("word/document.xml", f"<w:document>{marker}</w:document>")
+        for name, body in (
+            ("[Content_Types].xml", "<Types/>"),
+            ("word/document.xml", f"<w:document>{marker}</w:document>"),
+        ):
+            archive.writestr(
+                zipfile.ZipInfo(name, date_time=(2026, 1, 1, 0, 0, 0)), body
+            )
     return buffer.getvalue()
 
 
@@ -45,7 +51,9 @@ async def test_library_upload_default_rename_and_delete(client, auth):
     created = await _upload(client, auth, "Rapportmall")
     assert created.status_code == 201, created.text
     template = created.json()
-    assert template["status"] == "unchecked"
+    # Without a tool runtime the upload is stored unchecked; with one, the stub
+    # archive fails inspection. Either way the row exists and is usable below.
+    assert template["status"] in {"unchecked", "invalid"}
     assert template["is_default"] is False
     assert template["filename"] == "Rapportmall.docx"
     assert template["selected_by"] == 0
