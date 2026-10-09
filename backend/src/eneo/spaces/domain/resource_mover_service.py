@@ -136,7 +136,7 @@ class ResourceMoverService:
 
         assert source_space.id is not None and target_space.id is not None
         if source_space.id == target_space.id:
-            return
+            raise BadRequestException("Assistant is already in the space")
         # Lock parents in stable order before the assistant, then re-read access
         # facts. Membership and settings writes take the same parent lock.
         for locked_id in sorted({source_space.id, target_space.id}, key=str):

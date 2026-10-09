@@ -358,3 +358,20 @@ async def test_website_link_within_tenant_succeeds() -> None:
 
     target_space.add_website.assert_called_once_with(website)
     service.website_repo.link.assert_awaited_once_with(website.id, target_space.id)
+
+
+async def test_assistant_move_to_its_current_space_is_rejected() -> None:
+    space = _space()
+    assistant = MagicMock(
+        id=uuid4(), is_default=False, completion_model=None, collections=[], websites=[]
+    )
+    space.get_assistant.return_value = assistant
+    service, space_repo = _service(source_space=space, target_space=space)
+
+    with pytest.raises(BadRequestException):
+        await service.move_assistant_to_space(
+            assistant_id=assistant.id, space_id=space.id
+        )
+
+    space_repo.lock.assert_not_awaited()
+    service.assistant_repo.move.assert_not_awaited()
