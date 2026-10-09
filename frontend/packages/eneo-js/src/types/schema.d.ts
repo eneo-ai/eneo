@@ -13357,6 +13357,8 @@ export interface components {
       dimensions?: number | null;
       /** Max Input */
       max_input?: number | null;
+      /** Max Batch Size */
+      max_batch_size?: number | null;
       /** Hf Link */
       hf_link?: string | null;
       /** Stability */
@@ -13488,6 +13490,8 @@ export interface components {
       dimensions?: number | null;
       /** Max Input */
       max_input?: number | null;
+      /** Max Batch Size */
+      max_batch_size?: number | null;
       /** Hf Link */
       hf_link?: string | null;
       /** Stability */
@@ -14826,7 +14830,7 @@ export interface components {
        * Format: uuid
        */
       user_integration_id: string;
-      embedding_model: components["schemas"]["EmbeddingModelPublicLegacy"];
+      embedding_model: components["schemas"]["EmbeddingModelPublic"];
       /** Site Id */
       site_id?: string | null;
       /** Drive Id */
