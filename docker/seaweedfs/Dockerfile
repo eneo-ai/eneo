@@ -2,7 +2,7 @@
 
 # This image is built by Eneo from the exact upstream source archive below.
 # It is not an upstream SeaweedFS image and does not claim upstream signing.
-FROM --platform=$BUILDPLATFORM docker.io/library/golang:1.26.8-bookworm@sha256:9fdc884aacc3bec89b20ffc69f4bb369c78210e3e4f600387b5128b12c199f81 AS builder
+FROM --platform=$BUILDPLATFORM docker.io/library/golang:1.26.9-bookworm@sha256:d9c68c2c51161e12fd77e4c6320687c9cd86e1af1e3ad6e6cd63ff970641453c AS builder
 
 ARG TARGETARCH
 ARG TARGETOS
@@ -20,7 +20,7 @@ RUN mkdir source \
     && test "$(sha256sum /tmp/seaweedfs.tar.gz | cut -d ' ' -f 1)" \
         = "2e37f5d8980256e490324e3759d38437ecfee734f60aa3e75528b05f7d19460e" \
     && test "$(sha256sum /tmp/seaweedfs-security.patch | cut -d ' ' -f 1)" \
-        = "1c1b5669f609c5a26159088bb5530b52d5bbe82206c3c1960f0d7a068e89f8e7" \
+        = "2ac6e56da48c0df37be494462061fceb7ff0d3b8a376e08f693f4a557817567d" \
     && git -C source apply --check /tmp/seaweedfs-security.patch \
     && git -C source apply /tmp/seaweedfs-security.patch
 
@@ -56,7 +56,7 @@ LABEL org.opencontainers.image.title="Eneo SeaweedFS object-content store" \
       io.eneo.upstream.commit="875cd1f67ea25e8965a4f5ba1e6aaf501ba6b6fa" \
       io.eneo.upstream.tree="f6590c71c41ec414fc193b89e9d9dd586d39ad17" \
       io.eneo.upstream.archive.sha256="2e37f5d8980256e490324e3759d38437ecfee734f60aa3e75528b05f7d19460e" \
-      io.eneo.downstream.patch.sha256="1c1b5669f609c5a26159088bb5530b52d5bbe82206c3c1960f0d7a068e89f8e7"
+      io.eneo.downstream.patch.sha256="2ac6e56da48c0df37be494462061fceb7ff0d3b8a376e08f693f4a557817567d"
 
 COPY --from=builder --chown=65532:65532 /out/weed /usr/local/bin/weed
 COPY --from=builder /out/SEAWEEDFS-LICENSE /licenses/seaweedfs/LICENSE
