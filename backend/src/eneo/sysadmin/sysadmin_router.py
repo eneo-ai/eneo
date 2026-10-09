@@ -115,6 +115,13 @@ _DEPLOYMENT_ADMIN_ACCESS_REASON = (
     "/tenants/{tenant_id}/model-configurations/{kind}/invalid/",
     response_model=ConfigurationInspection,
     summary="Inspect a page of persisted model configurations without loading applications",
+    description=(
+        "Scan up to 200 stored configurations in one tenant, including resources "
+        "hidden by validation failures. Return invalid field paths, error codes "
+        "and source fingerprints without exposing raw configuration values. "
+        "Use next_after to continue scanning; inspection never modifies data."
+    ),
+    responses=responses.get_responses([400]),
 )
 @endpoint_access(
     authentication=Authentication.SYSADMIN,
@@ -138,6 +145,13 @@ async def inspect_model_configurations(
     "/tenants/{tenant_id}/model-configurations/{kind}/{resource_id}/repair/",
     response_model=ConfigurationRepairResult,
     summary="Preview or apply an explicit repair of invalid stored model options",
+    description=(
+        "Repair one invalid configuration in the specified tenant using explicit, "
+        "validated replacement options. Defaults to dry-run. The source fingerprint "
+        "must match the inspected value, unless the requested replacement is already "
+        "stored. Reject changed or valid configurations; return 404 when the resource "
+        "does not belong to the tenant."
+    ),
     responses=responses.get_responses([400, 404]),
 )
 @endpoint_access(
