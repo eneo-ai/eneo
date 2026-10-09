@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from dataclasses import replace
+from datetime import UTC, datetime, timedelta
 from uuid import UUID, uuid4
 
 import httpx
@@ -16,7 +18,14 @@ from eneo.database.tables.transcription_services_table import (
     TranscriptionServiceConnections,
 )
 from eneo.transcription_services import service as service_module
-from eneo.transcription_services.models import SERVICE_ENDPOINT_MESSAGES
+from eneo.transcription_services.models import (
+    SERVICE_ENDPOINT_MESSAGES,
+    ConnectionCheckOutcome,
+    LastConnectionCheck,
+)
+from eneo.transcription_services.repository import (
+    TranscriptionServiceConnectionRepository,
+)
 from tests.integration.transcription_services.conftest import BASE
 
 pytestmark = [pytest.mark.integration, pytest.mark.asyncio]
@@ -344,7 +353,9 @@ async def test_a_check_asks_the_service_with_the_stored_key_and_sends_no_audio(
     )
 
     assert response.status_code == 200, response.text
-    assert response.json() == {
+    body = response.json()
+    assert body.pop("checked_at")
+    assert body == {
         "outcome": "ready",
         "detail": "accepting jobs",
         "identifies_speakers": identifies_speakers,
@@ -539,6 +550,78 @@ async def test_an_edit_committed_during_a_check_never_pairs_an_endpoint_with_ano
         ("vemsa-a.example.se", "Bearer first-secret"),
         ("vemsa-b.example.se", "Bearer second-secret"),
     }
+    # A result is kept only for the endpoint and key it tested.
+    monkeypatch.setattr(AsyncSession, "execute", execute)
+    kept = (
+        await client.get(f"{BASE}{connection['id']}/", headers=admin_headers)
+    ).json()["last_check"]
+    assert (kept is not None) == (sent[0] == "vemsa-b.example.se")
+
+
+async def test_a_check_is_kept_for_every_administrator_until_the_endpoint_or_key_changes(
+    client, admin_headers, create_connection, native_service
+):
+    connection = await create_connection()
+    url = f"{BASE}{connection['id']}/"
+    assert connection["last_check"] is None
+
+    checked = await client.post(f"{url}check/", headers=admin_headers)
+    after_check = await client.get(url, headers=admin_headers)
+    renamed = await client.patch(url, json={"name": "Vemsa"}, headers=admin_headers)
+    # The stored address in another spelling is not a move.
+    same_address = await client.patch(
+        url, json={"endpoint_url": "https://vemsa.example.se/"}, headers=admin_headers
+    )
+    rekeyed = await client.patch(url, json={"api_key": "new"}, headers=admin_headers)
+
+    assert checked.status_code == 200, checked.text
+    kept = renamed.json()["last_check"]
+    assert kept == {
+        "outcome": "ready",
+        "identifies_speakers": None,
+        "service_version": None,
+        "checked_at": checked.json()["checked_at"],
+    }
+    assert same_address.json()["last_check"] == kept
+    # Recording a check is not an edit of the connection.
+    assert after_check.json()["updated_at"] == connection["updated_at"]
+    assert rekeyed.json()["last_check"] is None
+
+
+async def test_an_earlier_check_never_replaces_a_later_kept_one(
+    db_container, admin_user, create_connection
+):
+    # Two administrators' checks can finish in either order.
+    connection_id = UUID((await create_connection())["id"])
+    later = LastConnectionCheck(
+        outcome=ConnectionCheckOutcome.CREDENTIALS_REJECTED,
+        identifies_speakers=None,
+        service_version=None,
+        checked_at=datetime(2026, 10, 9, 8, 0, tzinfo=UTC),
+    )
+    earlier = replace(
+        later,
+        outcome=ConnectionCheckOutcome.READY,
+        checked_at=later.checked_at - timedelta(seconds=5),
+    )
+    async with db_container() as container:
+        repository = TranscriptionServiceConnectionRepository(
+            container.session(), admin_user.tenant_id
+        )
+        connection, ciphertext = await repository.get_with_key(connection_id)
+        for check in (later, earlier):
+            await repository.record_check(
+                connection_id,
+                check,
+                endpoint_url=connection.endpoint_url,
+                api_key_encrypted=ciphertext,
+            )
+
+    async with db_container() as container:
+        kept = await TranscriptionServiceConnectionRepository(
+            container.session(), admin_user.tenant_id
+        ).get(connection_id)
+    assert kept.last_check == later
 
 
 async def test_an_organisation_connects_at_most_one_page_of_services(

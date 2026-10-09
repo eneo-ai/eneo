@@ -1,6 +1,6 @@
 // Copyright (c) 2026 Sundsvalls Kommun
 
-import type { TranscriptionServiceCheck } from "@eneo/eneo-js";
+import type { TranscriptionServiceLastCheck } from "@eneo/eneo-js";
 import { m } from "$lib/paraglide/messages";
 
 export type CheckTone = "positive" | "info" | "warning" | "negative";
@@ -9,7 +9,7 @@ export type CheckTone = "positive" | "info" | "warning" | "negative";
  *  table shows, the sentence the dialog adds, and the tone both use. */
 export type CheckSummary = { tone: CheckTone; label: string; detail: string };
 
-export function describeCheck(check: TranscriptionServiceCheck): CheckSummary {
+export function describeCheck(check: TranscriptionServiceLastCheck): CheckSummary {
   switch (check.outcome) {
     case "ready":
       if (check.identifies_speakers === true) {

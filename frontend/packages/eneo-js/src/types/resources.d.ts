@@ -124,6 +124,8 @@ export type TranscriptionService = components["schemas"]["TranscriptionServicePu
 export type TranscriptionServiceCreate = components["schemas"]["TranscriptionServiceCreate"];
 export type TranscriptionServiceUpdate = components["schemas"]["TranscriptionServiceUpdate"];
 export type TranscriptionServiceCheck = components["schemas"]["TranscriptionServiceCheckPublic"];
+export type TranscriptionServiceLastCheck =
+  components["schemas"]["TranscriptionServiceLastCheckPublic"];
 export type TranscriptionServiceSummary = components["schemas"]["TranscriptionServiceSummary"];
 export type SpaceTranscriptionServiceLink = components["schemas"]["SpaceTranscriptionServiceLink"];
 export type Permission = components["schemas"]["Permission"];

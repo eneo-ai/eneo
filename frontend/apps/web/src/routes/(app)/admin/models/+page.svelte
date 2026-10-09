@@ -53,7 +53,7 @@
     <Page.Tab id="transcription_models">
       <!-- Two sections: models write the text, services label who speaks. -->
       <section aria-labelledby="transcription-models-heading">
-        <header class="px-4 pt-4">
+        <header class="pt-4">
           <h2
             id="transcription-models-heading"
             class="text-primary text-sm font-semibold tracking-tight"

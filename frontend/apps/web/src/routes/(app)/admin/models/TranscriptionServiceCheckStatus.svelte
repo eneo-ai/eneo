@@ -7,7 +7,7 @@
 -->
 
 <script lang="ts">
-  import type { TranscriptionServiceCheck } from "@eneo/eneo-js";
+  import type { TranscriptionServiceLastCheck } from "@eneo/eneo-js";
   import CircleCheck from "@lucide/svelte/icons/circle-check";
   import CircleX from "@lucide/svelte/icons/circle-x";
   import Info from "@lucide/svelte/icons/info";
@@ -16,7 +16,7 @@
   import { cn } from "$lib/utils.js";
   import { describeCheck, type CheckTone } from "./transcriptionServiceCheck";
 
-  let { check, callout = false }: { check: TranscriptionServiceCheck; callout?: boolean } =
+  let { check, callout = false }: { check: TranscriptionServiceLastCheck; callout?: boolean } =
     $props();
 
   const icons = { positive: CircleCheck, info: Info, warning: TriangleAlert, negative: CircleX };

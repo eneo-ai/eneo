@@ -135,6 +135,20 @@ async def test_a_granted_service_is_listed_and_usable_in_the_space(
     assert await _available(db_container, space_id, connection["id"])
 
 
+async def test_the_service_counts_the_spaces_granted_it(client, headers):
+    connection = await _connection(client, headers)
+    for _ in range(2):
+        await _grant(client, headers, await _space(client, headers), connection["id"])
+
+    listed = await client.get(BASE, headers=headers)
+
+    [service] = [
+        item for item in listed.json()["items"] if item["id"] == connection["id"]
+    ]
+    assert connection["space_count"] == 0
+    assert service["space_count"] == 2
+
+
 async def test_an_unrelated_save_keeps_the_grants(client, db_container, headers):
     connection = await _connection(client, headers)
     space_id = await _space(client, headers)

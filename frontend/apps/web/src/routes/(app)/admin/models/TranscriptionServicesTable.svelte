@@ -4,15 +4,14 @@
   The organisation's speaker identification services, as the second section of
   the transcription tab. This list owns every change: each is saved as it is
   made and applied from the response, one at a time per service, so a late
-  answer never undoes a later change or brings back a removed service. Check
-  results are kept for the session only.
+  answer never undoes a later change or brings back a removed service. The
+  latest check is stored with the service, so every administrator sees it.
 -->
 
 <script lang="ts">
   import type {
     SecurityClassification,
     TranscriptionService,
-    TranscriptionServiceCheck,
     TranscriptionServiceCreate,
     TranscriptionServiceUpdate
   } from "@eneo/eneo-js";
@@ -32,6 +31,7 @@
   import * as Table from "$lib/components/ui/table/index.js";
   import { toastError } from "$lib/core/errors";
   import { getEneo } from "$lib/core/Eneo";
+  import { formatDateTime, formatRelativeTime } from "$lib/core/formatting/dateTime";
   import { m } from "$lib/paraglide/messages";
   import TranscriptionServiceCheckStatus from "./TranscriptionServiceCheckStatus.svelte";
   import TranscriptionServiceDialog from "./TranscriptionServiceDialog.svelte";
@@ -48,7 +48,7 @@
 
   // The loaded list, then every change this page saves to it.
   let services = $derived(loaded);
-  const checks = new SvelteMap<string, TranscriptionServiceCheck | "checking">();
+  const checking = new SvelteSet<string>();
   // The latest check started per service; an earlier one's answer is dropped.
   const checkRuns = new SvelteMap<string, number>();
   // Services with a change in flight; their other changes wait for it.
@@ -60,6 +60,8 @@
   let editing = $state<TranscriptionService | null>(null);
   let removeOpen = $state(false);
   let removing = $state<TranscriptionService | null>(null);
+  let disableOpen = $state(false);
+  let disabling = $state<TranscriptionService | null>(null);
 
   function host(url: string): string {
     try {
@@ -69,10 +71,40 @@
     }
   }
 
-  // Updates a service still in the list; one that has left it stays gone.
+  // Lets "Testad för 2 minuter sedan" age while the page stays open.
+  let now = $state(Date.now());
+  $effect(() => {
+    const timer = setInterval(() => (now = Date.now()), 60_000);
+    return () => clearInterval(timer);
+  });
+
+  // A server clock slightly ahead of this one must not read "om 2 sekunder".
+  function checkedAgo(checkedAt: string): string {
+    return formatRelativeTime(Math.min(Date.parse(checkedAt), now), now);
+  }
+
+  function spaceUsage(count: number): string {
+    if (count === 0) return m.speaker_service_used_in_none();
+    return count === 1
+      ? m.speaker_service_used_in_one({ count })
+      : m.speaker_service_used_in({ count });
+  }
+
+  // Changes a service still in the list; one that has left it stays gone.
+  function patch(id: string, fields: Partial<TranscriptionService>): boolean {
+    if (!services.some((service) => service.id === id)) return false;
+    services = services.map((service) => (service.id === id ? { ...service, ...fields } : service));
+    return true;
+  }
+
+  // Applies a saved service as the server returned it, its check included:
+  // the server clears a check whose address or key changed, by anyone. A
+  // check still running tested settings this answer may have replaced, so its
+  // result is dropped; a new address or key starts a fresh one.
   function replace(next: TranscriptionService): boolean {
-    if (!services.some((service) => service.id === next.id)) return false;
-    services = services.map((service) => (service.id === next.id ? next : service));
+    if (!patch(next.id, next)) return false;
+    checkRuns.set(next.id, (checkRuns.get(next.id) ?? 0) + 1);
+    checking.delete(next.id);
     return true;
   }
 
@@ -90,42 +122,62 @@
   async function runCheck(id: string) {
     const run = (checkRuns.get(id) ?? 0) + 1;
     checkRuns.set(id, run);
-    checks.set(id, "checking");
+    checking.add(id);
     try {
       const result = await eneo.transcriptionServices.check({ id });
-      if (checkRuns.get(id) === run) checks.set(id, result);
+      if (checkRuns.get(id) === run) {
+        now = Date.now();
+        patch(id, { last_check: result });
+      }
     } catch (error) {
-      if (checkRuns.get(id) !== run) return;
-      checks.delete(id);
-      toastError(error);
+      if (checkRuns.get(id) === run) toastError(error);
+    } finally {
+      if (checkRuns.get(id) === run) checking.delete(id);
     }
   }
 
+  async function saveEnabled(id: string, enabled: boolean) {
+    replace(
+      await mutate(id, () => eneo.transcriptionServices.update({ id }, { is_enabled: enabled }))
+    );
+  }
+
+  // Switching on, or off for a service no space uses, happens at once and is
+  // undone if the save fails. Switching off a service in use asks first.
   async function setEnabled(service: TranscriptionService, enabled: boolean) {
     if (busy.has(service.id)) return;
-    replace({ ...service, is_enabled: enabled });
+    if (!enabled && service.space_count > 0) {
+      disabling = service;
+      disableOpen = true;
+      return;
+    }
+    patch(service.id, { is_enabled: enabled });
     try {
-      replace(
-        await mutate(service.id, () =>
-          eneo.transcriptionServices.update({ id: service.id }, { is_enabled: enabled })
-        )
-      );
+      await saveEnabled(service.id, enabled);
     } catch (error) {
-      replace(service);
+      patch(service.id, { is_enabled: !enabled });
       toastError(error);
     }
   }
 
-  // A saved service is tested once right away, so the row says whether it works.
-  async function create(body: TranscriptionServiceCreate) {
+  // A new service is tested at once; the dialog stays open to show the result.
+  async function create(body: TranscriptionServiceCreate): Promise<TranscriptionService> {
     const created = await eneo.transcriptionServices.create(body);
     services = [...services, created];
+    editing = created;
     void runCheck(created.id);
+    return created;
   }
 
-  async function update(id: string, body: TranscriptionServiceUpdate) {
+  // Only a new address or key changes what a check would find.
+  async function update(
+    id: string,
+    body: TranscriptionServiceUpdate
+  ): Promise<TranscriptionService> {
+    const retest = "endpoint_url" in body || "api_key" in body;
     const updated = await mutate(id, () => eneo.transcriptionServices.update({ id }, body));
-    if (replace(updated)) void runCheck(id);
+    if (replace(updated) && retest) void runCheck(id);
+    return updated;
   }
 
   function openDialog(service: TranscriptionService | null) {
@@ -144,12 +196,20 @@
     const { id } = removing;
     await mutate(id, () => eneo.transcriptionServices.delete({ id }));
     services = services.filter((service) => service.id !== id);
-    checks.delete(id);
+    checking.delete(id);
     checkRuns.delete(id);
   }
+
+  async function disable() {
+    if (disabling) await saveEnabled(disabling.id, false);
+  }
+
+  const editingNow = $derived(
+    editing ? services.find((service) => service.id === editing?.id) : undefined
+  );
 </script>
 
-<section aria-labelledby="{uid}-heading" class="flex flex-col gap-4 border-t p-4">
+<section aria-labelledby="{uid}-heading" class="flex flex-col gap-4 border-t py-4">
   <header class="flex flex-wrap items-start justify-between gap-3">
     <div>
       <h2 id="{uid}-heading" class="text-primary text-sm font-semibold tracking-tight">
@@ -187,13 +247,12 @@
         </Table.Header>
         <Table.Body>
           {#each services as service (service.id)}
-            {@const check = checks.get(service.id)}
             <Table.Row>
               <Table.Cell>
                 <div class="flex min-w-0 flex-col">
                   <span class="font-medium">{service.name}</span>
                   <span class="text-muted-foreground truncate text-sm">
-                    {host(service.endpoint_url)}
+                    {host(service.endpoint_url)} · {spaceUsage(service.space_count)}
                   </span>
                 </div>
               </Table.Cell>
@@ -207,13 +266,24 @@
                 {/if}
               </Table.Cell>
               <Table.Cell>
-                {#if check === "checking"}
+                {#if checking.has(service.id)}
                   <span class="text-muted-foreground inline-flex items-center gap-1.5 text-sm">
                     <Spinner aria-hidden="true" />
                     {m.speaker_service_testing()}
                   </span>
-                {:else if check}
-                  <TranscriptionServiceCheckStatus {check} />
+                {:else if service.last_check}
+                  <div class="flex flex-col items-start">
+                    <TranscriptionServiceCheckStatus check={service.last_check} />
+                    <time
+                      class="text-muted-foreground text-xs"
+                      datetime={service.last_check.checked_at}
+                      title={formatDateTime(service.last_check.checked_at)}
+                    >
+                      {m.speaker_service_checked({
+                        when: checkedAgo(service.last_check.checked_at)
+                      })}
+                    </time>
+                  </div>
                 {:else}
                   <span class="text-muted-foreground text-sm">
                     {m.speaker_service_not_tested()}
@@ -222,9 +292,8 @@
               </Table.Cell>
               <Table.Cell>
                 <Switch
-                  checked={service.is_enabled}
+                  bind:checked={() => service.is_enabled, (enabled) => setEnabled(service, enabled)}
                   disabled={busy.has(service.id)}
-                  onCheckedChange={(enabled) => setEnabled(service, enabled)}
                   aria-label={service.name}
                 />
               </Table.Cell>
@@ -285,7 +354,8 @@
     bind:open={dialogOpen}
     service={editing}
     {classifications}
-    check={editing ? checks.get(editing.id) : undefined}
+    check={editingNow?.last_check ?? undefined}
+    checking={editingNow ? checking.has(editingNow.id) : false}
     onCreate={create}
     onUpdate={update}
     onTest={() => editing && runCheck(editing.id)}
@@ -293,9 +363,23 @@
 {/key}
 
 <ConfirmDialog
+  bind:open={disableOpen}
+  title={m.speaker_service_disable_title({ name: disabling?.name ?? "" })}
+  description={disabling?.space_count === 1
+    ? m.speaker_service_disable_description_one({ count: 1 })
+    : m.speaker_service_disable_description({ count: disabling?.space_count ?? 0 })}
+  confirmLabel={m.speaker_service_disable_confirm()}
+  pendingLabel={m.speaker_service_disabling()}
+  errorDisplay="inline"
+  onConfirm={disable}
+/>
+
+<ConfirmDialog
   bind:open={removeOpen}
   title={m.speaker_service_delete_title({ name: removing?.name ?? "" })}
-  description={m.speaker_service_delete_description()}
+  description={removing && removing.space_count > 0
+    ? `${spaceUsage(removing.space_count)}. ${m.speaker_service_delete_description()}`
+    : m.speaker_service_delete_description()}
   confirmLabel={m.remove()}
   pendingLabel={m.removing()}
   errorDisplay="inline"

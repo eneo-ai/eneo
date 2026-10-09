@@ -8,6 +8,7 @@ const check = (overrides: Partial<TranscriptionServiceCheck>): TranscriptionServ
   detail: "",
   identifies_speakers: true,
   service_version: null,
+  checked_at: "2026-10-09T07:00:00Z",
   ...overrides
 });
 

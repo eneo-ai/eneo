@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from enum import StrEnum
+from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Any
 from uuid import UUID
 
@@ -22,6 +22,8 @@ from eneo.transcription_services.client import (
 )
 from eneo.transcription_services.models import (
     MAX_CONNECTIONS_PER_ORGANISATION,
+    ConnectionCheckOutcome,
+    LastConnectionCheck,
     TranscriptionServiceConnection,
 )
 
@@ -39,13 +41,6 @@ if TYPE_CHECKING:
 _CHECK_TIMEOUT_SECONDS = 10.0
 
 
-class ConnectionCheckOutcome(StrEnum):
-    READY = "ready"
-    NOT_ACCEPTING_JOBS = "not_accepting_jobs"
-    UNAVAILABLE = "unavailable"
-    CREDENTIALS_REJECTED = "credentials_rejected"
-
-
 @dataclass(frozen=True, slots=True)
 class ConnectionCheck:
     """What the service answered to an authenticated readiness request.
@@ -58,6 +53,7 @@ class ConnectionCheck:
     detail: str
     identifies_speakers: bool | None
     service_version: str | None
+    checked_at: datetime
 
 
 class TranscriptionServiceConnectionService:
@@ -152,12 +148,23 @@ class TranscriptionServiceConnectionService:
         api_key_encrypted = (
             self.encryption.encrypt(api_key) if is_provided(api_key) else NOT_PROVIDED
         )
+        # Sending the stored endpoint again is not a move; a new key always is
+        # a change, since it cannot be compared with the stored one.
+        check_outdated = (
+            is_provided(endpoint_url) and endpoint_url != row.endpoint_url
+        ) or is_provided(api_key_encrypted)
         if is_provided(name):
             row.name = name
         if is_provided(endpoint_url):
             row.endpoint_url = endpoint_url
         if is_provided(api_key_encrypted):
             row.api_key_encrypted = api_key_encrypted
+        if check_outdated:
+            # The kept check described the old endpoint or key.
+            row.last_check_outcome = None
+            row.last_check_identifies_speakers = None
+            row.last_check_service_version = None
+            row.last_checked_at = None
         if is_provided(is_enabled):
             row.is_enabled = is_enabled
         if is_provided(classification_id):
@@ -204,6 +211,7 @@ class TranscriptionServiceConnectionService:
                 detail="the service rejected the API key",
                 identifies_speakers=None,
                 service_version=None,
+                checked_at=datetime.now(UTC),
             )
         else:
             result = ConnectionCheck(
@@ -215,7 +223,19 @@ class TranscriptionServiceConnectionService:
                 detail=readiness.detail,
                 identifies_speakers=readiness.identifies_speakers,
                 service_version=readiness.service_version,
+                checked_at=datetime.now(UTC),
             )
+        await self.repository.record_check(
+            connection.id,
+            LastConnectionCheck(
+                outcome=result.outcome,
+                identifies_speakers=result.identifies_speakers,
+                service_version=result.service_version,
+                checked_at=result.checked_at,
+            ),
+            endpoint_url=connection.endpoint_url,
+            api_key_encrypted=ciphertext,
+        )
         await self._audit(
             ActionType.TRANSCRIPTION_SERVICE_CHECKED,
             connection,

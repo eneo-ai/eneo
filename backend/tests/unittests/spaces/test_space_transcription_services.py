@@ -37,6 +37,8 @@ def _connection(level: int, *, enabled: bool = True) -> TranscriptionServiceConn
         security_classification=_classification(level),
         created_at=now,
         updated_at=now,
+        space_count=0,
+        last_check=None,
     )
 
 

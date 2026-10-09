@@ -25,6 +25,8 @@ const service = (overrides: Partial<TranscriptionService> = {}): TranscriptionSe
   endpoint_url: "https://vemsa.sundsvall.se",
   is_enabled: true,
   security_classification: null,
+  space_count: 0,
+  last_check: null,
   created_at: "2026-10-01T00:00:00Z",
   updated_at: "2026-10-01T00:00:00Z",
   ...overrides
@@ -43,7 +45,8 @@ const result = (outcome: TranscriptionServiceCheck["outcome"]): TranscriptionSer
   outcome,
   detail: "",
   identifies_speakers: true,
-  service_version: null
+  service_version: null,
+  checked_at: new Date().toISOString()
 });
 
 const actionsFor = (name: string) =>
@@ -132,8 +135,116 @@ it("shows only the check of the saved settings when one was running before the s
   const before = deferred<TranscriptionServiceCheck>();
   const after = deferred<TranscriptionServiceCheck>();
   check.mockReturnValueOnce(before.promise).mockReturnValueOnce(after.promise);
-  update.mockImplementation(async (_id: unknown, body: Partial<TranscriptionService>) =>
-    service(body)
+  update.mockImplementation(async () => service());
+  render(TranscriptionServicesTable, { services: [service()], classifications: [] });
+
+  await actionsFor("Vemsa Sundsvall").click();
+  await page.getByRole("menuitem", { name: m.speaker_service_test() }).click();
+  await actionsFor("Vemsa Sundsvall").click();
+  await page.getByRole("menuitem", { name: m.edit() }).click();
+  // The dialog focuses its first field as it opens; type only after that.
+  await expect.element(page.getByLabelText(m.name())).toHaveFocus();
+  await page.getByLabelText(m.speaker_service_api_key()).fill("new-key");
+  await page.getByRole("button", { name: m.save() }).click();
+
+  // A new key starts a fresh check of what it saved.
+  await expect.poll(() => check.mock.calls.length).toBe(2);
+  const row = page.getByRole("row", { name: /Vemsa Sundsvall/ });
+  after.resolve(result("ready"));
+  await expect.element(row).toHaveTextContent(m.speaker_service_status_ready());
+  before.resolve(result("unavailable"));
+  await settle();
+  await expect.element(row).not.toHaveTextContent(m.speaker_service_status_unavailable());
+  await expect.element(row).toHaveTextContent(m.speaker_service_status_ready());
+});
+
+it("shows the stored check, when it ran and how many spaces use the service", async () => {
+  render(TranscriptionServicesTable, {
+    services: [service({ space_count: 2, last_check: result("ready") })],
+    classifications: []
+  });
+
+  const row = page.getByRole("row", { name: /Vemsa Sundsvall/ });
+  await expect.element(row).toHaveTextContent(m.speaker_service_used_in({ count: 2 }));
+  await expect.element(row).toHaveTextContent(m.speaker_service_status_ready());
+  await expect.element(row.getByRole("time")).toBeVisible();
+});
+
+it("does not test again after a change that keeps the address and key", async () => {
+  update.mockImplementation(async () => service({ name: "Vemsa Nord" }));
+  render(TranscriptionServicesTable, { services: [service()], classifications: [] });
+
+  await actionsFor("Vemsa Sundsvall").click();
+  await page.getByRole("menuitem", { name: m.edit() }).click();
+  // The dialog focuses its first field as it opens; type only after that.
+  await expect.element(page.getByLabelText(m.name())).toHaveFocus();
+  await page.getByLabelText(m.name()).fill("Vemsa Nord");
+  await page.getByRole("button", { name: m.save() }).click();
+
+  await expect.element(page.getByRole("row", { name: /Vemsa Nord/ })).toBeVisible();
+  expect(check).not.toHaveBeenCalled();
+});
+
+it("asks before switching off a service that spaces use, and keeps it on until confirmed", async () => {
+  update.mockImplementation(async () => service({ space_count: 3, is_enabled: false }));
+  render(TranscriptionServicesTable, {
+    services: [service({ space_count: 3 })],
+    classifications: []
+  });
+
+  const toggle = page.getByRole("switch", { name: "Vemsa Sundsvall" });
+  await toggle.click();
+
+  await expect
+    .element(page.getByText(m.speaker_service_disable_description({ count: 3 })))
+    .toBeVisible();
+  await expect.element(toggle).toBeChecked();
+  expect(update).not.toHaveBeenCalled();
+
+  await page.getByRole("button", { name: m.speaker_service_disable_confirm() }).click();
+  expect(update).toHaveBeenCalledWith({ id: "s1" }, { is_enabled: false });
+  await expect.element(toggle).not.toBeChecked();
+});
+
+it("shows the check the server returns after a save, even one cleared by someone else", async () => {
+  // Another administrator gave the service a new key meanwhile; the server
+  // cleared its check, and a rename here must not bring the old one back.
+  update.mockImplementation(async () => service({ name: "Vemsa Nord", last_check: null }));
+  render(TranscriptionServicesTable, {
+    services: [service({ last_check: result("ready") })],
+    classifications: []
+  });
+
+  await actionsFor("Vemsa Sundsvall").click();
+  await page.getByRole("menuitem", { name: m.edit() }).click();
+  // The dialog focuses its first field as it opens; type only after that.
+  await expect.element(page.getByLabelText(m.name())).toHaveFocus();
+  await page.getByLabelText(m.name()).fill("Vemsa Nord");
+  await page.getByRole("button", { name: m.save() }).click();
+
+  const row = page.getByRole("row", { name: /Vemsa Nord/ });
+  await expect.element(row).toHaveTextContent(m.speaker_service_not_tested());
+  await expect.element(row).not.toHaveTextContent(m.speaker_service_status_ready());
+});
+
+it("reads a check timed a moment ahead of this clock as just now", async () => {
+  const ahead = new Date(Date.now() + 5_000).toISOString();
+  render(TranscriptionServicesTable, {
+    services: [service({ last_check: { ...result("ready"), checked_at: ahead } })],
+    classifications: []
+  });
+
+  const time = page.getByRole("row", { name: /Vemsa Sundsvall/ }).getByRole("time");
+  await expect.element(time).toHaveTextContent(m.speaker_service_checked({ when: "nu" }));
+});
+
+it("drops a running check's answer once a save returns newer settings", async () => {
+  // The check tested the old address; another administrator moved the service
+  // meanwhile, and the rename here answered with the cleared check.
+  const running = deferred<TranscriptionServiceCheck>();
+  check.mockReturnValueOnce(running.promise);
+  update.mockImplementation(async () =>
+    service({ name: "Vemsa Nord", endpoint_url: "https://vemsa-nord.sundsvall.se" })
   );
   render(TranscriptionServicesTable, { services: [service()], classifications: [] });
 
@@ -141,16 +252,14 @@ it("shows only the check of the saved settings when one was running before the s
   await page.getByRole("menuitem", { name: m.speaker_service_test() }).click();
   await actionsFor("Vemsa Sundsvall").click();
   await page.getByRole("menuitem", { name: m.edit() }).click();
-  await page.getByLabelText(m.name()).fill("Vemsa Sundsvall Nord");
+  await expect.element(page.getByLabelText(m.name())).toHaveFocus();
+  await page.getByLabelText(m.name()).fill("Vemsa Nord");
   await page.getByRole("button", { name: m.save() }).click();
+  const row = page.getByRole("row", { name: /Vemsa Nord/ });
+  await expect.element(row).toHaveTextContent(m.speaker_service_not_tested());
 
-  // The save starts a fresh check of what it saved.
-  await expect.poll(() => check.mock.calls.length).toBe(2);
-  const row = page.getByRole("row", { name: /Vemsa Sundsvall Nord/ });
-  after.resolve(result("ready"));
-  await expect.element(row).toHaveTextContent(m.speaker_service_status_ready());
-  before.resolve(result("unavailable"));
+  running.resolve(result("ready"));
   await settle();
-  await expect.element(row).not.toHaveTextContent(m.speaker_service_status_unavailable());
-  await expect.element(row).toHaveTextContent(m.speaker_service_status_ready());
+  await expect.element(row).not.toHaveTextContent(m.speaker_service_status_ready());
+  await expect.element(row).toHaveTextContent(m.speaker_service_not_tested());
 });

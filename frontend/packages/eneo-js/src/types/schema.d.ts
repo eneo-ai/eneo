@@ -38047,6 +38047,11 @@ export interface components {
     /** TranscriptionServiceCheckPublic */
     TranscriptionServiceCheckPublic: {
       /**
+       * Checked At
+       * Format: date-time
+       */
+      checked_at: string;
+      /**
        * Detail
        * @description What the service answered, without secrets
        */
@@ -38089,6 +38094,28 @@ export interface components {
       /** @description Security classification of the service */
       security_classification?: components["schemas"]["ModelId"] | null;
     };
+    /**
+     * TranscriptionServiceLastCheckPublic
+     * @description The latest check of the service's current endpoint and key.
+     */
+    TranscriptionServiceLastCheckPublic: {
+      /**
+       * Checked At
+       * Format: date-time
+       */
+      checked_at: string;
+      /**
+       * Identifies Speakers
+       * @description Whether the service reports it can identify speakers. Null: the service does not report which tasks it supports.
+       */
+      identifies_speakers: boolean | null;
+      outcome: components["schemas"]["ConnectionCheckOutcome"];
+      /**
+       * Service Version
+       * @description Version the service reports, when it reports one
+       */
+      service_version: string | null;
+    };
     /** TranscriptionServicePublic */
     TranscriptionServicePublic: {
       /**
@@ -38105,9 +38132,16 @@ export interface components {
       id: string;
       /** Is Enabled */
       is_enabled: boolean;
+      /** @description The latest check of the current endpoint and key, or null when they have not been checked. Changing either clears it. */
+      last_check: components["schemas"]["TranscriptionServiceLastCheckPublic"] | null;
       /** Name */
       name: string;
       security_classification: components["schemas"]["SecurityClassificationPublic"] | null;
+      /**
+       * Space Count
+       * @description Spaces granted the service. Their flows cannot identify speakers while it is switched off or after it is removed.
+       */
+      space_count: number;
       /**
        * Updated At
        * Format: date-time

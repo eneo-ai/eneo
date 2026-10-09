@@ -40,6 +40,8 @@ from eneo.server.protocol import responses
 from eneo.settings.encryption_service import EncryptionService
 from eneo.transcription_services.models import (
     MAX_CONNECTIONS_PER_ORGANISATION,
+    ConnectionCheckOutcome,
+    LastConnectionCheck,
     ServiceEndpointError,
     TranscriptionServiceConnection,
     parse_service_endpoint,
@@ -48,7 +50,6 @@ from eneo.transcription_services.repository import (
     TranscriptionServiceConnectionRepository,
 )
 from eneo.transcription_services.service import (
-    ConnectionCheckOutcome,
     TranscriptionServiceConnectionService,
 )
 from eneo.users.user import UserInDB
@@ -152,12 +153,57 @@ class TranscriptionServiceUpdate(BaseModel):
         return _parsed_endpoint(value) if is_provided(value) else value
 
 
+class TranscriptionServiceLastCheckPublic(BaseModel):
+    """The latest check of the service's current endpoint and key."""
+
+    outcome: ConnectionCheckOutcome
+    identifies_speakers: bool | None = Field(
+        description=(
+            "Whether the service reports it can identify speakers. Null: the "
+            "service does not report which tasks it supports."
+        )
+    )
+    service_version: str | None = Field(
+        description="Version the service reports, when it reports one"
+    )
+    checked_at: datetime
+
+    @classmethod
+    def from_domain(
+        cls, check: LastConnectionCheck | None
+    ) -> TranscriptionServiceLastCheckPublic | None:
+        if check is None:
+            return None
+        return cls(
+            outcome=check.outcome,
+            identifies_speakers=check.identifies_speakers,
+            service_version=check.service_version,
+            checked_at=check.checked_at,
+        )
+
+
+class TranscriptionServiceCheckPublic(TranscriptionServiceLastCheckPublic):
+    detail: str = Field(description="What the service answered, without secrets")
+
+
 class TranscriptionServicePublic(BaseModel):
     id: UUID
     name: str
     endpoint_url: str
     is_enabled: bool
     security_classification: SecurityClassificationPublic | None
+    space_count: int = Field(
+        description=(
+            "Spaces granted the service. Their flows cannot identify speakers "
+            "while it is switched off or after it is removed."
+        )
+    )
+    last_check: TranscriptionServiceLastCheckPublic | None = Field(
+        description=(
+            "The latest check of the current endpoint and key, or null when "
+            "they have not been checked. Changing either clears it."
+        )
+    )
     created_at: datetime
     updated_at: datetime
 
@@ -172,6 +218,10 @@ class TranscriptionServicePublic(BaseModel):
             is_enabled=connection.is_enabled,
             security_classification=SecurityClassificationPublic.from_domain(
                 connection.security_classification
+            ),
+            space_count=connection.space_count,
+            last_check=TranscriptionServiceLastCheckPublic.from_domain(
+                connection.last_check
             ),
             created_at=connection.created_at,
             updated_at=connection.updated_at,
@@ -198,20 +248,6 @@ class TranscriptionServiceSummary(BaseModel):
                 connection.security_classification
             ),
         )
-
-
-class TranscriptionServiceCheckPublic(BaseModel):
-    outcome: ConnectionCheckOutcome
-    detail: str = Field(description="What the service answered, without secrets")
-    identifies_speakers: bool | None = Field(
-        description=(
-            "Whether the service reports it can identify speakers. Null: the "
-            "service does not report which tasks it supports."
-        )
-    )
-    service_version: str | None = Field(
-        description="Version the service reports, when it reports one"
-    )
 
 
 @router.get(
@@ -347,6 +383,7 @@ async def check_transcription_service(
         detail=check.detail,
         identifies_speakers=check.identifies_speakers,
         service_version=check.service_version,
+        checked_at=check.checked_at,
     )
 
 

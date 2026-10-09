@@ -33,6 +33,23 @@ class TranscriptionOperation(StrEnum):
     DIARIZE = "diarize"
 
 
+class ConnectionCheckOutcome(StrEnum):
+    READY = "ready"
+    NOT_ACCEPTING_JOBS = "not_accepting_jobs"
+    UNAVAILABLE = "unavailable"
+    CREDENTIALS_REJECTED = "credentials_rejected"
+
+
+@dataclass(frozen=True, slots=True)
+class LastConnectionCheck:
+    """The latest check of a connection's current endpoint and key."""
+
+    outcome: ConnectionCheckOutcome
+    identifies_speakers: bool | None
+    service_version: str | None
+    checked_at: datetime
+
+
 @dataclass(frozen=True, slots=True)
 class TranscriptionServiceConnection:
     """An organisation's connection to one native transcription service.
@@ -50,6 +67,9 @@ class TranscriptionServiceConnection:
     security_classification: SecurityClassification | None
     created_at: datetime
     updated_at: datetime
+    # Spaces granted the connection; flows there lose speaker labels without it.
+    space_count: int
+    last_check: LastConnectionCheck | None
 
     @property
     def can_access(self) -> bool:

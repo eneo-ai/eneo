@@ -22,7 +22,11 @@ from eneo.main.exceptions import NameCollisionException, NotFoundException
 from eneo.security_classifications.domain.entities.security_classification import (
     SecurityClassification,
 )
-from eneo.transcription_services.models import TranscriptionServiceConnection
+from eneo.transcription_services.models import (
+    ConnectionCheckOutcome,
+    LastConnectionCheck,
+    TranscriptionServiceConnection,
+)
 
 _UNIQUE_NAME = "uq_transcription_service_connections_name"
 
@@ -169,6 +173,43 @@ class TranscriptionServiceConnectionRepository:
         self.session.expire(row)
         return await self.get(connection_id)
 
+    async def record_check(
+        self,
+        connection_id: UUID,
+        check: LastConnectionCheck,
+        *,
+        endpoint_url: str,
+        api_key_encrypted: str,
+    ) -> None:
+        """Keep a check result, unless the endpoint or key it was run against
+        changed meanwhile, or a later check is already kept: a result never
+        describes settings it did not test, and never replaces a newer one.
+
+        Not an edit of the connection, so ``updated_at`` stays.
+        """
+        table = TranscriptionServiceConnections
+        await self.session.execute(
+            sa.update(table)
+            .where(
+                table.tenant_id == self.tenant_id,
+                table.id == connection_id,
+                table.endpoint_url == endpoint_url,
+                table.api_key_encrypted == api_key_encrypted,
+                sa.or_(
+                    table.last_checked_at.is_(None),
+                    table.last_checked_at <= check.checked_at,
+                ),
+            )
+            .values(
+                last_check_outcome=check.outcome.value,
+                last_check_identifies_speakers=check.identifies_speakers,
+                last_check_service_version=check.service_version,
+                last_checked_at=check.checked_at,
+                updated_at=table.updated_at,
+            )
+            .execution_options(synchronize_session=False)
+        )
+
     async def delete(self, connection_id: UUID) -> None:
         """Delete the connection; the database removes its space grants."""
         await self.session.delete(await self._row(connection_id, for_update=True))
@@ -225,4 +266,20 @@ def _to_domain(row: TranscriptionServiceConnections) -> TranscriptionServiceConn
         ),
         created_at=row.created_at,
         updated_at=row.updated_at,
+        space_count=row.space_count,
+        last_check=_last_check(row),
+    )
+
+
+def _last_check(row: TranscriptionServiceConnections) -> LastConnectionCheck | None:
+    # An outcome this build does not know reads as untested.
+    outcomes = {outcome.value: outcome for outcome in ConnectionCheckOutcome}
+    outcome = outcomes.get(row.last_check_outcome or "")
+    if outcome is None or row.last_checked_at is None:
+        return None
+    return LastConnectionCheck(
+        outcome=outcome,
+        identifies_speakers=row.last_check_identifies_speakers,
+        service_version=row.last_check_service_version,
+        checked_at=row.last_checked_at,
     )
