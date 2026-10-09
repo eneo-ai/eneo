@@ -36,6 +36,8 @@ export type CapabilityDescriptor = {
   builtinProvider?: boolean;
   /** What the bundled tool runtime's provider of this capability does, shown before it is added. */
   bundledDescription?: () => string;
+  /** One line for the configured source row: what the bundled provider does, nothing about how. */
+  bundledSummary?: () => string;
   /** A short usage note for administrators, with a link to the docs instead of more settings. */
   guide?: { hint: () => string; label: () => string; url: string };
 };
@@ -80,7 +82,8 @@ export const CAPABILITIES: readonly CapabilityDescriptor[] = [
     noActiveProviderHint: m.file_analysis_no_active_provider_hint,
     notAvailableHereHint: m.file_analysis_not_available_here_hint,
     classificationHint: m.file_analysis_classification_hint,
-    bundledDescription: m.tools_builtin_file_analysis_description
+    bundledDescription: m.tools_builtin_file_analysis_description,
+    bundledSummary: m.tools_builtin_file_analysis_summary
   },
   {
     purpose: "file_creation",
@@ -95,6 +98,7 @@ export const CAPABILITIES: readonly CapabilityDescriptor[] = [
     notAvailableHereHint: m.file_creation_not_available_here_hint,
     classificationHint: m.file_creation_classification_hint,
     bundledDescription: m.tools_builtin_file_creation_description,
+    bundledSummary: m.tools_builtin_file_creation_summary,
     guide: {
       hint: m.tools_templates_hint,
       label: m.tools_templates_guide,
@@ -113,7 +117,8 @@ export const CAPABILITIES: readonly CapabilityDescriptor[] = [
     noActiveProviderHint: m.charts_no_active_provider_hint,
     notAvailableHereHint: m.charts_not_available_here_hint,
     classificationHint: m.charts_classification_hint,
-    bundledDescription: m.tools_builtin_charts_description
+    bundledDescription: m.tools_builtin_charts_description,
+    bundledSummary: m.tools_builtin_charts_summary
   }
 ];
 
