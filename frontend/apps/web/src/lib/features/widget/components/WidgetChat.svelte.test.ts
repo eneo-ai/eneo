@@ -325,6 +325,22 @@ beforeEach(() => {
 });
 
 describe("WidgetChat", () => {
+  test("a suggested question hands focus to the composer before it disappears", async () => {
+    renderApp();
+    await expect.element(suggestion()).toBeVisible();
+    await userEvent.click(suggestion());
+    // The button is gone with the question; focus must not fall to the body.
+    await expect.element(composer()).toHaveFocus();
+    await releaseAnswer();
+    await expect.element(composer()).toHaveFocus();
+  });
+
+  test("offers no toggle for a description that fits on two lines", async () => {
+    renderApp();
+    await expect.element(composer()).toBeVisible();
+    expect(page.getByRole("button", { name: "widget_subtitle_more" }).query()).toBeNull();
+  });
+
   test("hides suggestions while composing and restores them when an unsent draft is cleared", async () => {
     renderApp();
     await expect.element(suggestion()).toBeVisible();
@@ -1132,6 +1148,14 @@ describe("WidgetChat when text is enlarged or spaced out", () => {
       .filter((element) => {
         // Visually hidden on purpose.
         if (element.closest(".sr-only")) return false;
+        // Collapsed on purpose, with a control beside it that reveals the rest
+        // (the two-line description): nothing is lost, 1.4.12 is kept.
+        if (
+          element.id &&
+          root.querySelector(`[aria-controls="${element.id}"][aria-expanded="false"]`)
+        ) {
+          return false;
+        }
         const style = getComputedStyle(element);
         return (
           (cuts(style.overflowX) && element.scrollWidth > element.clientWidth + 1) ||
@@ -1193,6 +1217,30 @@ describe("WidgetChat when text is enlarged or spaced out", () => {
       await expectReadable();
       await userEvent.click(suggestion());
       await releaseAnswer();
+      await expectReadable();
+    });
+  });
+
+  test("clamps a long description to two lines and offers to show all of it", async () => {
+    const long = "Du chattar med en AI-assistent som svarar utifrån kommunens egna texter. ".repeat(
+      4
+    );
+    await atViewport(375, 700, async () => {
+      renderApp({ texts: { ...config().texts, subtitle: long.trim() } });
+      const toggle = page.getByRole("button", { name: "widget_subtitle_more" });
+      await expect.element(toggle).toBeVisible();
+      // WCAG 2.5.8: the control stays a 24 CSS px target whatever the root font size.
+      expect(toggle.element().getBoundingClientRect().height).toBeGreaterThanOrEqual(24);
+      const description = document.getElementById("widget-subtitle")!;
+      // Visually two lines; the whole text stays in the document for screen readers.
+      expect(description.scrollHeight).toBeGreaterThan(description.clientHeight);
+      expect(description.textContent?.trim()).toBe(long.trim());
+      await userEvent.click(toggle);
+      const less = page.getByRole("button", { name: "widget_subtitle_less" });
+      await expect.element(less).toHaveAttribute("aria-expanded", "true");
+      await vi.waitFor(() =>
+        expect(description.scrollHeight).toBeLessThanOrEqual(description.clientHeight + 1)
+      );
       await expectReadable();
     });
   });
@@ -1275,6 +1323,20 @@ describe("WidgetChat inside the loader's panel", () => {
     fromLoader(layoutMessage(false, false));
     await expect.element(expandButton()).toBeVisible();
     await vi.waitFor(() => expect(announced()).toBe("widget_collapsed_announced"));
+  });
+
+  test("Escape in the enlarged chat shrinks it before a second Escape closes it", async () => {
+    renderFramed();
+    await expect.element(page.getByRole("button", { name: "widget_close" })).toBeVisible();
+    fromLoader(layoutMessage(true, true));
+    await expect.element(shrinkButton()).toBeVisible();
+    const posted = vi.spyOn(window.parent, "postMessage");
+    await userEvent.keyboard("{Escape}");
+    expect(posted).toHaveBeenLastCalledWith({ ns: "eneo-widget", v: 1, type: "collapse" }, HOST);
+    fromLoader(layoutMessage(false, false));
+    await expect.element(expandButton()).toBeVisible();
+    await userEvent.keyboard("{Escape}");
+    expect(posted).toHaveBeenLastCalledWith({ ns: "eneo-widget", v: 1, type: "close" }, HOST);
   });
 
   test("the first layout is not announced", async () => {

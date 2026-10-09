@@ -110,7 +110,7 @@
   }
   /* The field is the whole box, so the box carries the focus indicator. */
   .widget-composer:has(textarea:focus-visible) {
-    outline: 2px solid var(--text-primary);
+    outline: 2px solid var(--widget-focus, var(--text-primary));
     outline-offset: 2px;
   }
   .widget-composer textarea:focus-visible {
@@ -119,6 +119,8 @@
   .widget-send {
     min-width: 44px;
     min-height: 44px;
+    /* Transparent, so forced colours draw the button's edge. */
+    border: 1px solid transparent;
     background: var(--widget-accent);
     color: var(--widget-on-accent);
   }

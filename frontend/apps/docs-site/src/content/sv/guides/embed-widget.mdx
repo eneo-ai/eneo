@@ -1,6 +1,6 @@
 ---
 title: Bädda in en chattwidget på webbplatsen
-translationSource: guides/embed-widget.mdx@05d6a9299eb0
+translationSource: guides/embed-widget.mdx@d4f8304577bb
 ---
 
 # Bädda in en chattwidget på webbplatsen
@@ -549,7 +549,9 @@ Widgeten är byggd för WCAG 2.2 AA:
   namngiven dialogruta, och chattramen har widgetens namn.
 - När chatten öppnas flyttas fokus in i den. Escape stänger den, även när
   fokus har flyttats vidare till sidan. Fokus återgår då till knappen eller
-  stannar där besökaren befinner sig.
+  stannar där besökaren befinner sig. I det förstorade läget förminskar det
+  första Escape chatten och nästa stänger den. Att välja en förslagsfråga
+  behåller fokus i chatten: i skrivfältet, eller på rubriken på en pekskärm.
 - Skärmläsare meddelar att en fråga har skickats och läser sedan upp det
   färdiga svaret en gång, och de meddelar när en referens har kopierats. Svaret
   läses aldrig upp ord för ord medan det skrivs.
@@ -579,7 +581,12 @@ Widgeten är byggd för WCAG 2.2 AA:
   längre får plats rullar hela panelen, så att alla kontroller kan nås.
 - Allt fungerar med tangentbord, färgerna uppfyller kontrastkraven och chatten
   följer webbläsarens inställningar för färgschema och minskad rörelse.
-  Redaktörer får en kontrastkontroll av färgen de väljer.
+  Redaktörer får en kontrastkontroll av färgen de väljer. Fokusramen tar
+  widgetens egen färg där den syns mot panelen, och knappen och kontrollerna
+  behåller sina kanter i Windows kontrastlägen.
+- Beskrivningen under rubriken visas på två rader; en längre text får en knapp
+  **Visa hela**, så att en lång AI-upplysning aldrig trycker ner konversationen
+  på en telefon. Skärmläsare får hela texten oavsett.
 - Chatten körs i en egen ram på Eneos adress. Webbläsarens egna inställningar
   når in i den (zoom, standardteckenstorlek, färgschema, minskad rörelse,
   påtvingade färger, skärmläsare och webbläsartillägg), men webbplatsens egna

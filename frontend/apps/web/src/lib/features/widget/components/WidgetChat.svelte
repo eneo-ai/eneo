@@ -131,6 +131,22 @@
   const showPending = $derived(pendingQuestion !== null && messages.length <= pendingFrom);
   const busy = $derived(restoring || status !== "idle" || chat.askQuestion.isLoading);
   const subtitle = $derived(config.texts.subtitle);
+  // A long description is clamped to two lines in the header; the toggle is
+  // offered only while something is actually hidden. Screen readers get the
+  // whole text either way, the clamp is visual.
+  let subtitleEl = $state<HTMLParagraphElement | null>(null);
+  let subtitleOpen = $state(false);
+  let subtitleOverflows = $state(false);
+  $effect(() => {
+    const el = subtitleEl;
+    void subtitle;
+    if (!el || subtitleOpen || typeof ResizeObserver === "undefined") return;
+    const measure = () => (subtitleOverflows = el.scrollHeight > el.clientHeight + 1);
+    measure();
+    const observer = new ResizeObserver(measure);
+    observer.observe(el);
+    return () => observer.disconnect();
+  });
   // Retention 0: the backend deletes the session when the answer ends, so
   // there is nothing to continue, rate or restore. Each question stands alone.
   const singleTurn = $derived(config.single_turn);
@@ -196,13 +212,23 @@
     if (event.key !== "Escape" || event.defaultPrevented || confirmStartOver) return;
     if (!bridge.embedded) return;
     event.preventDefault();
-    bridge.close();
+    // Leaving the enlarged layout comes first, as with full screen elsewhere;
+    // a second Escape closes the chat.
+    if (expanded) bridge.collapse();
+    else bridge.close();
   }
 
   async function send(question: string): Promise<void> {
     // One request at a time. The guard is synchronous, so a second click while
     // the token is minted or before the first chunk never starts another ask.
     if (restoring || status !== "idle" || chat.askQuestion.isLoading) return;
+    // A suggested question leaves the page with the question; focus must not
+    // go with it. The composer takes it, or on a touch screen the heading,
+    // so the keyboard does not open over the answer.
+    if (document.activeElement?.closest(".widget-suggestions")) {
+      if (matchMedia("(pointer: coarse)").matches) title?.focus({ preventScroll: true });
+      else composer?.focus();
+    }
     status = "sending";
     errorMessage = null;
     pendingQuestion = question;
@@ -360,7 +386,27 @@
         <h1 bind:this={title} tabindex="-1" class="text-base font-semibold break-words">
           {config.texts.title || config.name}
         </h1>
-        <p class="widget-header-muted text-xs">{subtitle}</p>
+        <p
+          id="widget-subtitle"
+          bind:this={subtitleEl}
+          class={[
+            "widget-header-muted widget-subtitle",
+            !subtitleOpen && "widget-subtitle-clamped"
+          ]}
+        >
+          {subtitle}
+        </p>
+        {#if subtitleOverflows || subtitleOpen}
+          <button
+            type="button"
+            class="widget-subtitle-toggle"
+            aria-expanded={subtitleOpen}
+            aria-controls="widget-subtitle"
+            onclick={() => (subtitleOpen = !subtitleOpen)}
+          >
+            {subtitleOpen ? m.widget_subtitle_less() : m.widget_subtitle_more()}
+          </button>
+        {/if}
       </div>
     </div>
     <div class="flex shrink-0 items-center gap-1">
@@ -450,7 +496,7 @@
               />
             {/each}
             {#if showPending && pendingQuestion !== null}
-              <li class="flex flex-col gap-3">
+              <li class="widget-enter flex flex-col gap-3">
                 <WidgetQuestionBubble text={pendingQuestion} />
                 <!-- Announced once when the question is sent, not by the dots. -->
                 <div aria-hidden="true"><TypingIndicator /></div>
@@ -510,7 +556,7 @@
         onSend={(question) => void send(question)}
       />
       {#if config.texts.footer_text || config.texts.footer_link_url}
-        <p class="text-secondary text-xs">
+        <p class="text-secondary text-[0.8rem]">
           {config.texts.footer_text}
           {#if config.texts.footer_link_url && isHttpUrl(config.texts.footer_link_url)}
             <!-- eslint-disable svelte/no-navigation-without-resolve -- external link from widget configuration -->
@@ -622,6 +668,51 @@
   }
   .widget-header-muted {
     color: var(--text-secondary);
+  }
+  .widget-subtitle {
+    font-size: 0.8rem;
+    line-height: 1.35;
+  }
+  .widget-subtitle-clamped {
+    display: -webkit-box;
+    -webkit-box-orient: vertical;
+    -webkit-line-clamp: 2;
+    line-clamp: 2;
+    overflow: hidden;
+  }
+  .widget-subtitle-toggle {
+    margin-top: 0.125rem;
+    /* WCAG 2.5.8 counts CSS pixels; the embed's root font is 15px, so no rem here. */
+    min-height: 24px;
+    min-width: 24px;
+    padding: 0;
+    border-radius: 0.25rem;
+    background: transparent;
+    color: inherit;
+    font-size: 0.8rem;
+    text-decoration: underline;
+    text-underline-offset: 2px;
+  }
+  /* In a wide panel the conversation reads as a sheet on a faint ground. */
+  @media (min-width: 48em) {
+    .widget-log {
+      background: var(--background-secondary);
+    }
+  }
+  /* New turns and acknowledgements settle in rather than appear. */
+  :global(.widget-enter) {
+    animation: widget-enter 0.16s cubic-bezier(0.2, 0.8, 0.2, 1) both;
+  }
+  @keyframes widget-enter {
+    from {
+      opacity: 0;
+      transform: translateY(4px);
+    }
+  }
+  @media (prefers-reduced-motion: reduce) {
+    :global(.widget-enter) {
+      animation: none;
+    }
   }
   .widget-new-question {
     border-color: var(--widget-accent);
