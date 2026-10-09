@@ -78,6 +78,28 @@ describe("assistant widget page", () => {
     expect(create).not.toHaveBeenCalled();
   });
 
+  test("a personal space says widgets are not supported there yet", async () => {
+    const create = vi.fn();
+    render(WidgetPage, {
+      data: {
+        widget: null,
+        assistant: { id: "a1", name: "Kontakt", published: true, mcp_servers: [] },
+        currentSpace: { id: "s1", organization: false, personal: true },
+        eneo: { widgets: { create } },
+        isAdmin: true,
+        policy: null,
+        release: null,
+        templates: []
+      } as never
+    });
+
+    await expect
+      .element(page.getByText("widget_admin_blocker_personal_space_unsupported"))
+      .toBeVisible();
+    expect(page.getByRole("button", { name: "widget_admin_create" }).query()).toBeNull();
+    expect(create).not.toHaveBeenCalled();
+  });
+
   test("archiving the widget takes the editor away and offers a new widget", async () => {
     const archive = vi.fn(async () => ({ ...widget, status: "archived", revision: 3 }));
     const update = vi.fn();

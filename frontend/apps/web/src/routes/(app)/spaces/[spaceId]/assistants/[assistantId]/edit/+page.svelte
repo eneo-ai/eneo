@@ -632,7 +632,9 @@
               title={m.widget_admin_title()}
               description={data.currentSpace.organization
                 ? m.widget_admin_blocker_organization_space_unsupported()
-                : m.widget_admin_link_description()}
+                : data.currentSpace.personal
+                  ? m.widget_admin_blocker_personal_space_unsupported()
+                  : m.widget_admin_link_description()}
             >
               <div class="flex h-14 items-center">
                 <!-- eslint-disable-next-line svelte/no-navigation-without-resolve -- localized href built from typed route segments -->

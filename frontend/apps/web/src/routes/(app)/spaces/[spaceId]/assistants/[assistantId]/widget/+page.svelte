@@ -20,6 +20,15 @@
   } = getSpacesManager();
 
   let widget = $state<Widget | null>(untrack(() => data.widget));
+  // Widgets need a space the organisation governs: not the organisation
+  // space (visitors could not read its assistants) and not a personal one.
+  const unsupportedSpace = $derived(
+    data.currentSpace.organization
+      ? m.widget_admin_blocker_organization_space_unsupported()
+      : data.currentSpace.personal
+        ? m.widget_admin_blocker_personal_space_unsupported()
+        : null
+  );
   let name = $state(untrack(() => data.assistant.name));
   // Widgets follow a template's published release, so drafts are not offered.
   const templates = $derived(data.templates.filter((t) => t.published_at != null));
@@ -95,18 +104,14 @@
           <Card.Header>
             <Card.Title
               ><h2>
-                {data.currentSpace.organization
-                  ? m.widget_admin_title()
-                  : m.widget_admin_create_title()}
+                {unsupportedSpace ? m.widget_admin_title() : m.widget_admin_create_title()}
               </h2></Card.Title
             >
             <Card.Description
-              >{data.currentSpace.organization
-                ? m.widget_admin_blocker_organization_space_unsupported()
-                : m.widget_admin_create_description()}</Card.Description
+              >{unsupportedSpace ?? m.widget_admin_create_description()}</Card.Description
             >
           </Card.Header>
-          {#if !data.currentSpace.organization}
+          {#if !unsupportedSpace}
             <Card.Content>
               <form
                 class="flex flex-col gap-6"

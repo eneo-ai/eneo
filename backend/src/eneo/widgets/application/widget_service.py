@@ -164,6 +164,13 @@ class WidgetService:
         # assistant read permission, so a widget there could never answer.
         if space.is_organization():
             blockers.append("organization_space_unsupported")
+        # A personal space belongs to one account, and an anonymous widget on a
+        # public website must not depend on it: nothing governs the assistant
+        # when the person leaves. Personal assistants are meant to be reached
+        # through a widget where the visitor signs in and gets their own
+        # assistant, a separate feature; until it exists, drafts stay drafts.
+        if space.is_personal():
+            blockers.append("personal_space_unsupported")
         return blockers
 
     def _view(
@@ -223,7 +230,13 @@ class WidgetService:
         if space.is_organization():
             raise BadRequestException(
                 "Widgets cannot be created in the organization space."
-                " Choose a shared or personal space."
+                " Choose a shared space."
+            )
+        if space.is_personal():
+            # See _activation_blockers: a public widget needs a space the
+            # organization governs, not one account's own.
+            raise BadRequestException(
+                "Widgets cannot be created in a personal space. Choose a shared space."
             )
         # Raises NotFound when the assistant is not part of this space.
         space.get_assistant(target_id)

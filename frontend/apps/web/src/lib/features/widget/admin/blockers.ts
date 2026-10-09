@@ -13,6 +13,8 @@ export function blockerLabel(code: string): string {
       return m.widget_admin_blocker_target_not_published();
     case "organization_space_unsupported":
       return m.widget_admin_blocker_organization_space_unsupported();
+    case "personal_space_unsupported":
+      return m.widget_admin_blocker_personal_space_unsupported();
     case "archived":
       return m.widget_admin_blocker_archived();
     case "daily_token_budget_exceeds_policy":
