@@ -22,6 +22,7 @@ from eneo.flows.domain.runtime import (
 from eneo.flows.flow_api_error_code import FlowApiErrorCode
 from eneo.flows.flow_run_provenance import (
     FlowResolvedInputEdge,
+    FlowResolvedInputFlowInputSource,
     merge_resolved_input_edges,
 )
 from eneo.flows.flow_template_asset_repo import FlowTemplateAssetRepository
@@ -476,7 +477,12 @@ def _resolve_template_bindings(
                     context, match.group(1).strip()
                 )
                 resolved[placeholder] = _template_binding_text(
-                    placeholder=placeholder, value=raw_value
+                    placeholder=placeholder,
+                    value=raw_value,
+                    from_run_input=any(
+                        isinstance(edge.source, FlowResolvedInputFlowInputSource)
+                        for edge in interpolation.edges
+                    ),
                 )
             else:
                 resolved[placeholder] = interpolation.text
@@ -552,14 +558,23 @@ def _optional_string(value: Any) -> str | None:
     return None
 
 
-def _template_binding_text(*, placeholder: str, value: Any) -> str | None:
+def _template_binding_text(
+    *, placeholder: str, value: Any, from_run_input: bool
+) -> str | None:
     """Text for a binding that consists of one complete expression.
 
     ``None`` stays ``None`` so the renderer can tell "the source produced
     nothing" from a deliberate empty binding; structured values are refused
     because a section or field takes text, never serialized data.
+
+    Run input is the exception: a null or empty-list value there means the
+    reader gave nothing, which is how an optional number, date or select
+    (``None``) and an optional multiselect or list (``[]``) arrive when left
+    empty. It leaves the placeholder empty like an empty text field does.
     """
 
+    if from_run_input and (value is None or value == []):
+        return ""
     if value is None:
         return None
     if isinstance(value, str):

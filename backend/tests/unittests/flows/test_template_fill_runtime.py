@@ -1110,8 +1110,23 @@ async def test_execute_template_fill_step_rejects_checksum_drift() -> None:
 
 
 @pytest.mark.asyncio
-async def test_execute_template_fill_step_allows_explicit_empty_binding() -> None:
+@pytest.mark.parametrize(
+    ("binding", "author_input"),
+    [
+        ("", "Anders Svensson"),
+        # An optional number, date or select left empty is stored as null and an
+        # empty multiselect or list as an empty list. These rows kill the mutant
+        # that drops the run-input branch of _template_binding_text: the step
+        # then stops on "without a value" or "structured data".
+        ("{{author}}", None),
+        ("{{author}}", []),
+    ],
+)
+async def test_execute_template_fill_step_allows_explicit_empty_binding(
+    binding: str, author_input: object
+) -> None:
     run = _run()
+    run.input_payload_json["author"] = author_input
     result = _completed_result(run=run)
     state = _state(result=result)
     template_file_id = uuid4()
@@ -1129,7 +1144,7 @@ async def test_execute_template_fill_step_allows_explicit_empty_binding() -> Non
     )
 
     step = _step()
-    step.output_config["bindings"]["author"] = ""
+    step.output_config["bindings"]["author"] = binding
 
     output = await execute_template_fill_step(
         step=step,
@@ -1500,14 +1515,19 @@ async def test_execute_template_fill_step_supports_datum_system_variable() -> No
 
 
 @pytest.mark.asyncio
-async def test_execute_template_fill_step_rejects_structured_json_binding() -> None:
+# The empty list kills the mutant that leaves a placeholder empty for an empty
+# list from any source, not only from run input.
+@pytest.mark.parametrize("structured", [{"status": "approved", "score": 5}, []])
+async def test_execute_template_fill_step_rejects_structured_json_binding(
+    structured: object,
+) -> None:
     run = _run()
     result = _completed_result(run=run)
     result = result.model_copy(
         update={
             "output_payload_json": {
                 "text": '{"status":"preview"}',
-                "structured": {"status": "approved", "score": 5},
+                "structured": structured,
             }
         },
         deep=True,
