@@ -31,6 +31,7 @@ from eneo.completion_models.infrastructure.completion_service import (
 from eneo.files.file_models import FilePublic
 from eneo.flows.ai_builder import ai_builder_read_access
 from eneo.flows.ai_builder.ai_builder_api_models import (
+    AIBuilderAttachmentWarning,
     ApplyPlanRequest,
     ApplyResultResponse,
     CreateSessionRequest,
@@ -1921,9 +1922,12 @@ class TestGetSessionEndpoint:
         session = _make_session_domain(actor_user_id=container.user.return_value.id)
         service = container.ai_builder_service.return_value
         service.get_session.return_value = session
+        warning = AIBuilderAttachmentWarning(
+            code="attachments_unreadable", file_names=["brief.pdf"]
+        )
         service.get_session_attachment_snapshot.return_value = SimpleNamespace(
             files=[],
-            warnings=["One or more files are unavailable."],
+            warnings=[warning],
         )
 
         result = await get_session(
@@ -1932,7 +1936,16 @@ class TestGetSessionEndpoint:
             container=container,
         )
 
-        assert result.attachment_warnings == ["One or more files are unavailable."]
+        # The reader is told in their own language, so the response carries the
+        # code and the file names, not a sentence.
+        assert result.attachment_warnings == [warning]
+        assert result.model_dump(mode="json")["attachment_warnings"] == [
+            {
+                "code": "attachments_unreadable",
+                "file_names": ["brief.pdf"],
+                "more_count": 0,
+            }
+        ]
 
     @pytest.mark.anyio
     async def test_returns_session_telemetry_summary(self):

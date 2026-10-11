@@ -33,6 +33,7 @@ from eneo.files.file_models import FilePublic
 from eneo.flows.ai_builder.ai_builder_api_models import (
     AIBuilderArchitectureDiagnostic,
     AIBuilderArchitectureTupleDiagnostic,
+    AIBuilderAttachmentWarning,
     AIBuilderClassifierDiagnostic,
     AIBuilderClassifierDiagnosticsResponse,
     AIBuilderConversationMessage,
@@ -783,7 +784,7 @@ def _to_session_response(
     *,
     edit_scope: AIBuilderSessionEditScope | None,
     attachments: list[FilePublic] | None = None,
-    attachment_warnings: list[str] | None = None,
+    attachment_warnings: list[AIBuilderAttachmentWarning] | None = None,
 ) -> SessionResponse:
     telemetry = summarize_session_telemetry(session.conversation)
     return SessionResponse(

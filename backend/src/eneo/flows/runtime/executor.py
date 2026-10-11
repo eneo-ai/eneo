@@ -2071,7 +2071,13 @@ class FlowRunExecutor:
         failed_input_payload: dict[str, Any] | None,
         state: RunExecutionState | None = None,
     ) -> dict[str, Any]:
-        failed_prompt = getattr(typed_exc, "effective_prompt", None)
+        # A step that never calls a completion model sent no prompt, so its
+        # failed attempt records none either, like its completed result.
+        failed_prompt = (
+            getattr(typed_exc, "effective_prompt", None)
+            if step.may_call_completion_provider
+            else ""
+        )
         error_code = _typed_io_failure_code(typed_exc.code)
         rejected_completion = (
             typed_exc.rejected_completion

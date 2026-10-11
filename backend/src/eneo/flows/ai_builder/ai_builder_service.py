@@ -22,7 +22,9 @@ from eneo.completion_models.infrastructure.tenant_model_capabilities import (
 )
 from eneo.files.file_models import File
 from eneo.flows.ai_builder.ai_builder_api_models import (
+    AI_BUILDER_ATTACHMENT_WARNING_MAX_NAMES,
     AI_BUILDER_REASONING_EFFORT_MAX_LENGTH,
+    AIBuilderAttachmentWarning,
     AIBuilderSessionEditScope,
     ApplyResultResponse,
     SessionListItemResponse,
@@ -203,18 +205,17 @@ class PreparedMessageContext:
 @dataclass(frozen=True)
 class SessionAttachmentSnapshot:
     files: list[File]
-    warnings: list[str]
+    warnings: list[AIBuilderAttachmentWarning]
 
 
-def _format_attachment_name_list(names: list[str], *, limit: int = 3) -> str:
+def _unreadable_attachments_warning(names: list[str]) -> AIBuilderAttachmentWarning:
     unique_names = list(dict.fromkeys(name for name in names if name))
-    shown = unique_names[:limit]
-    if not shown:
-        return "unknown files"
-    if len(unique_names) <= limit:
-        return ", ".join(shown)
-    remaining = len(unique_names) - limit
-    return f"{', '.join(shown)}, and {remaining} more"
+    shown = unique_names[:AI_BUILDER_ATTACHMENT_WARNING_MAX_NAMES]
+    return AIBuilderAttachmentWarning(
+        code="attachments_unreadable",
+        file_names=shown,
+        more_count=len(unique_names) - len(shown),
+    )
 
 
 class AIBuilderService:
@@ -813,19 +814,21 @@ class AIBuilderService:
             return SessionAttachmentSnapshot(files=[], warnings=[])
 
         files = await self.file_service.get_files_by_ids(file_ids)
-        warnings: list[str] = []
-        if len({file.id for file in files}) != len(set(file_ids)):
+        warnings: list[AIBuilderAttachmentWarning] = []
+        missing_count = len(set(file_ids)) - len({file.id for file in files})
+        if missing_count > 0:
+            # Files attached earlier that this session can no longer read; their
+            # names went with them, so only the count is known.
             warnings.append(
-                "One or more previously attached reference files are no longer available to this AI Builder session."
+                AIBuilderAttachmentWarning(
+                    code="attachments_unavailable", more_count=missing_count
+                )
             )
         unreadable_files = [
             file.name for file in files if readable_attachment_text(file) is None
         ]
         if unreadable_files:
-            warnings.append(
-                "Attached reference files do not currently contain readable extracted text or transcription for AI Builder planning: "
-                f"{_format_attachment_name_list(unreadable_files)}."
-            )
+            warnings.append(_unreadable_attachments_warning(unreadable_files))
         return SessionAttachmentSnapshot(files=files, warnings=warnings)
 
     async def detach_session_attachment(

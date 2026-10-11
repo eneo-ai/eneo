@@ -4649,6 +4649,64 @@ async def test_render_verbatim_renders_input_text_without_llm_or_rag(user):
 
 
 @pytest.mark.asyncio
+async def test_failed_step_without_a_completion_model_records_no_prompt(user):
+    executor, _, flow_run_repo, _ = _build_executor(user)
+
+    def refuse_render(text, output_type, step_order, title):
+        raise TypedIOValidationException(
+            "Step 1: the document could not be rendered.",
+            code=FlowApiErrorCode.TYPED_IO_VALIDATION_FAILED.value,
+        )
+
+    executor.document_render_service = SimpleNamespace(
+        render_document=refuse_render,
+        render_structured_document=MagicMock(),
+        limits=DocumentRenderLimits(),
+    )
+    run = _run(status=FlowRunStatus.RUNNING, user=user, input_payload={})
+    step = _runtime_step(
+        input_type="text",
+        output_type="pdf",
+        output_mode="render_verbatim",
+    )
+    assistant = _mock_assistant_for_execute_step()
+    assistant.get_prompt_text.return_value = "Never sent to a model"
+    executor._load_assistant = AsyncMock(return_value=assistant)
+    executor._resolve_step_input = AsyncMock(
+        return_value=StepInputValue(
+            text="Final report body",
+            source_text="Final report body",
+            input_source="previous_step",
+        )
+    )
+
+    with pytest.raises(TypedIOValidationException) as exc_info:
+        await executor._execute_step(step=step, run=run, attempt_no=1)
+
+    executor._terminalize_run = AsyncMock()
+    claimed = _completed_step_result(
+        run_id=run.id,
+        flow_id=run.flow_id,
+        tenant_id=run.tenant_id,
+        step_order=1,
+        text="",
+    )
+    await executor._handle_typed_step_failure(
+        run_id=run.id,
+        tenant_id=run.tenant_id,
+        step=step,
+        attempt_no=1,
+        claimed=claimed,
+        typed_exc=exc_info.value,
+        failed_input_payload=None,
+    )
+
+    failed = flow_run_repo.save_step_result.await_args.args[1]
+    assert failed.status == FlowStepResultStatus.FAILED
+    assert failed.effective_prompt == ""
+
+
+@pytest.mark.asyncio
 async def test_json_input_contract_rejects_unparseable_json(user):
     executor, _, _, _ = _build_executor(user)
     run = _run(

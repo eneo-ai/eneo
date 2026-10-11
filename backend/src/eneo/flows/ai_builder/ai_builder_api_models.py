@@ -297,6 +297,35 @@ class AIBuilderRunFailureLaunchResponse(BaseModel):
     error_code: str
 
 
+# How many file names one attachment warning carries; the rest are counted.
+AI_BUILDER_ATTACHMENT_WARNING_MAX_NAMES = 5
+
+
+class AIBuilderAttachmentWarning(BaseModel):
+    """Why attached reference material does not reach the AI Builder.
+
+    A code and the facts, never a sentence: the client says it in the reader's
+    language. `attachments_unavailable` means files attached earlier can no
+    longer be read by this session (their names are gone with them);
+    `attachments_unreadable` names files that hold no extracted text or
+    transcription to plan from.
+    """
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    code: Literal["attachments_unavailable", "attachments_unreadable"]
+    file_names: list[str] = Field(
+        default_factory=list,
+        max_length=AI_BUILDER_ATTACHMENT_WARNING_MAX_NAMES,
+        description="The affected files' names, at most five; empty when unknown.",
+    )
+    more_count: int = Field(
+        default=0,
+        ge=0,
+        description="Affected files beyond those named in `file_names`.",
+    )
+
+
 class AIBuilderConversationMessage(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
@@ -839,7 +868,9 @@ class SessionResponse(BaseModel):
     attachments: list[FilePublic] = Field(
         default_factory=lambda: cast(list[FilePublic], [])
     )
-    attachment_warnings: list[str] = Field(default_factory=list)
+    attachment_warnings: list[AIBuilderAttachmentWarning] = Field(
+        default_factory=lambda: cast(list[AIBuilderAttachmentWarning], [])
+    )
     edit_scope: AIBuilderSessionEditScope | None = Field(
         default=None,
         description=(

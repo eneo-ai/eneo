@@ -1041,6 +1041,27 @@ def test_investigation_message_names_every_selected_kind_and_its_steps():
     assert "steg 1, 2 och 3" in investigation_message(
         [_focus("step_not_useful", [1, 2, 3, 3])]
     )
+    # The screen previews these sentences word for word, and it says "resultat"
+    # ("result"), the word a reader meets everywhere else, not "utdata".
+    assert (
+        investigation_message([_focus("instruction_outcome_drift", [2])])
+        == "Undersök att resultatet kan avvika från instruktionen i steg 2 "
+        "utifrån körningarna."
+    )
+    assert (
+        investigation_message([_focus("step_not_useful", [2])])
+        == "Undersök att ett stegs resultat kanske inte används i steg 2 "
+        "utifrån körningarna."
+    )
+    assert (
+        investigation_message([_focus("instruction_outcome_drift", [2])], "en")
+        == "Investigate a result that may drift from the instruction in step 2 "
+        "based on the runs."
+    )
+    assert (
+        investigation_message([_focus("step_not_useful", [2])], "en")
+        == "Investigate a step's result that may go unused in step 2 based on the runs."
+    )
     # Several suggestions are one turn, so they are one sentence.
     assert investigation_message(
         [_focus("duplicated_work", [1, 2]), _focus("missing_check", [3])]
@@ -1442,11 +1463,14 @@ def test_a_run_failure_handoff_is_a_server_written_command():
     reference = AIBuilderRunFailureContext(
         flow_version=4, definition_checksum="sum", run_id=uuid4(), step_order=5
     )
+    # One sentence for every kind of failure: the reference names no error, so
+    # a sentence about one kind (a format, a cut-off answer) would be wrong for
+    # the others. The screen shows these same words.
     assert repair_message(5) == (
-        "Åtgärda felet i steg 5 så att modellens svar uppfyller stegets utdatakontrakt."
+        "Åtgärda felet i steg 5 utifrån den misslyckade körningen."
     )
     assert repair_message(5, "en") == (
-        "Fix the error in step 5 so that the model's answer meets the step's output contract."
+        "Fix the error in step 5 based on the failed run."
     )
     first = SendMessageRequest(
         client_turn_id=uuid4(), message="klientens text", review_context=reference

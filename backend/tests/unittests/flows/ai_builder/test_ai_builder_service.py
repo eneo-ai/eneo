@@ -4008,7 +4008,12 @@ async def test_get_session_attachment_snapshot_returns_warning_when_some_files_m
     snapshot = await service.get_session_attachment_snapshot(session_id=uuid4())
 
     assert snapshot.files == [available_file]
-    assert snapshot.warnings
+    # A code, not a sentence: the screen words it in the reader's language. A
+    # file that is gone has no name left to give.
+    assert [
+        (warning.code, warning.file_names, warning.more_count)
+        for warning in snapshot.warnings
+    ] == [("attachments_unavailable", [], 1)]
 
 
 @pytest.mark.asyncio
@@ -4042,8 +4047,9 @@ async def test_get_session_attachment_snapshot_warns_when_attached_file_has_no_r
     snapshot = await service.get_session_attachment_snapshot(session_id=uuid4())
 
     assert snapshot.files == [unreadable_file]
-    assert any("readable" in warning.lower() for warning in snapshot.warnings)
-    assert any(unreadable_file.name in warning for warning in snapshot.warnings)
+    assert [(warning.code, warning.file_names) for warning in snapshot.warnings] == [
+        ("attachments_unreadable", [unreadable_file.name])
+    ]
 
 
 class TestSharedActorSessionIsolation:

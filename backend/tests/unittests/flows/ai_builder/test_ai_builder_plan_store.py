@@ -114,6 +114,25 @@ def test_build_lint_warnings_hides_internal_info_level_quality_lints() -> None:
     ]
 
 
+def test_build_lint_warnings_keeps_the_field_a_warning_is_about() -> None:
+    # The screen names the field ("Fältet Ärende togs bort …"); without the
+    # name it can only say that some field was removed.
+    validation = SpecValidationResult()
+    validation.warnings.append(
+        LintWarning(
+            step_ref="step_a",
+            code="runtime_shadow_form_field_dropped",
+            message="A run-time field shadowed the primary input and was dropped.",
+            severity=LintSeverity.WARNING,
+            field_name="Ärende",
+        )
+    )
+
+    [warning] = build_lint_warnings(validation)
+
+    assert warning.field_name == "Ärende"
+
+
 def test_build_flow_builder_proposal_promotes_full_compiled_candidate() -> None:
     validation = SpecValidationResult()
     validation.add_warning(

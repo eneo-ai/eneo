@@ -531,6 +531,44 @@ async def test_publish_flow_snapshots_the_assistants_it_validated(user):
 
 
 @pytest.mark.asyncio
+async def test_publish_flow_refuses_a_flow_without_steps_with_a_code_the_editor_reads(
+    user,
+):
+    flow_repo = AsyncMock()
+    version_repo = AsyncMock()
+    service = _service(user=user, flow_repo=flow_repo, version_repo=version_repo)
+    flow = Flow(
+        id=uuid4(),
+        tenant_id=user.tenant_id,
+        space_id=uuid4(),
+        name="Empty Flow",
+        description=None,
+        created_by_user_id=user.id,
+        owner_user_id=user.id,
+        published_version=None,
+        metadata_json=None,
+        data_retention_days=None,
+        draft_revision=1,
+        created_at=datetime.now(timezone.utc),
+        updated_at=datetime.now(timezone.utc),
+        steps=[],
+    )
+    flow_repo.get.return_value = flow
+
+    with pytest.raises(BadRequestException) as caught:
+        await service.publish_flow(flow_id=flow.id)
+
+    # The editor routes a refusal into its banner by context.issue_code; without
+    # it the reader gets a generic toast instead of what to do.
+    assert caught.value.code == FlowGraphIssueCode.FLOW_HAS_NO_STEPS.value
+    assert caught.value.context == {
+        "issue_code": FlowGraphIssueCode.FLOW_HAS_NO_STEPS.value
+    }
+    version_repo.create.assert_not_awaited()
+    flow_repo.update.assert_not_awaited()
+
+
+@pytest.mark.asyncio
 async def test_publish_flow_refuses_section_step_reading_json_step_text(user):
     flow_repo = AsyncMock()
     version_repo = AsyncMock()

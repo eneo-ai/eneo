@@ -28,7 +28,10 @@ from eneo.flows.domain.flow import (
 from eneo.flows.domain.flow_invariant_exceptions import (
     FlowPublishedDefinitionInvalidError,
 )
-from eneo.flows.domain.flow_step_validation import FlowStepValidationError
+from eneo.flows.domain.flow_step_validation import (
+    FlowGraphIssueCode,
+    FlowStepValidationError,
+)
 from eneo.flows.domain.step_config import clean_inactive_step_config
 from eneo.flows.flow_api_error_code import FlowApiErrorCode
 from eneo.flows.flow_authoring_transcription import (
@@ -682,8 +685,11 @@ class FlowService:
             prompt_templates=prompt_templates,
         )
         if not flow.steps:
+            code = FlowGraphIssueCode.FLOW_HAS_NO_STEPS.value
             raise BadRequestException(
-                "Flow must contain at least one step before publish."
+                "Flow must contain at least one step before publish.",
+                code=code,
+                context={"issue_code": code},
             )
 
     def _validate_steps(

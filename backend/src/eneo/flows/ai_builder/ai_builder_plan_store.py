@@ -41,16 +41,17 @@ def build_lint_warnings(
     *,
     informational_warning_keys: frozenset[tuple[str, str]] = frozenset(),
 ) -> list[LintWarning]:
+    # A copy keeps everything the warning says, the field it is about included;
+    # only the severity may be lowered here.
     return [
-        LintWarning(
-            step_ref=warning.step_ref,
-            code=warning.code,
-            message=warning.message,
-            severity=(
-                LintSeverity.INFO
-                if (warning.step_ref, warning.code) in informational_warning_keys
-                else warning.severity
-            ),
+        warning.model_copy(
+            update={
+                "severity": (
+                    LintSeverity.INFO
+                    if (warning.step_ref, warning.code) in informational_warning_keys
+                    else warning.severity
+                )
+            }
         )
         for warning in validation.warnings
         if _is_user_visible_lint_warning(warning)

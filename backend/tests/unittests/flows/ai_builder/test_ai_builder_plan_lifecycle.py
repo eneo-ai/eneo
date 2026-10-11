@@ -648,8 +648,10 @@ async def test_a_modified_step_that_names_no_field_is_a_plan_to_ask_for_again(
         derive(session=session, plan=plan)
 
     # Not a conflict: refreshing loads the same plan, so the person is told to
-    # ask again, in the message the apply card shows.
+    # ask again. The screen words it from the reason, since retrying can never
+    # succeed and a bare bad request only lets it say "try again".
     assert refused.value.code == AIBuilderErrorCode.BAD_REQUEST
+    assert refused.value.context["reason"] == "plan_outdated"
     assert "Ask the Builder again for the change." in str(refused.value)
 
 

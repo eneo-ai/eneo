@@ -441,14 +441,14 @@ _RENDERED_WITH_TEXT: frozenset[str] = frozenset(
 _RUN_STATUS_SV: dict[str, str] = {"completed": "lyckad", "failed": "misslyckad"}
 _SUGGESTION_KIND_LABELS_SV: dict[str, str] = {
     "duplicated_work": "möjligt dubbelarbete",
-    "instruction_outcome_drift": "att utdata kan avvika från instruktionen",
-    "step_not_useful": "att ett stegs utdata kanske inte används",
+    "instruction_outcome_drift": "att resultatet kan avvika från instruktionen",
+    "step_not_useful": "att ett stegs resultat kanske inte används",
     "missing_check": "en kontroll som kan saknas",
 }
 _SUGGESTION_KIND_LABELS_EN: dict[str, str] = {
     "duplicated_work": "possible duplicated work",
-    "instruction_outcome_drift": "output that may drift from the instruction",
-    "step_not_useful": "a step's output that may go unused",
+    "instruction_outcome_drift": "a result that may drift from the instruction",
+    "step_not_useful": "a step's result that may go unused",
     "missing_check": "a check that may be missing",
 }
 
@@ -506,20 +506,16 @@ def repair_message(step_order: int, language: Literal["sv", "en"] = "sv") -> str
     """The user message the server writes for the initial failure handoff.
 
     The failed step is named by its number only: the reference carries no
-    name, and the run's error, prompt and answer reach the planner as
-    evidence, never as conversation text. The screen shows the same
+    name and no error, and the run's error, prompt and answer reach the
+    planner as evidence, never as conversation text. One sentence therefore
+    covers every kind of failure; a sentence about one kind (a format, a
+    cut-off answer) would be wrong for the others. The screen shows the same
     sentence, so what the user saw sent is what the conversation retains.
     The user's later turns are their own words.
     """
     if language == "en":
-        return (
-            f"Fix the error in step {step_order} so that the model's answer "
-            "meets the step's output contract."
-        )
-    return (
-        f"Åtgärda felet i steg {step_order} så att modellens svar uppfyller "
-        "stegets utdatakontrakt."
-    )
+        return f"Fix the error in step {step_order} based on the failed run."
+    return f"Åtgärda felet i steg {step_order} utifrån den misslyckade körningen."
 
 
 def require_same_definition(

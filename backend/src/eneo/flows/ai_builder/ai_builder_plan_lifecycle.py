@@ -96,6 +96,7 @@ def raise_persisted_flow_mcp_plan_error(exc: ValidationError) -> None:
         raise AIBuilderBadRequestException(
             "The stored AI Builder plan contains unsupported Flow MCP configuration. Generate a new plan without MCP.",
             code=AIBuilderErrorCode.BAD_REQUEST,
+            context={"reason": "plan_mcp_unsupported"},
         ) from exc
 
 
@@ -172,7 +173,12 @@ def _modified_step_changes_for_apply(
             "This plan was made before an update of the AI Builder and can no "
             "longer be applied. Ask the Builder again for the change.",
             code=AIBuilderErrorCode.BAD_REQUEST,
-            context={"plan_id": str(plan.id), "session_id": str(session.id)},
+            # The reason lets the screen say "ask again" instead of "try again".
+            context={
+                "plan_id": str(plan.id),
+                "session_id": str(session.id),
+                "reason": "plan_outdated",
+            },
         )
     return modified_changes
 
