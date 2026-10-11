@@ -1,20 +1,12 @@
 import { cleanup, render, screen, within } from "@testing-library/svelte";
 import type { FlowStep } from "@eneo/eneo-js";
-import { afterAll, afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it } from "vitest";
 import { m } from "$lib/paraglide/messages";
 
 import FlowStepRequestPreview from "./FlowStepRequestPreview.svelte";
 
 afterEach(() => {
   cleanup();
-});
-
-// Bits UI releases the dialog's body scroll lock 24 ms after it closes
-// (body-scroll-lock.svelte.js). Waiting past that before the file ends lets
-// the timer fire here instead of after jsdom is gone, where it throws
-// "document is not defined" into whichever file runs next.
-afterAll(async () => {
-  await new Promise((resolve) => setTimeout(resolve, 50));
 });
 
 const step = {
