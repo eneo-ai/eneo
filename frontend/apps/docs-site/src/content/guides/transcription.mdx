@@ -27,6 +27,8 @@ Before you start, make sure the provider's endpoint is reachable from the Eneo b
 2. Give each space that needs the model access to it. In the space's **Settings**, under **Advanced Settings**, switch the model on in **Transcription models**.
 3. Check the result. Open a flow draft in the space, go to its **Transcription** stage and turn transcription on. The model is in the **Model** list.
 
+A flow stores the model it transcribes with, and Eneo never picks one on its own. To spare flow authors the choice, mark one transcription model as the organisation's default: open the model's **Edit** dialog and tick **Default** (**standard**). Flows that the AI Builder creates and flows that are imported then get that model filled in, in spaces that can use it. With no default marked, the author chooses the model in the flow's **Transcription** stage, and the flow cannot be published until one is chosen.
+
 ## Set up live transcription
 
 An app that records audio for a flow can show the text while someone speaks. When the recording ends, the app uploads it to the flow run as usual. If the live session heard the whole recording, the app can hand its transcript to the run, and the run uses that text without transcribing the recording again. In every other case, and when Eneo cannot match the live transcript to the uploaded recording, the flow's transcription model transcribes the recording. To build the app side, see [Show live text while recording](/guides/flows/integrating-flows#show-live-text-while-recording).

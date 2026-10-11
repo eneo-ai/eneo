@@ -144,10 +144,11 @@ describe("flowPackageTransfer", () => {
     });
   });
 
-  it("blocks import when an audio package has no target transcription model", () => {
+  it("blocks import when an audio package has no transcription model to choose in the space", () => {
     const plan = flowPackageImportPlan({
       can_install_as_draft: false,
       can_publish_after_import: false,
+      transcription_model_available: false,
       target_state: {
         audio_transcription_required: true,
         default_transcription_model_id: null
@@ -162,7 +163,33 @@ describe("flowPackageTransfer", () => {
     expect(readiness).toMatchObject({
       canImport: false,
       canPublishAfterImport: false,
-      requiresTranscriptionModel: true
+      requiresTranscriptionModel: true,
+      transcriptionModelToChoose: false
+    });
+  });
+
+  it("imports an audio package without a model when the space has one but no default is marked", () => {
+    // Nothing is chosen for the flow: its author picks the model before publishing.
+    const plan = flowPackageImportPlan({
+      can_install_as_draft: true,
+      can_publish_after_import: false,
+      transcription_model_available: true,
+      target_state: {
+        audio_transcription_required: true,
+        default_transcription_model_id: null
+      }
+    });
+
+    const readiness = getFlowPackageImportReadiness(
+      plan,
+      createInitialFlowPackageImportSelections(plan)
+    );
+
+    expect(readiness).toMatchObject({
+      canImport: true,
+      canPublishAfterImport: false,
+      requiresTranscriptionModel: false,
+      transcriptionModelToChoose: true
     });
   });
 
@@ -478,6 +505,7 @@ function flowPackageImportPlan(
     },
     can_publish_after_import: true,
     can_install_as_draft: true,
+    transcription_model_available: true,
     dependency_resolutions: [
       {
         kind: "model",

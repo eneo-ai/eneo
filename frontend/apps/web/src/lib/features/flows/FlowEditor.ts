@@ -329,6 +329,13 @@ function createFlowEditor(data: FlowEditorInitData) {
     });
   }
 
+  // The server refuses to publish an audio flow without a transcription model
+  // but saves the draft, so the editor says it: the code is the whole message.
+  function setTranscriptionModelMissing(missing: boolean) {
+    const code = "flow_audio_transcription_model_required";
+    setFlowValidationError(code, missing ? code : null);
+  }
+
   function replaceFlowValidationErrors(prefix: string, entries: Map<string, string[]>) {
     validationErrors.update((current) => {
       const next = new Map(current);
@@ -1166,6 +1173,7 @@ function createFlowEditor(data: FlowEditorInitData) {
     moveStepAtIndex,
     replaceFormSchemaFields,
     setTranscriptionEnabled,
+    setTranscriptionModelMissing,
     setEvidenceExportAllowed,
     setWizardMetadata,
     applyStepsWithSafeOrderRemap,

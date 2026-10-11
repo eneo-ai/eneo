@@ -1,4 +1,5 @@
 import type { Flow } from "@eneo/eneo-js";
+import { stepsTakeAudio } from "./flowRuntimeInputConfig";
 
 export type FlowWizardMetadata = {
   transcription_enabled?: boolean;
@@ -17,6 +18,32 @@ type SpeakerServiceLink = { meets_security_classification: boolean; available: b
 /** The granted services new work in the space may use (the backend's rule). */
 export function usableSpeakerServices<T extends SpeakerServiceLink>(services: T[]): T[] {
   return services.filter((service) => service.meets_security_classification && service.available);
+}
+
+/**
+ * The id a `{ id }` reference in the wizard metadata names. A blank id reads
+ * as no choice, as the backend reads it (parse_transcription_config).
+ */
+export function wizardReferenceId(reference: { id?: unknown } | null | undefined): string | null {
+  const id = reference?.id;
+  return typeof id === "string" && id.trim() !== "" ? id : null;
+}
+
+/**
+ * A draft that transcribes audio and whose author has chosen no transcription
+ * model. The server saves such a draft and refuses to publish it; nothing is
+ * chosen for the flow.
+ */
+export function transcriptionModelNotChosen(args: {
+  wizard: FlowWizardMetadata;
+  transcriptionEnabled: boolean;
+  steps: Parameters<typeof stepsTakeAudio>[0];
+}): boolean {
+  return (
+    args.transcriptionEnabled &&
+    wizardReferenceId(args.wizard.transcription_model) === null &&
+    stepsTakeAudio(args.steps)
+  );
 }
 
 export type FlowSaveStatus = "saved" | "saving" | "unsaved";

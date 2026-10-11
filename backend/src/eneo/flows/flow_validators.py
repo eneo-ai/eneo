@@ -617,6 +617,7 @@ def collect_step_graph_issues(
         validate=lambda: _validate_audio_transcription_settings(
             steps=sorted_steps,
             metadata_json=metadata_json,
+            require_model=require_complete_template_fill_config,
         ),
     )
     return issues
@@ -1546,7 +1547,10 @@ def _validate_audio_transcription_settings(
     *,
     steps: Sequence[FlowStepValidationView],
     metadata_json: FlowPersistedJsonObject | None,
+    require_model: bool,
 ) -> None:
+    """A draft that takes audio may be saved before its author has chosen the
+    transcription model; publishing requires the choice (`require_model`)."""
     try:
         transcription_required = requires_audio_transcription(steps)
     except BadRequestException:
@@ -1565,7 +1569,7 @@ def _validate_audio_transcription_settings(
             "Transcription must be enabled when using audio input steps.",
             code=FLOW_AUDIO_TRANSCRIPTION_REQUIRED,
         )
-    if config.model_id is None:
+    if require_model and config.model_id is None:
         raise BadRequestException(
             "A transcription model must be selected when using audio input steps.",
             code=FLOW_AUDIO_TRANSCRIPTION_MODEL_REQUIRED,

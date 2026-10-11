@@ -34,6 +34,7 @@ from eneo.flow_packages.domain.flow_package_import_plan import (
 )
 from eneo.flow_packages.domain.flow_package_requirements import (
     FlowPackageKnowledgeRequirement,
+    FlowPackageModelKind,
     FlowPackageModelRequirement,
     FlowPackageRequirementEntry,
     FlowPackageRequirementKind,
@@ -136,7 +137,12 @@ def build_flow_package_import_plan(
 
     The speaker identification service is not part of the import review: the
     installed draft gets the organisation's default at installation, like any
-    new draft."""
+    new draft.
+
+    `default_transcription_model_id` is the default an administrator marked,
+    when the target space can use it. A package that takes audio is installed
+    without a model when there is none, and cannot be published until its
+    author chooses one."""
     envelope.validated_resource_contract()
     audio_transcription_required = requires_audio_transcription(envelope.spec.steps)
     effective_transcription_model_id = (
@@ -168,6 +174,11 @@ def build_flow_package_import_plan(
         target_state=FlowPackageImportTargetState(
             audio_transcription_required=audio_transcription_required,
             default_transcription_model_id=effective_transcription_model_id,
+        ),
+        # The candidates are the models the space can use.
+        transcription_model_available=any(
+            candidate.model_kind is FlowPackageModelKind.TRANSCRIPTION_MODEL
+            for candidate in candidates.models
         ),
         dependency_resolutions=dependency_resolutions,
     )

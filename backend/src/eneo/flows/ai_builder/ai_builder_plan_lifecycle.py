@@ -62,11 +62,10 @@ from eneo.flows.application.flow_draft_materialization import (
 )
 from eneo.flows.flow_authoring_spec import (
     FlowDraftSpecCore,
-    InputSource,
-    InputType,
     OutputMode,
     has_flow_mcp_unsupported_error,
 )
+from eneo.flows.flow_authoring_transcription import requires_audio_transcription
 from eneo.flows.flow_resource_bindings import LocalResourceBinding, LocalResourceKind
 from eneo.flows.flow_template_asset_service import (
     AttachedTemplateFileUnavailableError,
@@ -75,6 +74,7 @@ from eneo.flows.flow_template_asset_service import (
 if TYPE_CHECKING:
     from eneo.flows.application.flow_service import FlowService
     from eneo.flows.flow_template_asset_service import FlowTemplateAssetService
+    from eneo.spaces.space import Space
     from eneo.spaces.space_service import SpaceService
     from eneo.users.user import UserInDB
 
@@ -618,13 +618,15 @@ class AIBuilderPlanLifecycle:
             session=session,
             spec=plan.spec,
         )
-        default_transcription_model_id = (
-            await self._resolve_default_transcription_model_id(session.space_id)
-        )
+        space = await self.space_service.get_space(session.space_id)
         self._require_create_audio_transcription_model(
-            session=session,
-            plan=plan,
-            default_transcription_model_id=default_transcription_model_id,
+            session=session, plan=plan, space=space
+        )
+        # Only a default an administrator marked is filled in; with none the
+        # draft is written without a model and its author chooses.
+        marked_default = space.get_marked_default_transcription_model()
+        default_transcription_model_id = (
+            None if marked_default is None else marked_default.id
         )
         spec = plan.spec
         removed_existing_step_refs = _removed_existing_step_refs_for_apply(
@@ -897,14 +899,6 @@ class AIBuilderPlanLifecycle:
             terminal_plan_step_ref=template_steps[0].plan_step_ref,
         )
 
-    async def _resolve_default_transcription_model_id(
-        self,
-        space_id: UUID,
-    ) -> UUID | None:
-        space = await self.space_service.get_space(space_id)
-        model = space.get_default_transcription_model()
-        return None if model is None else model.id
-
     async def _plan_resource_bindings_for_apply(
         self,
         *,
@@ -986,17 +980,15 @@ class AIBuilderPlanLifecycle:
         *,
         session: BuilderSession,
         plan: BuilderPlan,
-        default_transcription_model_id: UUID | None,
+        space: Space,
     ) -> None:
+        """Refuse to create a flow that takes audio in a space with no
+        transcription model its author could choose."""
         if session.target_kind != TargetKind.CREATE:
             return
-        if default_transcription_model_id is not None:
+        if not requires_audio_transcription(plan.spec.steps):
             return
-        if not any(
-            step.input_source == InputSource.FLOW_INPUT
-            and step.input_type == InputType.AUDIO
-            for step in plan.spec.steps
-        ):
+        if any(model.can_access for model in space.transcription_models):
             return
         raise AIBuilderBadRequestException(
             "A transcription model must be selected when using audio input steps.",

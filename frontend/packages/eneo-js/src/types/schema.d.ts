@@ -19306,6 +19306,11 @@ export interface components {
       /** Payload Schema */
       payload_schema: string;
       target_state: components["schemas"]["FlowPackageImportTargetState"];
+      /**
+       * Transcription Model Available
+       * @description Whether the target space has a transcription model it can use. A package that takes audio cannot be installed where it has none.
+       */
+      transcription_model_available: boolean;
     };
     /**
      * FlowPackageImportPlanStatus
@@ -19473,12 +19478,12 @@ export interface components {
     FlowPackageImportTargetState: {
       /**
        * Audio Transcription Required
-       * @description Whether the portable package needs the target space's default transcription model.
+       * @description Whether the package takes audio, so the installed flow needs a transcription model before it can be published.
        */
       audio_transcription_required: boolean;
       /**
        * Default Transcription Model Id
-       * @description Target-space transcription default captured by the plan, or null when unavailable or not applicable.
+       * @description The organisation's default transcription model, when one is marked and the target space can use it: the installed draft is given it. Null when the package takes no audio or no default is marked; a draft that takes audio is then installed without a model, and its author chooses one before publishing.
        */
       default_transcription_model_id: string | null;
     };

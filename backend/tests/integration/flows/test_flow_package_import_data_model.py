@@ -262,6 +262,7 @@ def _import_plan() -> FlowPackageImportPlan:
             audio_transcription_required=False,
             default_transcription_model_id=None,
         ),
+        transcription_model_available=False,
     )
 
 
@@ -368,7 +369,7 @@ class _FakeSpaceActor:
 
 
 class _FakeTargetSpace:
-    def get_default_transcription_model(self) -> None:
+    def get_marked_default_transcription_model(self) -> None:
         return None
 
 

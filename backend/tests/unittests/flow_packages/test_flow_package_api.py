@@ -1117,7 +1117,86 @@ async def test_import_flow_package_rejects_unsupported_form_field_type_without_i
 
 
 @pytest.mark.anyio
-async def test_import_flow_package_reports_missing_audio_default_before_install(
+async def test_import_flow_package_installs_audio_package_without_a_model_when_no_default_is_marked(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    target_space_id = UUID("aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa")
+    flow_id = UUID("88888888-8888-4888-8888-888888888888")
+    installed_with: list[UUID | None] = []
+    # The space can use a transcription model that nobody marked as default.
+    _patch_import_access(
+        monkeypatch,
+        target_space_id=target_space_id,
+        space=_FakeSpace(
+            default_transcription_model_id=None,
+            unmarked_transcription_model_ids=(uuid4(),),
+        ),
+    )
+    package_bytes = _package_bytes(spec=_audio_spec())
+    content_checksum = reader.read_flow_package(package_bytes).content_checksum
+
+    class FakeInstallService:
+        async def install_as_draft(
+            self, *, command: ResolvedFlowPackageInstallCommand, **kwargs: object
+        ) -> FlowPackageInstallResult:
+            installed_with.append(command.default_transcription_model_id)
+            assert command.import_plan.can_install_as_draft is True
+            assert command.import_plan.can_publish_after_import is False
+            return FlowPackageInstallResult(
+                flow_id=flow_id,
+                flow_name="Audio Demo",
+                package_id="se.demo.flow",
+                package_version="1.0.0",
+                content_checksum=content_checksum,
+                steps_created=1,
+                resource_bindings_count=0,
+            )
+
+    class FakeImportRepo:
+        def __init__(self, session: object) -> None:
+            pass
+
+        async def acquire_space_import_lock(self, **kwargs: object) -> None:
+            return None
+
+        async def get_successful_retry(self, **kwargs: object) -> None:
+            return None
+
+        async def create_draft_created(self, **kwargs: object) -> UUID:
+            return UUID("99999999-9999-4999-8999-999999999999")
+
+    monkeypatch.setattr(
+        flow_package_router, "FlowPackageInstallService", FakeInstallService
+    )
+    monkeypatch.setattr(
+        flow_package_router, "FlowPackageImportRepository", FakeImportRepo
+    )
+
+    response = await flow_package_router.import_flow_package_as_draft(
+        id=target_space_id,
+        import_request=FlowPackageImportRequest(
+            package_base64=base64.b64encode(package_bytes).decode("ascii"),
+            expected_content_checksum=content_checksum,
+            expected_target_state=FlowPackageImportTargetState(
+                audio_transcription_required=True,
+                default_transcription_model_id=None,
+            ),
+            selected_bindings=[],
+        ),
+        request=_request(),
+        container=cast(
+            Container,
+            _FakeContainer(audit_service=_FakeAuditService(), session=_FakeSession()),
+        ),
+    )
+
+    assert not isinstance(response, flow_package_router.JSONResponse)
+    assert response.flow_id == flow_id
+    assert installed_with == [None]
+
+
+@pytest.mark.anyio
+async def test_import_flow_package_refuses_audio_package_in_a_space_without_a_transcription_model(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     target_space_id = UUID("aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa")
@@ -1778,10 +1857,23 @@ class _FakeTranscriptionModel:
 
 
 class _FakeSpace:
-    def __init__(self, *, default_transcription_model_id: UUID | None) -> None:
-        self._default_transcription_model_id = default_transcription_model_id
+    """A space whose usable transcription models are its marked default, when
+    it has one, and `unmarked_transcription_model_ids`."""
 
-    def get_default_transcription_model(self) -> _FakeTranscriptionModel | None:
+    def __init__(
+        self,
+        *,
+        default_transcription_model_id: UUID | None,
+        unmarked_transcription_model_ids: tuple[UUID, ...] = (),
+    ) -> None:
+        self._default_transcription_model_id = default_transcription_model_id
+        self.transcription_model_ids = (
+            ()
+            if default_transcription_model_id is None
+            else (default_transcription_model_id,)
+        ) + unmarked_transcription_model_ids
+
+    def get_marked_default_transcription_model(self) -> _FakeTranscriptionModel | None:
         if self._default_transcription_model_id is None:
             return None
         return _FakeTranscriptionModel(self._default_transcription_model_id)
@@ -1885,7 +1977,21 @@ def _patch_import_access(
         )
 
     def fake_candidate_loader(space: Space) -> FlowPackageImportPlannerCandidates:
-        return FlowPackageImportPlannerCandidates(models=[_model_candidate()])
+        return FlowPackageImportPlannerCandidates(
+            models=[
+                _model_candidate(),
+                *(
+                    FlowPackageModelCandidate(
+                        local_kind=LocalResourceKind.TRANSCRIPTION_MODEL,
+                        local_id=model_id,
+                        label="Transcription",
+                        model_kind=FlowPackageModelKind.TRANSCRIPTION_MODEL,
+                        identity=FlowPackageModelIdentity(provider="local", model="kb"),
+                    )
+                    for model_id in cast(_FakeSpace, space).transcription_model_ids
+                ),
+            ]
+        )
 
     monkeypatch.setattr(
         flow_package_router.flow_access_context,

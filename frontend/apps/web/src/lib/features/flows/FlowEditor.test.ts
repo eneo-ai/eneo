@@ -1453,6 +1453,18 @@ describe("FlowEditor server validation routing", () => {
     }
   });
 
+  it("reports a missing transcription model as an issue of the draft, and clears it", () => {
+    const editor = createFlowEditor({ flow: makeFlow(), eneo: makeEneo() });
+    const key = "flow:flow_audio_transcription_model_required";
+
+    editor.setTranscriptionModelMissing(true);
+    // The draft saves without a model, so the editor is what says it cannot be published.
+    expect([...get(editor.state.validationErrors).keys()]).toEqual([key]);
+
+    editor.setTranscriptionModelMissing(false);
+    expect(get(editor.state.validationErrors).size).toBe(0);
+  });
+
   it("shows the speaker service the server filled in, and sends it back unchanged", async () => {
     const filled = { id: "service-default" };
     const flow = makeFlow({

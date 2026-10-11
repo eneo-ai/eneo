@@ -30,7 +30,10 @@ export type FlowPackageImportBlockingReason = {
 export type FlowPackageImportReadiness = {
   canImport: boolean;
   canPublishAfterImport: boolean;
+  /** The space has no transcription model the flow's author could choose: nothing can be imported. */
   requiresTranscriptionModel: boolean;
+  /** Imported without a transcription model: its author chooses one before publishing. */
+  transcriptionModelToChoose: boolean;
   blockingReasons: FlowPackageImportBlockingReason[];
   selectedRequiredCount: number;
   totalRequiredCount: number;
@@ -216,8 +219,14 @@ export function getFlowPackageImportReadiness(
   let totalRequiredCount = 0;
   let unresolvedRequiredCount = 0;
   let unsupportedTemplateAssetCount = 0;
-  const requiresTranscriptionModel =
-    plan.target_state.audio_transcription_required &&
+  // A model is filled in only when the organisation marked a default the
+  // space can use. Without one the draft is imported and its author
+  // chooses; only a space with no usable model at all blocks the import.
+  const takesAudio = plan.target_state.audio_transcription_required;
+  const requiresTranscriptionModel = takesAudio && !plan.transcription_model_available;
+  const transcriptionModelToChoose =
+    takesAudio &&
+    plan.transcription_model_available &&
     plan.target_state.default_transcription_model_id === null;
 
   for (const resolution of plan.dependency_resolutions ?? []) {
@@ -305,6 +314,7 @@ export function getFlowPackageImportReadiness(
     canImport,
     canPublishAfterImport: canImport && plan.can_publish_after_import,
     requiresTranscriptionModel,
+    transcriptionModelToChoose,
     blockingReasons,
     selectedRequiredCount,
     totalRequiredCount,

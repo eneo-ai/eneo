@@ -912,6 +912,34 @@ def _candidates(
     )
 
 
+# The target space of an audio package: no transcription model, one nobody
+# marked as the organisation's default, or the marked default.
+_TARGET_TRANSCRIPTION = pytest.mark.parametrize(
+    "target", ["no_model", "unmarked_model", "marked_default"]
+)
+
+
+def _transcription_target(
+    target: str,
+) -> tuple[FlowPackageImportPlannerCandidates, UUID | None]:
+    """The target space's candidates and its marked default transcription model."""
+    if target == "no_model":
+        return _candidates(), None
+    model_id = uuid4()
+    candidates = _candidates(
+        models=[
+            FlowPackageModelCandidate(
+                local_kind=LocalResourceKind.TRANSCRIPTION_MODEL,
+                local_id=model_id,
+                label="Transcription",
+                model_kind=FlowPackageModelKind.TRANSCRIPTION_MODEL,
+                identity=FlowPackageModelIdentity(provider="local", model="kb"),
+            )
+        ]
+    )
+    return candidates, model_id if target == "marked_default" else None
+
+
 def _knowledge_candidate(
     local_id: UUID,
     *,
@@ -1000,7 +1028,7 @@ async def test_install_normalizes_literal_disabled_config_without_changing_envel
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("target_has_model", [False, True])
+@_TARGET_TRANSCRIPTION
 @pytest.mark.parametrize(
     "input_config, transcription_required",
     [
@@ -1020,7 +1048,7 @@ async def test_install_normalizes_literal_disabled_config_without_changing_envel
     ],
 )
 async def test_export_install_preserves_upload_transcription_dependency(
-    target_has_model: bool,
+    target: str,
     input_config: FlowPersistedJsonObject | None,
     transcription_required: bool,
 ) -> None:
@@ -1056,16 +1084,18 @@ async def test_export_install_preserves_upload_transcription_dependency(
         provenance=template.provenance,
     )
     envelope = read_flow_package(write_flow_package(exported))
-    target_model_id = uuid4() if target_has_model else None
-    candidates = _candidates()
+    candidates, target_model_id = _transcription_target(target)
     plan = build_flow_package_import_plan(
         envelope,
         candidates=candidates,
         default_transcription_model_id=target_model_id,
     )
     assert plan.target_state.audio_transcription_required is transcription_required
+    assert plan.can_publish_after_import is (
+        not transcription_required or target == "marked_default"
+    )
     service = _flow_service()
-    if transcription_required and not target_has_model:
+    if transcription_required and target == "no_model":
         assert plan.can_install_as_draft is False
         with pytest.raises(FlowPackageValidationError) as exc_info:
             await _install_as_draft(
@@ -1102,9 +1132,9 @@ async def test_export_install_preserves_upload_transcription_dependency(
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("target_has_model", [False, True])
+@_TARGET_TRANSCRIPTION
 async def test_export_install_preserves_previous_step_audio_upload_transcription(
-    target_has_model: bool,
+    target: str,
 ) -> None:
     envelope = _envelope(
         requirements=[],
@@ -1160,8 +1190,7 @@ async def test_export_install_preserves_previous_step_audio_upload_transcription
     )
     envelope = read_flow_package(write_flow_package(envelope))
     assert envelope.spec.steps[0].name == ""
-    target_model_id = uuid4() if target_has_model else None
-    candidates = _candidates()
+    candidates, target_model_id = _transcription_target(target)
     plan = build_flow_package_import_plan(
         envelope,
         candidates=candidates,
@@ -1169,8 +1198,9 @@ async def test_export_install_preserves_previous_step_audio_upload_transcription
     )
     assert plan.target_state.audio_transcription_required is True
     assert plan.target_state.default_transcription_model_id == target_model_id
+    assert plan.can_publish_after_import is (target == "marked_default")
     service = _flow_service()
-    if not target_has_model:
+    if target == "no_model":
         assert plan.can_install_as_draft is False
         with pytest.raises(FlowPackageValidationError) as exc_info:
             await _install_as_draft(

@@ -224,7 +224,7 @@ def _make_user(
 def _make_space_service() -> AsyncMock:
     space_service = AsyncMock()
     space = MagicMock()
-    space.get_default_transcription_model.return_value = None
+    space.get_marked_default_transcription_model.return_value = None
     space.completion_models = []
     space.collections = []
     space.mcp_servers = []

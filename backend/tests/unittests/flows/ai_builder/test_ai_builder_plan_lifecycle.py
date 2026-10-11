@@ -100,7 +100,7 @@ def _make_user() -> MagicMock:
 def _make_space_service() -> AsyncMock:
     space_service = AsyncMock()
     space = MagicMock()
-    space.get_default_transcription_model.return_value = None
+    space.get_marked_default_transcription_model.return_value = None
     space.completion_models = []
     space.collections = []
     space.mcp_servers = []
@@ -174,7 +174,11 @@ def _make_authoring_service(
     return service
 
 
-def _make_spec(*, input_type: InputType = InputType.TEXT) -> FlowDraftSpecCore:
+def _make_spec(
+    *,
+    input_type: InputType = InputType.TEXT,
+    input_config: dict[str, object] | None = None,
+) -> FlowDraftSpecCore:
     return FlowDraftSpecCore(
         flow_name="Flow",
         steps=[
@@ -184,9 +188,31 @@ def _make_spec(*, input_type: InputType = InputType.TEXT) -> FlowDraftSpecCore:
                 assistant_spec=AssistantSpec(instructions="Do something."),
                 input_source=InputSource.FLOW_INPUT,
                 input_type=input_type,
+                input_config=input_config,
             )
         ],
     )
+
+
+# The two ways a flow takes audio: its input is a recording, or a step accepts
+# an uploaded one.
+_AUDIO_SPECS = pytest.mark.parametrize(
+    "audio_spec",
+    [
+        {"input_type": InputType.AUDIO},
+        {
+            "input_type": InputType.DOCUMENT,
+            "input_config": {
+                "runtime_input": {
+                    "enabled": True,
+                    "required": True,
+                    "input_format": "audio",
+                }
+            },
+        },
+    ],
+    ids=["audio_input", "audio_upload"],
+)
 
 
 def _make_grounded_spec(
@@ -1857,14 +1883,18 @@ class TestAIBuilderPlanLifecycle:
             await lifecycle.apply_plan(plan_id=plan.id, expected_revision=1)
 
     @pytest.mark.anyio
-    async def test_apply_plan_requires_transcription_model_for_audio_create(
-        self,
-    ):
+    @staticmethod
+    def _audio_create(
+        *,
+        audio_spec: dict[str, object],
+        transcription_models: list[SimpleNamespace],
+        authoring_service: AsyncMock | None = None,
+    ) -> tuple[AIBuilderPlanLifecycle, BuilderPlan]:
+        """A create session whose approved plan takes audio, in a space with
+        these transcription models."""
         user = _make_user()
         repo = _make_repo_mock()
-        flow_service = AsyncMock()
         space_service = AsyncMock()
-
         session = _make_session(
             tenant_id=user.tenant_id,
             actor_user_id=user.id,
@@ -1874,28 +1904,67 @@ class TestAIBuilderPlanLifecycle:
         plan = _make_plan(
             session_id=session.id,
             tenant_id=user.tenant_id,
-            spec=_make_spec(input_type=InputType.AUDIO),
+            spec=_make_spec(**audio_spec),
         )
         space = MagicMock()
-        space.get_default_transcription_model.return_value = None
+        space.transcription_models = transcription_models
+        space.get_marked_default_transcription_model.return_value = next(
+            (model for model in transcription_models if model.is_org_default), None
+        )
         space_service.get_space.return_value = space
         repo.get_plan.return_value = plan
         repo.get_plan_for_update.return_value = plan
         repo.get_session.return_value = session
         repo.get_session_for_update.return_value = session
         session.latest_plan_id = plan.id
-
         lifecycle = AIBuilderPlanLifecycle(
             user=user,
             repo=repo,
-            flow_service=flow_service,
+            flow_service=AsyncMock(),
             space_service=space_service,
+            authoring_service=authoring_service,
+        )
+        return lifecycle, plan
+
+    @_AUDIO_SPECS
+    @pytest.mark.parametrize("unusable_models", [0, 1])
+    @pytest.mark.anyio
+    async def test_apply_plan_refuses_audio_create_in_a_space_without_a_usable_transcription_model(
+        self, audio_spec: dict[str, object], unusable_models: int
+    ):
+        lifecycle, plan = self._audio_create(
+            audio_spec=audio_spec,
+            transcription_models=[
+                SimpleNamespace(id=uuid4(), can_access=False, is_org_default=False)
+            ]
+            * unusable_models,
         )
 
-        with pytest.raises(
-            BadRequestException, match="transcription model must be selected"
-        ):
+        with pytest.raises(BadRequestException) as exc_info:
             await lifecycle.apply_plan(plan_id=plan.id)
+
+        assert exc_info.value.code == "transcription_model_required"
+
+    @_AUDIO_SPECS
+    @pytest.mark.parametrize("marked", [True, False])
+    @pytest.mark.anyio
+    async def test_apply_plan_fills_only_a_marked_default_transcription_model(
+        self, audio_spec: dict[str, object], marked: bool
+    ):
+        model = SimpleNamespace(id=uuid4(), can_access=True, is_org_default=marked)
+        authoring_service = _make_authoring_service(steps_created=1, steps_updated=0)
+        lifecycle, plan = self._audio_create(
+            audio_spec=audio_spec,
+            transcription_models=[model],
+            authoring_service=authoring_service,
+        )
+
+        await lifecycle.apply_plan(plan_id=plan.id)
+
+        command = authoring_service.prepare.await_args.kwargs["command"]
+        # With no marked default the draft is created without a model: the
+        # only usable one is not chosen for its author.
+        assert command.default_transcription_model_id == (model.id if marked else None)
 
     @pytest.mark.anyio
     async def test_apply_plan_create_failure_does_not_list_flows(
@@ -2248,7 +2317,7 @@ class TestAIBuilderPlanLifecycle:
             resource_bindings=plan_bindings,
         )
         space = MagicMock()
-        space.get_default_transcription_model.return_value = None
+        space.get_marked_default_transcription_model.return_value = None
         space.completion_models = [
             SimpleNamespace(id=model_id, name="gpt-5.4-nano", provider_type="openai")
         ]
@@ -2310,7 +2379,7 @@ class TestAIBuilderPlanLifecycle:
             spec=_make_grounded_spec(model_ref="model.fast-model", knowledge_refs=[]),
         )
         space = MagicMock()
-        space.get_default_transcription_model.return_value = None
+        space.get_marked_default_transcription_model.return_value = None
         space_service.get_space.return_value = space
         repo.get_plan.return_value = plan
         repo.get_plan_for_update.return_value = plan
@@ -2364,7 +2433,7 @@ class TestAIBuilderPlanLifecycle:
             ),
         )
         space = MagicMock()
-        space.get_default_transcription_model.return_value = None
+        space.get_marked_default_transcription_model.return_value = None
         space.completion_models = [
             SimpleNamespace(id=uuid4(), name="Fast model", provider_type="openai")
         ]

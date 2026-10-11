@@ -768,7 +768,7 @@ def _read_flow_package_bytes(package_bytes: bytes) -> FlowPackageEnvelope:
 
 
 def _target_space_default_transcription_model_id(space: Space) -> UUID | None:
-    model = space.get_default_transcription_model()
+    model = space.get_marked_default_transcription_model()
     return None if model is None else model.id
 
 

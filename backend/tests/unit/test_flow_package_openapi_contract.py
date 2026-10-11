@@ -444,6 +444,7 @@ def test_openapi_flow_package_response_schemas_are_public_contracts(
         "payload_schema",
         "package_summary",
         "target_state",
+        "transcription_model_available",
         "omissions",
     } <= set(plan_schema.get("required", []))
     assert "package_kind" not in validation_schema.get("properties", {})

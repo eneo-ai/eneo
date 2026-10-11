@@ -407,6 +407,19 @@ class Space:
         # Get the most recently added model as a fallback
         return self.get_latest_transcription_model()
 
+    def get_marked_default_transcription_model(self) -> Optional[TranscriptionModel]:
+        """The transcription model an administrator marked as the
+        organisation's default, while this space can use it. No other model
+        stands in when none is marked or the marked one is not usable here."""
+        return next(
+            (
+                model
+                for model in self.transcription_models
+                if model.is_org_default and model.can_access
+            ),
+            None,
+        )
+
     @property
     def embedding_models(self):
         """The embedding models usable in this space."""

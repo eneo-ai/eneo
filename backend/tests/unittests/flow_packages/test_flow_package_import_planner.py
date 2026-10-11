@@ -794,7 +794,7 @@ def test_planner_rejects_empty_flow_before_reporting_publishable() -> None:
         ),
     ],
 )
-def test_planner_exposes_audio_target_state_and_blocks_missing_default_model(
+def test_planner_fills_only_a_marked_default_transcription_model(
     input_type: InputType,
     input_config: FlowPersistedJsonObject | None,
 ) -> None:
@@ -804,26 +804,44 @@ def test_planner_exposes_audio_target_state_and_blocks_missing_default_model(
         input_type=input_type,
         input_config=input_config,
     )
+    model_id = "77777777-7777-4777-8777-777777777777"
+    usable = FlowPackageImportPlannerCandidates(
+        models=[
+            _model_candidate(
+                local_id=model_id,
+                label="Transcription",
+                model_kind=FlowPackageModelKind.TRANSCRIPTION_MODEL,
+            )
+        ]
+    )
 
-    blocked = build_flow_package_import_plan(
+    no_model = build_flow_package_import_plan(
         envelope,
         candidates=FlowPackageImportPlannerCandidates(),
         default_transcription_model_id=None,
     )
-    model_id = UUID("77777777-7777-4777-8777-777777777777")
-    ready = build_flow_package_import_plan(
-        envelope,
-        candidates=FlowPackageImportPlannerCandidates(),
-        default_transcription_model_id=model_id,
+    unmarked = build_flow_package_import_plan(
+        envelope, candidates=usable, default_transcription_model_id=None
+    )
+    marked = build_flow_package_import_plan(
+        envelope, candidates=usable, default_transcription_model_id=UUID(model_id)
     )
 
-    assert blocked.target_state.audio_transcription_required is True
-    assert blocked.target_state.default_transcription_model_id is None
-    assert blocked.can_install_as_draft is False
-    assert blocked.can_publish_after_import is False
-    assert ready.target_state.audio_transcription_required is True
-    assert ready.target_state.default_transcription_model_id == model_id
-    assert ready.can_install_as_draft is True
+    # Nowhere to take a model from: the package cannot be installed here.
+    assert no_model.target_state.audio_transcription_required is True
+    assert no_model.transcription_model_available is False
+    assert no_model.can_install_as_draft is False
+    assert no_model.can_publish_after_import is False
+    # A usable model nobody marked is not chosen: the draft is installed
+    # without one and cannot be published until its author chooses.
+    assert unmarked.target_state.audio_transcription_required is True
+    assert unmarked.target_state.default_transcription_model_id is None
+    assert unmarked.transcription_model_available is True
+    assert unmarked.can_install_as_draft is True
+    assert unmarked.can_publish_after_import is False
+    assert marked.target_state.default_transcription_model_id == UUID(model_id)
+    assert marked.can_install_as_draft is True
+    assert marked.can_publish_after_import is True
 
 
 @pytest.mark.parametrize(
@@ -856,7 +874,9 @@ def test_audio_upload_graph_requires_transcription_model(
     )
     steps = flow_step_validation_views_from_draft_spec(envelope.spec.steps)
     issues = collect_step_graph_issues(
-        steps, metadata_json={"wizard": {"transcription_enabled": True}}
+        steps,
+        metadata_json={"wizard": {"transcription_enabled": True}},
+        require_complete_template_fill_config=True,
     )
     assert FlowGraphIssueCode.FLOW_AUDIO_TRANSCRIPTION_MODEL_REQUIRED in {
         issue.code for issue in issues

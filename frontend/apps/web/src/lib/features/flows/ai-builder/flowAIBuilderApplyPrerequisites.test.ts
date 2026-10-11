@@ -30,6 +30,30 @@ describe("flowAIBuilderApplyPrerequisites", () => {
     expect(prerequisites.blockers).toEqual([]);
   });
 
+  it("blocks a plan whose audio arrives as an upload when the run starts, like audio from the flow's input", () => {
+    const audioUpload = {
+      input_source: "previous_step",
+      input_type: "text",
+      input_config: { runtime_input: { enabled: true, input_format: "audio" } }
+    } as Partial<StepSpec>;
+    const blocked = getAIBuilderApplyPrerequisites({
+      plan: makePlan(audioUpload),
+      targetKind: "create",
+      transcriptionModels: [{ can_access: false }]
+    });
+    const documentUpload = getAIBuilderApplyPrerequisites({
+      plan: makePlan({
+        ...audioUpload,
+        input_config: { runtime_input: { enabled: true, input_format: "document" } }
+      } as Partial<StepSpec>),
+      targetKind: "create",
+      transcriptionModels: []
+    });
+
+    expect(blocked.blockers).toEqual([{ code: "transcription_model_required" }]);
+    expect(documentUpload.canApply).toBe(true);
+  });
+
   it("does not block edit plans because the backend create-only invariant owns this check", () => {
     const prerequisites = getAIBuilderApplyPrerequisites({
       plan: makePlan({ input_source: "flow_input", input_type: "audio" }),

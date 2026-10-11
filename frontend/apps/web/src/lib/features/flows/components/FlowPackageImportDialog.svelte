@@ -665,6 +665,11 @@
                       </span>
                     {/if}
                   </div>
+                  {#if readiness.transcriptionModelToChoose}
+                    <p class="text-secondary text-sm leading-relaxed">
+                      {m.flow_package_transcription_model_to_choose()}
+                    </p>
+                  {/if}
                 {/if}
               {/if}
 

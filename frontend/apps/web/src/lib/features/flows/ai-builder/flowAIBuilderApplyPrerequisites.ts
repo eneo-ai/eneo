@@ -1,4 +1,5 @@
 import type { StepSpec, TargetKind } from "./protocol";
+import { stepsTakeAudio } from "$lib/features/flows/flowRuntimeInputConfig";
 import { hasAccessibleTranscriptionModel } from "$lib/features/spaces/spaceModelAvailability";
 import type { TranscriptionModel } from "@eneo/eneo-js";
 
@@ -10,7 +11,7 @@ export type AIBuilderApplyBlocker = {
 
 type TranscriptionModelAvailability = Pick<TranscriptionModel, "can_access">;
 
-type PlanApplyPrerequisitesStep = Pick<StepSpec, "input_source" | "input_type">;
+type PlanApplyPrerequisitesStep = Pick<StepSpec, "input_source" | "input_type" | "input_config">;
 
 type PlanApplyPrerequisitesPlan = {
   proposal: {
@@ -36,12 +37,11 @@ export function getAIBuilderApplyPrerequisites({
   targetKind,
   transcriptionModels
 }: ApplyPrerequisitesInput): AIBuilderApplyPrerequisites {
+  // A flow that takes audio can be created without a transcription model
+  // only where its author can then choose one: the space must have a usable
+  // model, whether or not one is the organisation's default.
   const requiresTranscriptionModel =
-    targetKind === "create" &&
-    (plan?.proposal.spec.steps.some(
-      (step) => step.input_source === "flow_input" && step.input_type === "audio"
-    ) ??
-      false);
+    targetKind === "create" && stepsTakeAudio(plan?.proposal.spec.steps ?? []);
 
   const blockers: AIBuilderApplyBlocker[] =
     requiresTranscriptionModel && !hasAccessibleTranscriptionModel(transcriptionModels)

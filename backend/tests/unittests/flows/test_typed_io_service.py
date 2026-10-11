@@ -416,8 +416,8 @@ def test_audio_input_requires_transcription_enabled(user):
         service._validate_steps(steps, metadata_json=metadata)
 
 
-def test_audio_input_requires_transcription_model(user):
-    """audio input requires wizard transcription model selection."""
+def test_audio_input_requires_transcription_model_to_publish(user):
+    """A draft is saved without a transcription model; publishing requires one."""
     service = _service(user)
     steps = [_step(input_type="audio")]
     metadata = {
@@ -426,10 +426,15 @@ def test_audio_input_requires_transcription_model(user):
             "transcription_language": "sv",
         }
     }
+    service._validate_steps(steps, metadata_json=metadata)
     with pytest.raises(
         BadRequestException, match="transcription model must be selected"
     ):
-        service._validate_steps(steps, metadata_json=metadata)
+        service._validate_steps(
+            steps,
+            metadata_json=metadata,
+            require_complete_template_fill_config=True,
+        )
 
 
 def test_audio_input_accepts_valid_transcription_config(user):

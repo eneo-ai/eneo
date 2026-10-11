@@ -51,6 +51,24 @@ function sanitizeMaxFiles(value: unknown): number | null {
 
 export const FILE_BASED_INPUT_TYPES = new Set<string>(["document", "file", "audio"]);
 
+type AudioInputStepLike = Pick<FlowStep, "input_config"> & {
+  input_source?: string | null;
+  input_type?: string | null;
+};
+
+/**
+ * Whether a flow with these steps transcribes audio: a step takes audio from
+ * the flow's input, or an audio upload when the run starts. The backend's rule
+ * (requires_audio_transcription in eneo.flows.flow_authoring_transcription).
+ */
+export function stepsTakeAudio(steps: readonly AudioInputStepLike[]): boolean {
+  return steps.some((step) => {
+    if (step.input_source === "flow_input" && step.input_type === "audio") return true;
+    const runtimeInput = asObject(asObject(step.input_config)?.runtime_input);
+    return runtimeInput?.enabled === true && runtimeInput.input_format === "audio";
+  });
+}
+
 export function isDefaultRuntimeConfig(config: FlowRuntimeInputConfigValue): boolean {
   return (
     config.label.trim() === "" &&

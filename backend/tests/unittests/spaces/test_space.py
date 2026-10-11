@@ -655,3 +655,37 @@ def test_a_level_change_records_the_links_it_removes(kind):
     space.update(security_classification=_classification(3))
 
     assert space.link_changes(kind) == (set(), {low.id})
+
+
+def _transcription_model(*, marked: bool, day: int = 1):
+    return SimpleNamespace(
+        id=uuid4(),
+        is_org_default=marked,
+        can_access=True,
+        created_at=datetime(2024, 1, day),
+    )
+
+
+def test_the_marked_default_transcription_model_is_the_one_marked(space: Space):
+    marked = _transcription_model(marked=True, day=1)
+    space.transcription_models = [_transcription_model(marked=False, day=2), marked]
+
+    assert space.get_marked_default_transcription_model() is marked
+
+
+def test_no_transcription_model_stands_in_for_an_unmarked_default(space: Space):
+    # The only usable model is not a default nobody marked.
+    only = _transcription_model(marked=False)
+    space.transcription_models = [only]
+
+    assert space.get_marked_default_transcription_model() is None
+    assert space.get_default_transcription_model() is only
+
+
+def test_a_marked_default_the_space_cannot_use_is_not_its_default(space: Space):
+    marked = _transcription_model(marked=True)
+    space.transcription_models = [marked, _transcription_model(marked=False)]
+    # The organisation turned the linked model off after it was granted.
+    marked.can_access = False
+
+    assert space.get_marked_default_transcription_model() is None

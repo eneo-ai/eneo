@@ -116,7 +116,7 @@ def resolve_flow_package_install_command(
             expected=expected_target_state,
             current=import_plan.target_state,
         )
-    if import_plan.target_state.install_blocks:
+    if import_plan.lacks_transcription_model:
         raise FlowPackageValidationError(
             code=FlowPackageErrorCode.IMPORT_UNAVAILABLE_LOCAL_RESOURCE,
             message=("The target space has no transcription model for this package."),

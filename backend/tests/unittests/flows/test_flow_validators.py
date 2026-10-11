@@ -22,6 +22,7 @@ from eneo.flows.flow_review_policy import (
     FlowStepReviewPolicy,
 )
 from eneo.flows.flow_validators import (
+    FLOW_AUDIO_TRANSCRIPTION_MODEL_REQUIRED,
     FLOW_AUDIO_TRANSCRIPTION_REQUIRED,
     _is_plain_tree,
     _validate_step_mapped_execution,
@@ -2263,6 +2264,45 @@ def test_validate_steps_rejects_audio_input_without_transcription_metadata():
             ]
         )
     assert exc_info.value.code == FLOW_AUDIO_TRANSCRIPTION_REQUIRED
+
+
+def _transcribing_step() -> FlowStep:
+    return _step(
+        input_source="flow_input",
+        input_type="audio",
+        output_type="text",
+        output_mode="transcribe_only",
+    )
+
+
+def test_an_audio_draft_is_saved_before_its_transcription_model_is_chosen():
+    metadata = {"wizard": {"transcription_enabled": True}}
+
+    validate_steps([_transcribing_step()], metadata_json=metadata)
+
+    with pytest.raises(BadRequestException) as exc_info:
+        validate_steps(
+            [_transcribing_step()],
+            metadata_json=metadata,
+            require_complete_template_fill_config=True,
+        )
+    assert exc_info.value.code == FLOW_AUDIO_TRANSCRIPTION_MODEL_REQUIRED
+
+
+def test_a_malformed_transcription_model_choice_is_refused_when_a_draft_is_saved():
+    with pytest.raises(
+        BadRequestException, match="wizard.transcription_model.id must be a valid UUID"
+    ) as exc_info:
+        validate_steps(
+            [_transcribing_step()],
+            metadata_json={
+                "wizard": {
+                    "transcription_enabled": True,
+                    "transcription_model": {"id": "not-a-model-id"},
+                }
+            },
+        )
+    assert exc_info.value.code == "flow_audio_transcription_invalid"
 
 
 def test_validate_steps_rejects_structured_contract_for_all_previous_text_input():

@@ -590,6 +590,7 @@ async def _create_default_transcription_model(
     db_container,
     space_id: str,
     tenant_id: UUID,
+    marked_default: bool = True,
 ) -> UUID:
     async with db_container() as container:
         session = container.session()
@@ -615,7 +616,7 @@ async def _create_default_transcription_model(
             org="OpenAI",
             base_url="https://api.openai.com/v1",
             is_enabled=True,
-            is_default=True,
+            is_default=marked_default,
         )
         session.add(model)
         await session.flush()
@@ -9795,25 +9796,41 @@ async def test_ai_builder_api_edit_mode_keeps_a_transcription_only_flow_at_one_s
     assert updated.steps[0].output_type == "text"
 
 
-@pytest.mark.asyncio
-@pytest.mark.integration
-async def test_ai_builder_api_create_mode_audio_apply_without_transcription_model_returns_typed_error_and_no_orphan_flow(
+async def _apply_audio_create_plan(
+    *,
     client,
     bearer_token,
     completion_model_factory,
     db_container,
+    space_name: str,
+    transcription_model_is_marked_default: bool | None,
 ):
+    """Apply an approved create plan that takes audio, in a space with no
+    transcription model (None), one nobody marked as the organisation's
+    default (False), or the marked default (True).
+
+    Returns the space, its transcription model and the apply response."""
     space_id = await _create_space_with_planner_model(
         client=client,
         bearer_token=bearer_token,
         db_container=db_container,
         completion_model_factory=completion_model_factory,
-        space_name="AI Builder API audio missing transcription model",
+        space_name=space_name,
         # The conservative tool-schema reserve no longer fits the 8000-token
         # fixture default; the planner window must be owned by this test.
         planner_model_overrides={"max_input_tokens": 128_000},
         planner_model_is_only_space_model=True,
     )
+    transcription_model_id = None
+    if transcription_model_is_marked_default is not None:
+        async with db_container() as container:
+            tenant_id = container.user().tenant_id
+        transcription_model_id = await _create_default_transcription_model(
+            db_container=db_container,
+            space_id=space_id,
+            tenant_id=tenant_id,
+            marked_default=transcription_model_is_marked_default,
+        )
 
     outline_flow = _make_tool_call(
         tool_call_id="call_plan",
@@ -9900,6 +9917,26 @@ async def test_ai_builder_api_create_mode_audio_apply_without_transcription_mode
         json={},
         headers={"Authorization": f"Bearer {bearer_token}"},
     )
+    return space_id, transcription_model_id, apply_response
+
+
+@pytest.mark.asyncio
+@pytest.mark.integration
+async def test_ai_builder_api_create_mode_audio_apply_without_transcription_model_returns_typed_error_and_no_orphan_flow(
+    client,
+    bearer_token,
+    completion_model_factory,
+    db_container,
+):
+    space_id, _, apply_response = await _apply_audio_create_plan(
+        client=client,
+        bearer_token=bearer_token,
+        completion_model_factory=completion_model_factory,
+        db_container=db_container,
+        space_name="AI Builder API audio missing transcription model",
+        transcription_model_is_marked_default=None,
+    )
+
     assert apply_response.status_code == 400, apply_response.text
     assert apply_response.json()["code"] == "transcription_model_required"
 
@@ -9910,6 +9947,51 @@ async def test_ai_builder_api_create_mode_audio_apply_without_transcription_mode
     )
     assert list_response.status_code == 200, list_response.text
     assert list_response.json()["count"] == 0
+
+
+@pytest.mark.asyncio
+@pytest.mark.integration
+@pytest.mark.parametrize("marked_default", [True, False])
+async def test_ai_builder_api_create_mode_audio_apply_fills_only_a_marked_default_transcription_model(
+    client,
+    bearer_token,
+    completion_model_factory,
+    db_container,
+    marked_default: bool,
+):
+    """The organisation's marked default becomes the draft's model. A usable
+    model nobody marked is not chosen for the author: the draft is created
+    without one, and cannot be published until one is chosen."""
+    _, transcription_model_id, apply_response = await _apply_audio_create_plan(
+        client=client,
+        bearer_token=bearer_token,
+        completion_model_factory=completion_model_factory,
+        db_container=db_container,
+        space_name=f"AI Builder API audio default marked {marked_default}",
+        transcription_model_is_marked_default=marked_default,
+    )
+    assert apply_response.status_code == 200, apply_response.text
+    flow_id = apply_response.json()["flow_id"]
+
+    async with db_container() as container:
+        flow = await container.flow_service().get_flow(UUID(flow_id))
+    wizard = (flow.metadata_json or {})["wizard"]
+    assert wizard["transcription_enabled"] is True
+    assert wizard.get("transcription_model") == (
+        {"id": str(transcription_model_id)} if marked_default else None
+    )
+
+    publish_response = await client.post(
+        f"/api/v1/flows/{flow_id}/publish/",
+        headers={"Authorization": f"Bearer {bearer_token}"},
+    )
+    if marked_default:
+        assert publish_response.status_code == 200, publish_response.text
+    else:
+        assert publish_response.status_code == 400, publish_response.text
+        assert (
+            publish_response.json()["code"] == "flow_audio_transcription_model_required"
+        )
 
 
 @pytest.mark.asyncio

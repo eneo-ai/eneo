@@ -8,7 +8,11 @@
   import { getSpacesManager } from "$lib/features/spaces/SpacesManager";
   import { getAppContext } from "$lib/core/AppContext";
   import { getFlowWizardMetadata, initFlowEditor } from "$lib/features/flows/FlowEditor";
-  import { usableSpeakerServices } from "$lib/features/flows/flowEditorMetadata";
+  import {
+    transcriptionModelNotChosen,
+    usableSpeakerServices,
+    wizardReferenceId
+  } from "$lib/features/flows/flowEditorMetadata";
   import { getFlowUserMode } from "$lib/features/flows/FlowUserMode";
   import FlowStepList from "$lib/features/flows/components/FlowStepList.svelte";
   import FlowStepEditPanel from "$lib/features/flows/components/FlowStepEditPanel.svelte";
@@ -455,11 +459,7 @@
       }))
   );
   const isTranscriptionSkipped = $derived(!transcriptionEnabled);
-  const transcriptionModelId = $derived(
-    typeof wizardMetadata.transcription_model?.id === "string"
-      ? wizardMetadata.transcription_model.id
-      : null
-  );
+  const transcriptionModelId = $derived(wizardReferenceId(wizardMetadata.transcription_model));
   let transcriptionModel = $state<TranscriptionModel | null>(null);
   const resolvedTranscriptionModel = $derived(
     ($currentSpace.transcription_models ?? []).find((model) => model.id === transcriptionModelId) ??
@@ -476,12 +476,21 @@
   const transcriptionModelMissingInSpace = $derived(
     transcriptionModelId !== null && transcriptionModel === null
   );
+  // Nothing chooses a transcription model for a flow: the author does, and
+  // until then the draft says so instead of looking ready to publish.
+  $effect(() => {
+    flowEditor.setTranscriptionModelMissing(
+      transcriptionModelNotChosen({
+        wizard: wizardMetadata,
+        transcriptionEnabled,
+        steps: $update.steps ?? []
+      })
+    );
+  });
   const transcriptionLanguage = $derived(wizardMetadata.transcription_language ?? "sv");
   const transcriptionDiarization = $derived(wizardMetadata.transcription_diarization ?? true);
   const speakerServicePickId = $derived(
-    typeof wizardMetadata.transcription_speaker_service?.id === "string"
-      ? wizardMetadata.transcription_speaker_service.id
-      : null
+    wizardReferenceId(wizardMetadata.transcription_speaker_service)
   );
   // Speakers are labelled by the speaker identification service the flow
   // chose, among those granted to the space.

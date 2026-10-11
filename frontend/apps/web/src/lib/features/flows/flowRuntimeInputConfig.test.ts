@@ -4,6 +4,7 @@ import {
   buildRuntimeInputStepPatch,
   coerceRuntimeInputConfigForStep,
   getRuntimeInputConfig,
+  stepsTakeAudio,
   updateRuntimeInputConfig
 } from "./flowRuntimeInputConfig";
 
@@ -128,5 +129,41 @@ describe("flowRuntimeInputConfig", () => {
     ).toEqual({
       question: "Sammanfatta {{step_input.text}}"
     });
+  });
+});
+
+describe("stepsTakeAudio", () => {
+  it("is true for audio from the flow's input and for an audio upload when the run starts", () => {
+    expect(
+      stepsTakeAudio([{ input_source: "flow_input", input_type: "audio", input_config: null }])
+    ).toBe(true);
+    expect(
+      stepsTakeAudio([
+        {
+          input_source: "previous_step",
+          input_type: "text",
+          input_config: { runtime_input: { enabled: true, input_format: "audio" } }
+        }
+      ])
+    ).toBe(true);
+  });
+
+  it("is false for a switched-off audio upload, another upload format and audio passed on by a step", () => {
+    expect(
+      stepsTakeAudio([
+        {
+          input_source: "previous_step",
+          input_type: "text",
+          input_config: { runtime_input: { enabled: false, input_format: "audio" } }
+        },
+        {
+          input_source: "previous_step",
+          input_type: "text",
+          input_config: { runtime_input: { enabled: true, input_format: "document" } }
+        },
+        { input_source: "previous_step", input_type: "audio", input_config: null }
+      ])
+    ).toBe(false);
+    expect(stepsTakeAudio([])).toBe(false);
   });
 });

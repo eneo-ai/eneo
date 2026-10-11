@@ -247,14 +247,17 @@ class FlowPackageImportTargetState(BaseModel):
 
     audio_transcription_required: bool = Field(
         description=(
-            "Whether the portable package needs the target space's default "
-            "transcription model."
+            "Whether the package takes audio, so the installed flow needs a "
+            "transcription model before it can be published."
         )
     )
     default_transcription_model_id: UUID | None = Field(
         description=(
-            "Target-space transcription default captured by the plan, or null when "
-            "unavailable or not applicable."
+            "The organisation's default transcription model, when one is marked "
+            "and the target space can use it: the installed draft is given it. "
+            "Null when the package takes no audio or no default is marked; a "
+            "draft that takes audio is then installed without a model, and its "
+            "author chooses one before publishing."
         )
     )
 
@@ -270,7 +273,9 @@ class FlowPackageImportTargetState(BaseModel):
         return self
 
     @property
-    def install_blocks(self) -> bool:
+    def publish_blocks(self) -> bool:
+        """The installed draft takes audio and is given no transcription
+        model: its author chooses one before it can be published."""
         return (
             self.audio_transcription_required
             and self.default_transcription_model_id is None
@@ -302,21 +307,36 @@ class FlowPackageImportPlan(BaseModel):
     omissions: list[FlowPackageOmission] = Field(max_length=1)
     package_summary: FlowPackageImportPlanSummary
     target_state: FlowPackageImportTargetState
+    transcription_model_available: bool = Field(
+        description=(
+            "Whether the target space has a transcription model it can use. A "
+            "package that takes audio cannot be installed where it has none."
+        )
+    )
     dependency_resolutions: list[FlowPackageDependencyResolutionEntry] = Field(
         default_factory=_empty_dependency_resolutions
     )
 
+    @property
+    def lacks_transcription_model(self) -> bool:
+        """The package takes audio and the target space has no transcription
+        model its author could choose."""
+        return (
+            self.target_state.audio_transcription_required
+            and not self.transcription_model_available
+        )
+
     @computed_field
     @property
     def can_install_as_draft(self) -> bool:
-        return not self.target_state.install_blocks and all(
+        return not self.lacks_transcription_model and all(
             not resolution.install_blocks for resolution in self.dependency_resolutions
         )
 
     @computed_field
     @property
     def can_publish_after_import(self) -> bool:
-        return not self.target_state.install_blocks and all(
+        return not self.target_state.publish_blocks and all(
             not resolution.publish_blocks for resolution in self.dependency_resolutions
         )
 
