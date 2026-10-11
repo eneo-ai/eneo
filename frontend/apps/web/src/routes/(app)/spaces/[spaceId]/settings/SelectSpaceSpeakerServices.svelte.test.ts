@@ -76,6 +76,26 @@ it("explains why a granted service cannot be used, and keeps it removable", asyn
   await expect.element(low).toBeEnabled();
 });
 
+it("says flows must choose once the space can use more than one service", async () => {
+  const services = [service("a", "Vemsa Sundsvall"), service("b", "Vemsa Timrå")];
+  // A second grant that cannot be used leaves the first one automatic.
+  currentSpace.value = {
+    security_classification: null,
+    transcription_services: [link("a", "Vemsa Sundsvall"), link("b", "Vemsa Timrå", true, false)]
+  };
+  const first = render(SelectSpaceSpeakerServices, { services, securityEnabled: false });
+  await expect.element(page.getByRole("switch", { name: "Vemsa Timrå" })).toBeChecked();
+  await expect.element(page.getByText(m.speaker_service_space_several())).not.toBeInTheDocument();
+  first.unmount();
+
+  currentSpace.value = {
+    security_classification: null,
+    transcription_services: [link("a", "Vemsa Sundsvall"), link("b", "Vemsa Timrå")]
+  };
+  render(SelectSpaceSpeakerServices, { services, securityEnabled: false });
+  await expect.element(page.getByText(m.speaker_service_space_several())).toBeVisible();
+});
+
 it("grants a usable service and refuses one below the space's classification", async () => {
   currentSpace.value = {
     security_classification: restricted,

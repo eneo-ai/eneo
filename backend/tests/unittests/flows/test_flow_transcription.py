@@ -923,7 +923,7 @@ async def test_vemsa_receives_the_speaker_bound_the_run_settled(
     run = _run(user=user, payload=stored)
     _patch_run_input_payload(flow_run_repo, run)
 
-    await executor._resolve_step_input(
+    resolved = await executor._resolve_step_input(
         step=_runtime_step(),
         context=executor.variable_resolver.build_context(run.input_payload_json, []),
         run=run,
@@ -939,8 +939,14 @@ async def test_vemsa_receives_the_speaker_bound_the_run_settled(
         requested_file_ids=[file.id],
     )
 
-    # The step connects the speaker service its flow's space offers.
+    # The step connects the speaker service its flow's space offers, and its
+    # evidence names the service that labelled it.
     with_speaker_service.assert_awaited_once_with(_SPEAKER_SERVICE)
+    assert resolved.transcription_metadata is not None
+    assert (
+        resolved.transcription_metadata["speaker_service"],
+        resolved.transcription_metadata["speaker_service_id"],
+    ) == ("Vemsa", str(_SPEAKER_SERVICE.id))
     submitted = vemsa.requests[0].read()
     assert b'name="task"\r\n\r\ndiarize' in submitted
     if bound is None:
@@ -1281,6 +1287,9 @@ async def test_audio_resolve_multifile_near_cap_keeps_request_order(
     assert resolved.transcription_metadata["audio_seconds"] == 30.0
     assert resolved.transcription_metadata["model"] == "whisper-1"
     assert resolved.transcription_metadata["model_id"] == str(model.id)
+    # No labelling call was made, so no speaker service is named.
+    assert resolved.transcription_metadata["speaker_service"] is None
+    assert resolved.transcription_metadata["speaker_service_id"] is None
     assert resolved.text.startswith("b" * 40)
     assert resolved.text.endswith("a" * 43)
     assert any(

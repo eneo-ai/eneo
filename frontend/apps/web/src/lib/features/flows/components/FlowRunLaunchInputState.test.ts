@@ -96,7 +96,7 @@ describe("FlowRunLaunchInputState", () => {
     const state = new FlowRunLaunchInputState();
     const transcription: FlowRunContractTranscription = {
       live: { available: true, reason: null },
-      speaker_labels: { selectable: true, required: false, default: true }
+      speaker_labels: { selectable: true, required: false, default: true, unavailable_reason: null }
     };
     state.markLiveSessionStarted();
     expect(state.speakerLabels(transcription)).toBe(false);

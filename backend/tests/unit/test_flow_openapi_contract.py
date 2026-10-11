@@ -1978,11 +1978,18 @@ def test_openapi_documents_transcription_options_and_the_run_speaker_choice(
         "model_unavailable",
         "model_not_realtime",
     }
-    assert set(schemas["FlowSpeakerLabelsOptionPublic"]["properties"]) == {
+    speaker_labels = schemas["FlowSpeakerLabelsOptionPublic"]
+    assert set(speaker_labels["properties"]) == set(speaker_labels["required"])
+    assert set(speaker_labels["properties"]) == {
         "selectable",
         "required",
         "default",
+        "unavailable_reason",
     }
+    assert _extract_enum_values(
+        openapi_spec,
+        _non_null_schema(speaker_labels["properties"]["unavailable_reason"]),
+    ) == {"no_service", "choice_required", "picked_unavailable"}
     assert {option.get("type") for option in speaker_choice["anyOf"]} == {
         "boolean",
         "null",

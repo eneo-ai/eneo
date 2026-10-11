@@ -38,9 +38,11 @@ The server validates required fields, dates, finite numbers, collection shapes, 
 
 ## Speaker labels
 
-`transcription.speaker_labels` in the run contract has `selectable`, `required`, and `default`. When `selectable` is true, the create request may carry a top-level `speaker_labels` of `true` or `false`; omit it or send `null` to keep the Flow's `default`. `selectable` is false when no transcription service labels speakers, or when `required` is true because a step maps speakers to names.
+`transcription.speaker_labels` in the run contract has `selectable`, `required`, `default`, and `unavailable_reason`. When `selectable` is true, the create request may carry a top-level `speaker_labels` of `true` or `false`; omit it or send `null` to keep the Flow's `default`. `selectable` is false when no transcription service labels speakers, or when `required` is true because a step maps speakers to names.
 
 Sending `true` or `false` while `selectable` is false returns `422 flow_run_speaker_labels_not_selectable`. The choice is part of the logical request: a changed choice needs a new `Idempotency-Key`. Labelling speakers makes the run take longer.
+
+`unavailable_reason` is `null` unless `required` is true and no speaker identification service can label the Flow: `no_service`, `choice_required` (the Space has several and the Flow picks none), or `picked_unavailable` (the Flow's pick is no longer usable in the Space). While it is set, do not collect a recording or create a run; a run created anyway fails its transcription step with `typed_io_speaker_service_unavailable`.
 
 ## Step-bound uploads
 

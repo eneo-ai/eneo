@@ -37,6 +37,11 @@
   // Every granted service, usable or not. Null when the space came without
   // them: a save would then drop grants it cannot see, so none is offered.
   const links = $derived($currentSpace.transcription_services ?? null);
+  // With more than one usable service nothing is used automatically: each
+  // flow that identifies speakers has to choose its own.
+  const flowsMustChoose = $derived(
+    (links ?? []).filter((link) => link.available && link.meets_security_classification).length > 1
+  );
   // Each save sends the whole list, so a second switch waits for the first.
   let saving = $state(false);
 
@@ -115,5 +120,10 @@
         </Field.Field>
       {/each}
     </div>
+    {#if flowsMustChoose}
+      <p class="text-muted-foreground mt-2 text-sm" role="status">
+        {m.speaker_service_space_several()}
+      </p>
+    {/if}
   {/if}
 </Settings.Row>

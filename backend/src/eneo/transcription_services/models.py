@@ -22,17 +22,6 @@ SERVICE_ENDPOINT_MAX_LENGTH = 2048
 MAX_CONNECTIONS_PER_ORGANISATION = 200
 
 
-class TranscriptionOperation(StrEnum):
-    """Work Eneo asks a native transcription service to do.
-
-    A service may advertise more tasks (Vemsa also realigns corrected
-    transcripts); Eneo neither sends those nor offers them as supported.
-    """
-
-    TRANSCRIBE = "transcribe"
-    DIARIZE = "diarize"
-
-
 class ConnectionCheckOutcome(StrEnum):
     READY = "ready"
     NOT_ACCEPTING_JOBS = "not_accepting_jobs"

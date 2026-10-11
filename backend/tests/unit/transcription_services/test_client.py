@@ -6,6 +6,7 @@ import asyncio
 import io
 import subprocess
 import sys
+from dataclasses import replace
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -30,7 +31,6 @@ from eneo.transcription_services.client import (
     UnexpectedStatus,
     parse_result_segments,
 )
-from eneo.transcription_services.models import TranscriptionOperation
 from tests.unit.transcription_services.scripted_service import (
     JOB_ID,
     RESULT_BODY,
@@ -40,14 +40,14 @@ from tests.unit.transcription_services.scripted_service import (
     status,
 )
 
-TRANSCRIBE = TranscriptionJobRequest(
-    operation=TranscriptionOperation.TRANSCRIBE, language="sv"
+LABEL = TranscriptionJobRequest(
+    language="sv", segments=[TranscriptSegment("hej du", 0.0, 0.7)]
 )
 
 
 async def _submit(
     service: ScriptedService,
-    request: TranscriptionJobRequest = TRANSCRIBE,
+    request: TranscriptionJobRequest = LABEL,
     *,
     base_url: str = "http://tolka.test",
 ) -> str:
@@ -75,25 +75,12 @@ async def test_submit_sends_the_multipart_job_contract() -> None:
     body = _form(service)
     assert b'name="file"' in body and b"fake" in body
     assert b'name="language"' in body and b"sv" in body
+    # Every job asks for speaker labels on a transcript it carries.
     assert b'name="diarize"' in body and b"true" in body
-    # A transcribe job names no model and no task: the service runs its own.
+    assert b'name="task"' in body and b"diarize" in body
+    assert b"false" not in body
+    # No model is named unless the request carries one.
     assert b'name="model"' not in body
-    assert b'name="task"' not in body
-
-
-async def test_submit_sends_diarize_false_when_speaker_identification_is_off() -> None:
-    service = ScriptedService(submit_responses=[accepted()])
-
-    await _submit(
-        service,
-        TranscriptionJobRequest(
-            operation=TranscriptionOperation.TRANSCRIBE, language="sv", diarize=False
-        ),
-    )
-
-    body = _form(service)
-    assert b'name="diarize"' in body and b"false" in body
-    assert b"true" not in body
 
 
 async def test_diarize_job_sends_the_transcript_and_its_model() -> None:
@@ -102,7 +89,6 @@ async def test_diarize_job_sends_the_transcript_and_its_model() -> None:
     await _submit(
         service,
         TranscriptionJobRequest(
-            operation=TranscriptionOperation.DIARIZE,
             language="sv",
             words=[TranscriptWord("hej", 0.0, 0.4), TranscriptWord("du", 0.5, 0.7)],
             model="whisper-1",
@@ -124,7 +110,6 @@ async def test_diarize_job_accepts_segments_without_words() -> None:
     await _submit(
         service,
         TranscriptionJobRequest(
-            operation=TranscriptionOperation.DIARIZE,
             language="sv",
             segments=[TranscriptSegment("hej du", 0.0, 0.7)],
         ),
@@ -135,46 +120,29 @@ async def test_diarize_job_accepts_segments_without_words() -> None:
     assert b'name="words"' not in body
 
 
-@pytest.mark.parametrize("diarize, sent", [(True, True), (False, False)])
-async def test_speaker_bound_is_sent_only_when_diarizing(diarize, sent) -> None:
+@pytest.mark.parametrize("max_speakers", [3, None])
+async def test_speaker_bound_is_sent_only_when_set(max_speakers) -> None:
     service = ScriptedService(submit_responses=[accepted()])
 
-    await _submit(
-        service,
-        TranscriptionJobRequest(
-            operation=TranscriptionOperation.TRANSCRIBE,
-            language="sv",
-            diarize=diarize,
-            max_speakers=3,
-        ),
-    )
+    await _submit(service, replace(LABEL, max_speakers=max_speakers))
 
-    assert (b'name="max_speakers"' in _form(service)) is sent
+    assert (b'name="max_speakers"' in _form(service)) is (max_speakers is not None)
 
 
-@pytest.mark.parametrize(
-    "enabled, diarize, expected",
-    [(False, True, False), (True, True, True), (True, False, False)],
-)
-async def test_speaker_review_is_requested_only_by_explicit_opt_in(
-    enabled, diarize, expected
-) -> None:
+@pytest.mark.parametrize("enabled", [False, True])
+async def test_speaker_review_is_requested_only_by_explicit_opt_in(enabled) -> None:
     service = ScriptedService(submit_responses=[accepted()])
     client = make_client(service)
     client.include_speaker_review = enabled
 
     await client.submit_job(
-        TranscriptionJobRequest(
-            operation=TranscriptionOperation.TRANSCRIBE,
-            language="sv",
-            diarize=diarize,
-        ),
+        LABEL,
         filename="a.wav",
         mimetype="audio/wav",
         payload=io.BytesIO(b"audio"),
     )
 
-    assert (b'name="include_speaker_review"' in _form(service)) == expected
+    assert (b'name="include_speaker_review"' in _form(service)) == enabled
 
 
 @pytest.mark.parametrize(
@@ -205,9 +173,7 @@ async def test_speaker_review_is_requested_only_by_explicit_opt_in(
 )
 def test_an_invalid_request_cannot_be_built(fields) -> None:
     with pytest.raises(ValueError):
-        TranscriptionJobRequest(
-            operation=TranscriptionOperation.DIARIZE, language="sv", **fields
-        )
+        TranscriptionJobRequest(language="sv", **fields)
 
 
 @pytest.mark.parametrize(
@@ -280,7 +246,7 @@ async def test_an_answer_lost_after_upload_is_an_unknown_outcome(lost) -> None:
 
     with pytest.raises(SubmissionOutcomeUnknown) as raised:
         await client.submit_job(
-            TRANSCRIBE,
+            LABEL,
             filename="a.mp3",
             mimetype="audio/mpeg",
             payload=io.BytesIO(b"x"),
@@ -301,7 +267,7 @@ async def test_a_request_that_never_left_is_a_failed_request() -> None:
 
     with pytest.raises(RequestFailed) as raised:
         await client.submit_job(
-            TRANSCRIBE,
+            LABEL,
             filename="a.mp3",
             mimetype="audio/mpeg",
             payload=io.BytesIO(b"x"),

@@ -27,12 +27,14 @@ from eneo.flows.flow_run_contract_service import (
     build_final_output_contract,
     max_speakers_option,
     settle_max_speakers,
+    speaker_labels_option,
 )
 from eneo.flows.published_definition import (
     FLOW_DEFINITION_SCHEMA_VERSION,
     FLOW_PUBLISHED_FORM_SCHEMA_INVALID,
     published_definition_checksum,
 )
+from eneo.flows.transcription_config import SpeakerServiceGap
 from eneo.main.config import Settings, get_settings
 from eneo.main.exceptions import BadRequestException, NotFoundException
 from eneo.main.models import NOT_PROVIDED
@@ -303,6 +305,7 @@ async def test_a_step_that_maps_speakers_requires_labels_so_a_run_cannot_choose(
         "selectable": False,
         "required": True,
         "default": True,
+        "unavailable_reason": None,
     }
     # A speaker service labels a multi-part recording as one.
     assert contract.transcription.single_recording is True
@@ -315,6 +318,13 @@ async def test_a_step_that_maps_speakers_requires_labels_so_a_run_cannot_choose(
     ).get_run_contract(flow_id=flow.id, space=_space(None))
     assert unlabelled.transcription is not None
     assert unlabelled.transcription.single_recording is True
+    # The labels the flow requires cannot be produced, and the contract says why.
+    assert unlabelled.transcription.speaker_labels.model_dump() == {
+        "selectable": False,
+        "required": True,
+        "default": False,
+        "unavailable_reason": SpeakerServiceGap.NO_SERVICE,
+    }
 
 
 @pytest.mark.asyncio
@@ -390,6 +400,8 @@ async def test_a_run_chooses_speaker_labels_only_when_a_space_service_labels_the
     # The flow asks for labels by default; without a service a run gets none.
     assert contract.transcription.speaker_labels.default is selectable
     assert (contract.transcription.max_speakers is not None) is selectable
+    # Optional labels are never missing: without a service the run has none.
+    assert contract.transcription.speaker_labels.unavailable_reason is None
 
 
 @pytest.mark.asyncio
@@ -1372,9 +1384,9 @@ def test_the_speaker_count_option_names_the_participants_field(
         steps,
         wizard_metadata=None,
         speaker_labels=FlowSpeakerLabelsOptionPublic(
-            selectable=True, required=False, default=True
+            selectable=True, required=False, default=True, unavailable_reason=None
         ),
-        speakers_identifiable=True,
+        service_gap=None,
     )
 
     assert option is not None
@@ -1382,6 +1394,30 @@ def test_the_speaker_count_option_names_the_participants_field(
 
 
 _AUDIO_INPUT = {"runtime_input": {"enabled": True, "input_format": "audio"}}
+
+
+@pytest.mark.parametrize("gap", [None, *SpeakerServiceGap])
+def test_only_a_flow_that_requires_labels_reports_why_none_can_be_produced(
+    gap: SpeakerServiceGap | None,
+) -> None:
+    audio_step = replace(
+        _runtime_step(step_order=1, output_type="text"), input_config=_AUDIO_INPUT
+    )
+    mapping_step = replace(
+        _runtime_step(step_order=2, output_type="json"), output_mode="speaker_mapping"
+    )
+    wizard: dict[str, object] = {"transcription_enabled": True}
+
+    required = speaker_labels_option(
+        [audio_step, mapping_step], wizard_metadata=wizard, service_gap=gap
+    )
+    optional = speaker_labels_option(
+        [audio_step], wizard_metadata=wizard, service_gap=gap
+    )
+
+    assert required is not None and optional is not None
+    assert (required.required, required.unavailable_reason) == (True, gap)
+    assert (optional.required, optional.unavailable_reason) == (False, None)
 
 
 @pytest.mark.parametrize(
@@ -1423,7 +1459,7 @@ def test_the_speaker_bound_comes_from_the_run_the_form_the_flow_or_automatic(
         steps=steps,
         wizard_metadata=wizard,
         speaker_labels=True,
-        speakers_identifiable=True,
+        service_gap=None,
         form_input={"antal": form_count} if form_count is not None else {},
     )
 

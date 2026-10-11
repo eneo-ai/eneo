@@ -556,6 +556,10 @@ class FlowTranscriptionResult:
     diarization: str | None = None
     # Time spent in the external speaker-labelling calls, when any were made.
     diarization_elapsed_ms: int | None = None
+    # The connection asked to label the speakers, as it was named then: an
+    # organisation may have several.
+    speaker_service_id: UUID | None = None
+    speaker_service_name: str | None = None
     # Labelled speakers across all files, after renumbering to unique labels.
     speakers: list[dict[str, Any]] = field(default_factory=_empty_speakers)
     # Upper bound given to diarization, from the participants form field.
@@ -586,6 +590,10 @@ class FlowTranscriptionResult:
             "file_ids": [str(file_id) for file_id in self.file_ids],
             "diarization": self.diarization,
             "diarization_elapsed_ms": self.diarization_elapsed_ms,
+            "speaker_service": self.speaker_service_name,
+            "speaker_service_id": str(self.speaker_service_id)
+            if self.speaker_service_id is not None
+            else None,
             "speakers": self.speakers,
             "max_speakers": self.max_speakers,
             "alignment": self.alignment,
@@ -1238,7 +1246,7 @@ async def resolve_and_transcribe_audio_for_step(
             else SpeakerServiceGap.NO_SERVICE,
             step_order=step_order,
         ) from exc
-    return await transcribe_audio_input(
+    result = await transcribe_audio_input(
         files=ordered_files,
         transcriber=transcriber,
         transcription_model=transcription_model,
@@ -1255,4 +1263,12 @@ async def resolve_and_transcribe_audio_for_step(
         live_transcript_requested=live_transcript_requested,
         single_recording=single_recording,
         decode_limits=decode_limits,
+    )
+    # No labelling call was made for a recording without speech.
+    if speaker_service is None or result.diarization_elapsed_ms is None:
+        return result
+    return replace(
+        result,
+        speaker_service_id=speaker_service.id,
+        speaker_service_name=speaker_service.name,
     )

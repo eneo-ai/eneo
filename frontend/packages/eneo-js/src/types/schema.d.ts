@@ -21033,7 +21033,8 @@ export interface components {
      *         "speaker_labels": {
      *           "default": true,
      *           "required": false,
-     *           "selectable": true
+     *           "selectable": true,
+     *           "unavailable_reason": null
      *         }
      *       }
      *     }
@@ -25995,6 +25996,8 @@ export interface components {
        * @description Whether a run may choose with `speaker_labels` on run creation. False when the flow's space has no speaker identification service it can use, or the flow requires labels.
        */
       selectable: boolean;
+      /** @description Why the speaker labels this flow requires cannot be produced, or null. Set only while `required` is true and no speaker identification service can label the flow in its space: the space has none (`no_service`), it has several and the flow picks none (`choice_required`), or the flow's pick is no longer usable there (`picked_unavailable`). A run created while it is set fails its transcription step with `typed_io_speaker_service_unavailable`, so check it before collecting a recording. */
+      unavailable_reason: components["schemas"]["SpeakerServiceGap"] | null;
     };
     /** FlowStepAttemptCompletionConfiguration */
     FlowStepAttemptCompletionConfiguration: {

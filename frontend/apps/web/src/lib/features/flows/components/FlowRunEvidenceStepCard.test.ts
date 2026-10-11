@@ -26,7 +26,11 @@ function renderCard(
   transcriptContext: FlowRunTranscriptContext | null = null,
   onRepairFailure: ((stepOrder: number) => void) | null = null,
   runError: { step_order?: number | null } | null = null,
-  overrides: { stepDef?: Record<string, unknown>; isPowerUser?: boolean } = {}
+  overrides: {
+    stepDef?: Record<string, unknown>;
+    isPowerUser?: boolean;
+    transcription?: Record<string, unknown>;
+  } = {}
 ): string {
   return render(FlowRunEvidenceStepCard, {
     props: {
@@ -160,6 +164,19 @@ describe("FlowRunEvidenceStepCard", () => {
 
     expect(renderCard(false, { ...result, output_payload_json: { structured: {} } })).not.toContain(
       m.flow_run_sections_read_one()
+    );
+  });
+
+  it("names the speaker identification service that labelled the step, in Avancerad", () => {
+    const labelled = { diarization: "external", speaker_service: "Vemsa Sundsvall" };
+    const card = (overrides: Parameters<typeof renderCard>[5]) =>
+      renderCard(false, result, null, null, null, overrides);
+
+    expect(card({ isPowerUser: true, transcription: labelled })).toContain("Vemsa Sundsvall");
+    expect(card({ transcription: labelled })).not.toContain("Vemsa Sundsvall");
+    // A step labelled before the service was recorded shows no empty row.
+    expect(card({ isPowerUser: true, transcription: { diarization: "external" } })).not.toContain(
+      `${m.flow_run_transcription_speaker_service()}</dt>`
     );
   });
 

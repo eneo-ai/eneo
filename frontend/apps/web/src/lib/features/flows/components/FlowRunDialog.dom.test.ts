@@ -1011,7 +1011,12 @@ describe("FlowRunDialog transcription options", () => {
       contract: "speaker labels the flow requires",
       transcription: {
         live: { available: false, reason: "model_not_realtime" },
-        speaker_labels: { selectable: false, required: true, default: true }
+        speaker_labels: {
+          selectable: false,
+          required: true,
+          default: true,
+          unavailable_reason: null
+        }
       } satisfies FlowRunContractTranscription,
       requiredLine: true
     }
@@ -1021,6 +1026,65 @@ describe("FlowRunDialog transcription options", () => {
 
     expect(screen.queryAllByRole("switch")).toHaveLength(0);
     expect(screen.queryByText(m.speaker_labels_required()) !== null).toBe(requiredLine);
+  });
+
+  it.each([
+    { gap: "no_service", reason: m.flow_run_speakers_unavailable_no_service },
+    { gap: "choice_required", reason: m.flow_run_speakers_unavailable_choice_required },
+    { gap: "picked_unavailable", reason: m.flow_run_speakers_unavailable_picked_unavailable }
+  ] as const)(
+    "collects nothing for a flow whose required speaker labels are missing ($gap)",
+    async ({ gap, reason }) => {
+      renderDialog(
+        buildEneo({
+          upload: vi.fn(),
+          // An optional recording leaves the first page nothing else to wait for.
+          steps: [{ ...runtimeStep, required: false }],
+          transcription: {
+            live: { available: false, reason: "model_not_realtime" },
+            speaker_labels: {
+              selectable: false,
+              required: true,
+              default: false,
+              unavailable_reason: gap
+            }
+          }
+        })
+      );
+
+      const notice = await screen.findByRole("alert");
+      expect(notice.textContent).toContain(m.flow_run_speakers_unavailable_title());
+      expect(notice.textContent).toContain(reason());
+      // No step to record or upload on, and no way forward.
+      expect(screen.queryByText(/Audio input/)).toBeNull();
+      expect((screen.getByRole("button", { name: "Nästa" }) as HTMLButtonElement).disabled).toBe(
+        true
+      );
+    }
+  );
+
+  it("gives one reason when the flow cannot run, not the input its hidden step would need", async () => {
+    // A required recording would otherwise explain the disabled Next button.
+    renderDialog(
+      buildEneo({
+        upload: vi.fn(),
+        transcription: {
+          live: { available: false, reason: "model_not_realtime" },
+          speaker_labels: {
+            selectable: false,
+            required: true,
+            default: false,
+            unavailable_reason: "no_service"
+          }
+        }
+      })
+    );
+
+    await screen.findByRole("alert");
+    const next = screen.getByRole("button", { name: "Nästa" }) as HTMLButtonElement;
+    expect(next.disabled).toBe(true);
+    expect(next.title).toBe("");
+    expect(screen.queryByRole("status")).toBeNull();
   });
 
   it("keeps the flow's speaker default until live text streams, and keeps an explicit choice", async () => {
@@ -1149,7 +1213,12 @@ describe("FlowRunDialog transcription options", () => {
       run: "no choice when the flow decides",
       transcription: {
         live: { available: true, reason: null },
-        speaker_labels: { selectable: false, required: false, default: true }
+        speaker_labels: {
+          selectable: false,
+          required: false,
+          default: true,
+          unavailable_reason: null
+        }
       } satisfies FlowRunContractTranscription,
       turnOff: false,
       sent: undefined
@@ -1229,7 +1298,12 @@ async function recordWithLiveText() {
 function offeredTranscription(speakerDefault: boolean): FlowRunContractTranscription {
   return {
     live: { available: true, reason: null },
-    speaker_labels: { selectable: true, required: false, default: speakerDefault }
+    speaker_labels: {
+      selectable: true,
+      required: false,
+      default: speakerDefault,
+      unavailable_reason: null
+    }
   };
 }
 

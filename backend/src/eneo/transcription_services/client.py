@@ -36,9 +36,13 @@ from eneo.files.transcript import (
     TranscriptWord,
 )
 from eneo.main.logging import get_logger
-from eneo.transcription_services.models import TranscriptionOperation
 
 logger = get_logger(__name__)
+
+# The one task Eneo asks of a service: label the speakers of a transcript the
+# flow's own model wrote. A service may advertise more (Vemsa also transcribes
+# and realigns corrected transcripts); Eneo sends none of those.
+DIARIZE_TASK = "diarize"
 
 JOB_COMPLETED = "completed"
 JOB_FAILED = "failed"
@@ -123,31 +127,29 @@ class JobNotFound(TranscriptionServiceError):
 
 @dataclass(frozen=True, slots=True)
 class TranscriptionJobRequest:
-    """The form fields of one job, checked when built so that an invalid
-    request fails before anything is recorded or sent."""
+    """The form fields of one speaker-labelling job, checked when built so
+    that an invalid request fails before anything is recorded or sent."""
 
-    operation: TranscriptionOperation
     language: str | None
-    diarize: bool = True
-    # A diarize job labels these instead of transcribing the audio itself.
+    # The transcript whose speakers the job labels; the service does not
+    # transcribe the audio itself.
     words: Sequence[TranscriptWord] | None = None
     segments: Sequence[TranscriptSegment] | None = None
-    # The model that produced a diarize job's transcript; the service echoes
-    # it in the result.
+    # The model that produced the transcript; the service echoes it in the
+    # result.
     model: str | None = None
     max_speakers: int | None = None
 
     def __post_init__(self) -> None:
-        if self.operation is TranscriptionOperation.DIARIZE:
-            if self.segments and any(
-                segment.speaker_attribution or segment.overlap_ids
-                for segment in self.segments
-            ):
-                raise ValueError(
-                    "Reviewed transcripts require explicit re-diarization and decision invalidation."
-                )
-            if not self.words and not self.segments:
-                raise ValueError("A diarize job needs a timestamped transcript.")
+        if self.segments and any(
+            segment.speaker_attribution or segment.overlap_ids
+            for segment in self.segments
+        ):
+            raise ValueError(
+                "Reviewed transcripts require explicit re-diarization and decision invalidation."
+            )
+        if not self.words and not self.segments:
+            raise ValueError("A diarize job needs a timestamped transcript.")
         if self.max_speakers is not None:
             _require_positive_speaker_bound(self.max_speakers)
 
@@ -457,31 +459,30 @@ def _form_fields(
 ) -> dict[str, str]:
     data: dict[str, str] = {
         "language": request.language or "auto",
-        "diarize": "true" if request.diarize else "false",
+        "diarize": "true",
     }
-    if include_speaker_review and request.diarize:
+    if include_speaker_review:
         data["include_speaker_review"] = "true"
-    if request.operation is TranscriptionOperation.DIARIZE:
-        data["task"] = request.operation.value
-        if request.words:
-            data["words"] = json.dumps(
-                [
-                    {"word": word.word, "start": word.start, "end": word.end}
-                    for word in request.words
-                ],
-                separators=(",", ":"),
-            )
-        if request.segments:
-            data["segments"] = json.dumps(
-                [
-                    {"text": seg.text, "start": seg.start, "end": seg.end}
-                    for seg in request.segments
-                ],
-                separators=(",", ":"),
-            )
+    data["task"] = DIARIZE_TASK
+    if request.words:
+        data["words"] = json.dumps(
+            [
+                {"word": word.word, "start": word.start, "end": word.end}
+                for word in request.words
+            ],
+            separators=(",", ":"),
+        )
+    if request.segments:
+        data["segments"] = json.dumps(
+            [
+                {"text": seg.text, "start": seg.start, "end": seg.end}
+                for seg in request.segments
+            ],
+            separators=(",", ":"),
+        )
     if request.model:
         data["model"] = request.model
-    if request.diarize and request.max_speakers is not None:
+    if request.max_speakers is not None:
         data["max_speakers"] = str(request.max_speakers)
     return data
 
@@ -549,7 +550,7 @@ def _identifies_speakers(raw: object) -> bool | None:
     """Whether the reported task list includes ``diarize``; None without a list."""
     if not isinstance(raw, list):
         return None
-    return TranscriptionOperation.DIARIZE.value in cast(list[object], raw)
+    return DIARIZE_TASK in cast(list[object], raw)
 
 
 def _failure_kind(raw: object) -> JobFailureKind | None:

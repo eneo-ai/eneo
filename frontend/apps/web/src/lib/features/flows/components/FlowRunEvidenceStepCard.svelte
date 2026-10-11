@@ -54,6 +54,8 @@
     /** null: no speaker labels requested; "external": labelled; "skipped:<reason>". */
     diarization?: string | null;
     diarization_elapsed_ms?: number | null;
+    /** The speaker identification service that labelled the speakers, by its name then. */
+    speaker_service?: string | null;
     /** forced | segment_split | segment_only, from the service. */
     alignment?: string | null;
     /** Audio files read, in the order their timestamps restart. */
@@ -507,6 +509,10 @@
               {#if isPowerUser}
                 <dt class="text-secondary">{m.flow_run_transcription_model()}</dt>
                 <dd class="break-all">{transcription.model ?? "\u2014"}</dd>
+                {#if transcription.speaker_service}
+                  <dt class="text-secondary">{m.flow_run_transcription_speaker_service()}</dt>
+                  <dd class="break-words">{transcription.speaker_service}</dd>
+                {/if}
                 <dt class="text-secondary">{m.flow_run_transcription_size()}</dt>
                 <dd class="tabular-nums">{formatBytes(transcription.transcript_bytes)}</dd>
                 <dt class="text-secondary">{m.flow_run_transcription_estimated_tokens()}</dt>

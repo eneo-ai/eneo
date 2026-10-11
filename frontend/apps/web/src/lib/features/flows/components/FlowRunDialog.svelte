@@ -91,6 +91,7 @@
   import FlowRunDialogForm from "./FlowRunDialogForm.svelte";
   import FlowRunDialogRuntimeStep from "./FlowRunDialogRuntimeStep.svelte";
   import FlowRunDialogReview from "./FlowRunDialogReview.svelte";
+  import FlowRunDialogSpeakersUnavailable from "./FlowRunDialogSpeakersUnavailable.svelte";
   import FlowRunDialogTemplateOverview from "./FlowRunDialogTemplateOverview.svelte";
   import FlowRunDialogHeader from "./FlowRunDialogHeader.svelte";
   import FlowRunDialogWizardHeader from "./FlowRunDialogWizardHeader.svelte";
@@ -294,16 +295,26 @@
       ? stepsRequiringInput.findIndex((step) => step.step_id === currentPage.stepId) + 1
       : 0
   );
+  // The flow needs speaker labels no service in its space can give, so a run
+  // would fail its transcription: nothing is collected for it.
+  const speakerServiceGap = $derived(
+    runContract?.transcription?.speaker_labels.unavailable_reason ?? null
+  );
   const canGoNext = $derived(
     currentPageIndex < wizardPages.length - 1 &&
       currentPageProgressBlockers.length === 0 &&
+      speakerServiceGap === null &&
       !isSubmitting
   );
   // Surfaced as visible helper text next to the Next button so a blocked step
   // explains itself, not just as a hover title. Undefined while submitting.
   const nextDisabledReason = $derived(getDisabledNextReason());
   const canSubmitRun = $derived(
-    runContract !== null && !runContractError && !isSubmitting && runBlockers.length === 0
+    runContract !== null &&
+      !runContractError &&
+      speakerServiceGap === null &&
+      !isSubmitting &&
+      runBlockers.length === 0
   );
   const isReviewPage = $derived(currentPage?.kind === "review");
   // The final text of a recording its live text heard whole is still coming,
@@ -1410,7 +1421,9 @@
   }
 
   function getDisabledNextReason(): string | undefined {
-    if (isSubmitting) return undefined;
+    // The notice about the missing speaker service already says why; the
+    // page whose input would be missing is not shown.
+    if (isSubmitting || speakerServiceGap !== null) return undefined;
     // While the step records, stopping is what unlocks both Next and Tillbaka.
     const recording = currentPageProgressBlockers.find(
       (blocker) => blocker.kind === "recording-in-progress"
@@ -1680,6 +1693,8 @@
           </Alert.Action>
         </Alert.Root>
       </div>
+    {:else if speakerServiceGap}
+      <FlowRunDialogSpeakersUnavailable gap={speakerServiceGap} />
     {:else if currentPage}
       <FlowRunDialogWizardHeader
         {wizardPages}

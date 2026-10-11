@@ -1205,13 +1205,14 @@ Use the [Flow error reference](/guides/flows/reference/errors) for the complete 
 
 A flow that transcribes recorded audio reports live text availability, speaker-label options, and an optional speaker-count limit in the run contract's `transcription` object. For any other flow, `transcription` is `null`.
 
-| Field                       | Meaning                                                                                                                                                                                                                                                                  |
-| --------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| `live.available`            | The flow's audio step can show live text while someone records                                                                                                                                                                                                           |
-| `live.reason`               | `null` when live text is available. Otherwise `transcription_disabled` (the flow does not transcribe audio), `model_unavailable` (the flow's transcription model is not available in its space), or `model_not_realtime` (the model does not support live transcription) |
-| `speaker_labels.selectable` | A run may choose speaker labels with `speaker_labels`. It is `false` when the flow's space has no speaker identification service it can use, or when the flow requires labels                                                                                            |
-| `speaker_labels.required`   | The flow needs speaker labels, because a step maps speakers to names                                                                                                                                                                                                     |
-| `speaker_labels.default`    | The flow's own setting, which applies when a run makes no choice. It is `false` when the space has no speaker identification service it can use                                                                                                                          |
+| Field                               | Meaning                                                                                                                                                                                                                                                                  |
+| ----------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `live.available`                    | The flow's audio step can show live text while someone records                                                                                                                                                                                                           |
+| `live.reason`                       | `null` when live text is available. Otherwise `transcription_disabled` (the flow does not transcribe audio), `model_unavailable` (the flow's transcription model is not available in its space), or `model_not_realtime` (the model does not support live transcription) |
+| `speaker_labels.selectable`         | A run may choose speaker labels with `speaker_labels`. It is `false` when the flow's space has no speaker identification service it can use, or when the flow requires labels                                                                                            |
+| `speaker_labels.required`           | The flow needs speaker labels, because a step maps speakers to names                                                                                                                                                                                                     |
+| `speaker_labels.default`            | The flow's own setting, which applies when a run makes no choice. It is `false` when the space has no speaker identification service it can use                                                                                                                          |
+| `speaker_labels.unavailable_reason` | Why the labels the flow requires cannot be produced: `no_service`, `choice_required` or `picked_unavailable`. `null` unless `required` is `true` and no service can label the flow. See [Stop before recording](#stop-before-recording-when-required-labels-are-missing) |
 
 ### Choose speaker labels for a run
 
@@ -1237,6 +1238,18 @@ When `transcription.speaker_labels.selectable` is `true`, your app can let the u
 3. Check the run: `GET /api/v1/flows/{id}/graph/?run_id={run_id}` marks the audio step's node with `"speaker_identification": true` only when the run labels speakers.
 
 When `selectable` is `false`, do not send `true` or `false`: Eneo refuses the request with `422` and code `flow_run_speaker_labels_not_selectable`. Labelling speakers makes the run take longer. A retry of a failed run and a transcript regeneration keep the run's choice. `speaker_labels` belongs at the top level of the request; inside `input_payload_json` it is a reserved key.
+
+### Stop before recording when required labels are missing
+
+A flow with a step that maps speakers to names requires speaker labels (`speaker_labels.required` is `true`). When no speaker identification service can label that flow, `speaker_labels.unavailable_reason` says why:
+
+| `unavailable_reason` | Meaning                                                                    | Who can fix it                                                                  |
+| -------------------- | -------------------------------------------------------------------------- | ------------------------------------------------------------------------------- |
+| `no_service`         | The flow's space has no speaker identification service the flow can use    | An administrator gives the space access to a service                            |
+| `choice_required`    | The space has several services and the flow has not chosen one             | The flow's author chooses a service and publishes the flow again                |
+| `picked_unavailable` | The service the flow chose can no longer be used in the space              | The author chooses another service and publishes again, or access is given back |
+
+While it is not `null`, do not start a recording or create a run. Show the reason instead. A run created anyway fails its transcription step with `typed_io_speaker_service_unavailable`, and the run error's `details.speaker_service_gap` carries the same value. The step is refused before any audio is transcribed. For a flow that does not require labels, `unavailable_reason` is always `null`: without a service, a run transcribes without speaker labels.
 
 ### Set a speaker-count limit
 

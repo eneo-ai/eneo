@@ -1317,7 +1317,12 @@ describe("FlowRunDialog recording rotation", () => {
       createSession,
       transcription: {
         live: { available: true, reason: null },
-        speaker_labels: { selectable: true, required: false, default: true }
+        speaker_labels: {
+          selectable: true,
+          required: false,
+          default: true,
+          unavailable_reason: null
+        }
       }
     });
 
@@ -1726,7 +1731,7 @@ describe("FlowRunDialog live transcript in the run", () => {
 
 const oneRecordingOffered: FlowRunContractTranscription = {
   live: { available: false, reason: "model_not_realtime" },
-  speaker_labels: { selectable: true, required: false, default: true },
+  speaker_labels: { selectable: true, required: false, default: true, unavailable_reason: null },
   single_recording: true
 };
 
@@ -1734,7 +1739,7 @@ const liveText: DialogOptions = {
   createSession: vi.fn(async () => liveSession),
   transcription: {
     live: { available: true, reason: null },
-    speaker_labels: { selectable: true, required: false, default: true }
+    speaker_labels: { selectable: true, required: false, default: true, unavailable_reason: null }
   }
 };
 

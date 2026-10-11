@@ -24,6 +24,7 @@ from eneo.flows.flow_metadata import FlowFormFieldType
 from eneo.flows.flow_review_expiry_policy import FLOW_REVIEW_EXPIRY_DEFAULT_SECONDS
 from eneo.flows.flow_review_policy import FlowStepReviewMode
 from eneo.flows.flow_run_step_result_file import FlowRunStepResultFile
+from eneo.flows.transcription_config import SpeakerServiceGap
 from eneo.json_types import JsonObject, JsonValue
 
 FlowCitationSummaryStatus: TypeAlias = Literal[
@@ -529,6 +530,18 @@ class FlowSpeakerLabelsOptionPublic(BaseModel):
             "What a run gets when it makes no choice: the flow's own speaker-label "
             "setting, or false while the space has no speaker identification "
             "service it can use."
+        )
+    )
+    unavailable_reason: SpeakerServiceGap | None = Field(
+        description=(
+            "Why the speaker labels this flow requires cannot be produced, or null. "
+            "Set only while `required` is true and no speaker identification "
+            "service can label the flow in its space: the space has none "
+            "(`no_service`), it has several and the flow picks none "
+            "(`choice_required`), or the flow's pick is no longer usable there "
+            "(`picked_unavailable`). A run created while it is set fails its "
+            "transcription step with `typed_io_speaker_service_unavailable`, so "
+            "check it before collecting a recording."
         )
     )
 

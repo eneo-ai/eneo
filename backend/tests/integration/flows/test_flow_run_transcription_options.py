@@ -155,7 +155,12 @@ async def test_without_a_service_runs_transcribe_without_speaker_labels(
 
     assert contract["transcription"] == {
         "live": {"available": True, "reason": None},
-        "speaker_labels": {"selectable": False, "required": False, "default": False},
+        "speaker_labels": {
+            "selectable": False,
+            "required": False,
+            "default": False,
+            "unavailable_reason": None,
+        },
         "max_speakers": None,
         "single_recording": True,
     }
@@ -194,7 +199,12 @@ async def test_with_a_service_a_run_may_choose_and_the_flow_sets_the_default(
 
     assert contract["transcription"] == {
         "live": {"available": True, "reason": None},
-        "speaker_labels": {"selectable": True, "required": False, "default": False},
+        "speaker_labels": {
+            "selectable": True,
+            "required": False,
+            "default": False,
+            "unavailable_reason": None,
+        },
         "max_speakers": {
             "form_field": None,
             "participants_field": None,
@@ -456,6 +466,7 @@ async def test_a_run_started_again_from_its_speaker_options_survives_a_republish
         "selectable": True,
         "required": False,
         "default": False,
+        "unavailable_reason": None,
     }
     assert (read.json()["speaker_labels"], read.json()["max_speakers"]) == (True, 3)
     assert again.status_code == 201, again.text
@@ -478,6 +489,7 @@ async def test_a_flow_that_asks_for_the_count_advertises_its_form_field(
         "selectable": False,
         "required": True,
         "default": True,
+        "unavailable_reason": None,
     }
     assert contract["transcription"]["max_speakers"] == {
         "form_field": "antal_talare",

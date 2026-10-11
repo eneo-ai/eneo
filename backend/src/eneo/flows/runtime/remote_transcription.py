@@ -72,6 +72,7 @@ from eneo.model_providers.domain.provider_call_observer import (
 from eneo.model_providers.infrastructure import litellm_transport
 from eneo.settings.encryption_service import EncryptionService
 from eneo.transcription_services.client import (
+    DIARIZE_TASK,
     JOB_CANCELLED,
     JOB_COMPLETED,
     JOB_FAILED,
@@ -87,7 +88,6 @@ from eneo.transcription_services.client import (
     TranscriptionServiceError,
     UnexpectedStatus,
 )
-from eneo.transcription_services.models import TranscriptionOperation
 from eneo.transcription_services.repository import (
     TranscriptionServiceConnectionRepository,
 )
@@ -154,9 +154,7 @@ class RemoteFlowTranscriber:
             file,
             file_id=file_id,
             request=TranscriptionJobRequest(
-                operation=TranscriptionOperation.DIARIZE,
                 language=language,
-                diarize=True,
                 words=words,
                 segments=segments,
                 model=model_name,
@@ -545,7 +543,7 @@ class RemoteFlowTranscriber:
         )
         idempotency_key = hashlib.sha256(
             json.dumps(
-                [operation_scope, str(file_id), audio_digest, request.operation],
+                [operation_scope, str(file_id), audio_digest, DIARIZE_TASK],
                 separators=(",", ":"),
             ).encode()
         ).hexdigest()
