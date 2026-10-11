@@ -2247,7 +2247,7 @@ async def test_worker_saves_failure_addresses_during_crawl_and_flushes_the_final
         await crawl_task(job_id=dispatch_id, params=task, container=container)
     except Exception:
         print("DIAG tasks at failure:", _tasks(), flush=True)
-        async with sessionmanager.session() as diag:
+        async with sessionmanager.session() as diag, diag.begin():
             runs = (
                 await diag.execute(sa.text("SELECT id, phase FROM crawl_runs"))
             ).all()
