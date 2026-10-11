@@ -573,6 +573,10 @@ const ACTION_MESSAGES = {
     name: m.audit_action_data_retention_batch,
     description: m.audit_action_data_retention_batch_description
   },
+  data_retention_run: {
+    name: m.audit_action_data_retention_run,
+    description: m.audit_action_data_retention_run_description
+  },
   data_retention_skipped: {
     name: m.audit_action_data_retention_skipped,
     description: m.audit_action_data_retention_skipped_description

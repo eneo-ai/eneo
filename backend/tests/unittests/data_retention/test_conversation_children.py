@@ -6,10 +6,12 @@ import pytest
 import sqlalchemy as sa
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from eneo.data_retention.application.conversation_retention import (
+    ConversationRootKind,
+)
 from eneo.data_retention.infrastructure.conversation_retention_repo import (
     ConversationCascadeError,
     ConversationRetentionRepository,
-    ConversationRootKind,
     collect_conversation_children,
 )
 

@@ -6,6 +6,7 @@ test_data_retention_hierarchical.py and test_unused_file_cleanup.py.
 
 from __future__ import annotations
 
+import math
 from collections.abc import Sequence
 from dataclasses import dataclass, field
 from datetime import date, datetime, timedelta, timezone
@@ -21,7 +22,8 @@ from eneo.data_retention.application.conversation_retention import (
     ConversationBlockReason,
     ConversationDeletion,
     ConversationPage,
-    ConversationPagePace,
+    ConversationRootCostEstimate,
+    ConversationRootKind,
     ConversationUnitResult,
     conversation_page_allocation,
     is_past_owner,
@@ -50,6 +52,7 @@ class _Pages:
     deleting a root removes it from later pages."""
 
     roots: list[_Root]
+    kind: ConversationRootKind = ConversationRootKind.QUESTION
     # Owners with a policy, with or without due roots.
     owners: list[UUID] = field(default_factory=lambda: [_OWNER])
     now: list[float] = field(default_factory=lambda: [0.0])
@@ -175,7 +178,8 @@ async def test_an_oversized_root_is_charged_its_bounded_proof_and_passed() -> No
         pages,
         _batch(allocation.max_batch, None),
         allocation,
-        ConversationPagePace(),
+        ConversationRootCostEstimate(),
+        gather_seconds=math.inf,
         clock=pages.clock,
     )
 
@@ -196,13 +200,14 @@ async def test_a_root_short_of_the_chunk_remainder_is_retried_fresh() -> None:
     first, second = _roots((0, 3), (7, 2))
     pages = _Pages(roots=[first, second])
     allocation = _allocation(unit_rows=10, chunk_rows=12)
-    pace = ConversationPagePace()
+    estimate = ConversationRootCostEstimate()
 
     shortage = await run_conversation_page(
         pages,
         _batch(allocation.max_batch, None),
         allocation,
-        pace,
+        estimate,
+        gather_seconds=math.inf,
         clock=pages.clock,
     )
 
@@ -218,14 +223,15 @@ async def test_a_root_short_of_the_chunk_remainder_is_retried_fresh() -> None:
         pages,
         _batch(allocation.max_batch, shortage.cursor),
         allocation,
-        pace,
+        estimate,
+        gather_seconds=math.inf,
         clock=pages.clock,
     )
 
     assert retried.rows == 2 + 7 + 2
     assert retried.blocked == {}
     assert pages.deleted == [first.keyset.id, second.keyset.id]
-    # The paced page of one root is full, so the cursor stays at that root.
+    # The estimated page of one root is full, so the cursor stays at that root.
     assert retried.cursor == second.keyset
 
 
@@ -242,7 +248,8 @@ async def test_the_deadline_stops_admission_after_the_first_root() -> None:
         pages,
         _batch(allocation.max_batch, None, deadline=5.0),
         allocation,
-        ConversationPagePace(),
+        ConversationRootCostEstimate(),
+        gather_seconds=math.inf,
         clock=pages.clock,
     )
 
@@ -267,7 +274,8 @@ async def test_time_spent_before_the_page_counts_against_the_deadline() -> None:
         pages,
         _batch(allocation.max_batch, None, deadline=5.0),
         allocation,
-        ConversationPagePace(),
+        ConversationRootCostEstimate(),
+        gather_seconds=math.inf,
         clock=pages.clock,
     )
 
@@ -276,28 +284,57 @@ async def test_time_spent_before_the_page_counts_against_the_deadline() -> None:
 
 
 @pytest.mark.asyncio
+async def test_the_gather_window_stops_admission_before_the_deadline() -> None:
+    """Mutant: the page admits roots until the execution deadline only, so its
+    root locks are held for the whole remaining execution time."""
+    roots = _roots((0, 1), (0, 1), (0, 1))
+    pages = _Pages(roots=list(roots), seconds_per_call=0.6)
+    allocation = _allocation(unit_rows=10, chunk_rows=30)
+
+    result = await run_conversation_page(
+        pages,
+        _batch(allocation.max_batch, None),
+        allocation,
+        ConversationRootCostEstimate(),
+        gather_seconds=1.0,
+        clock=pages.clock,
+    )
+
+    # The lock and the first root take 1.2 of the 1.0 seconds; the deadline is 60.
+    assert pages.deleted == [roots[0].keyset.id]
+    assert result.cursor == roots[0].keyset
+    assert not result.deferred and not result.exhausted
+
+
+@pytest.mark.asyncio
 async def test_an_expensive_chunk_shrinks_the_next_page() -> None:
-    """Mutant: the pace is never updated, so after roots that cost six rows each
+    """Mutant: the cost estimate is never updated, so after roots that cost six rows each
     the next chunk still locks a page sized for the cheapest root."""
     roots = _roots(*((4, 1),) * 12)
     pages = _Pages(roots=list(roots))
     allocation = _allocation(unit_rows=10, chunk_rows=30)
-    pace = ConversationPagePace()
+    estimate = ConversationRootCostEstimate()
 
     first = await run_conversation_page(
-        pages, _batch(allocation.max_batch, None), allocation, pace, clock=pages.clock
+        pages,
+        _batch(allocation.max_batch, None),
+        allocation,
+        estimate,
+        gather_seconds=math.inf,
+        clock=pages.clock,
     )
     await run_conversation_page(
         pages,
         _batch(allocation.max_batch, first.cursor),
         allocation,
-        pace,
+        estimate,
+        gather_seconds=math.inf,
         clock=pages.clock,
     )
 
     # One owner and ten locked roots, three deletions of five rows and the
     # fourth root's proof fill the 30-row chunk: 30 rows over 3 visited roots
-    # is a pace of 10, so 30 // 10 = 3 roots next.
+    # is an estimate of 10, so 30 // 10 = 3 roots next.
     assert first.rows == 30
     assert pages.limits == [10, 3]
 
@@ -317,7 +354,8 @@ async def test_probed_owners_are_charged_and_a_full_owner_page_continues() -> No
         pages,
         _batch(allocation.max_batch, None),
         allocation,
-        ConversationPagePace(),
+        ConversationRootCostEstimate(),
+        gather_seconds=math.inf,
         clock=pages.clock,
     )
 
@@ -331,7 +369,8 @@ async def test_probed_owners_are_charged_and_a_full_owner_page_continues() -> No
         pages,
         _batch(allocation.max_batch, first.cursor),
         allocation,
-        ConversationPagePace(),
+        ConversationRootCostEstimate(),
+        gather_seconds=math.inf,
         clock=pages.clock,
     )
 
@@ -356,6 +395,8 @@ def test_every_history_step_goes_first_on_some_date() -> None:
             ),
             overdue_window=timedelta(days=1),
             overdue_rows=10,
+            overdue_owner_rows=1000,
+            gather_seconds=1.0,
         )
         orders.append([step.name for step in task.steps()])
 

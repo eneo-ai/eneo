@@ -120,6 +120,8 @@ class RetentionJobRunRecord:
     outcome: RetentionJobOutcome
     blocked: dict[str, int]
     error_code: RetentionErrorCode | None
+    # The last renewal; a running row that stopped renewing was abandoned.
+    heartbeat_at: datetime
 
 
 @dataclass(frozen=True, slots=True)
@@ -132,7 +134,7 @@ class RetentionJobRunRepository:
     def __init__(self, session: AsyncSession) -> None:
         self.session = session
 
-    async def claim(self, *, task: str, stale_after_seconds: int) -> UUID | None:
+    async def claim(self, *, task: str, lease_stale_seconds: int) -> UUID | None:
         """Start an execution, superseding a stale one; None means the claim is lost.
 
         Runs inside the caller's transaction. The supersession rechecks the running
@@ -150,7 +152,7 @@ class RetentionJobRunRepository:
                 RetentionJobRuns.task == task,
                 RetentionJobRuns.outcome == _RUNNING,
                 RetentionJobRuns.heartbeat_at
-                < now - sa.func.make_interval(0, 0, 0, 0, 0, 0, stale_after_seconds),
+                < now - sa.func.make_interval(0, 0, 0, 0, 0, 0, lease_stale_seconds),
             )
             .values(
                 outcome=RetentionJobOutcome.SUPERSEDED.value,
@@ -333,6 +335,7 @@ class RetentionJobRunRepository:
                 if row.error_code is not None
                 else None
             ),
+            heartbeat_at=row.heartbeat_at,
         )
 
     async def has_any_run(self, tasks: Sequence[str]) -> bool:

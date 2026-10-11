@@ -11,8 +11,10 @@ back, so deletions never commit without their audit or progress.
 Every retention transaction (claim, chunk, finish, skip) first sets its lock and
 statement timeouts, so waiting on another execution's row lock ends within the
 configured limit: a claim that times out is recorded as a skipped run, a chunk
-that times out ends the run as partial, and a finish that times out leaves the
-running row to the stale takeover, which records it as superseded.
+that times out or is chosen as a deadlock victim ends the run as partial, and a
+finish that times out leaves the running row to the stale takeover, which
+records it as superseded. A step that breaks the adopter contract ends the run
+as failed with `contract_violation`, apart from database failures.
 
 Everything a step reports is a count under a name the task declares in closed
 sets: a disposal fact (`count_keys`, for example rows deleted), an observation
@@ -24,10 +26,11 @@ charged rows or files must report them under some key or is refused, and a
 call may not charge more than its batch allows. A step call that makes no
 progress ends that step for the run (recorded as `<step>.stalled`). Explicit
 deferral ends the step after committing its cursor and audit, is recorded as
-the blocked reason `<step>.deferred`, and lets later steps use the remaining
-budget. The budget is checked before every call, and the batch carries the
-execution's deadline so a step stops admitting new units at it; the unit in
-progress completes within the statement timeouts.
+the count `<step>.deferred` on the job row (a deferral disposes of nothing and
+keeps nothing, so alone it writes no audit event), and lets later steps use
+the remaining budget. The budget is checked before every call, and the batch
+carries the execution's deadline so a step stops admitting new units at it;
+the unit in progress completes within the statement timeouts.
 
 Each step has a durable keyset cursor: the batch carries the position the
 task's newest execution reached, the step returns its new position, and the
@@ -39,6 +42,11 @@ written to the job row when the execution ends, whatever the outcome (budget
 spent, a failed or timed-out chunk), in its own bounded transaction before the
 final outcome; a superseded execution writes none. A snapshot that fails is
 logged; the previous snapshot continues to age until health marks it stale.
+
+The final outcome and one required `data_retention_run` audit event with the
+execution's outcome and audited totals commit together in the finish
+transaction, so an execution that was superseded or whose finish timed out
+writes no event, and an outcome never commits without its event.
 """
 
 from __future__ import annotations
@@ -70,19 +78,32 @@ from eneo.data_retention.domain.retention import (
     RetentionUsage,
     retention_batch_audit_id,
     retention_name,
+    retention_run_audit_id,
+    retention_summary,
 )
 
 logger = logging.getLogger(__name__)
 
 
-class _TimeoutSQLState(StrEnum):
+class _TransientSQLState(StrEnum):
+    """Database errors that end a chunk without a defect: the next execution
+    retries the same work."""
+
     STATEMENT_CANCELLED = "57014"
     LOCK_NOT_AVAILABLE = "55P03"
+    # A lock cycle with a user transaction (for example a manual File delete,
+    # which waits on File roots without SKIP LOCKED); PostgreSQL aborts one side.
+    DEADLOCK_DETECTED = "40P01"
 
 
-# The runner's own count: a step call without progress ended the step.
+_TIMEOUT_STATES = frozenset(
+    {_TransientSQLState.STATEMENT_CANCELLED, _TransientSQLState.LOCK_NOT_AVAILABLE}
+)
+
+
+# The runner's own counts: a step call without progress ended the step, or the
+# step deferred its remaining work to the next execution.
 STALLED = "stalled"
-# The runner records this stop both in progress and the required audit.
 DEFERRED = "deferred"
 
 
@@ -102,7 +123,8 @@ class RetentionBatch:
 
 @dataclass(frozen=True, slots=True)
 class RetentionTenantEffect:
-    """What one step call removed for one tenant; that tenant's audit event.
+    """What one step call reported for one tenant: its disposal facts (the
+    tenant's audit event) and its observations (kept on the job row only).
 
     `tenant_id=None` is a deployment-level effect (for example pruned job runs),
     audited in the deployment's tenant.
@@ -135,7 +157,9 @@ class RetentionStep:
     # A step whose unit of work is larger than a chunk (one whole file family)
     # asks for batches of up to this many rows and files instead.
     max_batch: int | None = None
-    # Zero declares that this step does not spend the file budget.
+    # The step's file allowance per batch. None gives it the same allowance as
+    # its rows (max_batch, else the chunk); zero declares that this step does
+    # not spend the file budget.
     max_files: int | None = None
 
 
@@ -177,13 +201,20 @@ class RetentionAuditSink(Protocol):
 
 @runtime_checkable
 class RetentionOverdueReporter(Protocol):
-    """A task whose due work can be overdue; one bounded read."""
+    """A task whose due work can be overdue; one bounded read.
+
+    The one owner of "this task reports overdue work": the runner records a
+    snapshot for it and health expects one (overdue_reporter)."""
 
     async def overdue(self) -> RetentionOverdue: ...
 
 
+def overdue_reporter(task: RetentionTask) -> RetentionOverdueReporter | None:
+    return task if isinstance(task, RetentionOverdueReporter) else None
+
+
 class RetentionJobRunStore(Protocol):
-    async def claim(self, *, task: str, stale_after_seconds: int) -> UUID | None: ...
+    async def claim(self, *, task: str, lease_stale_seconds: int) -> UUID | None: ...
 
     async def renew(self, job_run_id: UUID) -> bool: ...
 
@@ -223,7 +254,7 @@ class RetentionChunkLimits:
     rows: int
     statement_timeout_ms: int
     lock_timeout_ms: int
-    stale_after_seconds: int
+    lease_stale_seconds: int
 
 
 @dataclass(frozen=True, slots=True)
@@ -263,24 +294,44 @@ class _SQLStateError(Protocol):
     def sqlstate(self) -> str | None: ...
 
 
-def is_retention_timeout(exc: BaseException) -> bool:
-    """A statement or lock timeout, also when another error wraps it (a lock
-    helper that reports a busy lock as its own error)."""
+def _transient_state(exc: BaseException) -> _TransientSQLState | None:
+    """The transient database state that ended `exc`, also when another error
+    wraps it (a lock helper that reports a busy lock as its own error)."""
     cause: BaseException | None = exc
     while cause is not None:
         if isinstance(cause, DBAPIError):
             if not isinstance(cause.orig, _SQLStateError):
-                return False
+                return None
             try:
-                state = _TimeoutSQLState(cause.orig.sqlstate)
+                return _TransientSQLState(cause.orig.sqlstate)
             except ValueError:
-                return False
-            return state in (
-                _TimeoutSQLState.STATEMENT_CANCELLED,
-                _TimeoutSQLState.LOCK_NOT_AVAILABLE,
-            )
+                return None
         cause = cause.__cause__
-    return False
+    return None
+
+
+def is_retention_timeout(exc: BaseException) -> bool:
+    """A statement or lock timeout: the claim and finish wait limits."""
+    return _transient_state(exc) in _TIMEOUT_STATES
+
+
+def is_lock_wait_timeout(exc: BaseException) -> bool:
+    """A lock wait reached the lock timeout (55P03), and no other state: a
+    statement timeout or a deadlock still ends the chunk."""
+    return _transient_state(exc) is _TransientSQLState.LOCK_NOT_AVAILABLE
+
+
+def _chunk_ending(
+    exc: Exception,
+) -> tuple[RetentionJobOutcome, RetentionErrorCode]:
+    if isinstance(exc, RetentionContractError):
+        return RetentionJobOutcome.FAILED, RetentionErrorCode.CONTRACT_VIOLATION
+    state = _transient_state(exc)
+    if state is _TransientSQLState.DEADLOCK_DETECTED:
+        return RetentionJobOutcome.PARTIAL, RetentionErrorCode.CHUNK_DEADLOCK
+    if state is not None:
+        return RetentionJobOutcome.PARTIAL, RetentionErrorCode.CHUNK_TIMEOUT
+    return RetentionJobOutcome.FAILED, RetentionErrorCode.CHUNK_FAILED
 
 
 def _merged(
@@ -327,7 +378,7 @@ class RetentionRunner:
         try:
             async with self._transaction():
                 job_run_id = await self.job_runs.claim(
-                    task=task.name, stale_after_seconds=self.limits.stale_after_seconds
+                    task=task.name, lease_stale_seconds=self.limits.lease_stale_seconds
                 )
                 if job_run_id is None:
                     raise _ClaimLost
@@ -337,7 +388,7 @@ class RetentionRunner:
         except Exception as exc:
             if not is_retention_timeout(exc):
                 raise
-            return await self._record(task.name, RetentionErrorCode.CLAIM_TIMEOUT)
+            return await self._record_claim_timeout(task.name)
 
         progress = _Progress(started=self.clock(), cursors=cursors)
         outcome = RetentionJobOutcome.SUCCEEDED
@@ -358,9 +409,8 @@ class RetentionRunner:
                 blocked=progress.blocked,
             )
         except Exception as exc:
-            if is_retention_timeout(exc):
-                outcome = RetentionJobOutcome.PARTIAL
-                error_code = RetentionErrorCode.CHUNK_TIMEOUT
+            outcome, error_code = _chunk_ending(exc)
+            if outcome is RetentionJobOutcome.PARTIAL:
                 logger.warning(
                     "Retention task %s chunk %s ended: %s",
                     task.name,
@@ -368,20 +418,26 @@ class RetentionRunner:
                     error_code.value,
                 )
             else:
-                outcome = RetentionJobOutcome.FAILED
-                error_code = RetentionErrorCode.CHUNK_FAILED
                 logger.exception(
-                    "Retention task %s chunk %s failed", task.name, progress.batch_seq
+                    "Retention task %s chunk %s failed: %s",
+                    task.name,
+                    progress.batch_seq,
+                    error_code.value,
                 )
 
-        if isinstance(task, RetentionOverdueReporter):
-            await self._record_overdue(task.name, task, job_run_id)
+        reporter = overdue_reporter(task)
+        if reporter is not None:
+            await self._record_overdue(task.name, reporter, job_run_id)
 
         try:
             async with self._transaction():
                 finished = await self.job_runs.finish(
                     job_run_id, outcome=outcome, error_code=error_code
                 )
+                if finished:
+                    await self._audit_run(
+                        task.name, job_run_id, outcome, error_code, progress
+                    )
         except Exception as exc:
             if not is_retention_timeout(exc):
                 raise
@@ -447,16 +503,22 @@ class RetentionRunner:
                     and result.rows == 0
                     and result.files == 0
                 )
+                totals = _effect_totals(result)
                 counts = _merged(
                     progress.counts,
                     step.name,
-                    {**_effect_totals(result), **({STALLED: 1} if stalled else {})},
+                    {
+                        **totals,
+                        **({STALLED: 1} if stalled else {}),
+                        **({DEFERRED: 1} if result.deferred else {}),
+                    },
                 )
-                blocked = _merged(
-                    progress.blocked,
-                    step.name,
-                    {**result.blocked, **({DEFERRED: 1} if result.deferred else {})},
-                )
+                blocked = _merged(progress.blocked, step.name, result.blocked)
+                disposed = {
+                    key: value
+                    for key, value in totals.items()
+                    if value and key in task.count_keys
+                }
                 cursors = dict(progress.cursors)
                 if result.exhausted:
                     cursors.pop(step.name, None)
@@ -470,6 +532,8 @@ class RetentionRunner:
                     cursors=cursors,
                 )
             progress.counts, progress.blocked = counts, blocked
+            progress.disposed = _merged(progress.disposed, step.name, disposed)
+            progress.disposal_totals = _summed(progress.disposal_totals, disposed)
             progress.cursors = cursors
             progress.used = progress.used.plus(rows=result.rows, files=result.files)
             if result.exhausted:
@@ -502,6 +566,48 @@ class RetentionRunner:
         except Exception:
             logger.exception("Retention task %s could not record overdue work.", name)
 
+    async def _audit_run(
+        self,
+        task: str,
+        job_run_id: UUID,
+        outcome: RetentionJobOutcome,
+        error_code: RetentionErrorCode | None,
+        progress: _Progress,
+    ) -> None:
+        """The execution's required end event, in its finish transaction: what an
+        administrator reads first (outcome and totals) instead of every chunk."""
+        tenant_id = await self.job_runs.deployment_tenant_id()
+        if tenant_id is None:
+            # An outcome without its required audit event would be silent.
+            raise RetentionContractError("No tenant to hold the retention audit event.")
+        ending = (
+            f"{outcome.value} ({error_code.value})"
+            if error_code is not None
+            else outcome.value
+        )
+        await self.audit_service.log(
+            audit_id=retention_run_audit_id(job_run_id),
+            tenant_id=tenant_id,
+            actor_type=ActorType.SYSTEM,
+            action=ActionType.DATA_RETENTION_RUN,
+            entity_type=EntityType.TENANT_SETTINGS,
+            entity_id=tenant_id,
+            description=(
+                f"Retention {task} finished: {ending}; "
+                f"{retention_summary(progress.disposal_totals, progress.blocked)}"
+            ),
+            metadata={
+                "task": task,
+                "job_run_id": str(job_run_id),
+                "outcome": outcome.value,
+                "error_code": error_code.value if error_code is not None else None,
+                "counts": dict(progress.disposed),
+                "blocked": dict(progress.blocked),
+                "batch_count": progress.batch_seq,
+            },
+            required=True,
+        )
+
     async def skip(self, task: str) -> RetentionRunReport:
         """Record a run the deployment's emergency switch suppressed; never silent.
 
@@ -527,7 +633,7 @@ class RetentionRunner:
                 entity_type=EntityType.TENANT_SETTINGS,
                 entity_id=tenant_id,
                 description=(
-                    f"Retention {task} skipped: disabled by deployment setting."
+                    f"Retention {task} skipped: turned off by a deployment setting."
                 ),
                 metadata={
                     "task": task,
@@ -537,7 +643,7 @@ class RetentionRunner:
                 required=True,
             )
         logger.warning(
-            "Retention task %s skipped: disabled by deployment setting.", task
+            "Retention task %s skipped: turned off by a deployment setting.", task
         )
         return RetentionRunReport(
             task=task,
@@ -546,10 +652,10 @@ class RetentionRunner:
             error_code=reason,
         )
 
-    async def _record(
-        self, task: str, error_code: RetentionErrorCode
-    ) -> RetentionRunReport:
-        """Record a run that did not start because its claim timed out."""
+    async def _record_claim_timeout(self, task: str) -> RetentionRunReport:
+        """Record a run that did not start because its claim timed out; no audit
+        event, as nothing ran and the job row holds the reason."""
+        error_code = RetentionErrorCode.CLAIM_TIMEOUT
         logger.warning("Retention task %s not started: %s.", task, error_code.value)
         async with self._transaction():
             job_run_id = await self.job_runs.record_skip(
@@ -631,8 +737,6 @@ class RetentionRunner:
             )
             merge(tenant_id, _AuditEvent(tenant_id=tenant_id, counts=removed))
         blocked = {key: value for key, value in result.blocked.items() if value}
-        if result.deferred:
-            blocked[DEFERRED] = 1
         if blocked:
             tenant_id = await deployment_tenant_id()
             merge(tenant_id, _AuditEvent(tenant_id=tenant_id, blocked=blocked))
@@ -658,7 +762,10 @@ class RetentionRunner:
             action=ActionType.DATA_RETENTION_BATCH,
             entity_type=EntityType.TENANT_SETTINGS,
             entity_id=tenant_id,
-            description=f"Scheduled retention {task} ran its {step} step.",
+            description=(
+                f"Retention {task}, step {step}: "
+                f"{retention_summary(event.counts, event.blocked)}"
+            ),
             metadata={
                 "task": task,
                 "step": step,
@@ -684,6 +791,10 @@ class _Progress:
     used: RetentionUsage = field(default_factory=RetentionUsage)
     counts: dict[str, int] = field(default_factory=dict[str, int])
     blocked: dict[str, int] = field(default_factory=dict[str, int])
+    # The audited disposal facts by `<step>.<key>`, and summed over the steps
+    # by key for the end event's description.
+    disposed: dict[str, int] = field(default_factory=dict[str, int])
+    disposal_totals: dict[str, int] = field(default_factory=dict[str, int])
     batch_seq: int = 0
     budget_spent: bool = False
     cursors: dict[str, RetentionKeyset] = field(

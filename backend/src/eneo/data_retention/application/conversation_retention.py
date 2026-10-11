@@ -27,13 +27,45 @@ from eneo.data_retention.domain.retention import (
 from eneo.files.file_retention import FileRetentionReason
 
 
+class ConversationRootKind(StrEnum):
+    QUESTION = "question"
+    APP_RUN = "app_run"
+
+    @property
+    def deleted_key(self) -> str:
+        """The count of deleted roots, named for what a root is in the product."""
+        return (
+            "questions_deleted"
+            if self is ConversationRootKind.QUESTION
+            else "app_runs_deleted"
+        )
+
+
 class ConversationBlockReason(StrEnum):
     UNIT_EXCEEDS_BUDGET = "unit_exceeds_budget"
     NO_LONGER_DUE = "no_longer_due"
     ROOT_LOCKED = "root_locked"
-    FILE_FAMILY_EXCEEDS_BUDGET = "file_family_exceeds_budget"
-    FILE_TENANT_MISMATCH = "file_tenant_mismatch"
-    FILE_LOCKED = "file_locked"
+    # Another transaction held a row the root DELETE cascades to (a child row
+    # or stored content), past the lock timeout.
+    CASCADE_LOCKED = "cascade_locked"
+
+    @property
+    def key(self) -> str:
+        """The blocked count name, as FileRetentionReason.key is for a File."""
+        return self.value
+
+
+# File refusals that keep the conversation: its unit rolls back whole and is
+# blocked under the File's own key. A budget shortage is the unit's, not the
+# File's: it is retried fresh or blocked as unit_exceeds_budget.
+CONVERSATION_FILE_BLOCKS = frozenset(
+    reason
+    for reason in FileRetentionReason
+    if reason.rolls_back and reason is not FileRetentionReason.INSUFFICIENT_BUDGET
+)
+
+# A conversation is kept for its own reason or for a File refusal.
+ConversationUnitBlock = ConversationBlockReason | FileRetentionReason
 
 
 @dataclass(frozen=True, slots=True)
@@ -50,10 +82,11 @@ class ConversationUnitResult:
     deletion: ConversationDeletion | None = None
     sessions_deleted: int = 0
     files_deleted: int = 0
+    # Files of a deleted conversation that its release kept, by reason.
     file_outcomes: Mapping[FileRetentionReason, int] = field(
         default_factory=dict[FileRetentionReason, int]
     )
-    block: ConversationBlockReason | None = None
+    block: ConversationUnitBlock | None = None
     fits: bool = True
 
 
@@ -86,6 +119,9 @@ class ConversationPage:
 
 
 class ConversationPageRepository(Protocol):
+    @property
+    def kind(self) -> ConversationRootKind: ...
+
     async def lock_due_page(
         self, cursor: RetentionKeyset | None, limit: int
     ) -> ConversationPage:
@@ -109,7 +145,7 @@ class ConversationPageRepository(Protocol):
 
 
 @dataclass(slots=True)
-class ConversationPagePace:
+class ConversationRootCostEstimate:
     """Rows a step's latest chunk charged per visited root, kept for one execution.
 
     Every locked root is charged its discovery, and a root the chunk cannot
@@ -159,8 +195,9 @@ async def run_conversation_page(
     repository: ConversationPageRepository,
     batch: RetentionBatch,
     allocation: ConversationPageAllocation,
-    pace: ConversationPagePace,
+    estimate: ConversationRootCostEstimate,
     *,
+    gather_seconds: float,
     clock: Callable[[], float] = time.monotonic,
 ) -> RetentionStepResult:
     """Lock one page of due roots and delete those that fit, in keyset order.
@@ -173,7 +210,12 @@ async def run_conversation_page(
     The cursor is the last visited root; once every root of a page that did not
     fill its limit is visited, every owner probed is done, so the cursor passes
     the last one, and a short owner page also ends the pass.
+    Roots after the first are admitted for `gather_seconds` from the call, and
+    never at or after the execution deadline: the page's root locks are held
+    until the chunk commits, so a user deleting a paged chat waits at most
+    that long plus one unit.
     """
+    stop_at = min(clock() + gather_seconds, batch.deadline)
     out = RetentionEffects()
     # Defer the execution tail rather than paying for one-root transactions.
     if batch.rows < allocation.unit_rows + CONVERSATION_UNIT_OVERHEAD_ROWS:
@@ -183,7 +225,7 @@ async def run_conversation_page(
     page_size = max(
         1,
         min(
-            ordinary // max(CONVERSATION_UNIT_OVERHEAD_ROWS + 1, pace.unit_rows),
+            ordinary // max(CONVERSATION_UNIT_OVERHEAD_ROWS + 1, estimate.unit_rows),
             # Discovery (at most one owner and one root per page entry) must
             # leave the first root its whole unit allowance.
             (batch.rows - allocation.unit_rows) // CONVERSATION_UNIT_OVERHEAD_ROWS,
@@ -202,12 +244,11 @@ async def run_conversation_page(
     visited = 0
     deferred = False
     for root in roots:
-        # The execution deadline stops admission; the first root always runs so
-        # every chunk makes progress.
-        if visited and clock() >= batch.deadline:
+        # The first root always runs so every chunk makes progress.
+        if visited and clock() >= stop_at:
             break
         if root.id not in locked:
-            out.blocked[ConversationBlockReason.ROOT_LOCKED.value] += 1
+            out.blocked[ConversationBlockReason.ROOT_LOCKED.key] += 1
             cursor = root
             visited += 1
             continue
@@ -229,7 +270,7 @@ async def run_conversation_page(
             if remaining < allocation.unit_rows:
                 deferred = visited == 0
                 break
-            out.blocked[ConversationBlockReason.UNIT_EXCEEDS_BUDGET.value] += 1
+            out.blocked[ConversationBlockReason.UNIT_EXCEEDS_BUDGET.key] += 1
             cursor = root
             visited += 1
             continue
@@ -252,20 +293,20 @@ async def run_conversation_page(
             ):
                 deferred = visited == 0
                 break
-            out.blocked[ConversationBlockReason.UNIT_EXCEEDS_BUDGET.value] += 1
+            out.blocked[ConversationBlockReason.UNIT_EXCEEDS_BUDGET.key] += 1
         elif unit.block is not None:
-            out.blocked[unit.block.value] += 1
+            out.blocked[unit.block.key] += 1
         if unit.deletion is not None:
-            out.add(unit.deletion.tenant_id, "conversations_deleted")
+            out.add(unit.deletion.tenant_id, repository.kind.deleted_key)
             out.add(unit.deletion.tenant_id, f"by_{unit.deletion.source.value}_rule")
             out.add(unit.deletion.tenant_id, "sessions_deleted", unit.sessions_deleted)
             out.add(unit.deletion.tenant_id, "files_deleted", unit.files_deleted)
             for reason, count in unit.file_outcomes.items():
-                out.add(unit.deletion.tenant_id, f"files_{reason.value}", count)
+                out.add(unit.deletion.tenant_id, reason.key, count)
         cursor = root
         visited += 1
     if visited:
-        pace.unit_rows = -(-rows // visited)
+        estimate.unit_rows = -(-rows // visited)
     # A root window short of its limit holds every due root of the probed
     # owners; once all of them are visited those owners are done.
     owners_done = visited == len(roots) and len(roots) < page_size

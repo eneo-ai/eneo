@@ -193,7 +193,7 @@ uses bounded atomic units; manual deletion releases unused Files immediately:
 - **Deleting a conversation or App run**, by hand or through conversation
   retention, deletes the Files that only that conversation or run used. A File
   still used elsewhere is kept.
-- **The daily retention task at 03:30 UTC by default** removes other File families that no chat,
+- **The daily retention task (03:30 by default, in the worker's time zone)** removes other File families that no chat,
   Assistant, App, or App run uses and that are older than the configured grace period (24 hours by default). This covers
   Files left behind when an Assistant, App, Space, or group chat is deleted,
   uploads that were never attached, and a File removed from an Assistant or
@@ -204,7 +204,7 @@ uses bounded atomic units; manual deletion releases unused Files immediately:
   uploaded again rather than silently left out. The task walks every root File
   past the grace period in creation order, one candidate per read, and only
   locks and proves the families whose own use is absent; a root still in use
-  costs one examined row and is counted as `roots_in_use`, not reported as
+  costs one examined row and is counted as `files_in_use`, not reported as
   blocked.
 
 Knowledge is never part of this cleanup. Documents in a collection and the
@@ -229,20 +229,27 @@ remaining uses. Do not report it complete merely because a conversation or
 retention execution has finished.
 
 Preview the cleanup inside the worker container. It reports the number of
-File families and managed bytes per organization without deleting anything:
+File families per organization (`families`, `families_by_tenant`) and their
+managed bytes in total (`managed_bytes`) without deleting anything:
 
 ```bash
 docker compose exec worker python -m eneo.files.unused_file_cleanup preview
 ```
 
-Preview is advisory and takes database locks while checking families. Its totals
-can include families that a bounded execution retains because of its limits.
+Preview is advisory. It takes database locks while it checks families, under the
+same statement and lock timeouts as a retention chunk. Its totals can include
+families that a bounded execution retains because of its limits.
 
 `run` starts one budgeted execution of the registered unused-files task and prints
-its job id, outcome, deletion counts and blocked counts as JSON. It honours the
-same emergency switch, reference checks, audit and resumable cursor as the nightly
-execution. `partial` means work remains; it does not mean every candidate was removed.
-Locked or oversized families stay intact. See [Scheduled execution and limits](/docs/audit-logging#scheduled-execution-and-limits)
+its job id, outcome, counts and blocked counts as JSON. It honours the same
+emergency switch, reference checks, audit and resumable cursor as the nightly
+execution. `partial` means work remains; it does not mean every candidate was
+removed. Locked or oversized families stay intact. `counts` holds disposal facts
+(`families.roots_deleted`, `families.files_deleted`) and observations
+(`families.files_in_use`) alike. `outcome` is `null` with no `job_run_id` when
+another execution held the task and nothing ran; it is `running` with
+`error_code: finish_timeout` when the work was done but the final outcome could
+not be written, and the next execution records that row as superseded. See [Scheduled execution and limits](/docs/audit-logging#scheduled-execution-and-limits)
 for settings and health reporting.
 
 ## Choose the right deployment

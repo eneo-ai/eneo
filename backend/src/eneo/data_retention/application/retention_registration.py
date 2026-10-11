@@ -15,4 +15,3 @@ class RetentionTaskRegistration:
     enabled: bool
     budget: RetentionBudget
     build: Callable[[AsyncSession], RetentionTask]
-    reports_overdue: bool = False

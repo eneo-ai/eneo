@@ -9,7 +9,6 @@ Tests cover:
 
 from __future__ import annotations
 
-from collections.abc import Sequence
 from datetime import datetime, timedelta, timezone
 from uuid import UUID
 
@@ -25,7 +24,10 @@ from eneo.database.tables.files_table import Files
 from eneo.database.tables.questions_table import Questions, QuestionsFiles
 from eneo.database.tables.sessions_table import Sessions
 from eneo.database.tables.spaces_table import Spaces
-from tests.integration.data_retention.retention_support import run_registered_retention
+from tests.integration.data_retention.retention_support import (
+    run_registered_retention,
+    step_batches,
+)
 
 
 @pytest.fixture
@@ -190,7 +192,7 @@ async def test_assistant_level_retention_deletes_old_questions(
 
     # Run cleanup
     report = await run_registered_retention(retention_session)
-    deleted_count = report.counts.get("questions.conversations_deleted", 0)
+    deleted_count = report.counts.get("questions.questions_deleted", 0)
     await retention_session.flush()
 
     # Verify: old question deleted, recent kept
@@ -232,7 +234,7 @@ async def test_space_level_retention_fallback(
 
     # Run cleanup
     report = await run_registered_retention(retention_session)
-    deleted_count = report.counts.get("questions.conversations_deleted", 0)
+    deleted_count = report.counts.get("questions.questions_deleted", 0)
     await retention_session.flush()
 
     # Verify: old question deleted, recent kept
@@ -273,7 +275,7 @@ async def test_assistant_overrides_space_retention(
 
     # Run cleanup
     report = await run_registered_retention(retention_session)
-    deleted_count = report.counts.get("questions.conversations_deleted", 0)
+    deleted_count = report.counts.get("questions.questions_deleted", 0)
     await retention_session.flush()
 
     # Verify: question deleted by assistant retention (30d), not space (90d)
@@ -319,7 +321,7 @@ async def test_tenant_level_retention_fallback(
 
     # Run cleanup
     report = await run_registered_retention(retention_session)
-    deleted_count = report.counts.get("questions.conversations_deleted", 0)
+    deleted_count = report.counts.get("questions.questions_deleted", 0)
     await retention_session.flush()
 
     # Verify: old question deleted by tenant policy
@@ -354,7 +356,7 @@ async def test_no_retention_keeps_all_questions(
 
     # Run cleanup
     report = await run_registered_retention(retention_session)
-    deleted_count = report.counts.get("questions.conversations_deleted", 0)
+    deleted_count = report.counts.get("questions.questions_deleted", 0)
     await retention_session.flush()
 
     # Verify: nothing deleted
@@ -393,7 +395,7 @@ async def test_app_level_retention_deletes_old_runs(
 
     # Run cleanup
     report = await run_registered_retention(retention_session)
-    deleted_count = report.counts.get("app_runs.conversations_deleted", 0)
+    deleted_count = report.counts.get("app_runs.app_runs_deleted", 0)
     await retention_session.flush()
 
     # Verify: old run deleted, recent kept
@@ -436,7 +438,7 @@ async def test_space_level_app_retention_fallback(
 
     # Run cleanup
     report = await run_registered_retention(retention_session)
-    deleted_count = report.counts.get("app_runs.conversations_deleted", 0)
+    deleted_count = report.counts.get("app_runs.app_runs_deleted", 0)
     await retention_session.flush()
 
     # Verify: old run deleted by space policy
@@ -474,7 +476,7 @@ async def test_multi_tenant_isolation(
 
     # Run cleanup
     report = await run_registered_retention(retention_session)
-    deleted_count = report.counts.get("questions.conversations_deleted", 0)
+    deleted_count = report.counts.get("questions.questions_deleted", 0)
     await retention_session.flush()
 
     # Verify: only this tenant's old questions deleted
@@ -538,7 +540,7 @@ async def test_hard_delete_not_soft_delete(
 
     # Run cleanup
     report = await run_registered_retention(retention_session)
-    deleted_count = report.counts.get("questions.conversations_deleted", 0)
+    deleted_count = report.counts.get("questions.questions_deleted", 0)
     await retention_session.flush()
 
     assert deleted_count == 1
@@ -591,7 +593,7 @@ async def test_tenant_level_retention_fallback_for_app_runs(
 
     # Run cleanup
     report = await run_registered_retention(retention_session)
-    deleted_count = report.counts.get("app_runs.conversations_deleted", 0)
+    deleted_count = report.counts.get("app_runs.app_runs_deleted", 0)
     await retention_session.flush()
 
     # Verify: old run deleted by tenant policy
@@ -638,7 +640,7 @@ async def test_boundary_condition_exact_retention_days(
     report = await run_registered_retention(
         retention_session, now=boundary_question.created_at + timedelta(days=30)
     )
-    deleted_count = report.counts.get("questions.conversations_deleted", 0)
+    deleted_count = report.counts.get("questions.questions_deleted", 0)
     await retention_session.flush()
 
     # Verify: only question past boundary is deleted
@@ -695,7 +697,7 @@ async def test_tenant_enabled_but_days_null_keeps_forever(
 
     # Run cleanup
     report = await run_registered_retention(retention_session)
-    deleted_count = report.counts.get("questions.conversations_deleted", 0)
+    deleted_count = report.counts.get("questions.questions_deleted", 0)
     await retention_session.flush()
 
     # Verify: nothing deleted (enabled=True but days=NULL means keep forever)
@@ -744,25 +746,25 @@ async def test_policy_cancellation_after_discovery_preserves_the_conversation(
             retention_session, owner.id, test_tenant.id, admin_user.id, days_old=2
         )
     owner_id, conversation_id = owner.id, conversation.id
-    original_delete = ConversationRetentionRepository.delete_due_prefix
+    original_delete = ConversationRetentionRepository.delete_if_still_due
 
     async def cancel_before_delete(
-        repository: ConversationRetentionRepository, identifiers: Sequence[UUID]
-    ) -> Sequence[ConversationDeletion]:
+        repository: ConversationRetentionRepository, identifier: UUID
+    ) -> ConversationDeletion | None:
         async with sessionmanager.session() as other, other.begin():
             await other.execute(
                 update(type(owner))
                 .where(type(owner).id == owner_id)
                 .values(data_retention_days=None)
             )
-        return await original_delete(repository, identifiers)
+        return await original_delete(repository, identifier)
 
     monkeypatch.setattr(
-        ConversationRetentionRepository, "delete_due_prefix", cancel_before_delete
+        ConversationRetentionRepository, "delete_if_still_due", cancel_before_delete
     )
     report = await run_registered_retention(retention_session)
     step = "app_runs" if is_app else "questions"
-    assert report.counts.get(f"{step}.conversations_deleted", 0) == 0
+    assert report.counts.get(f"{step}.{step}_deleted", 0) == 0
     assert report.blocked[f"{step}.no_longer_due"] == 1
     assert (
         await retention_session.get(AppRuns if is_app else Questions, conversation_id)
@@ -822,7 +824,7 @@ async def test_retention_removes_files_only_the_old_answer_used(
 
     report = await run_registered_retention(retention_session)
 
-    assert report.counts["questions.conversations_deleted"] == 1
+    assert report.counts["questions.questions_deleted"] == 1
     assert report.counts["questions.files_deleted"] == 2
     assert report.counts["questions.files_in_use"] == 1
     remaining = set(
@@ -842,9 +844,11 @@ async def test_an_oversized_question_is_proved_within_one_limit_and_passed(
 ):
     """Mutants: a LIMIT per child relation instead of one over all of them; an
     oversized root that stops the page or is deleted anyway."""
+    from eneo.data_retention.application.conversation_retention import (
+        ConversationRootKind,
+    )
     from eneo.data_retention.infrastructure.conversation_retention_repo import (
         ConversationRetentionRepository,
-        ConversationRootKind,
     )
     from eneo.database.tables.mcp_tool_references_table import McpToolReference
     from eneo.main.config import get_settings
@@ -898,9 +902,261 @@ async def test_an_oversized_question_is_proved_within_one_limit_and_passed(
     report = await run_registered_retention(retention_session, settings=settings)
 
     assert report.blocked["questions.unit_exceeds_budget"] == 1
-    assert report.counts["questions.conversations_deleted"] == 1
+    assert report.counts["questions.questions_deleted"] == 1
     assert await retention_session.get(Questions, big_id) is not None
     assert await retention_session.get(Questions, small_id) is None
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("short", ["session", "files"])
+async def test_a_unit_its_remainder_cannot_fund_writes_nothing(
+    retention_session: AsyncSession,
+    test_assistant: Assistants,
+    test_tenant,
+    admin_user,
+    short: str,
+):
+    """Mutant: the root DELETE and its cascade run first and are rolled back
+    when the remainder cannot fund the session release or the Files."""
+    from sqlalchemy import event
+
+    from eneo.data_retention.application.conversation_retention import (
+        ConversationRootKind,
+    )
+    from eneo.data_retention.infrastructure.conversation_retention_repo import (
+        ConversationRetentionRepository,
+    )
+
+    test_assistant.data_retention_days = 1
+    await retention_session.flush()
+    question = await create_old_question(
+        retention_session, test_assistant.id, test_tenant.id, admin_user.id, 2
+    )
+    upload = Files(
+        name="upload",
+        mimetype="application/pdf",
+        user_id=admin_user.id,
+        tenant_id=test_tenant.id,
+    )
+    retention_session.add(upload)
+    await retention_session.flush()
+    retention_session.add(
+        QuestionsFiles(question_id=question.id, file_id=upload.id, type="user")
+    )
+    await retention_session.flush()
+    repository = ConversationRetentionRepository(
+        retention_session,
+        kind=ConversationRootKind.QUESTION,
+        now=datetime.now(timezone.utc),
+    )
+    statements: list[str] = []
+
+    def record(_conn, _cursor, statement, *_args) -> None:
+        statements.append(statement)
+
+    connection = (await retention_session.connection()).sync_connection
+    event.listen(connection, "before_cursor_execute", record)
+    try:
+        # A session release needs up to 3 rows after the root DELETE.
+        unit = await repository.delete_unit(
+            question.id,
+            child_rows=1,
+            max_rows=3 if short == "session" else 10,
+            max_files=0 if short == "files" else 10,
+            max_family_rows=5,
+        )
+    finally:
+        event.remove(connection, "before_cursor_execute", record)
+
+    assert not unit.fits and unit.deletion is None
+    assert not [
+        statement
+        for statement in statements
+        if statement.lstrip().upper().startswith(("DELETE", "SAVEPOINT"))
+    ]
+    assert await retention_session.get(Questions, question.id) is not None
+
+
+async def _held_and_later_questions(
+    retention_session: AsyncSession, test_assistant: Assistants, test_tenant, admin_user
+) -> tuple[UUID, UUID]:
+    """A due question linked to an upload, then a later due question."""
+    test_assistant.data_retention_days = 1
+    await retention_session.flush()
+    held = await create_old_question(
+        retention_session, test_assistant.id, test_tenant.id, admin_user.id, 3
+    )
+    later = await create_old_question(
+        retention_session, test_assistant.id, test_tenant.id, admin_user.id, 2
+    )
+    upload = Files(
+        name="upload",
+        mimetype="application/pdf",
+        user_id=admin_user.id,
+        tenant_id=test_tenant.id,
+    )
+    retention_session.add(upload)
+    await retention_session.flush()
+    retention_session.add(
+        QuestionsFiles(question_id=held.id, file_id=upload.id, type="user")
+    )
+    held_id, later_id = held.id, later.id
+    await retention_session.commit()
+    return held_id, later_id
+
+
+@pytest.mark.asyncio
+async def test_a_cascade_lock_wait_keeps_one_question_and_the_open_chunk_goes_on(
+    retention_session: AsyncSession,
+    test_assistant: Assistants,
+    test_tenant,
+    admin_user,
+):
+    """Mutants: a lock timeout inside the unit savepoint fails the whole chunk,
+    so the run ends partial and the next due question waits for another run;
+    the lock wait charges the unit's whole row allowance, which at the default
+    unit (5000 rows) and chunk (500 rows) ends the chunk, so the later
+    question is deleted in a second batch."""
+    from eneo.database.database import sessionmanager
+    from eneo.main.config import get_settings
+
+    held_id, later_id = await _held_and_later_questions(
+        retention_session, test_assistant, test_tenant, admin_user
+    )
+    # The default unit and chunk rows: a unit allowance far above the chunk.
+    # The gather window outlasts the lock wait on a cold database.
+    settings = get_settings().model_copy(
+        update={
+            "retention_chunk_lock_timeout_ms": 200,
+            "retention_chunk_gather_seconds": 60.0,
+        }
+    )
+
+    # A chat that holds the link row the held question's DELETE cascades to.
+    async with sessionmanager.session() as chat, chat.begin():
+        await chat.execute(
+            select(QuestionsFiles.question_id)
+            .where(QuestionsFiles.question_id == held_id)
+            .with_for_update()
+        )
+        report = await run_registered_retention(retention_session, settings=settings)
+
+    assert report.blocked["questions.cascade_locked"] == 1
+    assert report.counts["questions.questions_deleted"] == 1
+    assert await retention_session.get(Questions, held_id) is not None
+    assert await retention_session.get(Questions, later_id) is None
+    # One questions batch kept the held question and deleted the later one.
+    [batch] = await step_batches(retention_session, report.job_run_id, "questions")
+    assert batch["blocked"] == {"cascade_locked": 1}
+    assert batch["counts"] == {
+        "questions_deleted": 1,
+        "sessions_deleted": 1,
+        "by_assistant_or_app_rule": 1,
+    }
+
+
+@pytest.mark.asyncio
+async def test_a_cascade_lock_wait_at_the_default_ratio_ends_the_chunk_and_the_run_goes_on(
+    retention_session: AsyncSession,
+    test_assistant: Assistants,
+    test_tenant,
+    admin_user,
+):
+    """The default gather window is shorter than the default lock timeout, so
+    the chunk that waited admits no further root: it commits the kept question
+    and the next chunk deletes the later one. Mutants: a lock timeout inside
+    the unit savepoint fails the chunk, so the run ends chunk_timeout and the
+    later question is kept; the lock wait charges the unit's whole row
+    allowance, so the execution budget cannot fund another unit and the later
+    question is deferred."""
+    from eneo.data_retention.domain.retention import RetentionJobOutcome
+    from eneo.database.database import sessionmanager
+    from eneo.main.config import get_settings
+
+    held_id, later_id = await _held_and_later_questions(
+        retention_session, test_assistant, test_tenant, admin_user
+    )
+    # The default gather window and lock timeout, pinned; an execution budget
+    # that funds a second unit only if the wait was charged what it read.
+    settings = get_settings().model_copy(
+        update={
+            "retention_chunk_lock_timeout_ms": 2_000,
+            "retention_chunk_gather_seconds": 1.0,
+            "retention_conversations_max_unit_rows": 5_000,
+            "retention_conversations_max_rows_per_run": 6_000,
+        }
+    )
+
+    async with sessionmanager.session() as chat, chat.begin():
+        await chat.execute(
+            select(QuestionsFiles.question_id)
+            .where(QuestionsFiles.question_id == held_id)
+            .with_for_update()
+        )
+        report = await run_registered_retention(retention_session, settings=settings)
+
+    # Every due question was visited; the kept one is a blocked count.
+    assert report.outcome is RetentionJobOutcome.SUCCEEDED
+    assert await retention_session.get(Questions, held_id) is not None
+    assert await retention_session.get(Questions, later_id) is None
+    batches = await step_batches(retention_session, report.job_run_id, "questions")
+    assert [(batch["counts"], batch["blocked"]) for batch in batches] == [
+        ({}, {"cascade_locked": 1}),
+        (
+            {
+                "questions_deleted": 1,
+                "sessions_deleted": 1,
+                "by_assistant_or_app_rule": 1,
+            },
+            {},
+        ),
+    ]
+
+
+@pytest.mark.asyncio
+async def test_a_statement_timeout_in_the_unit_ends_the_chunk(
+    retention_session: AsyncSession,
+    test_assistant: Assistants,
+    test_tenant,
+    admin_user,
+):
+    """Mutant: the unit takes every database error for a lock wait, so a
+    statement timeout (57014) keeps the question as cascade_locked and the
+    chunk goes on instead of ending the run partial."""
+    from eneo.data_retention.domain.retention import (
+        RetentionErrorCode,
+        RetentionJobOutcome,
+    )
+    from eneo.database.database import sessionmanager
+    from eneo.main.config import get_settings
+
+    held_id, _later_id = await _held_and_later_questions(
+        retention_session, test_assistant, test_tenant, admin_user
+    )
+    # The statement times out before its lock wait would, and not before a
+    # cold connection prepares the chunk's other statements.
+    settings = get_settings().model_copy(
+        update={
+            "retention_chunk_statement_timeout_ms": 3_000,
+            "retention_chunk_lock_timeout_ms": 60_000,
+        }
+    )
+
+    async with sessionmanager.session() as chat, chat.begin():
+        await chat.execute(
+            select(QuestionsFiles.question_id)
+            .where(QuestionsFiles.question_id == held_id)
+            .with_for_update()
+        )
+        report = await run_registered_retention(
+            retention_session,
+            settings=settings,
+            error_code=RetentionErrorCode.CHUNK_TIMEOUT,
+        )
+
+    assert report.outcome is RetentionJobOutcome.PARTIAL
+    assert "questions.cascade_locked" not in report.blocked
+    assert await retention_session.get(Questions, held_id) is not None
 
 
 @pytest.mark.asyncio
@@ -934,11 +1190,11 @@ async def test_owners_without_due_history_are_charged_and_passed(
     # budget there.
     first = await run_registered_retention(retention_session, settings=settings)
     assert first.counts["questions.owners_examined"] == 3
-    assert "questions.conversations_deleted" not in first.counts
+    assert "questions.questions_deleted" not in first.counts
     assert await retention_session.get(Questions, due_id) is not None
 
     second = await run_registered_retention(retention_session, settings=settings)
-    assert second.counts["questions.conversations_deleted"] == 1
+    assert second.counts["questions.questions_deleted"] == 1
     assert await retention_session.get(Questions, due_id) is None
 
 
@@ -949,11 +1205,19 @@ async def test_overdue_covers_every_owner_page(
     test_tenant,
     admin_user,
 ):
-    """Mutant: overdue reads one page of owners, so more owners than the page
-    report an incomplete snapshot (unknown health) and miss a later one."""
+    """Mutants: overdue reads one page of owners, so more owners than the page
+    report an incomplete snapshot (unknown health) and miss a later one; the
+    walk ignores its bound in owner rows, or takes it from the overdue row cap,
+    so it reads every owner however many."""
+    from eneo.data_retention.application.conversation_history_retention_task import (
+        ConversationHistoryRetentionTask,
+    )
+    from eneo.data_retention.application.conversation_retention import (
+        ConversationRootKind,
+        conversation_page_allocation,
+    )
     from eneo.data_retention.infrastructure.conversation_retention_repo import (
         ConversationRetentionRepository,
-        ConversationRootKind,
     )
 
     owners = await _numbered_owners(retention_session, test_assistant, admin_user)
@@ -964,16 +1228,40 @@ async def test_overdue_covers_every_owner_page(
     )
     window = timedelta(days=1)
 
+    # Six owners in pages of two: the fourth page comes back empty.
     assert await repository.overdue(
-        window=window, limit=2, owner_page=2
+        window=window, limit=2, owner_page=2, max_pages=4
     ) == RetentionOverdue(count=0, complete=True, oldest_due_at=None)
 
     await create_old_question(
         retention_session, owners[-1].id, test_tenant.id, admin_user.id, days_old=60
     )
-    overdue = await repository.overdue(window=window, limit=2, owner_page=2)
+    overdue = await repository.overdue(
+        window=window, limit=2, owner_page=2, max_pages=4
+    )
     assert (overdue.count, overdue.complete) == (1, True)
     assert overdue.oldest_due_at is not None
+    # Four owner rows are two pages of two, which end before the fifth owner
+    # and its question; the row cap of ten does not widen the walk.
+    task = ConversationHistoryRetentionTask(
+        retention_session,
+        # Discovery pages hold 6 // 3 = 2 owners.
+        allocation=conversation_page_allocation(
+            unit_rows=4,
+            chunk_rows=6,
+            execution_rows=1000,
+            execution_files=10,
+            family_rows=5,
+        ),
+        now=datetime.now(timezone.utc),
+        overdue_window=window,
+        overdue_rows=10,
+        overdue_owner_rows=4,
+        gather_seconds=1.0,
+    )
+    assert await task.overdue() == RetentionOverdue(
+        count=0, complete=False, oldest_due_at=None
+    )
 
 
 @pytest.mark.asyncio
@@ -1035,6 +1323,8 @@ async def test_overdue_pages_owners_apart_from_the_cap_and_stops_at_it(
         now=datetime.now(timezone.utc),
         overdue_window=timedelta(days=1),
         overdue_rows=1,
+        overdue_owner_rows=1000,
+        gather_seconds=1.0,
     )
     statements: list[str] = []
 

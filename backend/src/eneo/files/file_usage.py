@@ -47,7 +47,10 @@ def collect_file_reference_columns(
     cascades: list[sa.Column[UUID]] = []
     for table in metadata.tables.values():
         for foreign_key in table.foreign_keys:
-            if foreign_key.column.table is not files_table:
+            # Only the column that references ``files.id`` carries a meaning; a
+            # composite key may also reference ``files.tenant_id`` for row-level
+            # safety without being a second reference to the File.
+            if foreign_key.column is not files_table.c.id:
                 continue
             column = foreign_key.parent
             if FILE_USAGE_INFO_KEY not in column.info:

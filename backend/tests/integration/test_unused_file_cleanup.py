@@ -8,18 +8,18 @@ transcriptions, are released for the object-content reconciler.
 
 from __future__ import annotations
 
+import asyncio
 from collections.abc import AsyncIterator
 from datetime import datetime, timedelta, timezone
 from uuid import UUID
 
 import pytest
 from sqlalchemy import func, select
+from sqlalchemy.exc import DBAPIError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from eneo.audit.domain.action_types import ActionType
-from eneo.data_retention.application.conversation_retention import (
-    ConversationBlockReason,
-)
+from eneo.data_retention.application.retention_runner import is_lock_wait_timeout
 from eneo.data_retention.domain.retention import RetentionJobOutcome, RetentionKeyset
 from eneo.data_retention.infrastructure.retention_job_run_repo import (
     RetentionJobRunRepository,
@@ -36,6 +36,7 @@ from eneo.database.tables.object_content_table import (
 from eneo.database.tables.questions_table import Questions, QuestionsFiles
 from eneo.database.tables.sessions_table import Sessions
 from eneo.files.file_models import FileType
+from eneo.files.file_retention import FileRetentionReason
 from eneo.files.unused_file_cleanup import preview_unused_files
 from eneo.main.config import get_settings
 from eneo.object_content.configuration import ObjectContentCoreSettings
@@ -47,7 +48,10 @@ from eneo.object_content.content import (
     capture_content,
 )
 from eneo.object_content.content_service import ObjectContentService
-from tests.integration.data_retention.retention_support import run_registered_retention
+from tests.integration.data_retention.retention_support import (
+    run_registered_retention,
+    step_batches,
+)
 
 
 async def _payload_source(payload: bytes) -> AsyncIterator[bytes]:
@@ -247,7 +251,7 @@ async def test_question_retention_deletes_chat_attachment(
     )
 
     report = await run_registered_retention(retention_session)
-    deleted = report.counts.get("questions.conversations_deleted", 0)
+    deleted = report.counts.get("questions.questions_deleted", 0)
 
     assert deleted == 1
     assert not await _file_exists(retention_session, attachment.id)
@@ -311,7 +315,7 @@ async def test_retention_deletes_derived_files_with_their_root(
             64,
             5,
             None,
-            ConversationBlockReason.FILE_FAMILY_EXCEEDS_BUDGET,
+            FileRetentionReason.FAMILY_EXCEEDS_BUDGET,
             id="kills-partial-family-cap-delete",
         ),
         # The first run spends 2 discovery + 5 on the smaller run's unit, so a
@@ -330,7 +334,7 @@ async def test_retention_deletes_derived_files_with_their_root(
             64,
             32,
             0,
-            ConversationBlockReason.FILE_LOCKED,
+            FileRetentionReason.LOCKED,
             id="kills-held-root-conversation-delete",
         ),
         pytest.param(
@@ -340,7 +344,7 @@ async def test_retention_deletes_derived_files_with_their_root(
             64,
             32,
             1,
-            ConversationBlockReason.FILE_LOCKED,
+            FileRetentionReason.LOCKED,
             id="kills-held-child-partial-delete",
         ),
     ],
@@ -355,7 +359,7 @@ async def test_conversation_file_refusal_is_atomic_and_resumable(
     chunk: int,
     family: int,
     locked: int | None,
-    block: ConversationBlockReason | None,
+    block: FileRetentionReason | None,
 ) -> None:
     settings = get_settings().model_copy(
         update={
@@ -394,7 +398,7 @@ async def test_conversation_file_refusal_is_atomic_and_resumable(
         RetentionJobOutcome.PARTIAL if block is None else RetentionJobOutcome.SUCCEEDED
     )
     assert report.job_run_id is not None
-    assert report.counts["app_runs.conversations_deleted"] == 1
+    assert report.counts["app_runs.app_runs_deleted"] == 1
     assert report.counts["app_runs.files_deleted"] == 1
     assert await retention_session.get(AppRuns, retained.id) is not None
     assert await retention_session.get(AppRunsFiles, (retained.id, root.id)) is not None
@@ -423,9 +427,7 @@ async def test_conversation_file_refusal_is_atomic_and_resumable(
         await retention_session.scalar(
             select(
                 func.sum(
-                    audits.c.log_metadata["counts"][
-                        "conversations_deleted"
-                    ].as_integer()
+                    audits.c.log_metadata["counts"]["app_runs_deleted"].as_integer()
                 )
             )
         )
@@ -435,11 +437,11 @@ async def test_conversation_file_refusal_is_atomic_and_resumable(
         report.job_run_id
     )
     if block is not None:
-        assert report.blocked[f"app_runs.{block.value}"] == 1
+        assert report.blocked[f"app_runs.{block.key}"] == 1
         assert (
             await retention_session.scalar(
                 select(
-                    func.sum(audits.c.log_metadata["blocked"][block.value].as_integer())
+                    func.sum(audits.c.log_metadata["blocked"][block.key].as_integer())
                 )
             )
             == 1
@@ -448,11 +450,8 @@ async def test_conversation_file_refusal_is_atomic_and_resumable(
     else:
         # The step stops on the shortage with no refusal; the next chunk lacks
         # a fresh unit's allowance and defers.
-        assert {
-            key: value
-            for key, value in report.blocked.items()
-            if key.startswith("app_runs.")
-        } == {"app_runs.deferred": 1}
+        assert not [key for key in report.blocked if key.startswith("app_runs.")]
+        assert report.counts["app_runs.deferred"] == 1
         assert cursors["app_runs"] == RetentionKeyset(
             at=progressed.created_at, id=progressed.id, group=retention_app.id
         )
@@ -461,7 +460,7 @@ async def test_conversation_file_refusal_is_atomic_and_resumable(
             RetentionJobOutcome.SUCCEEDED,
             RetentionJobOutcome.PARTIAL,
         }
-        assert retry.counts["app_runs.conversations_deleted"] == 1
+        assert retry.counts["app_runs.app_runs_deleted"] == 1
         assert retry.counts["app_runs.files_deleted"] == 2
         assert await retention_session.get(AppRuns, retained.id) is None
         for identifier in (root.id, child.id):
@@ -472,6 +471,58 @@ async def test_conversation_file_refusal_is_atomic_and_resumable(
             )
             == ContentState.DELETE_PENDING.value
         )
+
+
+@pytest.mark.integration
+@pytest.mark.asyncio
+async def test_held_stored_content_keeps_its_question_and_the_open_chunk_goes_on(
+    retention_session: AsyncSession,
+    admin_user,
+    retention_assistant: Assistants,
+) -> None:
+    """The File release's reference trigger waits on the stored content another
+    transaction holds. Mutants: the lock wait fails the whole chunk; it charges
+    the unit's whole row allowance (5000 rows by default), so the later
+    question is deleted in a second batch."""
+    held_file = await _create_file(retention_session, admin_user)
+    content_id = await _add_transcription(retention_session, admin_user, held_file)
+    held = await _create_question(
+        retention_session, retention_assistant, admin_user, days_old=3, file=held_file
+    )
+    later = await _create_question(
+        retention_session,
+        retention_assistant,
+        admin_user,
+        days_old=2,
+        file=await _create_file(retention_session, admin_user, name="later.mp3"),
+    )
+    held_id, held_file_id, later_id = held.id, held_file.id, later.id
+    await retention_session.commit()
+    # The default unit and chunk rows; a family cap that leaves the chunk room,
+    # and a gather window that outlasts the lock wait on a cold database.
+    settings = get_settings().model_copy(
+        update={
+            "retention_chunk_lock_timeout_ms": 200,
+            "retention_chunk_gather_seconds": 60.0,
+            "retention_max_family_rows": 32,
+        }
+    )
+
+    async with sessionmanager.session() as holder, holder.begin():
+        await holder.execute(
+            select(ObjectContents.id)
+            .where(ObjectContents.id == content_id)
+            .with_for_update()
+        )
+        report = await run_registered_retention(retention_session, settings=settings)
+
+    assert report.blocked["questions.cascade_locked"] == 1
+    assert report.counts["questions.questions_deleted"] == 1
+    assert await retention_session.get(Questions, held_id) is not None
+    assert await _file_exists(retention_session, held_file_id)
+    assert await retention_session.get(Questions, later_id) is None
+    [batch] = await step_batches(retention_session, report.job_run_id, "questions")
+    assert batch["blocked"] == {"cascade_locked": 1}
 
 
 @pytest.mark.integration
@@ -615,12 +666,22 @@ async def test_sweep_keeps_every_file_family_still_in_use(
         )
 
     assert result.outcome is RetentionJobOutcome.SUCCEEDED
-    assert result.counts["families.roots_in_use"] == 5
+    assert result.counts["families.files_in_use"] == 5
     assert result.counts["families.roots_deleted"] == 1
     assert result.blocked == {}
     for file_id in file_ids:
         assert await _committed_file_exists(file_id)
     assert not await _committed_file_exists(unused_id)
+
+
+async def _preview(session: AsyncSession, *, lock_timeout_ms: int):
+    return await preview_unused_files(
+        session,
+        older_than=timedelta(days=1),
+        page_size=2,
+        statement_timeout_ms=30_000,
+        lock_timeout_ms=lock_timeout_ms,
+    )
 
 
 @pytest.mark.integration
@@ -637,10 +698,10 @@ async def test_sweep_preview_counts_without_deleting(admin_user) -> None:
         ]
 
     async with sessionmanager.session() as session:
-        preview = await preview_unused_files(session, page_size=2)
+        preview = await _preview(session, lock_timeout_ms=2_000)
 
     assert preview.dry_run is True
-    assert preview.files == 3
+    assert preview.families == 3
     for orphan_id in orphan_ids:
         assert await _committed_file_exists(orphan_id)
 
@@ -649,3 +710,25 @@ async def test_sweep_preview_counts_without_deleting(admin_user) -> None:
     assert result.counts["families.roots_deleted"] == 3
     for orphan_id in orphan_ids:
         assert not await _committed_file_exists(orphan_id)
+
+
+@pytest.mark.integration
+@pytest.mark.asyncio
+async def test_sweep_preview_ends_at_a_held_file_instead_of_waiting(
+    admin_user,
+) -> None:
+    """Mutants: the preview transaction sets no lock timeout, so a File a user
+    holds keeps the preview, and every user queued behind it, waiting; the
+    preview is bounded by its statement timeout alone (57014, not 55P03)."""
+    async with sessionmanager.session() as session, session.begin():
+        held_id = (await _create_file(session, admin_user, days_old=30)).id
+
+    async with sessionmanager.session() as holder, holder.begin():
+        await holder.execute(
+            select(Files.id).where(Files.id == held_id).with_for_update()
+        )
+        async with sessionmanager.session() as session:
+            with pytest.raises(DBAPIError) as raised:
+                async with asyncio.timeout(10):
+                    await _preview(session, lock_timeout_ms=100)
+    assert is_lock_wait_timeout(raised.value)

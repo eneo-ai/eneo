@@ -165,6 +165,20 @@
             "en": "Signing in with username and password no longer fails with a generic error when Eneo runs behind a reverse proxy and the public address was never registered for the backend. When the sign-in service cannot be reached you are told so, instead of being asked to check your password. Integrations that use a secret API key are accepted even when their requests carry a browser Origin header.",
             "sv": "Inloggning med användarnamn och lösenord misslyckas inte längre med ett allmänt fel när Eneo körs bakom en omvänd proxy och den publika adressen aldrig registrerats i backend. När inloggningstjänsten inte går att nå får du veta det, i stället för att uppmanas kontrollera lösenordet. Integrationer som använder en hemlig API-nyckel accepteras även när deras anrop skickar med en Origin-header från webbläsaren."
           }
+        },
+        {
+          "id": "retention-runs-in-audit-log",
+          "type": "improved",
+          "area": "admin",
+          "audience": "admin",
+          "title": {
+            "en": "Follow retention runs in the audit log",
+            "sv": "Följ gallringskörningar i granskningsloggen"
+          },
+          "body": {
+            "en": "Every nightly retention run writes to the audit log: how many questions, app runs, sessions and files were removed, what was kept and why, and whether the run finished or stopped at its limit. The log never contains the content itself. Your operator can pause each retention task and set its limits.",
+            "sv": "Varje nattlig gallringskörning skriver till granskningsloggen: hur många frågor, appkörningar, sessioner och filer som togs bort, vad som behölls och varför, och om körningen blev klar eller stoppade vid sin gräns. Loggen innehåller aldrig själva innehållet. Driftansvarig kan pausa varje gallringsuppgift och ställa in dess gränser."
+          }
         }
       ]
     },

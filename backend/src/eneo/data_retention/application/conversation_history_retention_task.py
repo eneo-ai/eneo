@@ -6,9 +6,11 @@ from datetime import datetime, timedelta, timezone
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from eneo.data_retention.application.conversation_retention import (
+    CONVERSATION_FILE_BLOCKS,
     ConversationBlockReason,
     ConversationPageAllocation,
-    ConversationPagePace,
+    ConversationRootCostEstimate,
+    ConversationRootKind,
     run_conversation_page,
 )
 from eneo.data_retention.application.retention_runner import (
@@ -23,7 +25,6 @@ from eneo.data_retention.domain.retention import (
 )
 from eneo.data_retention.infrastructure.conversation_retention_repo import (
     ConversationRetentionRepository,
-    ConversationRootKind,
 )
 from eneo.files.file_retention import FileRetentionReason
 
@@ -33,28 +34,34 @@ CONVERSATION_HISTORY_TASK = "conversations.history"
 class ConversationHistoryRetentionTask:
     count_keys = frozenset(
         {
-            "conversations_deleted",
+            *(kind.deleted_key for kind in ConversationRootKind),
             "sessions_deleted",
             "files_deleted",
             *(f"by_{source.value}_rule" for source in ConversationPolicySource),
         }
     )
-    # Examined owners and Files kept for a typed reason: progress, not disposal.
+    # Examined owners and the Files a deleted conversation's release kept:
+    # progress, not disposal. The conversation is gone, so none is blocked; a
+    # File outcome that rolls back keeps the conversation and never gets here.
+    # The release passes no age limit, so a File is never kept as not old enough.
     observation_keys = frozenset(
         {
             "owners_examined",
             *(
-                f"files_{reason.value}"
-                for reason in (
-                    FileRetentionReason.IN_USE,
-                    FileRetentionReason.MISSING,
-                    FileRetentionReason.NOT_ROOT,
-                    FileRetentionReason.TENANT_MISMATCH,
-                )
+                reason.key
+                for reason in FileRetentionReason
+                if reason
+                not in {FileRetentionReason.DELETED, FileRetentionReason.NOT_OLD_ENOUGH}
+                and not reason.rolls_back
             ),
         }
     )
-    blocked_keys = frozenset(reason.value for reason in ConversationBlockReason)
+    blocked_keys = frozenset(
+        {
+            *(reason.key for reason in ConversationBlockReason),
+            *(reason.key for reason in CONVERSATION_FILE_BLOCKS),
+        }
+    )
 
     def __init__(
         self,
@@ -64,19 +71,24 @@ class ConversationHistoryRetentionTask:
         now: datetime,
         overdue_window: timedelta,
         overdue_rows: int,
+        overdue_owner_rows: int,
+        gather_seconds: float,
     ) -> None:
         self.now = now.astimezone(timezone.utc)
         self.allocation = allocation
         self.overdue_window = overdue_window
         self.overdue_rows = overdue_rows
+        # The owner rows each stream's walk may read: in whole discovery pages.
+        self.overdue_owner_pages = -(-overdue_owner_rows // allocation.page_size)
+        self.gather_seconds = gather_seconds
         self.questions = ConversationRetentionRepository(
             session, kind=ConversationRootKind.QUESTION, now=self.now
         )
         self.app_runs = ConversationRetentionRepository(
             session, kind=ConversationRootKind.APP_RUN, now=self.now
         )
-        self.question_pace = ConversationPagePace()
-        self.app_run_pace = ConversationPagePace()
+        self.question_cost = ConversationRootCostEstimate()
+        self.app_run_cost = ConversationRootCostEstimate()
 
     @property
     def name(self) -> str:
@@ -105,12 +117,20 @@ class ConversationHistoryRetentionTask:
 
     async def _questions(self, batch: RetentionBatch) -> RetentionStepResult:
         return await run_conversation_page(
-            self.questions, batch, self.allocation, self.question_pace
+            self.questions,
+            batch,
+            self.allocation,
+            self.question_cost,
+            gather_seconds=self.gather_seconds,
         )
 
     async def _app_runs(self, batch: RetentionBatch) -> RetentionStepResult:
         return await run_conversation_page(
-            self.app_runs, batch, self.allocation, self.app_run_pace
+            self.app_runs,
+            batch,
+            self.allocation,
+            self.app_run_cost,
+            gather_seconds=self.gather_seconds,
         )
 
     async def overdue(self) -> RetentionOverdue:
@@ -128,6 +148,7 @@ class ConversationHistoryRetentionTask:
                 window=self.overdue_window,
                 limit=remaining,
                 owner_page=self.allocation.page_size,
+                max_pages=self.overdue_owner_pages,
             )
             snapshots.append(snapshot)
             remaining -= snapshot.count

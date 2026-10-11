@@ -1,14 +1,14 @@
-"""Bound discovery before checking or locking orphaned conversation sessions."""
+"""Bound discovery before checking or locking sessions without a question."""
 
 from collections.abc import Mapping, Sequence
 from datetime import datetime, timedelta
+from typing import Final
 from uuid import UUID
 
 import sqlalchemy as sa
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.sql.elements import ColumnElement
 
-from eneo.data_retention.constants import ORPHANED_SESSION_CLEANUP_DAYS
 from eneo.data_retention.domain.retention import RetentionKeyset
 from eneo.data_retention.infrastructure.retention_sql import uuid_in
 from eneo.database.tables.help_assistant_runs_table import HelpAssistantRuns
@@ -16,11 +16,18 @@ from eneo.database.tables.questions_table import Questions
 from eneo.database.tables.sessions_table import Sessions
 
 
-class OrphanSessionRetentionRepository:
-    def __init__(self, session: AsyncSession, *, now: datetime) -> None:
+class EmptySessionRepository:
+    # The most one session's release reads and deletes: its lock and proof, the
+    # session row and its UNIQUE help-assistant helper row. Every caller that
+    # funds a release before locking reserves this much.
+    MAX_RELEASE_ROWS: Final = 3
+
+    def __init__(
+        self, session: AsyncSession, *, now: datetime, grace: timedelta
+    ) -> None:
         self.session = session
         self.now = now
-        self.grace = timedelta(days=ORPHANED_SESSION_CLEANUP_DAYS)
+        self.grace = grace
 
     def _unreferenced(self) -> ColumnElement[bool]:
         return (
@@ -41,7 +48,7 @@ class OrphanSessionRetentionRepository:
         rows = (await self.session.execute(statement)).tuples().all()
         return tuple(RetentionKeyset(id=identifier, at=at) for identifier, at in rows)
 
-    async def lock_orphans(self, ids: Sequence[UUID]) -> Mapping[UUID, int]:
+    async def lock_empty(self, ids: Sequence[UUID]) -> Mapping[UUID, int]:
         # The helper's UNIQUE session_id bounds its cascade to at most one row.
         cost = 1 + sa.case((HelpAssistantRuns.id.is_not(None), 1), else_=0)
         statement = (

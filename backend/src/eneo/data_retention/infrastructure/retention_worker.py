@@ -45,7 +45,7 @@ def retention_runner(
             rows=settings.retention_chunk_rows,
             statement_timeout_ms=settings.retention_chunk_statement_timeout_ms,
             lock_timeout_ms=settings.retention_chunk_lock_timeout_ms,
-            stale_after_seconds=settings.retention_stale_after_seconds,
+            lease_stale_seconds=settings.retention_lease_stale_seconds,
         ),
     )
 

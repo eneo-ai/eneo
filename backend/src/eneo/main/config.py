@@ -405,14 +405,22 @@ class Settings(BaseSettings):
     retention_max_seconds_per_run: int = Field(default=1800, gt=0)
     # Steps reserve a share of a chunk per unit (empty sessions a quarter, job
     # history a half); with chunks below four rows they would defer every night.
+    # At four, a chunk holds one conversation root per transaction.
     retention_chunk_rows: int = Field(default=500, ge=4, le=2000)
-    retention_family_gather_seconds: float = Field(default=1.0, gt=0)
+    # A chunk stops admitting conversation roots and File families after this
+    # long, so the row locks it holds do not keep users waiting.
+    retention_chunk_gather_seconds: float = Field(default=1.0, gt=0)
     # A singleton needs one lock, one fresh proof and one deleted row.
     retention_max_family_rows: int = Field(default=5000, ge=3, le=100_000)
     retention_unused_file_grace_hours: int = Field(default=24, gt=0)
+    # A session without a question is kept this long after it was created, so
+    # a chat that was just opened is not deleted before its first question.
+    retention_empty_session_grace_hours: int = Field(default=24, gt=0)
     retention_chunk_statement_timeout_ms: int = Field(default=30_000, gt=0)
     retention_chunk_lock_timeout_ms: int = Field(default=2_000, gt=0)
-    retention_stale_after_seconds: int = Field(default=3600, gt=0)
+    # A running execution whose heartbeat is older than this has lost its lease:
+    # the next run takes the task over and health reads it as abandoned.
+    retention_lease_stale_seconds: int = Field(default=3600, gt=0)
     retention_health_timeout_seconds: float = Field(default=1.0, gt=0)
     # /api/healthz is public: one database read per window, however many probes.
     retention_health_cache_seconds: float = Field(default=30, gt=0)
@@ -707,6 +715,15 @@ class Settings(BaseSettings):
             raise ValueError(
                 "RETENTION_MAX_FAMILY_ROWS plus discovery must fit "
                 "RETENTION_MAX_ROWS_PER_RUN."
+            )
+        # Each File member charges at least three rows (lock, fresh proof,
+        # delete). A family cap above three rows per budgeted file would admit a
+        # family with more members than the file budget: refused as
+        # insufficient_budget every pass, never as family_exceeds_budget.
+        if self.retention_max_family_rows > 3 * self.retention_max_files_per_run:
+            raise ValueError(
+                "RETENTION_MAX_FAMILY_ROWS must not exceed three times "
+                "RETENTION_MAX_FILES_PER_RUN."
             )
         validate_conversation_unit_budget(
             unit_rows=self.retention_conversations_max_unit_rows,

@@ -11,6 +11,7 @@ import sqlalchemy as sa
 
 from alembic import command
 from alembic.config import Config
+from eneo.data_retention.domain.retention import RetentionErrorCode
 from eneo.database.tables.app_table import AppRuns
 from eneo.database.tables.files_table import Files
 from eneo.database.tables.questions_table import InfoBlobReferences, Questions
@@ -139,7 +140,8 @@ def _tables(conn) -> set[str]:
 
 
 def test_downgrade_removes_them_and_upgrade_restores_them(round_trip_db):
-    """Kills an incomplete upgrade, a mismatched index, or a downgrade leaving the table."""
+    """Kills an incomplete upgrade, a mismatched index, a downgrade leaving the
+    table, or an error code the migrated CHECK refuses."""
     conn, cfg, engine = round_trip_db
     assert _tables(conn) == {"retention_job_runs"}
     assert _actual(engine) == _declared()
@@ -149,6 +151,12 @@ def test_downgrade_removes_them_and_upgrade_restores_them(round_trip_db):
     assert {c["name"]: c["nullable"] for c in columns} == {
         c.name: c.nullable for c in RetentionJobRuns.__table__.columns
     }
+    [error_codes] = [
+        check["sqltext"]
+        for check in sa.inspect(engine).get_check_constraints("retention_job_runs")
+        if check["name"] == "ck_retention_job_runs_error_code"
+    ]
+    assert all(f"'{code.value}'" in error_codes for code in RetentionErrorCode)
 
     command.downgrade(cfg, PRE_REVISION)
     assert _tables(conn) == set()

@@ -32,6 +32,7 @@ from pydantic import TypeAdapter
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from eneo.data_retention.application.retention_runner import RetentionRunReport
+from eneo.data_retention.application.retention_sql_limits import set_retention_timeouts
 from eneo.database.affected_rows import affected_row_count
 from eneo.database.tables.files_table import Files
 from eneo.database.tables.object_content_table import (
@@ -44,10 +45,13 @@ from eneo.main.config import get_settings
 
 @dataclass
 class UnusedFileSweepResult:
+    """Unused File families (a root with its derived Files) and their stored bytes."""
+
     dry_run: bool
-    files: int = 0
+    families: int = 0
+    # Managed bytes of every family together, not per organization.
     managed_bytes: int = 0
-    files_by_tenant: dict[str, int] = field(default_factory=dict[str, int])
+    families_by_tenant: dict[str, int] = field(default_factory=dict[str, int])
 
 
 async def delete_unused_root_files(
@@ -67,27 +71,32 @@ async def delete_unused_root_files(
 async def preview_unused_files(
     session: AsyncSession,
     *,
-    older_than: timedelta | None = None,
-    page_size: int | None = None,
+    older_than: timedelta,
+    page_size: int,
+    statement_timeout_ms: int,
+    lock_timeout_ms: int,
 ) -> UnusedFileSweepResult:
-    """Advisory inventory using the same reference owner as retention deletion."""
-    settings = get_settings()
-    grace = (
-        older_than
-        if older_than is not None
-        else timedelta(hours=settings.retention_unused_file_grace_hours)
-    )
-    limit = page_size if page_size is not None else settings.retention_chunk_rows
+    """Advisory inventory using the same reference owner as retention deletion.
+
+    Each page locks its candidate families like a retention chunk, so it takes
+    the chunk's wait limits: a File a user holds ends the preview with a lock
+    timeout instead of making that user wait for it.
+    """
     result = UnusedFileSweepResult(dry_run=True)
     tenants: Counter[str] = Counter()
     after: UUID | None = None
     while True:
         async with session.begin():
+            await set_retention_timeouts(
+                session,
+                statement_timeout_ms=statement_timeout_ms,
+                lock_timeout_ms=lock_timeout_ms,
+            )
             usage = FileUsageRepository(session)
             page = await usage.list_unreferenced_roots(
                 after=after,
-                older_than=grace,
-                limit=limit,
+                older_than=older_than,
+                limit=page_size,
             )
             if not page:
                 break
@@ -97,8 +106,8 @@ async def preview_unused_files(
                 continue
             tenants.update(await _tenant_counts(session, unused_ids))
             result.managed_bytes += await _managed_bytes(session, unused_ids)
-            result.files += len(unused_ids)
-    result.files_by_tenant = dict(sorted(tenants.items()))
+            result.families += len(unused_ids)
+    result.families_by_tenant = dict(sorted(tenants.items()))
     return result
 
 
@@ -146,7 +155,15 @@ async def _run_from_cli(*, dry_run: bool) -> UnusedFileSweepResult | RetentionRu
     try:
         async with database.session() as session:
             if dry_run:
-                return await preview_unused_files(session)
+                return await preview_unused_files(
+                    session,
+                    older_than=timedelta(
+                        hours=settings.retention_unused_file_grace_hours
+                    ),
+                    page_size=settings.retention_chunk_rows,
+                    statement_timeout_ms=settings.retention_chunk_statement_timeout_ms,
+                    lock_timeout_ms=settings.retention_chunk_lock_timeout_ms,
+                )
             registration = next(
                 task
                 for task in retention_task_registrations(settings)

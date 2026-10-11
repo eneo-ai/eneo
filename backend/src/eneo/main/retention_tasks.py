@@ -56,7 +56,6 @@ def retention_task_registrations(
             name=CONVERSATION_HISTORY_TASK,
             enabled=settings.retention_conversations_history_enabled,
             budget=chat_budget,
-            reports_overdue=True,
             build=lambda session: ConversationHistoryRetentionTask(
                 session,
                 allocation=conversation_page_allocation(
@@ -69,13 +68,22 @@ def retention_task_registrations(
                 now=observed_at,
                 overdue_window=timedelta(days=settings.retention_overdue_window_days),
                 overdue_rows=settings.retention_overdue_max_rows,
+                # The walk reads at most one execution's row budget of owners
+                # per stream: bounded like the deletion it reports on, with no
+                # setting of its own.
+                overdue_owner_rows=chat_budget.rows,
+                gather_seconds=settings.retention_chunk_gather_seconds,
             ),
         ),
         RetentionTaskRegistration(
             name=EMPTY_SESSIONS_TASK,
             enabled=settings.retention_empty_sessions_enabled,
             budget=budget,
-            build=lambda session: EmptySessionRetentionTask(session, now=observed_at),
+            build=lambda session: EmptySessionRetentionTask(
+                session,
+                now=observed_at,
+                grace=timedelta(hours=settings.retention_empty_session_grace_hours),
+            ),
         ),
         RetentionTaskRegistration(
             name=UNUSED_FILES_TASK,
@@ -87,7 +95,7 @@ def retention_task_registrations(
                 family_rows=settings.retention_max_family_rows,
                 execution_files=budget.files,
                 chunk_rows=settings.retention_chunk_rows,
-                gather_seconds=settings.retention_family_gather_seconds,
+                gather_seconds=settings.retention_chunk_gather_seconds,
             ),
         ),
         RetentionTaskRegistration(
@@ -125,6 +133,9 @@ async def _read_retention_health(settings: Settings) -> RetentionHealth:
                     RetentionJobRunRepository(session),
                     retention_task_registrations(settings),
                     now=datetime.now(timezone.utc),
+                    lease_stale_after=timedelta(
+                        seconds=settings.retention_lease_stale_seconds
+                    ),
                 )
     # A refused connection is an OSError, not a SQLAlchemy error.
     except (TimeoutError, SQLAlchemyError, OSError):

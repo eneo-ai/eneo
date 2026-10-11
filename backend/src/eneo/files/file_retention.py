@@ -16,6 +16,35 @@ class FileRetentionReason(StrEnum):
     FAMILY_EXCEEDS_BUDGET = "family_exceeds_budget"
     INSUFFICIENT_BUDGET = "insufficient_budget"
 
+    @property
+    def is_refusal(self) -> bool:
+        """The release refused a File it would otherwise remove.
+
+        Every other outcome is the File's own state: deleted, still in use, gone
+        already, or a derived File that its root's release owns.
+        """
+        return self not in {
+            FileRetentionReason.DELETED,
+            FileRetentionReason.IN_USE,
+            FileRetentionReason.MISSING,
+            FileRetentionReason.NOT_ROOT,
+        }
+
+    @property
+    def rolls_back(self) -> bool:
+        """The release could not finish, so the caller undoes what the unit
+        already wrote: the family was held, or larger than its allowance."""
+        return self in {
+            FileRetentionReason.LOCKED,
+            FileRetentionReason.FAMILY_EXCEEDS_BUDGET,
+            FileRetentionReason.INSUFFICIENT_BUDGET,
+        }
+
+    @property
+    def key(self) -> str:
+        """The count name of this outcome in every retention task that reports it."""
+        return f"files_{self.value}"
+
 
 @dataclass(frozen=True, slots=True)
 class FileRetentionResult:
@@ -36,8 +65,4 @@ class FileRetentionResult:
 
     @property
     def needs_rollback(self) -> bool:
-        return self.reason in {
-            FileRetentionReason.FAMILY_EXCEEDS_BUDGET,
-            FileRetentionReason.INSUFFICIENT_BUDGET,
-            FileRetentionReason.LOCKED,
-        }
+        return self.reason.rolls_back

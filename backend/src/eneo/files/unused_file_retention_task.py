@@ -22,7 +22,6 @@ from eneo.files.file_retention import FileRetentionReason
 from eneo.files.file_usage import FileUsageRepository
 
 UNUSED_FILES_TASK = "files.unused"
-ROOTS_IN_USE = "roots_in_use"
 
 
 class UnusedFileRetentionTask:
@@ -30,12 +29,15 @@ class UnusedFileRetentionTask:
     count_keys = frozenset(
         {"roots_deleted", "files_deleted", "file_dependencies_deleted"}
     )
-    # A File in use is the normal state, not a refusal: progress, not audit.
-    observation_keys = frozenset({ROOTS_IN_USE})
-    blocked_keys = frozenset(
-        reason.value
+    # A root kept in its own state (in use, gone, a derived File) is progress,
+    # not audit; a refused root is blocked.
+    observation_keys = frozenset(
+        reason.key
         for reason in FileRetentionReason
-        if reason not in (FileRetentionReason.DELETED, FileRetentionReason.IN_USE)
+        if not reason.is_refusal and reason is not FileRetentionReason.DELETED
+    )
+    blocked_keys = frozenset(
+        reason.key for reason in FileRetentionReason if reason.is_refusal
     )
 
     def __init__(
@@ -82,7 +84,7 @@ class UnusedFileRetentionTask:
 
             async def kept(rows: int, files: int) -> RetentionUnitUsage:
                 # Its own use is visible without a lock: charge its discovery.
-                out.add(None, ROOTS_IN_USE)
+                out.add(None, FileRetentionReason.IN_USE.key)
                 return RetentionUnitUsage(rows=1, files=0)
 
             async def handle(rows: int, files: int) -> RetentionUnitUsage:
@@ -97,17 +99,17 @@ class UnusedFileRetentionTask:
                     if result.needs_rollback:
                         await unit.rollback()
                 disposition = RetentionUnitDisposition.DONE
-                if result.reason is FileRetentionReason.INSUFFICIENT_BUDGET:
-                    if rows < self.family_rows + 1 or files < self.execution_files:
-                        disposition = RetentionUnitDisposition.DOES_NOT_FIT
-                    else:
-                        out.blocked[result.reason.value] += 1
-                elif result.reason is FileRetentionReason.IN_USE:
-                    # A use attached after the root was read, or one of a
-                    # derived File.
-                    out.add(None, ROOTS_IN_USE)
+                if result.reason is FileRetentionReason.INSUFFICIENT_BUDGET and (
+                    rows < self.family_rows + 1 or files < self.execution_files
+                ):
+                    # Short of a fully funded unit: retried in a fresh chunk.
+                    disposition = RetentionUnitDisposition.DOES_NOT_FIT
+                elif result.reason.is_refusal:
+                    out.blocked[result.reason.key] += 1
                 elif result.reason is not FileRetentionReason.DELETED:
-                    out.blocked[result.reason.value] += 1
+                    # Includes a use attached after the root was read, or one
+                    # of a derived File.
+                    out.add(None, result.reason.key)
                 out.add(result.tenant_id, "roots_deleted", result.deleted_roots)
                 out.add(result.tenant_id, "files_deleted", result.deleted_members)
                 out.add(

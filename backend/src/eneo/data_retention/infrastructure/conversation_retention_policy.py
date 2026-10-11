@@ -32,7 +32,7 @@ def conversation_retention_policy(
             own_days, Spaces.data_retention_days, organization_days
         ),
         source=sa.case(
-            (own_days.is_not(None), ConversationPolicySource.OWN.value),
+            (own_days.is_not(None), ConversationPolicySource.ASSISTANT_OR_APP.value),
             (
                 Spaces.data_retention_days.is_not(None),
                 ConversationPolicySource.SPACE.value,

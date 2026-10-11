@@ -12,7 +12,6 @@ from eneo.data_retention.application.retention_health import (
     RetentionHealth,
     RetentionHealthStatus,
 )
-from eneo.data_retention.application.retention_runner import RetentionOverdueReporter
 from eneo.database import database
 from eneo.database.database import DatabaseSessionManager
 from eneo.main.config import Settings, get_settings
@@ -31,14 +30,10 @@ def test_retention_cron_is_registered():
 
 
 def test_registrations_match_their_tasks():
-    """Mutant: a registration's name or overdue flag disagrees with its task, so
-    health reads a task that never writes a row or a snapshot (unknown forever)."""
+    """Mutant: a registration's name disagrees with its task, so health reads a
+    task that never writes a row (unknown forever)."""
     for registration in retention_task_registrations(get_settings()):
-        task = registration.build(AsyncSession())
-        assert registration.name == task.name
-        assert registration.reports_overdue == isinstance(
-            task, RetentionOverdueReporter
-        )
+        assert registration.name == registration.build(AsyncSession()).name
 
 
 @pytest.mark.parametrize(
@@ -50,6 +45,9 @@ def test_registrations_match_their_tasks():
         ("retention_chunk_rows", 4, True),
         ("retention_conversations_max_unit_rows", 3, False),
         ("retention_conversations_max_unit_rows", 4, True),
+        # The default family cap of 5000 rows needs ceil(5000 / 3) files.
+        ("retention_max_files_per_run", 1666, False),
+        ("retention_max_files_per_run", 1667, True),
     ],
 )
 def test_unit_floors_admit_the_minimum_complete_unit(
@@ -57,7 +55,9 @@ def test_unit_floors_admit_the_minimum_complete_unit(
 ):
     """Mutants: accept a family cap that cannot lock, prove and delete one File,
     a chunk below four rows, where a step reserving rows // 4 defers forever,
-    or a unit cap below a question's four rows with a session and its helper."""
+    a unit cap below a question's four rows with a session and its helper, or
+    a family cap that admits a family larger than the file budget (refused as
+    insufficient_budget every pass instead of family_exceeds_budget)."""
     values = get_settings().model_dump()
     values[setting] = value
     if valid:

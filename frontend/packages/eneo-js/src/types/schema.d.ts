@@ -9221,6 +9221,7 @@ export interface components {
       | "scim_token_revoked"
       | "retention_policy_applied"
       | "data_retention_batch"
+      | "data_retention_run"
       | "data_retention_skipped"
       | "encryption_key_rotated"
       | "system_maintenance"

@@ -12,6 +12,7 @@ from collections import defaultdict
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
 from enum import Enum
+from typing import Protocol
 from uuid import UUID
 
 from eneo.data_retention.application.retention_runner import (
@@ -58,9 +59,14 @@ class RetentionEffects:
         )
 
 
-RetentionUnitCandidate = tuple[
-    RetentionKeyset, Callable[[int, int], Awaitable["RetentionUnitUsage"]]
-]
+class RetentionUnitHandle(Protocol):
+    """Process one candidate unit within `rows` and `files`, the work it may
+    still charge in this call; it reports what it charged."""
+
+    def __call__(self, *, rows: int, files: int) -> Awaitable[RetentionUnitUsage]: ...
+
+
+RetentionUnitCandidate = tuple[RetentionKeyset, RetentionUnitHandle]
 
 
 class RetentionUnitDisposition(Enum):
@@ -121,7 +127,7 @@ async def gather_retention_units(
         if candidate is None:
             return out.result(rows=rows, files=files, exhausted=True, cursor=cursor)
         keyset, handle = candidate
-        spent = await handle(row_limit - rows, file_limit - files)
+        spent = await handle(rows=row_limit - rows, files=file_limit - files)
         if not (
             0 < spent.rows <= row_limit - rows
             and 0 <= spent.files <= file_limit - files

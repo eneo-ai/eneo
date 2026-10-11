@@ -119,7 +119,7 @@ async def test_an_empty_session_past_its_grace_is_deleted_and_counted(
 
     assert report.counts == {
         "sessions.sessions_deleted": 1,
-        "sessions.session_rows_examined": 2,
+        "sessions.sessions_examined": 2,
     }
     assert await retention_session.get(Sessions, empty_id) is None
     assert await retention_session.get(Sessions, used_id) is not None
@@ -147,7 +147,7 @@ async def test_a_help_assistant_session_is_charged_its_helper_row(
     await retention_session.flush()
     helped_id = helped.id
     (step,) = EmptySessionRetentionTask(
-        retention_session, now=datetime.now(timezone.utc)
+        retention_session, now=datetime.now(timezone.utc), grace=timedelta(days=1)
     ).steps()
 
     result = await step.run(
@@ -215,7 +215,7 @@ async def test_empty_sessions_do_not_starve_due_history(
         retention_session, settings=settings, now=now
     )
 
-    assert report.counts.get("questions.conversations_deleted") == 1, report
+    assert report.counts.get("questions.questions_deleted") == 1, report
     assert await retention_session.get(Questions, due_id) is None
 
 
@@ -250,7 +250,7 @@ async def test_history_deletes_the_session_its_last_question_leaves_empty(
 
     report = await run_registered_retention(retention_session)
 
-    assert report.counts["questions.conversations_deleted"] == 2
+    assert report.counts["questions.questions_deleted"] == 2
     assert report.counts["questions.sessions_deleted"] == 1
     assert await retention_session.get(Sessions, emptied_id) is None
     assert await retention_session.get(Sessions, continued_id) is not None
@@ -285,7 +285,7 @@ async def test_history_leaves_a_held_session_to_the_sweep(
         )
         report = await run_registered_retention(retention_session)
 
-    assert report.counts["questions.conversations_deleted"] == 1
+    assert report.counts["questions.questions_deleted"] == 1
     assert "questions.sessions_deleted" not in report.counts
     assert await retention_session.get(Questions, question_id) is None
     assert await retention_session.get(Sessions, held_id) is not None

@@ -216,7 +216,7 @@ async def test_app_run_retention_releases_shared_file_before_active_store_remova
         report = await run_registered_retention(
             session, now=recent_run.created_at + age
         )
-        assert report.counts["app_runs.conversations_deleted"] == 1
+        assert report.counts["app_runs.app_runs_deleted"] == 1
         assert report.counts.get("app_runs.files_in_use", 0) == references
         assert report.counts.get("app_runs.files_deleted", 0) == 1 - references
         assert await session.get(AppRuns, old_run.id) is None

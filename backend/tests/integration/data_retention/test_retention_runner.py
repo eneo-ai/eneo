@@ -14,7 +14,7 @@ from uuid import UUID, uuid4
 
 import pytest
 import sqlalchemy as sa
-from sqlalchemy.exc import IntegrityError
+from sqlalchemy.exc import DBAPIError, IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from eneo.audit.application.audit_service import AuditService
@@ -48,6 +48,7 @@ from eneo.data_retention.domain.retention import (
     RetentionKeyset,
     RetentionOverdue,
     retention_batch_audit_id,
+    retention_run_audit_id,
 )
 from eneo.data_retention.infrastructure.retention_job_run_repo import (
     RetentionJobRunRepository,
@@ -176,7 +177,7 @@ def _runner(
             rows=chunk_rows,
             statement_timeout_ms=30_000,
             lock_timeout_ms=lock_timeout_ms,
-            stale_after_seconds=3600,
+            lease_stale_seconds=3600,
         ),
         **({"clock": clock} if clock is not None else {}),
     )
@@ -202,10 +203,23 @@ async def _audits() -> list[AuditLogTable]:
         return audits
 
 
-async def _claim(stale_after_seconds: int = 3600) -> UUID | None:
+async def _run_audits() -> list[AuditLogTable]:
+    async with _committed() as session:
+        audits = list(
+            await session.scalars(
+                sa.select(AuditLogTable).where(
+                    AuditLogTable.action == ActionType.DATA_RETENTION_RUN.value
+                )
+            )
+        )
+        session.expunge_all()
+        return audits
+
+
+async def _claim(lease_stale_seconds: int = 3600) -> UUID | None:
     async with _committed() as session:
         return await RetentionJobRunRepository(session).claim(
-            task=_TASK, stale_after_seconds=stale_after_seconds
+            task=_TASK, lease_stale_seconds=lease_stale_seconds
         )
 
 
@@ -252,7 +266,7 @@ async def test_two_claims_at_once_leave_one_execution() -> None:
     async with sessionmanager.session() as first:
         async with first.begin():
             first_id = await RetentionJobRunRepository(first).claim(
-                task=_TASK, stale_after_seconds=3600
+                task=_TASK, lease_stale_seconds=3600
             )
             second = asyncio.create_task(_claim())
             # The second insert waits on the partial unique index.
@@ -269,7 +283,7 @@ async def test_stale_takeover_fences_the_superseded_execution() -> None:
     assert stale_id is not None
     await _make_stale(stale_id)
 
-    replacement_id = await _claim(stale_after_seconds=3600)
+    replacement_id = await _claim(lease_stale_seconds=3600)
 
     assert replacement_id not in (None, stale_id)
     async with _committed() as session:
@@ -292,14 +306,14 @@ async def test_renewed_execution_is_not_superseded() -> None:
     owner_id = await _claim()
     assert owner_id is not None
     # A fresh heartbeat is never taken over.
-    assert await _claim(stale_after_seconds=3600) is None
+    assert await _claim(lease_stale_seconds=3600) is None
     await _make_stale(owner_id)
 
     async with sessionmanager.session() as owner:
         async with owner.begin():
             # A chunk's first statement renews and keeps the row locked to commit.
             assert await RetentionJobRunRepository(owner).renew(owner_id)
-            takeover = asyncio.create_task(_claim(stale_after_seconds=3600))
+            takeover = asyncio.create_task(_claim(lease_stale_seconds=3600))
             await _until_a_session_waits_on_a_lock()
             assert not takeover.done()
 
@@ -316,7 +330,7 @@ async def test_a_claim_that_waits_past_the_lock_timeout_records_a_skip() -> None
         await holder.begin()
         # An uncommitted running row makes the runner's claim wait on it.
         assert await RetentionJobRunRepository(holder).claim(
-            task=_TASK, stale_after_seconds=3600
+            task=_TASK, lease_stale_seconds=3600
         )
         async with sessionmanager.session() as session:
             report = await _runner(session, lock_timeout_ms=100).run(_FakeTask(session))
@@ -381,7 +395,8 @@ async def test_an_outcome_that_waits_past_the_lock_timeout_leaves_the_lease(
 async def test_audit_failure_rolls_back_the_batch_and_its_progress(
     test_tenant, monkeypatch
 ) -> None:
-    """Kills committing deletion or progress when required audit fails."""
+    """Kills committing deletion, progress or the final outcome when a required
+    audit event fails (the end event written outside the finish transaction)."""
     items = await _work_items(1)
 
     async def unavailable(self, audit_log):
@@ -389,14 +404,20 @@ async def test_audit_failure_rolls_back_the_batch_and_its_progress(
 
     monkeypatch.setattr(AuditLogRepositoryImpl, "create", unavailable)
 
-    report = await _run()
+    with pytest.raises(RuntimeError):
+        await _run()
 
-    assert report.outcome == RetentionJobOutcome.FAILED
     assert await _remaining(items) == 1
     async with _committed() as session:
-        job = await session.get(RetentionJobRuns, report.job_run_id)
-        assert job is not None
-        assert (job.batch_count, job.counts) == (0, {})
+        [job] = await session.scalars(
+            sa.select(RetentionJobRuns).where(RetentionJobRuns.task == _TASK)
+        )
+        # The stale takeover records the execution the finish could not end.
+        assert (job.outcome, job.batch_count, job.counts) == (
+            RetentionJobOutcome.RUNNING.value,
+            0,
+            {},
+        )
 
 
 async def test_batch_audit_is_required_even_when_the_action_is_switched_off(
@@ -503,9 +524,16 @@ async def _job_row(job_run_id: UUID | None) -> RetentionJobRuns:
         return row
 
 
-@pytest.mark.parametrize("ending", ["budget", "failed_chunk", "timed_out_chunk"])
+class _Deadlocked(Exception):
+    sqlstate = "40P01"
+
+
+@pytest.mark.parametrize(
+    "ending", ["budget", "failed_chunk", "timed_out_chunk", "deadlocked_chunk"]
+)
 async def test_every_ending_writes_the_overdue_snapshot(test_tenant, ending) -> None:
-    """Mutant runner_no_snapshot_on_failure."""
+    """Mutant runner_no_snapshot_on_failure; deadlocked_chunk kills a deadlock
+    (a lock cycle with a user transaction) ending the run as failed."""
     await _work_items(3)
     due = datetime(2026, 9, 1, tzinfo=timezone.utc)
 
@@ -520,10 +548,14 @@ async def test_every_ending_writes_the_overdue_snapshot(test_tenant, ending) -> 
         await session.execute(sa.text("SELECT pg_sleep(0.2)"))
         return RetentionStepResult(exhausted=True)
 
+    async def deadlock(batch: RetentionBatch) -> RetentionStepResult:
+        raise DBAPIError("DELETE", None, _Deadlocked())
+
     extra = {
         "budget": (),
         "failed_chunk": (RetentionStep(name="boom", run=fail),),
         "timed_out_chunk": (RetentionStep(name="slow", run=time_out),),
+        "deadlocked_chunk": (RetentionStep(name="cycle", run=deadlock),),
     }[ending]
     async with sessionmanager.session() as session:
         task = _OverdueTask(session, snapshot, extra_steps=extra)
@@ -532,11 +564,18 @@ async def test_every_ending_writes_the_overdue_snapshot(test_tenant, ending) -> 
         ).run(task)
 
     expected = {
-        "budget": RetentionJobOutcome.PARTIAL,
-        "failed_chunk": RetentionJobOutcome.FAILED,
-        "timed_out_chunk": RetentionJobOutcome.PARTIAL,
+        "budget": (RetentionJobOutcome.PARTIAL, None),
+        "failed_chunk": (RetentionJobOutcome.FAILED, RetentionErrorCode.CHUNK_FAILED),
+        "timed_out_chunk": (
+            RetentionJobOutcome.PARTIAL,
+            RetentionErrorCode.CHUNK_TIMEOUT,
+        ),
+        "deadlocked_chunk": (
+            RetentionJobOutcome.PARTIAL,
+            RetentionErrorCode.CHUNK_DEADLOCK,
+        ),
     }[ending]
-    assert report.outcome == expected
+    assert (report.outcome, report.error_code) == expected
     row = await _job_row(report.job_run_id)
     assert row.overdue_observed_at is not None
     assert (row.overdue_count, row.overdue_complete) == (7, False)
@@ -603,31 +642,66 @@ async def test_job_history_charges_discovery_and_preserves_live_rows(
 
 
 _OK = RetentionJobOutcome.SUCCEEDED
+_RUNNING = RetentionJobOutcome.RUNNING
+_SKIPPED = RetentionJobOutcome.SKIPPED
+_OFF = RetentionErrorCode.DISABLED_BY_DEPLOYMENT_SETTING
 
 
+async def _no_overdue() -> RetentionOverdue:
+    return RetentionOverdue(count=0, complete=True)
+
+
+# age: days since the latest row started and last renewed its heartbeat.
 @pytest.mark.parametrize(
     "age, outcome, error, snapshot, enabled, reports, expected, flags, sibling_ran",
     [
-        (None, None, None, None, True, True, "initializing", {"missing"}, False),
+        (None, None, None, None, True, True, "initializing", {"no_execution"}, False),
         # The scheduled run reached the sibling, so this task's claim raised.
-        (None, None, None, None, True, True, "unknown", {"missing"}, True),
-        (None, None, None, None, False, True, "degraded", {"disabled"}, False),
+        (None, None, None, None, True, True, "unknown", {"no_execution"}, True),
+        # No row yet: the API's own setting is the only evidence.
+        (
+            None,
+            None,
+            None,
+            None,
+            False,
+            True,
+            "degraded",
+            {"disabled", "no_execution"},
+            False,
+        ),
+        # The worker skipped it, whatever the API process's setting says.
+        (0, _SKIPPED, _OFF, None, True, False, "degraded", {"disabled"}, False),
+        # The worker ran it although the API process has it turned off.
+        (0, _OK, None, None, False, False, "healthy", set(), False),
         (0, _OK, None, None, True, False, "healthy", set(), False),
         (
             0,
-            RetentionJobOutcome.RUNNING,
+            _RUNNING,
             None,
             None,
             True,
             True,
             "initializing",
-            {"missing"},
+            {"no_overdue_snapshot"},
             False,
         ),
-        (0, _OK, None, None, True, True, "unknown", {"missing"}, False),
+        # A crashed worker: its running row stopped renewing hours ago.
+        (0.5, _RUNNING, None, None, True, False, "unknown", {"abandoned"}, False),
+        (0, _OK, None, None, True, True, "unknown", {"no_overdue_snapshot"}, False),
         (3, _OK, None, (0, 0, True), True, True, "degraded", {"stale"}, False),
         (0, _OK, None, (0, 7, False), True, True, "degraded", {"overdue"}, False),
-        (0, _OK, None, (3, 0, True), True, True, "unknown", {"stale_overdue"}, False),
+        (
+            0,
+            _OK,
+            None,
+            (3, 0, True),
+            True,
+            True,
+            "unknown",
+            {"overdue_snapshot_stale"},
+            False,
+        ),
         (0, _OK, None, (0, 0, True), True, True, "healthy", set(), False),
         (0, _OK, None, (0, 0, False), True, True, "unknown", set(), False),
         (
@@ -643,7 +717,7 @@ _OK = RetentionJobOutcome.SUCCEEDED
         ),
         (
             0,
-            RetentionJobOutcome.SKIPPED,
+            _SKIPPED,
             RetentionErrorCode.CLAIM_TIMEOUT,
             None,
             True,
@@ -667,9 +741,12 @@ _OK = RetentionJobOutcome.SUCCEEDED
     ids=[
         "never-run",
         "never-run-beside-a-run",
-        "disabled",
+        "disabled-before-a-row",
+        "disabled-by-the-worker",
+        "enabled-in-the-worker",
         "no-reporter",
         "first-running",
+        "abandoned",
         "missing-snapshot",
         "stale-job",
         "overdue-lower-bound",
@@ -685,8 +762,11 @@ async def test_retention_health_reports_observation_gaps(
     age, outcome, error, snapshot, enabled, reports, expected, flags, sibling_ran
 ) -> None:
     """Kills healthy-on-missing/stale/incomplete evidence, ignored disabled/overdue
-    flags, a fresh failed, superseded or unclaimed run reading healthy, and a
-    task that never ran beside one that did staying initializing."""
+    flags, a fresh failed, superseded or unclaimed run reading healthy, a task
+    that never ran beside one that did staying initializing, an abandoned
+    running row reading healthy, `disabled` read from the API process's
+    setting instead of the worker's latest row, and `no_execution` dropped for
+    a disabled task without a row."""
     if sibling_ran:
         async with _committed() as session:
             session.add(
@@ -706,10 +786,10 @@ async def test_retention_health_reports_observation_gaps(
                 outcome=outcome.value,
                 started_at=at,
                 heartbeat_at=at,
-                finished_at=None if outcome is RetentionJobOutcome.RUNNING else at,
+                finished_at=None if outcome is _RUNNING else at,
                 error_code=error.value if error is not None else None,
                 counts={"items.deleted": 4},
-                blocked={"items.deferred": 1, "items.held": 0},
+                blocked={"items.held": 1, "items.locked": 0},
             )
             if snapshot is not None:
                 observed_age, count, complete = snapshot
@@ -718,19 +798,28 @@ async def test_retention_health_reports_observation_gaps(
                 row.overdue_complete = complete
                 row.overdue_oldest_due_at = _NOW - timedelta(days=5) if count else None
             session.add(row)
+
+    def build(session: AsyncSession) -> _FakeTask:
+        return _OverdueTask(session, _no_overdue) if reports else _FakeTask(session)
+
     config = RetentionTaskRegistration(
         name=_TASK,
         enabled=enabled,
         budget=RetentionBudget(rows=10, files=10, seconds=10),
-        build=_FakeTask,
-        reports_overdue=reports,
+        build=build,
     )
-    sibling = replace(config, name=_ITEMS_TASK, enabled=True, reports_overdue=False)
+    sibling = RetentionTaskRegistration(
+        name=_ITEMS_TASK,
+        enabled=True,
+        budget=config.budget,
+        build=_FakeTask,
+    )
     async with _committed() as session:
         health = await load_retention_health(
             RetentionJobRunRepository(session),
             (config, sibling) if sibling_ran else (config,),
             now=_NOW,
+            lease_stale_after=timedelta(hours=1),
         )
     assert health.status is RetentionHealthStatus(expected)
     assert len(health.tasks) == (2 if sibling_ran else 1)
@@ -742,16 +831,18 @@ async def test_retention_health_reports_observation_gaps(
             "disabled",
             "stale",
             "overdue",
-            "missing",
-            "stale_overdue",
+            "no_execution",
+            "no_overdue_snapshot",
+            "overdue_snapshot_stale",
+            "abandoned",
             "failed",
         )
         if getattr(task, flag)
     } == flags
-    if enabled and age is not None:
+    if age is not None:
         assert (task.latest_outcome, task.error_code) == (outcome, error)
-        assert task.blocked_reasons == ("items.deferred",)
-    if enabled and snapshot is not None:
+        assert task.blocked_reasons == ("items.held",)
+    if snapshot is not None:
         assert task.overdue_complete == snapshot[2]
 
 
@@ -787,7 +878,8 @@ async def test_a_step_breaking_its_contract_fails_and_commits_nothing(
     test_tenant, breach
 ) -> None:
     """Kills dropping the batch-charge check (over_charge) or the closed-set check
-    of count keys (undeclared_key)."""
+    of count keys (undeclared_key), or recording an adopter's contract breach as
+    a database failure (chunk_failed)."""
     items = await _work_items(1)
 
     def broken(
@@ -803,7 +895,7 @@ async def test_a_step_breaking_its_contract_fails_and_commits_nothing(
 
     assert (report.outcome, report.error_code) == (
         RetentionJobOutcome.FAILED,
-        RetentionErrorCode.CHUNK_FAILED,
+        RetentionErrorCode.CONTRACT_VIOLATION,
     )
     assert await _remaining(items) == 1
     row = await _job_row(report.job_run_id)
@@ -835,28 +927,45 @@ async def test_a_skip_records_its_row_and_a_required_audit(
     assert audit.log_metadata["job_run_id"] == str(report.job_run_id)
 
 
-@pytest.mark.parametrize("disposed", [False, True])
+@pytest.mark.parametrize("kind", ["observed", "disposed", "deferred"])
 async def test_observations_are_progress_and_only_disposals_are_audited(
-    test_tenant, disposed
+    test_tenant, kind
 ) -> None:
-    """Kills auditing a chunk that only observed, putting observations in the
-    audit event, or dropping them from the job row."""
-    counts = {"examined": 5, **({"deleted": 1} if disposed else {})}
+    """Kills auditing a chunk that only observed or deferred, putting
+    observations in a chunk's or the end event, a chunk description without
+    its counts, dropping observations from the job row, or recording a
+    deferral as a blocked reason instead of a count."""
+    counts = {"examined": 5, **({"deleted": 1} if kind == "disposed" else {})}
 
     def observed(
         batch: RetentionBatch, result: RetentionStepResult
     ) -> RetentionStepResult:
         effect = RetentionTenantEffect(tenant_id=None, counts=counts)
-        return replace(result, rows=5, effects=(effect,), exhausted=True)
+        deferred = kind == "deferred"
+        return replace(
+            result, rows=5, effects=(effect,), exhausted=not deferred, deferred=deferred
+        )
 
     async with sessionmanager.session() as session:
         report = await _runner(session).run(_FakeTask(session, reported=observed))
 
-    assert report.outcome is RetentionJobOutcome.SUCCEEDED
     row = await _job_row(report.job_run_id)
-    assert row.counts == {f"items.{key}": value for key, value in counts.items()}
-    assert [audit.log_metadata["counts"] for audit in await _audits()] == (
-        [{"deleted": 1}] if disposed else []
+    assert row.counts == {
+        **{f"items.{key}": value for key, value in counts.items()},
+        **({"items.deferred": 1} if kind == "deferred" else {}),
+    }
+    assert row.blocked == {}
+    assert [
+        (audit.description, audit.log_metadata["counts"]) for audit in await _audits()
+    ] == (
+        [("Retention tests.fake, step items: deleted 1", {"deleted": 1})]
+        if kind == "disposed"
+        else []
+    )
+    # The end event's totals hold disposal facts only.
+    [run] = await _run_audits()
+    assert run.log_metadata["counts"] == (
+        {"items.deleted": 1} if kind == "disposed" else {}
     )
 
 
@@ -878,3 +987,49 @@ async def test_the_batch_carries_the_execution_deadline() -> None:
         )
 
     assert seen == [100.0 + 600.0]
+
+
+@pytest.mark.parametrize("ending", ["finished", "superseded"])
+async def test_the_execution_ends_with_one_audit_event_in_its_finish(
+    test_tenant, ending
+) -> None:
+    """Kills dropping the end-of-execution event or writing it for an execution
+    that was superseded before it finished."""
+    await _work_items(3)
+    seen: list[UUID] = []
+
+    async def remember(batch: RetentionBatch) -> None:
+        seen.append(batch.job_run_id)
+
+    async def taken_over() -> RetentionOverdue:
+        # Another worker takes the stale task over before this one finishes.
+        await _make_stale(seen[0])
+        assert await _claim() is not None
+        return RetentionOverdue(count=0, complete=True)
+
+    async with sessionmanager.session() as session:
+        task = (
+            _OverdueTask(session, taken_over, after_batch=remember)
+            if ending == "superseded"
+            else _FakeTask(session, after_batch=remember)
+        )
+        report = await _runner(session, chunk_rows=1, budget_rows=2).run(task)
+
+    events = await _run_audits()
+    if ending == "superseded":
+        assert report.outcome is RetentionJobOutcome.SUPERSEDED
+        assert events == []
+        return
+    [event] = events
+    assert event.id == retention_run_audit_id(report.job_run_id)
+    assert event.tenant_id == test_tenant.id
+    assert event.log_metadata == {
+        "task": _TASK,
+        "job_run_id": str(report.job_run_id),
+        "outcome": "partial",
+        "error_code": None,
+        "counts": {"items.deleted": 2},
+        "blocked": {},
+        "batch_count": 2,
+    }
+    assert event.description == ("Retention tests.fake finished: partial; deleted 2")

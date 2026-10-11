@@ -166,8 +166,9 @@ def upgrade() -> None:
             name="ck_retention_job_runs_finished",
         ),
         sa.CheckConstraint(
-            "error_code IS NULL OR error_code IN ('chunk_failed', 'chunk_timeout', "
-            "'claim_timeout', 'disabled_by_deployment_setting', 'finish_timeout')",
+            "error_code IS NULL OR error_code IN ('chunk_deadlock', 'chunk_failed', "
+            "'chunk_timeout', 'claim_timeout', 'contract_violation', "
+            "'disabled_by_deployment_setting', 'finish_timeout')",
             name="ck_retention_job_runs_error_code",
         ),
         sa.CheckConstraint(
