@@ -2244,7 +2244,7 @@ async def test_worker_saves_failure_addresses_during_crawl_and_flushes_the_final
         )
 
     print("DIAG tasks before crawl:", _tasks(), flush=True)
-    print("DIAG ids: run", run_id, "attempt", attempt.id, "dispatch", dispatch_id, flush=True)
+    print("DIAG ids: run", run_id, "attempt", task.attempt_id, "dispatch", dispatch_id, flush=True)
     original_record = CrawlRunRepository._record_failures
 
     async def spy_record(self, record_run_id, failures):
