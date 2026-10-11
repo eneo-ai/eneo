@@ -2195,6 +2195,7 @@ async def test_persistence_failure_is_not_counted_as_a_successful_page(
 async def test_worker_saves_failure_addresses_during_crawl_and_flushes_the_final_page(
     db_session,
     admin_user,
+    monkeypatch,
 ) -> None:
     async with db_session() as session:
         website = await _persist_website(
@@ -2243,6 +2244,19 @@ async def test_worker_saves_failure_addresses_during_crawl_and_flushes_the_final
         )
 
     print("DIAG tasks before crawl:", _tasks(), flush=True)
+    print("DIAG ids: run", run_id, "attempt", attempt.id, "dispatch", dispatch_id, flush=True)
+    original_record = CrawlRunRepository._record_failures
+
+    async def spy_record(self, record_run_id, failures):
+        rows = (
+            await self.session.execute(
+                sa.text("SELECT id, dispatch_id, crawl_run_id FROM crawl_attempts")
+            )
+        ).all()
+        print("DIAG record_failures run_id:", record_run_id, "attempts:", rows, flush=True)
+        return await original_record(self, record_run_id, failures)
+
+    monkeypatch.setattr(CrawlRunRepository, "_record_failures", spy_record)
     try:
         await crawl_task(job_id=dispatch_id, params=task, container=container)
     except Exception:
