@@ -1,5 +1,6 @@
 <script lang="ts">
   import type { Flow } from "@eneo/eneo-js";
+  import type { NamedSecurityLevel } from "$lib/features/flows/flowClassificationNames";
   import { IconChevronDown } from "@eneo/icons/chevron-down";
   import { IconRefresh } from "@eneo/icons/refresh";
   import { IconLoadingSpinner } from "@eneo/icons/loading-spinner";
@@ -12,10 +13,13 @@
   let {
     flow,
     activeStepId,
+    classifications = [],
     onNodeClick
   }: {
     flow: Flow;
     activeStepId: string | null;
+    /** The organisation's security classes, which name the levels the graph shows. */
+    classifications?: NamedSecurityLevel[];
     onNodeClick?: (stepId: string) => void;
   } = $props();
 
@@ -73,6 +77,7 @@
     <FlowGraphComponent
       {flow}
       {activeStepId}
+      {classifications}
       onnodeclick={(id: string) => onNodeClick?.(id)}
       oncontentsize={(size: { width: number; height: number }) => (contentSize = size)}
     />
@@ -166,6 +171,7 @@
         <FlowGraphComponent
           {flow}
           {activeStepId}
+          {classifications}
           onnodeclick={(id: string) => {
             onNodeClick?.(id);
             isEnlarged = false;

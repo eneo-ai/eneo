@@ -299,9 +299,16 @@ describe("FlowValidationBanner security classification refusals", () => {
     { ...makeStep(), id: "step-1", step_order: 1, user_description: "Transkribera" },
     makeStep()
   ];
+  // The organisation's own classes name the levels the refusal carries.
+  const classifications = [
+    { name: "Intern", security_level: 2 },
+    { name: "Konfidentiell", security_level: 3 }
+  ];
   const names = {
     stepLabel: (order: number) => (order === 1 ? "Transkribera" : `Steg ${order}`),
-    modelName: (id: string) => ({ "model-a": "Modell A", "model-b": "Modell B" })[id]
+    modelName: (id: string) => ({ "model-a": "Modell A", "model-b": "Modell B" })[id],
+    className: (level: number) =>
+      classifications.find((entry) => entry.security_level === level)?.name ?? ""
   };
 
   it("says which step is read, what the model is cleared for and which models to choose", async () => {
@@ -309,6 +316,7 @@ describe("FlowValidationBanner security classification refusals", () => {
     render(FlowValidationBanner, {
       errors: new Map([[`flow:server:${code}:3`, [RAW]]]),
       steps,
+      classifications,
       onNavigateToStep,
       repairIssue: { code, stepOrder: 3, field: null, reference: null, classification: refusal },
       isExpanded: true
@@ -330,6 +338,7 @@ describe("FlowValidationBanner security classification refusals", () => {
     render(FlowValidationBanner, {
       errors: new Map([[`flow:server:${code}:3`, [RAW]]]),
       steps,
+      classifications,
       isExpanded: true
     });
 
@@ -340,6 +349,7 @@ describe("FlowValidationBanner security classification refusals", () => {
     render(FlowValidationBanner, {
       errors: new Map([[`flow:server:${code}:3`, [RAW]]]),
       steps,
+      classifications,
       repairIssue: {
         code: "flow_step_output_classification_write_down",
         stepOrder: 3,

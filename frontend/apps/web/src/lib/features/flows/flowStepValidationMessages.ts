@@ -141,6 +141,8 @@ function readClassificationRefusal(
 export type ClassificationNames = {
   stepLabel: (stepOrder: number) => string;
   modelName: (modelId: string) => string | undefined;
+  /** The organisation's own name for a security level. */
+  className: (level: number) => string;
 };
 
 /** The actionable sentence for a refusal: what is read, what the model has, what to choose. */
@@ -148,26 +150,27 @@ export function describeClassificationRefusal(
   refusal: ClassificationRefusal,
   names: ClassificationNames
 ): string {
-  const level = String(refusal.requiredLevel);
+  const name = names.className(refusal.requiredLevel);
+  const current = refusal.currentLevel === null ? null : names.className(refusal.currentLevel);
   const why =
     refusal.cause === "reads"
       ? m.flow_validation_classification_reads({
-          level,
+          name,
           sources: refusal.sourceStepOrders.map(names.stepLabel).join(", ")
         })
       : refusal.cause === "knowledge"
-        ? m.flow_validation_classification_knowledge({ level })
-        : m.flow_validation_classification_space({ level });
+        ? m.flow_validation_classification_knowledge({ name })
+        : m.flow_validation_classification_space({ name });
   if (refusal.kind === "output_write_down") {
     return `${why} ${m.flow_validation_classification_write_down({
-      override: String(refusal.currentLevel),
-      level
+      override: current ?? name,
+      name
     })}`;
   }
   const modelState =
-    refusal.currentLevel === null
+    current === null
       ? m.flow_validation_classification_model_none()
-      : m.flow_validation_classification_model_level({ level: String(refusal.currentLevel) });
+      : m.flow_validation_classification_model_level({ name: current });
   const models = refusal.qualifyingModelIds
     .map(names.modelName)
     .filter((name): name is string => Boolean(name));
@@ -175,8 +178,8 @@ export function describeClassificationRefusal(
     models.length > 0
       ? m.flow_validation_classification_choose_model({ models: models.join(", ") })
       : refusal.qualifyingModelIds.length === 0
-        ? m.flow_validation_classification_no_model({ level })
-        : m.flow_validation_classification_choose_level({ level });
+        ? m.flow_validation_classification_no_model({ name })
+        : m.flow_validation_classification_choose_level({ name });
   return `${why} ${modelState} ${choice}`;
 }
 

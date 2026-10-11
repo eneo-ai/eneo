@@ -17,6 +17,11 @@
   import "@xyflow/svelte/dist/style.css";
   import dagre from "dagre";
   import type { Flow, FlowStep } from "@eneo/eneo-js";
+  import {
+    securityClassName,
+    securityClassStanding,
+    type NamedSecurityLevel
+  } from "$lib/features/flows/flowClassificationNames";
   import FlowNodeLlm from "./FlowNodeLlm.svelte";
   import FlowNodeIO from "./FlowNodeIO.svelte";
   import FlowEdgeInteractive from "./FlowEdgeInteractive.svelte";
@@ -43,11 +48,13 @@
   interface Props {
     flow: Flow;
     activeStepId: string | null;
+    /** The organisation's security classes, which name the levels the nodes show. */
+    classifications?: NamedSecurityLevel[];
     onnodeclick?: (id: string) => void;
     /** Laid-out size of the graph, so a host can give it a shape that fits. */
     oncontentsize?: (size: { width: number; height: number }) => void;
   }
-  let { flow, activeStepId, onnodeclick, oncontentsize }: Props = $props();
+  let { flow, activeStepId, classifications = [], onnodeclick, oncontentsize }: Props = $props();
 
   const mode = getFlowUserMode();
   const flowEditor = getFlowEditor();
@@ -122,12 +129,15 @@
   $effect(() => {
     const orderedSteps = flow?.steps ?? [];
     const stepsJson = flowGraphLayoutKey(orderedSteps);
-    const metaJson = JSON.stringify(
-      orderedSteps.map((s) => ({
+    // The class names are part of what a node shows, so renamed classes
+    // rebuild the nodes too.
+    const metaJson = JSON.stringify({
+      classifications,
+      steps: orderedSteps.map((s) => ({
         assistant_id: s.assistant_id,
         meta: s.assistant_id ? (assistantMetaById.get(s.assistant_id) ?? null) : null
       }))
-    );
+    });
     const currentMode = $mode;
 
     if (stepsJson !== lastStepsJson || currentMode !== lastMode || metaJson !== lastMetaJson) {
@@ -231,6 +241,20 @@
     }
   }
 
+  // The levels a node shows, with the names the organisation gave them.
+  function classBadges(assistantClassLevel: number | null, classLevel: number | null) {
+    return {
+      assistantClassLevel,
+      classLevel,
+      assistantClassName:
+        assistantClassLevel === null
+          ? null
+          : securityClassName(classifications, assistantClassLevel),
+      className: classLevel === null ? null : securityClassName(classifications, classLevel),
+      classStanding: classLevel === null ? null : securityClassStanding(classifications, classLevel)
+    };
+  }
+
   function getClassificationLevel(step: FlowStep | undefined): number | null {
     if (!step) return null;
     const value = step.output_classification_override;
@@ -331,9 +355,10 @@
             isActive: node.id === activeId,
             mode: userMode,
             modelName: assistantMetaById.get(step.assistant_id)?.modelName ?? null,
-            assistantClassLevel:
+            ...classBadges(
               assistantMetaById.get(step.assistant_id)?.assistantClassificationLevel ?? null,
-            classLevel: getClassificationLevel(step)
+              getClassificationLevel(step)
+            )
           }
         });
         continue;

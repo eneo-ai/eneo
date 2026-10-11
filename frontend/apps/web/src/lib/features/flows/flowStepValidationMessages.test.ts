@@ -1,6 +1,7 @@
 import { EneoError } from "@eneo/eneo-js";
 import { describe, expect, it } from "vitest";
 import { m } from "$lib/paraglide/messages";
+import { securityClassName } from "./flowClassificationNames";
 import {
   describeClassificationRefusal,
   getValidationIssueMessage,
@@ -147,10 +148,17 @@ describe("security classification refusals", () => {
     );
   }
 
+  // The organisation's own classes: Eneo ships no fixed names for the levels.
+  const classes = [
+    { name: "Öppen", security_level: 1 },
+    { name: "Intern", security_level: 2 },
+    { name: "Konfidentiell", security_level: 3 }
+  ];
   const names = {
     stepLabel: (order: number) =>
       ({ 1: "Transkribera", 2: "Sammanfatta" })[order] ?? `Steg ${order}`,
-    modelName: (id: string) => ({ "model-a": "Modell A", "model-b": "Modell B" })[id]
+    modelName: (id: string) => ({ "model-a": "Modell A", "model-b": "Modell B" })[id],
+    className: (level: number) => securityClassName(classes, level)
   };
 
   it("carries the refusal facts on the parsed identity", () => {
@@ -240,12 +248,31 @@ describe("security classification refusals", () => {
 
     const message = describeClassificationRefusal(refusal, names);
 
-    expect(message).toContain("K3");
+    expect(message).toContain("Konfidentiell");
     expect(message).toContain("Transkribera");
-    expect(message).toContain("K2");
+    expect(message).toContain("Intern");
     expect(message).toContain("Modell A");
     expect(message).toContain("Modell B");
     expect(message).not.toContain("undefined");
+  });
+
+  it("names a level as the organisation named it, and invents no name for one it has no class for", () => {
+    const refusal: ClassificationRefusal = {
+      kind: "model_below_required",
+      requiredLevel: 3,
+      currentLevel: 2,
+      cause: "space",
+      sourceStepOrders: [],
+      qualifyingModelIds: ["model-a"]
+    };
+    const renamed = describeClassificationRefusal(refusal, {
+      ...names,
+      className: (level) => securityClassName([{ name: "Sekretess", security_level: 3 }], level)
+    });
+
+    expect(renamed).toContain("Sekretess");
+    expect(renamed).toContain(m.flow_classification_unnamed_level({ level: "2" }));
+    expect(renamed).not.toMatch(/K[0-9]/);
   });
 
   it("names every step a level is read from", () => {
@@ -276,8 +303,8 @@ describe("security classification refusals", () => {
     const knowledge = describeClassificationRefusal({ ...base, cause: "knowledge" }, names);
     const space = describeClassificationRefusal({ ...base, cause: "space" }, names);
 
-    expect(knowledge).toContain("K3");
-    expect(space).toContain("K3");
+    expect(knowledge).toContain("Konfidentiell");
+    expect(space).toContain("Konfidentiell");
     expect(knowledge).not.toBe(space);
     expect(knowledge).not.toContain("Transkribera");
   });
@@ -295,8 +322,7 @@ describe("security classification refusals", () => {
       names
     );
 
-    expect(message).toContain("K2");
-    expect(message).not.toContain("K0");
+    expect(message).toContain("Intern");
     expect(message).not.toContain("null");
     expect(message).not.toContain("Modell A");
   });
@@ -316,7 +342,7 @@ describe("security classification refusals", () => {
 
     expect(message).not.toContain("model-unknown");
     expect(message).not.toContain("undefined");
-    expect(message).toContain("K3");
+    expect(message).toContain("Konfidentiell");
   });
 
   it("explains a write-down with the override and the level the result already carries", () => {
@@ -332,8 +358,8 @@ describe("security classification refusals", () => {
       names
     );
 
-    expect(message).toContain("K1");
-    expect(message).toContain("K3");
+    expect(message).toContain("Öppen");
+    expect(message).toContain("Konfidentiell");
     expect(message).toContain("Transkribera");
   });
 });

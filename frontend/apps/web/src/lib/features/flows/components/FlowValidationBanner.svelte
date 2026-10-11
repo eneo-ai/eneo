@@ -7,6 +7,10 @@
   import { prefersReducedMotion } from "$lib/core/prefersReducedMotion";
   import type { FlowStep } from "@eneo/eneo-js";
   import { getSpacesManager } from "$lib/features/spaces/SpacesManager";
+  import {
+    securityClassName,
+    type NamedSecurityLevel
+  } from "$lib/features/flows/flowClassificationNames";
   import { IconInfo } from "@eneo/icons/info";
   import { fade, slide } from "svelte/transition";
   import { m } from "$lib/paraglide/messages";
@@ -35,6 +39,7 @@
   let {
     errors,
     steps = [],
+    classifications = [],
     onNavigateToStep,
     repairIssue = null,
     onRepairReference,
@@ -42,6 +47,8 @@
   }: {
     errors: Map<string, string[]>;
     steps?: FlowStep[];
+    /** The organisation's security classes, which name the levels a refusal carries. */
+    classifications?: NamedSecurityLevel[];
     onNavigateToStep?: (stepId: string) => void;
     /** The latest server rejection's identity and, for a classification refusal, its facts. */
     repairIssue?: ReturnType<typeof parseServerValidationIdentity>;
@@ -94,7 +101,8 @@
         const message = refusal
           ? describeClassificationRefusal(refusal, {
               stepLabel: stepLabelFor,
-              modelName: modelNameFor
+              modelName: modelNameFor,
+              className: (level) => securityClassName(classifications, level)
             })
           : translated !== parsed.code
             ? translated

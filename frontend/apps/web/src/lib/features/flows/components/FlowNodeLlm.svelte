@@ -5,6 +5,7 @@
   import * as Card from "$lib/components/ui/card/index.js";
   import { m } from "$lib/paraglide/messages";
   import { getDownstreamKindForOutput } from "$lib/features/flows/flowStepPresentation";
+  import type { SecurityClassStanding } from "$lib/features/flows/flowClassificationNames";
   import UserCheck from "@lucide/svelte/icons/user-check";
 
   let {
@@ -27,8 +28,20 @@
       modelName?: string;
       classLevel?: number | null;
       assistantClassLevel?: number | null;
+      /** The organisation's names for the two levels, and where the result's stands among its classes. */
+      className?: string | null;
+      assistantClassName?: string | null;
+      classStanding?: SecurityClassStanding | null;
     };
   } = $props();
+
+  // The result's class is toned by where it stands among the organisation's
+  // classes, never by a fixed level.
+  const CLASS_TONE: Record<SecurityClassStanding, string> = {
+    highest: "bg-negative-dimmer text-negative-stronger",
+    between: "bg-warning-dimmer text-warning-stronger",
+    lowest: "bg-positive-dimmer text-positive-stronger"
+  };
 
   const isPowerUser = $derived(data.mode === "power_user");
   const isAssembly = $derived(data.step.output_mode === "template_fill");
@@ -95,20 +108,15 @@
             variant="secondary"
             class="bg-accent-dimmer text-accent-stronger text-xs font-bold"
           >
-            {m.flow_node_model_class_badge({ level: String(data.assistantClassLevel) })}
+            {m.flow_node_model_class_badge({ name: data.assistantClassName ?? "" })}
           </Badge>
         {/if}
         {#if data.classLevel != null && data.classLevel !== data.assistantClassLevel}
           <Badge
             variant="secondary"
-            class="text-xs font-bold
-            {data.classLevel >= 3
-              ? 'bg-negative-dimmer text-negative-stronger'
-              : data.classLevel >= 2
-                ? 'bg-warning-dimmer text-warning-stronger'
-                : 'bg-positive-dimmer text-positive-stronger'}"
+            class={["text-xs font-bold", data.classStanding && CLASS_TONE[data.classStanding]]}
           >
-            {m.flow_node_output_class_badge({ level: String(data.classLevel) })}
+            {m.flow_node_output_class_badge({ name: data.className ?? "" })}
           </Badge>
         {/if}
       </div>

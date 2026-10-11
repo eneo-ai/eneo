@@ -733,6 +733,7 @@
           flowEditor.replaceInputBindingReference(detail.stepId, detail.target, detail.option)}
         errors={$validationErrors}
         steps={$update.steps}
+        classifications={data.securityClassifications}
         onNavigateToStep={(stepId) => {
           builderStage = 4;
           flowEditor.selectStep(stepId);
@@ -1317,6 +1318,7 @@
           <FlowGraphPanel
             flow={$update}
             activeStepId={$activeStepId}
+            classifications={data.securityClassifications}
             onNodeClick={(stepId) => flowEditor.selectStep(stepId)}
           />
         {:else}
