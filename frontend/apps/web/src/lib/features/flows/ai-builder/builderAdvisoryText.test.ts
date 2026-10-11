@@ -4,6 +4,7 @@ import { m } from "$lib/paraglide/messages";
 import {
   advisoryStepRef,
   advisoryText,
+  attachmentWarningText,
   flowNoteText,
   lintWarningText
 } from "./builderAdvisoryText";
@@ -83,5 +84,46 @@ describe("flowNoteText", () => {
       m.ai_builder_flow_note_vague_step_name()
     );
     expect(flowNoteText({ code: "unknown_note" })).toBe(m.ai_builder_flow_note_generic());
+  });
+});
+
+describe("attachmentWarningText", () => {
+  it("names the file the AI Builder cannot read and says what to do", () => {
+    const text = attachmentWarningText({
+      code: "attachments_unreadable",
+      file_names: ["protokoll.pdf"]
+    });
+
+    expect(text).toBe(m.ai_builder_attachment_warning_unreadable_one({ files: "protokoll.pdf" }));
+    expect(text).toContain("protokoll.pdf");
+  });
+
+  it("lists several files as a sentence and counts the ones it does not name", () => {
+    const text = attachmentWarningText({
+      code: "attachments_unreadable",
+      file_names: ["a.pdf", "b.pdf"],
+      more_count: 3
+    });
+
+    expect(text).toContain("a.pdf");
+    expect(text).toContain("b.pdf");
+    expect(text).toContain(m.ai_builder_attachment_warning_more_files({ count: "3" }));
+    // The plural sentence, since several files are meant.
+    expect(text).not.toBe(m.ai_builder_attachment_warning_unreadable_one({ files: "a.pdf" }));
+  });
+
+  it("counts files that are gone, since their names went with them", () => {
+    expect(attachmentWarningText({ code: "attachments_unavailable", more_count: 1 })).toBe(
+      m.ai_builder_attachment_warning_unavailable_one()
+    );
+    expect(attachmentWarningText({ code: "attachments_unavailable", more_count: 2 })).toBe(
+      m.ai_builder_attachment_warning_unavailable({ count: "2" })
+    );
+  });
+
+  it("says a calm generic sentence for a code it does not know", () => {
+    expect(attachmentWarningText({ code: "something_new" })).toBe(
+      m.ai_builder_attachment_warning_generic()
+    );
   });
 });

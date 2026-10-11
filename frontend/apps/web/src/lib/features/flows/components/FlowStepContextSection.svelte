@@ -179,7 +179,7 @@
       {/if}
     </Settings.Row>
     <Settings.Row
-      title={m.attachments()}
+      title={m.flow_step_attachments_title()}
       description={m.flow_step_attachments_desc()}
       density="compact"
     >

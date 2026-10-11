@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { countMessage } from "$lib/features/flows/flowCount";
   import type { RetrievedPassage, Eneo } from "@eneo/eneo-js";
   import { Button } from "$lib/components/ui/button/index.js";
   import * as Dialog from "$lib/components/ui/dialog/index.js";
@@ -410,7 +411,11 @@
                       matched: String(totalMatchedChunkCount)
                     })}
                   {:else}
-                    {m.flow_run_knowledge_chunk_count({ count: String(chunkItems.length) })}
+                    {countMessage(
+                      chunkItems.length,
+                      m.flow_run_knowledge_chunk_count_one,
+                      m.flow_run_knowledge_chunk_count
+                    )}
                   {/if}
                 </span>
                 <Button variant="outline" class="text-xs" onclick={nextChunk}>

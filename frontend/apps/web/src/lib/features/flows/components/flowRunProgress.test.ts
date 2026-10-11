@@ -1,4 +1,5 @@
 import { describe, expect, test } from "vitest";
+import { m } from "$lib/paraglide/messages";
 
 import {
   buildFlowRunProgressSnapshot,
@@ -288,7 +289,7 @@ describe("flowRunProgress helpers", () => {
     expect(snapshot.steps).toEqual([
       {
         stepOrder: 3,
-        label: "Step 3",
+        label: m.flow_step_fallback_label({ order: "3" }),
         status: "pending",
         errorMessage: null,
         errorCode: null,

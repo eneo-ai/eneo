@@ -76,7 +76,7 @@
       {m.recording_resume_discard()}
     </Button>
     <Button variant="ghost" size="sm" disabled={busy} onclick={() => onDismiss()}>
-      {m.cancel()}
+      {m.recording_resume_not_now()}
     </Button>
   </div>
 </Alert.Root>

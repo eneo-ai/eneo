@@ -1,5 +1,6 @@
 import { EneoError } from "@eneo/eneo-js";
 import { describe, expect, it } from "vitest";
+import { m } from "$lib/paraglide/messages";
 import {
   describeClassificationRefusal,
   getValidationIssueMessage,
@@ -374,5 +375,63 @@ describe("the step limit refusal", () => {
 
     expect(message).not.toBe(code);
     expect(message).not.toMatch(/\d/);
+  });
+});
+
+describe("getValidationIssueMessage", () => {
+  // Every value of FlowGraphIssueCode (backend/src/eneo/flows/domain/flow_step_validation.py).
+  // A code without a sentence reaches the banner as the server's English text.
+  const SERVER_ISSUE_CODES = [
+    "audio_document_transcript_chain_invalid",
+    "citation_mode_unsupported",
+    "duplicate_step_name",
+    "duplicate_step_order",
+    "flow_audio_transcription_invalid",
+    "flow_audio_transcription_model_required",
+    "flow_audio_transcription_required",
+    "flow_has_no_steps",
+    "flow_speaker_service_choice_required",
+    "flow_speaker_service_unavailable",
+    "flow_http_post_output_must_be_terminal",
+    "flow_input_alias_not_received",
+    "flow_input_binding_future_step_reference",
+    "flow_input_binding_invalid_step_reference",
+    "flow_input_binding_unknown_step_order",
+    "flow_input_binding_runtime_input_unused",
+    "flow_input_binding_unsupported_key",
+    "flow_input_contract_inapplicable",
+    "flow_review_policy_invalid",
+    "flow_review_policy_outbound_output_unsupported",
+    "flow_step_invalid",
+    "flow_step_limit_exceeded",
+    "input_contract_source_mismatch",
+    "input_contract_type_mismatch",
+    "invalid_input_contract_schema",
+    "invalid_output_contract_schema",
+    "output_contract_template_fill_incompatible",
+    "output_contract_type_mismatch",
+    "step_order_not_contiguous",
+    "template_fill_requires_docx",
+    "transcribe_only_violation",
+    "typed_io_audio_source_unsupported",
+    "typed_io_document_source_unsupported",
+    "typed_io_file_source_unsupported",
+    "typed_io_flow_input_position_invalid",
+    "typed_io_incompatible_type_chain",
+    "typed_io_invalid_input_source_combination",
+    "typed_io_invalid_input_source_position",
+    "typed_io_missing_previous_step",
+    "typed_io_multiple_flow_input_steps",
+    "unsupported_input_type"
+  ];
+
+  it.each(SERVER_ISSUE_CODES)("has a sentence for the server code %s", (code) => {
+    expect(getValidationIssueMessage(code)).not.toBe(code);
+  });
+
+  it("has a sentence for a step that calls a service without an address", () => {
+    expect(getValidationIssueMessage("http_missing_url")).toBe(
+      m.flow_validation_msg_http_missing_url()
+    );
   });
 });

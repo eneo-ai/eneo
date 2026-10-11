@@ -9,7 +9,7 @@ const RAIL_UNDERSTANDING = "Eneo förstår uppgiften";
 const RAIL_REVIEWING = "Du granskar innan flödet skapas";
 const CONFIRM_TITLE = "Så här har Eneo förstått uppgiften";
 const CONFIRM_ACTION = "Stämmer — utforma planen";
-const CONFIRM_STALE = "Sammanfattningen är uppdaterad.";
+const CONFIRM_STALE = "Sammanfattningen är uppdaterad";
 const QUESTION_CONFIRM = "Bekräfta svaret";
 const HOW_FLOW_WORKS = "Så fungerar flödet";
 

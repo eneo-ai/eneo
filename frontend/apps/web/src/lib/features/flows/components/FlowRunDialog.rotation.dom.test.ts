@@ -510,6 +510,7 @@ describe("FlowRunDialog recording rotation", () => {
     await fireEvent.click(screen.getByRole("button", { name: m.recording_pause() }));
     expect(media.recorders[0]?.state).toBe("paused");
     expect(screen.getByText(m.recording_paused())).toBeTruthy();
+    await paintedFrame();
     const timeLeft = screen.getByText(m.recording_time_left({ duration: "3 h 15 min" }));
     // Longer than a part: no new part starts, and nothing counts down.
     vi.advanceTimersByTime(30 * 60_000);
@@ -1768,6 +1769,13 @@ function pendingUpload(pendingUploads: PendingUpload[], file: File) {
 // the fake clock.
 const flush = () => vi.advanceTimersByTimeAsync(0);
 
+// The recorder paints its clock on real animation frames (see FAKED_CLOCK), so
+// fake time alone does not move what the dialog shows: let one frame pass.
+const paintedFrame = async () => {
+  await new Promise<void>((resolve) => window.requestAnimationFrame(() => resolve()));
+  await flush();
+};
+
 // The session's rotation: the next recorder starts, the replaced one keeps
 // running until the overlap ends.
 async function rotate() {
@@ -1863,7 +1871,7 @@ function failedRecordingAlert(): HTMLElement | null {
   return (
     screen
       .queryAllByRole("alert")
-      .find((alert) => within(alert).queryByText(m.recording_last_clip_ready())) ?? null
+      .find((alert) => within(alert).queryByText(m.recording_upload_failed_title())) ?? null
   );
 }
 

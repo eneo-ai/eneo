@@ -271,9 +271,9 @@ describe("flowRuntimeErrorMapping", () => {
     ]).toContain(getFlowRuntimeErrorMessage(error, "fallback"));
   });
 
-  it("passes through readable backend text for uncatalogued Flow errors", () => {
+  it("shows the caller's sentence instead of the server's English text for an uncatalogued error", () => {
     const error = new EneoError(
-      "Some other template error",
+      "Flow must contain at least one step before publish.",
       "RESPONSE",
       400,
       0,
@@ -281,15 +281,51 @@ describe("flowRuntimeErrorMapping", () => {
       { endpoint: "GET@test" }
     );
 
-    expect(getFlowRuntimeErrorMessage(error, "fallback")).toBe("Some other template error");
+    expect(getFlowRuntimeErrorMessage(error, "Flödet kunde inte publiceras.")).toBe(
+      "Flödet kunde inte publiceras."
+    );
+  });
+
+  it("says a draft changed elsewhere in the reader's language, not the server's Swedish", () => {
+    const serverText =
+      "Flödet har ändrats sedan det lästes in, till exempel i en annan flik eller av en kollega.";
+    const error = new EneoError(
+      serverText,
+      "RESPONSE",
+      400,
+      9007,
+      { message: serverText, eneo_error_code: 9007, code: "stale_revision" },
+      { endpoint: "PATCH@test" }
+    );
+    const restore = getLocale();
+    try {
+      setLocale("en", { reload: false });
+      expect(getFlowRuntimeErrorMessage(error, "fallback")).toBe(m.flow_edit_stale_revision());
+      expect(getFlowRuntimeErrorMessage(error, "fallback")).toContain("Reload the page");
+    } finally {
+      setLocale(restore, { reload: false });
+    }
+  });
+
+  it("uses the shared translated sentence for a platform error code", () => {
+    const error = new EneoError(
+      "Tenant quota exceeded",
+      "RESPONSE",
+      403,
+      9008,
+      {},
+      { endpoint: "GET@test" }
+    );
+
+    expect(getFlowRuntimeErrorMessage(error, "fallback")).toBe(m.eneo_error_9008());
   });
 
   it.each([
     [
       "flow_run_access_denied",
       [
-        "You do not have access to this flow run.",
-        "Du har inte åtkomst till den här flödeskörningen."
+        "You do not have access to this run. Ask the flow's owner or an administrator for access.",
+        "Du har inte åtkomst till den här körningen. Be den som äger flödet eller en administratör om åtkomst."
       ]
     ],
     [
@@ -548,5 +584,48 @@ describe("friendlyMimeNames", () => {
 
   it("passes through unknown MIME types", () => {
     expect(friendlyMimeNames(["application/x-custom"])).toEqual(["application/x-custom"]);
+  });
+
+  it("names every audio type the backend advertises once, by file ending", () => {
+    expect(
+      friendlyMimeNames([
+        "audio/x-m4a",
+        "audio/ogg",
+        "audio/wav",
+        "audio/mpeg",
+        "audio/mp3",
+        "video/webm",
+        "video/mp4",
+        "audio/webm",
+        "audio/mp4"
+      ])
+    ).toEqual(["M4A", "OGG", "WAV", "MP3", "WebM", "MP4"]);
+  });
+
+  it("names every text type the backend advertises", () => {
+    const names = friendlyMimeNames([
+      "text/markdown",
+      "text/plain",
+      "application/pdf",
+      "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+      "text/csv",
+      "application/csv",
+      "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+      "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+      "application/vnd.ms-excel",
+      "application/json",
+      "text/xml",
+      "application/xml"
+    ]);
+    expect(names.filter((name) => name.includes("/"))).toEqual([]);
+    expect(names).toContain(m.flow_file_type_plain_text());
+    expect(names.filter((name) => name === "XML")).toHaveLength(1);
+  });
+
+  it("uses the active language for a whole family of files", () => {
+    expect(friendlyMimeNames(["audio/*", "image/*"])).toEqual([
+      m.flow_file_type_any_audio(),
+      m.flow_file_type_any_image()
+    ]);
   });
 });

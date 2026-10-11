@@ -1,107 +1,58 @@
-import type { FlowLocale } from "$lib/features/flows/flowRunWizard";
+import { m } from "$lib/paraglide/messages";
+import { countMessage } from "$lib/features/flows/flowCount";
 
 export type FlowRunDialogLabels = ReturnType<typeof getFlowRunDialogLabels>;
 
-export function getFlowRunDialogLabels(locale: FlowLocale) {
-  if (locale === "sv") {
-    return {
-      progress: (current: number, total: number) => `${current} av ${total}`,
-      previous: "Tillbaka",
-      next: "Nästa",
-      audio: "Ljud",
-      file: "Fil",
-      document: "Dokument",
-      unnamedStep: (stepOrder: number) => `Steg ${stepOrder}`,
-      templateReady: "Klar",
-      templateNeedsAction: "Åtgärd krävs",
-      templateReadOnly: "Skrivskyddad",
-      templateUnavailable: "Otillgänglig",
-      templateReadOnlyMessage: "Du kan köra flödet men inte byta mall.",
-      templateNeedsActionMessage: "Mallen kräver åtgärd innan flödet kan köras.",
-      templateStatusTitle: "Mallstatus",
-      templateStatusDescription:
-        "Kontrollera att publicerade DOCX-mallar fortfarande är tillgängliga innan du kör flödet.",
-      templateFallbackName: (stepId: string) => `Mall för ${stepId}`,
-      retryUpload: "Försök igen",
-      disabledNextHint: "Fyll i obligatoriska fält först",
-      runtimeGroupEyebrow: "Filer för denna körning",
-      runtimeUploadHint: "Ladda upp fil eller dra den hit.",
-      runtimeUploadingHint: "Uppladdning pågår. Vänta tills filen är klar innan du går vidare.",
-      discardRecordingBusy:
-        "Du kan kassera inspelningen när den har stoppats och uppladdningen är klar.",
-      saveForLaterBusy:
-        "Du kan spara och fortsätta senare när inspelningen har stoppats och sparats på enheten.",
-      saveForLaterOnlyInTab:
-        "Inspelningen finns bara i den här fliken och kan inte sparas till senare. Spara den som fil eller försök ladda upp igen.",
-      allowedTypesToggle: "Visa tillåtna filtyper",
-      maxFiles: (count: number) => (count === 1 ? "Högst 1 fil" : `Högst ${count} filer`),
-      maxFileSize: (size: string) => `Högst ${size} per fil`,
-      maxFilesReached: "Max antal filer har redan laddats upp för detta steg.",
-      requiredBadge: "Obligatoriskt",
-      selectedFiles: (count: number) =>
-        `${count} fil${count === 1 ? "" : "er"} vald${count === 1 ? "" : "a"}`,
-      runBlockersTitle: "Det här behöver lösas innan du kan köra flödet",
-      reviewReady: "Allt som krävs är klart. Du kan köra flödet nu.",
-      reviewSummaryTitle: "Det här följer med i körningen",
-      reviewFieldsTitle: "Fält som skickas med",
-      reviewTextTitle: "Text som skickas in",
-      reviewFilesTitle: "Uppladdade filer",
-      runtimeReviewStep: (stepOrder: number, stepLabel: string) =>
-        `Steg ${stepOrder}: ${stepLabel}`,
-      closeConfirmTitle: "Du har osparade uppgifter",
-      closeConfirmMessage: "Om du stänger dialogen försvinner uppladdade filer och ifyllda fält.",
-      closeConfirmDiscard: "Stäng ändå",
-      closeConfirmKeep: "Fortsätt redigera",
-      technicalMimeToggle: "Visa tekniska MIME-typer"
-    };
-  }
-
+/**
+ * The run dialog's words, gathered once so the dialog and its parts are handed
+ * the same set. Every sentence lives in Paraglide; a count picks its singular
+ * form here so no part of the dialog can show "1 filer".
+ */
+export function getFlowRunDialogLabels() {
   return {
-    progress: (current: number, total: number) => `${current} of ${total}`,
-    previous: "Back",
-    next: "Next",
-    audio: "Audio",
-    file: "File",
-    document: "Document",
-    unnamedStep: (stepOrder: number) => `Step ${stepOrder}`,
-    templateReady: "Ready",
-    templateNeedsAction: "Needs action",
-    templateReadOnly: "Read-only",
-    templateUnavailable: "Unavailable",
-    templateReadOnlyMessage: "You can run the flow but you cannot change the template.",
-    templateNeedsActionMessage: "The template needs attention before the flow can run.",
-    templateStatusTitle: "Template status",
-    templateStatusDescription:
-      "Check that published DOCX templates are still available before you run the flow.",
-    templateFallbackName: (stepId: string) => `Template for ${stepId}`,
-    retryUpload: "Try again",
-    disabledNextHint: "Fill in required fields first",
-    runtimeGroupEyebrow: "Files for this run",
-    runtimeUploadHint: "Upload a file or drag it here.",
-    runtimeUploadingHint: "Upload in progress. Wait until the file is finished before continuing.",
-    discardRecordingBusy:
-      "You can discard the recording once it has stopped and the upload has finished.",
-    saveForLaterBusy:
-      "You can save and continue later once the recording has stopped and is saved on this device.",
-    saveForLaterOnlyInTab:
-      "The recording exists only in this tab and cannot be saved for later. Save it as a file or try the upload again.",
-    allowedTypesToggle: "Show allowed file types",
-    maxFiles: (count: number) => (count === 1 ? "Up to 1 file" : `Up to ${count} files`),
-    maxFileSize: (size: string) => `Up to ${size} per file`,
-    maxFilesReached: "The maximum number of files has already been uploaded for this step.",
-    requiredBadge: "Required",
-    selectedFiles: (count: number) => `${count} file${count === 1 ? "" : "s"} selected`,
-    runBlockersTitle: "This still needs to be resolved before you can run the flow",
-    reviewReady: "Everything required is ready. You can run the flow now.",
-    reviewSummaryTitle: "Included in this run",
-    reviewFieldsTitle: "Fields that will be sent",
-    reviewTextTitle: "Text that will be sent",
-    reviewFilesTitle: "Uploaded files",
-    runtimeReviewStep: (stepOrder: number, stepLabel: string) => `Step ${stepOrder}: ${stepLabel}`,
-    closeConfirmTitle: "You have unsaved changes",
-    closeConfirmMessage: "Closing this dialog will discard uploaded files and filled-in fields.",
-    closeConfirmDiscard: "Discard and close",
-    closeConfirmKeep: "Keep editing",
-    technicalMimeToggle: "Show technical MIME types"
+    progress: (current: number, total: number) =>
+      m.flow_run_dialog_progress({ current: String(current), total: String(total) }),
+    previous: m.back(),
+    next: m.next(),
+    audio: m.flow_run_dialog_format_audio(),
+    file: m.flow_run_dialog_format_file(),
+    document: m.flow_run_dialog_format_document(),
+    unnamedStep: (stepOrder: number) => m.flow_step_fallback_label({ order: String(stepOrder) }),
+    templateReady: m.flow_run_dialog_template_ready(),
+    templateNeedsAction: m.flow_run_dialog_template_needs_action(),
+    templateReadOnly: m.flow_run_dialog_template_read_only(),
+    templateUnavailable: m.flow_run_dialog_template_unavailable(),
+    templateReadOnlyMessage: m.flow_run_dialog_template_read_only_message(),
+    templateNeedsActionMessage: m.flow_run_dialog_template_needs_action_message(),
+    templateStatusTitle: m.flow_run_dialog_template_status_title(),
+    templateStatusDescription: m.flow_run_dialog_template_status_description(),
+    templateUnnamed: m.flow_run_dialog_template_unnamed(),
+    retryUpload: m.flow_retry(),
+    runtimeUploadHint: m.flow_run_dialog_upload_hint(),
+    runtimeUploadingHint: m.flow_run_dialog_uploading_hint(),
+    discardRecordingBusy: m.flow_run_dialog_discard_recording_busy(),
+    saveForLaterBusy: m.flow_run_dialog_save_for_later_busy(),
+    saveForLaterOnlyInTab: m.flow_run_dialog_save_for_later_only_in_tab(),
+    allowedTypesToggle: m.flow_run_dialog_allowed_types_toggle(),
+    maxFiles: (count: number) =>
+      countMessage(count, m.flow_run_dialog_max_files_one, m.flow_run_dialog_max_files),
+    maxFileSize: (size: string) => m.flow_run_dialog_max_file_size({ size }),
+    maxFilesReached: m.flow_run_dialog_max_files_reached(),
+    requiredBadge: m.flow_run_dialog_required_badge(),
+    selectedFiles: (count: number) =>
+      countMessage(count, m.flow_run_dialog_selected_files_one, m.flow_run_dialog_selected_files),
+    runBlockersTitle: m.flow_run_dialog_blockers_title(),
+    reviewReady: m.flow_run_dialog_review_ready(),
+    reviewSummaryTitle: m.flow_run_dialog_review_summary_title(),
+    reviewFieldsTitle: m.flow_run_dialog_review_fields_title(),
+    reviewTextTitle: m.flow_run_dialog_review_text_title(),
+    reviewFilesTitle: m.flow_run_dialog_review_files_title(),
+    runtimeReviewStep: (stepOrder: number, stepLabel: string) =>
+      m.flow_run_dialog_step_with_label({ order: String(stepOrder), label: stepLabel }),
+    closeConfirmTitle: m.flow_run_dialog_close_confirm_title(),
+    closeConfirmMessage: m.flow_run_dialog_close_confirm_message(),
+    closeConfirmDiscard: m.flow_run_dialog_close_confirm_discard(),
+    closeConfirmKeep: m.flow_run_dialog_close_confirm_keep(),
+    technicalMimeToggle: m.flow_run_dialog_technical_types_toggle()
   };
 }

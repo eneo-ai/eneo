@@ -360,9 +360,51 @@ describe("FlowEditor step mutation commands", () => {
         input_source: "flow_input",
         input_type: "text",
         output_type: "docx",
-        output_mode: "pass_through"
+        output_mode: "render_verbatim"
       });
     } finally {
+      editor.destroy();
+    }
+  });
+
+  it("addStep saves the template's starter instruction for an AI step", async () => {
+    const assistantUpdate = vi.fn(async () => ({ id: "assistant-new" }));
+    const editor = createFlowEditor({
+      flow: makeFlow(null, { steps: [] }),
+      eneo: makeEneo({
+        assistantCreate: vi.fn(async () => ({ id: "assistant-new" })),
+        assistantUpdate,
+        flowUpdate: echoUpdate()
+      })
+    });
+    try {
+      vi.useFakeTimers();
+      await editor.addStep({ name: "Sammanfatta", output_type: "text", prompt: "Sammanfatta." });
+      await vi.advanceTimersByTimeAsync(2000);
+      expect(assistantUpdate).toHaveBeenCalled();
+    } finally {
+      vi.useRealTimers();
+      editor.destroy();
+    }
+  });
+
+  it("addStep saves no starter instruction for a step that uses no AI model", async () => {
+    const assistantUpdate = vi.fn(async () => ({ id: "assistant-new" }));
+    const editor = createFlowEditor({
+      flow: makeFlow(null, { steps: [] }),
+      eneo: makeEneo({
+        assistantCreate: vi.fn(async () => ({ id: "assistant-new" })),
+        assistantUpdate,
+        flowUpdate: echoUpdate()
+      })
+    });
+    try {
+      vi.useFakeTimers();
+      await editor.addStep({ name: "Doc", output_type: "pdf", prompt: "Skriv ett dokument." });
+      await vi.advanceTimersByTimeAsync(2000);
+      expect(assistantUpdate).not.toHaveBeenCalled();
+    } finally {
+      vi.useRealTimers();
       editor.destroy();
     }
   });

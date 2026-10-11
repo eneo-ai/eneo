@@ -43,6 +43,8 @@ describe("aiBuilderErrorText", () => {
       { max_chars: 4000, actual_chars: 4100 },
       m.ai_builder_error_message_too_long({ max: "4000" })
     ],
+    ["bad_request", { reason: "plan_outdated" }, m.ai_builder_error_plan_outdated()],
+    ["bad_request", { reason: "plan_mcp_unsupported" }, m.ai_builder_error_plan_mcp_unsupported()],
     [
       "planner_upstream_error",
       { provider_exception_class: "rate_limit" },

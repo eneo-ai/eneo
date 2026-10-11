@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { countMessage } from "$lib/features/flows/flowCount";
   import type { FlowStep } from "@eneo/eneo-js";
   import { Button } from "$lib/components/ui/button/index.js";
   import { m } from "$lib/paraglide/messages";
@@ -107,7 +108,7 @@
     >
       <AlertCircle class="size-4 shrink-0" aria-hidden="true" />
       <span class="text-[13px] font-medium tracking-[-0.005em]">
-        {m.flow_check_result_issues({ count: String(issueCount) })}
+        {countMessage(issueCount, m.flow_check_result_issues_one, m.flow_check_result_issues)}
       </span>
       {#if onShowIssues}
         <Button variant="ghost" size="sm" class="ml-auto h-7" onclick={onShowIssues}>

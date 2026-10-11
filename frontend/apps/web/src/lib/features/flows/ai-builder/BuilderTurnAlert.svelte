@@ -204,7 +204,7 @@
               aria-describedby="ai-builder-turn-recovery-description"
               onclick={handleTurnRefresh}
             >
-              {m.refresh()}
+              {m.ai_builder_failure_action_refresh()}
             </Button>
           {/if}
           {#if presentation?.technical}

@@ -4,8 +4,10 @@ import { describe, expect, test, vi } from "vitest";
 import { createResourceEditor } from "./ResourceEditor";
 
 const toastError = vi.hoisted(() => vi.fn());
+const toast = vi.hoisted(() => ({ error: vi.fn() }));
 
 vi.mock("$lib/core/errors", () => ({ toastError }));
+vi.mock("$lib/components/toast", () => ({ toast }));
 
 type TestResource = {
   id: string;
@@ -13,6 +15,30 @@ type TestResource = {
 };
 
 describe("createResourceEditor save result", () => {
+  test("lets a feature word its own save failure instead of the shared toast", async () => {
+    toastError.mockClear();
+    const saveError = new Error("Persistence failed");
+    const editor = createResourceEditor({
+      resource: { id: "resource-1", name: "Original name" },
+      defaults: {},
+      editableFields: { name: true },
+      updateResource: vi.fn().mockRejectedValue(saveError),
+      saveErrorMessage: (error) => `Feature sentence for: ${(error as Error).message}`,
+      manageAttachements: false,
+      eneo: { files: { delete: vi.fn() } } as unknown as Eneo
+    });
+
+    editor.state.update.update((resource) => ({ ...resource, name: "Edited name" }));
+    await expect(editor.saveChanges()).resolves.toEqual({
+      saved: false,
+      error: saveError,
+      handled: false
+    });
+
+    expect(toast.error).toHaveBeenCalledWith("Feature sentence for: Persistence failed");
+    expect(toastError).not.toHaveBeenCalled();
+  });
+
   test("keeps a failed draft retryable and returns true only after persistence succeeds", async () => {
     const saveError = new Error("Persistence failed");
     const updateResource = vi

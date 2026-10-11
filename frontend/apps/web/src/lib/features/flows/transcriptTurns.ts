@@ -10,6 +10,7 @@
  * Everything here is pure and derived; nothing mutates segments or overlays.
  */
 
+import { countMessage } from "$lib/features/flows/flowCount";
 import { m } from "$lib/paraglide/messages";
 import type { CorrectionOccurrence } from "$lib/features/flows/transcriptCorrections";
 import {
@@ -158,7 +159,11 @@ export function computeTurns(
                     ? m.flow_transcript_review_detection_unavailable()
                     : "",
                   segment.overlapIds?.length
-                    ? m.flow_transcript_review_overlap_count({ count: segment.overlapIds.length })
+                    ? countMessage(
+                        segment.overlapIds.length,
+                        m.flow_transcript_review_overlap_count_one,
+                        m.flow_transcript_review_overlap_count
+                      )
                     : "",
                   run.overridden
                     ? run.decision === "unresolved"

@@ -108,12 +108,12 @@ export function getSelectableSecurityClassifications(
 
 export function getInputSourceOptionLabel(value: string, legacyInvalid: boolean): string {
   const label = getInputSourceLabel(value);
-  return legacyInvalid ? `${label} (${m.flow_step_legacy_invalid_option()})` : label;
+  return legacyInvalid ? m.flow_step_option_invalid({ label }) : label;
 }
 
 export function getInputTypeOptionLabel(value: string, legacyInvalid: boolean): string {
   const label = getInputTypeLabel(value);
-  return legacyInvalid ? `${label} (${m.flow_step_legacy_invalid_option()})` : label;
+  return legacyInvalid ? m.flow_step_option_invalid({ label }) : label;
 }
 
 // ---------------------------------------------------------------------------
@@ -215,7 +215,12 @@ export const MIME_PRESETS_DOCUMENT: MimePreset[] = [
     label: "PowerPoint (.pptx)"
   },
   { mime: "text/csv", label: "CSV" },
-  { mime: "text/plain", label: "Text" },
+  {
+    mime: "text/plain",
+    get label() {
+      return m.flow_file_type_plain_text();
+    }
+  },
   { mime: "text/markdown", label: "Markdown" }
 ];
 
@@ -225,7 +230,12 @@ export const MIME_PRESETS_AUDIO: MimePreset[] = [
   { mime: "audio/ogg", label: "OGG" },
   { mime: "audio/x-m4a", label: "M4A" },
   { mime: "audio/webm", label: "WebM" },
-  { mime: "audio/mp4", label: "MP4 (ljud)" }
+  {
+    mime: "audio/mp4",
+    get label() {
+      return m.flow_file_type_mp4_audio();
+    }
+  }
 ];
 
 export function getMimePresetsForFormat(format: string): MimePreset[] {
@@ -377,11 +387,7 @@ export function getIssueMessage(
       return m.flow_step_issue_all_previous_steps_json();
     case "typed_io_incompatible_type_chain":
       return previousStep
-        ? m.flow_typed_io_chain_incompatible({
-            outputType: previousStep.output_type,
-            inputType: activeStep.input_type,
-            prevStep: String(previousStep.step_order)
-          })
+        ? m.flow_typed_io_chain_incompatible({ prevStep: String(previousStep.step_order) })
         : m.flow_step_issue_missing_previous_step();
     case "typed_io_unsupported_type":
       return activeStep.input_type === "image" ? m.flow_typed_io_image_not_supported() : null;

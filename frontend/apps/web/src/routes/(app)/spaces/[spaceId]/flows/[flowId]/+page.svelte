@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { countMessage } from "$lib/features/flows/flowCount";
   import { prefersReducedMotion } from "$lib/core/prefersReducedMotion";
   import { Page } from "$lib/components/layout";
   import { browser } from "$app/environment";
@@ -274,12 +275,18 @@
   const stepJsonValidationSummary = $derived(
     stepJsonValidationFields.map((field) => STEP_JSON_FIELD_LABELS[field]?.() ?? field).join(", ")
   );
-  const canPublish = $derived(
-    !$isPublished &&
-      $saveStatus === "saved" &&
-      $validationErrors.size === 0 &&
-      !hasStepJsonValidationErrors
-  );
+  // Why Publish is unavailable, most basic reason first. The server refuses a flow
+  // without steps too, so the button must not offer it.
+  const publishBlockedReason = $derived.by(() => {
+    if ($isPublished) return null;
+    if (($update.steps?.length ?? 0) === 0) return m.flow_publish_blocked_no_steps();
+    if ($validationErrors.size > 0 || hasStepJsonValidationErrors) {
+      return m.flow_publish_blocked_errors();
+    }
+    if ($saveStatus !== "saved") return m.flow_publish_blocked_unsaved();
+    return null;
+  });
+  const canPublish = $derived(!$isPublished && publishBlockedReason === null);
 
   // Unsaved work (including a recorded instruction draft) holds navigation:
   // anything that unloads the document is refused while work is unsaved (a
@@ -497,12 +504,7 @@
   const checklistEntries = $derived([
     { key: "name", label: m.flow_checklist_name(), done: checklistHasName },
     { key: "steps", label: m.flow_checklist_steps(), done: checklistHasSteps },
-    {
-      key: "instructions",
-      label: m.flow_checklist_instructions(),
-      done: checklistHasSteps
-    },
-    { key: "valid", label: m.flow_checklist_valid(), done: checklistHasNoErrors }
+    { key: "valid", label: m.flow_check_no_known_issues(), done: checklistHasNoErrors }
   ]);
 
   // Auto-select first step when entering stage 4 with no selection
@@ -573,7 +575,10 @@
         {/if}
       </div>
       <div class="hidden lg:contents">
-        {#if activeTab === "builder"}
+        <!-- The mode also decides what the run history shows (step input, attempts,
+             the run ID), so it is offered wherever it has an effect. The AI
+             Builder discloses per card and has no mode. -->
+        {#if activeTab === "builder" || activeTab === "history"}
           <FlowUserModeToggle />
         {/if}
       </div>
@@ -638,8 +643,8 @@
         <Button
           variant={builderStage === 5 ? "default" : "outline"}
           disabled={!canPublish || publishLoading}
-          aria-describedby={!canPublish ? "flow-publish-disabled-reason" : undefined}
-          title={!canPublish ? m.flow_publish_not_ready_tooltip() : undefined}
+          aria-describedby={publishBlockedReason ? "flow-publish-disabled-reason" : undefined}
+          title={publishBlockedReason ?? undefined}
           onclick={async () => {
             publishLoading = true;
             try {
@@ -668,9 +673,9 @@
             {m.flow_publish()}
           {/if}
         </Button>
-        {#if !canPublish}
+        {#if publishBlockedReason}
           <span id="flow-publish-disabled-reason" class="sr-only">
-            {m.flow_publish_disabled_reason()}
+            {publishBlockedReason}
           </span>
         {/if}
       {/if}
@@ -756,7 +761,7 @@
                     aria-hidden="true"
                     class="absolute top-[1.125rem] left-[calc(50%+1rem)] h-0.5 w-[calc(100%-2rem)] motion-safe:transition-colors motion-safe:duration-(--duration-quick) {isCompleted
                       ? 'bg-accent-default'
-                      : 'bg-border-default'}"
+                      : 'bg-border'}"
                   ></span>
                 {/if}
                 <button
@@ -915,7 +920,8 @@
                           <span class="text-secondary">{m.flow_summary_validation()}</span>
                           {#if checklistHasNoErrors}
                             <span class="text-positive-stronger inline-flex items-center gap-1.5">
-                              <CheckCircle2 class="size-4" />
+                              <CheckCircle2 class="size-4" aria-hidden="true" />
+                              {m.flow_check_no_known_issues()}
                             </span>
                           {:else}
                             <span class="text-warning-stronger font-medium">
@@ -1285,7 +1291,11 @@
                     {m.flow_review_pipeline_title()}
                   </h3>
                   <span class="text-secondary text-xs tabular-nums">
-                    {m.flow_review_step_count({ count: String(($update.steps ?? []).length) })}
+                    {countMessage(
+                      ($update.steps ?? []).length,
+                      m.flow_step_count_one,
+                      m.flow_step_count
+                    )}
                   </span>
                 </div>
                 <ol class="mt-3 gap-x-8 sm:columns-2 2xl:columns-3">

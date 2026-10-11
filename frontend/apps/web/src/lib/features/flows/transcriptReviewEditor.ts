@@ -1,4 +1,5 @@
 /** Transcript-first editing uses UTF-16 locally; the controller converts wire anchors. */
+import { m } from "$lib/paraglide/messages";
 import { diffLineEdit, type CorrectionOccurrence } from "./transcriptCorrections";
 import {
   applySpeakerEditOverlay,
@@ -216,7 +217,7 @@ export function replaceReviewText(
   ranges: DisplayRange[],
   text: string
 ) {
-  if (!ranges.length) throw new Error("Placera markören i transkripttexten.");
+  if (!ranges.length) throw new Error(m.flow_transcript_editor_place_caret());
   let next = { ...draft, occurrences: [...draft.occurrences] };
   const first = shown[ranges[0].index];
   const caret = {
@@ -226,7 +227,7 @@ export function replaceReviewText(
   for (const [i, range] of ranges.entries()) {
     const f = shown[range.index];
     if (!f || range.start < 0 || range.end < range.start || range.end > f.text.length)
-      throw new Error("Markeringen behöver göras om.");
+      throw new Error(m.flow_transcript_editor_selection_redo());
     const replacement =
       f.text.slice(0, range.start) + (i === 0 ? text : "") + f.text.slice(range.end);
     const occurrence = diffLineEdit(

@@ -124,7 +124,7 @@ describe("FlowRunEvidence", () => {
         })
       )
     ).toBeTruthy();
-    expect(screen.getByText(/bland annat 3\./)).toBeTruthy();
+    expect(screen.getByText(/bland annat steg nummer 3\./)).toBeTruthy();
   });
 
   it("renders exact attempt-derived counts without a lower-bound marker", async () => {

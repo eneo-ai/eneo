@@ -164,7 +164,7 @@
           : "text-muted text-xs leading-relaxed"}
       >
         {countSelectedMissing
-          ? m.flow_step_speaker_mapping_missing_field_help()
+          ? m.flow_step_speaker_mapping_speaker_count_missing_field_help()
           : countOptions.length === 0
             ? m.flow_step_speaker_mapping_no_number_fields()
             : m.flow_step_speaker_mapping_speaker_count_help()}

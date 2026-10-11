@@ -1,3 +1,4 @@
+import { countMessage } from "$lib/features/flows/flowCount";
 import type { FlowSparse } from "@eneo/eneo-js";
 import { m } from "$lib/paraglide/messages";
 import type { RecoverableAIBuilderDraftSession } from "$lib/features/flows/ai-builder/protocol";
@@ -38,10 +39,7 @@ function describeFlow(flow: FlowSparse): string | null {
   const stepCount = flow.step_count;
   if (stepCount === 0) return flow.description?.trim() || null;
 
-  const steps =
-    stepCount === 1
-      ? m.flow_list_row_steps_one()
-      : m.flow_list_row_steps({ count: String(stepCount) });
+  const steps = countMessage(stepCount, m.flow_step_count_one, m.flow_step_count);
   const input = flow.input_type ? FLOW_INPUT_LABELS[flow.input_type]() : null;
   const output = flow.output_type ? FLOW_OUTPUT_LABELS[flow.output_type]() : null;
   const shape =

@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { countMessage } from "$lib/features/flows/flowCount";
   import type { FlowRunError, FlowRunResultFile, FlowRunStep, FlowStep, Eneo } from "@eneo/eneo-js";
   import { IconChevronDown } from "@eneo/icons/chevron-down";
   import { IconCopy } from "@eneo/icons/copy";
@@ -22,6 +23,7 @@
   import TranscriptPlayer, { type SignedAudio } from "./TranscriptPlayer.svelte";
   import * as Alert from "$lib/components/ui/alert/index.js";
   import {
+    diarizationSpeakerNumber,
     isPureTranscript,
     parseTranscript,
     type TranscriptFileReview,
@@ -247,6 +249,11 @@
     if (ownsStoredSegments) return transcriptContext.segments ?? parsed;
     return isPureTranscript(outputText) ? parsed : null;
   });
+  /** A raw diarization label reads as "Talare 1"; a name is shown as it is. */
+  function speakerRowLabel(label: string): string {
+    const number = diarizationSpeakerNumber(label);
+    return number === null ? label : m.flow_transcript_editor_speaker({ number });
+  }
   function confidenceText(confidence: SpeakerConfidence): string {
     if (confidence === "high") return m.flow_run_review_speakers_confidence_high();
     if (confidence === "medium") return m.flow_run_review_speakers_confidence_medium();
@@ -352,7 +359,7 @@
                 <ul class="divide-default mt-1.5 divide-y rounded-lg border p-0">
                   {#each speakerMapping as row (row.label)}
                     <li class="flex flex-wrap items-baseline gap-x-2.5 gap-y-1 px-3 py-2">
-                      <span class="text-secondary font-mono text-xs">{row.label}</span>
+                      <span class="text-secondary text-xs">{speakerRowLabel(row.label)}</span>
                       <span class="text-sm font-medium" class:text-secondary={row.name === null}>
                         {row.name ?? m.flow_run_transcript_unknown_speaker()}
                       </span>
@@ -422,9 +429,11 @@
               {#if correctionsController && correctionsController.staleCount > 0}
                 <Alert.Root class="mt-1">
                   <Alert.Description class="text-xs">
-                    {m.flow_run_transcript_corrections_stale({
-                      count: String(correctionsController.staleCount)
-                    })}
+                    {countMessage(
+                      correctionsController.staleCount,
+                      m.flow_run_transcript_corrections_stale_one,
+                      m.flow_run_transcript_corrections_stale
+                    )}
                   </Alert.Description>
                 </Alert.Root>
               {/if}
@@ -550,7 +559,7 @@
           </div>
         {/if}
         {#if showKnowledgeTrace}
-          <FlowRunKnowledgeTrace rag={stepRag} stepOrder={result.step_order} {eneo} />
+          <FlowRunKnowledgeTrace rag={stepRag} stepOrder={result.step_order} {eneo} {isPowerUser} />
         {/if}
 
         {#if result.effective_prompt}

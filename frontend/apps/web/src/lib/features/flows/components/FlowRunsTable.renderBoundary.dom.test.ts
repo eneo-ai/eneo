@@ -89,5 +89,7 @@ describe("FlowRunsTable render boundary", () => {
     );
     // Revealing already-loaded rows is render paging, not a backend fetch.
     expect(calls).toHaveLength(requestsBefore);
-  });
+    // 150 full rows in jsdom take longer than the default five seconds when the
+    // whole suite runs at once.
+  }, 20_000);
 });

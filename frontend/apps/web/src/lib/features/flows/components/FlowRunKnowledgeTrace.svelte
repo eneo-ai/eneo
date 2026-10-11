@@ -3,6 +3,7 @@
   import * as Collapsible from "$lib/components/ui/collapsible/index.js";
   import { IconChevronRight } from "@eneo/icons/chevron-right";
   import { m } from "$lib/paraglide/messages";
+  import { getLocale } from "$lib/paraglide/runtime";
   import { Button } from "$lib/components/ui/button/index.js";
   import * as Dialog from "$lib/components/ui/dialog/index.js";
   import { Input } from "$lib/components/ui/input/index.js";
@@ -21,11 +22,14 @@
   let {
     rag = null,
     eneo,
-    stepOrder
+    stepOrder,
+    isPowerUser = false
   }: {
     rag?: FlowRunDebugRag | null | undefined;
     eneo: Eneo;
     stepOrder: number;
+    /** Advanced mode: also show the response time and the raw error type. */
+    isPowerUser?: boolean;
   } = $props();
 
   let expanded = $state(false);
@@ -135,7 +139,11 @@
     if (value === null || value === undefined) {
       return "\u2014";
     }
-    return `${value}ms`;
+    return new Intl.NumberFormat(getLocale(), {
+      style: "unit",
+      unit: "millisecond",
+      unitDisplay: "short"
+    }).format(value);
   }
 </script>
 
@@ -163,12 +171,14 @@
             <span>{m.flow_run_knowledge_sources_label()}: {sourceTotal}</span>
             <span aria-hidden="true">&middot;</span>
             <span>{m.flow_run_knowledge_chunks_label()}: {rag.chunks_retrieved ?? 0}</span>
-            <span aria-hidden="true">&middot;</span>
-            <span
-              >{m.flow_run_knowledge_latency_label()}: {formatLatency(
-                rag.retrieval_duration_ms
-              )}</span
-            >
+            {#if isPowerUser}
+              <span aria-hidden="true">&middot;</span>
+              <span
+                >{m.flow_run_knowledge_latency_label()}: {formatLatency(
+                  rag.retrieval_duration_ms
+                )}</span
+              >
+            {/if}
           </div>
         </div>
         <IconChevronRight
@@ -183,7 +193,7 @@
           id={`flow-knowledge-trace-${stepOrder}`}
           class="border-default flex flex-col gap-3 border-t px-4 py-3"
         >
-          {#if rag.retrieval_error_type}
+          {#if isPowerUser && rag.retrieval_error_type}
             <p class="text-muted text-xs">
               {m.flow_run_knowledge_error_type()}:
               <span class="font-mono">{rag.retrieval_error_type}</span>

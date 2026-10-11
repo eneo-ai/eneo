@@ -17,7 +17,7 @@
   import FlowRunStatusBadge from "./FlowRunStatusBadge.svelte";
   import { getLocale } from "$lib/paraglide/runtime";
   import { toast } from "$lib/components/toast";
-  import { getFlowRunStatusLabel } from "./flowRunStatusLabel";
+  import { flowRunStatusTranslations, getFlowRunStatusLabel } from "./flowRunStatusLabel";
   import { getRedispatchToastKind } from "./flowRunRedispatchFeedback";
   import { m } from "$lib/paraglide/messages";
   import { formatFlowRunDuration, type FlowRunProgressSnapshot } from "./flowRunProgress";
@@ -128,17 +128,8 @@
 
   const statusCounts = $derived(createFlowRunStatusCounts(displayRuns));
 
-  const statusTranslations = {
-    completed: m.flow_run_status_completed,
-    failed: m.flow_run_status_failed,
-    queued: m.flow_run_status_queued,
-    running: m.flow_run_status_running,
-    awaiting_review: m.flow_run_status_awaiting_review,
-    cancelled: m.flow_run_status_cancelled
-  };
-
   function getRunStatusLabel(status: string): string {
-    return getFlowRunStatusLabel(status, statusTranslations);
+    return getFlowRunStatusLabel(status, flowRunStatusTranslations);
   }
 
   function getRunVersionLabel(run: FlowRunSummary): string {
@@ -414,10 +405,8 @@
   {:else if history.loadError}
     <Alert.Root variant="destructive">
       <Alert.Title>{m.flow_history_load_failed_title()}</Alert.Title>
-      <Alert.Description>
-        <span>{m.flow_history_load_failed_desc()}</span>
-        <span class="mt-1 block text-xs break-words opacity-80">{history.loadError}</span>
-      </Alert.Description>
+      <!-- loadError is already the sentence to show: the specific one, or the general one. -->
+      <Alert.Description>{history.loadError}</Alert.Description>
       <Alert.Action>
         <Button variant="outline" size="sm" onclick={() => void loadRuns()}>
           {m.flow_retry()}
@@ -470,9 +459,11 @@
           <p id={searchScopeHintId} class="text-muted mt-1 text-xs leading-relaxed">
             {windowFull
               ? m.flow_history_search_scope_hint_window_full({
-                  count: String(history.runs.length)
+                  count: history.runs.length.toLocaleString(getLocale())
                 })
-              : m.flow_history_search_scope_hint({ count: String(history.runs.length) })}
+              : m.flow_history_search_scope_hint({
+                  count: history.runs.length.toLocaleString(getLocale())
+                })}
           </p>
         {/if}
       </div>
@@ -515,7 +506,11 @@
         role="status"
       >
         <p class="text-secondary text-sm">
-          {searchQuery ? m.flow_history_no_search_matches() : m.flow_no_runs_yet()}
+          {searchQuery && statusFilter
+            ? m.flow_history_no_search_status_matches()
+            : searchQuery
+              ? m.flow_history_no_search_matches()
+              : m.flow_history_no_status_matches()}
         </p>
         <div class="flex flex-wrap items-center gap-2">
           <Button
@@ -526,7 +521,7 @@
               searchQuery = "";
             }}
           >
-            {m.clear()}
+            {m.flow_history_show_all()}
           </Button>
           {#if canLoadMore}
             <Button
@@ -747,7 +742,9 @@
                         disabled={cancellingRunId === run.id}
                         onclick={() => requestCancelRun(run.id)}
                       >
-                        {cancellingRunId === run.id ? m.flow_run_cancelling() : m.cancel()}
+                        {cancellingRunId === run.id
+                          ? m.flow_run_cancelling()
+                          : m.flow_run_cancel_action()}
                       </Button>
                     {/if}
                   </div>
@@ -853,7 +850,9 @@
                   disabled={cancellingRunId === run.id}
                   onclick={() => requestCancelRun(run.id)}
                 >
-                  {cancellingRunId === run.id ? m.flow_run_cancelling() : m.cancel()}
+                  {cancellingRunId === run.id
+                    ? m.flow_run_cancelling()
+                    : m.flow_run_cancel_action()}
                 </Button>
               </div>
             {/if}
@@ -873,13 +872,15 @@
         <span role="status">
           {#if hasHiddenMatches}
             {m.flow_history_showing_count_of({
-              shown: String(renderedRuns.length),
-              count: String(visibleRuns.length)
+              shown: renderedRuns.length.toLocaleString(getLocale()),
+              count: visibleRuns.length.toLocaleString(getLocale())
             })}
           {:else}
             {visibleRuns.length === 1
               ? m.flow_history_showing_count_one()
-              : m.flow_history_showing_count({ count: String(visibleRuns.length) })}
+              : m.flow_history_showing_count({
+                  count: visibleRuns.length.toLocaleString(getLocale())
+                })}
           {/if}
         </span>
         <span class="flex items-center gap-2">

@@ -675,7 +675,7 @@
             class="text-secondary shrink-0"
             onclick={clearEditContext}
           >
-            {m.ai_builder_edit_context_clear_short()}
+            {m.ai_builder_change_request_clear_scope()}
           </Button>
         {/if}
       </div>
@@ -795,7 +795,9 @@
         </p>
       {:else}
         <p class="composer-hint">
-          {draftRestored ? m.ai_builder_draft_persistence_note() : m.ai_builder_refine_hint()}
+          {draftRestored
+            ? m.ai_builder_draft_persistence_note()
+            : m.ai_builder_change_request_hint()}
         </p>
         <span class="composer-counter">
           {numberFormatter.format(charCount)} / {numberFormatter.format(messageCharLimit)}

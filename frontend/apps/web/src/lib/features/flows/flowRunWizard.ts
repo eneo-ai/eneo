@@ -1,3 +1,6 @@
+import { m } from "$lib/paraglide/messages";
+import { countMessage } from "./flowCount";
+
 export type FlowLocale = "sv" | "en";
 
 type WizardStepInput = {
@@ -76,27 +79,24 @@ export type FlowRunReviewSummaryItem = {
 };
 
 export function buildFlowRunWizardPages({
-  locale,
   hasTemplateOverview,
   hasFormFields,
   hasFreeformTextInput,
   stepsRequiringInput
 }: {
-  locale: FlowLocale;
   hasTemplateOverview: boolean;
   hasFormFields: boolean;
   hasFreeformTextInput: boolean;
   stepsRequiringInput: WizardStepInput[];
 }): FlowRunWizardPage[] {
-  const copy = RUN_WIZARD_COPY[locale];
   const pages: FlowRunWizardPage[] = [];
 
   if (hasTemplateOverview) {
     pages.push({
       id: "overview",
       kind: "overview",
-      title: copy.overviewTitle,
-      description: copy.overviewDescription,
+      title: m.flow_run_wizard_overview_title(),
+      description: m.flow_run_wizard_overview_description(),
       stepOrder: null
     });
   }
@@ -105,16 +105,16 @@ export function buildFlowRunWizardPages({
     pages.push({
       id: "form",
       kind: "form",
-      title: copy.formTitle,
-      description: copy.formDescription,
+      title: m.flow_run_wizard_form_title(),
+      description: m.flow_run_wizard_form_description(),
       stepOrder: null
     });
   } else if (hasFreeformTextInput) {
     pages.push({
       id: "freeform",
       kind: "freeform",
-      title: copy.freeformTitle,
-      description: copy.freeformDescription,
+      title: m.flow_run_wizard_freeform_title(),
+      description: m.flow_run_wizard_freeform_description(),
       stepOrder: null
     });
   }
@@ -123,8 +123,8 @@ export function buildFlowRunWizardPages({
     pages.push({
       id: runtimeStepPageId(step.step_id),
       kind: "runtime-step",
-      title: copy.runtimeStepTitle(step.step_order),
-      description: copy.runtimeStepDescription(step.step_order),
+      title: m.flow_run_wizard_runtime_step_title({ order: String(step.step_order) }),
+      description: m.flow_run_wizard_runtime_step_description({ order: String(step.step_order) }),
       stepId: step.step_id,
       stepOrder: step.step_order,
       stepLabel: getStepLabel(step)
@@ -134,8 +134,8 @@ export function buildFlowRunWizardPages({
   pages.push({
     id: "review",
     kind: "review",
-    title: copy.reviewTitle,
-    description: copy.reviewDescription,
+    title: m.flow_run_wizard_review_title(),
+    description: m.flow_run_wizard_review_description(),
     stepOrder: null
   });
 
@@ -143,7 +143,6 @@ export function buildFlowRunWizardPages({
 }
 
 export function buildFlowRunBlockers({
-  locale,
   missingRequiredFieldNames,
   stepsRequiringInput,
   runtimeFilesByStepId,
@@ -152,7 +151,6 @@ export function buildFlowRunBlockers({
   uploadingStepIds,
   recordingStepIds
 }: {
-  locale: FlowLocale;
   missingRequiredFieldNames: string[];
   stepsRequiringInput: WizardStepInput[];
   runtimeFilesByStepId: Record<string, { id: string }[]>;
@@ -161,7 +159,6 @@ export function buildFlowRunBlockers({
   uploadingStepIds: string[];
   recordingStepIds?: string[];
 }): FlowRunBlocker[] {
-  const copy = RUN_WIZARD_COPY[locale];
   const blockers: FlowRunBlocker[] = [];
 
   for (const fieldName of missingRequiredFieldNames) {
@@ -169,8 +166,8 @@ export function buildFlowRunBlockers({
       id: `form:${fieldName}`,
       kind: "missing-form-field",
       pageId: "form",
-      title: copy.missingFormField(fieldName),
-      actionLabel: copy.goToForm,
+      title: m.flow_run_wizard_missing_form_field({ name: fieldName }),
+      actionLabel: m.flow_run_wizard_go_to_form(),
       blocksProgress: true
     });
   }
@@ -182,8 +179,8 @@ export function buildFlowRunBlockers({
         id: runtimeStepPageId(step.step_id),
         kind: "missing-runtime-input",
         pageId: runtimeStepPageId(step.step_id),
-        title: copy.missingRuntimeInput(step.step_order, getStepLabel(step)),
-        actionLabel: copy.goToStep(step.step_order),
+        title: m.flow_run_wizard_missing_runtime_input(stepWords(step)),
+        actionLabel: m.flow_run_wizard_go_to_step({ order: String(step.step_order) }),
         blocksProgress: true
       });
     }
@@ -196,8 +193,8 @@ export function buildFlowRunBlockers({
       id: `uploading:${stepId}`,
       kind: "upload-in-progress",
       pageId: runtimeStepPageId(stepId),
-      title: copy.uploadInProgress(step.step_order, getStepLabel(step)),
-      actionLabel: copy.goToStep(step.step_order),
+      title: m.flow_run_wizard_upload_in_progress(stepWords(step)),
+      actionLabel: m.flow_run_wizard_go_to_step({ order: String(step.step_order) }),
       blocksProgress: false
     });
   }
@@ -209,8 +206,8 @@ export function buildFlowRunBlockers({
       id: `recording:${stepId}`,
       kind: "recording-in-progress",
       pageId: runtimeStepPageId(stepId),
-      title: copy.recordingInProgress(step.step_order, getStepLabel(step)),
-      actionLabel: copy.goToStep(step.step_order),
+      title: m.flow_run_wizard_recording_in_progress(stepWords(step)),
+      actionLabel: m.flow_run_wizard_go_to_step({ order: String(step.step_order) }),
       blocksProgress: true
     });
   }
@@ -222,8 +219,8 @@ export function buildFlowRunBlockers({
       id: `local-recording:${stepId}`,
       kind: "local-recording-pending",
       pageId: runtimeStepPageId(stepId),
-      title: copy.localRecordingPending(step.step_order, getStepLabel(step)),
-      actionLabel: copy.goToStep(step.step_order),
+      title: m.flow_run_wizard_local_recording_pending(stepWords(step)),
+      actionLabel: m.flow_run_wizard_go_to_step({ order: String(step.step_order) }),
       blocksProgress: true
     });
   }
@@ -236,8 +233,10 @@ export function buildFlowRunBlockers({
       id: `template:${item.step_id}`,
       kind: "template-readiness",
       pageId: "overview",
-      title: copy.templateNotReady(item.template_name ?? item.step_id),
-      actionLabel: copy.goToOverview,
+      title: item.template_name
+        ? m.flow_run_wizard_template_not_ready({ name: item.template_name })
+        : m.flow_run_wizard_template_not_ready_unnamed(),
+      actionLabel: m.flow_run_wizard_go_to_overview(),
       blocksProgress: false
     });
   }
@@ -250,43 +249,56 @@ export function runtimeStepPageId(stepId: string): `runtime-step:${string}` {
 }
 
 export function buildFlowRunReviewSummary({
-  locale,
   templateCount,
   filledFieldCount,
   runtimeStepCountWithFiles,
   uploadedFileCount
 }: {
-  locale: FlowLocale;
   templateCount: number;
   filledFieldCount: number;
   runtimeStepCountWithFiles: number;
   uploadedFileCount: number;
 }): FlowRunReviewSummaryItem[] {
-  const copy = RUN_WIZARD_COPY[locale];
   const items: FlowRunReviewSummaryItem[] = [];
 
   if (templateCount > 0) {
     items.push({
       id: "templates",
-      label: copy.reviewTemplateSummary(templateCount)
+      label: countMessage(
+        templateCount,
+        m.flow_run_wizard_summary_templates_one,
+        m.flow_run_wizard_summary_templates
+      )
     });
   }
   if (filledFieldCount > 0) {
     items.push({
       id: "fields",
-      label: copy.reviewFieldSummary(filledFieldCount)
+      label: countMessage(
+        filledFieldCount,
+        m.flow_run_wizard_summary_fields_one,
+        m.flow_run_wizard_summary_fields
+      )
     });
   }
   if (runtimeStepCountWithFiles > 0) {
     items.push({
       id: "steps",
-      label: copy.reviewStepSummary(runtimeStepCountWithFiles)
+      label: countMessage(
+        runtimeStepCountWithFiles,
+        m.flow_run_wizard_summary_steps_one,
+        m.flow_run_wizard_summary_steps
+      )
     });
   }
   if (uploadedFileCount > 0) {
     items.push({
       id: "files",
-      label: copy.reviewFileSummary(uploadedFileCount)
+      label: countMessage(
+        uploadedFileCount,
+        m.flow_run_wizard_summary_files_one,
+        m.flow_run_wizard_summary_files
+      )
     });
   }
 
@@ -294,71 +306,9 @@ export function buildFlowRunReviewSummary({
 }
 
 function getStepLabel(step: WizardStepInput): string {
-  return step.label?.trim() || `Step ${step.step_order}`;
+  return step.label?.trim() || m.flow_step_fallback_label({ order: String(step.step_order) });
 }
 
-const RUN_WIZARD_COPY = {
-  sv: {
-    overviewTitle: "Översikt",
-    overviewDescription:
-      "Kontrollera mallstatus och vad som behöver vara klart innan du kör flödet.",
-    formTitle: "Formulär",
-    formDescription: "Fyll i de uppgifter som ska användas i flödet.",
-    freeformTitle: "Indata",
-    freeformDescription: "Skriv den text som ska skickas in när flödet körs.",
-    reviewTitle: "Granska och kör",
-    reviewDescription: "Kontrollera underlag och eventuella hinder innan du startar flödet.",
-    runtimeStepTitle: (stepOrder: number) => `Steg ${stepOrder} i flödet`,
-    runtimeStepDescription: (stepOrder: number) =>
-      `Detta underlag används bara i steg ${stepOrder}.`,
-    missingFormField: (fieldName: string) => `Fältet "${fieldName}" behöver fyllas i.`,
-    missingRuntimeInput: (stepOrder: number, stepLabel: string) =>
-      `Ladda upp filer för steg ${stepOrder}: ${stepLabel}.`,
-    uploadInProgress: (stepOrder: number, stepLabel: string) =>
-      `Filer laddas fortfarande upp för steg ${stepOrder}: ${stepLabel}.`,
-    recordingInProgress: (stepOrder: number, stepLabel: string) =>
-      `Stoppa inspelningen för steg ${stepOrder}: ${stepLabel}.`,
-    localRecordingPending: (stepOrder: number, stepLabel: string) =>
-      `Slutför uppladdningen eller kassera inspelningen för steg ${stepOrder}: ${stepLabel}.`,
-    templateNotReady: (templateName: string) =>
-      `Mallen "${templateName}" behöver åtgärdas innan flödet kan köras.`,
-    reviewTemplateSummary: (count: number) => `${count} mall${count === 1 ? "" : "ar"} klar`,
-    reviewFieldSummary: (count: number) => `${count} fält ifyllda`,
-    reviewStepSummary: (count: number) => `${count} steg med uppladdat underlag`,
-    reviewFileSummary: (count: number) => `${count} fil${count === 1 ? "" : "er"} uppladdade`,
-    goToForm: "Gå till formulär",
-    goToStep: (stepOrder: number) => `Gå till steg ${stepOrder}`,
-    goToOverview: "Gå till översikt"
-  },
-  en: {
-    overviewTitle: "Overview",
-    overviewDescription: "Check template status and what must be ready before you run the flow.",
-    formTitle: "Form",
-    formDescription: "Fill in the information that should be used in the flow.",
-    freeformTitle: "Input",
-    freeformDescription: "Write the text that should be sent when the flow runs.",
-    reviewTitle: "Review and run",
-    reviewDescription: "Review the material and any blockers before you start the flow.",
-    runtimeStepTitle: (stepOrder: number) => `Step ${stepOrder} in the flow`,
-    runtimeStepDescription: (stepOrder: number) =>
-      `This material is only used in step ${stepOrder}.`,
-    missingFormField: (fieldName: string) => `The field "${fieldName}" needs to be filled in.`,
-    missingRuntimeInput: (stepOrder: number, stepLabel: string) =>
-      `Upload files for step ${stepOrder}: ${stepLabel}.`,
-    uploadInProgress: (stepOrder: number, stepLabel: string) =>
-      `Files are still uploading for step ${stepOrder}: ${stepLabel}.`,
-    recordingInProgress: (stepOrder: number, stepLabel: string) =>
-      `Stop the recording for step ${stepOrder}: ${stepLabel}.`,
-    localRecordingPending: (stepOrder: number, stepLabel: string) =>
-      `Finish uploading or discard the recording for step ${stepOrder}: ${stepLabel}.`,
-    templateNotReady: (templateName: string) =>
-      `The template "${templateName}" needs attention before the flow can run.`,
-    reviewTemplateSummary: (count: number) => `${count} template${count === 1 ? "" : "s"} ready`,
-    reviewFieldSummary: (count: number) => `${count} fields completed`,
-    reviewStepSummary: (count: number) => `${count} steps with uploaded material`,
-    reviewFileSummary: (count: number) => `${count} file${count === 1 ? "" : "s"} uploaded`,
-    goToForm: "Go to form",
-    goToStep: (stepOrder: number) => `Go to step ${stepOrder}`,
-    goToOverview: "Go to overview"
-  }
-} satisfies Record<FlowLocale, Record<string, unknown>>;
+function stepWords(step: WizardStepInput): { order: string; label: string } {
+  return { order: String(step.step_order), label: getStepLabel(step) };
+}

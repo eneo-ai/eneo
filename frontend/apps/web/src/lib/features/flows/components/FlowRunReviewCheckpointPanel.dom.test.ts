@@ -445,7 +445,7 @@ describe("FlowRunReviewCheckpointPanel", () => {
       props: { flowId: "flow-1", runId: "run-1", eneo: eneo as unknown as Eneo }
     });
 
-    await screen.findByText(m.flow_run_review_history_editor_user({ id: "b2c3d4e5" }));
+    await screen.findByText(m.flow_run_review_history_editor_other());
     expect(screen.queryByText(m.flow_run_review_history_editor_you())).toBeNull();
   });
 
@@ -536,7 +536,7 @@ describe("FlowRunReviewCheckpointPanel", () => {
     await screen.findByText(m.flow_run_review_load_failed());
     await fireEvent.click(screen.getByRole("button", { name: m.flow_retry() }));
 
-    await screen.findByText(m.flow_run_review_state_awaiting_review());
+    await screen.findByText(m.flow_run_status_awaiting_review());
     expect(active).toHaveBeenCalledTimes(2);
   });
 
@@ -600,7 +600,7 @@ describe("FlowRunReviewCheckpointPanel", () => {
       props: { flowId: "flow-1", runId: "run-1", eneo: eneo as unknown as Eneo }
     });
 
-    await screen.findByText(m.flow_run_review_state_awaiting_review());
+    await screen.findByText(m.flow_run_status_awaiting_review());
     await fireEvent.click(
       screen.getByRole("button", { name: m.flow_transcript_editor_approve_continue() })
     );
@@ -749,7 +749,7 @@ describe("FlowRunReviewCheckpointPanel", () => {
       props: { flowId: "flow-1", runId: "run-1", eneo: eneo as unknown as Eneo, onChanged }
     });
 
-    await screen.findByText(m.flow_run_review_state_awaiting_review());
+    await screen.findByText(m.flow_run_status_awaiting_review());
     expect(screen.queryByRole("button", { name: m.flow_run_review_resume() })).toBeNull();
 
     // Approving is the decision and continuing is its consequence, so one
@@ -795,13 +795,13 @@ describe("FlowRunReviewCheckpointPanel", () => {
       props: { flowId: "flow-1", runId: "run-1", eneo: eneo as unknown as Eneo }
     });
 
-    await screen.findByText(m.flow_run_review_state_awaiting_review());
+    await screen.findByText(m.flow_run_status_awaiting_review());
     await fireEvent.click(
       screen.getByRole("button", { name: m.flow_transcript_editor_approve_continue() })
     );
 
     await screen.findByText(m.flow_run_review_approve_failed());
-    expect(screen.getByText(m.flow_run_review_state_awaiting_review())).toBeTruthy();
+    expect(screen.getByText(m.flow_run_status_awaiting_review())).toBeTruthy();
     expect(screen.queryByRole("button", { name: m.flow_run_review_resume() })).toBeNull();
     const retry = screen.getByRole("button", { name: m.flow_transcript_editor_approve_continue() });
     await waitFor(() => expect((retry as HTMLButtonElement).disabled).toBe(false));
@@ -892,7 +892,7 @@ describe("FlowRunReviewCheckpointPanel", () => {
       props: { flowId: "flow-1", runId: "run-1", eneo: eneo as unknown as Eneo }
     });
 
-    await screen.findByText(m.flow_run_review_state_awaiting_review());
+    await screen.findByText(m.flow_run_status_awaiting_review());
 
     expect(screen.queryByText(m.flow_run_review_deadline_help())).toBeNull();
   });
@@ -927,7 +927,7 @@ describe("FlowRunReviewCheckpointPanel", () => {
       props: { flowId: "flow-1", runId: "run-1", eneo: eneo as unknown as Eneo }
     });
 
-    await screen.findByText(m.flow_run_review_state_awaiting_review());
+    await screen.findByText(m.flow_run_status_awaiting_review());
     const disclosure = screen.getByText(m.flow_run_review_reject_open()).closest("details");
     expect(disclosure?.open).toBe(false);
     expect(disclosure?.contains(screen.getByLabelText(m.flow_run_review_reject_reason()))).toBe(

@@ -204,6 +204,8 @@ describe("FlowRunsTable search and pagination", () => {
 
   it("moves a step to completed on the poll, marks its unread output stale, then shows evidence", async () => {
     vi.useFakeTimers({ shouldAdvanceTime: true });
+    // Token counts, read below as proof the poll carried usage, belong to Advanced.
+    userMode.current = "power_user";
     try {
       let listCalls = 0;
       const { eneo, calls, graphCalls, stepCalls, evidenceCalls } = makeRunsListEneo(
@@ -267,6 +269,7 @@ describe("FlowRunsTable search and pagination", () => {
       await waitFor(() => expect(evidenceCalls).toHaveLength(1));
       expect(stepCalls).toHaveLength(1);
     } finally {
+      userMode.current = "user";
       vi.useRealTimers();
     }
   });

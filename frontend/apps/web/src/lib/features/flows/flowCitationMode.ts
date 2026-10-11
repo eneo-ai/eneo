@@ -1,4 +1,5 @@
 import type { FlowStep } from "@eneo/eneo-js";
+import { outputModeUsesCompletionModel } from "./flowStepTypes";
 
 export const FLOW_CITATION_MODE_OFF = "off" as const;
 export const FLOW_CITATION_MODE_INLINE_INREF_SIDECAR = "inline_inref_sidecar" as const;
@@ -22,14 +23,16 @@ export function resolveFlowCitationMode(outputConfig: OutputConfigValue): FlowCi
     : FLOW_CITATION_MODE_OFF;
 }
 
+/**
+ * Source references attach to text an AI model wrote. A step that only passes text
+ * on, transcribes or renders a document has no model answer to reference, and the
+ * server refuses the setting there (`is_citation_capable_step`).
+ */
 export function supportsFlowCitationMode(
   step: Pick<FlowStep, "output_type" | "output_mode"> | null | undefined
 ): boolean {
   return Boolean(
-    step &&
-    step.output_type === "text" &&
-    step.output_mode !== "template_fill" &&
-    step.output_mode !== "transcribe_only"
+    step && step.output_type === "text" && outputModeUsesCompletionModel(step.output_mode)
   );
 }
 

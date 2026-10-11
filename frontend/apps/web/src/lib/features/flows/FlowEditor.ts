@@ -20,7 +20,7 @@ import {
   type FlowFormField
 } from "./flowFormSchema";
 import { remapStepOrderTemplateTokens, replaceExactTemplateToken } from "./flowVariableTokens";
-import { getFlowStepValidationIssues } from "./flowStepTypes";
+import { getFlowStepValidationIssues, outputModeUsesCompletionModel } from "./flowStepTypes";
 import { buildSpeakerMappingOutputConfig } from "./speakerMappingConfig";
 import { m } from "$lib/paraglide/messages";
 import { getFlowRuntimeErrorMessage } from "$lib/features/flows/flowRuntimeErrorMapping";
@@ -122,9 +122,11 @@ function createFlowEditor(data: FlowEditorInitData) {
     eneo: data.eneo,
     resource: data.flow,
     // A server-side validation rejection surfaces in the banner instead of
-    // the raw-message toast; other failures keep the default toast. Each
-    // save's result carries whether its own failure was routed here.
+    // a toast; other failures toast the flow's own sentence for the error, so
+    // the server's text is never shown. Each save's result carries whether its
+    // own failure was routed to the banner.
     onSaveError: (error) => reportServerValidationError(error),
+    saveErrorMessage: (error) => getFlowRuntimeErrorMessage(error, m.flow_save_failed()),
     defaults: {},
     updateResource: async (resource, changes) => {
       const cleanChanges = { ...changes } as Record<string, unknown>;
@@ -735,7 +737,7 @@ function createFlowEditor(data: FlowEditorInitData) {
     const prevStep = stepCount > 0 ? currentSteps[stepCount - 1] : null;
 
     const tempId = `_temp_${temporaryIdSuffix()}`;
-    const stepName = seed?.name ?? `Nytt steg ${stepCount + 1}`;
+    const stepName = seed?.name ?? m.flow_step_default_name({ order: stepCount + 1 });
     const newStep = buildBlankStep({
       tempId,
       stepOrder: stepCount + 1,
@@ -769,7 +771,8 @@ function createFlowEditor(data: FlowEditorInitData) {
       // immediate one) so it lands in the same ~500ms window as the step's
       // auto-save, collapsing the usual two "saved" flashes into one. The save
       // manager owns error handling, so a failed seed never discards the step.
-      if (seed?.prompt) {
+      // A step that uses no AI model (the no-AI document mode) has nothing to instruct.
+      if (seed?.prompt && outputModeUsesCompletionModel(newStep.output_mode ?? "pass_through")) {
         void saveAssistant(assistant.id, { prompt: { text: seed.prompt } });
       }
     } catch {
@@ -845,7 +848,7 @@ function createFlowEditor(data: FlowEditorInitData) {
     const prevStep = currentSteps.find((s: FlowStep) => s.step_order === afterOrder);
     const isFirstInsert = afterOrder === 0;
 
-    const defaultStepName = `Nytt steg ${afterOrder + 1}`;
+    const defaultStepName = m.flow_step_default_name({ order: afterOrder + 1 });
     const newStep = buildBlankStep({
       tempId,
       stepOrder: afterOrder + 1,
@@ -1004,11 +1007,9 @@ function createFlowEditor(data: FlowEditorInitData) {
     }
 
     if (impactedDeletedReferences.size > 0) {
-      const sortedDeleted = [...impactedDeletedReferences].sort((a, b) => a - b).join(", ");
-      setFlowValidationError(
-        "deleted-step-reference",
-        `Step references to removed step order(s) ${sortedDeleted} were marked for manual repair.`
-      );
+      // The banner names each broken reference with its own repair row; the code is
+      // the whole message, like the editor's other own checks.
+      setFlowValidationError("deleted-step-reference", "deleted-step-reference");
     } else {
       setFlowValidationError("deleted-step-reference", null);
     }

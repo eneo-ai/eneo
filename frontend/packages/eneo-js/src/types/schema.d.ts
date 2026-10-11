@@ -11334,6 +11334,34 @@ export interface paths {
 export type webhooks = Record<string, never>;
 export interface components {
   schemas: {
+    /**
+     * AIBuilderAttachmentWarning
+     * @description Why attached reference material does not reach the AI Builder.
+     *
+     *     A code and the facts, never a sentence: the client says it in the reader's
+     *     language. `attachments_unavailable` means files attached earlier can no
+     *     longer be read by this session (their names are gone with them);
+     *     `attachments_unreadable` names files that hold no extracted text or
+     *     transcription to plan from.
+     */
+    AIBuilderAttachmentWarning: {
+      /**
+       * Code
+       * @enum {string}
+       */
+      code: "attachments_unavailable" | "attachments_unreadable";
+      /**
+       * File Names
+       * @description The affected files' names, at most five; empty when unknown.
+       */
+      file_names?: string[];
+      /**
+       * More Count
+       * @description Affected files beyond those named in `file_names`.
+       * @default 0
+       */
+      more_count?: number;
+    };
     /** AIBuilderBudgetSettingsPublic */
     AIBuilderBudgetSettingsPublic: {
       /** Budget Token Hard Limit */
@@ -34543,7 +34571,7 @@ export interface components {
      */
     SessionResponse: {
       /** Attachment Warnings */
-      attachment_warnings?: string[];
+      attachment_warnings?: components["schemas"]["AIBuilderAttachmentWarning"][];
       /** Attachments */
       attachments?: components["schemas"]["FilePublic"][];
       /** Conversation */

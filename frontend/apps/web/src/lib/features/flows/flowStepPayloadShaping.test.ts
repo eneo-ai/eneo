@@ -83,12 +83,37 @@ describe("buildBlankStep", () => {
     const step = buildBlankStep({
       tempId: "_temp_3",
       stepOrder: 3,
+      name: "Data",
+      isFirst: false,
+      prevStepOutputType: "text",
+      outputType: "json"
+    });
+    expect(step.output_mode).toBe("pass_through");
+    expect(step.output_type).toBe("json");
+  });
+
+  it("makes a text step that delivers a document set the text as it is", () => {
+    const step = buildBlankStep({
+      tempId: "_temp_3",
+      stepOrder: 3,
       name: "Doc",
       isFirst: false,
       prevStepOutputType: "text",
       outputType: "docx"
     });
-    expect(step.output_mode).toBe("pass_through");
+    expect(step.output_mode).toBe("render_verbatim");
     expect(step.output_type).toBe("docx");
+  });
+
+  it("keeps the AI mode for a document written from structured data", () => {
+    const step = buildBlankStep({
+      tempId: "_temp_3",
+      stepOrder: 3,
+      name: "Doc",
+      isFirst: false,
+      prevStepOutputType: "json",
+      outputType: "docx"
+    });
+    expect(step.output_mode).toBe("pass_through");
   });
 });

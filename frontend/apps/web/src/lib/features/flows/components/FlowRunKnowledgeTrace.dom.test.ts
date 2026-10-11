@@ -47,4 +47,19 @@ describe("FlowRunKnowledgeTrace status line", () => {
     expect(screen.getByText(m.unknown())).toBeTruthy();
     expect(screen.queryByText("some_future_runtime_status")).toBeNull();
   });
+
+  it("writes the search time in the reader's number format, for advanced users only", () => {
+    const rag = {
+      status: "success",
+      chunks_retrieved: 2,
+      retrieval_duration_ms: 1234
+    } as unknown as FlowRunDebugRag;
+
+    const advanced = render(FlowRunKnowledgeTrace, { rag, eneo, stepOrder: 1, isPowerUser: true });
+    expect(advanced.container.textContent).toMatch(/1[\s,]234\sms/u);
+    cleanup();
+
+    const simple = render(FlowRunKnowledgeTrace, { rag, eneo, stepOrder: 1 });
+    expect(simple.container.textContent).not.toContain(m.flow_run_knowledge_latency_label());
+  });
 });

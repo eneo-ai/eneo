@@ -1,7 +1,9 @@
 import { describe, it, expect } from "vitest";
 import type { FlowStep } from "@eneo/eneo-js";
+import { m } from "$lib/paraglide/messages";
 import {
   getDefaultOpenStepChapter,
+  getStepAiWork,
   getStepAiWorkKind,
   getStepChapterStateKey
 } from "./flowStepEditorPresentation";
@@ -59,6 +61,14 @@ describe("getStepAiWorkKind", () => {
 
   it("marks an LLM step with a known-empty instruction as missing", () => {
     expect(getStepAiWorkKind(step({}), { instructionPresent: false })).toBe("missing");
+  });
+
+  it("does not say that AI works on a step that passes the text on without a model", () => {
+    const composed = step({ output_mode: "compose_text", output_type: "text" });
+    expect(getStepAiWorkKind(composed, { instructionPresent: false })).toBe("compose");
+    expect(getStepAiWork(composed, { instructionPresent: false }).text).toBe(
+      m.flow_capsule_ai_compose()
+    );
   });
 
   it("marks an LLM step with an instruction as process", () => {

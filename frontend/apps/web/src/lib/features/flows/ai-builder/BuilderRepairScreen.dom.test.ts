@@ -77,10 +77,11 @@ describe("BuilderRepairScreen", () => {
     expect(text).toContain(m.ai_builder_repair_hint_truncated());
     expect(text).not.toContain(m.ai_builder_repair_hint());
 
-    // A cut-off answer asks for room, not for the answer format.
+    // The sentence that is sent is the one the server keeps: the same for every
+    // kind of failure, since the server cannot tell them apart from the reference.
     await fireEvent.click(screen.getByTestId("repair-prepare"));
     expect(onprepare).toHaveBeenCalledWith({
-      message: m.ai_builder_repair_message_truncated({ step: "2" }),
+      message: m.ai_builder_repair_message({ step: "2" }),
       reviewContext: makeLaunch().reference
     });
   });

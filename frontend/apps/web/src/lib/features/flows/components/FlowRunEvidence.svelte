@@ -502,6 +502,7 @@
     <FlowRunEvidenceSummary
       {runStatus}
       traceId={evidence.debug_export?.run?.trace_id ?? null}
+      runId={$mode === "power_user" ? runId : null}
       redactionApplied={$mode === "power_user" &&
         evidence.debug_export?.security?.redaction_applied === true}
       tokenUsage={evidence.debug_export?.run?.summary?.token_usage ?? null}

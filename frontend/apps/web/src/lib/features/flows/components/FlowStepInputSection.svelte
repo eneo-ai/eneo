@@ -620,7 +620,9 @@
           <span class="text-warning-stronger font-medium">{m.select_a_model()}</span>
         {:else}
           {m.flow_transcription_model_label()}:
-          <span class="font-medium">{transcriptionModelLabel ?? "---"}</span>
+          <span class="font-medium">
+            {transcriptionModelLabel ?? m.flow_transcription_model_unnamed()}
+          </span>
         {/if}
       </span>
     </div>

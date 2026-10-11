@@ -6,6 +6,7 @@ import {
 } from "@eneo/eneo-js";
 import type { FlowRunError as FlowRunErrorContract } from "@eneo/eneo-js";
 import { m } from "$lib/paraglide/messages";
+import { getErrorCodeMessage } from "$lib/core/errors/getErrorMessage";
 
 export { FLOW_API_ERROR_CODE, FLOW_API_ERROR_CODES };
 export type { FlowApiErrorCode };
@@ -509,6 +510,19 @@ function matchesMissingTemplateContentError(readableMessage: string): boolean {
   return MISSING_TEMPLATE_CONTENT_PATTERNS.some((pattern) => normalized.includes(pattern));
 }
 
+/**
+ * Refusals the flow endpoints send under a code outside the generated Flow API set.
+ * The server words `stale_revision` in Swedish only, so it is said here in both languages.
+ */
+const FLOW_EDIT_REFUSAL_MESSAGES: Record<string, (() => string) | undefined> = {
+  stale_revision: () => m.flow_edit_stale_revision()
+};
+
+/**
+ * The sentence to show for a failed Flow request, always in the reader's language:
+ * the Flow error's own sentence, else the platform's sentence for the error code,
+ * else what the caller says failed. The server's English text is never shown.
+ */
 export function getFlowRuntimeErrorMessage(error: unknown, fallbackMessage: string): string {
   if (!(error instanceof EneoError)) {
     return fallbackMessage;
@@ -517,12 +531,17 @@ export function getFlowRuntimeErrorMessage(error: unknown, fallbackMessage: stri
   const descriptor = describeFlowApiError(error);
   if (descriptor) return resolveFlowApiErrorMessage(descriptor);
 
-  const readable = error.getReadableMessage();
-  if (matchesMissingTemplateContentError(readable)) {
-    return getFlowRuntimeErrorMessageByCode("flow_template_missing_content") ?? readable;
+  const editRefusal = FLOW_EDIT_REFUSAL_MESSAGES[getResponseCode(error) ?? ""];
+  if (editRefusal) return editRefusal();
+
+  const platformMessage = getErrorCodeMessage(error.code);
+  if (platformMessage) return platformMessage;
+
+  if (matchesMissingTemplateContentError(error.getReadableMessage())) {
+    return getFlowRuntimeErrorMessageByCode("flow_template_missing_content") ?? fallbackMessage;
   }
 
-  return readable;
+  return fallbackMessage;
 }
 
 export function getFlowRuntimeErrorMessageByCode(code: string | null | undefined): string | null {
@@ -535,39 +554,53 @@ export function getFlowRunErrorMessage(error: FlowRunError | null | undefined): 
   return descriptor ? resolveFlowApiErrorMessage(descriptor) : null;
 }
 
-const MIME_FRIENDLY_NAMES: Record<string, string> = {
+// Covers what the backend can advertise for a run input (TextMimeTypes, AudioMimeTypes and
+// ImageMimeTypes in backend/src/eneo/files). Several MIME types share a name on purpose:
+// the reader chooses a file by its ending, so "audio/mp4" and "audio/x-m4a" are both M4A.
+const MIME_FRIENDLY_NAMES: Record<string, string | (() => string)> = {
   "application/pdf": "PDF",
-  "application/msword": "Word",
+  "application/msword": "Word (.doc)",
   "application/vnd.openxmlformats-officedocument.wordprocessingml.document": "Word (.docx)",
-  "application/vnd.ms-excel": "Excel",
+  "application/vnd.ms-excel": "Excel (.xls)",
   "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet": "Excel (.xlsx)",
-  "application/vnd.ms-powerpoint": "PowerPoint",
+  "application/vnd.ms-powerpoint": "PowerPoint (.ppt)",
   "application/vnd.openxmlformats-officedocument.presentationml.presentation": "PowerPoint (.pptx)",
   "text/csv": "CSV",
   "application/csv": "CSV",
-  "text/plain": "Text",
+  "text/plain": () => m.flow_file_type_plain_text(),
   "text/html": "HTML",
   "text/markdown": "Markdown",
   "application/json": "JSON",
   "application/xml": "XML",
+  "text/xml": "XML",
   "image/png": "PNG",
   "image/jpeg": "JPEG",
   "image/gif": "GIF",
   "image/webp": "WebP",
+  "image/avif": "AVIF",
+  "image/heic": "HEIC",
+  "image/heif": "HEIF",
   "image/svg+xml": "SVG",
   "audio/mpeg": "MP3",
+  "audio/mp3": "MP3",
   "audio/wav": "WAV",
   "audio/ogg": "OGG",
-  "audio/webm": "WebM (ljud)",
+  "audio/webm": "WebM",
   "audio/mp4": "M4A",
+  "audio/x-m4a": "M4A",
   "video/mp4": "MP4",
   "video/webm": "WebM",
-  "audio/*": "Ljudfiler",
-  "video/*": "Videofiler",
-  "image/*": "Bildfiler"
+  "audio/*": () => m.flow_file_type_any_audio(),
+  "video/*": () => m.flow_file_type_any_video(),
+  "image/*": () => m.flow_file_type_any_image()
 };
 
+/** Names a reader recognises for the accepted file types; an unknown type keeps its MIME name. */
 export function friendlyMimeNames(mimetypes: string[]): string[] {
-  const names = mimetypes.map((mime) => MIME_FRIENDLY_NAMES[mime] ?? mime);
+  const names = mimetypes.map((mime) => {
+    const name = MIME_FRIENDLY_NAMES[mime];
+    if (name === undefined) return mime;
+    return typeof name === "string" ? name : name();
+  });
   return [...new Set(names)];
 }

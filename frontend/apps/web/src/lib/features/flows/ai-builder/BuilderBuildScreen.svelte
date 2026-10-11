@@ -229,7 +229,7 @@
       </div>
       <div class="border-default bg-secondary border-t px-5 py-3 max-sm:px-4">
         <p class="text-secondary text-[0.8125rem]">
-          {isEdit ? m.ai_builder_build_footer_edit() : m.ai_builder_build_footer()}
+          {isEdit ? m.ai_builder_build_footer_edit() : m.ai_builder_footer_nothing_created()}
         </p>
       </div>
     </div>

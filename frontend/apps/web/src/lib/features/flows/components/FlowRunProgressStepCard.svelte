@@ -19,12 +19,14 @@
   import FlowRunResultFileButton from "./FlowRunResultFileButton.svelte";
   import FlowRunStatusBadge from "./FlowRunStatusBadge.svelte";
   import FlowRunErrorAlert from "./FlowRunErrorAlert.svelte";
+  import FlowJsonViewer from "./FlowJsonViewer.svelte";
 
   let {
     step,
     expanded,
     focused = false,
     inputExpanded,
+    isPowerUser = false,
     copiedKey,
     panelId,
     onToggle,
@@ -36,6 +38,8 @@
     expanded: boolean;
     focused?: boolean;
     inputExpanded: boolean;
+    /** Advanced mode: also show the raw step input, the data format and token counts. */
+    isPowerUser?: boolean;
     copiedKey: string | null;
     panelId: string;
     onToggle: (stepOrder: number) => void;
@@ -165,15 +169,12 @@
 
             {#if hasStructuredOutput && step.outputPayload?.structured !== undefined}
               <div class="mt-1">
-                <Badge class="bg-accent-dimmer text-accent-stronger mb-1">
-                  {m.flow_run_structured_json_badge()}
-                </Badge>
-                <pre
-                  class="bg-hover-dimmer max-h-80 overflow-auto rounded-lg p-3 font-mono text-[13px] leading-relaxed break-words whitespace-pre-wrap">{JSON.stringify(
-                    step.outputPayload.structured,
-                    null,
-                    2
-                  )}</pre>
+                {#if isPowerUser}
+                  <Badge class="bg-accent-dimmer text-accent-stronger mb-1">
+                    {m.flow_run_structured_json_badge()}
+                  </Badge>
+                {/if}
+                <FlowJsonViewer value={step.outputPayload.structured} className="mt-0" />
               </div>
             {/if}
 
@@ -213,7 +214,7 @@
           </div>
         {/if}
 
-        {#if hasInput}
+        {#if isPowerUser && hasInput}
           <Collapsible.Root open={inputExpanded} onOpenChange={() => onToggleInput(step.stepOrder)}>
             <div class="flex items-center justify-between">
               <Collapsible.Trigger
@@ -255,7 +256,7 @@
           </Collapsible.Root>
         {/if}
 
-        {#if hasTokens}
+        {#if isPowerUser && hasTokens}
           <div class="border-default text-secondary flex items-center gap-2 border-t pt-3 text-xs">
             <span>{m.flow_run_tokens()}</span>
             <span aria-hidden="true">&middot;</span>

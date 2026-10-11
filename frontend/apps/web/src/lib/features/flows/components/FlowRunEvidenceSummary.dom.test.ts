@@ -58,6 +58,41 @@ describe("FlowRunEvidenceSummary trace identifier", () => {
   });
 });
 
+describe("FlowRunEvidenceSummary run identifier", () => {
+  const runId = "0d2c7c55-3a43-4a0b-9b1e-6f2f1c8c1a11";
+
+  afterEach(() => {
+    cleanup();
+    vi.restoreAllMocks();
+  });
+
+  it("offers the run's own ID for copying when the view passes it", async () => {
+    const writeText = vi.fn().mockResolvedValue(undefined);
+    vi.stubGlobal("navigator", { ...navigator, clipboard: { writeText } });
+    render(FlowRunEvidenceSummary, { props: { runStatus: "completed", traceId, runId } });
+
+    const button = screen.getByRole("button", { name: m.flow_run_evidence_run_id_copy() });
+    expect(button.textContent).toContain(m.flow_run_evidence_run_id());
+    expect(button.textContent).not.toContain(runId);
+    await fireEvent.click(button);
+
+    expect(writeText).toHaveBeenCalledWith(runId);
+    await waitFor(() =>
+      expect(
+        screen
+          .getAllByRole("status")
+          .some((node) => node.textContent?.trim() === m.flow_run_evidence_run_id_copied())
+      ).toBe(true)
+    );
+  });
+
+  it("shows no run ID unless the view passes one", () => {
+    render(FlowRunEvidenceSummary, { props: { runStatus: "completed", traceId } });
+
+    expect(screen.queryByRole("button", { name: m.flow_run_evidence_run_id_copy() })).toBeNull();
+  });
+});
+
 describe("FlowRunEvidenceSummary result files", () => {
   afterEach(() => cleanup());
 

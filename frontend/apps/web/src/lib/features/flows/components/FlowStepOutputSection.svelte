@@ -145,9 +145,9 @@
           <Select.Group>
             {#each availableOutputTypes as t (t.value)}
               <Select.Item value={t.value} label={outputTypeDisplayLabel(t.value, t.label)}>
-                {outputTypeDisplayLabel(t.value, t.label)}{t.legacyInvalid
-                  ? ` - ${m.flow_output_mode_needs_attention()}`
-                  : ""}
+                {t.legacyInvalid
+                  ? m.flow_step_option_invalid({ label: outputTypeDisplayLabel(t.value, t.label) })
+                  : outputTypeDisplayLabel(t.value, t.label)}
               </Select.Item>
             {/each}
           </Select.Group>
@@ -197,7 +197,9 @@
           <Select.Group>
             {#each availableOutputModes as mode (mode.value)}
               <Select.Item value={mode.value} label={mode.label}>
-                {mode.label}{mode.legacyInvalid ? ` — ${m.flow_output_mode_needs_attention()}` : ""}
+                {mode.legacyInvalid
+                  ? m.flow_step_option_invalid({ label: mode.label })
+                  : mode.label}
               </Select.Item>
             {/each}
           </Select.Group>

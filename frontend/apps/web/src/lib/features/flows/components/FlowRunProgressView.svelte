@@ -6,6 +6,7 @@
   import { toast } from "$lib/components/toast";
   import { serializeEvidencePayload } from "./flowRunEvidenceActions";
   import FlowRunProgressStepCard from "./FlowRunProgressStepCard.svelte";
+  import { getFlowUserMode } from "$lib/features/flows/FlowUserMode";
   import {
     formatFlowRunElapsed,
     getFlowRunFocusedStepOrder,
@@ -26,6 +27,10 @@
     runStartedAt?: string | null;
     onDownloadArtifact?: (fileId: string) => Promise<void>;
   } = $props();
+
+  // The same split as the finished run's view: the raw step input, the data
+  // format and token counts belong to Advanced.
+  const mode = getFlowUserMode();
 
   let userToggles: Record<number, boolean> = $state({});
   let expandedInputSteps: number[] = $state([]);
@@ -201,6 +206,7 @@
           expanded={isStepExpanded(step.stepOrder)}
           focused={focusedStepOrder === step.stepOrder}
           inputExpanded={expandedInputSteps.includes(step.stepOrder)}
+          isPowerUser={$mode === "power_user"}
           {copiedKey}
           panelId={getStepPanelId(step.stepOrder)}
           onToggle={toggleStep}

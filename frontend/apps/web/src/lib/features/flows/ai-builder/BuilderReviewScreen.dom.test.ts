@@ -507,7 +507,6 @@ describe("BuilderReviewScreen approval", () => {
 
     expect(screen.getByText(m.ai_builder_create_unknown_title())).toBeTruthy();
     expect(screen.queryByText(m.ai_builder_create_failed_body())).toBeNull();
-    expect(screen.queryByText(m.ai_builder_plan_unchanged())).toBeNull();
     expect(
       screen.getByRole("button", { name: m.ai_builder_turn_retry() }).hasAttribute("disabled")
     ).toBe(true);
@@ -1615,25 +1614,75 @@ describe("BuilderReviewScreen change requests", () => {
   });
 });
 
+describe("BuilderReviewScreen reference material", () => {
+  it("says in the reader's language which attached file cannot be read, and every warning", () => {
+    render(BuilderReviewScreenHarness, {
+      currentSpace: makeSpace({ transcriptionModels: [{ can_access: true }] }),
+      state: {
+        ...scopedStepEditState(),
+        session: makeSession({
+          status: "awaiting_approval",
+          latest_plan_id: "plan-1",
+          attachment_warnings: [
+            { code: "attachments_unavailable", more_count: 1 },
+            { code: "attachments_unreadable", file_names: ["inskannat.pdf"] }
+          ]
+        })
+      }
+    });
+
+    expect(screen.getByText(m.ai_builder_attachment_warning_unavailable_one())).toBeTruthy();
+    expect(
+      screen.getByText(m.ai_builder_attachment_warning_unreadable_one({ files: "inskannat.pdf" }))
+    ).toBeTruthy();
+  });
+});
+
 describe("BuilderReviewScreen recovery surfaces", () => {
+  it("does not repeat the heading when the failed update has no words of its own", () => {
+    render(BuilderReviewScreenHarness, {
+      currentSpace: makeSpace({ transcriptionModels: [{ can_access: true }] }),
+      state: {
+        ...scopedStepEditState(),
+        applyError: {
+          ...makeError("bad_request"),
+          category: "bad_request",
+          fallback_message: m.ai_builder_error_fallback_apply_plan()
+        }
+      }
+    });
+
+    expect(screen.getByText(m.ai_builder_apply_failed_title())).toBeTruthy();
+    // The heading says what failed; the body only says what to do.
+    expect(screen.getByText(m.ai_builder_apply_failed_retry())).toBeTruthy();
+    expect(screen.queryByText(m.ai_builder_error_fallback_apply_plan())).toBeNull();
+  });
+
   it("keeps a refused apply's English prose out of the screen, with no refresh to loop on", () => {
     // A plan persisted before diffs listed each step's changes: reloading
     // brings the same plan back, so this is not a conflict card. The server
-    // sends it as a bare bad_request, so the screen can only say the apply
-    // failed; the server's sentence stays in the diagnostic report.
+    // names the reason, so the screen tells the reader to ask again; the
+    // server's own sentence stays in the diagnostic report.
     const message =
       "This plan was made before an update of the AI Builder and can no longer be applied. Ask the Builder again for the change.";
     render(BuilderReviewScreenHarness, {
       currentSpace: makeSpace({ transcriptionModels: [{ can_access: true }] }),
       state: {
         ...scopedStepEditState(),
-        applyError: { ...makeError("bad_request"), category: "bad_request", message }
+        applyError: {
+          ...makeError("bad_request"),
+          category: "bad_request",
+          message,
+          details: { reason: "plan_outdated" }
+        }
       }
     });
 
     expect(screen.getByText(m.ai_builder_apply_failed_title())).toBeTruthy();
     expect(screen.queryByText(message)).toBeNull();
-    expect(screen.getByText(m.ai_builder_error_fallback_generic())).toBeTruthy();
+    expect(screen.getByText(m.ai_builder_error_plan_outdated())).toBeTruthy();
+    // Trying again can never write this plan in, so the card does not suggest it.
+    expect(screen.queryByText(m.ai_builder_apply_failed_retry())).toBeNull();
     expect(screen.queryByText(m.ai_builder_conflict_elsewhere_title())).toBeNull();
     expect(
       screen.queryByRole("button", { name: m.ai_builder_failure_action_refresh() })
@@ -2097,7 +2146,7 @@ describe("BuilderReviewScreen edit outcomes", () => {
     });
 
     await fireEvent.click(
-      screen.getByRole("button", { name: m.ai_builder_published_flow_unpublish() })
+      screen.getByRole("button", { name: m.ai_builder_unpublish_confirm_action() })
     );
     const dialog = within(await screen.findByRole("alertdialog"));
     expect(dialog.getByText(m.ai_builder_unpublish_confirm_title())).toBeTruthy();

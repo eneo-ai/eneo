@@ -7,7 +7,7 @@ type CreatedFlow = {
 };
 
 const RUN_FLOW_LABEL = /^(Run flow|Kör flöde)$/;
-const RUN_INPUT_LABEL = /^(Input|Indata)$/;
+const RUN_INPUT_LABEL = /^(Material|Underlag)$/;
 const NEXT_LABEL = /^(Next|Nästa)$/;
 const START_RUN_LABEL = /^(Start run|Starta körning)$/;
 const NEXT_STAGE_LABEL = /^(Next|Nästa):/;
@@ -34,8 +34,8 @@ const STEP_NAME_LABEL = /^(Step name|Stegnamn)$/;
 const REVIEW_CHECKPOINT_LABEL = /^(Review checkpoint|Granskningspunkt)$/;
 const APPROVE_LABEL = /^(Approve|Godkänn)$/;
 const RESUME_LABEL = /^(Resume|Fortsätt)$/;
-const CANCEL_BUTTON_LABEL = /^(Cancel|Avbryt)$/;
-const CANCEL_DIALOG_LABEL = /^(Cancel run|Avbryt körning)$/;
+const CANCEL_BUTTON_LABEL = /^(Cancel run|Avbryt körningen)$/;
+const CANCEL_DIALOG_LABEL = /^(Cancel the run\?|Avbryt körningen\?)$/;
 const CANCEL_ACTION_LABEL = /^(Cancel run|Avbryt körningen)$/;
 const CANCELLED_STATUS_LABEL = /^(Cancelled|Avbruten)$/;
 const DOWNLOAD_PDF_LABEL = /^(Download|Ladda ner) .*\.pdf$/;

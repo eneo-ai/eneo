@@ -13,6 +13,8 @@ import {
   locateWords,
   parseTranscript,
   segmentsFromMetadata,
+  SPEAKER_PALETTE,
+  SPEAKER_PALETTE_SIZE,
   speakerColorIndex,
   type TranscriptSegment
 } from "./transcriptSegments";
@@ -146,6 +148,23 @@ describe("findActiveSegmentIndex", () => {
     expect(findActiveSegmentIndex(segments, 1, 1)).toBe(2);
     expect(findActiveSegmentIndex(segments, 1, 1, 0)).toBe(2);
     expect(findActiveSegmentIndex(segments, 2, 1)).toBe(-1);
+  });
+});
+
+describe("SPEAKER_PALETTE", () => {
+  it("gives every slot its own colour, so eight speakers never share one", () => {
+    expect(SPEAKER_PALETTE).toHaveLength(SPEAKER_PALETTE_SIZE);
+    const colours = SPEAKER_PALETTE.map((slot) => `${slot.scope} ${slot.ink}`);
+    expect(new Set(colours).size).toBe(SPEAKER_PALETTE_SIZE);
+  });
+
+  it("names the class that defines --label-* wherever a slot reads it", () => {
+    // `--label-*` has no value outside a `.label-…` element: a slot that reads
+    // it without its scope paints nothing.
+    for (const slot of SPEAKER_PALETTE) {
+      const readsLabel = slot.chip.includes("label-") || slot.ink.includes("--label-");
+      expect(slot.scope.startsWith("label-")).toBe(readsLabel);
+    }
   });
 });
 

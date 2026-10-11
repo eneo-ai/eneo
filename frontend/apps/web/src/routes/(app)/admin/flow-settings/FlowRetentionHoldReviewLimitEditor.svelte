@@ -124,7 +124,10 @@
           <Field.Description>
             {limit.is_default === true
               ? m.flow_retention_hold_max_review_default_note({ days: DEFAULT_DAYS })
-              : m.flow_retention_hold_max_review_description()}
+              : m.flow_retention_hold_max_review_description({
+                  max: MAX_DAYS,
+                  default: DEFAULT_DAYS
+                })}
           </Field.Description>
         {/if}
       </Field.Field>

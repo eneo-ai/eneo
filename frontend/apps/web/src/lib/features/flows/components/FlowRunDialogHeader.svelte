@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { countMessage } from "$lib/features/flows/flowCount";
   import * as Dialog from "$lib/components/ui/dialog/index.js";
   import { Button } from "$lib/components/ui/button/index.js";
   import { Badge } from "$lib/components/ui/badge/index.js";
@@ -38,7 +39,7 @@
         <span class="text-primary truncate font-medium">{flowName}</span>
         {#if stepCount > 0}
           <Badge variant="outline" class="h-5 text-xs font-medium tabular-nums">
-            {m.flow_run_step_count({ count: String(stepCount) })}
+            {countMessage(stepCount, m.flow_step_count_one, m.flow_step_count)}
           </Badge>
         {/if}
       </Dialog.Description>

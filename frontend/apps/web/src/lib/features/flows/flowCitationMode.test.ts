@@ -51,6 +51,10 @@ describe("flow citation mode helpers", () => {
     expect(supportsFlowCitationMode(makeStep({ output_mode: "transcribe_only" }))).toBe(false);
   });
 
+  test("does not offer citations on a step that passes text on without an AI model", () => {
+    expect(supportsFlowCitationMode(makeStep({ output_mode: "compose_text" }))).toBe(false);
+  });
+
   test("adds and removes citation mode without clobbering other output config fields", () => {
     expect(setFlowCitationMode(null, FLOW_CITATION_MODE_INLINE_INREF_SIDECAR)).toEqual({
       citation_mode: FLOW_CITATION_MODE_INLINE_INREF_SIDECAR

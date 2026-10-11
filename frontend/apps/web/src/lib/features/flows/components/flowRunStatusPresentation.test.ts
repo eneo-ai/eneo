@@ -8,7 +8,8 @@ const translations = {
   queued: () => "Queued",
   running: () => "Running",
   awaiting_review: () => "Awaiting review",
-  cancelled: () => "Cancelled"
+  cancelled: () => "Cancelled",
+  unknown: () => "Unknown status"
 };
 
 describe("getFlowRunStatusView", () => {
@@ -48,9 +49,9 @@ describe("getFlowRunStatusView", () => {
     });
   });
 
-  it("falls back to raw unknown status with muted visuals", () => {
+  it("names an unknown status in words, with muted visuals", () => {
     expect(getFlowRunStatusView("mystery-status", translations)).toEqual({
-      label: "mystery-status",
+      label: "Unknown status",
       textClass: "text-secondary",
       dotClass: "bg-current",
       pulseDot: false

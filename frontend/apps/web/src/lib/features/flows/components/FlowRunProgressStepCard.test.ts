@@ -48,9 +48,14 @@ describe("FlowRunProgressStepCard", () => {
       location: { href: "https://app.example.test/sv/flows/run" },
       matchMedia: () => ({ matches: false })
     });
-    const renderWithTokens = (numTokensInput: number, numTokensOutput: number) =>
+    const renderWithTokens = (
+      numTokensInput: number,
+      numTokensOutput: number,
+      isPowerUser = true
+    ) =>
       render(FlowRunProgressStepCard, {
         props: {
+          isPowerUser,
           step: {
             stepOrder: 1,
             label: "Transcribe",
@@ -73,5 +78,7 @@ describe("FlowRunProgressStepCard", () => {
 
     expect(renderWithTokens(0, 0)).not.toContain(m.flow_run_tokens());
     expect(renderWithTokens(0, 7)).toContain(m.flow_run_tokens_out({ count: "7" }));
+    // Token counts are a technical detail: the default mode leaves them out.
+    expect(renderWithTokens(0, 7, false)).not.toContain(m.flow_run_tokens());
   });
 });

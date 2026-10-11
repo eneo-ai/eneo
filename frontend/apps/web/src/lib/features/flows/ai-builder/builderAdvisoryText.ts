@@ -1,5 +1,48 @@
 import { m } from "$lib/paraglide/messages";
+import { formatList } from "$lib/core/formatting/formatList";
+import { countMessage } from "$lib/features/flows/flowCount";
 import type { EditAdvisory, LintWarning } from "./protocol";
+
+/** Why attached reference material does not reach the AI Builder: a code and its facts. */
+export type AttachmentWarning = {
+  code: string;
+  file_names?: string[];
+  more_count?: number;
+};
+
+/**
+ * What the reader is told about attached files the AI Builder cannot use, and
+ * what to do about it. The server sends the code and the file names only.
+ */
+export function attachmentWarningText(warning: AttachmentWarning): string {
+  const names = warning.file_names ?? [];
+  const more = warning.more_count ?? 0;
+  if (warning.code === "attachments_unavailable") {
+    return countMessage(
+      Math.max(1, names.length + more),
+      m.ai_builder_attachment_warning_unavailable_one,
+      m.ai_builder_attachment_warning_unavailable
+    );
+  }
+  if (warning.code === "attachments_unreadable" && names.length > 0) {
+    const listed =
+      more > 0
+        ? [
+            ...names,
+            countMessage(
+              more,
+              m.ai_builder_attachment_warning_more_files_one,
+              m.ai_builder_attachment_warning_more_files
+            )
+          ]
+        : names;
+    const files = formatList(listed);
+    return names.length + more === 1
+      ? m.ai_builder_attachment_warning_unreadable_one({ files })
+      : m.ai_builder_attachment_warning_unreadable({ files });
+  }
+  return m.ai_builder_attachment_warning_generic();
+}
 
 /**
  * The one owner of what the plan's advisories, quality warnings and notes say

@@ -4267,7 +4267,7 @@ describe("FlowAIBuilder edit host contract", () => {
       }
 
       await fireEvent.click(
-        screen.getByRole("button", { name: m.ai_builder_edit_context_clear_short() })
+        screen.getByRole("button", { name: m.ai_builder_change_request_clear_scope() })
       );
 
       await waitFor(() => expect(screen.queryByText(SAVED_STEP_LABEL)).toBeNull());
@@ -4967,7 +4967,7 @@ describe("FlowAIBuilder turn recovery", () => {
     renderShell({ fetch, stream: makeStream().stream, resumeSessionId: "s-turn" });
     expect(await screen.findByText(m.ai_builder_turn_active_title())).toBeTruthy();
 
-    await fireEvent.click(button(m.refresh()));
+    await fireEvent.click(button(m.ai_builder_failure_action_refresh()));
 
     expect(await screen.findByText(m.ai_builder_turn_refresh_failed())).toBeTruthy();
     await waitFor(() => expect(reports).toHaveLength(1));
@@ -4996,7 +4996,7 @@ describe("FlowAIBuilder turn recovery", () => {
     expect(screen.getByText(m.ai_builder_reply_reading())).toBeTruthy();
     expect(screen.queryByRole("textbox")).toBeNull();
 
-    await fireEvent.click(button(m.refresh()));
+    await fireEvent.click(button(m.ai_builder_failure_action_refresh()));
 
     await waitFor(() => expect(textbox().disabled).toBe(false));
     expect(calls).toHaveLength(0);

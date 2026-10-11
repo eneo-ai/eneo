@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { countMessage } from "$lib/features/flows/flowCount";
   import type { FlowStep } from "@eneo/eneo-js";
   import { tick } from "svelte";
   import { asset } from "$app/paths";
@@ -384,9 +385,11 @@
       {#if templateOrphanedRows.length > 0}
         <Alert.Root variant="destructive">
           <Alert.Title
-            >{m.flow_template_fill_orphaned_warning({
-              count: String(templateOrphanedRows.length)
-            })}</Alert.Title
+            >{countMessage(
+              templateOrphanedRows.length,
+              m.flow_template_fill_orphaned_warning_one,
+              m.flow_template_fill_orphaned_warning
+            )}</Alert.Title
           >
           <Alert.Description class="flex flex-col gap-3">
             <p class="max-w-prose">{m.flow_template_fill_orphaned_help()}</p>

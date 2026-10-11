@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { countMessage } from "$lib/features/flows/flowCount";
   import { SvelteSet } from "svelte/reactivity";
   import ChevronRight from "@lucide/svelte/icons/chevron-right";
   import ChevronDown from "@lucide/svelte/icons/chevron-down";
@@ -109,7 +110,11 @@
           // An untranslated code falls back to the raw server sentence
           // rather than showing the bare code.
           message,
-          detail: raw && translated !== parsed.code && raw !== message ? raw : undefined
+          // The editor's own checks carry only their code, which explains nothing.
+          detail:
+            raw && translated !== parsed.code && raw !== message && raw !== parsed.code
+              ? raw
+              : undefined
         };
       }
       case "assistant": {
@@ -138,7 +143,10 @@
           stepName: "",
           stepId: undefined,
           message: translated !== parsed.code ? translated : (raw ?? parsed.message),
-          detail: raw && translated !== parsed.code && raw !== translated ? raw : undefined
+          detail:
+            raw && translated !== parsed.code && raw !== translated && raw !== parsed.code
+              ? raw
+              : undefined
         };
       }
     }
@@ -243,7 +251,11 @@
             <IconInfo class="text-negative-stronger size-3" aria-hidden="true" />
           </div>
           <span class="text-negative-stronger flex-1 text-left font-medium">
-            {m.flow_validation_issues({ count: String(errorCount) })}
+            {countMessage(
+              errorCount,
+              m.flow_validation_errors_count_one,
+              m.flow_validation_errors_count
+            )}
           </span>
           <span class="text-negative-stronger/80 hidden text-xs font-medium sm:inline">
             {isExpanded ? m.flow_validation_hide_details() : m.flow_validation_show_details()}

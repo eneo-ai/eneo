@@ -86,7 +86,9 @@
 </script>
 
 <Alert.Root variant="destructive">
-  <Alert.Title class="text-xs font-semibold">{m.flow_run_error()}</Alert.Title>
+  <Alert.Title class="text-xs font-semibold">
+    {isReviewPolicyError ? m.flow_run_error_not_started() : m.flow_run_error()}
+  </Alert.Title>
   <Alert.Description class="flex flex-col gap-2 text-xs">
     {#if isReviewPolicyError}
       <span>{m.flow_run_error_review_policy_invalid_summary()}</span>

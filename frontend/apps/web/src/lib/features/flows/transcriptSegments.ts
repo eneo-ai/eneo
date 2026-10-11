@@ -333,7 +333,36 @@ export function findActiveSegmentIndex(
   return result;
 }
 
-export const SPEAKER_PALETTE_SIZE = 8;
+/**
+ * The 1-based number of a raw diarization label (`SPEAKER_00` is speaker 1), or
+ * null when the label is already a name. Readers are shown "Talare 1", never the label.
+ */
+export function diarizationSpeakerNumber(label: string): number | null {
+  const numbered = /^SPEAKER_(\d+)$/.exec(label);
+  return numbered ? Number(numbered[1]) + 1 : null;
+}
+
+const LABEL_CHIP = "bg-label-dimmer text-label-stronger";
+const LABEL_INK = "var(--label-stronger)";
+
+/**
+ * One colour per palette slot. The player's speaker chips and the review
+ * editor's underlines read the same slot, so a speaker keeps one colour in
+ * both. `scope` is the design-system class that gives `--label-*` a value on
+ * the element; the first four hues are global tokens and need none.
+ */
+export const SPEAKER_PALETTE = [
+  { scope: "", chip: "bg-accent-dimmer text-accent-stronger", ink: "var(--accent-stronger)" },
+  { scope: "", chip: "bg-positive-dimmer text-positive-stronger", ink: "var(--positive-stronger)" },
+  { scope: "", chip: "bg-warning-dimmer text-warning-stronger", ink: "var(--warning-stronger)" },
+  { scope: "", chip: "bg-negative-dimmer text-negative-stronger", ink: "var(--negative-stronger)" },
+  { scope: "label-amethyst", chip: LABEL_CHIP, ink: LABEL_INK },
+  { scope: "label-pine", chip: LABEL_CHIP, ink: LABEL_INK },
+  { scope: "label-moss", chip: LABEL_CHIP, ink: LABEL_INK },
+  { scope: "label-neutral", chip: LABEL_CHIP, ink: LABEL_INK }
+] as const;
+
+export const SPEAKER_PALETTE_SIZE = SPEAKER_PALETTE.length;
 
 /** Stable palette slot for a speaker label so a person keeps a colour. */
 export function speakerColorIndex(label: string): number {

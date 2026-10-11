@@ -186,7 +186,7 @@
   const AUDIO_ACCEPT_FILTER = "audio/*,video/webm,video/mp4";
   const NAVIGATION_REASON_ID = "flow-run-navigation-reason";
   const locale = (getLocale() === "en" ? "en" : "sv") as FlowLocale;
-  const labels = getFlowRunDialogLabels(locale);
+  const labels = getFlowRunDialogLabels();
 
   const formFields = $derived.by(() => normalizeFlowFormFields(runContract?.form_fields ?? []));
   const hasFormFields = $derived(formFields.length > 0);
@@ -213,7 +213,6 @@
   const hasTemplateOverview = $derived(templateReadinessItems.length > 0);
   const wizardPages = $derived.by(() =>
     buildFlowRunWizardPages({
-      locale,
       hasTemplateOverview,
       hasFormFields,
       hasFreeformTextInput: showFreeformTextInput,
@@ -226,7 +225,6 @@
   });
   const runBlockers = $derived.by(() =>
     buildFlowRunBlockers({
-      locale,
       missingRequiredFieldNames,
       stepsRequiringInput,
       runtimeFilesByStepId: fileInputState.runtimeFilesSnapshot,
@@ -276,7 +274,6 @@
   });
   const reviewSummaryItems = $derived.by(() =>
     buildFlowRunReviewSummary({
-      locale,
       templateCount: templateReadyCount,
       filledFieldCount: completedFormFieldSummaries.length,
       runtimeStepCountWithFiles: reviewFileGroups.length,

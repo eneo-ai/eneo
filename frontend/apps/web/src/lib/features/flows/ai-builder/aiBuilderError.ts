@@ -209,6 +209,12 @@ const ERROR_COPY: Record<AIBuilderErrorCode, ErrorCopy> = {
     if (maxAttachments !== null) {
       return m.ai_builder_error_too_many_attachments({ max: maxAttachments });
     }
+    // A stored plan that can never be written in: trying again cannot help, so
+    // the reader is told to ask for a new plan.
+    if (error.details.reason === "plan_outdated") return m.ai_builder_error_plan_outdated();
+    if (error.details.reason === "plan_mcp_unsupported") {
+      return m.ai_builder_error_plan_mcp_unsupported();
+    }
     return null;
   },
   builder_attachment_unavailable: () => m.ai_builder_error_attachment_unavailable(),

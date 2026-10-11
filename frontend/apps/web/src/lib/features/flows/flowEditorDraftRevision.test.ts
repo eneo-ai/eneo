@@ -1,3 +1,4 @@
+import { m } from "$lib/paraglide/messages";
 import { get } from "svelte/store";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -301,8 +302,9 @@ describe("FlowEditor draft revision", () => {
     // The refused prompt stays in tab B as an unsaved draft, with the reason.
     expect(server.prompts["assistant-1"]).toBe("Gör uppgift 1.");
     expect((await tabB.loadAssistant("assistant-1"))?.prompt?.text).toBe("Från flik B");
+    // In the reader's language, not the server's Swedish-only sentence.
     expect(get(tabB.state.validationErrors).get("assistant:assistant-1")).toEqual([
-      "Flödet har ändrats sedan det lästes in."
+      m.flow_edit_stale_revision()
     ]);
     expect(get(tabB.state.resource).draft_revision).toBe(4);
 

@@ -1477,8 +1477,6 @@
               size: maxSizeLabel
             })}</span
           >
-        {:else}
-          <span>{m.recording_record_another_hint()}</span>
         {/if}
       </div>
     {/if}

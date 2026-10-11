@@ -113,9 +113,9 @@ describe("FlowRunErrorAlert", () => {
     });
 
     expect(body).toContain(m.flow_error_flow_step_timeout());
-    // The catalog sentence opens the same way as the facts summary, so the
-    // facts-only action line is the distinguishing mark.
-    expect(body).not.toContain(m.flow_run_error_step_timeout_action());
+    // The catalog sentence ends with the same advice the facts view gives on its
+    // own line; said once means the facts view did not render beside it.
+    expect(body.split(m.flow_run_error_step_timeout_action())).toHaveLength(2);
   });
 
   it("keeps the generic summary for message-only step error alerts", () => {

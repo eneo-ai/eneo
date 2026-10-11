@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { countMessage } from "$lib/features/flows/flowCount";
   import { Button } from "$lib/components/ui/button/index.js";
   import * as m from "$lib/paraglide/messages";
   const SPACE = " ";
@@ -6,7 +7,12 @@
   import { Textarea } from "$lib/components/ui/textarea/index.js";
   import * as DropdownMenu from "$lib/components/ui/dropdown-menu/index.js";
   import type { TranscriptSegment, TranscriptFileReview } from "../transcriptSegments";
-  import { formatClock, speakerColorIndex } from "../transcriptSegments";
+  import {
+    diarizationSpeakerNumber,
+    formatClock,
+    speakerColorIndex,
+    SPEAKER_PALETTE
+  } from "../transcriptSegments";
   import {
     reviewSelectionText,
     reviewFragments,
@@ -94,29 +100,19 @@
   );
   const selectedText = $derived(reviewSelectionText(shown, selection, draft));
   const activeWords = $derived(highlightedReviewWords(shown, currentFile, currentTime));
-  const colors = [
-    "accent-stronger",
-    "positive-stronger",
-    "warning-stronger",
-    "negative-stronger",
-    "label-stronger",
-    "dynamic-stronger",
-    "accent-stronger",
-    "positive-stronger"
-  ];
   const action =
     "min-h-9 rounded-md px-2.5 py-1.5 text-xs font-medium hover:bg-hover-default focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none disabled:opacity-50";
   const name = (speaker: string | null) => {
     if (!speaker) return m.flow_transcript_editor_unknown();
     const display = displayName(speaker);
-    return display === speaker && /^SPEAKER_\d+$/.test(speaker)
-      ? m.flow_transcript_editor_speaker({ number: Number(speaker.slice(8)) + 1 })
-      : display;
+    const number = display === speaker ? diarizationSpeakerNumber(speaker) : null;
+    return number === null ? display : m.flow_transcript_editor_speaker({ number });
   };
-  const color = (speaker: string | null) =>
-    speaker
-      ? "var(--" + colors[speakerColorIndex(speaker) % colors.length] + ")"
-      : "var(--warning-stronger)";
+  const slot = (speaker: string | null) =>
+    speaker ? SPEAKER_PALETTE[speakerColorIndex(speaker)] : null;
+  const color = (speaker: string | null) => slot(speaker)?.ink ?? "var(--warning-stronger)";
+  // The class that gives a slot's `--label-*` its value on the element.
+  const scope = (speaker: string | null) => slot(speaker)?.scope ?? "";
   function label(f: ReviewFragment) {
     return f.decision === "unresolved"
       ? m.flow_transcript_editor_unresolved()
@@ -465,9 +461,11 @@
   >
     <div class="flex flex-wrap items-center gap-2">
       <span class="text-muted mr-auto text-xs" aria-live="polite"
-        >{m.flow_transcript_editor_pending({
-          count: pending.length + wordlessIntervals.length
-        })}</span
+        >{countMessage(
+          pending.length + wordlessIntervals.length,
+          m.flow_transcript_editor_pending_one,
+          m.flow_transcript_editor_pending
+        )}</span
       >
       <Button
         variant="ghost"
@@ -749,7 +747,9 @@
             }}>{formatClock(first.source.start)}</button
           >
           <button
-            class="focus-visible:ring-ring mt-1 block min-h-[24px] max-w-full text-left text-xs [overflow-wrap:anywhere] whitespace-normal focus-visible:ring-2"
+            class="focus-visible:ring-ring mt-1 block min-h-[24px] max-w-full text-left text-xs [overflow-wrap:anywhere] whitespace-normal focus-visible:ring-2 {scope(
+              first.pending ? null : first.speaker
+            )}"
             style:color={color(first.pending ? null : first.speaker)}
             onclick={() => choose(paragraph.flatMap(wholePassage))}>{label(first)}</button
           >
@@ -760,7 +760,7 @@
           class="text-primary min-w-0 text-base leading-[1.7] [overflow-wrap:anywhere] whitespace-pre-wrap"
         >{#each paragraph as f, i (f.index)}{@const previousSpeech = paragraph.slice(0, i).findLast((fragment) => fragment.text.trim())}{#if i > 0 && paragraph[i - 1].source.index !== f.source.index}{SPACE}{/if}{#if previousSpeech && f.text.trim() && (previousSpeech.speaker !== f.speaker || (previousSpeech.decision !== f.decision && f.decision === "unresolved"))}<span
                 contenteditable="false"
-                class="bg-hover-dimmer mx-1 inline-block max-w-full rounded px-1.5 text-xs leading-5 [overflow-wrap:anywhere] whitespace-normal"
+                class="bg-hover-dimmer mx-1 inline-block max-w-full rounded px-1.5 text-xs leading-5 [overflow-wrap:anywhere] whitespace-normal {scope(f.speaker)}"
                 style:color={color(f.speaker)}>{label(f)}</span
               >{/if}<span
               data-text-span={f.index}
@@ -777,7 +777,9 @@
               onkeydown={(e) => keyPassage(e, f)}
               class="focus-visible:outline-ring py-1 underline decoration-[1.5px] underline-offset-[6px] focus-visible:rounded focus-visible:outline-2 {f.pending
                 ? 'cursor-pointer decoration-dotted'
-                : 'decoration-solid'}"
+                : 'decoration-solid'} {scope(
+                f.pending || f.decision === "unresolved" ? null : f.speaker
+              )}"
               style:text-decoration-color={color(
                 f.pending || f.decision === "unresolved" ? null : f.speaker
               )}

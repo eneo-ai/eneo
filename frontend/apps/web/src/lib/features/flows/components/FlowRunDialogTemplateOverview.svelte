@@ -43,7 +43,7 @@
           <div class="flex flex-wrap items-start justify-between gap-3">
             <div class="min-w-0">
               <p class="text-sm font-medium">
-                {item.template_name ?? labels.templateFallbackName(item.step_id)}
+                {item.template_name ?? labels.templateUnnamed}
               </p>
               {#if getTemplateReadinessMessage(item, labels)}
                 <p class="text-secondary mt-1 text-xs leading-relaxed">

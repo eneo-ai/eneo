@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { countMessage } from "$lib/features/flows/flowCount";
   import { IconPlay } from "@eneo/icons/play";
   import { IconLoadingSpinner } from "@eneo/icons/loading-spinner";
   import { untrack } from "svelte";
@@ -14,6 +15,7 @@
     findActiveWordIndex,
     formatClock,
     speakerColorIndex,
+    SPEAKER_PALETTE,
     type TranscriptFileReview,
     type TranscriptSegment
   } from "$lib/features/flows/transcriptSegments";
@@ -577,19 +579,6 @@
     });
   });
 
-  // One theme token pair per palette slot so a person keeps a colour in both
-  // themes; SPEAKER_PALETTE_SIZE slots cycle for larger groups.
-  const SPEAKER_CLASSES = [
-    "bg-accent-dimmer text-accent-stronger",
-    "bg-positive-dimmer text-positive-stronger",
-    "bg-warning-dimmer text-warning-stronger",
-    "bg-negative-dimmer text-negative-stronger",
-    "bg-label-dimmer text-label-stronger",
-    "bg-chart-1/15 text-chart-1",
-    "bg-chart-2/15 text-chart-2",
-    "bg-chart-3/15 text-chart-3"
-  ];
-
   function downloadTranscript() {
     const text = segments.length
       ? renderReviewedTranscript(segments, corrections, speakerEdits, speakerNames)
@@ -603,7 +592,8 @@
   }
 
   function speakerClass(label: string): string {
-    return SPEAKER_CLASSES[speakerColorIndex(label) % SPEAKER_CLASSES.length];
+    const slot = SPEAKER_PALETTE[speakerColorIndex(label)];
+    return slot.scope ? `${slot.scope} ${slot.chip}` : slot.chip;
   }
 </script>
 
@@ -766,7 +756,11 @@
       {/if}
       {#if uncertainWords > 0}
         <p class="text-warning-stronger text-xs" data-uncertain-words={uncertainWords}>
-          {m.flow_run_transcript_uncertain_count({ count: String(uncertainWords) })}
+          {countMessage(
+            uncertainWords,
+            m.flow_run_transcript_uncertain_count_one,
+            m.flow_run_transcript_uncertain_count
+          )}
         </p>
       {/if}
       <p class="text-muted sr-only">{m.flow_run_transcript_shortcuts()}</p>

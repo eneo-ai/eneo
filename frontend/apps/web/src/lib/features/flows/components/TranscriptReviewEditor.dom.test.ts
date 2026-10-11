@@ -212,7 +212,7 @@ it("wordless overlaps remain navigable evidence without an assignable text range
       }
     ]
   });
-  expect(screen.getByText("1 ställen att granska")).toBeTruthy();
+  expect(screen.getByText("1 ställe att granska")).toBeTruthy();
   await fireEvent.click(screen.getByRole("button", { name: "Nästa" }));
   expect(screen.getByText(/Inga transkriptord finns/)).toBeTruthy();
   expect(screen.queryByLabelText("Tilldela talare")).toBeNull();

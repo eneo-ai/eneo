@@ -226,7 +226,7 @@
           {#snippet toolbar()}
             {#if assistant?.id && !isPublished}
               <PromptVersionDialog
-                title={m.prompt_history_for({ name: m.instructions() })}
+                title={m.flow_step_instruction_history_title()}
                 loadPromptVersionHistory={() => {
                   return loadPromptVersions(step.assistant_id);
                 }}

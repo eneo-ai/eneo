@@ -9,7 +9,7 @@ import { outputModeUsesCompletionModel } from "$lib/features/flows/flowStepTypes
  * contradict each other.
  */
 export type StepAiWorkKind =
-  "transcribe" | "speakers" | "http" | "template" | "document" | "missing" | "process";
+  "transcribe" | "speakers" | "http" | "template" | "document" | "compose" | "missing" | "process";
 
 export function getStepAiWorkKind(
   step: FlowStep,
@@ -22,7 +22,8 @@ export function getStepAiWorkKind(
   }
   if (step.output_mode === "template_fill") return "template";
   if (!outputModeUsesCompletionModel(step.output_mode)) {
-    return step.output_type === "docx" || step.output_type === "pdf" ? "document" : "process";
+    // No model works on this step, so the header must not say that AI does.
+    return step.output_type === "docx" || step.output_type === "pdf" ? "document" : "compose";
   }
   // Only report a missing instruction when we actually know it is empty —
   // `null` means the assistant is still loading, so stay neutral.
@@ -97,8 +98,10 @@ export function getStepAiWork(
             ? m.flow_capsule_ai_template()
             : kind === "document"
               ? m.flow_capsule_ai_document()
-              : kind === "missing"
-                ? m.flow_capsule_ai_missing()
-                : m.flow_capsule_ai_process();
+              : kind === "compose"
+                ? m.flow_capsule_ai_compose()
+                : kind === "missing"
+                  ? m.flow_capsule_ai_missing()
+                  : m.flow_capsule_ai_process();
   return { text, missing: kind === "missing" };
 }

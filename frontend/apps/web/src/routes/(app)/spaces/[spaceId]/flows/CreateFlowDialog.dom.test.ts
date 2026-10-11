@@ -62,11 +62,12 @@ describe("CreateFlowDialog", () => {
           screen.getByRole("button", { name: new RegExp(m.flow_create_path_manual_title()) })
         );
         await fireEvent.input(screen.getByLabelText(m.name()), { target: { value: "Case flow" } });
-        // Mutant: bypass the Flow mapper and show coded backend text at this actual caller.
+        // Mutant: bypass the Flow mapper and show the server's text at this actual caller.
+        // An error without a sentence of its own gets the general one, never "Backend detail".
         for (const [code, expected] of [
+          [null, m.request_failed()],
           ["flow_run_stale_version", m.flow_error_flow_run_stale_version()],
-          ["unmapped_test_code", "Backend detail"],
-          [null, m.request_failed()]
+          ["unmapped_test_code", m.request_failed()]
         ] as const) {
           createFlow.mockRejectedValueOnce(
             code === null
@@ -79,6 +80,7 @@ describe("CreateFlowDialog", () => {
             })
           );
           await vi.waitFor(() => expect(screen.getByText(expected)).toBeTruthy());
+          expect(screen.queryByText("Backend detail")).toBeNull();
         }
         expect(goto).not.toHaveBeenCalled();
       } finally {

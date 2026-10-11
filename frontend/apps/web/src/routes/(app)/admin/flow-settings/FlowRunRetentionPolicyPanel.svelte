@@ -1,4 +1,6 @@
 <script lang="ts">
+  import { retentionDays } from "$lib/features/flows/flowRunRetentionPolicy";
+  import { countMessage } from "$lib/features/flows/flowCount";
   import type {
     FlowRetentionHoldPage,
     FlowRunRetentionFlowTarget,
@@ -518,7 +520,11 @@
         {:else}
           <div class="flex flex-wrap items-center justify-between gap-3">
             <Badge variant="secondary">
-              {m.flow_run_retention_review_queue_count({ count: reviewQueue.count })}
+              {countMessage(
+                reviewQueue.count,
+                m.flow_run_retention_review_queue_count_one,
+                m.flow_run_retention_review_queue_count
+              )}
             </Badge>
             <Button
               type="button"
@@ -567,8 +573,7 @@
                       <Table.Cell>
                         <div class="min-w-40 text-sm">
                           <p class="text-primary">
-                            {item.effective_policy.days}
-                            {m.flow_retention_days_suffix()} ·
+                            {retentionDays(item.effective_policy.days)} ·
                             {policyModeLabel(item.effective_policy.mode)}
                           </p>
                           <p class="text-secondary text-xs">

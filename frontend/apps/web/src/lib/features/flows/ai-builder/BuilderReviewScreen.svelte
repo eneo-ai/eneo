@@ -24,10 +24,11 @@
   import { getAIBuilderService } from "./FlowAIBuilderService.svelte.ts";
   import { describeFailure, type FailureAction } from "./aiBuilderFailurePresentation";
   import { fieldTypeLabel } from "./aiBuilderSummaryText";
-  import { aiBuilderErrorText } from "./aiBuilderError";
+  import { aiBuilderErrorCopy } from "./aiBuilderError";
   import {
     advisoryStepRef,
     advisoryText,
+    attachmentWarningText,
     flowNoteText,
     lintWarningText
   } from "./builderAdvisoryText";
@@ -275,14 +276,14 @@
           {
             key: "unchanged",
             count: stepChangeCounts.unchanged,
-            tone: "bg-border-stronger",
+            tone: "bg-[var(--border-stronger)]",
             one: m.ai_builder_diff_unchanged_one,
             other: m.ai_builder_diff_unchanged
           },
           {
             key: "removed",
             count: stepChangeCounts.removed,
-            tone: "bg-border-stronger",
+            tone: "bg-[var(--border-stronger)]",
             one: m.ai_builder_diff_removed_one,
             other: m.ai_builder_diff_removed
           }
@@ -763,9 +764,10 @@
   );
   const createFailed = $derived(isGeneralApplyError && isCreateMode);
   const createOutcomeUnknown = $derived(createFailed && service.createFailureOutcome === "unknown");
-  // The code's words, or which operation failed; never the server's prose.
-  const generalApplyErrorMessage = $derived(
-    service.applyError ? aiBuilderErrorText(service.applyError) : ""
+  // The code's own words; never the server's prose. Without them the card's
+  // heading already says what failed, so the body only says what to do.
+  const applyErrorOwnWords = $derived(
+    service.applyError ? aiBuilderErrorCopy(service.applyError) : null
   );
   // "Steg: 1 skapat och 2 uppdaterade.": only what happened, in agreement.
   const appliedCountsLine = $derived.by(() => {
@@ -1235,9 +1237,11 @@
             <p class="text-warning-stronger text-[0.8125rem] font-semibold">
               {m.ai_builder_reference_material()}
             </p>
-            <p class="text-warning-stronger/80 mt-0.5 text-xs leading-relaxed">
-              {attachmentWarnings[0]}
-            </p>
+            {#each attachmentWarnings as warning (warning.code)}
+              <p class="text-warning-stronger/80 mt-0.5 text-xs leading-relaxed">
+                {attachmentWarningText(warning)}
+              </p>
+            {/each}
           </div>
         {/if}
 
@@ -1426,7 +1430,7 @@
                     </h3>
                     {#if descriptionDiff}
                       <p
-                        class="text-secondary decoration-stronger text-[0.8125rem] leading-relaxed break-words line-through"
+                        class="text-secondary text-[0.8125rem] leading-relaxed break-words line-through"
                         aria-label={m.ai_builder_description_current()}
                       >
                         {descriptionDiff.previous}
@@ -1866,9 +1870,11 @@
                           {m.ai_builder_published_flow_title()}
                         </p>
                         <p class="text-warning-stronger/80 mt-0.5 text-xs leading-relaxed">
-                          {m.ai_builder_published_flow_description({
-                            version: String(publishedVersion ?? "")
-                          })}
+                          {publishedVersion == null
+                            ? m.ai_builder_published_flow_description_no_version()
+                            : m.ai_builder_published_flow_description({
+                                version: String(publishedVersion)
+                              })}
                         </p>
                         <div class="mt-2.5 flex flex-wrap gap-2">
                           <Button
@@ -1877,8 +1883,8 @@
                             onclick={() => (unpublishDialogOpen = true)}
                           >
                             {service.pendingOperationKind === "unpublishing"
-                              ? m.ai_builder_applying()
-                              : m.ai_builder_published_flow_unpublish()}
+                              ? m.ai_builder_updating_flow()
+                              : m.ai_builder_unpublish_confirm_action()}
                           </Button>
                           <Button
                             variant="outline"
@@ -1905,9 +1911,11 @@
                           {m.ai_builder_unpublished_apply_failed_title()}
                         </p>
                         <p class="text-warning-stronger/80 mt-0.5 text-xs leading-relaxed">
-                          {m.ai_builder_unpublished_apply_failed_body({
-                            message: generalApplyErrorMessage
-                          })}
+                          {applyErrorOwnWords
+                            ? m.ai_builder_unpublished_apply_failed_body({
+                                message: applyErrorOwnWords
+                              })
+                            : m.ai_builder_unpublished_apply_failed_body_plain()}
                         </p>
                         <div class="mt-2.5 flex flex-wrap gap-2">
                           <Button
@@ -1948,11 +1956,6 @@
                             {m.ai_builder_create_failed_retry_note()}
                           {/if}
                         </p>
-                        {#if !createOutcomeUnknown}
-                          <p class="text-warning-stronger/80 mt-1 text-xs">
-                            {m.ai_builder_plan_unchanged()}
-                          </p>
-                        {/if}
                         <div class="mt-2.5 flex flex-wrap gap-2">
                           <FlowAIBuilderDiagnosticCopyButton
                             report={applyErrorDiagnosticReport}
@@ -1970,9 +1973,7 @@
                           {m.ai_builder_apply_failed_title()}
                         </p>
                         <p class="text-warning-stronger/80 mt-0.5 text-xs leading-relaxed">
-                          {m.ai_builder_apply_failed_description({
-                            message: generalApplyErrorMessage
-                          })}
+                          {applyErrorOwnWords ?? m.ai_builder_apply_failed_retry()}
                         </p>
                         <div class="mt-2.5 flex flex-wrap gap-2">
                           <Button
@@ -2270,8 +2271,8 @@
             {/if}
           {:else if service.canApprove || service.canApply || service.pendingOperationKind === "approving" || service.pendingOperationKind === "applying"}
             <!-- Approving and applying are one decision for the reader: the
-                 dialog confirms it and runs both. "Tillämpa" remains for a plan
-                 approved earlier whose apply did not go through. -->
+                 dialog confirms it and runs both. "Skriv in ändringarna" remains
+                 for a plan approved earlier whose apply did not go through. -->
             <Button
               size="lg"
               class="px-4 max-sm:min-h-11"
@@ -2426,7 +2427,7 @@
       {progressStatusLabel(service.statusMessage)}
     </p>
     <p class="text-secondary mt-1 max-w-[28ch] text-xs leading-relaxed text-pretty">
-      {m.ai_builder_wait_expectation()}
+      {m.ai_builder_build_subtitle()}
     </p>
   </div>
 {:else}

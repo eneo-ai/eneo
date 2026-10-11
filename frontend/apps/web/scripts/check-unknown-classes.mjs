@@ -23,6 +23,8 @@ const NOT_CLASSES = new Set([
   "stroke-width",
   "stroke-linecap",
   "stroke-linejoin",
+  "stroke-dasharray",
+  "style:text-decoration-color",
   "fill-rule",
   "clip-rule",
   "text-field",

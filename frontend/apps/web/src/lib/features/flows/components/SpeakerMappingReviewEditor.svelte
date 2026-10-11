@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { countMessage } from "$lib/features/flows/flowCount";
   import { SvelteSet } from "svelte/reactivity";
   import ChevronRight from "@lucide/svelte/icons/chevron-right";
   import IconHeadphones from "@lucide/svelte/icons/headphones";
@@ -89,7 +90,11 @@
             )}
         />
         <p class="text-secondary mt-1 text-xs">
-          {m.flow_transcript_editor_lines({ count: row.lineCount })} · {row.name
+          {countMessage(
+            row.lineCount,
+            m.flow_transcript_editor_lines_one,
+            m.flow_transcript_editor_lines
+          )} · {row.name
             ? m.flow_transcript_editor_confidence({
                 confidence:
                   row.confidence === "high"

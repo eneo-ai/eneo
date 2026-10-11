@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { retentionDays } from "$lib/features/flows/flowRunRetentionPolicy";
   import { untrack } from "svelte";
   import { formatRecordingLength } from "$lib/features/audio/recordingLimits";
   import { beforeNavigate } from "$app/navigation";
@@ -205,7 +206,10 @@
     if (days == null) {
       return { active: false, label: m.flow_retention_status_no_upload_window() };
     }
-    return { active: true, label: m.flow_retention_status_upload_eligible_days({ days }) };
+    return {
+      active: true,
+      label: m.flow_retention_status_upload_eligible_days({ days: retentionDays(days) })
+    };
   });
 
   // "45 s", "20 min" or "7 h 59 min": whole units, as the rest of the page says time.
@@ -232,7 +236,7 @@
   );
 
   function formatStorage(value: number | null | undefined): string {
-    if (value == null) return m.flow_knowledge_evidence_default_hint();
+    if (value == null) return m.flow_input_limits_deployment_default_hint();
     if (value >= 1024 * MB) return `${Number((value / (1024 * MB)).toFixed(1))} GiB`;
     if (value >= MB) return `${Number((value / MB).toFixed(1))} MiB`;
     if (value >= KB) return `${Number((value / KB).toFixed(1))} KiB`;
@@ -788,8 +792,8 @@
           <Settings.NumberRow
             title={m.flow_knowledge_evidence_sources_title()}
             description={m.flow_knowledge_evidence_sources_description()}
-            placeholder={m.flow_knowledge_evidence_default_hint()}
-            hint={m.flow_knowledge_evidence_ceiling_hint({
+            placeholder={m.flow_input_limits_deployment_default_hint()}
+            hint={m.flow_input_limits_ceiling_hint({
               ceiling: String(EVIDENCE_MAX_SOURCES)
             })}
             field={evidenceSources}
@@ -797,8 +801,8 @@
           <Settings.NumberRow
             title={m.flow_knowledge_evidence_passages_per_source_title()}
             description={m.flow_knowledge_evidence_passages_per_source_description()}
-            placeholder={m.flow_knowledge_evidence_default_hint()}
-            hint={m.flow_knowledge_evidence_ceiling_hint({
+            placeholder={m.flow_input_limits_deployment_default_hint()}
+            hint={m.flow_input_limits_ceiling_hint({
               ceiling: String(EVIDENCE_MAX_PASSAGES)
             })}
             field={evidencePassages}
@@ -806,9 +810,9 @@
           <Settings.NumberRow
             title={m.flow_knowledge_evidence_passage_bytes_title()}
             description={m.flow_knowledge_evidence_passage_bytes_description()}
-            placeholder={m.flow_knowledge_evidence_default_hint()}
+            placeholder={m.flow_input_limits_deployment_default_hint()}
             unit="KiB"
-            hint={m.flow_knowledge_evidence_ceiling_bytes_hint({
+            hint={m.flow_input_limits_ceiling_hint({
               ceiling: `${EVIDENCE_MAX_PASSAGE_BYTES / KB} KiB`
             })}
             field={evidencePassageSize}
@@ -816,9 +820,9 @@
           <Settings.NumberRow
             title={m.flow_knowledge_evidence_step_bytes_title()}
             description={m.flow_knowledge_evidence_step_bytes_description()}
-            placeholder={m.flow_knowledge_evidence_default_hint()}
+            placeholder={m.flow_input_limits_deployment_default_hint()}
             unit="KiB"
-            hint={m.flow_knowledge_evidence_ceiling_bytes_hint({
+            hint={m.flow_input_limits_ceiling_hint({
               ceiling: `${EVIDENCE_MAX_STEP_BYTES / MB} MiB`
             })}
             field={evidenceStepSize}

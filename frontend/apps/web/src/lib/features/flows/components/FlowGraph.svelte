@@ -524,7 +524,7 @@
 
     const rawTitle = flow.name ?? "";
     const legendLabel = spec.hasBulkEdges ? m.flow_graph_legend_all_previous() : null;
-    const caption = m.flow_graph_export_caption();
+    const caption = m.flow_graph_order_hint();
     const keyWidth = font * 1.6;
     measure.font = titleFont;
     const titleWidth = measure.measureText(rawTitle).width;

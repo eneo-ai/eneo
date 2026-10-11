@@ -1,4 +1,5 @@
 import { getLocale } from "$lib/paraglide/runtime";
+import { m } from "$lib/paraglide/messages";
 import type {
   FlowGraph,
   FlowGraphNode,
@@ -80,7 +81,7 @@ export function buildFlowRunProgressSnapshot(
       live.status !== node.run_status;
     viewSteps.push({
       stepOrder: node.step_order,
-      label: node.label || `Step ${node.step_order}`,
+      label: node.label || m.flow_step_fallback_label({ order: String(node.step_order) }),
       status: statusOverlay
         ? (node.run_status ?? live?.status ?? "pending")
         : (live?.status ?? node.run_status ?? "pending"),
@@ -113,7 +114,7 @@ export function buildFlowRunProgressSnapshot(
     if (knownOrders.has(live.step_order)) continue;
     viewSteps.push({
       stepOrder: live.step_order,
-      label: `Step ${live.step_order}`,
+      label: m.flow_step_fallback_label({ order: String(live.step_order) }),
       status: live.status,
       errorMessage: live.error_message ?? null,
       errorCode: live.error_code ?? null,

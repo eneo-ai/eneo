@@ -4,6 +4,7 @@ import { getAddedItems, getRemovedItems } from "./getChangedItems";
 import { getDiff, type CompareOptions, type Diff } from "./getDiff";
 import { applyDefaults, type AppliedDefaults, type Defaults } from "./applyDefaults";
 import { toastError } from "$lib/core/errors";
+import { toast } from "$lib/components/toast";
 
 type Resource = Record<string, unknown> & { id: string };
 
@@ -47,6 +48,12 @@ export function createResourceEditor<T extends Resource, Defs extends Defaults<T
    * and this handled flag in its result.
    */
   onSaveError?: (error: unknown) => boolean;
+  /**
+   * The sentence for a failed save that `onSaveError` did not surface. Defaults
+   * to the shared error mapping; a feature with its own error vocabulary
+   * supplies it so the toast stays in the reader's language.
+   */
+  saveErrorMessage?: (error: unknown) => string;
   /**
    * Decides, when a queued save actually runs, whether the current state may
    * be persisted. Validation done when the save was queued can be stale by
@@ -168,7 +175,11 @@ export function createResourceEditor<T extends Resource, Defs extends Defaults<T
     } catch (e) {
       const handled = data.onSaveError?.(e) === true;
       if (!handled) {
-        toastError(e);
+        if (data.saveErrorMessage) {
+          toast.error(data.saveErrorMessage(e));
+        } else {
+          toastError(e);
+        }
       }
       return { saved: false, error: e, handled };
     } finally {

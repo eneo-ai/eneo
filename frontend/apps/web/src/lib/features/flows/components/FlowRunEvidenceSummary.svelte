@@ -18,6 +18,7 @@
   let {
     runStatus,
     traceId = null,
+    runId = null,
     redactionApplied = false,
     tokenUsage = null,
     transcriptionUsage = null,
@@ -26,6 +27,8 @@
   }: {
     runStatus: FlowRunSummary["status"];
     traceId?: string | null;
+    /** The run's own ID, for the views that hand it out (Advanced); others omit it. */
+    runId?: string | null;
     redactionApplied?: boolean;
     tokenUsage?: FlowRunTokenUsage | null;
     transcriptionUsage?: FlowRunTranscriptionUsage | null;
@@ -37,25 +40,64 @@
   // The row that was expanded already states the run's status, so a card
   // carrying nothing else would only repeat it.
   const hasRunDetail = $derived(
-    Boolean(tokenUsage || transcriptionUsage || traceId || redactionApplied)
+    Boolean(tokenUsage || transcriptionUsage || traceId || runId || redactionApplied)
   );
   const showResultFiles = $derived(resultFiles.length > 0 && onDownloadResultFile !== undefined);
-  let traceCopied = $state(false);
-  let traceCopiedTimer: ReturnType<typeof setTimeout> | null = null;
+  type CopiedIdentifier = "trace" | "run";
+  let copiedIdentifier = $state<CopiedIdentifier | null>(null);
+  let copiedTimer: ReturnType<typeof setTimeout> | null = null;
 
-  async function copyTraceId() {
-    if (!traceId) return;
+  async function copyIdentifier(kind: CopiedIdentifier, value: string | null) {
+    if (!value) return;
     try {
-      await navigator.clipboard.writeText(traceId);
-      traceCopied = true;
-      if (traceCopiedTimer) clearTimeout(traceCopiedTimer);
-      traceCopiedTimer = setTimeout(() => (traceCopied = false), 1600);
+      await navigator.clipboard.writeText(value);
+      copiedIdentifier = kind;
+      if (copiedTimer) clearTimeout(copiedTimer);
+      copiedTimer = setTimeout(() => (copiedIdentifier = null), 1600);
     } catch (error) {
-      console.error("Could not copy the trace id", error);
+      console.error("Could not copy the identifier", error);
       toast.error(m.flow_run_copy_failed());
     }
   }
 </script>
+
+<!-- A full identifier is support material, not something a municipal user
+     reads: a 36-character UUID dominated a row of human facts. The badge shows
+     the short form and copies the whole value, so a touch user who never sees a
+     tooltip can still hand it over. The badge's own text changing is invisible
+     to a screen reader, so a live region announces the same confirmation. -->
+{#snippet identifier(item: {
+  kind: CopiedIdentifier;
+  value: string;
+  label: string;
+  tooltip: string;
+  copyLabel: string;
+  copiedLabel: string;
+})}
+  <span class="sr-only" role="status" aria-live="polite">
+    {copiedIdentifier === item.kind ? item.copiedLabel : ""}
+  </span>
+  <Tooltip.Provider delayDuration={150}>
+    <Tooltip.Root>
+      <Tooltip.Trigger
+        onclick={() => copyIdentifier(item.kind, item.value)}
+        aria-label={item.copyLabel}
+        class="focus-visible:ring-ring rounded-full focus-visible:ring-2 focus-visible:outline-none"
+      >
+        <Badge variant="outline" class="font-mono text-xs">
+          {copiedIdentifier === item.kind
+            ? item.copiedLabel
+            : `${item.label}: ${item.value.slice(0, 8)}…`}
+        </Badge>
+      </Tooltip.Trigger>
+      <Tooltip.Content class="max-w-xs">
+        <span class="block">{item.tooltip}</span>
+        <span class="mt-1 block font-mono break-all">{item.value}</span>
+        <span class="text-muted mt-1 block">{item.copyLabel}</span>
+      </Tooltip.Content>
+    </Tooltip.Root>
+  </Tooltip.Provider>
+{/snippet}
 
 {#if hasRunDetail || showResultFiles}
   <Card.Root>
@@ -69,35 +111,24 @@
           <FlowRunTranscriptionUsageBadge {transcriptionUsage} />
         {/if}
         {#if traceId}
-          <!-- The badge's own text changing is invisible to a screen reader: the live
-           region announces the same confirmation. -->
-          <span class="sr-only" role="status" aria-live="polite">
-            {traceCopied ? m.flow_run_evidence_trace_id_copied() : ""}
-          </span>
-          <Tooltip.Provider delayDuration={150}>
-            <Tooltip.Root>
-              <!-- The full identifier is support material, not something a municipal
-               user reads: a 36-character UUID dominated a row of human facts. The
-               badge shows the short form and copies the whole value, so a touch
-               user who never sees a tooltip can still hand it to support. -->
-              <Tooltip.Trigger
-                onclick={copyTraceId}
-                aria-label={m.flow_run_evidence_trace_id_copy()}
-                class="focus-visible:ring-ring rounded-full focus-visible:ring-2 focus-visible:outline-none"
-              >
-                <Badge variant="outline" class="font-mono text-xs">
-                  {traceCopied
-                    ? m.flow_run_evidence_trace_id_copied()
-                    : `${m.flow_run_evidence_trace_id()}: ${traceId.slice(0, 8)}…`}
-                </Badge>
-              </Tooltip.Trigger>
-              <Tooltip.Content class="max-w-xs">
-                <span class="block">{m.flow_run_evidence_trace_id_tooltip()}</span>
-                <span class="mt-1 block font-mono break-all">{traceId}</span>
-                <span class="text-muted mt-1 block">{m.flow_run_evidence_trace_id_copy()}</span>
-              </Tooltip.Content>
-            </Tooltip.Root>
-          </Tooltip.Provider>
+          {@render identifier({
+            kind: "trace",
+            value: traceId,
+            label: m.flow_run_evidence_trace_id(),
+            tooltip: m.flow_run_evidence_trace_id_tooltip(),
+            copyLabel: m.flow_run_evidence_trace_id_copy(),
+            copiedLabel: m.flow_run_evidence_trace_id_copied()
+          })}
+        {/if}
+        {#if runId}
+          {@render identifier({
+            kind: "run",
+            value: runId,
+            label: m.flow_run_evidence_run_id(),
+            tooltip: m.flow_run_evidence_run_id_tooltip(),
+            copyLabel: m.flow_run_evidence_run_id_copy(),
+            copiedLabel: m.flow_run_evidence_run_id_copied()
+          })}
         {/if}
         {#if redactionApplied}
           <Tooltip.Provider delayDuration={150}>

@@ -37,15 +37,13 @@
   );
 
   // The server writes the retained sentence from the reference (the step's
-  // number); the screen sends the same sentence so what the user saw sent is
-  // what the conversation keeps. The step's name stays on this screen.
+  // number), one sentence for every kind of failure; the screen sends the same
+  // sentence so what the user saw sent is what the conversation keeps. The
+  // step's name, and what kind of failure it was, stay on this screen.
   function prepare() {
     if (!launch) return;
     onprepare({
-      // A cut-off answer is fixed by making room, not by following a format.
-      message: truncated
-        ? m.ai_builder_repair_message_truncated({ step: String(launch.step_number) })
-        : m.ai_builder_repair_message({ step: String(launch.step_number) }),
+      message: m.ai_builder_repair_message({ step: String(launch.step_number) }),
       reviewContext: launch.reference
     });
   }

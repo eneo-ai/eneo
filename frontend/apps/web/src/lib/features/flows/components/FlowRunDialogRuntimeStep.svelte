@@ -631,7 +631,7 @@
           <Alert.Root
             class="border-warning-default/30 bg-warning-dimmer/60 text-warning-stronger mt-4"
           >
-            <Alert.Title>{m.recording_last_clip_ready()}</Alert.Title>
+            <Alert.Title>{m.recording_upload_failed_title()}</Alert.Title>
             <Alert.Description class="text-warning-stronger/90">
               {m.recording_upload_failed_preserved()}
             </Alert.Description>

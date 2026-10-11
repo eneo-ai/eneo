@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { countMessage } from "$lib/features/flows/flowCount";
   import type {
     FlowRunReviewCheckpoint,
     FlowRunReviewCheckpointEdit,
@@ -295,9 +296,8 @@
     if (item.edited_by_user_id && item.edited_by_user_id === currentUserId) {
       return m.flow_run_review_history_editor_you();
     }
-    return m.flow_run_review_history_editor_user({
-      id: item.edited_by_user_id?.slice(0, 8) ?? item.edited_by_service_id?.slice(0, 8) ?? "?"
-    });
+    // The API gives no name for another person, and a piece of an id names nobody.
+    return m.flow_run_review_history_editor_other();
   }
 
   async function loadCurrentUser() {
@@ -413,7 +413,7 @@
   function getCheckpointStateLabel(state: FlowRunReviewCheckpoint["state"]): string {
     switch (state) {
       case "awaiting_review":
-        return m.flow_run_review_state_awaiting_review();
+        return m.flow_run_status_awaiting_review();
       case "edited":
         return m.flow_run_review_state_edited();
       case "approved":
@@ -699,9 +699,13 @@
             <Alert.Root variant="destructive">
               <Alert.Description class="text-xs">
                 {correctionsController.error}
-                <p>
-                  {m.flow_transcript_editor_draft_preserved()}
-                </p>
+                <!-- Only a failed save leaves corrections on the page; a failed
+                     first load has none to speak of. -->
+                {#if correctionsController.ready}
+                  <p>
+                    {m.flow_transcript_editor_draft_preserved()}
+                  </p>
+                {/if}
                 <span class="mt-2 flex flex-wrap gap-4">
                   <Button
                     variant="link"
@@ -727,9 +731,11 @@
           {#if correctionsController && correctionsController.staleCount > 0}
             <Alert.Root>
               <Alert.Description class="text-xs">
-                {m.flow_run_transcript_corrections_stale({
-                  count: String(correctionsController.staleCount)
-                })}
+                {countMessage(
+                  correctionsController.staleCount,
+                  m.flow_run_transcript_corrections_stale_one,
+                  m.flow_run_transcript_corrections_stale
+                )}
               </Alert.Description>
             </Alert.Root>
           {/if}

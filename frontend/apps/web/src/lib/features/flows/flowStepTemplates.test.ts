@@ -9,9 +9,11 @@ import {
 } from "./flowStepTemplates";
 import {
   getFlowStepValidationIssues,
+  getOutputModeCompatibilityIssue,
   mapOutputToInputType,
   type FlowStepLike
 } from "./flowStepTypes";
+import { buildBlankStep } from "./flowStepPayloadShaping";
 
 describe("getRecommendedTemplates", () => {
   it("recommends content templates and defers the JSON renderer when the previous output is text", () => {
@@ -139,6 +141,55 @@ describe("configured templates produce valid steps at every insertion position",
 
         expect(getFlowStepValidationIssues(steps)).toHaveLength(0);
       });
+
+      // The structural check above does not look at the output mode. This one builds the
+      // step the way FlowEditor.addStep does and asks the editor's own compatibility rule.
+      it(`${template.id} after ${previousOutput ?? "no"} previous output has a mode Eneo accepts`, () => {
+        const seed = templateToAddStepOptions(template)!;
+        const step = buildBlankStep({
+          tempId: "_temp_1",
+          stepOrder: previousOutput === null ? 1 : 2,
+          name: seed.name ?? "",
+          isFirst: previousOutput === null,
+          prevStepOutputType: previousOutput ?? undefined,
+          outputMode: seed.output_mode,
+          outputType: seed.output_type
+        });
+
+        expect(
+          getOutputModeCompatibilityIssue({
+            input_type: step.input_type!,
+            output_type: step.output_type!,
+            output_mode: step.output_mode!
+          })
+        ).toBeNull();
+      });
     }
   }
+});
+
+describe("the document template", () => {
+  const document = FLOW_STEP_TEMPLATES.find((t) => t.id === "document")!;
+
+  function createdFrom(previousOutput: FlowStep["output_type"] | null) {
+    const seed = resolveTemplateSeed(document, "pdf")!;
+    return buildBlankStep({
+      tempId: "_temp_1",
+      stepOrder: previousOutput === null ? 1 : 2,
+      name: seed.name ?? "",
+      isFirst: previousOutput === null,
+      prevStepOutputType: previousOutput ?? undefined,
+      outputMode: seed.output_mode,
+      outputType: seed.output_type
+    });
+  }
+
+  it("turns text into the document as it is, because an AI step cannot write the file", () => {
+    expect(createdFrom(null).output_mode).toBe("render_verbatim");
+    expect(createdFrom("text").output_mode).toBe("render_verbatim");
+  });
+
+  it("lets the AI write the document when the step reads structured data", () => {
+    expect(createdFrom("json").output_mode).toBe("pass_through");
+  });
 });

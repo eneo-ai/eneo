@@ -24,6 +24,7 @@ const CODE_TO_MESSAGE: Record<string, () => string> = {
   output_mode_incompatible: () => m.flow_validation_msg_output_mode_incompatible(),
   "deleted-step-reference": () => m.flow_validation_msg_deleted_step_reference(),
   assistant_save_failed: () => m.flow_validation_msg_assistant_save_failed(),
+  http_missing_url: () => m.flow_validation_msg_http_missing_url(),
   // Server-side step-graph issue codes (FlowGraphIssueCode) that authoring
   // can trigger; the raw technical sentence stays available as detail.
   flow_http_post_output_must_be_terminal: () => m.flow_validation_msg_http_post_not_terminal(),
@@ -56,6 +57,16 @@ const CODE_TO_MESSAGE: Record<string, () => string> = {
     m.flow_validation_msg_speaker_service_choice_required(),
   flow_speaker_service_unavailable: () => m.flow_validation_msg_speaker_service_unavailable(),
   flow_step_limit_exceeded: () => m.flow_error_flow_step_limit_exceeded(),
+  // The server names three of the editor's own checks differently.
+  duplicate_step_order: () => m.flow_validation_msg_duplicate_step_order(),
+  step_order_not_contiguous: () => m.flow_validation_msg_non_contiguous_step_order(),
+  unsupported_input_type: () => m.flow_validation_msg_unsupported_type(),
+  input_contract_type_mismatch: () => m.flow_validation_msg_input_contract_inapplicable(),
+  input_contract_source_mismatch: () => m.flow_validation_msg_input_contract_source_mismatch(),
+  audio_document_transcript_chain_invalid: () =>
+    m.flow_validation_msg_audio_document_chain_invalid(),
+  flow_audio_transcription_invalid: () => m.flow_validation_msg_audio_transcription_invalid(),
+  flow_has_no_steps: () => m.flow_publish_blocked_no_steps(),
   // The security-classification refusals a save raises. Their facts, when the
   // server sends them, turn this generic sentence into an actionable one
   // (describeClassificationRefusal).

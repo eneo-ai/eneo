@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { retentionDays } from "$lib/features/flows/flowRunRetentionPolicy";
   import type {
     FlowRunRetentionMode,
     FlowRunRetentionPolicy,
@@ -109,7 +110,7 @@
       return {
         level,
         name: bareScopeLabel(level),
-        value: own ? `${own.days} ${m.flow_retention_days_suffix()}` : null,
+        value: own ? retentionDays(own.days) : null,
         wins: settings.effective.state !== "off" && settings.effective.source === level
       };
     });
@@ -126,7 +127,7 @@
       return m.flow_run_retention_effective_off();
     }
     return m.flow_run_retention_effective_configured({
-      days: settings.effective.effective_days,
+      days: retentionDays(settings.effective.effective_days),
       mode: choiceLabel(settings.effective.mode),
       source: sourceLabel(settings.effective.source)
     });

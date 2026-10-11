@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { countMessage } from "$lib/features/flows/flowCount";
   import type { FlowRunDebugRagReference, Eneo } from "@eneo/eneo-js";
   import { IconChevronRight } from "@eneo/icons/chevron-right";
   import { m } from "$lib/paraglide/messages";
@@ -90,9 +91,11 @@
                     matched: String(counts.matchedCount)
                   })}
                 {:else}
-                  {m.flow_run_knowledge_chunks_matched({
-                    count: String(counts.matchedCount)
-                  })}
+                  {countMessage(
+                    counts.matchedCount,
+                    m.flow_run_knowledge_chunks_matched_one,
+                    m.flow_run_knowledge_chunks_matched
+                  )}
                 {/if}
               </span>
               {#if callNumber !== null}

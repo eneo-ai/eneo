@@ -305,7 +305,9 @@ describe("legal holds section", () => {
     await dialog.getByRole("button", { name: "Lägg spärr" }).click();
 
     await expect
-      .element(dialog.getByText("Minst en körning tillhör inte flödet. Kontrollera id:na."))
+      .element(
+        dialog.getByText("Minst en körning tillhör inte flödet. Kontrollera körnings-ID:na.")
+      )
       .toBeVisible();
     expect(toastErrorMock).not.toHaveBeenCalled();
   });

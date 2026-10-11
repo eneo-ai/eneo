@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { retentionDays } from "$lib/features/flows/flowRunRetentionPolicy";
   import * as Alert from "$lib/components/ui/alert/index.js";
   import { Button } from "$lib/components/ui/button/index.js";
   import * as Dialog from "$lib/components/ui/dialog/index.js";
@@ -208,11 +209,11 @@
           />
           {#if attempted && !reviewValid}
             <Field.Error>
-              {m.flow_retention_hold_review_invalid({ days: maxReviewDays })}
+              {m.flow_retention_hold_review_invalid({ days: retentionDays(maxReviewDays) })}
             </Field.Error>
           {:else}
             <Field.Description>
-              {m.flow_retention_hold_review_description({ days: maxReviewDays })}
+              {m.flow_retention_hold_review_description({ days: retentionDays(maxReviewDays) })}
             </Field.Description>
           {/if}
         </Field.Field>

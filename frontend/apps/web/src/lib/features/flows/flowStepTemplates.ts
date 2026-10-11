@@ -166,8 +166,10 @@ export function filterTemplates(
 
 /**
  * Resolve a template plus the chosen document format into an add-step seed. The
- * document template can produce Word (docx) or PDF — both are pass_through
- * document renderers, no extra config. Other templates ignore the format.
+ * document template can produce Word (docx) or PDF, with no extra config. Whether
+ * the AI writes the document or the text is set as it is follows from what the
+ * step reads, and is decided where the step is created (`buildBlankStep`). Other
+ * templates ignore the format.
  */
 export function resolveTemplateSeed(
   template: FlowStepTemplate,

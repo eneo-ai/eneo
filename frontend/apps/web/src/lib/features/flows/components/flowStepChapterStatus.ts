@@ -1,3 +1,4 @@
+import { countMessage } from "$lib/features/flows/flowCount";
 import type { FlowStep, SecurityClassification } from "@eneo/eneo-js";
 import { getTextProcessingMode } from "$lib/features/flows/flowTextProcessingConfig";
 import { m } from "$lib/paraglide/messages";
@@ -30,11 +31,18 @@ export function getChapterOutputStatus(step: FlowStep, isAdvancedMode = true): s
   // How much the answer holds, in words: "6 fält" says more than "JSON".
   const answer = describeAnswerFields(step);
   if (answer.kind === "fields" && answer.fields.length > 0) {
-    const count = String(answer.fields.length);
     parts.push(
       answer.perSection
-        ? m.flow_chapter_output_fields_per_section({ count })
-        : m.flow_chapter_output_fields({ count })
+        ? countMessage(
+            answer.fields.length,
+            m.flow_chapter_output_fields_per_section_one,
+            m.flow_chapter_output_fields_per_section
+          )
+        : countMessage(
+            answer.fields.length,
+            m.flow_chapter_output_fields_one,
+            m.flow_chapter_output_fields
+          )
     );
   }
   // Processing with the AI is what almost every step does; only other modes
