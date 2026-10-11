@@ -252,9 +252,14 @@ describe("scanRecoverableSessionsForSteps", () => {
 });
 
 describe("purgeSession", () => {
-  it("calls eneo.files.delete for uploaded segments and removes the IDB entry", async () => {
+  it("deletes uploaded segments through the flow's own endpoint and removes the IDB entry", async () => {
     const deleteSpy = vi.fn(async () => undefined);
-    const eneo = { files: { delete: deleteSpy } } as unknown as Eneo;
+    // The general file route refuses a file a flow still holds.
+    const generalDelete = vi.fn(async () => undefined);
+    const eneo = {
+      files: { delete: generalDelete },
+      flows: { steps: { runtimeFiles: { delete: deleteSpy } } }
+    } as unknown as Eneo;
 
     await persistRecordingSegment({
       flowId: "flow-1",
@@ -278,17 +283,22 @@ describe("purgeSession", () => {
 
     await purgeSession({ eneo, flowId: "flow-1", stepId: "step-1", sessionId: "sess-A" });
 
-    expect(deleteSpy).toHaveBeenCalledWith({ fileId: "file-uploaded" });
+    expect(deleteSpy).toHaveBeenCalledWith({ id: "flow-1", fileId: "file-uploaded" });
+    expect(generalDelete).not.toHaveBeenCalled();
     const remaining = await recordingSessionStore.readSession("flow-1", "step-1", "sess-A");
     expect(remaining).toEqual([]);
   });
 
   it("swallows server delete errors and still drops the IDB entry", async () => {
     const eneo = {
-      files: {
-        delete: vi.fn(async () => {
-          throw new Error("boom");
-        })
+      flows: {
+        steps: {
+          runtimeFiles: {
+            delete: vi.fn(async () => {
+              throw new Error("boom");
+            })
+          }
+        }
       }
     } as unknown as Eneo;
     await persistRecordingSegment({

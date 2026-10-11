@@ -19,6 +19,7 @@ from eneo.database.tables.flow_tables import (
     FlowRuntimeUploadedFiles,
     FlowStepAttempts,
     FlowStepResults,
+    FlowVersionFileReferences,
 )
 from eneo.database.tables.roles_table import Roles
 from eneo.database.tables.users_table import users_roles_table
@@ -2764,6 +2765,64 @@ async def test_flow_runtime_file_delete_hides_other_principal_attached_file(
     )
     assert owner_delete_response.status_code == 409, owner_delete_response.text
     assert owner_delete_response.json()["code"] == "flow_runtime_file_attached"
+
+
+@pytest.mark.asyncio
+@pytest.mark.integration
+async def test_flow_runtime_file_delete_keeps_upload_another_resource_uses(
+    client,
+    db_container,
+    admin_token,
+    admin_user,
+):
+    space_id = await _create_space(client, token=admin_token)
+    flow = await _create_published_required_runtime_input_flow(
+        client,
+        token=admin_token,
+        space_id=space_id,
+    )
+    flow_id = flow["id"]
+    contract_response = await client.get(
+        f"/api/v1/flows/{flow_id}/run-contract/",
+        headers={"Authorization": f"Bearer {admin_token}"},
+    )
+    assert contract_response.status_code == 200, contract_response.text
+    required_step = contract_response.json()["steps_requiring_input"][0]
+    uploaded = await _upload_runtime_document(
+        client,
+        flow_id=flow_id,
+        step_id=required_step["step_id"],
+        headers={"Authorization": f"Bearer {admin_token}"},
+    )
+    file_id = UUID(uploaded["id"])
+    async with db_container() as container:
+        container.session().add(
+            FlowVersionFileReferences(
+                flow_id=UUID(flow_id),
+                version=flow["published_version"],
+                tenant_id=admin_user.tenant_id,
+                file_id=file_id,
+            )
+        )
+
+    delete_response = await client.delete(
+        f"/api/v1/flows/{flow_id}/runtime-files/{uploaded['id']}/",
+        headers={"Authorization": f"Bearer {admin_token}"},
+    )
+
+    assert delete_response.status_code == 409, delete_response.text
+    payload = delete_response.json()
+    assert payload["code"] == "file_in_use"
+    assert payload["details"]["blockers"] == [{"kind": "flow_version", "count": 1}]
+    # The refusal leaves the upload as it was: still bound to the flow.
+    async with db_container() as container:
+        assert (
+            await container.session().scalar(
+                sa.select(FlowRuntimeUploadedFiles.flow_id).where(
+                    FlowRuntimeUploadedFiles.file_id == file_id
+                )
+            )
+        ) == UUID(flow_id)
 
 
 @pytest.mark.asyncio

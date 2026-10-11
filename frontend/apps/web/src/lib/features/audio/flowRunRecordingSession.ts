@@ -262,7 +262,9 @@ export async function scanRecoverableSessionsForSteps(args: {
 }
 
 // Deletes server-side files for every uploaded segment of this session,
-// then drops the IDB ledger. A failed server delete is logged and does not
+// then drops the IDB ledger. The files are the flow's own uploads, so the
+// flow's endpoint removes them: the general file route refuses a file that a
+// flow still holds. A failed server delete is logged and does not
 // abort (the orphan janitor sweeps survivors within 24 h). Returns false
 // when the ledger could not be read or dropped: the session is still there
 // and discarding it can be tried again.
@@ -281,7 +283,10 @@ export async function purgeSession(args: {
     for (const record of records) {
       if (record.uploadedFileId) {
         try {
-          await args.eneo.files.delete({ fileId: record.uploadedFileId });
+          await args.eneo.flows.steps.runtimeFiles.delete({
+            id: args.flowId,
+            fileId: record.uploadedFileId
+          });
         } catch (error) {
           console.warn("flowRunRecordingSession.purgeSession: server file delete failed", {
             fileId: record.uploadedFileId,

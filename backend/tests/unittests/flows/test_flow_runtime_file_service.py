@@ -14,6 +14,12 @@ from fastapi.testclient import TestClient
 from sqlalchemy.exc import IntegrityError
 
 from eneo.files import audio, text
+from eneo.files.file_models import (
+    FileDeletionPreview,
+    FileInUseError,
+    FileUsageKind,
+    FileUsageSummary,
+)
 from eneo.files.file_protocol import FileProtocol
 from eneo.files.file_service import FileService
 from eneo.files.file_size_service import FileSizeService
@@ -106,7 +112,7 @@ def _user(*, tenant_id=None):
 def _runtime_upload_repo(*, session: _Session | None = None) -> AsyncMock:
     repo = AsyncMock()
     repo.session = session or _Session()
-    repo.exists_for_owner.return_value = True
+    repo.release_for_owner.return_value = True
     return repo
 
 
@@ -1648,7 +1654,7 @@ async def test_delete_runtime_file_hides_file_without_flow_upload_binding() -> N
     settings_service = AsyncMock()
     flow_version_repo = AsyncMock()
     runtime_upload_repo = _runtime_upload_repo()
-    runtime_upload_repo.exists_for_owner.return_value = False
+    runtime_upload_repo.release_for_owner.return_value = False
     flow = _flow(step=_step(step_order=1, input_type="audio"))
     file_id = uuid4()
     flow_service.get_flow.return_value = flow
@@ -1664,7 +1670,7 @@ async def test_delete_runtime_file_hides_file_without_flow_upload_binding() -> N
         await service.delete_runtime_file(flow_id=flow.id, file_id=file_id)
 
     assert exc_info.value.code == "not_found"
-    runtime_upload_repo.exists_for_owner.assert_awaited_once()
+    runtime_upload_repo.release_for_owner.assert_awaited_once()
     file_service.delete_file.assert_not_awaited()
 
 
@@ -1770,6 +1776,38 @@ async def test_delete_runtime_file_maps_asyncpg_attachment_message() -> None:
         file_service=file_service,
         settings_service=settings_service,
         flow_version_repo=flow_version_repo,
+    )
+
+    with pytest.raises(ConflictException) as exc_info:
+        await service.delete_runtime_file(flow_id=flow.id, file_id=file_id)
+
+    assert exc_info.value.code == "flow_runtime_file_attached"
+    assert exc_info.value.context == {
+        "flow_id": str(flow.id),
+        "file_id": str(file_id),
+    }
+
+
+@pytest.mark.asyncio
+async def test_delete_runtime_file_maps_remaining_run_use_to_attached() -> None:
+    flow_service = AsyncMock()
+    file_service = AsyncMock()
+    flow = _flow(step=_step(step_order=1, input_type="audio"))
+    file_id = uuid4()
+    flow_service.get_flow.return_value = flow
+    file_service.delete_file.side_effect = FileInUseError(
+        FileDeletionPreview(
+            file_id=file_id,
+            can_delete=False,
+            affected_file_count=1,
+            blockers=[FileUsageSummary(kind=FileUsageKind.FLOW_RUNTIME, count=1)],
+        )
+    )
+    service = _service(
+        flow_service=flow_service,
+        file_service=file_service,
+        settings_service=AsyncMock(),
+        flow_version_repo=AsyncMock(),
     )
 
     with pytest.raises(ConflictException) as exc_info:

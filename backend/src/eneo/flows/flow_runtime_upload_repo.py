@@ -49,7 +49,7 @@ class FlowRuntimeUploadRepository:
         )
         return {file_id: float(seconds) for file_id, seconds in rows}
 
-    async def exists_for_owner(
+    async def release_for_owner(
         self,
         *,
         file_id: UUID,
@@ -57,8 +57,14 @@ class FlowRuntimeUploadRepository:
         tenant_id: UUID,
         principal: FlowPrincipal,
     ) -> bool:
+        """Delete the owner's binding of an upload to a flow; False when there is none.
+
+        The row lock waits for a run that is attaching the file. A run that
+        already has it as an input refuses the delete through
+        ``fk_flow_run_step_input_files_runtime_upload``.
+        """
         stmt = (
-            sa.select(FlowRuntimeUploadedFiles.file_id)
+            sa.delete(FlowRuntimeUploadedFiles)
             .where(FlowRuntimeUploadedFiles.file_id == file_id)
             .where(FlowRuntimeUploadedFiles.flow_id == flow_id)
             .where(FlowRuntimeUploadedFiles.tenant_id == tenant_id)
@@ -75,7 +81,10 @@ class FlowRuntimeUploadRepository:
                 FlowRuntimeUploadedFiles.owner_service_id
                 == principal.principal_service_id
             )
-        return await self.session.scalar(stmt.limit(1)) is not None
+        released = await self.session.scalar(
+            stmt.returning(FlowRuntimeUploadedFiles.file_id)
+        )
+        return released is not None
 
     async def list_bound_file_ids_for_owner(
         self,

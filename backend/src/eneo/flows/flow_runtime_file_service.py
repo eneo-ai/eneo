@@ -21,7 +21,7 @@ from eneo.files.audio import (
     AudioMeasurementBusy,
     AudioUnreadableError,
 )
-from eneo.files.file_models import FileInfo
+from eneo.files.file_models import FileInfo, FileInUseError, FileUsageKind
 from eneo.files.file_service import FileService
 from eneo.files.mime_support import canonicalize_mime, canonicalize_sniffed_mime
 from eneo.files.text import PdfExtractionLimitExceeded, PdfExtractionLimits
@@ -273,30 +273,43 @@ class FlowRuntimeFileService:
             flow_id=flow_id,
             intent=FlowRuntimePublicationIntent.RUNTIME_DELETE,
         )
-        exists = await self.runtime_upload_repo.exists_for_owner(
-            file_id=file_id,
-            flow_id=published.flow_id,
-            tenant_id=self.user.tenant_id,
-            principal=self._principal(),
+        attached = ConflictException(
+            "Runtime file is already attached to a flow run.",
+            code=FlowApiErrorCode.RUNTIME_FILE_ATTACHED.value,
+            context={
+                "flow_id": str(published.flow_id),
+                "file_id": str(file_id),
+            },
         )
-        if not exists:
-            raise NotFoundException(code="not_found")
-
         try:
+            # The upload binding is this endpoint's own use of the file, and the
+            # shared file-use check counts it. Release it first, so the check
+            # answers for every other use; the caller's transaction restores the
+            # binding when the delete is refused.
+            released = await self.runtime_upload_repo.release_for_owner(
+                file_id=file_id,
+                flow_id=published.flow_id,
+                tenant_id=self.user.tenant_id,
+                principal=self._principal(),
+            )
+            if not released:
+                raise NotFoundException(code="not_found")
             return await self.file_service.delete_file(file_id)
         except NotFoundException as exc:
             raise NotFoundException(code="not_found") from exc
         except IntegrityError as exc:
+            # A run that has the file as an input refuses the release.
             if not is_runtime_file_attachment_integrity_error(exc):
                 raise
-            raise ConflictException(
-                "Runtime file is already attached to a flow run.",
-                code=FlowApiErrorCode.RUNTIME_FILE_ATTACHED.value,
-                context={
-                    "flow_id": str(published.flow_id),
-                    "file_id": str(file_id),
-                },
-            ) from exc
+            raise attached from exc
+        except FileInUseError as exc:
+            # With the binding released, a remaining flow-runtime use is run state.
+            if not any(
+                blocker.kind is FileUsageKind.FLOW_RUNTIME
+                for blocker in exc.preview.blockers
+            ):
+                raise
+            raise attached from exc
 
     async def _upload_with_policy(
         self,

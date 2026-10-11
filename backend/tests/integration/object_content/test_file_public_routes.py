@@ -176,6 +176,7 @@ async def test_used_file_delete_returns_the_typed_preview_before_mutation(
         "can_delete": False,
         "affected_file_count": 1,
         "blockers": [{"kind": "chat_attachment", "count": 1}],
+        "flow_versions": [],
     }
     preview = await client.get(
         f"/api/v1/files/{file_id}/deletion-preview/",
