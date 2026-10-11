@@ -209,12 +209,14 @@ class SessionAttachmentSnapshot:
 
 
 def _unreadable_attachments_warning(names: list[str]) -> AIBuilderAttachmentWarning:
+    # One name per file: a name is shown once, and every file that is not
+    # named, a second one of the same name included, is counted.
     unique_names = list(dict.fromkeys(name for name in names if name))
     shown = unique_names[:AI_BUILDER_ATTACHMENT_WARNING_MAX_NAMES]
     return AIBuilderAttachmentWarning(
         code="attachments_unreadable",
         file_names=shown,
-        more_count=len(unique_names) - len(shown),
+        more_count=len(names) - len(shown),
     )
 
 

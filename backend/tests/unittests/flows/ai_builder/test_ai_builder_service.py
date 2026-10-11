@@ -35,6 +35,7 @@ def _make_repo_mock() -> AsyncMock:
 
 import pytest
 from litellm.exceptions import BadRequestError, RateLimitError
+from pydantic import ValidationError
 
 from eneo.authentication.auth_models import ApiKeyPermission, ApiKeyScopeType
 from eneo.authentication.principal_types import PrincipalType
@@ -4050,6 +4051,90 @@ async def test_get_session_attachment_snapshot_warns_when_attached_file_has_no_r
     assert [(warning.code, warning.file_names) for warning in snapshot.warnings] == [
         ("attachments_unreadable", [unreadable_file.name])
     ]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("names", "shown", "more_count"),
+    [
+        # Two files may share a name: one name is shown, both files count.
+        (["scan.pdf", "scan.pdf"], ["scan.pdf"], 1),
+        (["scan.pdf"] * 6, ["scan.pdf"], 5),
+        (
+            [f"scan-{number}.pdf" for number in range(1, 8)],
+            [f"scan-{number}.pdf" for number in range(1, 6)],
+            2,
+        ),
+    ],
+)
+async def test_an_unreadable_attachment_warning_counts_every_file_it_does_not_name(
+    names: list[str], shown: list[str], more_count: int
+) -> None:
+    user = _make_user()
+    repo = AsyncMock()
+    file_service = AsyncMock()
+    files = [
+        _make_file(
+            tenant_id=user.tenant_id,
+            owner_user_id=user.id,
+            name=name,
+            text=None,
+            blob=b"%PDF-1.7 unreadable",
+            mimetype="application/pdf",
+            file_type=FileType.DOCUMENT,
+        )
+        for name in names
+    ]
+    repo.list_session_file_ids.return_value = [file.id for file in files]
+    file_service.get_files_by_ids.return_value = files
+    service = AIBuilderService(
+        user=user,
+        repo=repo,
+        flow_service=AsyncMock(),
+        completion_service=AsyncMock(),
+        space_service=AsyncMock(),
+        template_asset_service=AsyncMock(),
+        file_service=file_service,
+    )
+
+    [warning] = (
+        await service.get_session_attachment_snapshot(session_id=uuid4())
+    ).warnings
+
+    assert warning.code == "attachments_unreadable"
+    assert warning.file_names == shown
+    assert warning.more_count == more_count
+    assert len(warning.file_names) + warning.more_count == len(files)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("read", ["get_plan", "list_session_plans"])
+async def test_a_stored_plan_with_mcp_fields_is_refused_with_a_reason_the_client_can_word(
+    read: str,
+) -> None:
+    user = _make_user()
+    repo = AsyncMock()
+    with pytest.raises(ValidationError) as stored_plan_error:
+        AssistantSpec.model_validate(
+            {"instructions": "Test", "mcp_tool_refs": ["mcp_tool.legacy"]}
+        )
+    getattr(repo, read).side_effect = stored_plan_error.value
+    service = AIBuilderService(
+        user=user,
+        repo=repo,
+        flow_service=AsyncMock(),
+        completion_service=AsyncMock(),
+        space_service=AsyncMock(),
+        template_asset_service=AsyncMock(),
+    )
+
+    with pytest.raises(AIBuilderBadRequestException) as refused:
+        await getattr(service, read)(uuid4())
+
+    # Reading this stored plan again cannot succeed: the reason lets the
+    # screen ask for a new plan without MCP instead of suggesting a retry.
+    assert refused.value.code == AIBuilderErrorCode.BAD_REQUEST
+    assert refused.value.context == {"reason": "plan_mcp_unsupported"}
 
 
 class TestSharedActorSessionIsolation:

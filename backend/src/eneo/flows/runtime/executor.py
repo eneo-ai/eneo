@@ -2072,7 +2072,8 @@ class FlowRunExecutor:
         state: RunExecutionState | None = None,
     ) -> dict[str, Any]:
         # A step that never calls a completion model sent no prompt, so its
-        # failed attempt records none either, like its completed result.
+        # failed result carries none, like its completed result. The attempt
+        # row keeps what was prepared when the attempt was activated.
         failed_prompt = (
             getattr(typed_exc, "effective_prompt", None)
             if step.may_call_completion_provider
