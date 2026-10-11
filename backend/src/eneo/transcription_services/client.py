@@ -533,9 +533,7 @@ def _job_result(body: dict[str, object]) -> TranscriptionJobResult:
     review = body.get("speaker_review")
     return TranscriptionJobResult(
         text=text,
-        duration_seconds=float(duration)
-        if isinstance(duration, (int, float))
-        else None,
+        duration_seconds=_finite_number(duration),
         model=model if isinstance(model, str) else None,
         language=language if isinstance(language, str) else None,
         alignment=alignment if isinstance(alignment, str) else None,
@@ -627,7 +625,12 @@ def _parse_words(raw: object) -> tuple[TranscriptWord, ...] | None:
 def _finite_number(value: object) -> float | None:
     if isinstance(value, bool) or not isinstance(value, (int, float)):
         return None
-    return float(value) if math.isfinite(value) else None
+    try:
+        number = float(value)
+    except OverflowError:
+        # JSON integers are unbounded; one beyond float is no usable number.
+        return None
+    return number if math.isfinite(number) else None
 
 
 def _json_object(response: httpx.Response) -> dict[str, object]:

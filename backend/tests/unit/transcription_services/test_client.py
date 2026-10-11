@@ -384,6 +384,20 @@ async def test_job_result_parses_the_transcript_and_its_sidecar() -> None:
     )
 
 
+async def test_a_job_result_keeps_its_transcript_when_the_duration_is_no_number() -> (
+    None
+):
+    # Kills the mutant that reads duration_seconds with float(): an integer
+    # beyond float raises OverflowError and the finished job is lost.
+    body = {**RESULT_BODY, "duration_seconds": 10**400}
+    service = ScriptedService(result_responses=[httpx.Response(200, json=body)])
+
+    result = await make_client(service).get_job_result(JOB_ID)
+
+    assert result is not None
+    assert (result.text, result.duration_seconds) == (RESULT_BODY["text"], None)
+
+
 @pytest.mark.parametrize(
     "response, error",
     [
@@ -424,6 +438,7 @@ def test_result_segments_come_back_in_time_order(raw, expected) -> None:
         {"start": 1, "end": 2},
         {"start": float("nan"), "end": 2, "text": "bad"},
         {"start": 1, "end": float("inf"), "text": "bad"},
+        {"start": 10**400, "end": 2, "text": "bad"},
     ],
     ids=[
         "non_object",
@@ -432,6 +447,7 @@ def test_result_segments_come_back_in_time_order(raw, expected) -> None:
         "no_text",
         "nan_start",
         "infinite_end",
+        "integer_beyond_float_start",
     ],
 )
 def test_one_malformed_segment_drops_the_whole_sidecar(invalid) -> None:
