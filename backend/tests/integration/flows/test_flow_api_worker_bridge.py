@@ -136,8 +136,9 @@ async def test_public_flow_run_crosses_real_broker_and_worker(
     assert attempt["attempt_no"] == 1
     assert isinstance(attempt["dispatch_task_id"], str)
     assert attempt["finished_at"] is not None
-    assert attempt["requested_model"]
-    assert attempt["provider"]
+    # A compose-text step calls no completion model, so its attempt names none.
+    assert attempt["requested_model"] is None
+    assert attempt["provider"] is None
     assert attempt["provenance_json"] is None
 
     async with db_container() as container:

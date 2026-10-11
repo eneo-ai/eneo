@@ -2,6 +2,7 @@ import type { Eneo } from "@eneo/eneo-js";
 import { page } from "@vitest/browser/context";
 import { render } from "vitest-browser-svelte";
 import { describe, expect, it, vi } from "vitest";
+import { formatBytes } from "$lib/core/formatting/formatBytes";
 import { m } from "$lib/paraglide/messages";
 import type { AttachmentRules } from "../AttachmentManager";
 import AttachmentDropzoneTestHost from "./AttachmentDropzoneTestHost.svelte";
@@ -78,7 +79,11 @@ describe("AttachmentDropzone", () => {
     await expect
       .element(
         page.getByText(
-          m.file_too_large_detail({ fileName: "big.txt", currentSize: "2 KB", maxSize: "1 KB" })
+          m.file_too_large_detail({
+            fileName: "big.txt",
+            currentSize: formatBytes(2048),
+            maxSize: formatBytes(1024)
+          })
         )
       )
       .toBeVisible();

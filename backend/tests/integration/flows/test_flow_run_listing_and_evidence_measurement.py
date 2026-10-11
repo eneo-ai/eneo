@@ -103,13 +103,14 @@ DEEP_OFFSET = 250
 # an empty result-file projection deliberately skips it.
 RUN_LISTING_STATEMENT_COUNT = 1
 # Access resolution, section measurements, bounded section loads, immutable
-# resolved-input lineage, durable file projections, and run token usage are
+# resolved-input lineage, durable file projections, run token usage, and the
+# models that answered per step (one statement over the run's receipts) are
 # fixed-cost per bundle; none scales in statement count with the number of
 # steps, attempts, provider calls, sources, or attached files. The reviewed
 # ceiling is the representative bundle's statement count (its two input files
 # cost two metadata reads the file-less heavy bundle does not issue).
 # Each history section adds one measurement and one bounded load.
-MAX_EVIDENCE_QUERY_COUNT = 29
+MAX_EVIDENCE_QUERY_COUNT = 30
 REPORT_PATH_ENV = "FLOW_RUN_LISTING_EVIDENCE_REPORT_PATH"
 SECRET_SENTINEL = "flow-evidence-secret-20260726"
 _BASE_TIME = datetime(2026, 7, 26, 12, 0, tzinfo=timezone.utc)

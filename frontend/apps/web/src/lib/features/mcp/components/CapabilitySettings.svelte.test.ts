@@ -11,8 +11,14 @@ type SpaceState = {
   available_capabilities: components["schemas"]["CapabilityAvailability"][];
 };
 const currentSpace = writable<SpaceState>({ enabled_capabilities: [], available_capabilities: [] });
-const updateSpace = vi.fn(async (update: { enabled_capabilities: CapabilityPurpose[] }) => {
-  currentSpace.update((space) => ({ ...space, ...update }));
+type SpacePatch = { enabled_capabilities: CapabilityPurpose[] };
+type SpaceUpdate = SpacePatch | ((space: SpaceState) => SpacePatch);
+// A settings row hands the manager a function of the space as it stands when
+// the update starts; this is the patch it builds from the current store.
+const patchOf = (update: SpaceUpdate): SpacePatch =>
+  typeof update === "function" ? update(get(currentSpace)) : update;
+const updateSpace = vi.fn(async (update: SpaceUpdate) => {
+  currentSpace.update((space) => ({ ...space, ...patchOf(update) }));
   return get(currentSpace);
 });
 vi.mock("$lib/features/spaces/SpacesManager", () => ({
@@ -94,9 +100,8 @@ describe("space function settings", () => {
     updateSpace.mockResolvedValueOnce(undefined as never);
     render(CapabilityRow, { capability });
     await control().click();
-    await vi.waitFor(() =>
-      expect(updateSpace).toHaveBeenCalledWith({ enabled_capabilities: ["web_search"] })
-    );
+    await vi.waitFor(() => expect(updateSpace).toHaveBeenCalledOnce());
+    expect(patchOf(updateSpace.mock.calls[0][0])).toEqual({ enabled_capabilities: ["web_search"] });
     await expect.element(control()).toHaveAttribute("aria-checked", "false");
   });
 
@@ -108,9 +113,10 @@ describe("space function settings", () => {
     render(CapabilityRow, { capability });
     await expect.element(page.getByText(m.not_available(), { exact: true })).toBeVisible();
     await control().click();
-    await vi.waitFor(() =>
-      expect(updateSpace).toHaveBeenCalledWith({ enabled_capabilities: ["image_generation"] })
-    );
+    await vi.waitFor(() => expect(updateSpace).toHaveBeenCalledOnce());
+    expect(patchOf(updateSpace.mock.calls[0][0])).toEqual({
+      enabled_capabilities: ["image_generation"]
+    });
     await expect.element(control()).toHaveAttribute("aria-checked", "false");
     await expect.element(control()).toBeDisabled();
   });
