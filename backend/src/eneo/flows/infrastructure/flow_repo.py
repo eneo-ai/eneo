@@ -9,6 +9,7 @@ from uuid import UUID
 
 import sqlalchemy as sa
 from sqlalchemy.dialects import postgresql
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from eneo.database.tables.ai_models_table import CompletionModels
@@ -56,6 +57,7 @@ from eneo.flows.enums import (
     final_output_delivery,
     final_step_output_type,
 )
+from eneo.flows.flow_authoring_name import FlowNameTakenError
 from eneo.flows.flow_evidence_policy import (
     FlowHistoryAccessContext,
     flow_evidence_metadata_facts,
@@ -213,6 +215,18 @@ def _resource_binding_from_row(row: FlowResourceBindings) -> LocalResourceBindin
     )
 
 
+# The partial unique index of Flows (database/tables/flow_tables.py): active
+# flow names are unique per space.
+_ACTIVE_FLOW_NAME_INDEX = "uq_flows_space_id_name_active"
+
+
+def _is_active_flow_name_violation(exc: IntegrityError) -> bool:
+    # asyncpg names the violated constraint on its own error; SQLAlchemy's
+    # dialect wraps that error and copies only the SQLSTATE to the wrapper.
+    driver_error = exc.orig.__cause__ if exc.orig is not None else None
+    return getattr(driver_error, "constraint_name", None) == _ACTIVE_FLOW_NAME_INDEX
+
+
 def _stale_revision_error(
     *, flow_id: UUID, expected_revision: int
 ) -> BadRequestException:
@@ -321,7 +335,12 @@ class FlowRepository:
             )
             .returning(Flows)
         )
-        flow_in_db = await self.session.scalar(insert_stmt)
+        try:
+            flow_in_db = await self.session.scalar(insert_stmt)
+        except IntegrityError as exc:
+            if not _is_active_flow_name_violation(exc):
+                raise
+            raise FlowNameTakenError() from exc
         if flow_in_db is None:
             raise NotFoundException("Could not create flow.")
         flow_id = flow_in_db.id
@@ -979,15 +998,20 @@ class FlowRepository:
         `draft_revision` by one while the draft is still at `revision`, else
         refused with `stale_revision`."""
 
-        flow_in_db = await self.session.scalar(
-            sa.update(Flows)
-            .where(Flows.id == flow_id)
-            .where(Flows.tenant_id == tenant_id)
-            .where(Flows.deleted_at.is_(None))
-            .where(Flows.draft_revision == revision)
-            .values(**values, draft_revision=Flows.draft_revision + 1)
-            .returning(Flows)
-        )
+        try:
+            flow_in_db = await self.session.scalar(
+                sa.update(Flows)
+                .where(Flows.id == flow_id)
+                .where(Flows.tenant_id == tenant_id)
+                .where(Flows.deleted_at.is_(None))
+                .where(Flows.draft_revision == revision)
+                .values(**values, draft_revision=Flows.draft_revision + 1)
+                .returning(Flows)
+            )
+        except IntegrityError as exc:
+            if not _is_active_flow_name_violation(exc):
+                raise
+            raise FlowNameTakenError() from exc
         if flow_in_db is not None:
             return flow_in_db
         existing_id = await self.session.scalar(

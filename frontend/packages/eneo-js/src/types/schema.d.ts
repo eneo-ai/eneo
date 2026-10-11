@@ -18061,6 +18061,7 @@ export interface components {
       | "flow_deleted"
       | "flow_owner_required"
       | "flow_managed_assistant"
+      | "flow_name_taken"
       | "flow_service_key_admin_required"
       | "flow_service_key_principal_not_supported"
       | "flow_service_key_space_id_required"
@@ -55577,6 +55578,22 @@ export interface operations {
           "application/json": components["schemas"]["GeneralError"];
         };
       };
+      /** @description Another active flow in the space already has this name. */
+      409: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          /**
+           * @example {
+           *       "code": "flow_name_taken",
+           *       "eneo_error_code": 9057,
+           *       "message": "A flow with this name already exists in this space."
+           *     }
+           */
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
       /** @description Validation Error */
       422: {
         headers: {
@@ -57628,6 +57645,22 @@ export interface operations {
            *       "code": "not_found",
            *       "eneo_error_code": 9000,
            *       "message": "Flow not found."
+           *     }
+           */
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Another active flow in the space already has this name. */
+      409: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          /**
+           * @example {
+           *       "code": "flow_name_taken",
+           *       "eneo_error_code": 9057,
+           *       "message": "A flow with this name already exists in this space."
            *     }
            */
           "application/json": components["schemas"]["GeneralError"];

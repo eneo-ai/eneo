@@ -40,11 +40,16 @@ from eneo.flows.api.flow_runtime_paths import (
 from eneo.flows.flow_access_policy import FlowApiAction, flow_action_access_reason
 from eneo.flows.flow_api_error_code import FlowApiErrorCode
 from eneo.flows.flow_api_exceptions import FlowBadRequestException
+from eneo.flows.flow_authoring_name import FlowNameTakenError
 from eneo.flows.flow_evidence_policy import flow_evidence_metadata_facts
 from eneo.flows.principal import FlowPrincipal
 from eneo.main.config import get_settings
 from eneo.main.container.container import Container
-from eneo.main.exceptions import ErrorCodes, UnauthorizedException
+from eneo.main.exceptions import (
+    ConflictException,
+    ErrorCodes,
+    UnauthorizedException,
+)
 from eneo.main.models import NOT_PROVIDED, OffsetPaginatedResponse
 from eneo.server.dependencies.container import get_container
 
@@ -97,6 +102,19 @@ _FLOW_PUBLISHED_RUNTIME_DESCRIPTION = (
 )
 
 _PUBLISHED_FLOW_RUNTIME_OPERATION_ID = "get_published_flow_runtime"
+_FLOW_NAME_TAKEN_MESSAGE = "A flow with this name already exists in this space."
+_FLOW_NAME_TAKEN_RESPONSE = error_response(
+    description="Another active flow in the space already has this name.",
+    message=_FLOW_NAME_TAKEN_MESSAGE,
+    eneo_error_code=ErrorCodes.CONFLICT,
+    code=FlowApiErrorCode.FLOW_NAME_TAKEN.value,
+)
+
+
+def _flow_name_taken_conflict() -> ConflictException:
+    return ConflictException(
+        _FLOW_NAME_TAKEN_MESSAGE, code=FlowApiErrorCode.FLOW_NAME_TAKEN.value
+    )
 
 
 def _classification_override_step_orders(
@@ -151,6 +169,7 @@ def _evidence_export_change(
             code="insufficient_scope",
             context={"auth_layer": "api_key_scope"},
         ),
+        409: _FLOW_NAME_TAKEN_RESPONSE,
     },
 )
 @endpoint_access(
@@ -184,13 +203,16 @@ async def create_flow(
     flow_service = container.flow_service()
     user = container.user()
 
-    created = await flow_service.create_flow(
-        space_id=flow_in.space_id,
-        name=flow_in.name,
-        description=flow_in.description,
-        steps=[assembler.to_domain_step(step) for step in flow_in.steps],
-        metadata_json=flow_in.metadata_json,
-    )
+    try:
+        created = await flow_service.create_flow(
+            space_id=flow_in.space_id,
+            name=flow_in.name,
+            description=flow_in.description,
+            steps=[assembler.to_domain_step(step) for step in flow_in.steps],
+            metadata_json=flow_in.metadata_json,
+        )
+    except FlowNameTakenError as exc:
+        raise _flow_name_taken_conflict() from exc
 
     created_flow_id = created.require_persisted_id()
     audit_service = container.audit_service()
@@ -542,6 +564,7 @@ async def get_published_flow_runtime(
             eneo_error_code=ErrorCodes.NOT_FOUND,
             code="not_found",
         ),
+        409: _FLOW_NAME_TAKEN_RESPONSE,
     },
 )
 @endpoint_access(
@@ -573,14 +596,17 @@ async def update_flow(
         if flow_in.expected_revision is None
         else flow_in.expected_revision
     )
-    updated = await container.flow_service().update_flow(
-        flow_id=id,
-        name=payload.get("name", NOT_PROVIDED),
-        description=payload.get("description", NOT_PROVIDED),
-        steps=steps,
-        metadata_json=payload.get("metadata_json", NOT_PROVIDED),
-        expected_revision=expected_revision,
-    )
+    try:
+        updated = await container.flow_service().update_flow(
+            flow_id=id,
+            name=payload.get("name", NOT_PROVIDED),
+            description=payload.get("description", NOT_PROVIDED),
+            steps=steps,
+            metadata_json=payload.get("metadata_json", NOT_PROVIDED),
+            expected_revision=expected_revision,
+        )
+    except FlowNameTakenError as exc:
+        raise _flow_name_taken_conflict() from exc
 
     updated_flow_id = updated.require_persisted_id()
     user = container.user()

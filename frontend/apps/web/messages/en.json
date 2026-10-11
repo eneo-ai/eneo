@@ -4826,6 +4826,7 @@
   "flow_error_flow_not_published": "Publish the flow before starting a run.",
   "flow_error_flow_owner_required": "Only the draft owner, an administrator or the space owner can change this flow.",
   "flow_error_flow_managed_assistant": "A step in the flow or a run that has not finished still uses this assistant. Remove or replace the step, or wait for the run to finish, before you delete the assistant.",
+  "flow_error_flow_name_taken": "A flow with this name already exists in this space. Choose another name.",
   "flow_error_flow_review_open_active_conflict_invariant": "The run reached a state where the review cannot continue. Reload the run, and contact support and give the run's reference if the problem remains.",
   "flow_error_flow_review_open_multiple_active_checkpoints_invariant": "The run reached a state where the review cannot continue. Reload the run, and contact support and give the run's reference if the problem remains.",
   "flow_error_flow_review_open_step_result_incomplete_invariant": "The review opened before the step's result was ready. Reload the run, and contact support and give the run's reference if the problem remains.",

@@ -86,6 +86,7 @@ from eneo.flows.assistant_authoring_snapshot import AssistantAuthoringSnapshot
 from eneo.flows.domain.flow import Flow, FlowStep
 from eneo.flows.flow_access_policy import FlowApiAction
 from eneo.flows.flow_api_error_code import FlowApiErrorCode
+from eneo.flows.flow_authoring_name import FlowNameTakenError
 from eneo.flows.flow_authoring_spec import (
     AssistantSpec,
     FlowDraftSpecCore,
@@ -747,16 +748,9 @@ async def test_import_flow_package_name_collision_returns_safe_receipt_and_audit
         space=_FakeSpace(default_transcription_model_id=uuid4()),
     )
 
-    class FlowNameCollision(Exception):
-        constraint_name = "uq_flows_space_id_name_active"
-
     class FakeInstallService:
         async def install_as_draft(self, **kwargs: object) -> FlowPackageInstallResult:
-            raise IntegrityError(
-                "INSERT INTO flows ...",
-                {},
-                FlowNameCollision("duplicate key contains private database details"),
-            )
+            raise FlowNameTakenError()
 
     class FakeImportRepo:
         def __init__(self, session: object) -> None:

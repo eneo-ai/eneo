@@ -30,6 +30,7 @@ from eneo.flows.enums import (
     FlowOutputType,
     FlowRuntimeInputFormat,
 )
+from eneo.flows.flow_authoring_name import FlowNameTakenError
 from eneo.flows.flow_resource_bindings import (
     FlowResourceBindingSource,
     LocalResourceBinding,
@@ -1138,7 +1139,7 @@ async def test_flow_repository_rejects_duplicate_active_name_in_space(
         )
         await repo.create(flow=base_flow, tenant_id=admin_user.tenant_id)
 
-        with pytest.raises(IntegrityError):
+        with pytest.raises(FlowNameTakenError):
             await repo.create(
                 flow=base_flow.model_copy(deep=True), tenant_id=admin_user.tenant_id
             )

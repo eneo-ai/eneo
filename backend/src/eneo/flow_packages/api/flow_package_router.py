@@ -19,7 +19,6 @@ from fastapi import (
 )
 from fastapi.responses import JSONResponse
 from pydantic import TypeAdapter, ValidationError
-from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from eneo.audit.application.audit_metadata import AuditMetadata
@@ -96,6 +95,7 @@ from eneo.flows.flow_access_policy import (
     require_flow_action,
 )
 from eneo.flows.flow_api_error_code import FlowApiErrorCode
+from eneo.flows.flow_authoring_name import FlowNameTakenError
 from eneo.flows.flow_resource_bindings import FlowResourceBindingResolutionError
 from eneo.main.container.container import Container
 from eneo.main.exceptions import (
@@ -116,7 +116,6 @@ from eneo.spaces.space import Space
 
 ENEO_PACKAGE_MEDIA_TYPE = "application/vnd.eneo.package+zip"
 MAX_PACKAGE_BASE64_CHARS = ((MAX_PACKAGE_UPLOAD_BYTES + 2) // 3) * 4
-FLOW_NAME_COLLISION_CONSTRAINT = "uq_flows_space_id_name_active"
 FLOW_IMPORT_NAME_COLLISION_CODE = FlowPackageErrorCode.IMPORT_NAME_COLLISION.value
 FLOW_IMPORT_NAME_COLLISION_MESSAGE = (
     "A Flow with this name already exists in the target space."
@@ -495,9 +494,7 @@ async def import_flow_package_as_draft(
                 if command.template_files
                 else None,
             )
-    except IntegrityError as exc:
-        if not _is_flow_name_collision(exc):
-            raise
+    except FlowNameTakenError:
         failure = FlowPackageImportFailurePayload(
             code=FLOW_IMPORT_NAME_COLLISION_CODE,
             message=FLOW_IMPORT_NAME_COLLISION_MESSAGE,
@@ -849,17 +846,6 @@ async def _record_failed_flow_package_import(
         ),
     )
     return import_id
-
-
-def _is_flow_name_collision(exc: IntegrityError) -> bool:
-    origin = exc.orig
-    diagnostic = getattr(origin, "diag", None)
-    constraint_name = getattr(diagnostic, "constraint_name", None)
-    if constraint_name is None:
-        constraint_name = getattr(origin, "constraint_name", None)
-    if constraint_name is not None:
-        return constraint_name == FLOW_NAME_COLLISION_CONSTRAINT
-    return FLOW_NAME_COLLISION_CONSTRAINT in str(origin)
 
 
 def _flow_package_import_failure_payload(

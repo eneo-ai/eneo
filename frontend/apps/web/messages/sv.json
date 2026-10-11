@@ -4826,6 +4826,7 @@
   "flow_error_flow_not_published": "Publicera flödet innan du startar en körning.",
   "flow_error_flow_owner_required": "Endast den som äger utkastet, en administratör eller ytans ägare kan ändra flödet.",
   "flow_error_flow_managed_assistant": "Ett steg i flödet eller en körning som inte har avslutats använder fortfarande assistenten. Ta bort eller byt ut steget, eller vänta tills körningen är klar, innan du tar bort assistenten.",
+  "flow_error_flow_name_taken": "Det finns redan ett flöde med det här namnet i den här ytan. Välj ett annat namn.",
   "flow_error_flow_review_open_active_conflict_invariant": "Körningen kom i ett läge där granskningen inte kan fortsätta. Läs in körningen igen, och kontakta support och uppge körningens referens om problemet kvarstår.",
   "flow_error_flow_review_open_multiple_active_checkpoints_invariant": "Körningen kom i ett läge där granskningen inte kan fortsätta. Läs in körningen igen, och kontakta support och uppge körningens referens om problemet kvarstår.",
   "flow_error_flow_review_open_step_result_incomplete_invariant": "Granskningen öppnades innan stegets resultat var klart. Läs in körningen igen, och kontakta support och uppge körningens referens om problemet kvarstår.",

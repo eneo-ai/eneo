@@ -140,6 +140,13 @@ FLOW_ERROR_TAXONOMY: dict[FlowApiErrorCode, FlowErrorTaxonomyEntry] = {
             "before you delete its assistant."
         ),
     ),
+    FlowApiErrorCode.FLOW_NAME_TAKEN: _entry(
+        category="Flow access",
+        surfaced_through="API error response",
+        cause="Another active flow in the space already has this name.",
+        consumer_action="Send another name, or rename or delete the other flow first.",
+        user_action="Choose another name for the flow.",
+    ),
     FlowApiErrorCode.SERVICE_KEY_ADMIN_REQUIRED: _entry(
         category="Flow access",
         surfaced_through="API error response",

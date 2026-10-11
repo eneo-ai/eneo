@@ -60,6 +60,7 @@ const FLOW_API_ERROR_MESSAGES = {
   flow_deleted: m.flow_error_flow_deleted,
   flow_owner_required: m.flow_error_flow_owner_required,
   flow_managed_assistant: m.flow_error_flow_managed_assistant,
+  flow_name_taken: m.flow_error_flow_name_taken,
   flow_service_key_admin_required: m.flow_error_flow_service_key_admin_required,
   flow_service_key_principal_not_supported: m.flow_error_flow_service_key_principal_not_supported,
   flow_service_key_space_id_required: m.flow_error_flow_service_key_space_id_required,

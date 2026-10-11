@@ -36,6 +36,10 @@ _ACRONYM_TOKENS = {
 }
 
 
+class FlowNameTakenError(Exception):
+    """Another active flow of the space already has the name."""
+
+
 def normalize_flow_name(value: str) -> str:
     normalized = _WHITESPACE_RE.sub(" ", value).strip()
     if not normalized:

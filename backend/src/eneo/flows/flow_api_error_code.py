@@ -12,6 +12,7 @@ class FlowApiErrorCode(str, Enum):
     FLOW_DELETED = "flow_deleted"
     OWNER_REQUIRED = "flow_owner_required"
     FLOW_MANAGED_ASSISTANT = "flow_managed_assistant"
+    FLOW_NAME_TAKEN = "flow_name_taken"
     SERVICE_KEY_ADMIN_REQUIRED = "flow_service_key_admin_required"
     SERVICE_KEY_PRINCIPAL_NOT_SUPPORTED = "flow_service_key_principal_not_supported"
     SERVICE_KEY_SPACE_ID_REQUIRED = "flow_service_key_space_id_required"
