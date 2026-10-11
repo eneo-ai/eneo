@@ -2233,7 +2233,42 @@ async def test_worker_saves_failure_addresses_during_crawl_and_flushes_the_final
 
     container = Container(session=providers.Object(SessionProxy()))
     container.crawler.override(providers.Object(CrawlEngine()))
-    await crawl_task(job_id=dispatch_id, params=task, container=container)
+
+    def _tasks() -> list[str]:
+        current = asyncio.current_task()
+        return sorted(
+            f"{t.get_name()}:{getattr(t.get_coro(), '__qualname__', '?')}"
+            for t in asyncio.all_tasks()
+            if t is not current
+        )
+
+    print("DIAG tasks before crawl:", _tasks(), flush=True)
+    try:
+        await crawl_task(job_id=dispatch_id, params=task, container=container)
+    except Exception:
+        print("DIAG tasks at failure:", _tasks(), flush=True)
+        async with sessionmanager.session() as diag:
+            runs = (
+                await diag.execute(sa.text("SELECT id, phase FROM crawl_runs"))
+            ).all()
+            attempts = (
+                await diag.execute(
+                    sa.text("SELECT id, crawl_run_id, finished_at FROM crawl_attempts")
+                )
+            ).all()
+            activity = (
+                await diag.execute(
+                    sa.text(
+                        "SELECT pid, state, xact_start, left(query, 160) FROM pg_stat_activity "
+                        "WHERE datname = current_database() AND pid <> pg_backend_pid()"
+                    )
+                )
+            ).all()
+            print("DIAG run_id:", run_id, "runs:", runs, flush=True)
+            print("DIAG attempts:", attempts, flush=True)
+            for row in activity:
+                print("DIAG activity:", row, flush=True)
+        raise
 
     async with db_session() as session:
         repository = CrawlRunRepository(session)
