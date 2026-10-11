@@ -29,6 +29,7 @@ const service = (overrides: Partial<TranscriptionService> = {}): TranscriptionSe
   name: "Vemsa Sundsvall",
   endpoint_url: "https://vemsa.sundsvall.se",
   is_enabled: true,
+  is_default: false,
   security_classification: null,
   space_count: 0,
   last_check: null,
@@ -188,6 +189,81 @@ it("does not test again after a change that keeps the address and key", async ()
 
   await expect.element(page.getByRole("row", { name: /Vemsa Nord/ })).toBeVisible();
   expect(check).not.toHaveBeenCalled();
+});
+
+it("shows the default and moves the mark when another service is made the default", async () => {
+  const timra = service({ id: "s2", name: "Vemsa Timrå", endpoint_url: "https://vemsa.timra.se" });
+  update.mockImplementation(async () => ({ ...timra, is_default: true }));
+  render(TranscriptionServicesTable, {
+    services: [service({ is_default: true }), timra],
+    classifications: []
+  });
+  const sundsvall = page.getByRole("row", { name: /Vemsa Sundsvall/ });
+  const other = page.getByRole("row", { name: /Vemsa Timrå/ });
+  await expect.element(sundsvall).toHaveTextContent(m.speaker_service_default_badge());
+  await expect.element(other).not.toHaveTextContent(m.speaker_service_default_badge());
+
+  await makeDefault("Vemsa Timrå");
+
+  // Only the change is sent, and only one service is the default afterwards.
+  expect(update).toHaveBeenCalledWith({ id: "s2" }, { is_default: true });
+  await expect.element(other).toHaveTextContent(m.speaker_service_default_badge());
+  await expect.element(sundsvall).not.toHaveTextContent(m.speaker_service_default_badge());
+  expect(check).not.toHaveBeenCalled();
+});
+
+async function makeDefault(name: string) {
+  await actionsFor(name).click();
+  await page.getByRole("menuitem", { name: m.edit() }).click();
+  await expect.element(page.getByLabelText(m.name())).toHaveFocus();
+  await page.getByLabelText(m.speaker_service_default_label()).click();
+  await page.getByRole("button", { name: m.save() }).click();
+}
+
+it("keeps one default when a slower answer to another edit arrives after the mark moved", async () => {
+  const timra = service({ id: "s2", name: "Vemsa Timrå", endpoint_url: "https://vemsa.timra.se" });
+  const switchingOff = deferred<TranscriptionService>();
+  update
+    .mockReturnValueOnce(switchingOff.promise)
+    .mockImplementationOnce(async () => ({ ...timra, is_default: true }));
+  render(TranscriptionServicesTable, {
+    services: [service({ is_default: true }), timra],
+    classifications: []
+  });
+  const sundsvall = page.getByRole("row", { name: /Vemsa Sundsvall/ });
+  const other = page.getByRole("row", { name: /Vemsa Timrå/ });
+
+  // Switching the default off is sent while it still carries the mark.
+  await page.getByRole("switch", { name: "Vemsa Sundsvall" }).click();
+  await makeDefault("Vemsa Timrå");
+  await expect.element(other).toHaveTextContent(m.speaker_service_default_badge());
+  switchingOff.resolve(service({ is_enabled: false, is_default: true }));
+  await settle();
+
+  await expect.element(other).toHaveTextContent(m.speaker_service_default_badge());
+  await expect.element(sundsvall).not.toHaveTextContent(m.speaker_service_default_badge());
+  await expect.element(page.getByRole("switch", { name: "Vemsa Sundsvall" })).not.toBeChecked();
+});
+
+it("leaves the default alone when the service being marked has left the list", async () => {
+  const timra = service({ id: "s2", name: "Vemsa Timrå", endpoint_url: "https://vemsa.timra.se" });
+  const marking = deferred<TranscriptionService>();
+  update.mockReturnValueOnce(marking.promise);
+  const { rerender } = render(TranscriptionServicesTable, {
+    services: [service(), timra],
+    classifications: []
+  });
+
+  await makeDefault("Vemsa Timrå");
+  // The page reloaded: another administrator removed that service and marked this one.
+  await rerender({ services: [service({ is_default: true })] });
+  marking.resolve({ ...timra, is_default: true });
+  await settle();
+
+  await expect
+    .element(page.getByRole("row", { name: /Vemsa Sundsvall/ }))
+    .toHaveTextContent(m.speaker_service_default_badge());
+  await expect.element(page.getByRole("row", { name: /Vemsa Timrå/ })).not.toBeInTheDocument();
 });
 
 it("asks before switching off a service that spaces use, and keeps it on until confirmed", async () => {

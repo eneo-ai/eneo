@@ -129,10 +129,62 @@ async def test_a_granted_service_is_listed_and_usable_in_the_space(
             "name": connection["name"],
             "meets_security_classification": True,
             "available": True,
+            "is_default": False,
         }
     ]
     assert await _grants(db_container, space_id) == {UUID(connection["id"])}
     assert await _available(db_container, space_id, connection["id"])
+
+
+async def _default_in(db_container, space_id: str) -> str | None:
+    async with db_container() as container:
+        space = await container.space_repo().one(UUID(space_id))
+        default = space.default_transcription_service
+        return None if default is None else str(default.id)
+
+
+async def test_a_space_takes_the_organisations_default_only_while_it_may_use_it(
+    client, db_container, headers
+):
+    plain = await _connection(client, headers)
+    marked = await _connection(client, headers)
+    space_id = await _space(client, headers)
+    await _grant(client, headers, space_id, plain["id"], marked["id"])
+
+    async def links(url: str) -> dict[str, bool]:
+        space = (await client.get(url, headers=headers)).json()
+        return {
+            link["id"]: link["is_default"] for link in space["transcription_services"]
+        }
+
+    # Nothing is the default until an administrator marks one, also when a
+    # space has services to use.
+    assert await _default_in(db_container, space_id) is None
+
+    response = await client.patch(
+        f"{BASE}{marked['id']}/", json={"is_default": True}, headers=headers
+    )
+    assert response.status_code == 200, response.text
+    expected = {plain["id"]: False, marked["id"]: True}
+    assert await links(f"/api/v1/spaces/{space_id}/") == expected
+    # A personal space lists the organisation's services the same way.
+    assert await links("/api/v1/spaces/type/personal/") == expected
+    assert await _default_in(db_container, space_id) == marked["id"]
+
+    # Switched off: it stays the marked default and nothing takes its place.
+    await client.patch(
+        f"{BASE}{marked['id']}/", json={"is_enabled": False}, headers=headers
+    )
+    assert await links(f"/api/v1/spaces/{space_id}/") == expected
+    assert await _default_in(db_container, space_id) is None
+
+    await client.patch(
+        f"{BASE}{marked['id']}/", json={"is_enabled": True}, headers=headers
+    )
+    assert await _default_in(db_container, space_id) == marked["id"]
+    # No longer granted to the space.
+    await _grant(client, headers, space_id, plain["id"])
+    assert await _default_in(db_container, space_id) is None
 
 
 async def test_the_service_counts_the_spaces_granted_it(client, headers):

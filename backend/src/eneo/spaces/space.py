@@ -237,6 +237,22 @@ class Space:
             None,
         )
 
+    @property
+    def default_transcription_service(
+        self,
+    ) -> "TranscriptionServiceConnection | None":
+        """The organisation's default speaker identification service, while
+        this space may use it. An administrator marked it; no other service
+        stands in when none is marked or the marked one is not usable here."""
+        return next(
+            (
+                connection
+                for connection in self.usable_transcription_services
+                if connection.is_default
+            ),
+            None,
+        )
+
     def is_mcp_server_in_space(self, mcp_server_id: UUID | None) -> bool:
         return mcp_server_id in [server.id for server in self.mcp_servers]
 

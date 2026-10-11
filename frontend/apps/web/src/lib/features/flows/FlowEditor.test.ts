@@ -1453,6 +1453,49 @@ describe("FlowEditor server validation routing", () => {
     }
   });
 
+  it("shows the speaker service the server filled in, and sends it back unchanged", async () => {
+    const filled = { id: "service-default" };
+    const flow = makeFlow({
+      wizard: { transcription_enabled: true, transcription_diarization: false }
+    });
+    // The server stores the organisation's default for a draft that asks for
+    // speaker labels without a choice; the editor never works it out itself.
+    const flowUpdate = vi.fn(async (args: unknown) => {
+      const { flow: current, update } = args as { flow: Flow; update: Partial<Flow> };
+      const sent = (update.metadata_json ?? current.metadata_json ?? {}) as {
+        wizard?: Record<string, unknown>;
+      };
+      const wizard = sent.wizard ?? {};
+      return {
+        ...current,
+        ...update,
+        metadata_json: {
+          ...sent,
+          wizard:
+            wizard.transcription_diarization && !wizard.transcription_speaker_service
+              ? { ...wizard, transcription_speaker_service: filled }
+              : wizard
+        }
+      } as Flow;
+    });
+    const editor = createFlowEditor({ flow, eneo: makeEneo({ flowUpdate }) });
+    const wizard = () =>
+      (get(editor.state.update).metadata_json as { wizard: Record<string, unknown> }).wizard;
+
+    editor.setWizardMetadata({ transcription_diarization: true });
+    await editor.flushSaves();
+    expect(wizard().transcription_speaker_service).toEqual(filled);
+
+    // The next edit carries the stored choice; it is not cleared or re-decided.
+    editor.setWizardMetadata({ transcription_language: "en" });
+    await editor.flushSaves();
+    const [{ update: second }] = flowUpdate.mock.calls[1] as [{ update: Partial<Flow> }];
+    expect(
+      (second.metadata_json as { wizard: Record<string, unknown> }).wizard
+        .transcription_speaker_service
+    ).toEqual(filled);
+  });
+
   it("types the flush rejection precisely and suppresses the raw toast", async () => {
     const flow = makeFlow();
     let failMode: "validation" | "generic" | null = "validation";

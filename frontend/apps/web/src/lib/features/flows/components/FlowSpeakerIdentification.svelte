@@ -21,6 +21,8 @@
     name: string;
     meets_security_classification: boolean;
     available: boolean;
+    /** The organisation's default: what a new draft gets filled in. */
+    is_default: boolean;
   };
 
   let {
@@ -59,6 +61,13 @@
     maxSpeakersRejected = value !== null && !(Number.isInteger(value) && value >= 1);
     if (maxSpeakersRejected) input.value = maxSpeakers === null ? "" : String(maxSpeakers);
     else onMaxSpeakersChange(value);
+  }
+
+  // The default is named, so an author sees why a new flow came with it.
+  function optionLabel(service: SpeakerServiceLink): string {
+    return service.is_default
+      ? m.flow_transcription_speakers_default_option({ name: service.name })
+      : service.name;
   }
 
   const usable = $derived(usableSpeakerServices(services));
@@ -126,14 +135,12 @@
           </Tooltip.Provider>
         {/if}
       </div>
+      <!-- A switch that cannot be turned off is not told how to turn off. -->
       <p class="text-secondary mt-1 text-xs leading-relaxed">
-        {m.flow_transcription_diarization_desc()}
+        {required
+          ? m.flow_transcription_speakers_required_note()
+          : m.flow_transcription_diarization_desc()}
       </p>
-      {#if required && !noService}
-        <p class="text-secondary mt-1 text-xs leading-relaxed">
-          {m.flow_transcription_speakers_required_note()}
-        </p>
-      {/if}
     </div>
     <Switch
       checked={!noService && on}
@@ -164,11 +171,15 @@
               aria-invalid={lost || undefined}
               aria-describedby={serviceNote}
             >
-              {picked?.name ?? lostLink?.name ?? m.flow_transcription_speakers_choose()}
+              {picked
+                ? optionLabel(picked)
+                : (lostLink?.name ?? m.flow_transcription_speakers_choose())}
             </Select.Trigger>
             <Select.Content>
               {#each usable as service (service.id)}
-                <Select.Item value={service.id} label={service.name}>{service.name}</Select.Item>
+                <Select.Item value={service.id} label={optionLabel(service)}>
+                  {optionLabel(service)}
+                </Select.Item>
               {/each}
             </Select.Content>
           </Select.Root>

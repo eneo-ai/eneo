@@ -92,16 +92,18 @@
   {:else}
     <div class="border-default overflow-hidden rounded-xl border">
       {#each services as service (service.id)}
-        {@const granted = links.some((link) => link.id === service.id)}
+        {@const link = links.find((granted) => granted.id === service.id)}
+        {@const granted = link !== undefined}
         {@const reason = blockedReason(service)}
+        {@const note = reason ?? (link?.is_default ? m.speaker_service_space_default() : undefined)}
         <Field.Field
           orientation="horizontal"
           class="border-default border-b px-4 py-3 last:border-b-0"
         >
           <Field.Content>
             <Field.Label for="{uid}-{service.id}">{service.name}</Field.Label>
-            {#if reason}
-              <Field.Description id="{uid}-{service.id}-reason">{reason}</Field.Description>
+            {#if note}
+              <Field.Description id="{uid}-{service.id}-note">{note}</Field.Description>
             {/if}
           </Field.Content>
           <!-- Bound through the grant itself, so a failed save never leaves the
@@ -110,7 +112,7 @@
             id="{uid}-{service.id}"
             bind:checked={() => granted, () => toggle(service)}
             disabled={saving || (!granted && reason !== undefined)}
-            aria-describedby={reason ? `${uid}-${service.id}-reason` : undefined}
+            aria-describedby={note ? `${uid}-${service.id}-note` : undefined}
           />
         </Field.Field>
       {/each}

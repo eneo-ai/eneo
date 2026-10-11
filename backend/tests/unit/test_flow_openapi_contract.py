@@ -4604,3 +4604,38 @@ def test_openapi_admin_history_purge_defaults_to_preview_and_is_bounded(
         assert operation["requestBody"]["content"]["application/json"]["schema"] == {
             "$ref": "#/components/schemas/FlowRunHistoryPurgeRequest"
         }
+
+
+def test_openapi_default_speaker_service_is_marked_by_update_and_shown_on_links(
+    openapi_spec: dict,
+) -> None:
+    schemas = openapi_spec["components"]["schemas"]
+    service = schemas["TranscriptionServicePublic"]
+    link = schemas["SpaceTranscriptionServiceLink"]
+    update = schemas["TranscriptionServiceUpdate"]
+
+    assert set(service["properties"]) == {
+        "id",
+        "name",
+        "endpoint_url",
+        "is_enabled",
+        "is_default",
+        "security_classification",
+        "space_count",
+        "last_check",
+        "created_at",
+        "updated_at",
+    }
+    assert set(link["properties"]) == {
+        "id",
+        "name",
+        "meets_security_classification",
+        "available",
+        "is_default",
+    }
+    for schema in (service, link):
+        assert schema["properties"]["is_default"]["type"] == "boolean"
+        assert "is_default" in schema["required"]
+    # An update changes the mark only when it sends it, and never to null.
+    assert update["properties"]["is_default"]["type"] == "boolean"
+    assert "is_default" not in update.get("required", [])

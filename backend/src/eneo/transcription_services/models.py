@@ -53,6 +53,10 @@ class TranscriptionServiceConnection:
     name: str
     endpoint_url: str
     is_enabled: bool
+    # The organisation's default, marked by an administrator and never
+    # inferred: a flow draft that asks for speaker labels without a choice
+    # gets it stored as its own choice.
+    is_default: bool
     security_classification: SecurityClassification | None
     created_at: datetime
     updated_at: datetime

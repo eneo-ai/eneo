@@ -163,6 +163,40 @@ class TranscriptionServiceConnectionRepository:
         """
         return await self._row(connection_id, for_update=True)
 
+    async def displace_default(self, connection_id: UUID) -> tuple[UUID, str] | None:
+        """Unmark the organisation's default so ``connection_id`` can be marked
+        in this transaction; the id and name of the connection that lost the
+        mark, if another one had it.
+
+        Call it before locking the connection. It locks every connection of
+        the organisation in id order, so two administrators marking different
+        defaults take turns here, and the later one unmarks what the earlier
+        one committed. The unique index would refuse two marks, not order them.
+        """
+        table = TranscriptionServiceConnections
+        # FOR NO KEY UPDATE: edits and other marks wait, a space being granted
+        # a connection (a key share on its row) does not, so no wait cycle.
+        await self.session.execute(
+            sa.select(table.id)
+            .where(table.tenant_id == self.tenant_id)
+            .order_by(table.id)
+            .with_for_update(key_share=True)
+        )
+        displaced = (
+            await self.session.execute(
+                sa.update(table)
+                .where(
+                    table.tenant_id == self.tenant_id,
+                    table.is_default,
+                    table.id != connection_id,
+                )
+                .values(is_default=False)
+                .returning(table.id, table.name)
+                .execution_options(synchronize_session=False)
+            )
+        ).one_or_none()
+        return None if displaced is None else (displaced.id, displaced.name)
+
     async def save(
         self, row: TranscriptionServiceConnections
     ) -> TranscriptionServiceConnection:
@@ -261,6 +295,7 @@ def _to_domain(row: TranscriptionServiceConnections) -> TranscriptionServiceConn
         name=row.name,
         endpoint_url=row.endpoint_url,
         is_enabled=row.is_enabled,
+        is_default=row.is_default,
         security_classification=SecurityClassification.to_domain(
             row.security_classification
         ),

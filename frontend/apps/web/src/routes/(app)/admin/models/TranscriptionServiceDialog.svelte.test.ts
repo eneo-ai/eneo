@@ -14,6 +14,7 @@ const saved: TranscriptionService = {
   name: "Vemsa Sundsvall",
   endpoint_url: "https://vemsa.sundsvall.se",
   is_enabled: true,
+  is_default: false,
   security_classification: null,
   space_count: 0,
   last_check: null,

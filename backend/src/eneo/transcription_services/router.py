@@ -142,6 +142,14 @@ class TranscriptionServiceUpdate(BaseModel):
         default=NOT_PROVIDED, description=_API_KEY_DESCRIPTION
     )
     is_enabled: bool | NotProvided = Field(default=NOT_PROVIDED)
+    is_default: bool | NotProvided = Field(
+        default=NOT_PROVIDED,
+        description=(
+            "True makes this the organisation's only default speaker "
+            "identification service, in place of the previous one. False "
+            "unmarks it and marks no other."
+        ),
+    )
     security_classification: ModelId | None | NotProvided = Field(
         default=NOT_PROVIDED,
         description="Null clears the classification; omit to keep it",
@@ -191,6 +199,14 @@ class TranscriptionServicePublic(BaseModel):
     name: str
     endpoint_url: str
     is_enabled: bool
+    is_default: bool = Field(
+        description=(
+            "The organisation's default speaker identification service: a "
+            "flow draft that asks for speaker labels without a chosen service "
+            "gets it stored as its choice, in spaces that may use it. At most "
+            "one service is the default, and only an administrator marks it."
+        )
+    )
     security_classification: SecurityClassificationPublic | None
     space_count: int = Field(
         description=(
@@ -216,6 +232,7 @@ class TranscriptionServicePublic(BaseModel):
             name=connection.name,
             endpoint_url=connection.endpoint_url,
             is_enabled=connection.is_enabled,
+            is_default=connection.is_default,
             security_classification=SecurityClassificationPublic.from_domain(
                 connection.security_classification
             ),
@@ -337,6 +354,7 @@ async def update_transcription_service(
         endpoint_url=data.endpoint_url,
         api_key=data.api_key,
         is_enabled=data.is_enabled,
+        is_default=data.is_default,
         security_classification=data.security_classification,
     )
     return TranscriptionServicePublic.from_domain(connection)

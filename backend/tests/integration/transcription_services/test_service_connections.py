@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 from dataclasses import replace
 from datetime import UTC, datetime, timedelta
 from uuid import UUID, uuid4
@@ -25,6 +26,9 @@ from eneo.transcription_services.models import (
 )
 from eneo.transcription_services.repository import (
     TranscriptionServiceConnectionRepository,
+)
+from eneo.transcription_services.service import (
+    TranscriptionServiceConnectionService,
 )
 from tests.integration.transcription_services.conftest import BASE
 
@@ -642,3 +646,131 @@ async def test_an_organisation_connects_at_most_one_page_of_services(
 
     assert refused.status_code == 400, refused.text
     assert refused.json()["code"] == "transcription_service_limit_reached"
+
+
+async def _defaults(db_container) -> set[str]:
+    """Every connection marked as a default, in any organisation."""
+    table = TranscriptionServiceConnections
+    async with db_container() as container:
+        marked = await container.session().scalars(
+            sa.select(table.id).where(table.is_default)
+        )
+        return {str(connection_id) for connection_id in marked}
+
+
+async def _mark_default(client, headers, connection: dict, marked: bool = True):
+    return await client.patch(
+        f"{BASE}{connection['id']}/", json={"is_default": marked}, headers=headers
+    )
+
+
+async def test_marking_a_default_unmarks_the_previous_one_and_promotes_nothing(
+    client, db_container, admin_headers, create_connection, tenant_factory, monkeypatch
+):
+    first, second = await create_connection(), await create_connection()
+    async with db_container() as container:
+        session = container.session()
+        other = await tenant_factory(session)
+        theirs = str(
+            await session.scalar(
+                sa.insert(TranscriptionServiceConnections)
+                .values(
+                    tenant_id=other.id,
+                    name="theirs",
+                    endpoint_url="https://theirs.example.se",
+                    api_key_encrypted="enc:fernet:v1:not-used",
+                    is_default=True,
+                )
+                .returning(TranscriptionServiceConnections.id)
+            )
+        )
+    audited = _record_audit(monkeypatch)
+    assert first["is_default"] is False
+
+    marked = await _mark_default(client, admin_headers, first)
+    assert marked.status_code == 200, marked.text
+    assert marked.json()["is_default"] is True
+    assert await _defaults(db_container) == {first["id"], theirs}
+
+    # The second mark is the organisation's only one; no unique violation.
+    marked = await _mark_default(client, admin_headers, second)
+    assert marked.status_code == 200, marked.text
+    assert await _defaults(db_container) == {second["id"], theirs}
+
+    # Unmarking, switching off and deleting the default promote no other.
+    switched_off = await client.patch(
+        f"{BASE}{second['id']}/", json={"is_enabled": False}, headers=admin_headers
+    )
+    assert switched_off.json()["is_default"] is True
+    assert await _defaults(db_container) == {second["id"], theirs}
+    unmarked = await _mark_default(client, admin_headers, second, False)
+    assert unmarked.json()["is_default"] is False
+    assert await _defaults(db_container) == {theirs}
+    await _mark_default(client, admin_headers, first)
+    deleted = await client.delete(f"{BASE}{first['id']}/", headers=admin_headers)
+    assert deleted.status_code == 204, deleted.text
+    assert await _defaults(db_container) == {theirs}
+
+    updates = [
+        entry["metadata"]
+        for entry in audited
+        if entry["action"].value == "transcription_service_updated"
+    ]
+    assert [entry["changes"] for entry in updates] == [
+        {"is_default": {"old": False, "new": True}},
+        {"is_default": {"old": False, "new": True}},
+        {"is_enabled": {"old": True, "new": False}},
+        {"is_default": {"old": True, "new": False}},
+        {"is_default": {"old": False, "new": True}},
+    ]
+    # Only the mark that took another connection's place names that connection.
+    assert [entry.get("extra") for entry in updates] == [
+        None,
+        {"displaced_default": {"id": first["id"], "name": first["name"]}},
+        None,
+        None,
+        None,
+    ]
+
+
+async def test_a_refused_update_keeps_the_previous_default(
+    client, db_container, admin_headers, create_connection
+):
+    default, other = await create_connection(), await create_connection()
+    await _mark_default(client, admin_headers, default)
+
+    refused = await client.patch(
+        f"{BASE}{other['id']}/",
+        json={"is_default": True, "name": default["name"]},
+        headers=admin_headers,
+    )
+
+    assert refused.status_code == 409, refused.text
+    assert await _defaults(db_container) == {default["id"]}
+
+
+async def test_two_administrators_marking_different_defaults_take_turns(
+    client, db_container, admin_headers, create_connection
+):
+    first, second = await create_connection(), await create_connection()
+
+    # One administrator's mark is written and not yet committed when the
+    # other's request arrives.
+    async with db_container() as container:
+        user = container.user()
+        await TranscriptionServiceConnectionService(
+            user=user,
+            repository=TranscriptionServiceConnectionRepository(
+                container.session(), user.tenant_id
+            ),
+            encryption=container.encryption_service(),
+            audit_service=container.audit_service(),
+        ).update(UUID(first["id"]), is_default=True)
+        later = asyncio.create_task(_mark_default(client, admin_headers, second))
+        done, _ = await asyncio.wait({later}, timeout=1.0)
+        assert not done
+
+    response = await later
+    assert response.status_code == 200, response.text
+    assert response.json()["is_default"] is True
+    assert await _defaults(db_container) == {second["id"]}

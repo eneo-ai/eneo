@@ -36,7 +36,9 @@ from eneo.flows.domain.speaker_mapping_config import steps_require_speaker_label
 from eneo.flows.domain.step_config import clean_inactive_step_config
 from eneo.flows.flow_api_error_code import FlowApiErrorCode
 from eneo.flows.flow_authoring_transcription import (
+    fill_default_speaker_service,
     kept_speaker_service_id,
+    lacks_speaker_service_choice,
     require_chosen_speaker_service,
     require_usable_speaker_service,
     transcription_config_for_write,
@@ -158,14 +160,18 @@ class FlowService:
         owner_user_id: UUID | None = None,
     ) -> Flow:
         steps = [clean_inactive_step_config(step) for step in steps]
-        normalized_metadata = normalize_flow_metadata_for_write(metadata_json)
+        normalized_metadata, space = await self._fill_default_speaker_service(
+            space_id=space_id,
+            metadata_json=normalize_flow_metadata_for_write(metadata_json),
+            steps=steps,
+        )
         self._validate_steps(steps, metadata_json=normalized_metadata)
         self._validate_variable_alias_collisions(
             steps=steps,
             metadata_json=normalized_metadata,
         )
         space = await self._check_speaker_service(
-            space_id=space_id, metadata_json=normalized_metadata
+            space_id=space_id, metadata_json=normalized_metadata, space=space
         )
         await self._validate_assistant_scope_for_steps(
             space_id=space_id,
@@ -297,6 +303,15 @@ class FlowService:
             next_metadata = normalize_flow_metadata_for_write(
                 cast(FlowPersistedJsonObject | None, metadata_json)
             )
+        space: Space | None = None
+        if steps is not None or metadata_json is not NOT_PROVIDED:
+            # Read from the flow the write ends with: steps alone can start
+            # asking for speaker labels.
+            next_metadata, space = await self._fill_default_speaker_service(
+                space_id=existing.space_id,
+                metadata_json=next_metadata,
+                steps=next_steps,
+            )
         # A step's own defect is reported before the classification, which
         # reads its configuration (create and publish validate first too).
         self._validate_steps(
@@ -309,15 +324,13 @@ class FlowService:
             metadata_json=next_metadata,
         )
         # An edit that leaves the metadata alone states no new choice.
-        space = (
-            await self._check_speaker_service(
+        if metadata_json is not NOT_PROVIDED:
+            space = await self._check_speaker_service(
                 space_id=existing.space_id,
                 metadata_json=next_metadata,
                 kept_metadata_json=existing.metadata_json,
+                space=space,
             )
-            if metadata_json is not NOT_PROVIDED
-            else None
-        )
         await self._validate_step_security_classification_for_steps(
             space_id=existing.space_id,
             steps=next_steps,
@@ -765,6 +778,31 @@ class FlowService:
                 "Flow steps must reference flow-managed assistants owned by the flow."
             )
 
+    async def _fill_default_speaker_service(
+        self,
+        *,
+        space_id: UUID,
+        metadata_json: FlowPersistedJsonObject | None,
+        steps: list[FlowStep],
+    ) -> tuple[FlowPersistedJsonObject | None, Space | None]:
+        """The metadata a draft write stores, with the organisation's default
+        speaker identification service as the flow's choice when it asks for
+        labels and chose none (see ``fill_default_speaker_service``). Only
+        draft writes call this; publishing never does.
+
+        Also returns the space when it was loaded, for the checks that follow."""
+        if self.space_service is None or not lacks_speaker_service_choice(
+            metadata_json, steps
+        ):
+            return metadata_json, None
+        space = await self.space_service.get_space(space_id)
+        return (
+            fill_default_speaker_service(
+                metadata=metadata_json, steps=steps, space=space
+            ),
+            space,
+        )
+
     async def _check_speaker_service(
         self,
         *,
@@ -772,6 +810,7 @@ class FlowService:
         metadata_json: FlowPersistedJsonObject | None,
         kept_metadata_json: FlowPersistedJsonObject | None = None,
         publishing_steps: list[FlowStep] | None = None,
+        space: Space | None = None,
     ) -> Space | None:
         """Refuse a malformed transcription choice, a picked speaker service
         the space may not use, and on publish (``publishing_steps``) a flow
@@ -780,7 +819,8 @@ class FlowService:
         it has, as a space keeps its grants, so an administrator's later
         change never blocks unrelated edits; publishing checks it again.
 
-        Returns the space when it was loaded, for the checks that follow."""
+        Returns the space (``space`` when the caller already loaded it) for
+        the checks that follow, or None when none was needed."""
         config = transcription_config_for_write(metadata_json)
         pick = config.speaker_service_in_use
         if pick is not None and pick == kept_speaker_service_id(kept_metadata_json):
@@ -794,8 +834,9 @@ class FlowService:
             # that is switched off is the one every run uses.
             pick = config.speaker_service_id
         if self.space_service is None or (pick is None and publishing_steps is None):
-            return None
-        space = await self.space_service.get_space(space_id)
+            return space
+        if space is None:
+            space = await self.space_service.get_space(space_id)
         if pick is not None:
             require_usable_speaker_service(pick, space=space)
         if publishing_steps is not None:

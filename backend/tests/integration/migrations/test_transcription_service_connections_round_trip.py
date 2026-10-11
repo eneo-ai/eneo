@@ -5,6 +5,7 @@ from pathlib import Path
 
 import pytest
 from sqlalchemy import create_engine, inspect, text
+from sqlalchemy.exc import IntegrityError
 from testcontainers.community.postgres import PostgresContainer
 
 from alembic import command
@@ -16,7 +17,8 @@ from eneo.database.tables.transcription_services_table import (
 
 pytestmark = [pytest.mark.integration, pytest.mark.migration_isolation]
 
-_REVISION = "202610091000"
+_REVISION = "202610111900"
+_LAST_CHECK_REVISION = "202610091000"
 _OPERATIONS_REVISION = "202610082100"
 _PREVIOUS_REVISION = "202610081100"
 _TABLES = (
@@ -75,6 +77,32 @@ def _checks(database_url: str) -> set[str]:
                 "transcription_service_connections"
             )
         }
+    finally:
+        engine.dispose()
+
+
+_INSERT_DEFAULT = text(
+    "INSERT INTO transcription_service_connections "
+    "(tenant_id, name, endpoint_url, api_key_encrypted, is_default) "
+    "VALUES (:tenant, :name, 'https://x', 'enc', true)"
+)
+
+
+def _default_mark(database_url: str) -> tuple[bool, set[str]]:
+    """Whether the connections have the default column, and their indexes
+    other than those of a constraint."""
+    engine = create_engine(database_url)
+    try:
+        inspector = inspect(engine)
+        table = "transcription_service_connections"
+        return (
+            "is_default" in {column["name"] for column in inspector.get_columns(table)},
+            {
+                index["name"]
+                for index in inspector.get_indexes(table)
+                if not index.get("duplicates_constraint")
+            },
+        )
     finally:
         engine.dispose()
 
@@ -157,8 +185,56 @@ def test_the_tables_round_trip_and_match_the_models(
                 "spaces_transcription_service_connections"
             )
         } == {"ix_spaces_transcription_service_connections_connection_id"}
+        [default_index] = [
+            index
+            for index in inspector.get_indexes("transcription_service_connections")
+            if not index.get("duplicates_constraint")
+        ]
+        [declared] = TranscriptionServiceConnections.__table__.indexes
+        assert (
+            default_index["name"],
+            default_index["unique"],
+            default_index["column_names"],
+            default_index["dialect_options"]["postgresql_where"],
+        ) == (
+            declared.name,
+            declared.unique,
+            [column.name for column in declared.columns],
+            str(declared.dialect_options["postgresql"]["where"]),
+        )
+        assert (declared.unique, declared.name) == (
+            True,
+            "uq_transcription_service_connections_default",
+        )
+
+        # No existing connection becomes the default, and an organisation has
+        # at most one; another organisation's default is its own.
+        with engine.connect() as connection:
+            transaction = connection.begin()
+            assert connection.execute(
+                text("SELECT is_default FROM transcription_service_connections")
+            ).scalars().all() == [False]
+            connection.execute(
+                text("UPDATE transcription_service_connections SET is_default = true")
+            )
+            other_tenant = connection.execute(
+                text(
+                    "INSERT INTO tenants (name, quota_limit, state) "
+                    "VALUES ('other tenant', 1, 'active') RETURNING id"
+                )
+            ).scalar_one()
+            connection.execute(_INSERT_DEFAULT, {"tenant": other_tenant, "name": "a"})
+            with pytest.raises(IntegrityError, match=default_index["name"]):
+                connection.execute(_INSERT_DEFAULT, {"tenant": tenant_id, "name": "b"})
+            transaction.rollback()
     finally:
         engine.dispose()
+
+    assert _default_mark(database_url) == (True, {default_index["name"]})
+    command.downgrade(config, _LAST_CHECK_REVISION)
+    assert _default_mark(database_url) == (False, set())
+    command.upgrade(config, _REVISION)
+    assert _default_mark(database_url) == (True, {default_index["name"]})
 
     # Downgrading restores the column; a kept connection is a speaker service.
     command.downgrade(config, _OPERATIONS_REVISION)

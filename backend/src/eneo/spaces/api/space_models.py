@@ -173,6 +173,14 @@ class SpaceTranscriptionServiceLink(BaseModel):
         )
     )
     available: bool = Field(description="False when the organisation disabled it.")
+    is_default: bool = Field(
+        description=(
+            "True for the organisation's default speaker identification "
+            "service, whether or not this space can use it now. A flow draft "
+            "that asks for speaker labels without a chosen service gets the "
+            "default stored as its choice only while the space can use it."
+        )
+    )
 
 
 class UpdateSpaceDryRunResponse(BaseModel):

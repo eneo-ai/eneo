@@ -17,6 +17,7 @@ from eneo.flows.flow_authoring_spec import (
 )
 from eneo.flows.flow_authoring_transcription import (
     apply_audio_transcription_defaults,
+    fill_default_speaker_service,
     kept_speaker_service_id,
     require_chosen_speaker_service,
     require_usable_speaker_service,
@@ -329,3 +330,82 @@ class TestChosenSpeakerService:
         self, wizard: dict[str, object], steps: list, usable: int
     ) -> None:
         self._require(wizard, steps, usable)
+
+
+class TestDefaultSpeakerService:
+    """A draft that asks for speaker labels without a chosen service is written
+    with the organisation's default as its own choice; nothing else is."""
+
+    _DEFAULT = uuid4()
+    _CHOSEN = {"transcription_speaker_service": {"id": str(uuid4())}}
+
+    @classmethod
+    def _fill(
+        cls, metadata: dict[str, object] | None, steps: list, *, default: bool = True
+    ) -> dict[str, object] | None:
+        return fill_default_speaker_service(
+            metadata=metadata,
+            steps=steps,
+            space=SimpleNamespace(  # pyright: ignore[reportArgumentType]
+                default_transcription_service=SimpleNamespace(id=cls._DEFAULT)
+                if default
+                else None
+            ),
+        )
+
+    @pytest.mark.parametrize(
+        ("wizard", "steps"),
+        [({}, []), (_LABELS_OFF, _MAPS_SPEAKERS)],
+        ids=["own_setting_on", "a_step_needs_labels_with_the_setting_off"],
+    )
+    def test_the_default_becomes_the_choice_of_a_flow_that_asks_and_chose_none(
+        self, wizard: dict[str, object], steps: list
+    ) -> None:
+        metadata = {
+            "form_schema": {"fields": []},
+            "wizard": {"transcription_enabled": True, "other": 1, **wizard},
+        }
+        written = {"form_schema": {"fields": []}, "wizard": dict(metadata["wizard"])}
+
+        filled = self._fill(metadata, steps)
+
+        assert filled == {
+            "form_schema": {"fields": []},
+            "wizard": {
+                **written["wizard"],
+                "transcription_speaker_service": {"id": str(self._DEFAULT)},
+            },
+        }
+        # The caller's metadata is not changed in place.
+        assert metadata == written
+
+    @pytest.mark.parametrize(
+        ("wizard", "steps", "default"),
+        [
+            (_CHOSEN, [], True),
+            ({**_CHOSEN, **_LABELS_OFF}, _MAPS_SPEAKERS, True),
+            (_LABELS_OFF, [], True),
+            ({"transcription_enabled": False}, _MAPS_SPEAKERS, True),
+            ({}, _MAPS_SPEAKERS, False),
+            ({"transcription_diarization": "yes"}, [], True),
+            ({"transcription_speaker_service": {"id": "nope"}}, [], True),
+        ],
+        ids=[
+            "a_choice_is_kept",
+            "a_choice_is_kept_when_a_step_needs_labels",
+            "labels_off_and_no_step_needs_them",
+            "the_flow_transcribes_nothing",
+            "the_space_has_no_usable_default",
+            "a_malformed_setting_is_left_to_validation",
+            "a_malformed_choice_is_left_to_validation",
+        ],
+    )
+    def test_nothing_else_is_filled(
+        self, wizard: dict[str, object], steps: list, default: bool
+    ) -> None:
+        metadata = {"wizard": {"transcription_enabled": True, **wizard}}
+
+        assert self._fill(metadata, steps, default=default) is metadata
+
+    def test_a_flow_without_metadata_stays_without(self) -> None:
+        assert self._fill(None, _MAPS_SPEAKERS) is None

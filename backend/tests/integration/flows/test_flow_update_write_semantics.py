@@ -19,6 +19,10 @@ import sqlalchemy as sa
 from pydantic import ValidationError
 
 from eneo.database.tables.flow_tables import Flows
+from eneo.database.tables.transcription_services_table import (
+    SpacesTranscriptionServiceConnections,
+    TranscriptionServiceConnections,
+)
 from eneo.flows.ai_builder.ai_builder_authoring_policy import AIBuilderAuthoringPolicy
 from eneo.flows.api import flow_authoring_router
 from eneo.flows.application.flow_authoring_command import (
@@ -888,6 +892,72 @@ async def test_a_builder_create_derives_the_upload_configuration_of_a_file_step(
     assert runtime_input["input_format"] == input_type
     for column in ("input_bindings", "output_contract", "review_policy"):
         assert row[column] is None, column
+
+
+@pytest.mark.parametrize("origin", ["package", "builder"])
+async def test_an_audio_flow_a_command_creates_gets_the_default_speaker_service(
+    client, db_container, admin_user, patch_auth_service_jwt, origin: str
+) -> None:
+    """The AI Builder's draft and an installed package go through the same
+    draft write as the editor, so they get the organisation's default too."""
+    space_id, _ = await _space(client, db_container, admin_user)
+    async with db_container() as container:
+        session = container.session()
+        service_id = await session.scalar(
+            sa.insert(TranscriptionServiceConnections)
+            .values(
+                tenant_id=admin_user.tenant_id,
+                name=f"vemsa-{uuid4().hex[:8]}",
+                endpoint_url="https://vemsa.example.se",
+                api_key_encrypted="enc:fernet:v1:not-used",
+                is_default=True,
+            )
+            .returning(TranscriptionServiceConnections.id)
+        )
+        session.add(
+            SpacesTranscriptionServiceConnections(
+                space_id=space_id, connection_id=service_id
+            )
+        )
+    spec = FlowDraftSpecCore(
+        flow_name="Ny",
+        flow_description="",
+        steps=[
+            _new_step_spec(
+                "a",
+                input_type=InputType.AUDIO,
+                output_mode=OutputMode.TRANSCRIBE_ONLY,
+                output_type=OutputType.TEXT,
+            )
+        ],
+    )
+    command_origin = (
+        _origin(spec)
+        if origin == "builder"
+        else FlowPackageAuthoringOrigin(
+            package_id="paket", package_version="1", content_checksum="0" * 64
+        )
+    )
+    async with db_container() as container:
+        result = await FlowAuthoringCommandService().apply(
+            command=CreateFlowAuthoringCommand(
+                space_id=space_id,
+                spec=spec,
+                origin=command_origin,
+                default_transcription_model_id=uuid4(),
+            ),
+            flow_service=container.flow_service(),
+            origin_policy=AIBuilderAuthoringPolicy(command_origin)
+            if isinstance(command_origin, AIBuilderFlowAuthoringOrigin)
+            else None,
+        )
+
+    async with db_container() as container:
+        flow = await container.flow_service().get_flow(result.flow_id)
+    assert flow.metadata_json is not None
+    assert flow.metadata_json["wizard"]["transcription_speaker_service"] == {
+        "id": str(service_id)
+    }
 
 
 # The manual API: green before and after the authoring write semantics.

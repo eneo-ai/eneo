@@ -1249,7 +1249,7 @@ When `selectable` is `false`, do not send `true` or `false`: Eneo refuses the re
 
 ### Check that speaker labels can be produced
 
-A flow labels speakers only with the speaker identification service its author chose. Eneo never chooses a service for a flow. A flow asks for speaker labels when a step requires them (`speaker_labels.required` is `true`) or when its own setting has them on. When the labels it asks for cannot be produced, `speaker_labels.unavailable_reason` says why:
+A flow labels speakers only with the speaker identification service stored in the flow: its author's choice, or the organisation's default filled in when the draft was saved. Nothing is chosen when a run starts. A flow asks for speaker labels when a step requires them (`speaker_labels.required` is `true`) or when its own setting has them on. When the labels it asks for cannot be produced, `speaker_labels.unavailable_reason` says why:
 
 | `unavailable_reason` | Meaning                                                                                                              | Who can fix it                                         |
 | -------------------- | -------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------ |

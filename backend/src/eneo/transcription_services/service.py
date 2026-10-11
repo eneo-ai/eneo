@@ -126,8 +126,19 @@ class TranscriptionServiceConnectionService:
         endpoint_url: str | NotProvided = NOT_PROVIDED,
         api_key: str | NotProvided = NOT_PROVIDED,
         is_enabled: bool | NotProvided = NOT_PROVIDED,
+        is_default: bool | NotProvided = NOT_PROVIDED,
         security_classification: ModelId | None | NotProvided = NOT_PROVIDED,
     ) -> TranscriptionServiceConnection:
+        """``is_default`` true makes this the organisation's only default;
+        false only unmarks this connection. Nothing else is ever marked."""
+        # The previous default is unmarked before this connection is locked or
+        # touched, so the new mark is written after the old one is gone and
+        # no flush of this row can come first.
+        displaced = (
+            await self.repository.displace_default(connection_id)
+            if is_default is True
+            else None
+        )
         row = await self.repository.lock(connection_id)
         before = await self.repository.get(connection_id)
         require_key_for_destination(
@@ -167,6 +178,8 @@ class TranscriptionServiceConnectionService:
             row.last_checked_at = None
         if is_provided(is_enabled):
             row.is_enabled = is_enabled
+        if is_provided(is_default):
+            row.is_default = is_default
         if is_provided(classification_id):
             row.security_classification_id = classification_id
         after = await self.repository.save(row)
@@ -179,6 +192,14 @@ class TranscriptionServiceConnectionService:
                 after,
                 f"Updated transcription service '{after.name}'",
                 changes=changes,
+                extra={
+                    "displaced_default": {
+                        "id": str(displaced[0]),
+                        "name": displaced[1],
+                    }
+                }
+                if displaced is not None
+                else None,
             )
         return after
 
@@ -281,6 +302,7 @@ def _facts(connection: TranscriptionServiceConnection) -> dict[str, Any]:
     return {
         "endpoint_url": connection.endpoint_url,
         "is_enabled": connection.is_enabled,
+        "is_default": connection.is_default,
         "security_classification_id": str(classification.id)
         if classification is not None
         else None,

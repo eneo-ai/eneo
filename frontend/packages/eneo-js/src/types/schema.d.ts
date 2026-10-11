@@ -36079,6 +36079,11 @@ export interface components {
        */
       id: string;
       /**
+       * Is Default
+       * @description True for the organisation's default speaker identification service, whether or not this space can use it now. A flow draft that asks for speaker labels without a chosen service gets the default stored as its choice only while the space can use it.
+       */
+      is_default: boolean;
+      /**
        * Meets Security Classification
        * @description False when the service's security classification is below the space's.
        */
@@ -38184,6 +38189,11 @@ export interface components {
        * Format: uuid
        */
       id: string;
+      /**
+       * Is Default
+       * @description The organisation's default speaker identification service: a flow draft that asks for speaker labels without a chosen service gets it stored as its choice, in spaces that may use it. At most one service is the default, and only an administrator marks it.
+       */
+      is_default: boolean;
       /** Is Enabled */
       is_enabled: boolean;
       /** @description The latest check of the current endpoint and key, or null when they have not been checked. Changing either clears it. */
@@ -38234,6 +38244,11 @@ export interface components {
        * @description Base URL of the service's native jobs API, http or https, without credentials, query or fragment. A trailing /v1 is removed.
        */
       endpoint_url?: string;
+      /**
+       * Is Default
+       * @description True makes this the organisation's only default speaker identification service, in place of the previous one. False unmarks it and marks no other.
+       */
+      is_default?: boolean;
       /** Is Enabled */
       is_enabled?: boolean;
       /** Name */

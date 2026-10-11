@@ -1,14 +1,18 @@
 """A flow labels speakers only with the service its author chose, and picks it
-only from those its space may use."""
+only from those its space may use. A draft that asks for labels without a
+choice is written with the organisation's default, when an administrator
+marked one the space may use."""
 
 from __future__ import annotations
 
 from typing import Any
-from uuid import uuid4
+from uuid import UUID, uuid4
 
 import pytest
+import sqlalchemy as sa
 from httpx import AsyncClient
 
+from eneo.database.tables.flow_tables import FlowVersions
 from eneo.main.models import ModelId
 from eneo.roles.permissions import Permission
 from eneo.roles.role import RoleCreate
@@ -310,3 +314,194 @@ async def test_a_step_that_maps_speakers_publishes_only_with_a_chosen_service(
         assert published.status_code == 200, published.text
     else:
         _refusal(published, _UNAVAILABLE)
+
+
+_SERVICES = "/api/v1/admin/transcription-services/"
+
+
+async def _mark_default(client: AsyncClient, headers, service_id: str) -> None:
+    response = await client.patch(
+        f"{_SERVICES}{service_id}/", json={"is_default": True}, headers=headers
+    )
+    assert response.status_code == 200, response.text
+
+
+def _chosen(response) -> dict[str, Any] | None:
+    assert response.status_code in (200, 201), response.text
+    wizard = (response.json()["metadata_json"] or {}).get("wizard", {})
+    return wizard.get("transcription_speaker_service")
+
+
+async def _save(client: AsyncClient, headers, flow_id: str, **body: Any):
+    return await client.patch(f"/api/v1/flows/{flow_id}/", json=body, headers=headers)
+
+
+async def test_a_draft_that_asks_for_labels_without_a_choice_gets_the_default(
+    client: AsyncClient, headers
+):
+    space_id = await _space(client, headers)
+    vemsa, other = (
+        await _connection(client, headers),
+        await _connection(client, headers),
+    )
+    await _grant(client, headers, space_id, vemsa, other)
+    await _mark_default(client, headers, vemsa)
+
+    created = await _create(client, headers, space_id, _metadata(None))
+    assert _chosen(created) == {"id": vemsa}
+    flow_id = created.json()["id"]
+    stored = await client.get(f"/api/v1/flows/{flow_id}/", headers=headers)
+    assert _chosen(stored) == {"id": vemsa}
+
+    # A choice is never replaced, and a flow that does not ask gets none.
+    kept = await _create(client, headers, space_id, _metadata(other))
+    assert _chosen(kept) == {"id": other}
+    labels_off = _metadata(None, transcription_diarization=False)
+    assert _chosen(await _create(client, headers, space_id, labels_off)) is None
+    no_audio = {"wizard": {"transcription_enabled": False}}
+    assert _chosen(await _create(client, headers, space_id, no_audio)) is None
+
+    # The editor clears the choice when labels are switched off; switching
+    # them on again asks again, so the default is written again.
+    off = await _save(client, headers, flow_id, metadata_json=labels_off)
+    assert _chosen(off) is None
+    on = await _save(client, headers, flow_id, metadata_json=_metadata(None))
+    assert _chosen(on) == {"id": vemsa}
+
+
+@pytest.mark.parametrize("default", ["none_marked", "not_granted", "switched_off"])
+async def test_nothing_is_filled_without_a_default_the_space_may_use(
+    client: AsyncClient, headers, default: str
+):
+    space_id = await _space(client, headers)
+    vemsa, other = (
+        await _connection(client, headers),
+        await _connection(client, headers),
+    )
+    # The space has a service to use in every case: none is chosen for the flow.
+    await _grant(
+        client,
+        headers,
+        space_id,
+        *([other] if default == "not_granted" else [vemsa, other]),
+    )
+    if default != "none_marked":
+        await _mark_default(client, headers, vemsa)
+    if default == "switched_off":
+        switched_off = await client.patch(
+            f"{_SERVICES}{vemsa}/", json={"is_enabled": False}, headers=headers
+        )
+        assert switched_off.status_code == 200, switched_off.text
+
+    created = await _create(client, headers, space_id, _metadata(None))
+
+    assert _chosen(created) is None
+    saved = await _save(
+        client, headers, created.json()["id"], metadata_json=_metadata(None)
+    )
+    assert _chosen(saved) is None
+
+
+async def test_steps_that_start_naming_speakers_get_the_default_without_a_metadata_write(
+    client: AsyncClient, headers
+):
+    space_id = await _space(client, headers)
+    vemsa, other = (
+        await _connection(client, headers),
+        await _connection(client, headers),
+    )
+    await _grant(client, headers, space_id, vemsa)
+    await _mark_default(client, headers, vemsa)
+    labels_off = {
+        "transcription_diarization": False,
+        "transcription_model": {"id": str(uuid4())},
+    }
+    form = {
+        "form_schema": {
+            "fields": [{"name": "deltagare", "type": "list", "label": "Deltagare"}]
+        }
+    }
+
+    async def saved_with_a_step_that_names_speakers(service_id: str | None):
+        created = await _create(
+            client, headers, space_id, _metadata(service_id, **labels_off) | form
+        )
+        # The flow's own setting is off, so nothing is asked of it yet.
+        assert _chosen(created) == (None if service_id is None else {"id": service_id})
+        flow_id = created.json()["id"]
+        assistant = await client.post(
+            f"/api/v1/flows/{flow_id}/assistants/",
+            json={"name": f"steg-{uuid4().hex[:6]}"},
+            headers=headers,
+        )
+        assert assistant.status_code == 201, assistant.text
+        step = {"assistant_id": assistant.json()["id"], "output_type": "text"}
+        return await _save(
+            client,
+            headers,
+            flow_id,
+            steps=[
+                step
+                | {
+                    "step_order": 1,
+                    "user_description": "Transkribera",
+                    "input_source": "flow_input",
+                    "input_type": "audio",
+                    "output_mode": "transcribe_only",
+                },
+                step
+                | {
+                    "step_order": 2,
+                    "user_description": "Vem är vem?",
+                    "input_source": "previous_step",
+                    "input_type": "text",
+                    "output_mode": "speaker_mapping",
+                    "output_type": "json",
+                    "output_config": {
+                        "speaker_mapping": {"participants_field": "deltagare"}
+                    },
+                    "review_policy": {"mode": "edit"},
+                },
+            ],
+        )
+
+    # The write names no metadata; the flow it ends with asks for labels.
+    assert _chosen(await saved_with_a_step_that_names_speakers(None)) == {"id": vemsa}
+    # A choice stays, also one the space may not use: publishing refuses it.
+    assert _chosen(await saved_with_a_step_that_names_speakers(other)) == {"id": other}
+
+
+async def test_publishing_fills_nothing_and_a_published_version_keeps_its_service(
+    client: AsyncClient, headers, db_container
+):
+    space_id = await _space(client, headers)
+    vemsa, other = (
+        await _connection(client, headers),
+        await _connection(client, headers),
+    )
+    await _grant(client, headers, space_id, vemsa, other)
+    # Saved before any default was marked: it asks for labels and chose none.
+    flow_id = await _publishable(client, headers, space_id, _metadata(None))
+    await _mark_default(client, headers, vemsa)
+
+    _refusal(await _publish(client, headers, flow_id), _NOT_CHOSEN)
+    stored = await client.get(f"/api/v1/flows/{flow_id}/", headers=headers)
+    assert _chosen(stored) is None
+
+    # One save writes the default as the flow's choice, and it publishes.
+    saved = await _save(client, headers, flow_id, metadata_json=_metadata(None))
+    assert _chosen(saved) == {"id": vemsa}
+    assert _chosen(await _publish(client, headers, flow_id)) == {"id": vemsa}
+
+    await _mark_default(client, headers, other)
+    stored = await client.get(f"/api/v1/flows/{flow_id}/", headers=headers)
+    assert _chosen(stored) == {"id": vemsa}
+    async with db_container() as container:
+        [definition] = await container.session().scalars(
+            sa.select(FlowVersions.definition_json).where(
+                FlowVersions.flow_id == UUID(flow_id)
+            )
+        )
+    assert definition["metadata_json"]["wizard"]["transcription_speaker_service"] == {
+        "id": vemsa
+    }

@@ -36,7 +36,8 @@ const link = (id: string, name: string, meets = true, available = true) => ({
   id,
   name,
   meets_security_classification: meets,
-  available
+  available,
+  is_default: false
 });
 
 // The selector hands the manager a function of the space as it stands when the
@@ -74,6 +75,27 @@ it("explains why a granted service cannot be used, and keeps it removable", asyn
   const low = page.getByRole("switch", { name: "Vemsa Sundsvall" });
   await expect.element(low).toBeChecked();
   await expect.element(low).toBeEnabled();
+});
+
+it("says which granted service is the organisation's default", async () => {
+  currentSpace.value = {
+    security_classification: null,
+    transcription_services: [
+      link("a", "Vemsa Sundsvall"),
+      { ...link("b", "Vemsa Timrå"), is_default: true }
+    ]
+  };
+  render(SelectSpaceSpeakerServices, {
+    services: [service("a", "Vemsa Sundsvall"), service("b", "Vemsa Timrå")],
+    securityEnabled: false
+  });
+
+  await expect
+    .element(page.getByRole("switch", { name: "Vemsa Timrå" }))
+    .toHaveAccessibleDescription(m.speaker_service_space_default());
+  await expect
+    .element(page.getByRole("switch", { name: "Vemsa Sundsvall" }))
+    .not.toHaveAccessibleDescription();
 });
 
 it("grants a usable service and refuses one below the space's classification", async () => {

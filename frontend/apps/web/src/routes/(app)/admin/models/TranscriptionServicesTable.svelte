@@ -26,6 +26,7 @@
   import Trash2 from "@lucide/svelte/icons/trash-2";
   import ConfirmDialog from "$lib/components/ConfirmDialog.svelte";
   import * as Alert from "$lib/components/ui/alert/index.js";
+  import { Badge } from "$lib/components/ui/badge/index.js";
   import { Button } from "$lib/components/ui/button/index.js";
   import * as DropdownMenu from "$lib/components/ui/dropdown-menu/index.js";
   import * as Empty from "$lib/components/ui/empty/index.js";
@@ -106,8 +107,22 @@
   // the server clears a check whose address or key changed, by anyone. A
   // check still running tested settings this answer may have replaced, so its
   // result is dropped; a new address or key starts a fresh one.
-  function replace(next: TranscriptionService): boolean {
-    if (!patch(next.id, next)) return false;
+  //
+  // The default mark belongs to the organisation, not to the row: only the
+  // answer to a save that changed it (`marksDefault`) brings it, and takes it
+  // from the service that had it. A slower answer to another edit carries the
+  // mark as it was when that edit was sent, so it keeps what the list shows.
+  function replace(next: TranscriptionService, marksDefault = false): boolean {
+    const current = services.find((service) => service.id === next.id);
+    if (!current) return false;
+    services = services.map((service) => {
+      if (service.id === next.id) {
+        return marksDefault ? next : { ...next, is_default: current.is_default };
+      }
+      return marksDefault && next.is_default && service.is_default
+        ? { ...service, is_default: false }
+        : service;
+    });
     checkRuns.set(next.id, (checkRuns.get(next.id) ?? 0) + 1);
     checking.delete(next.id);
     return true;
@@ -181,7 +196,7 @@
   ): Promise<TranscriptionService> {
     const retest = "endpoint_url" in body || "api_key" in body;
     const updated = await mutate(id, () => eneo.transcriptionServices.update({ id }, body));
-    if (replace(updated) && retest) void runCheck(id);
+    if (replace(updated, "is_default" in body) && retest) void runCheck(id);
     return updated;
   }
 
@@ -271,7 +286,12 @@
             <Table.Row>
               <Table.Cell>
                 <div class="flex min-w-0 flex-col">
-                  <span class="font-medium">{service.name}</span>
+                  <span class="flex items-center gap-2">
+                    <span class="font-medium">{service.name}</span>
+                    {#if service.is_default}
+                      <Badge variant="outline">{m.speaker_service_default_badge()}</Badge>
+                    {/if}
+                  </span>
                   <span class="text-muted-foreground truncate text-sm">
                     {host(service.endpoint_url)} · {spaceUsage(service.space_count)}
                   </span>

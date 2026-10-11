@@ -721,6 +721,7 @@ class SpaceAssembler:
                     connection
                 ),
                 available=connection.can_access,
+                is_default=connection.is_default,
             )
             for connection in connections
         ]

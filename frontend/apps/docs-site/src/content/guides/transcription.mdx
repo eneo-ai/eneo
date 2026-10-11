@@ -16,7 +16,7 @@ Only flows use live transcription and speaker identification services.
 
 - **The flow's transcription model always writes the text.** A speaker identification service never does, so the live text and the final transcript come from the same model.
 - **A speaker identification service only labels who spoke.** When the model has written the text, Eneo sends the service the audio file and the transcript with its timestamps. The service returns the same text with a speaker label on each line, such as `SPEAKER_00` and `SPEAKER_01`. This adds one upload of the audio and the service's processing time to the run.
-- **Eneo uses a service only when a run labels speakers and the flow's space can use the service.** A space can use a service that it has been given access to, that is switched on, and whose security class is not lower than the space's. A run follows the flow's speaker identification setting, unless the app that starts the run chooses otherwise. A flow uses only the service its author chose in the flow. Eneo never chooses a service for a flow, and never replaces a chosen service with another.
+- **Eneo uses a service only when a run labels speakers and the flow's space can use the service.** A space can use a service that it has been given access to, that is switched on, and whose security class is not lower than the space's. A run follows the flow's speaker identification setting, unless the app that starts the run chooses otherwise. A flow uses only the service stored in the flow: the one its author chose, or the organisation's default that Eneo filled in when the draft was saved. Nothing is chosen when a flow runs, and a stored service is never replaced with another.
 - **Without a chosen service, a flow still transcribes.** The transcript then has no speaker labels. The exception is a flow with a step that maps speakers to names, which needs the labels. See [Use speaker identification in a flow](#use-speaker-identification-in-a-flow).
 
 ## Set up a transcription model
@@ -131,16 +131,34 @@ A space administrator does this for each space. The service must be switched on,
 
 A service that cannot be added shows the reason next to its name: "Turned off by an administrator." or "The security class is lower than the space's." A service that was added before it became unusable stays in the list with that reason, and you can still switch it off.
 
-Access does not make a flow use the service. Each flow's author chooses the service in the flow, and Eneo never chooses one for a flow. Giving the space a second service therefore changes nothing for the flows that already run.
+Access does not make a flow use the service. Each flow stores its own service: the author's choice, or [the organisation's default](#set-a-default-service) filled in when the draft is saved. Giving the space a second service therefore changes nothing for the flows that already run.
 
 To replace a server without asking every author to choose again, [change the address of the existing service](#change-switch-off-or-remove-a-service) instead of connecting a second one.
+
+## Set a default service
+
+An administrator can mark one service as the organisation's default, so that flow authors do not have to choose it in every flow.
+
+1. Open **Admin → Models → Transcription models** and go to the **Speaker identification** section.
+2. Open the service's actions menu (the **⋯** button) and choose **Edit** (**Redigera**).
+3. Tick **Default for new flows** (**Standard för nya flöden**) and save.
+4. Check the result. The service shows **Default** (**Standard**) in the list. Only one service can be the default: marking another one moves the mark.
+
+What the default does:
+
+- When a flow draft is saved with speaker identification on and no service chosen, Eneo stores the default as the flow's service. This happens only in a space that can use the service, and it also covers flows that the AI Builder creates and flows that are imported.
+- The author sees the service in the flow's **Transcription** stage, marked "(default)", and can choose another.
+- The default only fills in drafts. A published flow keeps the service it was published with: marking another service, or clearing the mark, changes nothing for it.
+- Eneo never works out a default on its own. With no default marked, or in a space that cannot use the default, the author chooses.
+
+To mark the default through the API, send `{"is_default": true}` in the `PATCH` of the service.
 
 ## Use speaker identification in a flow
 
 Flow authors choose speaker identification in the flow editor's **Transcription** stage (**Transkribering**). A published flow is read-only, so unpublish it to change these settings and publish it again to apply them.
 
 1. Turn on **Speaker identification** (**Talaridentifiering**). The switch is off and cannot be used while the space has no service it can use.
-2. Under **Speaker identification service** (**Tjänst för talaridentifiering**), choose the service. The list shows the services the space can use. Eneo does not choose one for you, also when the space has only one. A flow with speaker identification on cannot be published until a service is chosen: "No speaker identification service is chosen." (**Ingen tjänst för talaridentifiering är vald.**) Turning speaker identification off also clears the choice.
+2. Under **Speaker identification service** (**Tjänst för talaridentifiering**), choose the service. The list shows the services the space can use. When your organisation has a default service that the space can use, Eneo fills it in when the draft is saved, and you can choose another. Otherwise choose the service yourself: Eneo never picks one on its own, also when the space has only one. A flow with speaker identification on cannot be published until a service is chosen: "No speaker identification service is chosen." (**Ingen tjänst för talaridentifiering är vald.**) Turning speaker identification off also clears the choice.
 3. Leave **Maximum number of speakers** (**Högst antal talare**), which appears when a service is chosen, empty to let the service count the speakers. The empty field shows "Automatic". Enter a whole number of at least 1 to set the most speakers the service may label.
 4. Publish the flow.
 5. Check the result. Run the flow with a recording of two people. Each line of the transcript starts with a time range and a label, such as `[00:00:12 - 00:00:15] SPEAKER_00:`. When the step has finished, its details in the run name the service that labelled it, under **Advanced** (**Avancerad**).

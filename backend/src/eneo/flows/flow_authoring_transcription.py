@@ -75,6 +75,48 @@ def apply_audio_transcription_defaults(
     return updated_metadata
 
 
+def lacks_speaker_service_choice(
+    metadata: FlowPersistedJsonObject | None, steps: Iterable[FlowStep]
+) -> bool:
+    """Whether the flow transcribes and asks for speaker labels (its own
+    setting, or a step that needs them) without having chosen a service. A
+    malformed choice is no answer here; the write's validation refuses it."""
+    try:
+        config = parse_transcription_config(metadata)
+    except FlowTranscriptionConfigError:
+        return False
+    return (
+        config.enabled
+        and config.speaker_service_id is None
+        and (config.diarization or steps_require_speaker_labels(steps))
+    )
+
+
+def fill_default_speaker_service(
+    *,
+    metadata: FlowPersistedJsonObject | None,
+    steps: Iterable[FlowStep],
+    space: Space,
+) -> FlowPersistedJsonObject | None:
+    """The metadata a draft is written with: the organisation's default
+    speaker identification service becomes the flow's own choice when the flow
+    asks for labels, chose none, and its space may use the default. `steps` are
+    the steps the flow ends with.
+
+    The choice is stored, so the flow runs with it as with one its author
+    made; nothing reads the default at publish or run time. An existing
+    choice is never replaced, and with no usable default the author chooses."""
+    default = space.default_transcription_service
+    if default is None or not lacks_speaker_service_choice(metadata, steps):
+        return metadata
+    filled = dict(metadata or {})
+    filled["wizard"] = {
+        **(clone_json_object(filled.get("wizard")) or {}),
+        SPEAKER_SERVICE_KEY: {"id": str(default.id)},
+    }
+    return filled
+
+
 def transcription_config_for_write(
     metadata: FlowPersistedJsonObject | None,
 ) -> FlowTranscriptionConfig:

@@ -26,7 +26,9 @@ def _classification(level: int) -> SecurityClassification:
     )
 
 
-def _connection(level: int, *, enabled: bool = True) -> TranscriptionServiceConnection:
+def _connection(
+    level: int, *, enabled: bool = True, default: bool = False
+) -> TranscriptionServiceConnection:
     now = datetime.now(timezone.utc)
     return TranscriptionServiceConnection(
         id=uuid4(),
@@ -34,6 +36,7 @@ def _connection(level: int, *, enabled: bool = True) -> TranscriptionServiceConn
         name=f"vemsa-{level}",
         endpoint_url="https://vemsa.example.se",
         is_enabled=enabled,
+        is_default=default,
         security_classification=_classification(level),
         created_at=now,
         updated_at=now,
@@ -133,3 +136,28 @@ def test_a_personal_space_cannot_be_granted_services():
 
     with pytest.raises(BadRequestException):
         space.update(transcription_services=[_connection(1)])
+
+
+def test_the_marked_default_is_the_spaces_default_while_it_is_usable():
+    other, marked = _connection(3), _connection(3, default=True)
+
+    space = _space(_classification(3), [other, marked])
+
+    assert space.default_transcription_service == marked
+
+
+@pytest.mark.parametrize(
+    "connections",
+    [
+        [_connection(3)],
+        [_connection(3), _connection(3, enabled=False, default=True)],
+        [_connection(3), _connection(1, default=True)],
+    ],
+    ids=["none-marked", "switched-off", "below-classification"],
+)
+def test_no_service_stands_in_for_a_default_the_space_cannot_use(connections):
+    # Also with exactly one usable service: a default is marked, never inferred.
+    space = _space(_classification(3), connections)
+
+    assert space.usable_transcription_services
+    assert space.default_transcription_service is None

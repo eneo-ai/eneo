@@ -21,6 +21,7 @@
   import CircleAlert from "@lucide/svelte/icons/circle-alert";
   import * as Alert from "$lib/components/ui/alert/index.js";
   import { Button } from "$lib/components/ui/button/index.js";
+  import { Checkbox } from "$lib/components/ui/checkbox/index.js";
   import * as Dialog from "$lib/components/ui/dialog/index.js";
   import * as Field from "$lib/components/ui/field/index.js";
   import { Input } from "$lib/components/ui/input/index.js";
@@ -74,6 +75,8 @@
   let address = $state(initial?.endpoint_url ?? "");
   let apiKey = $state("");
   let classificationId = $state(initial?.security_classification?.id ?? NONE);
+  let savedDefault = $state(initial?.is_default ?? false);
+  let isDefault = $state(initial?.is_default ?? false);
   let attempted = $state(false);
   let submitting = $state(false);
   let saveFirst = $state(false);
@@ -105,8 +108,10 @@
   const keyMissing = $derived((saved === null || addressMoved) && !apiKey.trim());
   const nameChanged = $derived(saved !== null && name.trim() !== saved.name);
   const classificationChanged = $derived(classificationId !== savedClassificationId);
+  const defaultChanged = $derived(saved !== null && isDefault !== savedDefault);
   const dirty = $derived(
-    saved !== null && (nameChanged || addressMoved || apiKey !== "" || classificationChanged)
+    saved !== null &&
+      (nameChanged || addressMoved || apiKey !== "" || classificationChanged || defaultChanged)
   );
 
   const nameInvalid = $derived(nameTaken || (attempted && nameMissing));
@@ -159,12 +164,14 @@
           ...(nameChanged && { name: name.trim() }),
           ...(classificationChanged && { security_classification: classification }),
           ...(addressMoved && { endpoint_url: address.trim() }),
-          ...(apiKey.trim() && { api_key: apiKey.trim() })
+          ...(apiKey.trim() && { api_key: apiKey.trim() }),
+          ...(defaultChanged && { is_default: isDefault })
         });
         // A service just connected stays open, so the new test is seen too.
         if (!connected) open = false;
         saved = updated;
         savedClassificationId = classificationId;
+        savedDefault = isDefault;
         apiKey = "";
         attempted = false;
       } else {
@@ -340,6 +347,24 @@
                 {m.speaker_service_classification_help()}
               </Field.Description>
             </Field.Field>
+
+            <!-- Offered once the service is connected: a default is a service
+                 an administrator has seen working. -->
+            {#if saved}
+              <Field.Field orientation="horizontal">
+                <Checkbox
+                  id="{uid}-default"
+                  bind:checked={isDefault}
+                  aria-describedby="{uid}-default-help"
+                />
+                <Field.Content>
+                  <Field.Label for="{uid}-default">{m.speaker_service_default_label()}</Field.Label>
+                  <Field.Description id="{uid}-default-help">
+                    {m.speaker_service_default_help()}
+                  </Field.Description>
+                </Field.Content>
+              </Field.Field>
+            {/if}
           </Field.Group>
         </fieldset>
 

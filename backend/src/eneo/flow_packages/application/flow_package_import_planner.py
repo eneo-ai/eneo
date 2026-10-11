@@ -132,6 +132,11 @@ def build_flow_package_import_plan(
     default_transcription_model_id: UUID | None = None,
     template_files: Mapping[str, FlowPackageTemplateFile] | None = None,
 ) -> FlowPackageImportPlan:
+    """The plan that is reviewed before the package is installed.
+
+    The speaker identification service is not part of the import review: the
+    installed draft gets the organisation's default at installation, like any
+    new draft."""
     envelope.validated_resource_contract()
     audio_transcription_required = requires_audio_transcription(envelope.spec.steps)
     effective_transcription_model_id = (

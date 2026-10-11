@@ -10,13 +10,15 @@ const vemsa = {
   id: "s-1",
   name: "Vemsa Sundsvall",
   meets_security_classification: true,
-  available: true
+  available: true,
+  is_default: false
 };
 const second = {
   id: "s-2",
   name: "Talare test",
   meets_security_classification: true,
-  available: true
+  available: true,
+  is_default: false
 };
 
 function renderRow(props: {
@@ -90,6 +92,19 @@ describe("speaker identification", () => {
     await page.getByRole("option", { name: vemsa.name, exact: true }).click();
 
     expect(onPick.mock.calls).toEqual([[vemsa.id]]);
+  });
+
+  it("names the organisation's default, in the list and as the flow's choice", async () => {
+    const standard = { ...second, is_default: true };
+    const label = m.flow_transcription_speakers_default_option({ name: standard.name });
+    renderRow({ services: [vemsa, standard], pickedId: standard.id });
+
+    // Filled in by the default or chosen by hand, it reads the same: the
+    // author sees which service is the organisation's default.
+    await expect.element(picker()).toHaveTextContent(label);
+    await picker().click();
+    await expect.element(page.getByRole("option", { name: label, exact: true })).toBeVisible();
+    await expect.element(page.getByRole("option", { name: vemsa.name, exact: true })).toBeVisible();
   });
 
   it.each([

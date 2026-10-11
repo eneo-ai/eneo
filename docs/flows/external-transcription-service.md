@@ -102,10 +102,14 @@ finalization allowance) less what earlier steps of the run consumed; a step's
 
 - **Speaker identification** applies when the flow chose a connected service
   that its space can use; otherwise the transcript has no speaker labels.
-  Nothing is chosen for a flow (`resolve_speaker_service`): not the space's
-  only service, not a fallback when the chosen one becomes unusable. A flow
-  that asks for labels without a choice is refused at publish
-  (`flow_speaker_service_not_chosen`).
+  Nothing is chosen for a flow at run time (`resolve_speaker_service`): not
+  the space's only service, not a fallback when the chosen one becomes
+  unusable. A flow that asks for labels without a choice is refused at
+  publish (`flow_speaker_service_not_chosen`). An administrator may mark one
+  connection as the organisation's default (`is_default`); a draft that asks
+  for labels without a choice gets it stored as its choice when the draft is
+  written, where its space can use it. Publishing and running never read
+  the default.
 - **The flow's transcription model is always required.** The flow's model
   selection and space governance apply; the selected model writes the text.
 - **Job flow**: one multipart `POST /v1/jobs` per audio file (with
