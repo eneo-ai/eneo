@@ -187,7 +187,7 @@ test("whole structured mappings show an accessible error and recover to a valid 
   await expect(source).toHaveAttribute("aria-invalid", "true");
   const errorId = await source.getAttribute("aria-describedby");
   expect(errorId).toBeTruthy();
-  await expect(page.locator(`[id="${errorId}"]`)).toContainText(/Whole objects|Hela objekt/);
+  await expect(page.locator(`[id="${errorId}"]`)).toContainText(/Whole lists|Hela listor/);
   await expect(
     page.getByRole("status").filter({ hasText: /All fields are mapped|Alla fält är kopplade/ })
   ).toHaveCount(0);
