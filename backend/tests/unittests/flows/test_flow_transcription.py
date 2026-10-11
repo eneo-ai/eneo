@@ -341,16 +341,26 @@ class _SpaceStub:
     ):
         self.transcription_models = models
         self._default_model = default_model
-        self.usable_transcription_services = (
+        self.linked_transcription_services = (
             [_SPEAKER_SERVICE] if speaker_services is None else speaker_services
         )
 
     def get_default_transcription_model(self):
         return self._default_model
 
+    @property
+    def standard_transcription_service(self):
+        return next(
+            (s for s in self.linked_transcription_services if s.can_access), None
+        )
+
     def usable_transcription_service(self, connection_id):
         return next(
-            (s for s in self.usable_transcription_services if s.id == connection_id),
+            (
+                s
+                for s in self.linked_transcription_services
+                if s.can_access and s.id == connection_id
+            ),
             None,
         )
 
@@ -767,9 +777,14 @@ async def _resolve_meeting(executor, flow_run_repo, file_service, user, wizard):
     ("speaker_services", "pick", "reason"),
     [
         ([], None, "no_service"),
+        (
+            [SimpleNamespace(id=uuid4(), name="Vemsa", can_access=False)],
+            None,
+            "none_usable",
+        ),
         ([_SPEAKER_SERVICE], uuid4(), "picked_unavailable"),
     ],
-    ids=["no_service", "revoked_pick"],
+    ids=["no_service", "switched_off", "revoked_pick"],
 )
 async def test_labels_without_a_usable_speaker_service_are_refused_before_audio(
     spool_contract, user, speaker_services, pick, reason

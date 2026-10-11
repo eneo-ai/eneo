@@ -1128,7 +1128,9 @@
                         onLabelsChange={(checked) =>
                           flowEditor.setWizardMetadata({ transcription_diarization: checked })}
                         onPick={(id) =>
-                          flowEditor.setWizardMetadata({ transcription_speaker_service: { id } })}
+                          flowEditor.setWizardMetadata({
+                            transcription_speaker_service: id ? { id } : null
+                          })}
                         maxSpeakers={wizardMetadata.transcription_max_speakers ?? null}
                         onMaxSpeakersChange={(value) =>
                           flowEditor.setWizardMetadata({ transcription_max_speakers: value })}

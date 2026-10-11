@@ -390,7 +390,6 @@ describe("getValidationIssueMessage", () => {
     "flow_audio_transcription_model_required",
     "flow_audio_transcription_required",
     "flow_has_no_steps",
-    "flow_speaker_service_choice_required",
     "flow_speaker_service_unavailable",
     "flow_http_post_output_must_be_terminal",
     "flow_input_alias_not_received",

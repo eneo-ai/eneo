@@ -22118,7 +22118,7 @@ export interface components {
       provider_work_may_have_completed?: boolean | null;
       /** @description Execution heartbeat facts used to recover a stalled worker. */
       recovery?: components["schemas"]["FlowRunRecoveryFacts"] | null;
-      /** @description Why no speaker identification service could label this run's speakers: the space has none (no_service), has several and the flow picks none (choice_required), or the flow's pick is no longer usable (picked_unavailable). Refused before any audio was sent. */
+      /** @description Why no speaker identification service could label this run's speakers: the space has none (no_service), has one or more but none it can use now, switched off or below the space's security classification (none_usable), or the service the flow chose is no longer usable (picked_unavailable). Refused before any audio was sent. */
       speaker_service_gap?: components["schemas"]["SpeakerServiceGap"] | null;
       /**
        * Step Description
@@ -26024,7 +26024,7 @@ export interface components {
        * @description Whether a run may choose with `speaker_labels` on run creation. False when the flow's space has no speaker identification service it can use, or the flow requires labels.
        */
       selectable: boolean;
-      /** @description Why the speaker labels this flow requires cannot be produced, or null. Set only while `required` is true and no speaker identification service can label the flow in its space: the space has none (`no_service`), it has several and the flow picks none (`choice_required`), or the flow's pick is no longer usable there (`picked_unavailable`). A run created while it is set fails its transcription step with `typed_io_speaker_service_unavailable`, so check it before collecting a recording. */
+      /** @description Why the speaker labels this flow asks for cannot be produced, or null. Set while the flow asks for labels (`required` is true, or its own speaker-label setting is on) and no speaker identification service can label it in its space: the space has none (`no_service`, reported only while `required` is true), it has one or more but none it can use now, because each is switched off or below the space's security classification (`none_usable`), or the service the flow chose is no longer usable there (`picked_unavailable`). While `required` is true a run created with it set fails its transcription step with `typed_io_speaker_service_unavailable`, so check it before collecting a recording. While `required` is false the run transcribes without speaker labels, so say so and let the person continue. */
       unavailable_reason: components["schemas"]["SpeakerServiceGap"] | null;
     };
     /** FlowStepAttemptCompletionConfiguration */
@@ -36046,7 +36046,8 @@ export interface components {
      * SpaceTranscriptionServiceLink
      * @description A transcription service granted to a space, with the state of the grant.
      *
-     *     New work in the space may use the service only when both flags are true.
+     *     New work in the space may use the service only when it meets the
+     *     classification and is available.
      */
     SpaceTranscriptionServiceLink: {
       /**
@@ -36060,6 +36061,11 @@ export interface components {
        */
       id: string;
       /**
+       * Is Standard
+       * @description True for the space's standard: flows in the space that have not chosen a service use this one. At most one link is the standard, and none is while the space has no usable service.
+       */
+      is_standard: boolean;
+      /**
        * Meets Security Classification
        * @description False when the service's security classification is below the space's.
        */
@@ -36072,7 +36078,7 @@ export interface components {
      * @description Why no service can label this flow's speakers.
      * @enum {string}
      */
-    SpeakerServiceGap: "no_service" | "choice_required" | "picked_unavailable";
+    SpeakerServiceGap: "no_service" | "none_usable" | "picked_unavailable";
     /**
      * StartRunRequest
      * @description Body for ``POST /runs/`` — start a new helper run.

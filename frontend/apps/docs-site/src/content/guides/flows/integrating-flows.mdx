@@ -1212,7 +1212,7 @@ A flow that transcribes recorded audio reports live text availability, speaker-l
 | `speaker_labels.selectable`         | A run may choose speaker labels with `speaker_labels`. It is `false` when the flow's space has no speaker identification service it can use, or when the flow requires labels                                                                                            |
 | `speaker_labels.required`           | The flow needs speaker labels, because a step maps speakers to names                                                                                                                                                                                                     |
 | `speaker_labels.default`            | The flow's own setting, which applies when a run makes no choice. It is `false` when the space has no speaker identification service it can use                                                                                                                          |
-| `speaker_labels.unavailable_reason` | Why the labels the flow requires cannot be produced: `no_service`, `choice_required` or `picked_unavailable`. `null` unless `required` is `true` and no service can label the flow. See [Stop before recording](#stop-before-recording-when-required-labels-are-missing) |
+| `speaker_labels.unavailable_reason` | Why the speaker labels the flow asks for cannot be produced: `no_service`, `none_usable` or `picked_unavailable`. `null` when they can, or when the flow asks for none. See [Check that speaker labels can be produced](#check-that-speaker-labels-can-be-produced)      |
 
 ### Choose speaker labels for a run
 
@@ -1239,17 +1239,22 @@ When `transcription.speaker_labels.selectable` is `true`, your app can let the u
 
 When `selectable` is `false`, do not send `true` or `false`: Eneo refuses the request with `422` and code `flow_run_speaker_labels_not_selectable`. Labelling speakers makes the run take longer. A retry of a failed run and a transcript regeneration keep the run's choice. `speaker_labels` belongs at the top level of the request; inside `input_payload_json` it is a reserved key.
 
-### Stop before recording when required labels are missing
+### Check that speaker labels can be produced
 
-A flow with a step that maps speakers to names requires speaker labels (`speaker_labels.required` is `true`). When no speaker identification service can label that flow, `speaker_labels.unavailable_reason` says why:
+A flow asks for speaker labels when a step requires them (`speaker_labels.required` is `true`) or when its own setting has them on. When no speaker identification service can label the flow, `speaker_labels.unavailable_reason` says why:
 
-| `unavailable_reason` | Meaning                                                                    | Who can fix it                                                                  |
-| -------------------- | -------------------------------------------------------------------------- | ------------------------------------------------------------------------------- |
-| `no_service`         | The flow's space has no speaker identification service the flow can use    | An administrator gives the space access to a service                            |
-| `choice_required`    | The space has several services and the flow has not chosen one             | The flow's author chooses a service and publishes the flow again                |
-| `picked_unavailable` | The service the flow chose can no longer be used in the space              | The author chooses another service and publishes again, or access is given back |
+| `unavailable_reason` | Meaning                                                                                                    | Who can fix it                                                                         |
+| -------------------- | ---------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------- |
+| `no_service`         | The flow's space has no speaker identification service. Reported only when `required` is `true`            | An administrator gives the space access to a service                                   |
+| `none_usable`        | The space has a service, but none it can use now: switched off, or below the space's security class        | An administrator switches the service on, or gives the space another                   |
+| `picked_unavailable` | The service the flow's author chose can no longer be used in the space. Eneo never replaces a chosen one   | The author chooses another service or the space's standard and publishes again         |
 
-While it is not `null`, do not start a recording or create a run. Show the reason instead. A run created anyway fails its transcription step with `typed_io_speaker_service_unavailable`, and the run error's `details.speaker_service_gap` carries the same value. The step is refused before any audio is transcribed. For a flow that does not require labels, `unavailable_reason` is always `null`: without a service, a run transcribes without speaker labels.
+What your app does depends on `required`:
+
+- **`required` is `true`.** Do not start a recording or create a run. Show the reason instead. A run created anyway fails its transcription step with `typed_io_speaker_service_unavailable`, and the run error's `details.speaker_service_gap` carries the same value. The step is refused before any audio is transcribed.
+- **`required` is `false`.** The run works and transcribes without speaker labels. Tell the person before they record, so that a transcript without labels is not a surprise.
+
+A flow that does not require labels, and whose author has not chosen a service, reports `null` in a space without any service: such a flow transcribes without labels, and there is nothing to tell. A flow whose chosen service is gone reports `picked_unavailable` there too. A flow whose author has not chosen a service uses the space's standard, the first service the space was given that it can use, so giving a space a second service never makes `unavailable_reason` appear.
 
 ### Set a speaker-count limit
 

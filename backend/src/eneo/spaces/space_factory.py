@@ -347,7 +347,12 @@ class SpaceFactory:
             space_completion_models = non_deprecated_completion_models
             space_transcription_models = non_deprecated_transcription_models
             space_embedding_models = non_deprecated_embedding_models
-            space_transcription_services = transcription_services
+            # No grant orders a personal space's services, so the oldest
+            # connection comes first (see Space.standard_transcription_service).
+            space_transcription_services = sorted(
+                transcription_services,
+                key=lambda connection: (connection.created_at, connection.id),
+            )
             space_mcp_servers = mcp_servers
         else:
             space_completion_models = [

@@ -669,8 +669,9 @@ def _speaker_service_refusal(
 
 _SPEAKER_SERVICE_GAP_MESSAGES = {
     SpeakerServiceGap.NO_SERVICE: ("the space has no speaker identification service."),
-    SpeakerServiceGap.CHOICE_REQUIRED: (
-        "the space has several speaker identification services and the flow picks none."
+    SpeakerServiceGap.NONE_USABLE: (
+        "the space's speaker identification service is switched off or may not "
+        "be used in the space."
     ),
     SpeakerServiceGap.PICKED_UNAVAILABLE: (
         "the flow's speaker identification service is no longer available in the space."

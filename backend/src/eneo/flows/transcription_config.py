@@ -27,17 +27,11 @@ class FlowTranscriptionConfig:
     language: str
     diarization: bool
     # The service that labels speakers, when the author picked one; None means
-    # the space's only speaker service, resolved when a run starts.
+    # the space's standard, resolved when the audio step runs.
     speaker_service_id: UUID | None = None
     # The most speakers the service may label in a run that states no bound;
     # None lets the service count them.
     max_speakers: int | None = None
-
-    @property
-    def labels_with_the_spaces_service(self) -> bool:
-        """Speakers are labelled by the space's only speaker service: labels
-        are on and no service is picked."""
-        return self.enabled and self.diarization and self.speaker_service_id is None
 
     @property
     def speaker_service_in_use(self) -> UUID | None:
@@ -124,8 +118,12 @@ def _reference_id(wizard: dict[str, Any], key: str) -> UUID | None:
 class SpeakerServiceGap(StrEnum):
     """Why no service can label this flow's speakers."""
 
+    # The space has no speaker identification service at all.
     NO_SERVICE = "no_service"
-    CHOICE_REQUIRED = "choice_required"
+    # The space has one or more, none usable now: switched off, or below the
+    # space's security classification.
+    NONE_USABLE = "none_usable"
+    # The service the flow chose is not usable in the space.
     PICKED_UNAVAILABLE = "picked_unavailable"
 
 
@@ -143,21 +141,25 @@ def resolve_speaker_service(
     config: FlowTranscriptionConfig, space: Space
 ) -> SpeakerServiceResolution:
     """The service that would label this flow's speakers in ``space``, whether
-    or not labels are on: a run may switch them on."""
+    or not labels are on: a run may switch them on.
+
+    The flow's own choice is strict, so nothing stands in for a chosen service
+    the space may no longer use; a flow without a choice uses the space's
+    standard."""
     if config.speaker_service_id is not None:
         connection = space.usable_transcription_service(config.speaker_service_id)
         return SpeakerServiceResolution(
             connection,
             None if connection is not None else SpeakerServiceGap.PICKED_UNAVAILABLE,
         )
-    services = space.usable_transcription_services
-    if len(services) == 1:
-        return SpeakerServiceResolution(services[0], None)
+    standard = space.standard_transcription_service
+    if standard is not None:
+        return SpeakerServiceResolution(standard, None)
     return SpeakerServiceResolution(
         None,
-        SpeakerServiceGap.NO_SERVICE
-        if not services
-        else SpeakerServiceGap.CHOICE_REQUIRED,
+        SpeakerServiceGap.NONE_USABLE
+        if space.linked_transcription_services
+        else SpeakerServiceGap.NO_SERVICE,
     )
 
 

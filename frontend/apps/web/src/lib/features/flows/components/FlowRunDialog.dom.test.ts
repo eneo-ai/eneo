@@ -1030,7 +1030,7 @@ describe("FlowRunDialog transcription options", () => {
 
   it.each([
     { gap: "no_service", reason: m.flow_run_speakers_unavailable_no_service },
-    { gap: "choice_required", reason: m.flow_run_speakers_unavailable_choice_required },
+    { gap: "none_usable", reason: m.flow_run_speakers_unavailable_none_usable },
     { gap: "picked_unavailable", reason: m.flow_run_speakers_unavailable_picked_unavailable }
   ] as const)(
     "collects nothing for a flow whose required speaker labels are missing ($gap)",
@@ -1086,6 +1086,48 @@ describe("FlowRunDialog transcription options", () => {
     expect(next.title).toBe("");
     expect(screen.queryByRole("status")).toBeNull();
   });
+
+  it.each([
+    { gap: "none_usable", notice: m.flow_run_speakers_not_identified_none_usable },
+    { gap: "picked_unavailable", notice: m.flow_run_speakers_not_identified_picked_unavailable }
+  ] as const)(
+    "runs without the speaker labels the flow asks for but does not require ($gap)",
+    async ({ gap, notice }) => {
+      const upload = vi.fn(async ({ file }: { file: File }) => uploadedFile("file-1", file.name));
+      const create = vi.fn(async () => ({ id: "run-1" }) as FlowRun);
+      renderDialog(
+        buildEneo({
+          upload,
+          create,
+          transcription: {
+            live: { available: false, reason: "model_not_realtime" },
+            speaker_labels: {
+              selectable: false,
+              required: false,
+              default: false,
+              unavailable_reason: gap
+            }
+          }
+        })
+      );
+
+      await screen.findByText("Audio input");
+      expect(screen.getByText(notice())).toBeTruthy();
+      // The person is told, not stopped: recording, upload and the run all go on.
+      expect(screen.queryByRole("alert")).toBeNull();
+      expect(screen.getByRole("button", { name: "Start test recording" })).toBeTruthy();
+      await fireEvent.drop(screen.getByRole("button", { name: /Audio input/ }), {
+        dataTransfer: { files: [new File(["audio"], "audio.webm", { type: "audio/webm" })] }
+      });
+      await waitFor(() => expect(screen.getByText("audio.webm")).toBeTruthy());
+      await fireEvent.click(screen.getByRole("button", { name: "Nästa" }));
+      await fireEvent.click(
+        await screen.findByRole("button", { name: m.flow_run_trigger_confirm() })
+      );
+
+      await waitFor(() => expect(create).toHaveBeenCalledOnce());
+    }
+  );
 
   it("keeps the flow's speaker default until live text streams, and keeps an explicit choice", async () => {
     installLiveTranscriptFakes();

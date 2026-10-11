@@ -11,7 +11,7 @@
 
   const reasons: Record<SpeakerServiceGap, () => string> = {
     no_service: m.flow_run_speakers_unavailable_no_service,
-    choice_required: m.flow_run_speakers_unavailable_choice_required,
+    none_usable: m.flow_run_speakers_unavailable_none_usable,
     picked_unavailable: m.flow_run_speakers_unavailable_picked_unavailable
   };
 </script>

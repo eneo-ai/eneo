@@ -1,27 +1,33 @@
 import { cleanup, fireEvent, render, screen } from "@testing-library/svelte";
+import { page } from "@vitest/browser/context";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { m } from "$lib/paraglide/messages";
 import FlowSpeakerIdentification from "./FlowSpeakerIdentification.svelte";
 
 afterEach(cleanup);
 
+// The space's standard: what a flow without a choice uses.
 const vemsa = {
   id: "s-1",
   name: "Vemsa Sundsvall",
   meets_security_classification: true,
-  available: true
+  available: true,
+  is_standard: true
 };
 const second = {
   id: "s-2",
   name: "Talare test",
   meets_security_classification: true,
-  available: true
+  available: true,
+  is_standard: false
 };
+const standardOption = m.flow_transcription_speakers_standard({ name: vemsa.name });
 
 function renderRow(props: {
   services?: (typeof vemsa)[];
   labels?: boolean;
   pickedId?: string | null;
+  onPick?: (serviceId: string | null) => void;
 }) {
   return render(FlowSpeakerIdentification, {
     services: props.services ?? [],
@@ -30,9 +36,16 @@ function renderRow(props: {
     maxSpeakers: null,
     disabled: false,
     onLabelsChange: vi.fn(),
-    onPick: vi.fn(),
+    onPick: props.onPick ?? vi.fn(),
     onMaxSpeakersChange: vi.fn()
   });
+}
+
+const picker = () => page.getByLabelText(m.flow_transcription_speakers_service_label());
+
+async function choose(option: string) {
+  await picker().click();
+  await page.getByRole("option", { name: option, exact: true }).click();
 }
 
 describe("speaker identification", () => {
@@ -61,17 +74,50 @@ describe("speaker identification", () => {
     expect(screen.queryByText(m.flow_transcription_speakers_service_label())).toBeNull();
   });
 
-  it("asks for a service when the space has several", () => {
-    renderRow({ services: [vemsa, second] });
+  it("uses the space's standard until the flow chooses another", async () => {
+    const onPick = vi.fn();
+    // The space says which service is its standard; it need not be listed first.
+    renderRow({ services: [second, vemsa], onPick });
 
-    expect(screen.getByText(m.flow_transcription_speakers_service_label())).toBeInTheDocument();
-    expect(screen.getByText(m.flow_transcription_speakers_choose_hint())).toBeInTheDocument();
+    await expect.element(picker()).toHaveTextContent(standardOption);
+    await picker().click();
+    await expect.element(page.getByRole("option").first()).toHaveTextContent(standardOption);
+    await page.getByRole("option", { name: second.name, exact: true }).click();
+
+    expect(onPick.mock.calls).toEqual([[second.id]]);
   });
 
-  it("says when the picked service is no longer usable", () => {
-    renderRow({ services: [vemsa], pickedId: "gone" });
+  it("goes back to the space's standard by clearing the flow's choice", async () => {
+    const onPick = vi.fn();
+    renderRow({ services: [vemsa, second], pickedId: second.id, onPick });
+
+    await expect.element(picker()).toHaveTextContent(second.name);
+    await choose(standardOption);
+
+    expect(onPick.mock.calls).toEqual([[null]]);
+  });
+
+  it("shows a choice of the space's only service, so it can be cleared", async () => {
+    const onPick = vi.fn();
+    renderRow({ services: [vemsa], pickedId: vemsa.id, onPick });
+
+    // Chosen, not merely used: the flow stays on it whatever the space's standard becomes.
+    await expect.element(picker()).toHaveTextContent(vemsa.name);
+    await choose(standardOption);
+
+    expect(onPick.mock.calls).toEqual([[null]]);
+  });
+
+  it("says when the picked service is no longer usable, and lets the standard replace it", async () => {
+    const onPick = vi.fn();
+    renderRow({ services: [vemsa], pickedId: "gone", onPick });
 
     expect(screen.getByText(m.flow_transcription_speakers_pick_unavailable())).toBeInTheDocument();
+    // The lost choice is not replaced on the author's behalf.
+    await expect.element(picker()).toHaveTextContent(m.flow_transcription_speakers_choose());
+    await choose(standardOption);
+
+    expect(onPick.mock.calls).toEqual([[null]]);
   });
 
   it("shows nothing more while labels are off", () => {

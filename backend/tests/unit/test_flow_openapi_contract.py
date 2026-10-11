@@ -1989,7 +1989,7 @@ def test_openapi_documents_transcription_options_and_the_run_speaker_choice(
     assert _extract_enum_values(
         openapi_spec,
         _non_null_schema(speaker_labels["properties"]["unavailable_reason"]),
-    ) == {"no_service", "choice_required", "picked_unavailable"}
+    ) == {"no_service", "none_usable", "picked_unavailable"}
     assert {option.get("type") for option in speaker_choice["anyOf"]} == {
         "boolean",
         "null",

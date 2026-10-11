@@ -1,9 +1,10 @@
 <!--
   Speaker identification for a flow's transcription. A transcription model
   writes the text; a speaker identification service granted to the space
-  labels who says what. The space's only usable service is used without a
-  choice; a picker appears only when the space has several, or when the
-  flow's pick is no longer usable. Mirrors the backend resolver
+  labels who says what. A flow that has not chosen a service uses the space's
+  standard, which the space marks (is_standard); nothing is ranked here. A
+  picker appears when the space has several, or when the flow has a choice of
+  its own to change or clear. Mirrors the backend resolver
   (resolve_speaker_service in eneo.flows.transcription_config).
 -->
 <script lang="ts">
@@ -20,7 +21,11 @@
     name: string;
     meets_security_classification: boolean;
     available: boolean;
+    is_standard: boolean;
   };
+
+  // The picker's value while the flow has no choice of its own.
+  const STANDARD = "standard";
 
   let {
     services,
@@ -39,7 +44,8 @@
     maxSpeakers: number | null;
     disabled: boolean;
     onLabelsChange: (labels: boolean) => void;
-    onPick: (serviceId: string) => void;
+    /** Null clears the flow's choice: it uses the space's standard again. */
+    onPick: (serviceId: string | null) => void;
     onMaxSpeakersChange: (maxSpeakers: number | null) => void;
   } = $props();
 
@@ -60,11 +66,16 @@
   const usable = $derived(usableSpeakerServices(services));
   const picked = $derived(usable.find((service) => service.id === pickedId) ?? null);
   const pickLost = $derived(pickedId !== null && picked === null);
-  // The service that will label speakers without the author choosing.
-  const resolved = $derived(
-    picked ?? (pickedId === null && usable.length === 1 ? usable[0] : null)
+  const standard = $derived(usable.find((service) => service.is_standard) ?? null);
+  const standardLabel = $derived(
+    standard ? m.flow_transcription_speakers_standard({ name: standard.name }) : null
   );
-  const offerPicker = $derived(usable.length > 1 || (pickLost && usable.length > 0));
+  // The service that will label speakers: the flow's choice, else the standard.
+  // A lost choice is never replaced on the author's behalf.
+  const resolved = $derived(picked ?? (pickLost ? null : standard));
+  // A flow's own choice always shows in the picker, even with one service to
+  // choose from: that is where the author sees it and can clear it.
+  const offerPicker = $derived(usable.length > 1 || (pickedId !== null && usable.length > 0));
   // Nothing to use and nothing to fix. A flow still labelling with a lost pick
   // keeps its switch, so the author can turn labels off and publish again.
   const noService = $derived(usable.length === 0 && !(pickLost && labels));
@@ -154,16 +165,21 @@
           </label>
           <Select.Root
             type="single"
-            value={picked?.id ?? ""}
+            value={picked?.id ?? (pickLost ? "" : STANDARD)}
             {disabled}
             onValueChange={(value) => {
-              if (value) onPick(value);
+              if (value) onPick(value === STANDARD ? null : value);
             }}
           >
             <Select.Trigger id="flow-speaker-service" class="mt-1.5 min-h-10 w-full">
-              {picked?.name ?? m.flow_transcription_speakers_choose()}
+              {picked?.name ??
+                (pickLost ? null : standardLabel) ??
+                m.flow_transcription_speakers_choose()}
             </Select.Trigger>
             <Select.Content>
+              {#if standardLabel}
+                <Select.Item value={STANDARD} label={standardLabel}>{standardLabel}</Select.Item>
+              {/if}
               {#each usable as service (service.id)}
                 <Select.Item value={service.id} label={service.name}>{service.name}</Select.Item>
               {/each}
@@ -172,10 +188,6 @@
           {#if pickLost}
             <p class="text-warning-stronger mt-1.5 text-xs leading-relaxed" role="status">
               {m.flow_transcription_speakers_pick_unavailable()}
-            </p>
-          {:else if picked === null}
-            <p class="text-secondary mt-1.5 text-xs leading-relaxed">
-              {m.flow_transcription_speakers_choose_hint()}
             </p>
           {/if}
         </div>

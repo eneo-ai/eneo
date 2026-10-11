@@ -32,6 +32,10 @@ from eneo.flows.domain.transcript_corrections import segments_content_hash
 from eneo.flows.enums import FlowRunLifecycleSource
 from eneo.flows.flow_api_error_code import FlowApiErrorCode
 from eneo.flows.flow_run_error import FlowRunError
+from eneo.flows.transcription_config import (
+    parse_transcription_config,
+    resolve_speaker_service,
+)
 from eneo.object_content.content import ObjectContentUnavailableError
 from tests.integration.flows.test_flow_live_transcription_session import (
     _published_flow,
@@ -309,23 +313,67 @@ async def test_a_speaker_choice_the_contract_does_not_offer_creates_no_run(
     assert dispatched == []
 
 
-async def test_two_services_and_no_pick_leave_the_run_no_speaker_choice(
+async def test_a_second_service_changes_nothing_for_a_flow_that_chose_none(
     client, flow_process_auth_headers, db_container, dispatched: list[UUID]
 ):
     headers = dict(flow_process_auth_headers)
     flow = await _published_flow(client, headers, db_container, input_required=False)
     read = await client.get(f"/api/v1/flows/{flow.flow_id}/", headers=headers)
-    services = [await _connection(client, headers) for _ in range(2)]
-    await _grant(client, headers, read.json()["space_id"], *services)
+    space_id = read.json()["space_id"]
+    first = await _connection(client, headers)
+    await _grant(client, headers, space_id, first)
+    with_one = await _contract(client, headers, flow.flow_id)
+
+    await _grant(client, headers, space_id, await _connection(client, headers), first)
+    with_two = await _contract(client, headers, flow.flow_id)
+    created = await _create_run(client, headers, flow.flow_id, {"speaker_labels": True})
+
+    assert with_one["transcription"]["speaker_labels"] == {
+        "selectable": True,
+        "required": False,
+        "default": True,
+        "unavailable_reason": None,
+    }
+    assert with_two["transcription"] == with_one["transcription"]
+    assert created.status_code == 201, created.text
+    async with db_container() as container:
+        space = await container.space_repo().one(UUID(space_id))
+    used = resolve_speaker_service(
+        parse_transcription_config(read.json()["metadata_json"]), space
+    )
+    assert used.connection is not None and str(used.connection.id) == first
+    assert len(dispatched) == 1
+
+
+async def test_a_switched_off_service_is_reported_and_the_run_goes_on_without_labels(
+    client, flow_process_auth_headers, db_container, dispatched: list[UUID]
+):
+    headers = dict(flow_process_auth_headers)
+    # The flow's own default asks for labels; it does not require them.
+    flow = await _published_flow(client, headers, db_container, input_required=False)
+    read = await client.get(f"/api/v1/flows/{flow.flow_id}/", headers=headers)
+    service = await _connection(client, headers)
+    await _grant(client, headers, read.json()["space_id"], service)
+    switched_off = await client.patch(
+        f"/api/v1/admin/transcription-services/{service}/",
+        json={"is_enabled": False},
+        headers=headers,
+    )
+    assert switched_off.status_code == 200, switched_off.text
 
     contract = await _contract(client, headers, flow.flow_id)
-    refused = await _create_run(client, headers, flow.flow_id, {"speaker_labels": True})
+    created = await _create_run(client, headers, flow.flow_id, {})
 
-    assert contract["transcription"]["speaker_labels"]["selectable"] is False
-    assert contract["transcription"]["max_speakers"] is None
-    assert refused.status_code == 422, refused.text
-    assert refused.json()["code"] == "flow_run_speaker_labels_not_selectable"
-    assert dispatched == []
+    assert contract["transcription"]["speaker_labels"] == {
+        "selectable": False,
+        "required": False,
+        "default": False,
+        "unavailable_reason": "none_usable",
+    }
+    assert created.status_code == 201, created.text
+    stored = (await _stored_inputs(db_container, flow.flow_id))[created.json()["id"]]
+    assert stored["speaker_labels"] is False
+    assert len(dispatched) == 1
 
 
 @pytest.mark.parametrize(

@@ -354,9 +354,11 @@ class FlowRunErrorDetails(BaseModel):
         default=None,
         description=(
             "Why no speaker identification service could label this run's "
-            "speakers: the space has none (no_service), has several and the "
-            "flow picks none (choice_required), or the flow's pick is no longer "
-            "usable (picked_unavailable). Refused before any audio was sent."
+            "speakers: the space has none (no_service), has one or more but "
+            "none it can use now, switched off or below the space's security "
+            "classification (none_usable), or the service the flow chose is no "
+            "longer usable (picked_unavailable). Refused before any audio was "
+            "sent."
         ),
     )
     completed_items: int | None = Field(

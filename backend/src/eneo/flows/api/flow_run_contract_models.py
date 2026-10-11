@@ -534,14 +534,20 @@ class FlowSpeakerLabelsOptionPublic(BaseModel):
     )
     unavailable_reason: SpeakerServiceGap | None = Field(
         description=(
-            "Why the speaker labels this flow requires cannot be produced, or null. "
-            "Set only while `required` is true and no speaker identification "
-            "service can label the flow in its space: the space has none "
-            "(`no_service`), it has several and the flow picks none "
-            "(`choice_required`), or the flow's pick is no longer usable there "
-            "(`picked_unavailable`). A run created while it is set fails its "
-            "transcription step with `typed_io_speaker_service_unavailable`, so "
-            "check it before collecting a recording."
+            "Why the speaker labels this flow asks for cannot be produced, or "
+            "null. Set while the flow asks for labels (`required` is true, or its "
+            "own speaker-label setting is on) and no speaker identification "
+            "service can label it in its space: the space has none "
+            "(`no_service`, reported only while `required` is true), it has one "
+            "or more but none it can use now, because each is switched off or "
+            "below the space's security classification (`none_usable`), or the "
+            "service the flow chose is no longer usable there "
+            "(`picked_unavailable`). While `required` is true a run created with "
+            "it set fails its transcription step with "
+            "`typed_io_speaker_service_unavailable`, so check it before "
+            "collecting a recording. While `required` is false the run "
+            "transcribes without speaker labels, so say so and let the person "
+            "continue."
         )
     )
 

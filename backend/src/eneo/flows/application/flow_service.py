@@ -36,7 +36,6 @@ from eneo.flows.domain.step_config import clean_inactive_step_config
 from eneo.flows.flow_api_error_code import FlowApiErrorCode
 from eneo.flows.flow_authoring_transcription import (
     kept_speaker_service_id,
-    require_one_speaker_service,
     require_usable_speaker_service,
     transcription_config_for_write,
 )
@@ -615,7 +614,7 @@ class FlowService:
             metadata_json=normalized_metadata,
         )
         space = await self._check_speaker_service(
-            space_id=flow.space_id, metadata_json=normalized_metadata, publishing=True
+            space_id=flow.space_id, metadata_json=normalized_metadata
         )
         await self._validate_step_security_classification_for_steps(
             space_id=flow.space_id,
@@ -768,27 +767,21 @@ class FlowService:
         space_id: UUID,
         metadata_json: FlowPersistedJsonObject | None,
         kept_metadata_json: FlowPersistedJsonObject | None = None,
-        publishing: bool = False,
     ) -> Space | None:
-        """Refuse a malformed transcription choice, a picked speaker service
-        the space may not use, and on publish a flow that labels speakers
-        without a pick in a space with several services. A saved draft keeps
-        the pick it has, as a space keeps its grants, so an administrator's
-        later change never blocks unrelated edits; publishing checks it again.
+        """Refuse a malformed transcription choice and a picked speaker service
+        the space may not use. A flow that picks none uses the space's
+        standard, so it has nothing to check. A saved draft keeps the pick it
+        has, as a space keeps its grants, so an administrator's later change
+        never blocks unrelated edits; publishing checks it again.
 
         Returns the space when it was loaded, for the checks that follow."""
-        config = transcription_config_for_write(metadata_json)
-        pick = config.speaker_service_in_use
+        pick = transcription_config_for_write(metadata_json).speaker_service_in_use
         if pick is not None and pick == kept_speaker_service_id(kept_metadata_json):
             pick = None
-        needs_one = publishing and config.labels_with_the_spaces_service
-        if self.space_service is None or (pick is None and not needs_one):
+        if self.space_service is None or pick is None:
             return None
         space = await self.space_service.get_space(space_id)
-        if pick is not None:
-            require_usable_speaker_service(pick, space=space)
-        if needs_one:
-            require_one_speaker_service(config, space=space)
+        require_usable_speaker_service(pick, space=space)
         return space
 
     async def _validate_step_security_classification_for_steps(

@@ -162,7 +162,8 @@ class UpdateSpaceRequest(BaseModel):
 class SpaceTranscriptionServiceLink(BaseModel):
     """A transcription service granted to a space, with the state of the grant.
 
-    New work in the space may use the service only when both flags are true."""
+    New work in the space may use the service only when it meets the
+    classification and is available."""
 
     id: UUID
     name: str
@@ -172,6 +173,13 @@ class SpaceTranscriptionServiceLink(BaseModel):
         )
     )
     available: bool = Field(description="False when the organisation disabled it.")
+    is_standard: bool = Field(
+        description=(
+            "True for the space's standard: flows in the space that have not "
+            "chosen a service use this one. At most one link is the standard, "
+            "and none is while the space has no usable service."
+        )
+    )
 
 
 class UpdateSpaceDryRunResponse(BaseModel):

@@ -219,6 +219,19 @@
   const liveTextOn = $derived(liveTextAvailable && launchInputState.liveTextOn);
   const speakerLabels = $derived(launchInputState.speakerLabels(transcription));
 
+  // The flow asks for speaker labels it does not require, and no service in
+  // the space can give them: the run transcribes without them. A space with
+  // no service at all is not reported.
+  const speakersNotIdentified = $derived.by(() => {
+    const option = transcription?.speaker_labels;
+    if (!option || option.required) return null;
+    if (option.unavailable_reason === "none_usable")
+      return m.flow_run_speakers_not_identified_none_usable();
+    if (option.unavailable_reason === "picked_unavailable")
+      return m.flow_run_speakers_not_identified_picked_unavailable();
+    return null;
+  });
+
   // The preview listens to the recorder's audio graph, which exists from the
   // moment the microphone opens until the recording is over.
   let recorderAudioGraph = $state.raw<RecorderAudioGraph | null>(null);
@@ -331,6 +344,11 @@
         {#if step.description}
           <p class="text-secondary mt-1 text-sm leading-relaxed">
             {step.description}
+          </p>
+        {/if}
+        {#if supportsAudioRecording && speakersNotIdentified}
+          <p class="text-warning-stronger mt-2 text-sm leading-relaxed">
+            {speakersNotIdentified}
           </p>
         {/if}
       </div>

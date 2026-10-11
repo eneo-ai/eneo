@@ -14,9 +14,16 @@ from eneo.database.tables.tenant_table import Tenants
 from eneo.database.tables.transcription_services_table import (
     SpacesTranscriptionServiceConnections,
 )
+from eneo.flows.transcription_config import (
+    parse_transcription_config,
+    resolve_speaker_service,
+)
 from eneo.main.models import ModelId
 from eneo.roles.permissions import Permission
 from eneo.roles.role import RoleCreate
+from eneo.transcription_services.repository import (
+    TranscriptionServiceConnectionRepository,
+)
 from eneo.users.user import UserUpdate
 from tests.integration.transcription_services.conftest import BASE
 
@@ -114,6 +121,40 @@ async def _available(db_container, space_id: str, connection_id: str) -> bool:
         return space.usable_transcription_service(UUID(connection_id)) is not None
 
 
+_NO_CHOICE = parse_transcription_config({"wizard": {"transcription_enabled": True}})
+
+
+async def _standard(client, db_container, headers, space_id: str) -> str | None:
+    """The service a flow that chose none uses in the space: the one it
+    resolves to, which is the one link the space marks as its standard."""
+    async with db_container() as container:
+        space = await container.space_repo().one(UUID(space_id))
+        resolved = resolve_speaker_service(_NO_CHOICE, space).connection
+    read = await client.get(f"/api/v1/spaces/{space_id}/", headers=headers)
+    assert read.status_code == 200, read.text
+    marked = [
+        link["id"]
+        for link in read.json()["transcription_services"]
+        if link["is_standard"]
+    ]
+    assert marked == ([] if resolved is None else [str(resolved.id)])
+    return marked[0] if marked else None
+
+
+async def _named(client, headers, prefix: str) -> str:
+    """A service whose name sorts by ``prefix``, so name order is the test's."""
+    return (await _connection(client, headers, name=f"{prefix}-{uuid4().hex[:8]}"))[
+        "id"
+    ]
+
+
+async def _switch(client, headers, connection_id: str, *, on: bool) -> None:
+    response = await client.patch(
+        f"{BASE}{connection_id}/", json={"is_enabled": on}, headers=headers
+    )
+    assert response.status_code == 200, response.text
+
+
 async def test_a_granted_service_is_listed_and_usable_in_the_space(
     client, db_container, headers
 ):
@@ -129,6 +170,7 @@ async def test_a_granted_service_is_listed_and_usable_in_the_space(
             "name": connection["name"],
             "meets_security_classification": True,
             "available": True,
+            "is_standard": True,
         }
     ]
     assert await _grants(db_container, space_id) == {UUID(connection["id"])}
@@ -262,3 +304,118 @@ async def test_an_unknown_service_cannot_be_granted(client, db_container, header
 
     assert response.status_code == 404, response.text
     assert await _grants(db_container, space_id) == set()
+
+
+async def test_the_first_service_a_space_was_given_stays_its_standard(
+    client, db_container, headers
+):
+    # The standard is the newer service with the later name: only the order
+    # of the grants says so.
+    older = await _named(client, headers, "z")
+    newer = await _named(client, headers, "m")
+    space_id = await _space(client, headers)
+    assert (await _grant(client, headers, space_id, newer)).status_code == 200
+
+    added = await _grant(client, headers, space_id, older, newer)
+
+    assert added.status_code == 200, added.text
+    assert await _standard(client, db_container, headers, space_id) == newer
+
+    renamed = await client.patch(
+        f"{BASE}{older}/", json={"name": f"a-{uuid4().hex[:8]}"}, headers=headers
+    )
+    assert renamed.status_code == 200, renamed.text
+    assert await _standard(client, db_container, headers, space_id) == newer
+
+    saved_again = await _grant(client, headers, space_id, older, newer)
+    assert saved_again.status_code == 200, saved_again.text
+    assert await _standard(client, db_container, headers, space_id) == newer
+
+
+async def test_a_revoked_standard_hands_over_and_comes_back_last(
+    client, db_container, headers
+):
+    first = await _named(client, headers, "a")
+    second = await _named(client, headers, "b")
+    space_id = await _space(client, headers)
+    await _grant(client, headers, space_id, first)
+    await _grant(client, headers, space_id, first, second)
+    assert await _standard(client, db_container, headers, space_id) == first
+
+    await _grant(client, headers, space_id, second)
+    assert await _standard(client, db_container, headers, space_id) == second
+
+    # Granted again, the older service is the space's latest: flows that moved
+    # to the other one stay on it.
+    await _grant(client, headers, space_id, first, second)
+    assert await _standard(client, db_container, headers, space_id) == second
+
+
+async def test_a_switched_off_standard_hands_over_until_it_is_switched_on_again(
+    client, db_container, headers
+):
+    first = await _named(client, headers, "a")
+    second = await _named(client, headers, "b")
+    space_id = await _space(client, headers)
+    await _grant(client, headers, space_id, first)
+    await _grant(client, headers, space_id, first, second)
+
+    await _switch(client, headers, first, on=False)
+    assert await _standard(client, db_container, headers, space_id) == second
+
+    await _switch(client, headers, second, on=False)
+    assert await _standard(client, db_container, headers, space_id) is None
+
+    await _switch(client, headers, first, on=True)
+    assert await _standard(client, db_container, headers, space_id) == first
+
+
+async def test_services_granted_together_rank_by_their_age_then_their_id(
+    client, db_container, headers, admin_user
+):
+    older = await _named(client, headers, "z")
+    newer = await _named(client, headers, "a")
+    by_age = await _space(client, headers)
+
+    await _grant(client, headers, by_age, newer, older)
+
+    assert await _standard(client, db_container, headers, by_age) == older
+
+    # Two services of one age: connected in one transaction.
+    async with db_container() as container:
+        connections = TranscriptionServiceConnectionRepository(
+            container.session(), admin_user.tenant_id
+        )
+        twins = [
+            await connections.create(
+                name=f"twin-{uuid4().hex[:8]}",
+                endpoint_url="https://vemsa.example.se",
+                api_key_encrypted="ciphertext",
+                is_enabled=True,
+                security_classification_id=None,
+            )
+            for _ in range(2)
+        ]
+    assert twins[0].created_at == twins[1].created_at
+    lower, higher = sorted(twin.id for twin in twins)
+    by_id = await _space(client, headers)
+
+    await _grant(client, headers, by_id, str(higher), str(lower))
+
+    assert await _standard(client, db_container, headers, by_id) == str(lower)
+
+
+async def test_a_personal_space_uses_the_organisations_oldest_usable_service(
+    client, db_container, headers
+):
+    # A personal space is granted nothing: it may use every service.
+    oldest = await _named(client, headers, "z")
+    newer = await _named(client, headers, "a")
+    async with db_container() as container:
+        personal = await container.space_init_service().get_personal_space()
+    space_id = str(personal.id)
+
+    assert await _standard(client, db_container, headers, space_id) == oldest
+
+    await _switch(client, headers, oldest, on=False)
+    assert await _standard(client, db_container, headers, space_id) == newer

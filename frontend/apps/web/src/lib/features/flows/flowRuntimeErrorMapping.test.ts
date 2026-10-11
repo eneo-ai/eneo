@@ -421,8 +421,8 @@ describe("speaker identification run errors", () => {
     expect(getFlowRunErrorMessage(refused("no_service"))).toBe(
       m.flow_error_typed_io_speaker_service_unavailable()
     );
-    expect(getFlowRunErrorMessage(refused("choice_required"))).toBe(
-      m.flow_speaker_service_gap_choice_required()
+    expect(getFlowRunErrorMessage(refused("none_usable"))).toBe(
+      m.flow_speaker_service_gap_none_usable()
     );
     expect(getFlowRunErrorMessage(refused("picked_unavailable"))).toBe(
       m.flow_speaker_service_gap_picked_unavailable()

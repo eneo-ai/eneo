@@ -49,16 +49,6 @@ def test_a_picked_speaker_service_is_used_only_while_speakers_are_labelled() -> 
         assert config.speaker_service_in_use is None
 
 
-def test_no_pick_means_the_spaces_only_speaker_service() -> None:
-    config = parse_transcription_config({"wizard": {"transcription_enabled": True}})
-
-    assert config.speaker_service_id is None
-    assert config.labels_with_the_spaces_service
-    assert not parse_transcription_config(
-        {"wizard": {"transcription_enabled": True, "transcription_diarization": False}}
-    ).labels_with_the_spaces_service
-
-
 @pytest.mark.parametrize("raw", ["service", {"id": "not-a-uuid"}])
 def test_a_malformed_speaker_service_reference_is_refused(raw: object) -> None:
     with pytest.raises(FlowTranscriptionConfigError):

@@ -1307,7 +1307,7 @@ FLOW_ERROR_TAXONOMY: dict[FlowApiErrorCode, FlowErrorTaxonomyEntry] = {
             "service the flow can use, so it is refused before any audio is sent."
         ),
         consumer_action=(
-            "Read the speaker_service_gap detail (no_service, choice_required, "
+            "Read the speaker_service_gap detail (no_service, none_usable, "
             "picked_unavailable), "
             "then grant or pick a service and republish, or run without speaker labels."
         ),

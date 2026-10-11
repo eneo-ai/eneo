@@ -16,7 +16,7 @@ Only flows use live transcription and speaker identification services.
 
 - **The flow's transcription model always writes the text.** A speaker identification service never does, so the live text and the final transcript come from the same model.
 - **A speaker identification service only labels who spoke.** When the model has written the text, Eneo sends the service the audio file and the transcript with its timestamps. The service returns the same text with a speaker label on each line, such as `SPEAKER_00` and `SPEAKER_01`. This adds one upload of the audio and the service's processing time to the run.
-- **Eneo uses a service only when a run labels speakers and the flow's space can use the service.** A space can use a service that it has been given access to, that is switched on, and whose security class is not lower than the space's. A run follows the flow's speaker identification setting, unless the app that starts the run chooses otherwise.
+- **Eneo uses a service only when a run labels speakers and the flow's space can use the service.** A space can use a service that it has been given access to, that is switched on, and whose security class is not lower than the space's. A run follows the flow's speaker identification setting, unless the app that starts the run chooses otherwise. A flow uses the service its author chose. A flow without a choice uses the space's standard service, which is the first service the space was given that it can use.
 - **Without a service, a flow still transcribes.** The transcript then has no speaker labels. The exception is a flow with a step that maps speakers to names, which needs the labels. See [Use speaker identification in a flow](#use-speaker-identification-in-a-flow).
 
 ## Set up a transcription model
@@ -131,19 +131,21 @@ A space administrator does this for each space. The service must be switched on,
 
 A service that cannot be added shows the reason next to its name: "Turned off by an administrator." or "The security class is lower than the space's." A service that was added before it became unusable stays in the list with that reason, and you can still switch it off.
 
-A space with one service uses it for every flow. When the space can use a second service, Eneo no longer chooses for the flows that relied on the first, and the setting says so below the list. Until the author chooses a service in each of those flows and publishes it again, their new runs have no speaker labels, and a flow with a **Review transcript** step cannot be run. To replace a server without this step, [change the address of the existing service](#change-switch-off-or-remove-a-service) instead of adding a second one.
+The first service a space is given, and can use, is the space's standard. Every flow in the space that has not chosen a service of its own uses it. Giving the space a second service changes nothing for those flows. When the space can use more than one service, the list marks the standard: "The space's standard. Used by flows that have not chosen another." (**Ytans standard. Används av flöden som inte har valt en annan.**)
+
+If the standard is switched off, or its security class no longer allows it in the space, the next service the space was given takes over, and when the first one can be used again it is the standard again. If you take the standard away from the space, or an administrator removes it, the next service becomes the standard and stays the standard: a service that you give the space again counts as its newest. To replace a server without changing which service is the standard, [change the address of the existing service](#change-switch-off-or-remove-a-service) instead of adding a second one.
 
 ## Use speaker identification in a flow
 
 Flow authors choose speaker identification in the flow editor's **Transcription** stage (**Transkribering**). A published flow is read-only, so unpublish it to change these settings and publish it again to apply them.
 
 1. Turn on **Speaker identification** (**Talaridentifiering**). The switch is off and cannot be used while the space has no service it can use.
-2. If the space has one service, the flow uses it and the editor shows "Done by" followed by the service's name. If the space has several, choose one under **Speaker identification service** (**Tjänst för talaridentifiering**). Eneo refuses to publish a flow that labels speakers without a choice in a space with several services.
+2. A flow that has not chosen a service uses the space's standard. With one service in the space, the editor shows "Done by" followed by the service's name. With several, **Speaker identification service** (**Tjänst för talaridentifiering**) shows "The space's standard" (**Ytans standard**) with the service's name. Choose another service there only when this flow needs a specific one, and choose the standard again to clear that choice. A chosen service is never replaced by another: if it can no longer be used in the space, the flow identifies no speakers until you choose again.
 3. Leave **Maximum number of speakers** (**Högst antal talare**) empty to let the service count the speakers. The empty field shows "Automatic". Enter a whole number of at least 1 to set the most speakers the service may label.
 4. Publish the flow.
 5. Check the result. Run the flow with a recording of two people. Each line of the transcript starts with a time range and a label, such as `[00:00:12 - 00:00:15] SPEAKER_00:`. When the step has finished, its details in the run name the service that labelled it, under **Advanced** (**Avancerad**).
 
-A step that maps speakers to names, **Review transcript** (**Granska transkript**), needs the labels. A flow with such a step labels speakers in every run. When no service can label the flow, Eneo's run dialog says so before anything is recorded: "This flow cannot be run right now" (**Flödet kan inte köras just nu**), with the reason. An app sees the same reason in the run contract as `transcription.speaker_labels.unavailable_reason`, see [Stop before recording when required labels are missing](/guides/flows/integrating-flows#stop-before-recording-when-required-labels-are-missing).
+A step that maps speakers to names, **Review transcript** (**Granska transkript**), needs the labels. A flow with such a step labels speakers in every run. When no service can label the flow, Eneo's run dialog says so before anything is recorded: "This flow cannot be run right now" (**Flödet kan inte köras just nu**), with the reason. An app sees the same reason in the run contract as `transcription.speaker_labels.unavailable_reason`, see [Check that speaker labels can be produced](/guides/flows/integrating-flows#check-that-speaker-labels-can-be-produced).
 
 An app that starts runs through the API can choose labels and a speaker limit for each run. See [Live text and speaker labels](/guides/flows/integrating-flows#live-text-and-speaker-labels).
 
@@ -164,9 +166,9 @@ After you switch off or remove a service, or take away a space's access:
 | Who | What they see |
 | --- | --- |
 | A space administrator | In the space's settings, a service that is switched off shows "Turned off by an administrator." A removed service is gone from the list. |
-| The author of a flow that used the space's only service | The **Speaker identification** switch is off and cannot be used. A question mark next to it explains that a service is needed. |
+| The author of a flow that used the space's standard | If the space can use another service, that one is the standard now and the flow uses it. Otherwise the **Speaker identification** switch is off and cannot be used, and a question mark next to it explains that a service is needed. |
 | The author of a flow that had chosen this service | A warning that the chosen service can no longer be used in the space, with a request to choose another or to turn speaker identification off. |
-| A person who runs a flow | New runs give a transcript without speaker labels. |
+| A person who runs a flow | Nothing changes when another service took over. Otherwise new runs give a transcript without speaker labels. The run dialog says so before the recording, "Speakers are not identified in this run" (**Talare identifieras inte i den här körningen**) with the reason, when the space still has a service that it cannot use, or when the flow's chosen service is the one that was lost. |
 | A person who runs a flow with a **Review transcript** step | The run dialog says "This flow cannot be run right now" with the reason, before anything is recorded. A run started through the API fails at its audio step with `typed_io_speaker_service_unavailable`. |
 
 ## Troubleshooting
@@ -180,28 +182,28 @@ After you switch off or remove a service, or take away a space's access:
 | The connection shows **Accepting jobs**, but runs fail with `typed_io_speaker_identification_failed` | The model wrote the text and the service then failed. The flow execution worker cannot reach the address, the service refused the key or the job, the job failed or was cancelled on the service, or the service cannot label a transcript it did not write. | Read `transcription_failure_kind` (`input`, `capacity`, `provider`, `internal` or `cancelled`) and `transcription_service_reason` in the run error's `details`. Test the connection, check that `task-execution-worker` reaches the address, and read the service's log. The person can run again. A flow that lets a run choose speaker labels can also be run without them. |
 | A run fails with `typed_io_speaker_service_unavailable` | The run needs speaker labels, but the flow's space has no service the flow can use. Eneo stops the step before it transcribes anything. The run was started through the API without checking the run contract, or the service became unusable after the run was created. | Read `speaker_service_gap` in the run error's `details` and use the table below. |
 | A run fails with `flow_step_timeout` while speakers are identified | The step's time limit ran out while the job waited or ran on the service. With `transcription_failure_kind` set to `capacity`, the service kept refusing the job because its queue was full. | Check the service's queue and workers. Raise its queue limits, or the step's time limit. |
-| Transcripts have no speaker labels | The flow has speaker identification off, the run chose no labels, or the space had no service the flow could use when the run was created. | Check the flow's **Transcription** stage and the space's **Speaker identification** setting. |
+| Transcripts have no speaker labels | The flow has speaker identification off, the run chose no labels, or the space had no service the flow could use when the run was created. In the last case the run dialog said "Speakers are not identified in this run", unless the space has no service at all and the flow's author had not chosen one. | Check the flow's **Transcription** stage and the space's **Speaker identification** setting. |
 
 `speaker_service_gap` has one of three values:
 
 | `speaker_service_gap` | Meaning | What to do |
 | --- | --- | --- |
-| `no_service` | The space has no service it can use: none has been added, or the ones added are switched off or have a lower security class than the space. | Give the space access to a service, or switch the service on. |
-| `choice_required` | The space has several services it can use and the flow has not chosen one. | Choose a service in the flow's **Transcription** stage and publish the flow again. |
-| `picked_unavailable` | The service the flow chose can no longer be used in the space: it was removed or switched off, the space lost access, or its security class is now lower than the space's. | Choose another service in the flow and publish again, or restore the service or the space's access. |
+| `no_service` | The space has no speaker identification service: none has been given to it. | Give the space access to a service. |
+| `none_usable` | The space has one or more services, but none it can use now: they are switched off, or their security class is lower than the space's. | Switch the service on, give it a security class that the space accepts, or give the space another service. |
+| `picked_unavailable` | The service the flow's author chose can no longer be used in the space: it was removed or switched off, the space lost access, or its security class is now lower than the space's. Eneo does not replace a chosen service with another. | Choose another service or the space's standard in the flow and publish again, or restore the service or the space's access. |
 
 For every run error code, see [Error codes](/guides/flows/reference/errors).
 
 ## Run Vemsa and vadsa
 
-Both servers are separate projects with their own installation guides: [Vemsa](https://github.com/eneo-ai/vemsa) identifies speakers, and [vadsa](https://github.com/eneo-ai/vadsa) transcribes. Eneo depends on these settings on their side.
+Both servers are separate projects: [Vemsa](https://github.com/eneo-ai/vemsa) identifies speakers, and [vadsa](https://github.com/eneo-ai/vadsa) transcribes. Each has a quick start that takes you from an empty host to a server connected to Eneo: the [Vemsa quick start](https://github.com/eneo-ai/vemsa/blob/main/docs/QUICKSTART.md) and the [vadsa quick start](https://github.com/eneo-ai/vadsa/blob/main/docs/quickstart.md). Eneo depends on these settings on their side.
 
 **Vemsa**
 
 | Setting | What Eneo depends on |
 | --- | --- |
 | `VEMSA_API_TOKENS` | Comma-separated credentials of the form `client_id=token`. Give Eneo its own entry, for example `eneo=` followed by a long random value, and enter the part after `=` as the **API key** in Eneo. Every space that uses the connection shares this one client. |
-| `VEMSA_BIND` | The Compose file publishes the API on `127.0.0.1`. Set a private address that the Eneo backend and the flow execution worker reach, or attach the API to a Docker network that Eneo shares with Vemsa's `compose.eneo.yaml`. |
+| `VEMSA_BIND` | The Compose file publishes the API on `127.0.0.1`. Set a private address that the Eneo backend and the flow execution worker reach, or attach the API to a Docker network that Eneo shares with Vemsa's `compose.eneo.yaml`. Eneo then reaches it at `http://vemsa:8000`. |
 | `VEMSA_MAX_QUEUED_JOBS_PER_CLIENT`, `VEMSA_MAX_QUEUED_JOBS` | The most jobs one client and all clients may have waiting or running, `10` and `100` by default. When Eneo's share is used up, the connection test shows **Not accepting jobs right now** and a run waits for room until its step's time limit. |
 | `VEMSA_MAX_AUDIO_BYTES` | The largest audio file Vemsa accepts, 2 GiB by default. Keep it at or above the largest audio file your flows accept. |
 | `VEMSA_ENGINE` | Eneo only asks Vemsa to label speakers, so the `diarize` engine, which loads no speech recognition model, is enough. |

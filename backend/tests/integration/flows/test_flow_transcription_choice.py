@@ -16,7 +16,6 @@ from eneo.users.user import UserUpdate
 pytestmark = [pytest.mark.integration, pytest.mark.asyncio]
 
 _UNAVAILABLE = "flow_speaker_service_unavailable"
-_CHOICE_REQUIRED = "flow_speaker_service_choice_required"
 _INVALID = "flow_audio_transcription_invalid"
 
 
@@ -120,7 +119,7 @@ async def test_a_flow_picks_only_a_speaker_service_its_space_may_use(
         "transcription_speaker_service"
     ] == {"id": vemsa}
 
-    # Without a pick the space's only speaker service is used when a run starts.
+    # Without a pick the space's standard is used when the audio step runs.
     created = await _create(client, headers, space_id, _metadata(None))
     assert created.status_code == 201, created.text
 
@@ -230,29 +229,15 @@ async def test_a_malformed_pick_is_refused_even_without_audio_steps(
     _refusal(refused, _INVALID)
 
 
-async def test_labels_without_a_pick_publish_only_when_the_space_has_one_service(
+async def test_labels_without_a_pick_publish_in_a_space_with_several_services(
     client: AsyncClient, headers
 ):
     space_id = await _space(client, headers)
     first = await _connection(client, headers)
     second = await _connection(client, headers)
-    await _grant(client, headers, space_id, first)
-    one_service = await _publishable(client, headers, space_id, _metadata(None))
-    published = await client.post(
-        f"/api/v1/flows/{one_service}/publish/", headers=headers
-    )
-    assert published.status_code == 200, published.text
-
     await _grant(client, headers, space_id, first, second)
-    several = await _publishable(client, headers, space_id, _metadata(None))
-    published = await client.post(f"/api/v1/flows/{several}/publish/", headers=headers)
-    _refusal(published, _CHOICE_REQUIRED)
+    flow_id = await _publishable(client, headers, space_id, _metadata(None))
 
-    picked = await client.patch(
-        f"/api/v1/flows/{several}/",
-        json={"metadata_json": _metadata(second)},
-        headers=headers,
-    )
-    assert picked.status_code == 200, picked.text
-    published = await client.post(f"/api/v1/flows/{several}/publish/", headers=headers)
+    published = await client.post(f"/api/v1/flows/{flow_id}/publish/", headers=headers)
+
     assert published.status_code == 200, published.text

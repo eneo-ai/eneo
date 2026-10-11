@@ -18,7 +18,6 @@ from eneo.flows.flow_authoring_spec import (
 from eneo.flows.flow_authoring_transcription import (
     apply_audio_transcription_defaults,
     kept_speaker_service_id,
-    require_one_speaker_service,
     require_usable_speaker_service,
     requires_audio_transcription,
     transcription_config_for_write,
@@ -187,11 +186,6 @@ class TestStepsTheFlowEndsWith:
         )
 
 
-_LABELS_WITHOUT_PICK = parse_transcription_config(
-    {"wizard": {"transcription_enabled": True}}
-)
-
-
 class TestPickedSpeakerService:
     """A picked speaker service must be one the space may use to identify
     speakers."""
@@ -199,10 +193,7 @@ class TestPickedSpeakerService:
     @staticmethod
     def _space(*connections: SimpleNamespace) -> SimpleNamespace:
         by_id = {connection.id: connection for connection in connections}
-        return SimpleNamespace(
-            usable_transcription_service=by_id.get,
-            usable_transcription_services=list(connections),
-        )
+        return SimpleNamespace(usable_transcription_service=by_id.get)
 
     @staticmethod
     def _connection() -> SimpleNamespace:
@@ -255,20 +246,4 @@ class TestPickedSpeakerService:
         assert (refused.value.code, refused.value.context) == (
             code,
             {"issue_code": code},
-        )
-
-    @pytest.mark.parametrize("count", [0, 1])
-    def test_labels_without_a_pick_need_at_most_one_service(self, count: int) -> None:
-        services = [self._connection() for _ in range(count)]
-
-        require_one_speaker_service(_LABELS_WITHOUT_PICK, space=self._space(*services))  # pyright: ignore[reportArgumentType]
-
-    def test_several_speaker_services_need_a_pick(self) -> None:
-        space = self._space(self._connection(), self._connection())
-
-        with pytest.raises(BadRequestException) as refused:
-            require_one_speaker_service(_LABELS_WITHOUT_PICK, space=space)  # pyright: ignore[reportArgumentType]
-
-        assert refused.value.code == (
-            FlowGraphIssueCode.FLOW_SPEAKER_SERVICE_CHOICE_REQUIRED.value
         )

@@ -293,9 +293,11 @@
       : 0
   );
   // The flow needs speaker labels no service in its space can give, so a run
-  // would fail its transcription: nothing is collected for it.
+  // would fail its transcription: nothing is collected for it. Labels the flow
+  // only asks for do not stop the run; its audio step says they are left out.
+  const speakerLabels = $derived(runContract?.transcription?.speaker_labels);
   const speakerServiceGap = $derived(
-    runContract?.transcription?.speaker_labels.unavailable_reason ?? null
+    speakerLabels?.required ? speakerLabels.unavailable_reason : null
   );
   const canGoNext = $derived(
     currentPageIndex < wizardPages.length - 1 &&

@@ -218,12 +218,23 @@ class Space:
     @property
     def usable_transcription_services(self) -> list["TranscriptionServiceConnection"]:
         """The connections new work in this space may use: granted, allowed by
-        the classification, and enabled by the organisation."""
+        the classification, and enabled by the organisation. In the order the
+        space was given them."""
         return [
             connection
             for connection in self._transcription_services
             if connection.can_access
         ]
+
+    @property
+    def standard_transcription_service(
+        self,
+    ) -> "TranscriptionServiceConnection | None":
+        """The service a flow in this space uses when it chose none: the first
+        usable one in the order the space was given them. When it stops being
+        usable the next one takes over, and it is the standard again once it
+        is back."""
+        return next(iter(self.usable_transcription_services), None)
 
     def usable_transcription_service(
         self, connection_id: UUID

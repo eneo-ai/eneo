@@ -15,6 +15,7 @@
   import * as Field from "$lib/components/ui/field/index.js";
   import { Switch } from "$lib/components/ui/switch/index.js";
   import { toastError } from "$lib/core/errors";
+  import { usableSpeakerServices } from "$lib/features/flows/flowEditorMetadata";
   import { getSpacesManager } from "$lib/features/spaces/SpacesManager";
   import { m } from "$lib/paraglide/messages";
 
@@ -37,11 +38,10 @@
   // Every granted service, usable or not. Null when the space came without
   // them: a save would then drop grants it cannot see, so none is offered.
   const links = $derived($currentSpace.transcription_services ?? null);
-  // With more than one usable service nothing is used automatically: each
-  // flow that identifies speakers has to choose its own.
-  const flowsMustChoose = $derived(
-    (links ?? []).filter((link) => link.available && link.meets_security_classification).length > 1
-  );
+  // Flows that have not chosen a service use the space's standard. The space
+  // says which one that is; it is pointed out only when there are several to
+  // tell apart.
+  const severalUsable = $derived(usableSpeakerServices(links ?? []).length > 1);
   // Each save sends the whole list, so a second switch waits for the first.
   let saving = $state(false);
 
@@ -97,16 +97,20 @@
   {:else}
     <div class="border-default overflow-hidden rounded-xl border">
       {#each services as service (service.id)}
-        {@const granted = links.some((link) => link.id === service.id)}
+        {@const link = links.find((granted) => granted.id === service.id)}
+        {@const granted = link !== undefined}
         {@const reason = blockedReason(service)}
+        {@const note =
+          reason ??
+          (severalUsable && link?.is_standard ? m.speaker_service_space_standard() : undefined)}
         <Field.Field
           orientation="horizontal"
           class="border-default border-b px-4 py-3 last:border-b-0"
         >
           <Field.Content>
             <Field.Label for="{uid}-{service.id}">{service.name}</Field.Label>
-            {#if reason}
-              <Field.Description id="{uid}-{service.id}-reason">{reason}</Field.Description>
+            {#if note}
+              <Field.Description id="{uid}-{service.id}-note">{note}</Field.Description>
             {/if}
           </Field.Content>
           <!-- Bound through the grant itself, so a failed save never leaves the
@@ -115,15 +119,10 @@
             id="{uid}-{service.id}"
             bind:checked={() => granted, () => toggle(service)}
             disabled={saving || (!granted && reason !== undefined)}
-            aria-describedby={reason ? `${uid}-${service.id}-reason` : undefined}
+            aria-describedby={note ? `${uid}-${service.id}-note` : undefined}
           />
         </Field.Field>
       {/each}
     </div>
-    {#if flowsMustChoose}
-      <p class="text-muted-foreground mt-2 text-sm" role="status">
-        {m.speaker_service_space_several()}
-      </p>
-    {/if}
   {/if}
 </Settings.Row>

@@ -42,7 +42,7 @@ The server validates required fields, dates, finite numbers, collection shapes, 
 
 Sending `true` or `false` while `selectable` is false returns `422 flow_run_speaker_labels_not_selectable`. The choice is part of the logical request: a changed choice needs a new `Idempotency-Key`. Labelling speakers makes the run take longer.
 
-`unavailable_reason` is `null` unless `required` is true and no speaker identification service can label the Flow: `no_service`, `choice_required` (the Space has several and the Flow picks none), or `picked_unavailable` (the Flow's pick is no longer usable in the Space). While it is set, do not collect a recording or create a run; a run created anyway fails its transcription step with `typed_io_speaker_service_unavailable`.
+`unavailable_reason` says why the speaker labels the Flow asks for cannot be produced, or is `null`: `no_service` (the Space has no speaker identification service; reported only when `required` is true), `none_usable` (the Space has one, but none it can use now), or `picked_unavailable` (the service the Flow's author chose is no longer usable in the Space). When `required` is true, do not collect a recording or create a run; a run created anyway fails its transcription step with `typed_io_speaker_service_unavailable`. When `required` is false, the run transcribes without speaker labels: tell the person and continue.
 
 ## Step-bound uploads
 

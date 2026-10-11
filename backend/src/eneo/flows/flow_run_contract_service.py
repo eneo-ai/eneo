@@ -304,7 +304,12 @@ def speaker_labels_option(
     Only a connected speaker service labels speakers, so without one
     (``service_gap``) there is nothing to choose and a run transcribes without
     labels; a step that maps speakers to names needs the labels whatever the
-    space offers, and reports the gap that would fail it.
+    space offers.
+
+    The gap is reported whenever the flow asks for labels and gets none: a
+    step requires them, or the flow's own setting is on. Except a space with
+    no service at all under a flow that only prefers labels: that space simply
+    transcribes, and there is nothing to tell anyone.
     """
     if _audio_input_step(steps) is None:
         return None
@@ -318,11 +323,14 @@ def speaker_labels_option(
         step.output_mode == FlowOutputMode.SPEAKER_MAPPING.value for step in steps
     )
     identifiable = service_gap is None
+    reported = required or (
+        config.diarization and service_gap is not SpeakerServiceGap.NO_SERVICE
+    )
     return FlowSpeakerLabelsOptionPublic(
         selectable=identifiable and not required,
         required=required,
         default=config.diarization and identifiable,
-        unavailable_reason=service_gap if required else None,
+        unavailable_reason=service_gap if reported else None,
     )
 
 
