@@ -57,12 +57,19 @@ from eneo.flows.application.flow_webhook_delivery_policy import (
     FLOW_WEBHOOK_MAX_ATTEMPTS,
 )
 from eneo.flows.domain.flow import FlowPersistedJsonObject
+from eneo.flows.domain.provider_call import (
+    TranscriptionCallCompletion,
+    TranscriptionProviderCallRequest,
+)
 from eneo.flows.enums import (
     FlowRunReviewCheckpointState,
     FlowRunStatus,
 )
 from eneo.flows.infrastructure import (
     flow_run_history_purge_repo as flow_run_history_purge_repo_module,
+)
+from eneo.flows.infrastructure.flow_provider_call_repo import (
+    FlowProviderCallRepository,
 )
 from eneo.flows.infrastructure.flow_run_audit_outbox_repo import (
     FlowRunAuditOutboxRepository,
@@ -2858,6 +2865,77 @@ async def test_debug_evidence_redacts_attempt_payloads_without_provenance(
     assert refreshed_attempt.input_payload_json is None
     assert refreshed_attempt.output_payload_json is None
     assert refreshed_attempt.provenance_json is None
+
+
+@pytest.mark.asyncio
+async def test_debug_evidence_redaction_leaves_no_model_listed_as_used(
+    async_session: AsyncSession,
+    test_tenant,
+    admin_user,
+    flow_retention_space: Spaces,
+    flow_retention_assistant: Assistants,
+    flow_retention_service: DataRetentionService,
+):
+    fixture = await _create_flow_runtime_fixture(
+        async_session,
+        tenant=test_tenant,
+        user=admin_user,
+        space=flow_retention_space,
+        assistant=flow_retention_assistant,
+        days_old=10,
+        flow_retention_days=30,
+        flow_settings={
+            "retention_policy": {
+                "run_debug_evidence_days": 7,
+            }
+        },
+    )
+    run_id, step_id = fixture.run.id, fixture.step_id
+    calls = FlowProviderCallRepository(async_session)
+    # Receipts are written while the attempt is open.
+    fixture.step_attempt.status = "started"
+    await async_session.flush()
+    transcription = await calls.start_call_for_execution(
+        run_id=run_id,
+        step_id=step_id,
+        attempt_no=fixture.step_attempt.attempt_no,
+        tenant_id=test_tenant.id,
+        request=TranscriptionProviderCallRequest(
+            provider_request_hash="1" * 64,
+            requested_model="openai/whisper-1",
+            provider="openai",
+            audio_seconds=12.0,
+        ),
+        resolved_input_edge_indexes=(),
+    )
+    await calls.complete_call(
+        call_id=transcription.id,
+        receipt=TranscriptionCallCompletion(response_model="whisper-1"),
+    )
+    fixture.step_attempt.status = "completed"
+    await async_session.flush()
+
+    with_receipts = await calls.list_models_used_by_step(
+        run_id=run_id, tenant_id=test_tenant.id
+    )
+    counts = await flow_retention_service.redact_old_flow_debug_evidence(
+        now=datetime.now(timezone.utc)
+    )
+    await _flush_and_clear_identity_map(async_session)
+    after_redaction = await calls.list_models_used_by_step(
+        run_id=run_id, tenant_id=test_tenant.id
+    )
+
+    assert with_receipts == {step_id: ("whisper-1",)}
+    assert counts.debug_provider_calls == 1
+    # The receipts were the proof. The attempt row still names gpt-4, the
+    # model it was configured to ask, and that is not read as a model used.
+    refreshed_attempt = await async_session.get(
+        FlowStepAttempts, fixture.step_attempt.id
+    )
+    assert refreshed_attempt is not None
+    assert refreshed_attempt.response_model == "gpt-4"
+    assert after_redaction == {}
 
 
 @pytest.mark.asyncio

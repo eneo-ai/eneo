@@ -66,6 +66,16 @@ completion model, provider, model settings or prompt. The model an
 attempt names is the one the step was about to ask, not proof that it was
 called; the provider-call receipts record the calls that were made.
 
+`models_used`, on the run summary and on each step, lists the models that
+answered: every completion and transcription model with a completed provider
+call, in any attempt. The name is the one the answer gave, or the route the call
+was sent to when the answer gave none. A model that was only configured, a
+rejected call and a call whose outcome is unknown are not listed, so an empty
+list does not prove that no provider received data; read the provider-call
+receipts for that. The receipts are the only proof: once debug-evidence
+retention has removed them the list is empty, and each attempt still names the
+model it was configured to ask.
+
 Attempts are an append-only evidence ledger. They support task retries and
 crash recovery, not a user-facing partial-rerun operation. Mapped inputs execute
 within the same attempt contract and bounded provider-call policy.

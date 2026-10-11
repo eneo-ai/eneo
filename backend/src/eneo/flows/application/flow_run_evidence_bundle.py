@@ -240,6 +240,7 @@ def build_evidence_bundle(
     provider_calls: ProviderCallEvidencePage | None = None,
     token_usage: FlowRunTokenUsage | None = None,
     transcription_usage: FlowRunTranscriptionUsage | None = None,
+    models_used_by_step_id: Mapping[UUID, Sequence[str]] | None = None,
     runtime_input_file_ids_by_step_result_id: Mapping[UUID, Sequence[UUID]]
     | None = None,
     runtime_input_file_metadata_by_step_result_id: Mapping[
@@ -327,6 +328,7 @@ def build_evidence_bundle(
             result_files=list(result_files),
             token_usage=token_usage,
             transcription_usage=transcription_usage,
+            models_used_by_step_id=models_used_by_step_id,
             knowledge_evidence_view=knowledge_evidence_view,
             omissions=omissions,
         ),

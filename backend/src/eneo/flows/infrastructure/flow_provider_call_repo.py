@@ -472,6 +472,48 @@ class FlowProviderCallRepository:
             for run_id in token_usage_by_run_id.keys() | audio_usage_by_run_id.keys()
         }
 
+    async def list_models_used_by_step(
+        self,
+        *,
+        run_id: UUID,
+        tenant_id: UUID,
+    ) -> dict[UUID, tuple[str, ...]]:
+        """The models that answered in one run, per step, sorted by name.
+
+        A model is listed when a completion or transcription call to it
+        completed, in any attempt. Its name is the one the answer gave, or the
+        route the call was sent to when the answer gave none. A call that was
+        rejected, or whose outcome is unknown, lists nothing; the receipts keep
+        that lifecycle.
+
+        Receipts are the only proof. An attempt's own model fields name the
+        model it was configured to ask and are never read here, so a run whose
+        receipts debug-evidence retention has deleted lists nothing.
+        """
+        model = sa.func.coalesce(
+            sa.func.nullif(sa.func.btrim(FlowProviderCalls.response_model), ""),
+            FlowProviderCalls.requested_model,
+        )
+        rows = await self.session.execute(
+            sa.select(FlowStepAttempts.step_id, model.label("model"))
+            .select_from(FlowProviderCalls)
+            .join(
+                FlowStepAttempts,
+                FlowStepAttempts.id == FlowProviderCalls.flow_step_attempt_id,
+            )
+            .where(FlowStepAttempts.flow_run_id == run_id)
+            .where(FlowStepAttempts.tenant_id == tenant_id)
+            .where(FlowProviderCalls.status == ProviderCallStatus.COMPLETED.value)
+            .distinct()
+        )
+        models_by_step_id: dict[UUID, list[str]] = {}
+        for row in rows:
+            models_by_step_id.setdefault(row.step_id, []).append(row.model)
+        return {
+            step_id: tuple(sorted(models))
+            for step_id, models in models_by_step_id.items()
+        }
+
     async def measure_evidence_row_count(
         self, *, run_id: UUID, tenant_id: UUID, ceiling: int
     ) -> int:

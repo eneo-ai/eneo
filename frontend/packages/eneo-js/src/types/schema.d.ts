@@ -17354,7 +17354,10 @@ export interface components {
       /** Failed Steps */
       failed_steps: number;
       final_output: components["schemas"]["EvidenceFinalOutputSummary"];
-      /** Models Used */
+      /**
+       * Models Used
+       * @description Models that answered in this run: every completion and transcription model with a completed provider call, in any attempt, sorted by name. The name is the one the answer gave, or the route the call was sent to when the answer gave none. A model that was only configured, a rejected call and a call whose outcome is unknown are not listed, so an empty list does not prove that no provider received data; the provider-call receipts keep that lifecycle. The receipts are the only proof: once debug-evidence retention has removed them the list is empty, and each attempt still names the model it was configured to ask.
+       */
       models_used: string[];
       /** Not Run Steps */
       not_run_steps: number;
@@ -17557,7 +17560,10 @@ export interface components {
       knowledge_sources_count: number;
       /** Knowledge Usage State */
       knowledge_usage_state?: string | null;
-      /** Models Used */
+      /**
+       * Models Used
+       * @description Models that answered in this step, by the same rule as the run summary's `models_used`.
+       */
       models_used: string[];
       output_summary?: components["schemas"]["PayloadPreview"] | null;
       /** Result Output Kind */
@@ -21206,9 +21212,15 @@ export interface components {
       provider?: string | null;
       /** Provider Response Id */
       provider_response_id?: string | null;
-      /** Requested Model */
+      /**
+       * Requested Model
+       * @description The completion model the step was about to ask. It is not proof that the model was called; `models_used` lists the models that answered. Absent for a step that calls no completion model.
+       */
       requested_model?: string | null;
-      /** Response Model */
+      /**
+       * Response Model
+       * @description The model recorded for the answer the attempt ended on: the configured model's name for a completed attempt, and the identity the provider reported for an answer that was rejected. The provider-call receipts hold the reported identity of every call.
+       */
       response_model?: string | null;
       /** Status */
       status?: string | null;
@@ -21633,7 +21645,10 @@ export interface components {
       failed_steps: number;
       /** @description Present when the interactive view narrowed retained knowledge evidence by not loading attempts or trimming recorded passage text, including corruption-caused attempt exclusion. Absent on exports and when the view returned all retained knowledge evidence. */
       knowledge_evidence_view?: components["schemas"]["FlowRunDebugKnowledgeEvidenceView"] | null;
-      /** Models Used */
+      /**
+       * Models Used
+       * @description Models that answered in this run: every completion and transcription model with a completed provider call, in any attempt, sorted by name. The name is the one the answer gave, or the route the call was sent to when the answer gave none. A model that was only configured, a rejected call and a call whose outcome is unknown are not listed, so an empty list does not prove that no provider received data; the provider-call receipts keep that lifecycle. The receipts are the only proof: once debug-evidence retention has removed them the list is empty, and each attempt still names the model it was configured to ask.
+       */
       models_used?: string[];
       /** Not Run Steps */
       not_run_steps: number;
@@ -21673,6 +21688,11 @@ export interface components {
       attempts?: components["schemas"]["FlowRunDebugAttempt"][];
       input: components["schemas"]["FlowRunDebugInput"];
       io_types: components["schemas"]["FlowRunDebugIoTypes"];
+      /**
+       * Models Used
+       * @description Models that answered in this step, by the same rule as the run summary's `models_used`.
+       */
+      models_used?: string[];
       output: components["schemas"]["FlowRunDebugOutput"];
       rag?: components["schemas"]["DebugRagSummary"] | null;
       /** Status */

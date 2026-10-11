@@ -999,6 +999,10 @@ class FlowRunEvidenceService:
             tenant_id=self.user.tenant_id,
         )
         run_usage = usage_by_run_id.get(resolved_run.id)
+        models_used_by_step_id = await self.provider_call_repo.list_models_used_by_step(
+            run_id=resolved_run.id,
+            tenant_id=self.user.tenant_id,
+        )
         if is_view:
             step_result_usage = self._section_usage(section_usages, "step_results")
             self._record_view_omission(
@@ -1036,6 +1040,7 @@ class FlowRunEvidenceService:
             transcription_usage=(
                 run_usage.transcription_usage if run_usage is not None else None
             ),
+            models_used_by_step_id=models_used_by_step_id,
             runtime_input_file_metadata_by_step_result_id=(
                 runtime_input_file_metadata_by_step_result_id
             ),

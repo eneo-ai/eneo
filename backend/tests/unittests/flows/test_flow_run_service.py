@@ -242,6 +242,7 @@ def _settings_service(
 def _provider_call_repo() -> AsyncMock:
     repo = AsyncMock(spec=FlowProviderCallRepository)
     repo.list_usage_for_runs.return_value = {}
+    repo.list_models_used_by_step.return_value = {}
     repo.list_evidence_page.return_value = ProviderCallEvidencePage(
         items=(),
         count=0,

@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from collections import Counter
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 from copy import deepcopy
 from datetime import datetime
 from typing import Annotated, Any, Literal, TypeAlias, cast
@@ -147,6 +147,7 @@ class DebugStepProjection(BaseModel):
     input: JsonObject
     output: JsonObject
     rag: DebugRagSummary | None = None
+    models_used: list[str]
     attempts: list[DebugAttemptProjection]
 
 
@@ -205,10 +206,17 @@ def build_debug_export(
     result_files: list[FlowRunStepResultFile] | None = None,
     token_usage: FlowRunTokenUsage | None = None,
     transcription_usage: FlowRunTranscriptionUsage | None = None,
+    models_used_by_step_id: Mapping[UUID, Sequence[str]] | None = None,
     knowledge_evidence_view: RunViewPassageOmission | None = None,
     omissions: Sequence[RunViewEvidenceOmission] = (),
 ) -> dict[str, Any]:
     definition_snapshot = version.definition_json
+    # Which models answered is the provider-call repository's fact. An attempt
+    # names the model its step was about to ask, which proves no call.
+    models_used_by_step = {
+        str(step_id): list(models)
+        for step_id, models in (models_used_by_step_id or {}).items()
+    }
     evidence_generated_at = _latest_evidence_timestamp(
         run=run,
         version=version,
@@ -253,6 +261,9 @@ def build_debug_export(
                         rag_metadata=rag_by_step_order.get(step_order),
                         attempts=attempts_by_step_order.get(step_order, []),
                         status=execution_statuses.get(step_order),
+                        models_used=models_used_by_step.get(
+                            str(raw_step_dict.get("step_id")), []
+                        ),
                     )
                 )
     summary = DebugRunSummaryProjection(
@@ -265,7 +276,9 @@ def build_debug_export(
         ),
         artifacts_count=len({str(item.file_id) for item in result_files or []}),
         duration_ms=_calculate_duration_ms(run.created_at, run.updated_at),
-        models_used=_collect_models_used(step_attempts or []),
+        models_used=sorted(
+            {model for models in models_used_by_step.values() for model in models}
+        ),
         token_usage=token_usage,
         transcription_usage=transcription_usage,
         knowledge_evidence_view=knowledge_evidence_view,
@@ -333,6 +346,7 @@ def normalize_debug_step(
     rag_metadata: dict[str, Any] | None = None,
     attempts: list[DebugAttemptProjection] | None = None,
     status: str | None = None,
+    models_used: Sequence[str] = (),
 ) -> dict[str, Any]:
     input_type = step.get("input_type")
     if (
@@ -370,6 +384,7 @@ def normalize_debug_step(
             "type": output_type,
         },
         rag=_diagnostic_rag_summary(rag_metadata),
+        models_used=list(models_used),
         attempts=list(attempts or []),
     ).model_dump(mode="json")
 
@@ -444,15 +459,6 @@ def _calculate_duration_ms(started_at: Any, finished_at: Any) -> int | None:
     if not isinstance(started_at, datetime) or not isinstance(finished_at, datetime):
         return None
     return max(0, int((finished_at - started_at).total_seconds() * 1000))
-
-
-def _collect_models_used(step_attempts: list[FlowStepAttempt]) -> list[str]:
-    models: list[str] = []
-    for attempt in step_attempts:
-        candidate = attempt.response_model or attempt.requested_model
-        if isinstance(candidate, str) and candidate.strip():
-            models.append(candidate.strip())
-    return list(dict.fromkeys(models))
 
 
 def withhold_attempt_passages(

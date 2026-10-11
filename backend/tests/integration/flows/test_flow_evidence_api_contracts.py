@@ -51,6 +51,8 @@ from eneo.flows.domain.flow_step_attempt_input import (
 from eneo.flows.domain.provider_call import (
     CompletionProviderCallRequest,
     ProviderCallCompletion,
+    TranscriptionCallCompletion,
+    TranscriptionProviderCallRequest,
 )
 from eneo.flows.enums import (
     FlowOutputType,
@@ -1092,6 +1094,118 @@ async def test_provider_call_evidence_endpoint_pages_relational_lifecycle_events
 
 @pytest.mark.asyncio
 @pytest.mark.integration
+async def test_evidence_lists_every_model_that_answered_not_only_the_calls_it_embeds(
+    client,
+    db_container,
+    patch_auth_service_jwt,
+    completion_model_factory,
+    space_factory,
+    assistant_factory,
+    admin_user,
+):
+    seeded, _, trace_token = await _seed_trace_view_flow_run_contract_data(
+        db_container=db_container,
+        patch_auth_service_jwt=patch_auth_service_jwt,
+        completion_model_factory=completion_model_factory,
+        space_factory=space_factory,
+        assistant_factory=assistant_factory,
+        admin_user=admin_user,
+    )
+    async with db_container() as container:
+        session = container.session()
+        attempt = await session.get(
+            FlowStepAttempts, UUID(seeded["initial_attempt_id"])
+        )
+        assert attempt is not None
+        attempt.status = "started"
+        await session.flush()
+        activated = await FlowRunRepository(session).activate_step_attempt(
+            run_id=attempt.flow_run_id,
+            step_id=attempt.step_id,
+            attempt_no=attempt.attempt_no,
+            tenant_id=admin_user.tenant_id,
+            resolved_input_edges=FlowResolvedInputEdges(schema_version=1, edges=()),
+            attempt_input=None,
+        )
+        assert activated is not None
+        calls = FlowProviderCallRepository(session=session)
+
+        async def start(request):
+            return await calls.start_call_for_execution(
+                run_id=attempt.flow_run_id,
+                step_id=attempt.step_id,
+                attempt_no=attempt.attempt_no,
+                tenant_id=admin_user.tenant_id,
+                request=request,
+                resolved_input_edge_indexes=(),
+            )
+
+        # The evidence view embeds the first hundred calls of a run.
+        for index in range(100):
+            completion = await start(
+                CompletionProviderCallRequest(
+                    provider_request_hash=f"{index:064x}",
+                    requested_model="openai/gpt-4o-mini",
+                    requested_capabilities=(),
+                )
+            )
+            await calls.complete_call(
+                call_id=completion.id,
+                receipt=ProviderCallCompletion(
+                    response_model="gpt-4o-mini-2026-07-01",
+                    num_tokens_input=1,
+                    num_tokens_output=1,
+                    input_source="provider",
+                    output_source="provider",
+                ),
+            )
+        transcription = await start(
+            TranscriptionProviderCallRequest(
+                provider_request_hash="f" * 64,
+                requested_model="openai/whisper-1",
+                provider="openai",
+                audio_seconds=12.0,
+            )
+        )
+        await calls.complete_call(
+            call_id=transcription.id,
+            receipt=TranscriptionCallCompletion(response_model="whisper-1"),
+        )
+        refused = await start(
+            CompletionProviderCallRequest(
+                provider_request_hash="e" * 64,
+                requested_model="openai/refused-before-an-answer",
+                requested_capabilities=(),
+            )
+        )
+        await calls.reject_call(call_id=refused.id, reason="response_format_rejected")
+        attempt.status = "completed"
+        await session.flush()
+
+    headers = {"Authorization": f"Bearer {trace_token}"}
+    run_url = f"/api/v1/flows/{seeded['flow_id']}/runs/{seeded['run_id']}"
+    evidence_response = await client.get(f"{run_url}/evidence/", headers=headers)
+    export_response = await client.get(
+        f"{run_url}/evidence/export?format=json", headers=headers
+    )
+
+    assert evidence_response.status_code == 200, evidence_response.text
+    evidence = evidence_response.json()
+    assert evidence["provider_calls"]["count"] == 100
+    assert evidence["provider_calls"]["has_more"] is True
+    answered = ["gpt-4o-mini-2026-07-01", "whisper-1"]
+    assert evidence["debug_export"]["run"]["summary"]["models_used"] == answered
+    assert [step["models_used"] for step in evidence["debug_export"]["steps"]] == [
+        answered
+    ]
+    assert export_response.status_code == 200, export_response.text
+    summary = export_response.json()["summary"]
+    assert summary["models_used"] == answered
+    assert [step["models_used"] for step in summary["step_overview"]] == [answered]
+
+
+@pytest.mark.asyncio
+@pytest.mark.integration
 async def test_completed_verified_evidence_projects_redacted_structured_result(
     client,
     db_container,
@@ -1669,7 +1783,9 @@ async def test_flow_run_evidence_export_returns_redacted_json_attachment(
     assert payload["content_hash"] == hashlib.sha256(serialized_bundle).hexdigest()
     assert payload["summary"]["status"] == "completed"
     assert payload["summary"]["steps_count"] == 1
-    assert payload["summary"]["models_used"] == ["gpt-4o-mini"]
+    # The seeded attempt names gpt-4o-mini, the model it was configured to
+    # ask, and the run has no provider-call receipt, so no model is confirmed.
+    assert payload["summary"]["models_used"] == []
     assert payload["summary"]["rag_source_names"] == [
         "https://kunskap.example.se/beslut/underlag"
     ]

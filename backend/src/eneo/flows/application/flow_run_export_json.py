@@ -302,7 +302,6 @@ def _build_summary_payload(
     review_checkpoint_summary: EvidenceReviewCheckpointSummary,
 ) -> EvidenceExportSummary:
     run = _as_json_object_or_empty(bundle_payload.get("run"))
-    step_attempts = _as_json_object_list(bundle_payload.get("step_attempts"))
     result_files = _result_file_records(bundle_payload)
     debug_export = _as_json_object_or_empty(bundle_payload.get("debug_export"))
     debug_run = _as_json_object_or_empty(debug_export.get("run"))
@@ -339,9 +338,7 @@ def _build_summary_payload(
         artifact_names=artifact_names,
         artifact_details=artifact_items,
         duration_ms=_strict_int_or_none(debug_summary.get("duration_ms")),
-        models_used=_strict_str_list(
-            debug_summary.get("models_used", _collect_models_used(step_attempts))
-        ),
+        models_used=_strict_str_list(debug_summary.get("models_used")),
         rag_sources_count=len(rag_source_names),
         rag_source_names=rag_source_names,
         rag_source_display_names=[
@@ -402,17 +399,6 @@ def _strict_str_list(value: Any) -> list[str]:
         return []
     items = cast(list[object] | tuple[object, ...], value)
     return [item for item in items if isinstance(item, str)]
-
-
-def _collect_models_used(step_attempts: Any) -> list[str]:
-    models: list[str] = []
-    for attempt in _as_json_object_list(step_attempts):
-        for key in ("response_model", "requested_model"):
-            raw_value = attempt.get(key)
-            if isinstance(raw_value, str) and raw_value.strip():
-                models.append(raw_value.strip())
-                break
-    return list(dict.fromkeys(models))
 
 
 def _review_checkpoint_records(
@@ -659,9 +645,13 @@ def _build_step_overview_payload(
     if not raw_steps:
         return []
     debug_export = _as_json_object_or_empty(bundle_payload.get("debug_export"))
+    debug_steps = _as_json_object_list(debug_export.get("steps"))
     execution_statuses = {
-        step.get("step_order"): _str_or_none(step.get("status"))
-        for step in _as_json_object_list(debug_export.get("steps"))
+        step.get("step_order"): _str_or_none(step.get("status")) for step in debug_steps
+    }
+    models_used_by_step_order = {
+        step.get("step_order"): _strict_str_list(step.get("models_used"))
+        for step in debug_steps
     }
     result_files_by_step_order = _latest_attempt_result_files_by_step_order(
         _result_file_records(bundle_payload)
@@ -737,7 +727,7 @@ def _build_step_overview_payload(
             attempts_count=len(attempts),
             retries=max(len(attempts) - 1, 0),
             duration_ms=_sum_attempt_durations(attempts),
-            models_used=_collect_models_used(attempts),
+            models_used=models_used_by_step_order.get(step_order, []),
             knowledge_sources_count=len(rag_sources),
             knowledge_usage_state=_resolve_step_knowledge_usage_state(rag_sources),
             knowledge_retrieval=(

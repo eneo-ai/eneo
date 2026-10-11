@@ -1642,6 +1642,91 @@ def test_build_debug_export_uses_provider_call_token_usage_summary() -> None:
     }
 
 
+def test_debug_export_lists_the_models_that_answered_not_the_one_an_attempt_names() -> (
+    None
+):
+    run, _ = _evidence_run_and_version()
+    transcribing_step_id, writing_step_id = uuid4(), uuid4()
+    version = _evidence_version_with_steps(
+        run, step_ids=[transcribing_step_id, writing_step_id]
+    )
+    # An attempt names the model its step was about to ask.
+    asked_but_unanswered = _attempt_with_provenance(run, None).model_copy(
+        update={
+            "step_id": writing_step_id,
+            "step_order": 2,
+            "requested_model": "configured-and-never-answered",
+            "response_model": None,
+        }
+    )
+
+    export = build_debug_export(
+        run=run,
+        version=version,
+        step_attempts=[asked_but_unanswered],
+        models_used_by_step_id={
+            transcribing_step_id: ("whisper-1",),
+            writing_step_id: ("gpt-4o-mini", "whisper-1"),
+        },
+    )
+
+    assert export["run"]["summary"]["models_used"] == ["gpt-4o-mini", "whisper-1"]
+    assert [step["models_used"] for step in export["steps"]] == [
+        ["whisper-1"],
+        ["gpt-4o-mini", "whisper-1"],
+    ]
+
+
+def test_evidence_export_summaries_list_the_models_that_answered() -> None:
+    run, _ = _evidence_run_and_version()
+    transcribing_step_id, writing_step_id = uuid4(), uuid4()
+    version = _evidence_version_with_steps(
+        run, step_ids=[transcribing_step_id, writing_step_id]
+    )
+    asked_but_unanswered = _attempt_with_provenance(run, None).model_copy(
+        update={
+            "step_id": writing_step_id,
+            "step_order": 2,
+            "requested_model": "configured-and-never-answered",
+            "response_model": None,
+        }
+    )
+
+    export = render_evidence_json_export(
+        bundle=build_evidence_bundle(
+            run=run,
+            version=version,
+            step_results=[],
+            step_attempts=[asked_but_unanswered],
+            models_used_by_step_id={transcribing_step_id: ("whisper-1",)},
+        ),
+        context=_raw_export_context(),
+    )
+
+    assert export["summary"]["models_used"] == ["whisper-1"]
+    assert [step["models_used"] for step in export["summary"]["step_overview"]] == [
+        ["whisper-1"],
+        [],
+    ]
+
+
+def test_debug_export_lists_no_model_for_a_run_nothing_answered() -> None:
+    run, _ = _evidence_run_and_version()
+    step_id = uuid4()
+    asked_but_unanswered = _attempt_with_provenance(run, None).model_copy(
+        update={"step_id": step_id, "response_model": None}
+    )
+
+    export = build_debug_export(
+        run=run,
+        version=_evidence_version_with_steps(run, step_ids=[step_id]),
+        step_attempts=[asked_but_unanswered],
+    )
+
+    assert export["run"]["summary"]["models_used"] == []
+    assert export["steps"][0]["models_used"] == []
+
+
 def test_normalize_rag_payload_adds_prompt_context_display_names_and_usage_state() -> (
     None
 ):

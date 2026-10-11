@@ -130,6 +130,23 @@ class EvidenceStepReviewImpact(BaseModel):
     events: list[EvidenceStepReviewEvent]
 
 
+MODELS_USED_DESCRIPTION = (
+    "Models that answered in this run: every completion and transcription "
+    "model with a completed provider call, in any attempt, sorted by name. "
+    "The name is the one the answer gave, or the route the call was sent to "
+    "when the answer gave none. A model that was only configured, a rejected "
+    "call and a call whose outcome is unknown are not listed, so an empty "
+    "list does not prove that no provider received data; the provider-call "
+    "receipts keep that lifecycle. The receipts are the only proof: once "
+    "debug-evidence retention has removed them the list is empty, and each "
+    "attempt still names the model it was configured to ask."
+)
+STEP_MODELS_USED_DESCRIPTION = (
+    "Models that answered in this step, by the same rule as the run "
+    "summary's `models_used`."
+)
+
+
 class EvidenceStepOverview(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
@@ -140,7 +157,7 @@ class EvidenceStepOverview(BaseModel):
     attempts_count: int
     retries: int
     duration_ms: int | None = None
-    models_used: list[str]
+    models_used: list[str] = Field(description=STEP_MODELS_USED_DESCRIPTION)
     knowledge_sources_count: int
     knowledge_usage_state: str | None = None
     knowledge_retrieval: EvidenceStepKnowledgeRetrievalSummary | None = None
@@ -169,7 +186,7 @@ class EvidenceExportSummary(BaseModel):
     artifact_names: list[str]
     artifact_details: list[EvidenceArtifactManifestItem]
     duration_ms: int | None = None
-    models_used: list[str]
+    models_used: list[str] = Field(description=MODELS_USED_DESCRIPTION)
     rag_sources_count: int
     rag_source_names: list[str]
     rag_source_display_names: list[str]

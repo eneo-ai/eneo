@@ -71,6 +71,8 @@ from eneo.flows.application.flow_run_evidence_export_manifest import (
     EvidenceExportManifest,
 )
 from eneo.flows.application.flow_run_evidence_export_summary import (
+    MODELS_USED_DESCRIPTION,
+    STEP_MODELS_USED_DESCRIPTION,
     EvidenceExportSummary,
 )
 from eneo.flows.assistant_execution_snapshot import assistant_execution_surface_hash
@@ -1905,8 +1907,23 @@ class FlowRunDebugAttempt(BaseModel):
     status: str | None = None
     duration_ms: int | None = None
     error_code: str | None = None
-    requested_model: str | None = None
-    response_model: str | None = None
+    requested_model: str | None = Field(
+        default=None,
+        description=(
+            "The completion model the step was about to ask. It is not proof "
+            "that the model was called; `models_used` lists the models that "
+            "answered. Absent for a step that calls no completion model."
+        ),
+    )
+    response_model: str | None = Field(
+        default=None,
+        description=(
+            "The model recorded for the answer the attempt ended on: the "
+            "configured model's name for a completed attempt, and the identity "
+            "the provider reported for an answer that was rejected. The "
+            "provider-call receipts hold the reported identity of every call."
+        ),
+    )
     provider: str | None = None
     finish_reason: str | None = None
     provider_response_id: str | None = None
@@ -1925,6 +1942,9 @@ class FlowRunDebugStep(BaseModel):
     input: FlowRunDebugInput
     output: FlowRunDebugOutput
     rag: DebugRagSummary | None = None
+    models_used: list[str] = Field(
+        default_factory=list, description=STEP_MODELS_USED_DESCRIPTION
+    )
     attempts: list[FlowRunDebugAttempt] = Field(
         default_factory=lambda: cast(list[FlowRunDebugAttempt], [])
     )
@@ -2018,7 +2038,9 @@ class FlowRunDebugRunSummary(BaseModel):
     attempts_count: int
     artifacts_count: int
     duration_ms: int | None = None
-    models_used: list[str] = Field(default_factory=list)
+    models_used: list[str] = Field(
+        default_factory=list, description=MODELS_USED_DESCRIPTION
+    )
     token_usage: FlowRunTokenUsagePublic | None = None
     transcription_usage: FlowRunTranscriptionUsagePublic | None = None
     knowledge_evidence_view: FlowRunDebugKnowledgeEvidenceView | None = Field(

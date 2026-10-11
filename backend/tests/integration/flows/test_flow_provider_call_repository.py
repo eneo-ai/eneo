@@ -2015,6 +2015,164 @@ async def test_run_usage_keeps_token_and_audio_completeness_independent(
 
 @pytest.mark.asyncio
 @pytest.mark.integration
+async def test_models_used_are_the_models_that_answered_completed_calls(
+    db_container,
+    completion_model_factory,
+    space_factory,
+    assistant_factory,
+    admin_user,
+) -> None:
+    async with db_container() as container:
+        session = container.session()
+        context = await _create_started_attempt(
+            session=session,
+            admin_user=admin_user,
+            completion_model_factory=completion_model_factory,
+            space_factory=space_factory,
+            assistant_factory=assistant_factory,
+        )
+        repo = FlowProviderCallRepository(session)
+
+        transcription = await _start_provider_call(
+            repo=repo,
+            context=context,
+            request=TranscriptionProviderCallRequest(
+                provider_request_hash="1" * 64,
+                requested_model="openai/whisper-1",
+                provider="openai",
+                audio_seconds=300.0,
+            ),
+        )
+        await repo.complete_call(
+            call_id=transcription.id,
+            receipt=TranscriptionCallCompletion(
+                response_model="whisper-1",
+                provider_response_id="transcription-1",
+            ),
+        )
+        answered = await _start_provider_call(
+            repo=repo,
+            context=context,
+            request=CompletionProviderCallRequest(
+                provider_request_hash="2" * 64,
+                requested_model="openai/gpt-4o-mini",
+                requested_capabilities=(),
+            ),
+        )
+        await repo.complete_call(
+            call_id=answered.id,
+            receipt=ProviderCallCompletion(
+                response_model="gpt-4o-mini-2026-07-01",
+                provider_response_id="completion-1",
+                num_tokens_input=21,
+                num_tokens_output=8,
+                input_source="provider",
+                output_source="provider",
+            ),
+        )
+        answered_without_naming_itself = await _start_provider_call(
+            repo=repo,
+            context=context,
+            request=CompletionProviderCallRequest(
+                provider_request_hash="3" * 64,
+                requested_model="azure/gpt-4.1",
+                requested_capabilities=(),
+            ),
+        )
+        await repo.complete_call(
+            call_id=answered_without_naming_itself.id,
+            receipt=ProviderCallCompletion(
+                num_tokens_input=5,
+                num_tokens_output=2,
+                input_source="provider",
+                output_source="provider",
+            ),
+        )
+        refused = await _start_provider_call(
+            repo=repo,
+            context=context,
+            request=CompletionProviderCallRequest(
+                provider_request_hash="4" * 64,
+                requested_model="openai/refused-before-an-answer",
+                requested_capabilities=(),
+            ),
+        )
+        await repo.reject_call(call_id=refused.id, reason="response_format_rejected")
+        lost = await _start_provider_call(
+            repo=repo,
+            context=context,
+            request=CompletionProviderCallRequest(
+                provider_request_hash="5" * 64,
+                requested_model="openai/outcome-never-learned",
+                requested_capabilities=(),
+            ),
+        )
+        await repo.mark_outcome_unknown(call_id=lost.id, reason="provider_error")
+        await _start_provider_call(
+            repo=repo,
+            context=context,
+            request=CompletionProviderCallRequest(
+                provider_request_hash="6" * 64,
+                requested_model="openai/still-waiting",
+                requested_capabilities=(),
+            ),
+        )
+
+        models_by_step_id = await repo.list_models_used_by_step(
+            run_id=context.run_id, tenant_id=context.tenant_id
+        )
+        another_tenants_view = await repo.list_models_used_by_step(
+            run_id=context.run_id, tenant_id=uuid4()
+        )
+
+    # The answer names the model when it can; the route it was sent to stands
+    # in when the answer does not.
+    assert models_by_step_id == {
+        context.step_id: ("azure/gpt-4.1", "gpt-4o-mini-2026-07-01", "whisper-1")
+    }
+    assert another_tenants_view == {}
+
+
+@pytest.mark.asyncio
+@pytest.mark.integration
+async def test_an_attempt_s_own_model_fields_are_not_models_used(
+    db_container,
+    completion_model_factory,
+    space_factory,
+    assistant_factory,
+    admin_user,
+) -> None:
+    async with db_container() as container:
+        session = container.session()
+        context = await _create_started_attempt(
+            session=session,
+            admin_user=admin_user,
+            completion_model_factory=completion_model_factory,
+            space_factory=space_factory,
+            assistant_factory=assistant_factory,
+        )
+        # An attempt records the model it was configured to ask, in both
+        # fields. Without a receipt neither says that a provider answered.
+        await FlowRunRepository(session=session).finish_attempt(
+            run_id=context.run_id,
+            step_id=context.step_id,
+            attempt_no=context.attempt_no,
+            tenant_id=context.tenant_id,
+            status=FlowStepAttemptStatus.COMPLETED,
+            requested_model="openai/gpt-4o-mini",
+            response_model="gpt-4o-mini",
+            provider="openai",
+        )
+
+        models_by_step_id = await FlowProviderCallRepository(
+            session
+        ).list_models_used_by_step(run_id=context.run_id, tenant_id=context.tenant_id)
+
+    assert models_by_step_id == {}
+
+
+@pytest.mark.asyncio
+@pytest.mark.integration
 async def test_a_retried_transcription_is_durable_from_the_adapter_to_the_run_total(
     setup_database,
     completion_model_factory,
