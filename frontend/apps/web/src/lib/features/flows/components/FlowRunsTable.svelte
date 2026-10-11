@@ -1,5 +1,11 @@
 <script lang="ts">
-  import { type Eneo, type Flow, type FlowRun, type FlowRunSummary } from "@eneo/eneo-js";
+  import {
+    FLOW_API_ERROR_CODE,
+    type Eneo,
+    type Flow,
+    type FlowRun,
+    type FlowRunSummary
+  } from "@eneo/eneo-js";
   import { untrack } from "svelte";
   import { Button } from "$lib/components/ui/button/index.js";
   import { Input } from "$lib/components/ui/input/index.js";
@@ -33,7 +39,12 @@
   } from "./flowRunStatusSets";
   import { getFlowUserMode } from "$lib/features/flows/FlowUserMode";
   import { IsMobile } from "$lib/hooks/is-mobile.svelte";
-  import { getFlowRuntimeErrorMessage } from "$lib/features/flows/flowRuntimeErrorMapping";
+  import {
+    extractFlowApiError,
+    getFlowRuntimeErrorMessage,
+    getFlowRuntimeErrorMessageByCode,
+    type FlowApiErrorCode
+  } from "$lib/features/flows/flowRuntimeErrorMapping";
   import {
     createFlowRunHistoryState,
     destroyFlowRunHistoryPolling,
@@ -249,6 +260,15 @@
     return isFlowRunActive(status) || isFlowRunAwaitingReview(status);
   }
 
+  // The reasons whose sentence is true for a refused restart. Every other
+  // answer keeps the action sentence: a platform category such as "internal
+  // error" says less, and the sentence of flow_run_abandoned says the run has
+  // been closed, which a refused restart has not done yet.
+  const REDISPATCH_REFUSAL_CODES: readonly FlowApiErrorCode[] = [
+    FLOW_API_ERROR_CODE.RUN_REDISPATCH_CONFLICT,
+    FLOW_API_ERROR_CODE.RUN_REDISPATCH_AUDIT_UNAVAILABLE
+  ];
+
   async function redispatchRun(run: FlowRunSummary) {
     redispatchingRunId = run.id;
     try {
@@ -265,7 +285,12 @@
       await loadRuns();
     } catch (error) {
       console.error("Failed to redispatch run", error);
-      toast.error(m.flow_run_redispatch_failed());
+      const reason = extractFlowApiError(error)?.code;
+      toast.error(
+        (reason && REDISPATCH_REFUSAL_CODES.includes(reason)
+          ? getFlowRuntimeErrorMessageByCode(reason)
+          : null) ?? m.flow_run_redispatch_failed()
+      );
     } finally {
       redispatchingRunId = null;
     }

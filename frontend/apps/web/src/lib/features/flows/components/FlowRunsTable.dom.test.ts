@@ -1,5 +1,5 @@
 import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/svelte";
-import type { Eneo, FlowRun } from "@eneo/eneo-js";
+import { EneoError, type Eneo, type FlowRun } from "@eneo/eneo-js";
 import { readable } from "svelte/store";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { m } from "$lib/paraglide/messages";
@@ -145,6 +145,39 @@ describe("FlowRunsTable retry from the failed step", () => {
 });
 
 describe("FlowRunsTable row actions", () => {
+  // Kills three mutants: reporting every refused start with the action
+  // sentence; replacing it with a platform category when no flow reason came;
+  // and showing the sentence of any flow code, such as flow_run_abandoned,
+  // which says the run has been closed.
+  it.each([
+    [
+      409,
+      9057,
+      { code: "flow_run_redispatch_conflict" },
+      m.flow_error_flow_run_redispatch_conflict
+    ],
+    [500, 9024, {}, m.flow_run_redispatch_failed],
+    [400, 9007, { code: "flow_run_abandoned" }, m.flow_run_redispatch_failed]
+  ] as const)(
+    "tells a refused start of a queued run by its own reason (%i)",
+    async (status, eneoCode, body, sentence) => {
+      const { eneo } = makeRunsListEneo(() => ({
+        items: [makeFlowRun({ id: "aaa", status: "queued" })],
+        has_more: false
+      }));
+      vi.spyOn(eneo.flows.runs, "redispatch").mockRejectedValue(
+        new EneoError("refused", "RESPONSE", status, eneoCode, body)
+      );
+      vi.spyOn(console, "error").mockImplementation(() => {});
+      renderTable(eneo);
+
+      const [startAgain] = await screen.findAllByRole("button", { name: m.flow_run_redispatch() });
+      await fireEvent.click(startAgain);
+
+      await waitFor(() => expect(toast.error).toHaveBeenLastCalledWith(sentence()));
+    }
+  );
+
   it("names the next step for a run waiting for review", async () => {
     const { eneo, calls } = makeRunsListEneo(() => ({
       items: [
